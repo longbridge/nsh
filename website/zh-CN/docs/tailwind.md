@@ -39,7 +39,7 @@ demo: guide-tailwind
 3. **`style` 优先于类名。**
 4. `!` 让一个类变为 important：`!p-0`。
 
-`nsh/ui/mobile` 的组件同样接受 `class` 和 `classList`；你的类会合并在组件自身样式之后，同等优先级时以你的为准。
+Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate 中的组件）同样接受 `class` 和 `classList`；你的类会合并在组件自身样式之后，同等优先级时以你的为准。
 
 ## 变体
 
@@ -50,10 +50,12 @@ demo: guide-tailwind
 | `focus:`、`focus-visible:` | 输入框获得焦点 |
 | `focus-within:` | 视图或其后代获得焦点 |
 | `disabled:`、`enabled:` | 元素的 `disabled` 属性为 true / false |
-| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:` | 最近的带 `group` 类的祖先处于该状态 |
+| `selected:` | 元素处于选中状态（`Button` 的 `selected`、`accessibilityState.selected`） |
+| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:`、`group-selected:` | 最近的带 `group` 类的祖先处于该状态 |
 | `group-active/name:` ... | 同上，针对标记为 `group/name` 的祖先 |
 | `first:`、`last:`、`odd:`、`even:`、`only:` | 元素自身在兄弟节点中的位置。要按行的位置给行内标签上色，把 `last:text-*` 写在行上，标签会继承它 |
 | `placeholder:` | 设置输入框占位文字的样式（`placeholder:text-zinc-400`） |
+| `selection:` | 设置输入框或可选文本的选区样式（`selection:text-violet-500`） |
 | `dark:` | 系统外观为深色 |
 | `sm:`、`md:`、`lg:`、`xl:`、`2xl:` | 窗口宽度至少为 640、768、1024、1280、1536 点 |
 | `max-sm:`、`max-md:` ... | 窗口宽度小于该断点 |
@@ -134,11 +136,11 @@ demo: guide-tailwind
 
 未知的键和无效的值会导致构建错误（`nsh.json: tailwind: unknown theme key 'colours'`）。主题会编译进 bundle，并在第一帧之前生效。
 
-Tailwind 主题只影响你自己的类名。`nsh/ui/mobile` 的组件从组件主题，即 `nsh.json` 中的 `"theme"` 获取颜色（[组件](../components/index.md)）。
+Tailwind 主题只影响你自己的类名。Rust 组件从组件主题，即 `nsh.json` 中的 `"theme"` 获取颜色（[用 Rust 开发](./rust.md)）。
 
 ## 主题 token
 
-你的类名也可以引用组件主题里的颜色和数值，让应用跟它的组件使用同一套主题：
+你的类名也可以引用组件主题里的颜色和数值，让应用跟它的 Rust 组件使用同一套主题：
 
 ```tsx
 <View class="rounded-(--radius-lg) border border-border bg-background p-4">
@@ -158,7 +160,7 @@ token 就是主题文件里的键，把其中的点写成连字符：`muted.fore
 | `(--name)`，Tailwind 4 的变量简写 | 主题颜色或数值 | `bg-(--primary)`、`rounded-(--radius)`、`p-(--gap-card)` |
 | `(color:--name)`、`(length:--name)`、`(number:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--link)`、`text-(length:--font-size)` |
 
-- **每个键都是 token。** 包括组件用到的键（`primary.background`、`border`、`radius`、`font.size` 等，列表见[组件](../components/index.md)），以及主题文件里的其他任何键：`"sidebar.background"` 生成 `bg-sidebar`，`"chart.up": "#16a34a"` 生成 `text-chart-up`，数值 `"radius.card": 10` 生成 `rounded-(--radius-card)`。数值的单位是点；`(number:--name)` 传入不带单位的数值。
+- **每个键都是 token。** 包括组件用到的键（`primary.background`、`border`、`radius`、`font.size` 等，列表见[用 Rust 开发](./rust.md)），以及主题文件里的其他任何键：`"sidebar.background"` 生成 `bg-sidebar`，`"chart.up": "#16a34a"` 生成 `text-chart-up`，数值 `"radius.card": 10` 生成 `rounded-(--radius-card)`。数值的单位是点；`(number:--name)` 传入不带单位的数值。
 - **两种外观。** token 带有主题的浅色值和深色值：`bg-primary` 会随外观自动切换，不需要 `dark:` 类。只在一种模式里设置的颜色在两种模式下都使用该值。
 - **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以只有 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 才是主题 token。
 - **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类会在原生侧重新应用样式，不运行 JavaScript。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。

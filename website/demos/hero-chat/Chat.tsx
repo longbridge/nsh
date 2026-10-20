@@ -1,8 +1,8 @@
 import { batch, computed, effect, Input, Scroll, signal, Text, View, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
+import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
 import { List } from "nsh/list";
-import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
 import { Icon, type IconName } from "./icons";
 import { alpha, Appear, Badge, colors, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "./ui";
 import { Glyph } from "./chat/glyphs";
@@ -40,7 +40,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * from local scripts and timers.
  */
 export function Chat(props: { autoplay?: string } = {}) {
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   let ids = 0;
   const nextId = () => `m${ids++}`;
 
@@ -512,7 +512,7 @@ export function Chat(props: { autoplay?: string } = {}) {
               estimatedItemSize={140}
               initialScrollIndex={Math.max(0, messages().length - 1)}
               style={{ flex: 1 }}
-              contentContainerStyle={{ paddingTop: 8, paddingBottom: 16 }}
+              contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
               keyboardDismissMode="interactive"
               maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
               scrollEventThrottle={100}
@@ -648,8 +648,8 @@ export function Chat(props: { autoplay?: string } = {}) {
                         if (row().id === "attach") attachment.set({ image: photo, file: { name: "trip-notes.pdf", size: "2.4 MB" } });
                         else play(row().id);
                       }}
-                      underlayColor={alpha(colors.text, 0.06)}
-                      accessibilityRole="button"
+                      activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
+                      role="button"
                       accessibilityLabel={row().label}
                       style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
                     >
@@ -690,7 +690,7 @@ export function Chat(props: { autoplay?: string } = {}) {
         </If>
 
         {/* The composer. */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboard().height > 0 ? 0 : insets().bottom), gap: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
           <If when={attachment()}>
             <Appear>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -715,14 +715,12 @@ export function Chat(props: { autoplay?: string } = {}) {
           >
             <Input
               value={draft()}
-              onChangeText={(v) => draft.set(v)}
+              onChange={(v) => draft.set(v)}
               multiline
               placeholder={`Message ${model()}`}
-              placeholderTextColor={colors.faint}
-              selectionColor={colors.accent}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
+              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View

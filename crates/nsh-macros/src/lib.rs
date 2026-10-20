@@ -12,7 +12,7 @@
 //!   methods of the component's ref in JS (`ref.setValue(5)`,
 //!   `await ref.value()`).
 //! - `#[module]` on an `impl` block of a unit struct: functions of a JS
-//!   object (`Alert.alert(...)`).
+//!   object (`AlertDialog.show(...)`).
 //! - `#[class]` on a struct and on its `impl` block: a JS class backed by
 //!   the Rust value (`new Tally(3)`, `tally.add(2)`).
 //!
@@ -1107,7 +1107,7 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
 ///
 /// It also makes `pub fn registry() -> Registry` at the crate's root: the
 /// set, for tests and other Rust code (`my_app_native::registry()`, next to
-/// `nsh_ui_mobile::registry()`), so the crate's root has no other item
+/// `nsh_base::registry()`), so the crate's root has no other item
 /// named `registry`.
 ///
 /// The specifier is checked at compile time: a bare import specifier
@@ -1517,7 +1517,7 @@ fn module_cx(ty: &Type) -> bool {
 /// `#[module]` on an `impl` block of a unit struct: its functions with a
 /// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
 /// a JS object named after the struct
-/// (`Alert.alert(...)`), documented by their doc comments. The struct
+/// (`AlertDialog.show(...)`), documented by their doc comments. The struct
 /// takes `#[module]` too, and its doc comment documents the object (a doc
 /// comment on the block is an error: TS shows the struct's); a
 /// component's struct (`#[component]`) needs none. The signature decides
@@ -1539,7 +1539,7 @@ fn module_cx(ty: &Type) -> bool {
 /// nothing, a [`JsValue`], an instance, or a `Result` of one (an `Err`
 /// throws or rejects with its message). A UI set registers the module
 /// (`Registry::module::<Alert>()`); a component exported under the same
-/// name gets the functions too (`StatusBar.setHidden(...)`).
+/// name gets the functions too (`Chart.clear(...)` for a `Chart` component).
 /// `#[module(flat)]` exports the functions one by one instead of as an
 /// object. `#[module(flat, default)]` also exports that object as `default`.
 /// Visible associated constants of type `&'static str`, `bool`, or a primitive

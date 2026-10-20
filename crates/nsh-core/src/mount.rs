@@ -291,7 +291,19 @@ pub struct StickyCell {
     pub end: Points,
 }
 
+/// The header heights a platform without a native header gives the core
+/// ([`crate::Core::set_header_heights`]; the desktops, the web): NSH draws
+/// no header there. A page's `header` slot ([`ScreenConfig::header_view`])
+/// is placed at its top instead, as wide as the page and as tall as it lays
+/// out, and the content starts below it; the native header's options
+/// (`title`, `headerLeft`, `headerStyle`, ...) are ignored.
+pub const NO_NATIVE_HEADER: (Points, Points) = (Points::ZERO, Points::ZERO);
+
 /// Options of a screen: its header and transitions.
+///
+/// The header options are the native header's (iOS, Android); a platform
+/// without one ([`NO_NATIVE_HEADER`]) reads only `header_view`,
+/// `header_height`, `prevent_back`, `gesture_enabled` and `animation`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScreenConfig {
     /// Title in the header.
@@ -313,11 +325,13 @@ pub struct ScreenConfig {
     /// Show the back button.
     pub back_visible: bool,
     /// The interactive back gesture (iOS swipe back, Android predictive back
-    /// following the finger) is on; the back button pops either way.
+    /// following the finger) is on; the back button pops either way
+    /// (`popOnSwipe`).
     pub gesture_enabled: bool,
-    /// The user cannot leave the screen (no swipe, the back buttons send
-    /// [`crate::EventKind::BackRequest`] instead of popping): answered by the
-    /// platform when the system asks, without JS.
+    /// The user cannot leave the screen (`popOnBack` false: no swipe, the
+    /// back buttons do not pop): answered by the platform when the system
+    /// asks, without JS. Every back press sends
+    /// [`crate::EventKind::BackRequest`] either way.
     pub prevent_back: bool,
     /// Push / pop transition.
     pub animation: ScreenAnimation,
@@ -327,8 +341,14 @@ pub struct ScreenConfig {
     pub right: Option<NodeId>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
-    /// Height of the header area at the top of the screen (status bar
-    /// included), as the core laid the content out below it.
+    /// The app's header (`header`): on a platform without a native header
+    /// ([`NO_NATIVE_HEADER`]), a view at the top of the screen whose frame
+    /// the core sets (as wide as the screen, as tall as it lays out),
+    /// above the content.
+    pub header_view: Option<NodeId>,
+    /// Height of the header area at the top of the screen, as the core laid
+    /// the content out below it: the native header's (status bar included),
+    /// or the `header` view's without a native header.
     pub header_height: Points,
 }
 
@@ -350,29 +370,54 @@ impl Default for ScreenConfig {
             left: None,
             right: None,
             title_view: None,
+            header_view: None,
             header_height: Points::ZERO,
         }
     }
 }
 
-/// Options of a modal.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Options of a modal (`Dialog`).
+///
+/// The modal itself has no look: on the desktops and the web it is a
+/// transparent layer over the whole window (no card, scrim, shadow or
+/// background; `presentation` is ignored), and what shows is the app's
+/// popup and backdrop, which the runtime renders inside it.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModalConfig {
     /// How it appears.
     pub animation: ModalAnimation,
-    /// How it covers the screen.
+    /// How it covers the screen (iOS).
     pub presentation: ModalPresentation,
-    /// The background shows what is behind.
-    pub transparent: bool,
     /// Android: the content reaches under the status bar.
     pub status_bar_translucent: bool,
     /// iOS: the orientations it allows ([`ModalConfig::PORTRAIT`], ...);
     /// 0 keeps the presenter's.
     pub orientations: u8,
-    /// The user can close it natively (iOS sheets swiped down, the Android
-    /// back button), reported as `onRequestClose` and `onDismiss` afterwards;
-    /// otherwise those only send `onRequestClose` and `visible` decides.
-    pub dismissible: bool,
+    /// Escape and the Android back button close it natively
+    /// (`closeOnEscape`); either way they report
+    /// [`crate::EventKind::RequestClose`] (reason `"cancel"`), and
+    /// [`crate::EventKind::Dismiss`] after closing.
+    pub close_on_escape: bool,
+    /// A press on the backdrop closes it (`closeOnBackdropPress`): the
+    /// runtime handles presses on the app's backdrop part; a platform
+    /// reads it only for a backdrop of its own (a native sheet's).
+    pub close_on_backdrop_press: bool,
+    /// Swiping a sheet down closes it natively (`closeOnSwipe`).
+    pub close_on_swipe: bool,
+}
+
+impl Default for ModalConfig {
+    fn default() -> Self {
+        Self {
+            animation: ModalAnimation::default(),
+            presentation: ModalPresentation::default(),
+            status_bar_translucent: false,
+            orientations: 0,
+            close_on_escape: true,
+            close_on_backdrop_press: true,
+            close_on_swipe: true,
+        }
+    }
 }
 
 impl ModalConfig {
@@ -415,8 +460,8 @@ pub struct InputConfig {
     pub max_length: Option<u32>,
     /// The user can edit the text.
     pub editable: bool,
-    /// Return unfocuses a single-line input (React Native's
-    /// `blurOnSubmit`); [`InputConfig::submit`] resolves it.
+    /// Return unfocuses a single-line input without a `submitBehavior`
+    /// (always true from TS); [`InputConfig::submit`] resolves it.
     pub blur_on_submit: bool,
     /// `submitBehavior` as set; [`InputConfig::submit`] resolves it.
     pub submit_behavior: Option<SubmitBehavior>,
@@ -437,11 +482,10 @@ pub struct InputConfig {
 }
 
 impl InputConfig {
-    /// What return does, as `submitBehavior`, `blurOnSubmit` and
-    /// `multiline` say together (React Native's resolution): the set
-    /// behavior (a single line never takes line breaks), else a line break
-    /// in a multiline input, else a submit that unfocuses unless
-    /// `blurOnSubmit` is false.
+    /// What return does, as `submitBehavior` and `multiline` say
+    /// together: the set behavior (a single line never takes line breaks),
+    /// else a line break in a multiline input, else a submit that
+    /// unfocuses unless [`InputConfig::blur_on_submit`] is false (Rust).
     pub fn submit(&self) -> SubmitBehavior {
         match self.submit_behavior {
             Some(SubmitBehavior::Newline) if !self.multiline => SubmitBehavior::BlurAndSubmit,

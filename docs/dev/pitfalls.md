@@ -31,8 +31,8 @@ Things that were found the hard way. Read the section of the area you change bef
   be named `on...` on host elements (`List` sends `onEndReachedThreshold` as `endReachedThreshold`).
 - **There is no error boundary**: hot component proxies catch what a component throws, report it and render nothing until the
   fix (`nsh-js` `hot.rs`).
-- **Hot proxies return accessors**, not nodes: runtime code that inspects what a component returned (`Stack` looks for a
-  `<screen>`, `navigation.rs`) must accept an accessor.
+- **Hot proxies return accessors**, not nodes: runtime code that inspects what a component returned (`NavStack` looks for a
+  `<NavPage>`, `navigation.rs`) must accept an accessor.
 
 ## Core and layout
 
@@ -124,9 +124,9 @@ Things that were found the hard way. Read the section of the area you change bef
   resize the text stays drawn at zero size.
 - **UINavigationController breaks transitions started during another one**: stack changes that arrive while
   `transitionCoordinator()` is set wait for `didShow` and are applied on the next main-queue turn (the coordinator outlives
-  the callback); only screens the controller actually had count as popped by the user.
+  the callback); only pages the controller actually had count as popped by the user.
 - **`UIAlertController` asserts when its presentation controller's delegate is set**; a popover action sheet (iPad, Mac) hides
-  its cancel action and runs it on a tap outside, so sheets without one get a hidden cancel answering "dismissed".
+  its cancel action and runs it on a tap outside, so sheets without one get a hidden, untitled cancel answering "dismissed" (`null`).
 - **Catalyst: a mouse drag does not scroll a UIScrollView** (Mac behavior); test scrolling with trackpad-style scroll wheel
   events (with phases), which also produce drag and momentum callbacks. Mouse drags do reach views as touches.
 - **Catalyst: the Mac idiom moves a navigation bar's contents into the window's toolbar** (`UINavigationBar.behavioralStyle`
@@ -169,8 +169,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
-- **Android, modal content placement**: `Box.place` lays a view out at its core frame directly, so the status bar offset of a
-  non-translucent modal is a content view inside the dialog's container, not an offset applied to the root's layout; the dialog
+- **Android, `Dialog` content placement**: `Box.place` lays a view out at its core frame directly, so the status bar offset of a
+  non-translucent `Dialog` (no `statusBarTranslucent`) is a content view inside the Android dialog's container, not an offset applied to the root's layout; the dialog
   copies the activity's bar appearance (light / dark icons).
 - **Android, nested scrolling**: scroll views enable nested scrolling, or an outer vertical ScrollView intercepts every vertical
   drag meant for an inner one.
@@ -267,7 +267,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, `--script`'s `shot`, shows them: WebKit
-  draws them for it). Screens and modals that leave as images take their live web views and videos along (`native::lend`).
+  draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
 
@@ -292,7 +292,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).
 - **A focused WebView2 page has the keyboard in a window of its own** (`Chrome_WidgetWin_0`, a child of the
-  surface's window): the surface's window gets no keys until it takes the focus back, so dialogs and modals take it
+  surface's window): the surface's window gets no keys until it takes the focus back, so alerts and dialogs take it
   (`native::take_keyboard`), and `--script`'s `type` / `key` post to that window while it has the focus. A
   `MoveFocus` right after the click needs a few hundred milliseconds before typed characters reach the page.
 - **`std::fs::canonicalize` returns verbatim paths** (`\\?\C:\…`), which rolldown and path prefix comparisons do not

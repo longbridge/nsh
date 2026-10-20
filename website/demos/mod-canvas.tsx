@@ -10,7 +10,7 @@ function Chip(props: { label: string; onPress: () => void }) {
   return (
     <Text
       onPress={props.onPress}
-      activeOpacity={0.6}
+      activeStyle={{ opacity: 0.6 }}
       style={{
         paddingHorizontal: 14,
         paddingVertical: 8,

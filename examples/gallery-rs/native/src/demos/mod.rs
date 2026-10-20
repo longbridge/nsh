@@ -10,7 +10,6 @@ mod gestures;
 mod images;
 mod lists;
 mod media;
-mod mobile_ui;
 mod navigation;
 mod photos;
 mod physics;
@@ -28,7 +27,10 @@ use nsh_core::ui::{AnyElement, Screen, prelude::*};
 
 use crate::{
     nav::{self, Route},
-    ui::{IconName, IconTile, MONO, PressProps, appear, colors, header, icon, press_with, radius},
+    ui::{
+        IconName, IconTile, MONO, PageHeader, PressProps, appear, colors, header, icon, press_with,
+        radius, titled, with_header,
+    },
 };
 
 /// A demo of the index: its name, what it shows, its icon and its
@@ -56,8 +58,7 @@ impl Demo {
         Route {
             key: self.key().into(),
             screen: Rc::new(move || {
-                header(screen().title(name))
-                    .child(view().flex_1().bg(colors::BACKGROUND).child(content()))
+                titled(name).child(view().flex_1().bg(colors::BACKGROUND).child(content()))
             }),
         }
     }
@@ -197,12 +198,6 @@ pub(crate) static GROUPS: &[Group] = &[
         title: "Platform",
         demos: &[
             Demo {
-                name: "Mobile UI",
-                detail: "nsh/ui/mobile in Rust: a ListView and a Group of the app's rows",
-                icon: IconName::Mobile,
-                content: || mobile_ui::MobileUi::element(()).into_element(),
-            },
-            Demo {
                 name: "Components",
                 detail: "Press feedback, sheet, layout animation, input accessory, modal options",
                 icon: IconName::Components,
@@ -322,7 +317,10 @@ pub(crate) fn index() -> Screen {
                 .into_element()
         })
         .collect();
-    header(screen().key("index").title("Rust Gallery")).child(
+    with_header(header(screen().key("index").title("Rust Gallery")), || {
+        PageHeader::new("Rust Gallery").back(false)
+    })
+    .child(
         scroll()
             .flex_1()
             .bg(colors::BACKGROUND)

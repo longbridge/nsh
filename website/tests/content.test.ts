@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // every `demo:` names a file in demos/.
 
 const ROOT = join(import.meta.dir, '..');
-const SECTIONS = ['docs', 'elements', 'components', 'modules'];
+const SECTIONS = ['docs', 'elements', 'modules'];
 
 interface Front { title?: unknown; description?: unknown; order?: unknown; demo?: unknown; group?: unknown }
 

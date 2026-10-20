@@ -79,7 +79,7 @@ pub struct HostInfo {
     pub platform: HostPlatform,
     /// The bytecode format its engine loads (`BYTECODE_VERSION`).
     pub bytecode_version: String,
-    /// The specifiers of the UI sets it serves (`nsh/ui/mobile`, an app's
+    /// The specifiers of the UI sets it serves (an app's
     /// own): the server sends no bundle that imports others.
     pub ui_sets: Vec<String>,
 }

@@ -1,4 +1,4 @@
-//! `nsh`, the command line tool. It links the mobile UI; an app with Rust
+//! `nsh`, the command line tool. It links `nsh/base`; an app with Rust
 //! components of its own (`nsh.json` `"rust"`) is known to it by the
 //! description its describe program prints (`rust_app.rs`), and runs in the
 //! hosts and runners built for it.
@@ -30,17 +30,17 @@ use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
 use nsh_core::ui::{Registry, description::SetDescription};
 
-/// The UI sets this command line links: the mobile UI.
+/// The UI sets this command line links: `nsh/base`.
 pub(crate) fn own_sets() -> &'static [Registry] {
     static OWN: OnceLock<Vec<Registry>> = OnceLock::new();
-    OWN.get_or_init(|| vec![nsh_ui_mobile::registry()])
+    OWN.get_or_init(|| vec![nsh_base::registry()])
 }
 
 /// The UI sets of the command's app, as data ([`set_app_sets`]).
 static UI_SETS: RwLock<Option<Arc<[SetDescription]>>> = RwLock::new(None);
 
 /// The UI sets the hosts serve, as data: what bundles import natively,
-/// what bytecode links against, what `.nsh/types` declares. The mobile UI,
+/// what bytecode links against, what `.nsh/types` declares. `nsh/base`,
 /// then an app's own sets ([`set_app_sets`]).
 pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
     if let Some(sets) = &*UI_SETS.read().unwrap_or_else(|e| e.into_inner()) {
@@ -51,7 +51,7 @@ pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
     sets
 }
 
-/// Makes [`ui_sets`] the mobile UI and `app`, the sets of the app's crates
+/// Makes [`ui_sets`] `nsh/base` and `app`, the sets of the app's crates
 /// (described again after a change to its Rust code).
 pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
     let sets: Arc<[SetDescription]> = own_sets()

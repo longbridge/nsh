@@ -1,9 +1,9 @@
 import { cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
-import { Modal, Screen, Sheet, useSafeAreaInsets } from "nsh/ui/mobile";
+import { Dialog, NavPage, safeAreaInsets } from "nsh/base";
 import { Icon } from "../../icons";
-import { Button, colors, finish, header, Press, Stat } from "../../ui";
+import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat } from "../../ui";
 import { Depth, OrderBook } from "./Book";
 import { Chart } from "./Chart";
 import { compact, type Market, percent, price, sectors, type Stock, signed, time, toneOf } from "./market";
@@ -237,9 +237,14 @@ function PauseButton(props: { market: Market }) {
 /** A stock, pushed: its view under a header with the pause button. */
 export function Detail(props: { market: Market; stock: Stock }) {
   return (
-    <Screen title={props.stock.code} {...header} headerRight={<PauseButton market={props.market} />}>
+    <NavPage
+      title={props.stock.code}
+      {...header}
+      headerRight={<PauseButton market={props.market} />}
+      header={<PageHeader title={props.stock.code} right={<PauseButton market={props.market} />} />}
+    >
       <StockView market={props.market} stock={props.stock} />
-    </Screen>
+    </NavPage>
   );
 }
 
@@ -257,7 +262,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
   const side = signal<Side>("buy");
   const ticket = signal(false);
   const banner = createBanner();
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   const trade = (s: Side) => {
     side.set(s);
     ticket.set(true);
@@ -361,9 +366,9 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           </Sheet>
         }
       >
-        <Modal visible={ticket()} desktop={{ presentationStyle: "formSheet" }} onRequestClose={() => ticket.set(false)}>
+        <Dialog open={ticket()} presentation="formSheet" onOpenChange={(open) => ticket.set(open)}>
           <View style={{ flex: 1, padding: 20, backgroundColor: colors.surface }}>{ticketView}</View>
-        </Modal>
+        </Dialog>
       </If>
     </View>
   );

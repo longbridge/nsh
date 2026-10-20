@@ -22,7 +22,7 @@
 //! ([`compile_tsx`], [`tsx`]), and `nsh test`'s [`compiler`].
 //!
 //! ```ignore
-//! let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+//! let sets = vec![nsh_base::registry(), my_app_native::registry()];
 //! let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
 //! app.wait_for("Ready")?;
 //! ```

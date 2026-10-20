@@ -8,8 +8,12 @@ workaround here in the same change.
 
 | # | Area | Finding | Workaround in the app |
 |---|---|---|---|
-| 1 | Mobile UI | `nsh/ui/mobile` has no switch, slider, segmented control, stepper styled for dark themes, menu or tab bar; each app writes them. | `ui.tsx` and the tab bar in `App.tsx` (about 500 lines). |
-| 2 | Touch, layout | There is no popover / anchored overlay primitive: a menu renders inside its anchor's parent, and nothing closes it on a tap elsewhere on the screen. | The easing menu hangs under the picker's row, which has a `zIndex` over the curve; a backdrop over the curve closes it (`cards/ThrottleProfile.tsx`). |
+| 1 | Touch, layout | There is no popover / anchored overlay primitive: a menu renders inside its anchor's parent, and nothing closes it on a tap elsewhere on the screen. | The easing menu hangs under the picker's row, which has a `zIndex` over the curve; a backdrop over the curve closes it (`cards/ThrottleProfile.tsx`). |
+
+## By design
+
+- Styled controls (switch, slider, segmented control, stepper, menu, tab bar) are the app's own: NSH ships
+  primitives and capabilities, and the app draws its controls with them (`ui.tsx` and the tab bar in `App.tsx`).
 
 ## Fixed
 

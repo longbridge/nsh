@@ -30,7 +30,7 @@ log.workspace = true
 nsh-core.workspace = true
 nsh-animation.workspace = true
 nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 gtk4.workspace = true
 # GIF and WebP (first frame), which GDK cannot decode without gdk-pixbuf loaders.
 image = { workspace = true, features = ["gif", "webp"] }

@@ -420,9 +420,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ModalPresentation::PageSheet => 1,
                     ModalPresentation::FormSheet => 2,
                 });
-                e.bool(config.transparent);
                 e.bool(config.status_bar_translucent);
-                e.bool(config.dismissible);
+                // The back button is Escape (`closeOnEscape`).
+                e.bool(config.close_on_escape);
             }
             MountItem::LayoutAnimation(animation) => {
                 e.int(LAYOUT_ANIMATION);
@@ -507,7 +507,6 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         });
                         e.bool(c.hidden);
                         e.bool(c.animated);
-                        opt_color(&mut e, c.background);
                     }
                     Command::Dialog(d) => {
                         e.int(12);
@@ -929,6 +928,7 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
         e.int(id.map_or(-1, |i| i as i32));
     }
     e.float(c.header_height.0);
+    e.opt_string(c.back_title.as_deref());
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {
@@ -942,7 +942,6 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
     for v in [h.top, h.right, h.bottom, h.left] {
         e.float(v.0);
     }
-    e.float(p.active_opacity.unwrap_or(f32::NAN));
     let a = &p.accessibility;
     e.int(match a.accessible {
         None => -1,

@@ -8,7 +8,7 @@ use anyhow::{Context as _, bail};
 use crate::ui;
 
 const APP: &str = r##"import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 function App() {
   const count = signal(0);
@@ -17,8 +17,8 @@ function App() {
       <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
@@ -285,8 +285,8 @@ nsh-core = {core}
     );
     if desktop {
         manifest.push_str(&format!(
-            "nsh-ui-mobile = {}\nenv_logger = \"0.11\"\n",
-            dep("nsh-ui-mobile", "")
+            "nsh-base = {}\nenv_logger = \"0.11\"\n",
+            dep("nsh-base", "")
         ));
         for platform in ["linux", "macos", "windows"] {
             manifest.push_str(&format!(

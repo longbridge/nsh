@@ -132,7 +132,7 @@ export function Rcs() {
           {(q, i) => (
             <View
               onPress={() => selected.set(selected() === q().id ? null : q().id)}
-              accessibilityRole="button"
+              role="button"
               accessibilityState={{ selected: selected() === q().id }}
             >
               <Line first={i() === 0} selected={selected() === q().id}>

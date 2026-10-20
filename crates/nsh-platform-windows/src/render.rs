@@ -2,7 +2,7 @@
 //!
 //! [`frame`] draws the whole tree of a surface into its window's swap
 //! chain and presents it; [`snapshot`] draws it into an offscreen bitmap
-//! and reads the pixels back (`-> Rect {script` screenshots). Both go through
+//! and reads the pixels back (`--script` screenshots). Both go through
 //! [`draw_view`], which draws one view and its subtree in this order:
 //!
 //! 1. shadows and background ([`crate::decor::draw_background`]),

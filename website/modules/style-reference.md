@@ -373,6 +373,13 @@ Text styles apply to `<Text>` and `<Input>`. They are also inherited, as in CSS:
 | `textDecorationThickness` | `number \| "auto" \| "from-font"` | Line thickness. |
 | `textUnderlineOffset` | `number \| "auto"` | Distance of the underline from the baseline. |
 
+### Placeholder and selection
+
+| Key | Type | Description |
+|---|---|---|
+| `placeholderColor` | `ColorValue` | The color of an `<Input>`'s placeholder (`placeholder:text-*`). |
+| `selectionColor` | `ColorValue` | An `<Input>`'s caret and selection, a selectable `<Text>`'s selection highlight and handles (`selection:text-*`); the platform's accent by default. |
+
 ### Text shadow
 
 | Key | Type | Description |
@@ -405,7 +412,6 @@ Some settings are props in NSH, not style keys. Their Tailwind classes exist, bu
 | Touch pass-through | `pointerEvents` | `pointer-events-none`, `pointer-events-auto` |
 | Image fit | `resizeMode` on `<Image>` | `object-cover`, `object-contain`, ... |
 | Selectable text | `selectable` on `<Text>` | `select-text`, `select-none` |
-| Placeholder color | `placeholderTextColor` on `<Input>` | `placeholder:text-*` |
 | Material shadow (Android) | `android={{ elevation }}` | |
 
 ## Related

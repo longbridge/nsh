@@ -2221,11 +2221,11 @@ dependencies = [
  "gpui-fast-platform",
  "gpui-kit",
  "log",
+ "nsh-base",
  "nsh-bundler",
  "nsh-core",
  "nsh-js",
  "nsh-platform-gpui",
- "nsh-ui-mobile",
  "serde_json",
  "tokio",
 ]
@@ -5913,6 +5913,13 @@ name = "nsh-animation"
 version = "0.1.1"
 
 [[package]]
+name = "nsh-base"
+version = "0.1.1"
+dependencies = [
+ "nsh-core",
+]
+
+[[package]]
 name = "nsh-bundler"
 version = "0.1.1"
 dependencies = [
@@ -6035,9 +6042,9 @@ dependencies = [
  "lb-wry",
  "log",
  "nsh-animation",
+ "nsh-base",
  "nsh-core",
  "nsh-engine",
- "nsh-ui-mobile",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "rustc-hash 2.1.3",
@@ -6051,14 +6058,6 @@ dependencies = [
  "windows-sys 0.61.2",
  "x11rb",
  "zbus",
-]
-
-[[package]]
-name = "nsh-ui-mobile"
-version = "0.1.1"
-dependencies = [
- "nsh-core",
- "serde_json",
 ]
 
 [[package]]

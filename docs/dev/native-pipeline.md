@@ -46,18 +46,19 @@ loader). Where each one is implemented and declared: `js-modules.md`.
 - `nsh/list`, `nsh/gesture`, `nsh/animated`, `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/native`, `nsh/ios`,
   `nsh/image` (`Image`: the image element's component with its registry's functions on it) and the hand-written part
   of `nsh/android` (below).
-- The modules of registries (`Registry::specifier`): the UI sets a host serves (`HostOptions::ui_sets`,
-  `nsh/ui/mobile`) and the runtime's (the registry parts of `nsh/android`, `nsh/accessibility` and `nsh/image`). Their
+- The modules of registries (`Registry::specifier`): the runtime's (`nsh/clipboard` and the registry parts of
+  `nsh/android`, `nsh/accessibility`, `nsh/desktop` and `nsh/image`) and the UI sets a host serves
+  (`HostOptions::ui_sets`: `nsh/base` by default, the app's `app/native`). Their
   components, modules and re-exports become exports (`components.rs`): a component is a host view naming it, with its
   props converted into their Rust types and sent by one render effect, events delivered to `on<Event>` handlers,
   children and slot holders; a module function runs in the call, or converts its arguments there and sends what it
   runs to the core as an op, returning a promise the core's events settle when it has a result
-  (`docs/dev/rust-classes.md`, "How calls cross"). Values a registry names natively (`Registry::native_values`: the mobile UI's navigation) and
-  re-exports (`safeArea`, `useSafeAreaInsets`) come from the runtime. NSH's own export wins over a registry's of the
+  (`docs/dev/rust-classes.md`, "How calls cross"). Values a registry names natively (`Registry::native_values`: `nsh/base`'s navigation) and
+  re-exports (`safeArea`, `safeAreaInsets`) come from the runtime. NSH's own export wins over a registry's of the
   same name.
 
 QuickJS-NG resolves imports when it compiles a module, so the bytecode compiler installs the same loader
-(`compile_bytecode_with` with the UI sets); names are checked when the module links (evaluation). The exports are made
+(`compile_bytecode_with` with the app's UI sets); names are checked when the module links (evaluation). The exports are made
 on first import. The compiler only needs the names a module exports, so it takes the UI sets as data
 (`nsh_core::ui::description::SetDescription`: specifier, exports and their kinds, declarations, re-exports, files),
 as the bundler and `.nsh/types` do: `ModuleTable::compiling` serves nsh's own modules and the runtime's registries in
@@ -73,11 +74,11 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   `jsx::PRIMITIVES` imported from its module (alias-aware: `import { View as V } from "nsh"`) compiles to what it is,
   with no component call: `View`, `Text`, `Scroll`, `Input` (`nsh`), `Image` (`nsh/image`), `WebView`, `Video` to
   their host elements made in place, `List` to `nsh:rt`'s `list`, `If` / `Each` to `cond` / `each`; `Canvas`,
-  `Modal` and `InputAccessoryView` are native components that do more than make their element (the drawing,
-  `visible` and the insets, iOS only) and are called. The exports are callable components too (`dom.rs`
+  `Dialog` (`nsh/base`) and `InputAccessoryView` are native components that do more than make their element (the
+  drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. The exports are callable components too (`dom.rs`
   `host_component`; `If` and `Each` are real globals), so `const C = cond ? View : Text; <C />` works through the
   component path. Lowercase tags are errors with the import to write (`<view>`: write `<View>` and `import { View }
-  from "nsh"`; for another, the closest binding, primitive or UI set component). Why: TypeScript checks a lowercase
+  from "nsh"`; for another, the closest binding, primitive or registry component). Why: TypeScript checks a lowercase
   tag against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
   Props keep their camelCase names. Only `<Text>` shows text (the core lays out raw text in a text block alone): text
   written in another host element (`<View>Hi</View>`, a string, number or template literal) is an error saying where it
@@ -105,7 +106,7 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - Code is generated as JS text with holes, parsed, and the app's expressions are moved into the holes: they keep their
   spans (the source map points at the app), generated nodes take their JSX element's span.
 - The entry's prologue gives the renderer the app's themes (`setup`: the Tailwind theme and the components' `uiTheme`,
-  before anything renders). A font import (`import Inter from "./Inter.ttf"`) compiles to `import { font } from
+  the appearance and the status bar's default, `nsh.json` `"statusBar"`, before anything renders). A font import (`import Inter from "./Inter.ttf"`) compiles to `import { font } from
   "nsh:rt"; export default font(uri, family)`: its family, registered by the host before the first frame.
 
 ## The renderer (`crates/nsh-js/src/dom.rs`)
@@ -144,7 +145,7 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - `List` (`nsh/list`) is the renderer's (`list.rs`; its tags compile to a component call of `nsh:rt`'s `list`, the
   same function). The core asks for rows (`Host::bind_list`), bound natively (`list::bind`); a recycled cell gets a
   new index and its item accessor follows; header, footer, empty and separator cells, viewability tokens (with
-  `minimumViewTime`), `initialScrollIndex`. Rust components with rows (`ListView`) get a list of the app's data as
+  `minimumViewTime`), `initialScrollIndex`. Rust components with rows (an `Items` prop) get a list of the app's data as
   their items slot.
 - Nodes have the methods of `YNode` (`_core.d.ts`: `focus`, `blur`, `setSelection`, `command`, `scrollTo`, `zoomTo`,
   `scrollToOffset`, `scrollToIndex`, `scrollToEnd`, the web view's and video's): each sends a command
@@ -153,11 +154,15 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 
 ## Navigation
 
-`createNavigator`, `Stack`, `Screen` and `Modal` are natives (`navigation.rs`), which the mobile UI exports
-(`Registry::native_values`). A stack renders each route (by identity) with the app's function into a screen, the app's
-`<Screen>` or one around what it rendered (also when a hot component returns an accessor); a screen the user pops
-natively removes its route; screens and modals provide the insets they report to what they render
-(`useSafeAreaInsets`).
+`createNavStack`, `NavStack`, `NavPage` and `Dialog` are natives (`navigation.rs`), which `nsh/base` exports
+(`Registry::native_values`). A stack renders each route (each push its own entry, the same route pushed twice
+included) with the app's function into a page, the app's `<NavPage>` or one around what it rendered (also when a hot
+component returns an accessor); a page the user pops natively removes its route and calls `onDismiss`; pages and dialogs
+provide the insets they report to what they render (`safeAreaInsets`). The handlers of a page's and a dialog's native
+events are the runtime's: they keep the stack in step and call the app's props (`onDismiss`, `onBackPress`, `onOpen`,
+`onClose`, `onCancel`, `onOpenChange`), so the app's names are not the core's events' (`onDismiss`,
+`onRequestClose`, ...). A dialog renders the app's popup (`class` / `style`) and, while the app styles one
+(`backdropClass` / `backdropStyle`), a backdrop part behind it whose presses are close attempts.
 
 ## Runtime modules
 
@@ -213,7 +218,7 @@ Development bundles (CommonJS, one chunk per module) need nothing: rolldown rend
 
 Development bundles are compiled by the same compiler, after the bundler's hot transform (`crates/nsh-bundler/src/hot.rs`)
 has wrapped the components, the functions passed to top-level `mount()` and the top-level `context()`, `signal()` and
-`createNavigator()` calls, one CommonJS chunk per module, and run by the native hot
+`createNavStack()` calls, one CommonJS chunk per module, and run by the native hot
 runtime (`crates/nsh-js/src/hot.rs`, see `tooling.md`). The script is an ES module: it imports `nsh:hot` (which makes the
 `__nsh_hot` global; only development bundles import it) and the namespaces of the native modules the app imports, which
 factories `require` by specifier; an edit that imports a native module the running script did not makes the host

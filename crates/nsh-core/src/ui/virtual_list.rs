@@ -245,20 +245,20 @@ impl VirtualList {
         self
     }
 
-    /// Above the rows, scrolling with them (TS: `ListHeaderComponent`):
+    /// Above the rows, scrolling with them (TS: `header`):
     /// part of this view, so its state and handlers are the
     /// component's, and it is never recycled.
     pub fn header(self, header: impl IntoElement) -> Self {
         self.extra(CellSlot::Header, "\0header", header.into_element())
     }
 
-    /// Below the rows, scrolling with them (TS: `ListFooterComponent`).
+    /// Below the rows, scrolling with them (TS: `footer`).
     pub fn footer(self, footer: impl IntoElement) -> Self {
         self.extra(CellSlot::Footer, "\0footer", footer.into_element())
     }
 
     /// Shown instead of the rows while there are none (TS:
-    /// `ListEmptyComponent`).
+    /// `empty`).
     pub fn empty(mut self, empty: impl IntoElement) -> Self {
         let empty = empty.into_element();
         match self.list().count.clone() {
@@ -274,7 +274,7 @@ impl VirtualList {
         }
     }
 
-    /// Between rows (TS: `ItemSeparatorComponent`): `separator()` renders
+    /// Between rows (TS: `separator`): `separator()` renders
     /// one after each row but the last (before it in an inverted list), in
     /// the row's cell.
     pub fn separator<R: IntoElement>(mut self, separator: impl Fn() -> R + 'static) -> Self {

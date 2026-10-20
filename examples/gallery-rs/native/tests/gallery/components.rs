@@ -1,5 +1,5 @@
-//! The Components demo on a headless engine: its cards render, the mobile
-//! UI's buttons and the press feedback tiles answer presses, the sheet and
+//! The Components demo on a headless engine: its cards render, the press
+//! feedback tiles answer presses, the sheet and
 //! the modal open and close, the keyboard avoiding view's screen pushes,
 //! the platform's rows and the screen reader's buttons, the input
 //! accessory.
@@ -14,15 +14,9 @@ use crate::common::shows;
 fn components_render_and_answer_presses() {
     let (engine, rx, mut screen) = crate::common::open("Components");
     for label in [
-        "nsh/ui/mobile",
-        "0 taps",
-        "Primary",
-        "Card with slots",
-        "An outlined card, children only.",
-        "Colors come from the app's theme",
         "Press feedback",
         "Fades while pressed",
-        "activeOpacity={0.4}",
+        "activeStyle={{ opacity: 0.4 }}",
         "Enabled",
         "On",
         "Last pressed",
@@ -54,16 +48,6 @@ fn components_render_and_answer_presses() {
     ] {
         assert!(shows(&screen, label), "{label}: {:?}", screen.texts);
     }
-    // A nested Rust component's event reaches this demo's state.
-    crate::common::press(&engine, &rx, &mut screen, "Primary");
-    crate::common::press(&engine, &rx, &mut screen, "Secondary");
-    assert!(shows(&screen, "2 taps"), "{:?}", screen.texts);
-    // Its slot's content: the footer's buttons.
-    crate::common::press(&engine, &rx, &mut screen, "Add one");
-    assert!(shows(&screen, "3 taps"), "{:?}", screen.texts);
-    crate::common::press(&engine, &rx, &mut screen, "Reset");
-    assert!(shows(&screen, "0 taps"), "{:?}", screen.texts);
-
     crate::common::press(&engine, &rx, &mut screen, "Fades while pressed");
     assert!(shows(&screen, "Fading tile"), "{:?}", screen.texts);
 
@@ -124,10 +108,13 @@ fn components_push_the_keyboard_avoiding_view() {
         "{:?}",
         screen.texts
     );
-    crate::common::press(&engine, &rx, &mut screen, "position");
+    crate::common::press(&engine, &rx, &mut screen, "height");
     assert!(
-        shows(&screen, "behavior=\"position\"")
-            && shows(&screen, "The inner content view moves up as a whole."),
+        shows(&screen, "behavior=\"height\"")
+            && shows(
+                &screen,
+                "The view shrinks: its background ends at the keyboard."
+            ),
         "{:?}",
         screen.texts
     );

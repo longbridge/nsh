@@ -1,5 +1,5 @@
 import { mount, signal, Text } from "nsh";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 import { Badge, Counter, Format } from "__SPECIFIER__";
 
 // Its count lives in Rust (`native/src/lib.rs`).

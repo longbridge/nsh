@@ -1,11 +1,21 @@
-//! Navigation: `createNavigator`, `Stack`, `Screen` and `Modal` (the
-//! mobile UI exports them: `Registry::native_values`).
+//! Navigation and dialogs: `createNavStack`, `NavStack`, `NavPage` and
+//! `Dialog` (`nsh/base` exports them: `Registry::native_values`).
 //!
-//! A stack renders each route of its navigator with the app's function into
-//! a native screen (UINavigationController on iOS, a stack with a toolbar
-//! on Android); screens stay mounted while their route is in the stack. A
-//! screen the user pops natively removes its route. Screens and modals
-//! provide their insets to what they render (`useSafeAreaInsets`).
+//! A stack renders each route of its state with the app's function into a
+//! native page (UINavigationController on iOS, a stack with a toolbar on
+//! Android); pages stay mounted while their route is in the stack. A page
+//! the user pops natively removes its route. Pages and dialogs provide
+//! their insets to what they render (`safeAreaInsets`).
+//!
+//! NSH draws no look of its own: the desktops and the web show a page's
+//! `header` slot at its top (the core places it) and nothing else; a
+//! dialog renders the app's popup and, when styled, its backdrop, inside a
+//! native layer that has no look either.
+//!
+//! The handlers of a page's and a dialog's native events are the
+//! runtime's: they keep the stack in step and call the app's props
+//! (`onDismiss`, `onBackPress`, `onOpen`, `onClose`, `onCancel`,
+//! `onOpenChange`), so the app's names are not the core's events'.
 
 use std::{
     ffi::{CStr, CString, c_int},
@@ -64,88 +74,168 @@ fn free(ctx: *mut JsContext, v: JsValue) {
     unsafe { qjs::JS_FreeValue(ctx, v) };
 }
 
-/// The mobile UI's navigation (its `Registry::native_values`).
+/// `nsh/base`'s navigation and dialogs (its `Registry::native_values`).
 pub(crate) const EXPORTS: &[Item] = &[
     (
-        "createNavigator",
-        Export::Function(create_navigator, 1),
+        "createNavStack",
+        Export::Function(create_nav_stack, 1),
         Ts::function(
-            "A stack of routes for `<Stack>`, starting with `initial`.",
-            &["<R>(initial: R | R[]): Navigator<R>"],
+            "The state of a `<NavStack>`: its routes, starting with `routes`.",
+            &["<R>(routes: R[]): NavStackState<R>"],
         ),
     ),
     (
-        "Stack",
+        "NavStack",
         Export::Function(stack, 1),
         Ts::function(
-            "A native navigation stack: UINavigationController on iOS (swipe back,\nnative header), a stack with a toolbar and predictive back on Android.\nScreens stay mounted (with their state) while they are in the stack.",
-            &["<R>(props: StackProps<R>): YNode"],
+            "A native navigation stack: UINavigationController on iOS (swipe back,\nnative header), a stack with a toolbar and predictive back on Android.\nPages stay mounted (with their state) while they are in the stack.",
+            &["<R>(props: NavStackProps<R>): YNode"],
         ),
     ),
     (
-        "Screen",
+        "NavPage",
         Export::Function(screen, 1),
         Ts::function(
-            "One screen of a `<Stack>`, with its header options.",
-            &["(props: ScreenProps): YNode"],
+            "One page of a `<NavStack>`: its `header` (desktops, the web) and the system\nheader's options (iOS, Android).",
+            &["(props: NavPageProps): YNode"],
         ),
     ),
     (
-        "Modal",
+        "Dialog",
         Export::Function(modal, 1),
         Ts::function(
-            "Content presented over everything else, in its own native window layer.",
-            &["(props: ModalProps): JSX.Element"],
+            "A modal surface over everything else, in its own native window layer\n(`presentation` picks its form on iOS). It owns no look: `class` and `style`\nstyle the popup, `backdropClass` and `backdropStyle` a backdrop behind it.",
+            &["(props: DialogProps): JSX.Element"],
         ),
     ),
 ];
 
 /// The types of the navigation's exports.
-pub(crate) const TYPES: &str = r#"/** A stack of routes for `<Stack>`: plain values, compared by identity. */
-export interface Navigator<R> {
+pub(crate) const TYPES: &str = r#"/** The routes of a `<NavStack>`: the app's values; each push is a page of its own, the same route pushed twice included. */
+export interface NavStackState<R> {
   /** The routes, bottom to top (reactive). */
   routes: Accessor<readonly R[]>;
-  /** Pushes a screen. */
+  /** Pushes a page. */
   push(route: R): void;
-  /** Pops `count` screens (at least one stays). */
+  /** Pops `count` pages (default 1; at least one stays). */
   pop(count?: number): void;
-  /** Pops back to the first screen. */
-  popToTop(): void;
-  /** Replaces the top screen. */
+  /** Pops back to the first page. */
+  popToRoot(): void;
+  /** Replaces the top page. */
   replace(route: R): void;
-  /** Replaces all screens. */
-  reset(routes: R[]): void;
-  /** Removes a route wherever it is (the user popped its screen). */
+  /** Replaces the pages with `routes`; a route that stays (the same value)
+   * keeps its page and its state. */
+  setRoutes(routes: R[]): void;
+  /** Removes the topmost page of `route`, wherever it is. */
   remove(route: R): void;
 }
 
-export interface StackProps<R> {
-  navigator: Navigator<R>;
+export interface NavStackProps<R> {
+  state: NavStackState<R>;
+  /** Finds the stack in tests and `nsh test --trace`. */
+  testID?: string;
   style?: StyleProp<ViewStyle>;
-  /** Renders a route; return a `<Screen>` for header options. */
+  class?: string;
+  /** Renders a route; return a `<NavPage>` for header options. */
   children: (route: R, index: Accessor<number>) => JSX.Element;
 }
 
-export interface ScreenProps extends ScreenHostProps {
-  headerLeft?: JSX.Element;
-  headerRight?: JSX.Element;
-  /** Replaces the title. */
-  headerTitle?: JSX.Element;
-  style?: StyleProp<ViewStyle>;
-  children?: JSX.Element;
-  ios?: IOSScreenHostProps;
-  desktop?: DesktopScreenHostProps;
+/** The color of the status bar's content. */
+export type StatusBarForeground = "auto" | "light" | "dark";
+
+/** What the status bar shows while a page or dialog is up (`statusBar`; iOS
+ * and Android). The fields left out keep what is below: the pages under it
+ * and the app's default (`nsh.json` `statusBar`). */
+export interface StatusBar {
+  /** The content's color: "light" for dark backgrounds, "dark" for light ones, "auto" the platform's for the appearance. */
+  foreground?: StatusBarForeground;
+  /** Hidden. */
+  hidden?: boolean;
+  /** Animate the change when the page or dialog comes and goes. */
+  animated?: boolean;
 }
 
-export interface ModalProps extends ModalHostProps {
-  /** Shown while true (default). */
-  visible?: boolean;
+/** The colors of a page's system header (iOS and Android). */
+export interface HeaderStyle {
+  backgroundColor?: ColorValue;
+  /** The title's. */
+  color?: ColorValue;
+  /** The back button's and the bar buttons'. */
+  tintColor?: ColorValue;
+}
+
+export interface NavPageProps extends NavPageHostProps {
+  /** Finds the page in tests and `nsh test --trace`. */
+  testID?: string;
+  /** The app's header on the desktops and the web, which have no system
+   * header: placed at the top of the page, as wide as the page and as tall
+   * as it lays out, with the content below it. NSH draws nothing else
+   * there (no title, no back button); iOS and Android show their system
+   * header instead. */
+  header?: JSX.Element;
+  /** iOS and Android: the system header's leading item. */
+  headerLeft?: JSX.Element;
+  /** iOS and Android: the system header's trailing item. */
+  headerRight?: JSX.Element;
+  /** iOS and Android: replaces the system header's title. */
+  headerTitle?: JSX.Element;
+  /** iOS and Android: the system header's colors. */
+  headerStyle?: HeaderStyle;
+  /** iOS and Android: the system header's colors as classes (`bg-*`,
+   * `text-*` for the title, `tint-*` for the buttons); `headerStyle` wins
+   * over them. */
+  headerClass?: string;
+  /** The user popped the page (back button, swipe); its route is gone. */
+  onDismiss?: () => void;
+  /** The user pressed back on the page (the header's back button, Android
+   * back, Escape / Alt+Left / the mouse's back button on the desktops, the
+   * browser's back), whether or not `popOnBack` let it pop. */
+  onBackPress?: () => void;
   style?: StyleProp<ViewStyle>;
+  class?: string;
   children?: JSX.Element;
-  ios?: IOSModalHostProps;
-  android?: AndroidModalHostProps;
-  desktop?: DesktopModalHostProps;
-  web?: WebModalHostProps;
+}
+
+/** What closed a dialog: Escape or the back button (`"cancel"`), a press
+ * on its backdrop part, a sheet swiped down. */
+export type DialogChangeReason = "cancel" | "backdropPress" | "swipe";
+
+export interface DialogProps extends DialogHostProps {
+  /** Finds the dialog in tests and `nsh test --trace`. */
+  testID?: string;
+  /** Shown while true (default). */
+  open?: boolean;
+  /** How it comes in and goes (default `"slide"`). */
+  animation?: "slide" | "fade" | "none";
+  /** It finished appearing. */
+  onOpen?: () => void;
+  /** It went away: the user closed it, or the app removed it. */
+  onClose?: () => void;
+  /** The user tried to close it (Escape, back, a backdrop press, a swipe
+   * down), whether or not a `closeOn*` flag let it close. */
+  onCancel?: () => void;
+  /** The user closed it (the `closeOn*` flag of what they did let it
+   * close): it closes whatever `open` says, so keep `open` in sync (set it
+   * to false here); while `open` stays true it stays closed, and it opens
+   * again when `open` goes from false to true. */
+  onOpenChange?: (open: boolean, reason: DialogChangeReason) => void;
+  /** The popup's style: the view holding the children. The dialog itself
+   * has no look: on the desktops and the web it is a transparent layer over
+   * the window (`presentation` is ignored there). */
+  style?: StyleProp<ViewStyle>;
+  /** The popup's classes. */
+  class?: string;
+  /** The backdrop's style: with this or `backdropClass`, a view filling the
+   * dialog behind the popup (none otherwise), whose presses are close
+   * attempts (`"backdropPress"`, closing when `closeOnBackdropPress`). */
+  backdropStyle?: StyleProp<ViewStyle>;
+  /** The backdrop's classes (see `backdropStyle`). */
+  backdropClass?: string;
+  /** Finds the backdrop in tests and `nsh test --trace`. */
+  backdropTestID?: string;
+  children?: JSX.Element;
+  ios?: IOSDialogHostProps;
+  android?: AndroidDialogHostProps;
 }
 "#;
 
@@ -167,34 +257,38 @@ fn routes_of(ctx: *mut JsContext, routes: JsValue) -> Vec<JsValue> {
     out
 }
 
-/// `createNavigator(initial)`: the route stack of a `<Stack>`.
-unsafe extern "C" fn create_navigator(
+/// `createNavStack(routes)`: the route stack of a `<NavStack>`.
+unsafe extern "C" fn create_nav_stack(
     ctx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let initial = arg(argc, argv, 0);
-    // SAFETY: a new array of the initial route(s).
-    let routes = unsafe {
-        if qjs::JS_IsArray(initial) {
-            let mut values = routes_of(ctx, initial);
-            qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr())
-        } else {
-            let mut values = [qjs::JS_DupValue(ctx, initial)];
-            qjs::JS_NewArrayFrom(ctx, 1, values.as_mut_ptr())
-        }
-    };
-    let signal = reactive::new_signal(ctx, routes);
-    free(ctx, routes);
+    // SAFETY: an inline tag check.
+    if !unsafe { qjs::JS_IsArray(initial) } {
+        // SAFETY: throwing in the calling context.
+        return unsafe {
+            qjs::JS_ThrowTypeError(ctx, c"createNavStack: an array of routes".as_ptr())
+        };
+    }
+    let mut entries: Vec<JsValue> = routes_of(ctx, initial)
+        .into_iter()
+        .map(|route| entry(ctx, route))
+        .collect();
+    // SAFETY: a new array taking the entries.
+    let entries =
+        unsafe { qjs::JS_NewArrayFrom(ctx, entries.len() as c_int, entries.as_mut_ptr()) };
+    let signal = reactive::new_signal(ctx, entries);
+    free(ctx, entries);
     // SAFETY: a new object taking the functions.
     let nav = unsafe { qjs::JS_NewObject(ctx) };
     let methods: [(&CStr, c_int, c_int); 6] = [
         (c"push", 1, 0),
         (c"pop", 1, 1),
-        (c"popToTop", 0, 2),
+        (c"popToRoot", 0, 2),
         (c"replace", 1, 3),
-        (c"reset", 1, 4),
+        (c"setRoutes", 1, 4),
         (c"remove", 1, 5),
     ];
     for (name, length, magic) in methods {
@@ -209,13 +303,33 @@ unsafe extern "C" fn create_navigator(
     // `routes`: a read-only accessor.
     let read = native(ctx, read_routes, 0, &mut [signal]);
     let routes = reactive::memo(ctx, read, false);
-    // SAFETY: the object takes the accessor; the signal is held by the
-    // functions.
+    // SAFETY: the object takes the accessor and the signal, the latter
+    // hidden (not enumerable, not writable): `<NavStack>` renders its entries.
     unsafe {
         qjs::JS_SetPropertyStr(ctx, nav, c"routes".as_ptr(), routes);
-        qjs::JS_FreeValue(ctx, signal);
+        qjs::JS_DefinePropertyValueStr(ctx, nav, ENTRIES.as_ptr(), signal, 0);
     }
     nav
+}
+
+/// The hidden property of a navigator holding its entries' signal.
+const ENTRIES: &CStr = c"__nshEntries";
+
+/// One screen of a navigator: an object of its own around the route, so a
+/// route pushed twice is two screens, and the user popping one removes
+/// that one (takes `route`).
+fn entry(ctx: *mut JsContext, route: JsValue) -> JsValue {
+    // SAFETY: a new object taking the route.
+    unsafe {
+        let entry = qjs::JS_NewObject(ctx);
+        qjs::JS_SetPropertyStr(ctx, entry, c"route".as_ptr(), route);
+        entry
+    }
+}
+
+/// The route of an entry (owned).
+fn route_of(ctx: *mut JsContext, entry: JsValue) -> JsValue {
+    get(ctx, entry, c"route")
 }
 
 unsafe extern "C" fn read_routes(
@@ -226,12 +340,23 @@ unsafe extern "C" fn read_routes(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: one data value: the routes signal.
-    unsafe { qjs::JS_Call(ctx, *data, UNDEFINED, 0, ptr::null_mut()) }
+    // SAFETY: one data value: the entries' signal.
+    let entries = unsafe { qjs::JS_Call(ctx, *data, UNDEFINED, 0, ptr::null_mut()) };
+    let mut routes: Vec<JsValue> = routes_of(ctx, entries)
+        .into_iter()
+        .map(|e| {
+            let route = route_of(ctx, e);
+            free(ctx, e);
+            route
+        })
+        .collect();
+    free(ctx, entries);
+    // SAFETY: a new array taking the routes.
+    unsafe { qjs::JS_NewArrayFrom(ctx, routes.len() as c_int, routes.as_mut_ptr()) }
 }
 
-/// The navigator's functions, by magic: push, pop, popToTop, replace,
-/// reset, remove.
+/// The stack state's functions, by magic: push, pop, popToRoot, replace,
+/// setRoutes, remove; 6: remove one entry (the user popped its page).
 unsafe extern "C" fn navigate(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -247,7 +372,7 @@ unsafe extern "C" fn navigate(
     let a0 = arg(argc, argv, 0);
     let dup = |v: JsValue| unsafe { qjs::JS_DupValue(ctx, v) };
     match magic {
-        0 => routes.push(dup(a0)),
+        0 => routes.push(entry(ctx, dup(a0))),
         1 => {
             let mut count = 1f64;
             // SAFETY: converting a live value.
@@ -268,23 +393,58 @@ unsafe extern "C" fn navigate(
             if let Some(v) = routes.pop() {
                 free(ctx, v);
             }
-            routes.push(dup(a0));
+            routes.push(entry(ctx, dup(a0)));
         }
         4 => {
-            for v in routes.drain(..) {
-                free(ctx, v);
+            // A route that stays keeps its page (its entry), in order: the
+            // first unused entry of the same route.
+            let mut old: Vec<Option<JsValue>> = routes.drain(..).map(Some).collect();
+            routes = routes_of(ctx, a0)
+                .into_iter()
+                .map(|route| {
+                    let kept = old.iter_mut().find(|slot| {
+                        slot.is_some_and(|e| {
+                            let r = route_of(ctx, e);
+                            // SAFETY: an identity comparison of live values.
+                            let same = unsafe { qjs::JS_IsStrictEqual(ctx, r, route) };
+                            free(ctx, r);
+                            same
+                        })
+                    });
+                    match kept.and_then(Option::take) {
+                        Some(e) => {
+                            free(ctx, route);
+                            e
+                        }
+                        None => entry(ctx, route),
+                    }
+                })
+                .collect();
+            for e in old.into_iter().flatten() {
+                free(ctx, e);
             }
-            routes = routes_of(ctx, a0);
+        }
+        5 => {
+            // The topmost screen showing the route.
+            let at = routes.iter().rposition(|&e| {
+                let route = route_of(ctx, e);
+                // SAFETY: an identity comparison of live values.
+                let same = unsafe { qjs::JS_IsStrictEqual(ctx, route, a0) };
+                free(ctx, route);
+                same
+            });
+            if let Some(at) = at {
+                free(ctx, routes.remove(at));
+            }
         }
         _ => {
-            let (gone, kept): (Vec<_>, Vec<_>) = routes
-                .into_iter()
-                // SAFETY: identity comparisons of live values.
-                .partition(|&v| unsafe { qjs::JS_IsStrictEqual(ctx, v, a0) });
-            for v in gone {
-                free(ctx, v);
+            // SAFETY: identity comparisons of live values.
+            if let Some(at) = routes
+                .iter()
+                .position(|&e| unsafe { qjs::JS_IsStrictEqual(ctx, e, a0) })
+            {
+                free(ctx, routes.remove(at));
             }
-            routes = kept;
         }
     }
     // SAFETY: a new array taking the routes.
@@ -295,7 +455,7 @@ unsafe extern "C" fn navigate(
 
 // --- Stack ------------------------------------------------------------------------
 
-/// `<Stack navigator>{(route, index) => <Screen …>}</Stack>`.
+/// `<NavStack state>{(route, index) => <NavPage …>}</NavStack>`.
 unsafe extern "C" fn stack(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -308,15 +468,15 @@ unsafe extern "C" fn stack(
         Err(e) => return e,
     };
     let result = (|| -> Result<(), JsValue> {
-        dom::spread_except(ctx, node, props, &["navigator", "children"])?;
-        let navigator = get(ctx, props, c"navigator");
-        let routes = get(ctx, navigator, c"routes");
+        dom::spread_except(ctx, node, props, &["state", "children"])?;
+        let navigator = get(ctx, props, c"state");
+        let entries = get(ctx, navigator, ENTRIES);
         free(ctx, navigator);
         let render = native(ctx, stack_row, 2, &mut [props]);
-        // SAFETY: `each(routes, render)`: rows by route identity.
-        let mut args = [routes, render];
+        // SAFETY: `each(entries, render)`: a row per pushed screen.
+        let mut args = [entries, render];
         let rows = unsafe { crate::dom::each(ctx, UNDEFINED, 2, args.as_mut_ptr()) };
-        free(ctx, routes);
+        free(ctx, entries);
         free(ctx, render);
         // SAFETY: an inline tag check.
         if unsafe { qjs::JS_IsException(rows) } {
@@ -335,7 +495,7 @@ unsafe extern "C" fn stack(
     }
 }
 
-/// One route of a stack: its screen (the app's `<Screen>`, or one around
+/// One route of a stack: its screen (the app's `<NavPage>`, or one around
 /// what it rendered); a native pop removes the route.
 unsafe extern "C" fn stack_row(
     ctx: *mut JsContext,
@@ -348,9 +508,10 @@ unsafe extern "C" fn stack_row(
     // SAFETY: one data value (the stack's props); `item` is an accessor.
     let props = unsafe { *data };
     let (item, index) = (arg(argc, argv, 0), arg(argc, argv, 1));
-    let route = reactive::untracked_with(ctx, || unsafe {
+    let entry = reactive::untracked_with(ctx, || unsafe {
         qjs::JS_Call(ctx, item, UNDEFINED, 0, ptr::null_mut())
     });
+    let route = route_of(ctx, entry);
     let children = get(ctx, props, c"children");
     let mut args = [route, index];
     // SAFETY: the app's function, called untracked.
@@ -359,16 +520,17 @@ unsafe extern "C" fn stack_row(
     });
     free(ctx, children);
     // SAFETY: an inline tag check.
+    free(ctx, route);
     if unsafe { qjs::JS_IsException(rendered) } {
-        free(ctx, route);
+        free(ctx, entry);
         return rendered;
     }
-    let navigator = get(ctx, props, c"navigator");
-    let remove = get(ctx, navigator, c"remove");
+    let navigator = get(ctx, props, c"state");
+    let entries = get(ctx, navigator, ENTRIES);
     free(ctx, navigator);
-    let popped = native(ctx, pop_route, 0, &mut [remove, route]);
-    free(ctx, remove);
-    free(ctx, route);
+    let popped = native(ctx, pop_route, 0, &mut [entries, entry]);
+    free(ctx, entries);
+    free(ctx, entry);
     // An accessor (e.g. a component made hot) may render another screen
     // later.
     let result =
@@ -391,11 +553,10 @@ unsafe extern "C" fn pop_route(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: two data values: the navigator's `remove` and the route.
-    unsafe {
-        let mut args = [*data.add(1)];
-        qjs::JS_Call(ctx, *data, UNDEFINED, 1, args.as_mut_ptr())
-    }
+    // SAFETY: two data values: the navigator's entries and the entry.
+    let mut args = [unsafe { *data.add(1) }];
+    // SAFETY: `navigate` removing that entry (magic 6) from the signal.
+    unsafe { navigate(ctx, UNDEFINED, 1, args.as_mut_ptr(), 6, data) }
 }
 
 unsafe extern "C" fn screen_of_accessor(
@@ -578,8 +739,8 @@ unsafe extern "C" fn read_prop(
     }
 }
 
-/// `<Screen title … headerLeft headerRight headerTitle>`: one screen of a
-/// stack, with its header options.
+/// `<NavPage title … header headerLeft headerRight headerTitle>`: one page
+/// of a stack, with its header options.
 unsafe extern "C" fn screen(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -598,10 +759,12 @@ unsafe extern "C" fn screen(
             props,
             &[
                 "children",
+                "header",
                 "headerLeft",
                 "headerRight",
                 "headerTitle",
                 "onDismiss",
+                "onBackPress",
                 "onInsets",
             ],
         )?;
@@ -614,12 +777,22 @@ unsafe extern "C" fn screen(
         let r = dom::set_handler(ctx, id, EventKind::Dismiss, dismiss);
         free(ctx, dismiss);
         r?;
+        // Only when the app listens: the event mask tells the platform
+        // whether a back press goes to JS at all.
+        let listens = get(ctx, props, c"onBackPress");
+        // SAFETY: an inline check of a live value.
+        let listens_fn = unsafe { !qjs::JS_IsUndefined(listens) && !qjs::JS_IsNull(listens) };
+        free(ctx, listens);
+        if listens_fn {
+            forward(ctx, id, EventKind::BackRequest, props, "onBackPress")?;
+        }
         // The header's slots, then the content with the screen's insets.
         let mut parts = Vec::new();
         for (slot, key) in [
             ("left", "headerLeft"),
             ("right", "headerRight"),
             ("title", "headerTitle"),
+            ("header", "header"),
         ] {
             let content = reader(ctx, props, key);
             // SAFETY: a new string the function keeps a dup of.
@@ -700,7 +873,8 @@ unsafe extern "C" fn header_item(
     }
 }
 
-/// A screen's dismissal: a native pop tells the stack, then the app.
+/// A page's dismissal: a native pop tells the stack, then the app
+/// (`onDismiss`).
 unsafe extern "C" fn on_dismiss(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -735,10 +909,61 @@ unsafe extern "C" fn on_dismiss(
     }
 }
 
-// --- Modal --------------------------------------------------------------------------
+// --- Handlers of the app's props -------------------------------------------------
 
-/// `<Modal visible onRequestClose …>`: content over everything else, in
-/// its own native window layer, while `visible` is not false.
+/// Sets the handler of `event` on node `id` to one calling `props[key]`
+/// (read when the event comes) with the event's arguments.
+fn forward(
+    ctx: *mut JsContext,
+    id: nsh_core::NodeId,
+    event: EventKind,
+    props: JsValue,
+    key: &str,
+) -> Result<(), JsValue> {
+    // SAFETY: a new string the function keeps a dup of.
+    let k = unsafe { qjs::JS_NewStringLen(ctx, key.as_ptr().cast(), key.len() as _) };
+    let f = native(ctx, call_prop, 1, &mut [props, k]);
+    free(ctx, k);
+    let r = dom::set_handler(ctx, id, event, f);
+    free(ctx, f);
+    r
+}
+
+unsafe extern "C" fn call_prop(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (props, key); the arguments are borrowed.
+    unsafe {
+        let Some(key) = dom::string_arg(ctx, *data.add(1)) else {
+            return qjs::JS_EXCEPTION;
+        };
+        let k = CString::new(key).unwrap_or_default();
+        let f = get(ctx, *data, &k);
+        let r = if qjs::JS_IsFunction(ctx, f) {
+            qjs::JS_Call(ctx, f, UNDEFINED, argc, argv)
+        } else {
+            UNDEFINED
+        };
+        free(ctx, f);
+        r
+    }
+}
+
+// --- Dialog -------------------------------------------------------------------------
+
+/// `<Dialog open onOpenChange …>`: content over everything else, in its
+/// own native window layer, while it is open: `open` is not false and the
+/// user did not close it ([`close_attempt`]).
+///
+/// What shows is the app's: the popup (a view with the dialog's `class`
+/// and `style`, holding the children) and, only when the app styles one
+/// (`backdropClass` / `backdropStyle`), a backdrop behind it filling the
+/// layer, whose presses are close attempts (`"backdropPress"`).
 unsafe extern "C" fn modal(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -746,9 +971,38 @@ unsafe extern "C" fn modal(
     argv: *mut JsValue,
 ) -> JsValue {
     let props = arg(argc, argv, 0);
-    let run = native(ctx, modal_run, 0, &mut [props]);
+    // Closed by the user while `open` stayed true: `closed` (a plain
+    // object's flag, which the run resets without writing a signal it
+    // reads) and `tick`, which runs it again.
+    // SAFETY: a new object.
+    let state = unsafe { qjs::JS_NewObject(ctx) };
+    let tick = reactive::new_signal(ctx, qjs::JS_NewFloat64(0.0));
+    let run = native(ctx, modal_run, 0, &mut [props, state, tick]);
+    free(ctx, state);
+    free(ctx, tick);
     let shown = reactive::memo(ctx, run, false);
     reactive::finish_value(ctx, shown)
+}
+
+/// The `closed` flag of a dialog's state object.
+fn closed_by_user(ctx: *mut JsContext, state: JsValue) -> bool {
+    let v = get(ctx, state, c"closed");
+    // SAFETY: an inline check of a live value.
+    let closed = unsafe { qjs::JS_IsBool(v) && qjs::JS_VALUE_GET_BOOL(v) };
+    free(ctx, v);
+    closed
+}
+
+fn set_closed_by_user(ctx: *mut JsContext, state: JsValue, closed: bool) {
+    // SAFETY: a property write of a live object.
+    unsafe {
+        qjs::JS_SetPropertyStr(
+            ctx,
+            state,
+            c"closed".as_ptr(),
+            if closed { qjs::JS_TRUE } else { qjs::JS_FALSE },
+        );
+    }
 }
 
 unsafe extern "C" fn modal_run(
@@ -759,13 +1013,21 @@ unsafe extern "C" fn modal_run(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: one data value (the props).
-    let props = unsafe { *data };
-    let visible = get(ctx, props, c"visible");
+    // SAFETY: three data values (props, state, tick).
+    let (props, state, tick) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    // Tracked: a close by the user runs this again.
+    let t = unsafe { qjs::JS_Call(ctx, tick, UNDEFINED, 0, ptr::null_mut()) };
+    free(ctx, t);
+    let open = get(ctx, props, c"open");
     // SAFETY: an inline check of a live value.
-    let hidden = unsafe { qjs::JS_IsBool(visible) && !qjs::JS_VALUE_GET_BOOL(visible) };
-    free(ctx, visible);
-    if hidden {
+    let closed = unsafe { qjs::JS_IsBool(open) && !qjs::JS_VALUE_GET_BOOL(open) };
+    free(ctx, open);
+    if closed {
+        // The app followed (or closed it itself): the next `open` shows it.
+        set_closed_by_user(ctx, state, false);
+        return qjs::JS_NULL;
+    }
+    if closed_by_user(ctx, state) {
         return qjs::JS_NULL;
     }
     reactive::untracked_with(ctx, || {
@@ -774,22 +1036,61 @@ unsafe extern "C" fn modal_run(
             Err(e) => return e,
         };
         let result = (|| -> Result<(), JsValue> {
-            dom::spread_except(ctx, node, props, &["children", "visible", "onInsets"])?;
+            dom::spread_except(
+                ctx,
+                node,
+                props,
+                &[
+                    "children",
+                    "open",
+                    "class",
+                    "style",
+                    "backdropClass",
+                    "backdropStyle",
+                    "backdropTestID",
+                    "onInsets",
+                    "onOpen",
+                    "onClose",
+                    "onCancel",
+                    "onOpenChange",
+                ],
+            )?;
             let (insets, on_insets) = native_insets(ctx, false);
             let id = dom::node_id(ctx, node).expect("a node");
             let r = dom::set_handler(ctx, id, EventKind::Insets, on_insets);
             free(ctx, on_insets);
             r?;
-            let children = reader(ctx, props, "children");
-            let content = with_insets(ctx, insets, children);
-            free(ctx, children);
-            free(ctx, insets);
+            forward(ctx, id, EventKind::Show, props, "onOpen")?;
+            forward(ctx, id, EventKind::Dismiss, props, "onClose")?;
+            let cancel = native(ctx, on_cancel, 1, &mut [props, state, tick]);
+            let r = dom::set_handler(ctx, id, EventKind::RequestClose, cancel);
+            free(ctx, cancel);
+            r?;
+            // The backdrop part, while the app styles one.
+            let has = native(ctx, has_backdrop, 0, &mut [props]);
+            let make = native(ctx, backdrop_part, 0, &mut [props, state, tick]);
+            let backdrop = dom::cond_value(ctx, has, make);
+            free(ctx, has);
+            free(ctx, make);
             // SAFETY: an inline tag check.
-            if unsafe { qjs::JS_IsException(content) } {
-                return Err(content);
+            if unsafe { qjs::JS_IsException(backdrop) } {
+                free(ctx, insets);
+                return Err(backdrop);
             }
-            let r = dom::insert_value_at(ctx, node, content, None);
-            free(ctx, content);
+            let popup = popup_part(ctx, props, insets);
+            free(ctx, insets);
+            let popup = match popup {
+                Ok(popup) => popup,
+                Err(e) => {
+                    free(ctx, backdrop);
+                    return Err(e);
+                }
+            };
+            let mut parts = [backdrop, popup];
+            // SAFETY: a new array taking the parts.
+            let all = unsafe { qjs::JS_NewArrayFrom(ctx, 2, parts.as_mut_ptr()) };
+            let r = dom::insert_value_at(ctx, node, all, None);
+            free(ctx, all);
             r
         })();
         match result {
@@ -799,5 +1100,231 @@ unsafe extern "C" fn modal_run(
                 e
             }
         }
+    })
+}
+
+/// The popup: a view with the dialog's `class` and `style` holding its
+/// children (with the dialog's `insets`, borrowed); owned.
+fn popup_part(ctx: *mut JsContext, props: JsValue, insets: JsValue) -> Result<JsValue, JsValue> {
+    let popup = dom::create_element(ctx, Tag::View)?;
+    let result = (|| -> Result<(), JsValue> {
+        for (prop, key) in [("class", "class"), ("style", "style")] {
+            let read = reader(ctx, props, key);
+            let r = dom::bind_prop_with(ctx, popup, prop, read);
+            free(ctx, read);
+            r?;
+        }
+        let children = reader(ctx, props, "children");
+        let content = with_insets(ctx, insets, children);
+        free(ctx, children);
+        // SAFETY: an inline tag check.
+        if unsafe { qjs::JS_IsException(content) } {
+            return Err(content);
+        }
+        let r = dom::insert_value_at(ctx, popup, content, None);
+        free(ctx, content);
+        r
+    })();
+    match result {
+        Ok(()) => Ok(popup),
+        Err(e) => {
+            free(ctx, popup);
+            Err(e)
+        }
+    }
+}
+
+/// Whether the app styles a backdrop (`backdropClass` or `backdropStyle`).
+unsafe extern "C" fn has_backdrop(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (the props).
+    let props = unsafe { *data };
+    let mut has = false;
+    for key in [c"backdropClass", c"backdropStyle"] {
+        let v = get(ctx, props, key);
+        // SAFETY: inline checks of a live value.
+        has |= unsafe { !qjs::JS_IsUndefined(v) && !qjs::JS_IsNull(v) };
+        free(ctx, v);
+    }
+    if has { qjs::JS_TRUE } else { qjs::JS_FALSE }
+}
+
+/// The backdrop: a view filling the dialog behind the popup, with the
+/// app's `backdropClass` and `backdropStyle` and no look of its own; a
+/// press on it is a close attempt (`"backdropPress"`).
+unsafe extern "C" fn backdrop_part(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: three data values (props, state, tick).
+    let props = unsafe { *data };
+    let view = match dom::create_element(ctx, Tag::View) {
+        Ok(view) => view,
+        Err(e) => return e,
+    };
+    let result = (|| -> Result<(), JsValue> {
+        let class = native(ctx, backdrop_class, 0, &mut [props]);
+        let r = dom::bind_prop_with(ctx, view, "class", class);
+        free(ctx, class);
+        r?;
+        let style = reader(ctx, props, "backdropStyle");
+        let r = dom::bind_prop_with(ctx, view, "style", style);
+        free(ctx, style);
+        r?;
+        let test_id = reader(ctx, props, "backdropTestID");
+        let r = dom::bind_prop_with(ctx, view, "testID", test_id);
+        free(ctx, test_id);
+        r?;
+        // SAFETY: the three data values, which the function keeps dups of.
+        let press = native(ctx, backdrop_press, 0, unsafe {
+            std::slice::from_raw_parts_mut(data, 3)
+        });
+        let r = dom::set_prop_value(ctx, view, "onPress", press);
+        free(ctx, press);
+        r
+    })();
+    match result {
+        Ok(()) => view,
+        Err(e) => {
+            free(ctx, view);
+            e
+        }
+    }
+}
+
+/// The backdrop's classes: filling the dialog, then the app's.
+unsafe extern "C" fn backdrop_class(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (the props).
+    let v = get(ctx, unsafe { *data }, c"backdropClass");
+    // SAFETY: an inline tag check.
+    let own = if unsafe { qjs::JS_IsString(v) } {
+        dom::string_arg(ctx, v).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    free(ctx, v);
+    let class = format!("absolute inset-0 {own}");
+    // SAFETY: a new string.
+    unsafe { qjs::JS_NewStringLen(ctx, class.as_ptr().cast(), class.len() as _) }
+}
+
+unsafe extern "C" fn backdrop_press(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: three data values (props, state, tick).
+    let (props, state, tick) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    close_attempt(ctx, props, state, tick, "backdropPress")
+}
+
+/// The platform reports that the user tried to close a dialog natively
+/// (payload: `reason`).
+unsafe extern "C" fn on_cancel(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: three data values (props, state, tick); the event is
+    // borrowed.
+    let (props, state, tick) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    let e = arg(argc, argv, 0);
+    let value = get(ctx, e, c"reason");
+    // SAFETY: an inline tag check.
+    let reason = if unsafe { qjs::JS_IsString(value) } {
+        dom::string_arg(ctx, value).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    free(ctx, value);
+    let reason = match reason.as_str() {
+        "backdropPress" => "backdropPress",
+        "swipe" => "swipe",
+        _ => "cancel",
+    };
+    close_attempt(ctx, props, state, tick, reason)
+}
+
+/// The user tried to close a dialog: `onCancel`, then, when the
+/// `closeOn*` flag of what they did lets it close, `onOpenChange(false,
+/// reason)` and the dialog closes (a platform that closed it natively
+/// already reports `onClose`; otherwise removing it does).
+fn close_attempt(
+    ctx: *mut JsContext,
+    props: JsValue,
+    state: JsValue,
+    tick: JsValue,
+    reason: &str,
+) -> JsValue {
+    let flag: &CStr = match reason {
+        "backdropPress" => c"closeOnBackdropPress",
+        "swipe" => c"closeOnSwipe",
+        _ => c"closeOnEscape",
+    };
+    let call = |key: &CStr, args: &mut [JsValue]| -> JsValue {
+        let f = get(ctx, props, key);
+        // SAFETY: a call of the app's function with borrowed arguments.
+        let r = unsafe {
+            if qjs::JS_IsFunction(ctx, f) {
+                qjs::JS_Call(ctx, f, UNDEFINED, args.len() as c_int, args.as_mut_ptr())
+            } else {
+                UNDEFINED
+            }
+        };
+        free(ctx, f);
+        r
+    };
+    let r = call(c"onCancel", &mut []);
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(r) } {
+        return r;
+    }
+    free(ctx, r);
+    let closes = get(ctx, props, flag);
+    // SAFETY: an inline check of a live value.
+    let kept = unsafe { qjs::JS_IsBool(closes) && !qjs::JS_VALUE_GET_BOOL(closes) };
+    free(ctx, closes);
+    if kept || closed_by_user(ctx, state) {
+        return UNDEFINED;
+    }
+    reactive::batch_with(ctx, || {
+        // SAFETY: a new string, freed after the call.
+        let reason =
+            unsafe { qjs::JS_NewStringLen(ctx, reason.as_ptr().cast(), reason.len() as _) };
+        let r = call(c"onOpenChange", &mut [qjs::JS_FALSE, reason]);
+        free(ctx, reason);
+        // SAFETY: an inline tag check.
+        if unsafe { qjs::JS_IsException(r) } {
+            return r;
+        }
+        free(ctx, r);
+        // Closed whether or not the app keeps `open` in sync.
+        set_closed_by_user(ctx, state, true);
+        let n = reactive::peek_number(ctx, tick).unwrap_or(0.0);
+        reactive::set_signal(ctx, tick, qjs::JS_NewFloat64(n + 1.0));
+        reactive::finish_value(ctx, UNDEFINED)
     })
 }

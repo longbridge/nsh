@@ -1,9 +1,9 @@
 # What a user does and sees (compat/apps.rs).
 expect Press: none
 # A finger goes down and comes up.
-event id:press onPressIn
+event id:press onPressDown
 expect Press: in
-event id:press onPressOut
+event id:press onPressUp
 expect Press: in out
 # The mouse comes over, moves with Shift and Command held, and leaves.
 listens id:hover onHoverIn
@@ -27,8 +27,8 @@ event id:action onAccessibilityAction actionName=increment
 expect Action: increment
 event id:action onAccessibilityAction actionName=activate
 expect Action: activate
-covers [events] onPressIn
-covers [events] onPressOut
+covers [events] onPressDown
+covers [events] onPressUp
 covers [events] onHoverIn
 covers [events] onHoverMove
 covers [events] onHoverOut

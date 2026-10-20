@@ -645,8 +645,8 @@ pub struct EngineConfig {
     pub header_heights: (Points, Points),
     /// The JS VM's resource limits (a JS app's; Rust code has none).
     pub limits: Limits,
-    /// The UI sets JS imports (`nsh_ui_mobile::registry()` on mobile, the
-    /// app's own): their Rust components and modules. A Rust app's
+    /// The UI sets JS imports (`nsh_base::registry()` by default, the app's
+    /// own): their Rust components and modules. A Rust app's
     /// components need no registration.
     pub ui_sets: Vec<nsh_core::ui::Registry>,
     /// The tokio runtime the components' async tasks use (timers, IO,

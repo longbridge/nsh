@@ -1,5 +1,5 @@
 import { type JSX } from "nsh";
-import { createNavigator } from "nsh/ui/mobile";
+import { createNavStack } from "nsh/base";
 import type { IconName } from "./icons";
 
 /** A demo of the index. */
@@ -10,7 +10,7 @@ export interface DemoEntry {
   screen: () => JSX.Element;
 }
 
-/** A screen a demo pushes: a component rendering its own `<Screen>`. */
+/** A screen a demo pushes: a component rendering its own `<NavPage>`. */
 export type Route = { name: "home" } | { name: "demo"; demo: DemoEntry } | { name: "page"; page: () => JSX.Element };
 
-export const nav = createNavigator<Route>({ name: "home" });
+export const nav = createNavStack<Route>([{ name: "home" }]);

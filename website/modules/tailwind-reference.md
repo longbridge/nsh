@@ -240,7 +240,8 @@ Tailwind's text shadows have several layers; natively one shadow is drawn, the w
 
 | Class | Sets |
 |---|---|
-| `placeholder:text-<color>` | `placeholderTextColor` |
+| `placeholder:text-<color>` | `placeholderColor` |
+| `selection:text-<color>` | `selectionColor` (an input's caret and selection, a selectable text's highlight) |
 | `caret-<color>` | the cursor color |
 
 ## Backgrounds
@@ -425,6 +426,9 @@ States are tracked by the platform only for elements whose classes use them, and
 | `focus-within:` | the element or a descendant has focus |
 | `disabled:` | the element has the `disabled` prop |
 | `enabled:` | the element does not have the `disabled` prop |
+| `selected:` | the element is selected: a `Button`'s `selected`, or `accessibilityState.selected` |
+
+The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle` and `disabledStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
 
 `disabled` works on any element: it applies `disabled:` and removes the element's press handlers, so it shows no press feedback either.
 
@@ -449,6 +453,7 @@ Mark an ancestor with `group` and style descendants by its state with `group-<st
 | `group-focus:`, `group-focus-visible:` | focused |
 | `group-focus-within:` | focused or containing focus |
 | `group-disabled:` | disabled |
+| `group-selected:` | selected |
 
 ```tsx
 <View onPress={open} class="group/row flex-row items-center gap-3 p-3 active:bg-zinc-100">
@@ -471,9 +476,9 @@ Mark an ancestor with `group` and style descendants by its state with `group-<st
 <Each of={items()}>{(item) => <Text class="border-b border-zinc-200 py-3 last:border-b-0">{item().name}</Text>}</Each>
 ```
 
-### Placeholder
+### Placeholder and selection
 
-`placeholder:` applies to an `<Input>`'s placeholder and only takes a text color: `placeholder:text-zinc-400`.
+`placeholder:` applies to an `<Input>`'s placeholder and only takes a text color: `placeholder:text-zinc-400` (the style key `placeholderColor`). `selection:` applies to the selection of an `<Input>` (its caret too) or a selectable `<Text>`, and also only takes a text color: `selection:text-violet-500` (the style key `selectionColor`).
 
 ### Important
 
@@ -534,7 +539,7 @@ With this theme, `bg-brand-500`, `bg-brand` (the `DEFAULT` shade), `text-accent`
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> The Tailwind theme shapes only your app's classes. The components of `nsh/ui/mobile` take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Components](../components/index.md). Classes can name that theme's colors and numbers too (`bg-primary`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
+> The Tailwind theme shapes only your app's classes. Rust components take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Rust](../docs/rust.md). Classes can name that theme's colors and numbers too (`bg-primary`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
 
 ## Related
 

@@ -10,7 +10,7 @@ group: platforms
 The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
 GPUI Kit is built on, on macOS, Windows and Linux alike. Its main use is embedding: an `AppView` is a GPUI view, so a
 GPUI or GPUI Kit app shows NSH modules anywhere in its own element tree. The core, the reactive graph, the renderer,
-Taffy layout and the `nsh/ui/mobile` components are the same as on every other platform, so one bundle runs
+Taffy layout and the native modules are the same as on every other platform, so one bundle runs
 everywhere. `Platform.OS` is the OS it runs on (`"macos"`, `"windows"` or `"linux"`) and the `desktop={{…}}` props
 apply.
 
@@ -133,7 +133,7 @@ so only load it from your own app's files.
   follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 - `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
   from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.
-- `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own, and gives
+- `set_ui_sets(sets)` sets the UI sets every engine serves, for apps with Rust components of their own ([Rust](./rust.md)), and gives
   your app's own sets: an app reaches the functions and classes of one by name with
   [`nativeModule`](../modules/nsh-native.md#nativemodule) and is built with the stock `nsh build`. The repository's
   `examples/embed-gpui` keeps a trading desk in the host this way, which two embedded order tickets and the host's

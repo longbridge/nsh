@@ -19,15 +19,23 @@
 //!   props interfaces (`nsh/types.d.ts`, `*Props`), handlers (`on…`) being
 //!   events; a platform's props are `ios.<name>`, `android.<name>`,
 //!   `desktop.<name>` and `web.<name>`;
+//! - `[props] <Component>.<name>`, `[events] <Component>.<name>`: a
+//!   component's own props, the members of `<Component>Props` in the module
+//!   that exports `<Component>` (`[props] List.header`, `[events]
+//!   Dialog.onOpenChange`), less the host props' names, which it inherits
+//!   or passes on as they are (`testID`, `style`, `animation`, ...) and
+//!   which are items of their own; an event is an `on…` function;
 //! - `[styles] <name>`: the keys of `LayoutStyle`, `ViewStyle`, `TextStyle`
 //!   and `ImageStyle`.
 //!
 //! A script claims the parts it checks with `covers <item>` steps, and the
-//! claims are verified ([`verify`]): the bundle uses the part, and a prop,
-//! event or style key renamed in the bundle makes a check of the script
-//! fail (any step that checks: `expect`, `absent`, `tap`, `frame`,
+//! claims are verified ([`verify`]): the bundle uses the part (a
+//! component's prop: the component and the name), and a prop, event or
+//! style key renamed in the bundle makes a check of the script fail (any
+//! step that checks: `expect`, `absent`, `tap`, `frame`, `origin`,
 //! `prop`, `noprop`, `style`, `nostyle`, `listens`, `log`), so the script
-//! sees what it does. Exports and globals cannot be taken out of an app that still
+//! sees what it does; a prop a component requires (`NavStack`'s `state`)
+//! may make the app fail instead. Exports and globals cannot be taken out of an app that still
 //! runs, so only their use is verified; their claim is the script
 //! author's word that a step checks their result.
 //!
@@ -37,18 +45,19 @@
 //! imports (bundles are tree-shaken, so what they import they call), a
 //! global it names as a free identifier, and a prop, event or style key it
 //! writes as a string literal (`prop(el, "testID", …)`) or an object key
-//! (`{ flexDirection: "row" }`, spreads, component props). The compiler
+//! (`{ flexDirection: "row" }`, spreads, component props, the getters the
+//! compiler makes for reactive ones: `{ get header() { … } }`). The compiler
 //! makes some exports in place: `View`, `Text`, ... are `element("view")`,
 //! ..., `List` is `nsh:rt`'s `list`, `If` and `Each` its `cond` and `each`,
 //! a host element's `children` its `append` and `insert`. A style reached
 //! only through Tailwind classes is not counted.
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::PathBuf,
 };
 
-use super::{api_dir, apps, base_revision, compare, git, surface, text};
+use super::{api_dir, apps, base_revision, compare, in_force, record_at, surface, text};
 
 /// The list's name under `api/`.
 const FILE: &str = "uncovered.txt";
@@ -90,10 +99,11 @@ const PLATFORMS: &[(&str, &str)] = &[
 ];
 
 /// The parts of the API: `runtime.txt`'s exports and the globals NSH
-/// declares, the host elements' props and events and the style keys of
-/// `types`.
-fn items(runtime: &str, types: &[(String, String)]) -> BTreeSet<String> {
+/// declares, the host elements' and the components' props and events and
+/// the style keys of `types`; and of them, the props a component requires.
+fn items(runtime: &str, types: &[(String, String)]) -> (BTreeSet<String>, HashSet<String>) {
     let mut out = BTreeSet::new();
+    let mut required = HashSet::new();
     // Every global the runtime adds to QuickJS' is declared there (nsh-js'
     // `declarations` tests hold it), so what is not declared is the
     // language's.
@@ -106,6 +116,7 @@ fn items(runtime: &str, types: &[(String, String)]) -> BTreeSet<String> {
         .filter(|(_, d)| d.kind != "interface" && d.kind != "type")
         .map(|(name, _)| name.split(' ').next().unwrap().to_owned())
         .collect();
+    let mut exports = HashSet::new();
     let mut section = "";
     for line in runtime.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') {
@@ -118,6 +129,7 @@ fn items(runtime: &str, types: &[(String, String)]) -> BTreeSet<String> {
         let path = line.split_once(' ').map_or(line, |(p, _)| p);
         if !path.contains(['.', '#']) && (section != "globals" || declared.contains(path)) {
             out.insert(format!("[{section}] {path}"));
+            exports.insert(format!("[{section}] {path}"));
         }
     }
     let host = &types
@@ -125,14 +137,14 @@ fn items(runtime: &str, types: &[(String, String)]) -> BTreeSet<String> {
         .find(|(p, _)| p == "nsh/types.d.ts")
         .expect("nsh/types.d.ts")
         .1;
+    // The names of the host props (no platform's), which components
+    // declaring them pass on as they are.
+    let mut host_props = HashSet::new();
     for (name, d) in compare::declarations(host) {
         if d.kind != "interface" {
             continue;
         }
-        let members = d
-            .members
-            .keys()
-            .filter(|m| m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        let members = d.members.keys().filter(|m| is_name(m));
         if STYLES.contains(&name.as_str()) {
             out.extend(members.map(|m| format!("[styles] {m}")));
         } else if name.ends_with("Props") {
@@ -149,10 +161,51 @@ fn items(runtime: &str, types: &[(String, String)]) -> BTreeSet<String> {
             for m in members {
                 let section = if is_handler(m) { "events" } else { "props" };
                 out.insert(format!("[{section}] {prefix}{m}"));
+                if prefix.is_empty() {
+                    host_props.insert(m.clone());
+                }
             }
         }
     }
-    out
+    // A component's own props: `<Component>Props` of the module that
+    // exports `<Component>`, less the host props it inherits or declares
+    // again (`testID`, `style`, `children`, ...).
+    for (path, text) in types {
+        let Some(module) = path.strip_suffix(".d.ts") else {
+            continue;
+        };
+        let module = module.strip_suffix("/index").unwrap_or(module);
+        for (name, d) in compare::declarations(text) {
+            let Some(component) = name.strip_suffix("Props") else {
+                continue;
+            };
+            if d.kind != "interface" || !exports.contains(&format!("[{module}] {component}")) {
+                continue;
+            }
+            for (m, texts) in &d.members {
+                if !is_name(m) || host_props.contains(m) {
+                    continue;
+                }
+                // A handler is a function (`onEndReachedThreshold` is a
+                // number).
+                let handler = is_handler(m) && texts.iter().any(|t| t.contains("=>"));
+                let section = if handler { "events" } else { "props" };
+                let item = format!("[{section}] {component}.{m}");
+                if texts.iter().all(|t| !t.starts_with(&format!("{m}?"))) {
+                    required.insert(item.clone());
+                }
+                out.insert(item);
+            }
+        }
+    }
+    (out, required)
+}
+
+/// A member named by an identifier (not a call or index signature).
+fn is_name(member: &str) -> bool {
+    member
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// `onPress`, not `one`.
@@ -183,7 +236,7 @@ impl Usage {
             let prev = if i == 0 { Tok::Other } else { at(i - 1) };
             // `...x` spreads `x`; `a.x` and `a?.x` are members.
             let member = prev == Tok::Punct(b'.') && (i < 2 || at(i - 2) != Tok::Punct(b'.'));
-            let key = matches!(prev, Tok::Punct(b'{' | b',')) && at(i + 1) == Tok::Punct(b':');
+            let key = is_key(&toks, i);
             match *tok {
                 Tok::Str(s) => {
                     self.keys.insert(s.to_owned());
@@ -261,6 +314,18 @@ impl Usage {
         }
     }
 
+    /// Whether the bundle renders the component `name`, of whichever
+    /// module: it imports it, or the compiler made it in place.
+    fn uses_component(&self, name: &str) -> bool {
+        self.imports
+            .iter()
+            .any(|i| i.rsplit_once(' ').is_some_and(|(_, n)| n == name))
+            || PRIMITIVES
+                .iter()
+                .filter(|p| p.1 == name)
+                .any(|p| self.covers(&format!("[{}] {}", p.0, p.1)))
+    }
+
     /// Whether some bundle read into `self` exercises `item`.
     fn covers(&self, item: &str) -> bool {
         let (section, name) = item.split_once(' ').expect("[<section>] <name>");
@@ -275,6 +340,11 @@ impl Usage {
                 self.keys.contains(name) || rt("append") || rt("insert")
             }
             "[props]" | "[events]" => match name.split_once('.') {
+                Some((component, prop))
+                    if component.starts_with(|c: char| c.is_ascii_uppercase()) =>
+                {
+                    self.keys.contains(prop) && self.uses_component(component)
+                }
                 Some((platform, prop)) => self.keys.contains(platform) && self.keys.contains(prop),
                 None => self.keys.contains(name),
             },
@@ -445,6 +515,17 @@ fn lex(src: &str) -> Vec<Tok<'_>> {
     out
 }
 
+/// Whether `toks[i]` is a property's name in an object literal:
+/// `{ name: … }`, or a getter, `{ get name() { … } }`, as the JSX
+/// compiler passes a component's reactive props.
+fn is_key(toks: &[Tok], i: usize) -> bool {
+    let at = |i: Option<usize>| i.and_then(|i| toks.get(i)).copied().unwrap_or(Tok::Other);
+    let opens = |t: Tok| matches!(t, Tok::Punct(b'{' | b','));
+    let (prev, next) = (at(i.checked_sub(1)), at(Some(i + 1)));
+    (opens(prev) && next == Tok::Punct(b':'))
+        || (prev == Tok::Ident("get") && opens(at(i.checked_sub(2))) && next == Tok::Punct(b'('))
+}
+
 /// Whether a `/` after `prev` starts a regular expression (not a division).
 fn regex_may_follow(prev: Option<&Tok>) -> bool {
     match prev {
@@ -502,10 +583,12 @@ fn claims(script: &str) -> Vec<&str> {
 /// Whether the claim that `fixture`'s script checks `item` holds, or why
 /// not. The bundle must use it; a prop, event or style key must also
 /// matter to the script: with it renamed in the bundle (so the runtime no
-/// longer knows it), a check of the script fails, with no error reported.
-/// Exports and globals cannot be taken out without the app failing to
-/// link or throwing, so for them the use is what is verified.
-fn verify(fixture: &Fixture, item: &str) -> Result<(), String> {
+/// longer knows it), a check of the script fails, with no error reported;
+/// a prop a component requires may make the app fail instead, as an app
+/// without it would. Exports and globals cannot be taken out without the
+/// app failing to link or throwing, so for them the use is what is
+/// verified.
+fn verify(fixture: &Fixture, item: &str, required: bool) -> Result<(), String> {
     if !fixture.usage.covers(item) {
         return Err("its bundle does not use it".into());
     }
@@ -518,9 +601,12 @@ fn verify(fixture: &Fixture, item: &str) -> Result<(), String> {
     if code == fixture.code {
         return Err("its bundle names it only where it cannot be taken out".into());
     }
-    match apps::run(code, &fixture.script, &fixture.dir.join("assets")) {
+    match apps::run(code, &fixture.script, &fixture.dir) {
         Ok(()) => Err("the script passes without it: no step checks what it does".into()),
         Err(f) if f.check.is_some() && !f.errors => Ok(()),
+        // The component cannot work without it: the app's failing is the
+        // check.
+        Err(f) if required && f.errors => Ok(()),
         Err(f) => Err(format!(
             "without it the app fails, but not at a check of the script: {}",
             f.message
@@ -544,7 +630,7 @@ fn without(code: &str, name: &str, keys_only: bool) -> String {
             continue;
         }
         let (prev, next) = (at(i - 1), at(i + 1));
-        let key = matches!(prev, Tok::Punct(b'{' | b',')) && next == Tok::Punct(b':');
+        let key = is_key(&toks, i);
         let argument = matches!(tok, Tok::Str(_))
             && prev == Tok::Punct(b',')
             && matches!(next, Tok::Punct(b',' | b')'));
@@ -585,7 +671,7 @@ fn write_list(uncovered: &BTreeSet<String>) {
 /// adding to it.
 #[test]
 fn every_api_is_tested() {
-    let items = items(&surface::runtime(), &surface::types());
+    let (items, required) = items(&surface::runtime(), &surface::types());
     let fixtures = fixtures();
     let mut problems = String::new();
     let claimed: Vec<(&Fixture, &str)> = fixtures
@@ -593,14 +679,14 @@ fn every_api_is_tested() {
         .flat_map(|f| claims(&f.script).into_iter().map(move |c| (f, c)))
         .collect();
     // Each verification runs an app; they run side by side.
-    let all = &items;
+    let (all, required) = (&items, &required);
     let verified: Vec<Result<(), String>> = std::thread::scope(|s| {
         let runs: Vec<_> = claimed
             .iter()
             .map(|&(f, item)| {
                 s.spawn(move || {
                     if all.contains(item) {
-                        verify(f, item)
+                        verify(f, item, required.contains(item))
                     } else {
                         Err("not a part of the API".into())
                     }
@@ -652,11 +738,12 @@ fn every_api_is_tested() {
 }
 
 /// `api/uncovered.txt` gains nothing over what it listed at the record's
-/// base revision (see `nothing_merged_is_removed`).
+/// base revision, once the record is in force there (see
+/// `nothing_merged_is_removed`).
 #[test]
 fn uncovered_only_shrinks() {
-    let base = match base_revision() {
-        Ok(rev) => rev,
+    let (base, rev) = match base_revision().and_then(|rev| Ok((record_at(&rev)?, rev))) {
+        Ok(base) => base,
         Err(e) if std::env::var_os("CI").is_some() => {
             panic!("the record's base: {e} (CI needs git's history and `main`)")
         }
@@ -665,26 +752,44 @@ fn uncovered_only_shrinks() {
             return;
         }
     };
-    if git(&["show", &format!("{base}:api/{}", super::IN_FORCE)]).is_err() {
-        // The record was not in force at the base: it holds nothing.
-        return;
-    }
-    let Ok(at_base) = git(&["show", &format!("{base}:api/{FILE}")]) else {
-        // The list did not exist yet at the base.
+    let now = std::fs::read(api_dir().join(FILE))
+        .map(text)
+        .unwrap_or_default();
+    let Some(added) = uncovered_added(&base, &now) else {
+        eprintln!("note: uncovered_only_shrinks: the record was not in force at {rev}");
         return;
     };
-    let at_base = entries(&text(at_base));
-    let now = entries(
-        &std::fs::read(api_dir().join(FILE))
-            .map(text)
-            .unwrap_or_default(),
-    );
-    let added: Vec<_> = now.difference(&at_base).cloned().collect();
     assert!(
         added.is_empty(),
-        "api/{FILE} gained entries over {base}: a new API comes with a fixture that uses it, \
+        "api/{FILE} gained entries over {rev}: a new API comes with a fixture that uses it, \
          an exercised one stays exercised:\n  {}",
         added.join("\n  ")
+    );
+}
+
+/// The entries `now` (the list of this checkout) adds over the list of
+/// `base` (the files of `api/` at the base revision); `None` when the
+/// record was not in force there, which holds nothing.
+fn uncovered_added(base: &BTreeMap<String, Vec<u8>>, now: &str) -> Option<Vec<String>> {
+    if !in_force(base) {
+        return None;
+    }
+    let at_base = entries(&base.get(FILE).cloned().map(text).unwrap_or_default());
+    Some(entries(now).difference(&at_base).cloned().collect())
+}
+
+/// The list may only shrink, and only from the commit that put the record
+/// in force on.
+#[test]
+fn uncovered_is_held_once_in_force() {
+    let mut base = BTreeMap::new();
+    base.insert(FILE.to_owned(), b"[nsh] a\n[nsh] b\n".to_vec());
+    assert_eq!(uncovered_added(&base, "[nsh] a\n[nsh] c\n"), None);
+    base.insert(super::IN_FORCE.to_owned(), b"# in force\n".to_vec());
+    assert_eq!(uncovered_added(&base, "[nsh] a\n"), Some(vec![]));
+    assert_eq!(
+        uncovered_added(&base, "[nsh] a\n[nsh] c\n"),
+        Some(vec!["[nsh] c".to_owned()])
     );
 }
 
@@ -698,7 +803,8 @@ fn usage_is_read() {
          import{\"odd\" as c}from\"nsh/x\";\
          // fetch(\"onPress\")\n/* Blob */ let r=/[\"/]fetch/g,x=1/2/3;\
          a(e,`style`,{flexDirection:`row`,...setTimeout,[k]:1});m.Platform.OS;\
-         x=`a${{width:URL}}b${`testID`}`;y={gap:1}.gap;z=q?flex:1;foo.atob(1);",
+         x=`a${{width:URL}}b${`testID`}`;y={gap:1}.gap;z=q?flex:1;foo.atob(1);\
+         import{list as li}from\"nsh:rt\";c(li,{get header(){return 1},get:2});",
     );
     let mut imports: Vec<_> = usage.imports.iter().map(String::as_str).collect();
     imports.sort_unstable();
@@ -709,10 +815,20 @@ fn usage_is_read() {
             "[nsh/x] odd",
             "[nsh:rt] cond",
             "[nsh:rt] element",
+            "[nsh:rt] list",
             "[nsh:rt] prop"
         ]
     );
-    for key in ["style", "flexDirection", "row", "width", "testID", "gap"] {
+    for key in [
+        "style",
+        "flexDirection",
+        "row",
+        "width",
+        "testID",
+        "gap",
+        "header",
+        "get",
+    ] {
         assert!(usage.keys.contains(key), "{key}");
     }
     for no in ["onPress", "flex", "OS"] {
@@ -729,8 +845,14 @@ fn usage_is_read() {
     assert!(!usage.covers("[nsh] Text"));
     assert!(!usage.covers("[globals] Each"));
     assert!(!usage.covers("[props] ios.testID"));
+    assert!(usage.covers("[props] List.header"));
+    assert!(!usage.covers("[props] Video.header"));
+    assert_eq!(
+        without("c(li,{get header(){},header:1,x:header})", "header", false),
+        "c(li,{get header__untested(){},header__untested:1,x:header})"
+    );
 
-    let runtime = "# x\n[nsh]\nView function\nView.x number\nA#.m function\n\n[globals]\nArray function\nfetch function\n";
+    let runtime = "# x\n[nsh]\nView function\nView.x number\nA#.m function\n\n[nsh/list]\nList function\n\n[globals]\nArray function\nfetch function\n";
     let types = [
         (
             "nsh/globals.d.ts".to_owned(),
@@ -745,13 +867,23 @@ fn usage_is_read() {
          export interface Insets {\n  top: number;\n}\n"
                 .to_owned(),
         ),
+        (
+            "nsh/list.d.ts".to_owned(),
+            "export interface ListProps<T> extends HostProps {\n  testID?: string;\n  header?: T;\n  onEndReached?: () => void;\n  onEndReachedThreshold?: number;\n}\n\
+             export interface RowProps {\n  x?: number;\n}\n"
+                .to_owned(),
+        ),
     ];
     assert_eq!(
-        items(runtime, &types).into_iter().collect::<Vec<_>>(),
+        items(runtime, &types).0.into_iter().collect::<Vec<_>>(),
         [
+            "[events] List.onEndReached",
             "[events] onPress",
             "[globals] fetch",
+            "[nsh/list] List",
             "[nsh] View",
+            "[props] List.header",
+            "[props] List.onEndReachedThreshold",
             "[props] ios.clearButtonMode",
             "[props] testID",
             "[styles] color",

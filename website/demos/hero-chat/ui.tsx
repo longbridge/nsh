@@ -294,7 +294,7 @@ export function Press(props: {
   /** How far it shrinks (default 0.97). */
   scale?: number;
   style?: ViewStyle;
-  accessibilityRole?: "button" | "tab" | "switch" | "link";
+  role?: "button" | "tab" | "switch" | "link";
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; checked?: boolean; disabled?: boolean };
   hitSlop?: number;
@@ -306,9 +306,9 @@ export function Press(props: {
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       disabled={props.disabled}
-      onPressIn={() => s.spring(props.scale ?? 0.97, motion.press)}
-      onPressOut={() => s.spring(1, motion.press)}
-      accessibilityRole={props.accessibilityRole ?? "button"}
+      onPressDown={() => s.spring(props.scale ?? 0.97, motion.press)}
+      onPressUp={() => s.spring(1, motion.press)}
+      role={props.role ?? "button"}
       accessibilityLabel={props.accessibilityLabel}
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
@@ -508,7 +508,7 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
   return (
     <View
       onPress={props.onPress}
-      underlayColor={props.onPress ? colors.raised : undefined}
+      activeStyle={{ backgroundColor: props.onPress ? colors.raised : undefined }}
       style={{
         minHeight: 48,
         flexDirection: "row",
@@ -647,7 +647,7 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
         t.spring(last ? 1 : 0, motion.settle);
         props.onChange(last);
       }}
-      accessibilityRole="switch"
+      role="switch"
       accessibilityLabel={props.label}
       accessibilityState={{ checked: props.value }}
       hitSlop={8}
@@ -705,7 +705,7 @@ export function Segmented<T extends string>(props: {
   return (
     <View
       onLayout={(e) => width.set(e.width)}
-      accessibilityRole="tablist"
+      role="tablist"
       style={{
         height,
         flexDirection: "row",
@@ -736,7 +736,7 @@ export function Segmented<T extends string>(props: {
         {(option) => (
           <View
             onPress={() => props.onChange(option().value)}
-            accessibilityRole="tab"
+            role="tab"
             accessibilityState={{ selected: props.value === option().value }}
             style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 }}
           >

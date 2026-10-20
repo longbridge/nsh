@@ -54,19 +54,16 @@ ops::NativeProp::ProgressInterval.0                              # time
 ops::NativeProp::Rate.0                                          # a playback rate multiplier
 ops::NativeProp::Volume.0                                        # audio volume, 0..1
 ops::PayloadValue::Number.0                                      # a generic number (a JS value, a recorded slot)
-ops::Prop::ActiveOpacity.0                                       # an opacity, 0..1
 ops::Prop::EndReachedThreshold.0                                 # in viewport lengths (a ratio)
 ops::Prop::LongPressDelay.0                                      # time
 ops::Prop::MaxFontSizeMultiplier.0                               # a font scale factor
 ops::Prop::MinimumFontScale.0                                    # a font scale factor
-ops::Prop::UnderlayOpacity.0                                     # an opacity, 0..1
 ops::ScrollProp::Deceleration.0                                  # a rate or a physical constant of an animation
 ops::ScrollProp::EventThrottle.0                                 # time
 ops::ScrollProp::MaxZoom.0                                       # a zoom scale factor
 ops::ScrollProp::MinZoom.0                                       # a zoom scale factor
 ops::ScrollProp::Zoom.0                                          # a zoom scale factor
 ops::TouchEvent.timestamp                                        # time
-ops::UNDERLAY_OPACITY                                            # an opacity, 0..1
 ops::Viewability.item_visible_percent                            # a percent, 0..100, as React Native's viewabilityConfig takes it
 ops::Viewability.view_area_percent                               # a percent, 0..100, as React Native's viewabilityConfig takes it
 platform::Environment.font_scale                                 # a font scale factor
@@ -80,7 +77,6 @@ props::LayoutCurve::Spring.damping                               # a rate or a p
 props::LayoutTransition.delay_ms                                 # time
 props::LayoutTransition.duration_ms                              # time
 props::LayoutTransition::new(duration_ms)                        # time
-props::ViewProps.active_opacity                                  # an opacity, 0..1
 props::ViewProps.long_press_delay                                # time
 shape::SMOOTHING                                                 # a corner smoothing factor
 style::Color::to_f64 ->                                          # color components
@@ -164,9 +160,7 @@ ui::animated::sample_spring(fps)                                 # time
 ui::animated::sample_spring(from)                                # an animated value (any quantity)
 ui::animated::sample_spring(to)                                  # an animated value (any quantity)
 ui::element::Image::fade_duration(ms)                            # time
-ui::element::Interactive::active_opacity(opacity)                # an opacity, 0..1
 ui::element::Interactive::long_press_delay(ms)                   # time
-ui::element::Interactive::underlay(opacity)                      # an opacity, 0..1
 ui::element::Text::max_font_size_multiplier(multiplier)          # a font scale factor
 ui::element::Text::shrink_to_fit(min_scale)                      # a font scale factor
 ui::element_ref::ElementRef::seek(seconds)                       # time

@@ -179,8 +179,12 @@ pub(super) struct ListState {
     by_index: FxHashMap<u32, u32>,
     free: Vec<u32>,
     pub(super) extras: [Extra; 3],
-    /// `contentContainerStyle`: padding and gaps.
+    /// Padding and gaps: `contentStyle`, else `contentClass`'s.
     pub(super) content: ListContentStyle,
+    /// `contentStyle` as set.
+    content_style: ListContentStyle,
+    /// What `contentClass` sets.
+    content_class: ListContentStyle,
     pub(super) horizontal: bool,
     pub(super) inverted: bool,
     /// `maintainVisibleContentPosition`'s `autoscrollToBottomThreshold`:
@@ -238,6 +242,8 @@ impl ListState {
             free: Vec::new(),
             extras: [Extra::NONE; 3],
             content: ListContentStyle::default(),
+            content_style: ListContentStyle::default(),
+            content_class: ListContentStyle::default(),
             horizontal: false,
             inverted: false,
             follow_end: None,
@@ -663,7 +669,24 @@ impl ListState {
         }
     }
 
+    /// `contentStyle`: it wins over `contentClass` when set.
     pub(super) fn set_content(&mut self, content: ListContentStyle) {
+        self.content_style = content;
+        self.apply_content();
+    }
+
+    /// What `contentClass` sets.
+    pub(super) fn set_class_content(&mut self, content: ListContentStyle) {
+        self.content_class = content;
+        self.apply_content();
+    }
+
+    fn apply_content(&mut self) {
+        let content = if self.content_style != ListContentStyle::default() {
+            self.content_style
+        } else {
+            self.content_class
+        };
         if content != self.content {
             let cross_changed = self.cross_padding() != {
                 let p = &content.padding;

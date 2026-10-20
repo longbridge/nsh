@@ -24,9 +24,9 @@ use super::{
 /// JS (or from the component whose view has it), its events go to JS.
 /// `#[component]` on a function makes the type and this impl.
 ///
-/// It is registered under its type's name ([`std::any::type_name`]:
-/// `nsh_ui_mobile::button::Button`) and exported to JS as the type's own
-/// name (`Button`), so neither is written by hand
+/// It is registered under its type's full path ([`std::any::type_name`]:
+/// its crate, modules and name) and exported to JS as the type's own name
+/// (the last segment), so neither is written by hand
 /// ([`Registry::register`]).
 ///
 /// ```ignore
@@ -354,10 +354,10 @@ impl Event for NoEvent {
 /// from it ([`declarations`]).
 #[derive(Debug, Clone)]
 pub struct ComponentSpec {
-    /// Its registered name: its type's ([`std::any::type_name`]:
-    /// `nsh_ui_mobile::button::Button`), unique within one binary.
+    /// Its registered name: its type's full path ([`std::any::type_name`]),
+    /// unique within one binary.
     pub name: &'static str,
-    /// Its JS export: the type's own name (`Button`).
+    /// Its JS export: the type's own name, the last segment of its path.
     pub export: String,
     /// Documentation.
     pub doc: &'static str,
@@ -431,9 +431,8 @@ pub(crate) fn name_of<C: Component>() -> &'static str {
     std::any::type_name::<C>()
 }
 
-/// A type's own name, its JS export: `nsh_ui_mobile::tab_bar::TabBar` ->
-/// `TabBar` (a generic one's without its arguments: `app::Picker<app::Fruit>`
-/// -> `Picker`).
+/// A type's own name, its JS export: the last segment of its path, without
+/// a generic type's arguments (the test `components_are_named_after_their_types`).
 fn export_name(type_name: &str) -> &str {
     let path = type_name.split('<').next().unwrap_or(type_name);
     path.rsplit("::").next().unwrap_or(path)
@@ -478,6 +477,7 @@ pub struct Root {
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
+    status_bar: Option<crate::StatusBarSetting>,
 }
 
 impl Root {
@@ -489,6 +489,7 @@ impl Root {
             fonts: Vec::new(),
             appearance: None,
             app_id: None,
+            status_bar: None,
         }
     }
 
@@ -523,6 +524,18 @@ impl Root {
     pub fn appearance(mut self, appearance: crate::platform::Appearance) -> Self {
         self.appearance = Some(appearance);
         self
+    }
+
+    /// The status bar's default (`nsh.json` `"statusBar"`), under what
+    /// pages and dialogs set (`Screen::status_bar`, `Modal::status_bar`).
+    pub fn status_bar(mut self, setting: crate::StatusBarSetting) -> Self {
+        self.status_bar = Some(setting);
+        self
+    }
+
+    /// The status bar's default ([`Root::status_bar`]).
+    pub fn status_bar_ref(&self) -> Option<crate::StatusBarSetting> {
+        self.status_bar
     }
 
     /// The appearance it starts in ([`Root::appearance`]; `None`: the
@@ -605,7 +618,7 @@ pub struct Registry {
     /// The runtime module the functions belong to (`nsh/android`): JS
     /// calls them as `nsh/android:Toast.show`, apart from any UI set's.
     namespace: Option<&'static str>,
-    /// The JS module a UI set is imported as (`nsh/ui/mobile`).
+    /// The JS module a UI set is imported as (`app/native`).
     ui_set: Option<&'static str>,
     /// The files its crates ship ([`Registry::assets`]).
     assets: Arc<Vec<&'static [super::AssetFile]>>,
@@ -807,7 +820,7 @@ impl Registry {
     }
 
     /// The registry of a UI set apps import as `specifier`
-    /// (`nsh/ui/mobile`). An app's crate makes its own with
+    /// (`app/native`). An app's crate makes its own with
     /// `#[native_module("…")]`.
     pub fn ui_set(specifier: &'static str) -> Self {
         Self {
@@ -828,7 +841,7 @@ impl Registry {
         (&self.reexports.0, &self.reexports.1)
     }
 
-    /// Exports `values` `nsh-js` makes for the set (`Stack`, `Screen`),
+    /// Exports `values` `nsh-js` makes for the set (`NavStack`, `NavPage`),
     /// declared by hand rather than generated from a spec.
     pub fn native_values(&mut self, values: &[&'static str]) -> &mut Self {
         Arc::make_mut(&mut self.native_values).extend_from_slice(values);
@@ -989,7 +1002,7 @@ fn same_class(name: &str, old: &str, new: &str, set: Option<&str>) -> String {
     }
 }
 
-/// ` in `nsh/ui/mobile`` for a registry with a specifier.
+/// ` in `app/native`` for a registry with a specifier.
 fn of_set(set: Option<&str>) -> String {
     set.map(|s| format!(" in `{s}`")).unwrap_or_default()
 }

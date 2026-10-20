@@ -23,7 +23,7 @@ nsh-core.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 nsh-package.workspace = true
 nsh-testing = { workspace = true, features = ["bundle"] }
 crossbeam-channel.workspace = true

@@ -1,8 +1,11 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/list`'s
 // `List` (`nsh:rt`'s `list`): the rows near the viewport rendered from
-// `each`, with a header, and rows added when `each` changes. Kept with
+// `each`, with a header, a footer and separators, rows added when `each`
+// changes, the padding of its content (`contentStyle`,
+// `contentClass`), and what an empty list shows; `Scroll`'s view around its
+// content (`contentStyle`, `contentClass`). Kept with
 // `cargo xtask api --keep api/cases/core-list.tsx`; its script checks each.
-import { Text, View, mount, signal } from "nsh";
+import { Scroll, Text, View, mount, signal } from "nsh";
 import { List } from "nsh/list";
 
 function App() {
@@ -12,15 +15,45 @@ function App() {
       <View testID="add" onPress={() => items.set([...items(), `Item ${items().length + 1}`])}>
         <Text>Add</Text>
       </View>
-      <List testID="list" each={items()} style={{ height: 400 }} ListHeaderComponent={<Text>Fruits</Text>}>
+      <List
+        testID="list"
+        each={items()}
+        style={{ height: 300 }}
+        contentStyle={{ paddingHorizontal: 10 }}
+        header={<Text>Fruits</Text>}
+        footer={() => <Text>End of fruits</Text>}
+        separator={() => <View testID="sep" style={{ height: 2 }} />}
+      >
         {(item, index) => (
-          <View style={{ height: 40 }}>
+          <View testID={`row-${index()}`} style={{ height: 40 }}>
             <Text>
               {index() + 1}. {item()}
             </Text>
           </View>
         )}
       </List>
+      <List
+        testID="classed"
+        each={["Plum"]}
+        style={{ height: 60 }}
+        contentClass="px-4"
+        empty={<Text>No plums</Text>}
+      >
+        {(item) => (
+          <View testID="plum" style={{ height: 30 }}>
+            <Text>{item()}</Text>
+          </View>
+        )}
+      </List>
+      <List testID="none" each={[] as string[]} style={{ height: 60 }} empty={() => <Text>Nothing here</Text>}>
+        {(item) => <Text>{item()}</Text>}
+      </List>
+      <Scroll testID="scroll" style={{ height: 80 }} contentStyle={{ padding: 12 }}>
+        <View testID="inner" style={{ height: 20 }} />
+      </Scroll>
+      <Scroll testID="scroll2" style={{ height: 80 }} contentClass="p-2">
+        <View testID="inner2" style={{ height: 20 }} />
+      </Scroll>
     </View>
   );
 }

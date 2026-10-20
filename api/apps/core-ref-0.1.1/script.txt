@@ -1,0 +1,10 @@
+# What a user does and sees (compat/apps.rs).
+# The signal and the function got their node when the views were made.
+expect Signal: set
+expect Calls: 1
+expect Sizes: none
+# Each form holds its own view: measuring each gives its size.
+tap id:measure
+expect Sizes: 100x10 110x11 120x12 130x13 150x15 160x16
+expect Calls: 1
+covers [nsh:rt] ref

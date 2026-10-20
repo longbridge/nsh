@@ -101,7 +101,7 @@ function MarketStrip(props: { market: Market }) {
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 56 }}>
         <View
           onPress={toggle}
-          accessibilityRole="button"
+          role="button"
           accessibilityLabel={opened() ? "Hide breadth" : "Show breadth"}
           style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, height: 56 }}
         >
@@ -281,8 +281,8 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
   return (
     <View
       onPress={props.onPress}
-      underlayColor={colors.surface}
-      accessibilityRole="button"
+      activeStyle={{ backgroundColor: colors.surface }}
+      role="button"
       accessibilityLabel={props.stock.name}
       accessibilityState={props.wide ? { selected: !!props.active } : undefined}
       class={props.wide ? (props.active ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card dark:hover:bg-graphite-card") : undefined}

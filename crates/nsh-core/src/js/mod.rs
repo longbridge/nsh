@@ -13,8 +13,8 @@
 /// `nsh`, the API apps write against; `nsh:rt`, the renderer compiled JSX
 /// calls; `nsh/device` and `nsh/accessibility`, the environment; the
 /// platforms' and host elements' modules. Registries add theirs
-/// (`Registry::specifier`: `nsh/ui/mobile`, ...) or the functions of
-/// nsh's own (`nsh/image`, `nsh/android`).
+/// (`Registry::specifier`: `nsh/base`, an app's set) or
+/// the functions of nsh's own (`nsh/image`, `nsh/android`).
 pub const NATIVE_MODULES: &[&str] = &[
     "nsh",
     "nsh:rt",
@@ -124,14 +124,18 @@ mod tests {
             ("HostProps", "  onLayout?: (e: LayoutEvent) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
-            ("InputHostProps", "  onChangeText?: (text: string) => void;"),
+            ("InputHostProps", "  onChange?: (text: string) => void;"),
+            (
+                "InputHostProps",
+                "  onSubmit?: (e: { text: string }) => void;",
+            ),
+            ("InputHostProps", "  masked?: boolean;"),
+            ("InputHostProps", "  readonly?: boolean;"),
             ("IOSInputHostProps", "  inputAccessoryViewID?: string;"),
             (
                 "IOSInputHostProps",
                 "  keyboardAppearance?: KeyboardAppearance;",
             ),
-            ("TextHostProps", "  selectionColor?: ColorValue;"),
-            ("InputHostProps", "  selectionColor?: ColorValue;"),
             (
                 "ImageHostProps",
                 "  onLoad?: (e: { width: number; height: number }) => void;",
@@ -148,28 +152,15 @@ mod tests {
                 "ScrollingHostProps",
                 "  onScroll?: (e: ScrollEvent) => void;",
             ),
-            (
-                "ListHostProps",
-                "  contentContainerStyle?: ListContentStyle;",
-            ),
-            (
-                "IOSModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            (
-                "DesktopModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            (
-                "WebModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            ("DesktopScreenHostProps", "  headerBackTitle?: string;"),
+            ("ListHostProps", "  contentStyle?: ListContentStyle;"),
+            ("DialogHostProps", "  presentation?: ModalPresentation;"),
+            ("DialogHostProps", "  closeOnEscape?: boolean;"),
+            ("NavPageHostProps", "  headerBackTitle?: string;"),
+            ("NavPageHostProps", "  popOnBack?: boolean;"),
             (
                 "DesktopWebViewHostProps",
                 "  allowsBackForwardNavigationGestures?: boolean;",
             ),
-            ("ModalHostProps", "  onRequestClose?: () => void;"),
         ] {
             let at = elements
                 .find(&format!("export interface {interface} {{"))
@@ -191,7 +182,17 @@ mod tests {
         );
         assert!(animation.contains("  readonly scaleXY: \"scaleXY\";"));
         // What the runtime sets itself is not part of the types.
-        for internal in ["splice?", "cellIndex?", "tailwindTheme?", "headerSlot?"] {
+        for internal in [
+            "splice?",
+            "cellIndex?",
+            "tailwindTheme?",
+            "headerSlot?",
+            "onChangeText?",
+            "onDismiss?",
+            "onRequestClose?",
+            "selectionColor?",
+            "placeholderTextColor?",
+        ] {
             assert!(!elements.contains(internal), "{internal}");
         }
     }

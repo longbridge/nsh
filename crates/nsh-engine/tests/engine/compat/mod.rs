@@ -7,7 +7,9 @@
 //! There are no copies per version: git's history is the baseline. The
 //! record as of the merge base with `main` (on `main`, the parent commit)
 //! must still be offered, so by induction nothing that ever reached `main`
-//! goes, except the entries `api/closed.txt` closes for security.
+//! goes, except the entries `api/closed.txt` closes for security. The
+//! record holds from the commit that added `api/in-force.txt` on: a base
+//! without it (before that commit reached `main`) holds nothing.
 //!
 //! `NSH_API_UPDATE=1` rewrites `runtime.txt` and `types/` (`cargo xtask api`
 //! runs it); `NSH_API_BASE=<rev>` names another base.
@@ -161,7 +163,7 @@ fn base_revision() -> Result<String, String> {
 /// The file of `api/` whose presence at the base revision puts the record
 /// in force (docs/dev/compatibility.md). It is read at the base, so a
 /// change that deletes it is held all the same.
-pub(crate) const IN_FORCE: &str = "in-force.txt";
+const IN_FORCE: &str = "in-force.txt";
 
 /// Whether `base` (the files of `api/` at the base revision) holds this
 /// checkout: the record was in force there.
@@ -327,7 +329,7 @@ fn record_breaks_are_reported() {
     let file = |p: &str, t: &str| (p.to_owned(), t.as_bytes().to_vec());
     let runtime = "[nsh]\nView function\nText function\n";
     let types = "export declare function a(x: number): void;\n";
-    let base: BTreeMap<_, _> = [
+    let mut base: BTreeMap<_, _> = [
         file("runtime.txt", runtime),
         file("types/nsh/index.d.ts", types),
         file("apps/counter/bundle.js", "call(1);\n"),
@@ -337,6 +339,10 @@ fn record_breaks_are_reported() {
         ),
     ]
     .into();
+    // Before the record is in force, a base holds nothing.
+    assert!(!in_force(&base));
+    base.insert(IN_FORCE.into(), b"# in force\n".to_vec());
+    assert!(in_force(&base));
     let now_types = [("nsh/index.d.ts".to_owned(), types.to_owned())];
     let mut apps: BTreeMap<_, _> = base
         .iter()

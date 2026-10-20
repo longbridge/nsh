@@ -726,7 +726,7 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
     };
     // Returns once the menu closed (the chosen item's action sent).
     menu.popUpMenuPositioningItem_atLocation_inView(None, location, Some(root));
-    // A menu opened during a press (`onPressIn`, a long press) took its
+    // A menu opened during a press (`onPressDown`, a long press) took its
     // release: the press ends here, or the view would stay pressed.
     crate::input::cancel_pointer(surface);
     // The app's `Menu.popup` promise settles.

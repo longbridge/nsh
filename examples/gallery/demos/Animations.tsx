@@ -356,7 +356,7 @@ function EasingRace() {
 /** A selectable capsule (36 pt, with hit slop up to 44). */
 function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
   return (
-    <Press onPress={props.onPress} hitSlop={4} accessibilityRole="tab" accessibilityState={{ selected: !!props.active }}>
+    <Press onPress={props.onPress} hitSlop={4} role="tab" accessibilityState={{ selected: !!props.active }}>
       <View
         style={{
           height: 36,

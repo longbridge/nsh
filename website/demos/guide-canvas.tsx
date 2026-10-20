@@ -10,7 +10,7 @@ function Button(props: { label: string; onPress: () => void }) {
   return (
     <View
       onPress={props.onPress}
-      activeOpacity={0.6}
+      activeStyle={{ opacity: 0.6 }}
       style={{ ...ui().raised, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 }}
     >
       <Text style={{ color: ui().text, fontWeight: "600" }}>{props.label}</Text>

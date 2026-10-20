@@ -192,11 +192,12 @@ pub(crate) fn show_dialog(dialog: &Dialog, view: &UIView, control: &EngineContro
             .any(|b| b.style == DialogButtonStyle::Cancel)
     {
         // A popover hides its cancel action and runs it on a tap outside:
-        // one that answers "dismissed".
+        // one that answers "dismissed". It is never shown, so it has no
+        // title (labels all come from the app).
         let answer = answer.clone();
         let handler = RcBlock::new(move |_| answer.answer(-1));
         let action = UIAlertAction::actionWithTitle_style_handler(
-            Some(&NSString::from_str("Cancel")),
+            None,
             UIAlertActionStyle::Cancel,
             Some(&handler),
             mtm,

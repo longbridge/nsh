@@ -1,0 +1,11 @@
+fontscale 2
+# What a user does and sees (compat/apps.rs), with the system's text size
+# twice the default.
+style id:scaled fontSize 20
+style id:fixed fontSize 10
+style id:capped fontSize 15
+style id:field fontSize 20
+style id:field-fixed fontSize 10
+style id:field-capped fontSize 15
+covers [props] allowFontScaling
+covers [props] maxFontSizeMultiplier

@@ -125,7 +125,7 @@ unsafe impl<T> Send for Shared<T> {}
 // SAFETY: as above.
 unsafe impl<T> Sync for Shared<T> {}
 
-// -> Rect {- Custom fonts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- Custom fonts ---------------------------------------------------------------------
 
 /// Fonts registered by any engine (`register_font`): one collection every
 /// engine searches before the system's.
@@ -214,7 +214,7 @@ fn custom_collection() -> Option<IDWriteFontCollection> {
     registry.0.collection.as_ref().and_then(|c| c.cast().ok())
 }
 
-// -> Rect {- Fonts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Fonts ------------------------------------------------------------------------------
 
 /// The family of the system's UI font (the message font: Segoe UI).
 pub(crate) fn ui_family() -> Arc<str> {
@@ -380,7 +380,7 @@ impl std::fmt::Debug for Shared<IDWriteFontFace> {
     }
 }
 
-// -> Rect {- The final layout -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- The final layout ---------------------------------------------------------------------
 
 /// A layer of a color glyph run (an emoji's colored parts).
 struct Layer {
@@ -463,7 +463,7 @@ pub(crate) struct WinLayout {
     attachments: Vec<Option<(f32, f32)>>,
 }
 
-// -> Rect {- Recording -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Recording ------------------------------------------------------------------------------
 
 /// A glyph run as DirectWrite drew it.
 struct RawRun {
@@ -715,7 +715,7 @@ impl IDWriteInlineObject_Impl for Placeholder_Impl {
     }
 }
 
-// -> Rect {- The engine -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- The engine ---------------------------------------------------------------------------
 
 /// A span's line box: its primary font's ascent and descent (points) and
 /// its `lineHeight` (0: the font's).
@@ -1871,7 +1871,7 @@ impl TextEngine for DWriteTextEngine {
     }
 }
 
-// -> Rect {- Drawing -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Drawing --------------------------------------------------------------------------------
 
 /// The text a view draws.
 pub(crate) struct DrawnText {
@@ -2389,7 +2389,7 @@ pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     layout.char_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0)
 }
 
-// -> Rect {- Selection -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Selection ----------------------------------------------------------------------
 
 /// How far (points) the mouse moves on selectable text before a drag
 /// selects: past input's press slop where the press would fire (a link, an
@@ -2556,7 +2556,7 @@ fn pressed(key: u64, view: &NshView, s: &Selection, clicks: u32, x: f32, y: f32,
         };
         let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = layout.char_at(lx, ly);
-        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
+        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressDown];
         let over_press = press.iter().any(|&k| state.events.contains(k))
             || char_index
                 .and_then(|i| drawn.text.link_at(i))
@@ -3458,11 +3458,7 @@ mod tests {
             }),
             ..style
         };
-        let t = text(&[
-            ("Run ", style),
-            ("cargo test -> Rect {all", code),
-            (" now", style),
-        ]);
+        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
         let boxes = |width: Option<f32>| {
             let (size, layout) = layout_of(&engine, &t, width);
             let l = layout.downcast::<WinLayout>().unwrap();

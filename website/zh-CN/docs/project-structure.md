@@ -74,7 +74,8 @@ mount(App);
 | `minRuntime` | string | `publish` | 能运行该签名包的最低 NSH 运行时版本，例如 `0.2.0`。默认：CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 | `icon` | string | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
-| `theme` | string 或 object | 每次构建 | `nsh/ui/mobile` 组件的主题：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[组件](../components/index.md)）。 |
+| `theme` | string 或 object | 每次构建 | 应用的 Rust 组件绘制时使用的主题：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)）。 |
+| `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
@@ -82,7 +83,7 @@ mount(App);
 
 `nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。
 
-`tailwind`、`theme`、`appearance`、`capabilities` 和 `resolve` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
+`tailwind`、`theme`、`appearance`、`statusBar`、`capabilities` 和 `resolve` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
 
 ```text
 error building App.tsx failed
@@ -90,7 +91,7 @@ nsh.json: tailwind: unknown theme key `colours`
 ```
 
 > [!WARNING]
-> `nsh package` 和 `nsh publish` 会严格读取 `nsh.json`，目前会拒绝它们不认识的键，包括 `theme`。如果你设置了组件主题，在此问题修复之前，请用去掉该键的应用副本进行打包。
+> `nsh package` 和 `nsh publish` 会严格读取 `nsh.json`，目前会拒绝它们不认识的键，包括 `theme`。如果你设置了主题，在此问题修复之前，请用去掉该键的应用副本进行打包。
 
 ### capabilities
 
@@ -130,7 +131,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 | `globals.d.ts` | `If` 和 `Each`；`console`、定时器、`requestAnimationFrame`、`fetch` 及其他[全局 API](../modules/globals.md) |
 | `assets.d.ts` | 导入图片或字体得到的值 |
 | `list.d.ts`、`animated.d.ts`、`device.d.ts` 等 | 每个模块一个文件（`nsh/list`、`nsh/animated`、`nsh/device` 等） |
-| `ui/mobile.d.ts` | `nsh/ui/mobile` |
+| `base.d.ts` | `nsh/base` |
 
 `lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。`.nsh` 中的文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh check`。
 
@@ -170,7 +171,7 @@ const open = async () => {
 | 模块 | 内容 |
 |---|---|
 | `nsh` | 响应式（`signal`、`computed`、`effect` 等）、`mount`、`split`、`context`；`View`、`Text`、`Scroll`、`Input`（[参考](../modules/nsh.md)） |
-| `nsh/ui/mobile` | 移动端 UI 组件集：组件、导航、弹窗、安全区域（[组件](../components/index.md)） |
+| `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、安全区域（`SafeAreaView`、`safeArea`、`safeAreaInsets`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame`、`KeyboardAvoidingView`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
 | `nsh/list` | `List`：虚拟化、可复用的列表 |
 | `nsh/animated` | 原生动画 |
 | `nsh/canvas` | 2D 绘图 |
@@ -182,7 +183,7 @@ const open = async () => {
 | `nsh/native` | 嵌入应用注册的组件和函数 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |
 
-[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/ui/mobile"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
+[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/base"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
 
 ### npm 包
 

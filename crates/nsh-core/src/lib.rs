@@ -57,8 +57,8 @@ pub use crate::{
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     mount::{
-        ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig,
-        ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,
+        ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem, NO_NATIVE_HEADER,
+        NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
@@ -67,8 +67,7 @@ pub use crate::{
         ListContentStyle, ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op,
         PayloadValue, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp,
         ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, UNDERLAY_OPACITY, Viewability,
-        WebSource,
+        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,

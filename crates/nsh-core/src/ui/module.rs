@@ -1,5 +1,5 @@
 //! Modules: functions a UI set exports to JS without a component
-//! (`Alert.alert(...)`, `Keyboard.dismiss()`), written in Rust with
+//! (`AlertDialog.show(...)`, `Keyboard.dismiss()`), written in Rust with
 //! `#[module]` and generated into the set's JS module like its components.
 //! The signature decides how a call runs: a function without a context
 //! runs in the JS call and returns its value (as a class's method does);
@@ -23,14 +23,14 @@ use crate::{Command, Dialog, LayoutAnimation, ROOT_ID, StatusBarSetting};
 
 /// A JS object of functions (`#[module]` implements it).
 pub trait Module {
-    /// Its JS name: the type's own (`#[module] impl Alert`: `Alert`), which
-    /// `#[module]` writes; JS calls its functions by it (`Alert.alert`).
+    /// Its JS name: the type's own (`#[module] impl Keyboard`: `Keyboard`), which
+    /// `#[module]` writes; JS calls its functions by it (`Keyboard.dismiss`).
     const NAME: &'static str;
     /// Documentation (the `impl` block's doc comment).
     const DOC: &'static str;
     /// Its functions.
     const FUNCTIONS: &'static [Function];
-    /// Its functions are exported one by one (`setStatusBarBackgroundColor`)
+    /// Its functions are exported one by one
     /// rather than as an object (`#[module(flat)]`).
     const FLAT: bool = false;
     /// Export the same flat module object as `default`.

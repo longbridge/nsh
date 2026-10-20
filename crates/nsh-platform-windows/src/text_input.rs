@@ -697,7 +697,7 @@ fn dwrite_align(config: &InputConfig) -> DWRITE_TEXT_ALIGNMENT {
     }
 }
 
-// -> Rect {- Focus -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- Focus -------------------------------------------------------------------
 
 /// A surface's focused field, and whether its window is active.
 #[derive(Default)]
@@ -820,7 +820,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     place_ime(surface);
 }
 
-// -> Rect {- The IME -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- The IME -----------------------------------------------------------------
 
 /// Enables the IME while an editable, non-secure field has the focus.
 fn update_ime(surface: &Surface) {
@@ -1058,7 +1058,7 @@ pub(crate) fn ime(
     }
 }
 
-// -> Rect {- Edits and events -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Edits and events ----------------------------------------------------------
 
 /// Sends `kind` if JS listens to it.
 fn send(
@@ -1172,7 +1172,7 @@ fn return_key(behavior: SubmitBehavior, multiline: bool, modifiers: Modifiers) -
     }
 }
 
-// -> Rect {- Contracts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- Contracts -----------------------------------------------------------------
 
 /// Sets up an input view.
 pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
@@ -1847,7 +1847,7 @@ fn vertical(input: &InputState, down: bool, page: bool) -> usize {
     model.text_at(at, secure)
 }
 
-// -> Rect {- The caret's blinking -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- The caret's blinking ----------------------------------------------------
 
 /// The caret blinks on one thread timer for all surfaces (a `TIMERPROC`,
 /// so no window procedure is involved), running only while some field

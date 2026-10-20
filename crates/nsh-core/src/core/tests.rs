@@ -2004,7 +2004,7 @@ fn inputs_resolve_what_return_does() {
         ..InputConfig::default()
     };
     // React Native's defaults: one line submits and unfocuses, several
-    // lines take line breaks; `blurOnSubmit={false}` keeps the focus.
+    // lines take line breaks; `blur_on_submit` false keeps the focus.
     assert_eq!(config(false, true, None).submit(), S::BlurAndSubmit);
     assert_eq!(config(false, false, None).submit(), S::Submit);
     assert_eq!(config(true, true, None).submit(), S::Newline);
@@ -3257,6 +3257,16 @@ fn disabled_views_take_no_presses() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
 }
 
+/// A style patch of `decls` (`activeStyle={{ … }}`).
+fn patch(decls: &[(&str, crate::StyleValue<'_>)]) -> Option<Arc<crate::StylePatch>> {
+    let mut style = crate::Style::default();
+    let mut patch = crate::StylePatch::default();
+    for (key, value) in decls {
+        patch.set(&mut style, key, *value).unwrap();
+    }
+    Some(Arc::new(patch))
+}
+
 #[test]
 fn disabled_views_are_disabled_for_screen_readers() {
     let mut c = core();
@@ -3290,70 +3300,125 @@ fn disabled_views_are_disabled_for_screen_readers() {
 }
 
 #[test]
-fn underlay_shows_while_pressed() {
+fn active_style_applies_while_pressed_and_not_disabled() {
+    use crate::{StyleValue as V, tailwind::state};
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white");
-    view_with_classes(&mut c, 3, "opacity-50");
     apply(
         &mut c,
         vec![
-            Op::Remove {
-                parent: ROOT_ID,
-                child: 3,
-            },
-            Op::Insert {
-                parent: 2,
-                child: 3,
-                before: None,
+            // The inline style is under it.
+            Op::SetStyle {
+                id: 2,
+                style: Box::default(),
+                patch: {
+                    let mut s = crate::Style::default();
+                    let mut p = crate::StylePatch::default();
+                    p.set(&mut s, "opacity", V::Number(0.9)).unwrap();
+                    p
+                },
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::UnderlayColor(Color::parse("#dddddd")),
+                prop: Prop::ActiveStyle(patch(&[
+                    ("backgroundColor", V::Str("#dddddd")),
+                    ("opacity", V::Number(0.5)),
+                ])),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::DisabledStyle(patch(&[("opacity", V::Number(0.3))])),
             },
         ],
     );
     let batch = c.commit().unwrap();
     assert!(batch.items.iter().any(|i| matches!(
         i,
-        MountItem::TrackStates { id: 2, states } if *states == crate::tailwind::state::PRESSED
+        MountItem::TrackStates { id: 2, states } if *states == state::PRESSED
     )));
-    c.set_states(2, crate::tailwind::state::PRESSED);
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.9);
+    c.set_states(2, state::PRESSED);
     let batch = c.commit().unwrap();
-    assert_eq!(
-        view_style_of(&batch, 2).unwrap().background_color,
-        Color(0xdddd_ddff)
-    );
-    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 0.5 * 0.85);
+    let style = view_style_of(&batch, 2).unwrap();
+    assert_eq!(style.background_color, Color(0xdddd_ddff));
+    assert_eq!(style.opacity, 0.5);
     c.set_states(2, 0);
+    let batch = c.commit().unwrap();
+    let style = view_style_of(&batch, 2).unwrap();
+    assert_eq!(style.background_color, Color(0xffff_ffff));
+    assert_eq!(style.opacity, 0.9);
+    // Disabled: no active style, the disabled one.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::Disabled(true)),
+        }],
+    );
+    c.set_states(2, state::PRESSED);
+    let batch = c.commit().unwrap();
+    let style = view_style_of(&batch, 2).unwrap();
+    assert_eq!(style.background_color, Color(0xffff_ffff));
+    assert_eq!(style.opacity, 0.3);
+    // Removed: the classes alone.
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Native(NativeProp::Disabled(false)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ActiveStyle(None),
+            },
+        ],
+    );
     let batch = c.commit().unwrap();
     assert_eq!(
         view_style_of(&batch, 2).unwrap().background_color,
         Color(0xffff_ffff)
     );
-    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 0.5);
 }
 
 #[test]
-fn underlay_replaces_gradients_while_pressed() {
+fn selected_style_follows_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState, StyleValue as V};
     let mut c = core();
-    view_with_classes(&mut c, 2, "bg-linear-to-b from-white to-black");
+    view_with_classes(&mut c, 2, "bg-white selected:bg-black");
+    let selected = |on| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            selected: on,
+            ..AccessibilityState::default()
+        })),
+    };
     apply(
         &mut c,
-        vec![Op::SetProp {
-            id: 2,
-            prop: Prop::UnderlayColor(Color::parse("#dddddd")),
-        }],
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::SelectedStyle(patch(&[("opacity", V::Number(0.7))])),
+            },
+            selected(true),
+        ],
     );
     let batch = c.commit().unwrap();
-    assert!(view_style_of(&batch, 2).unwrap().effects.is_some());
-    c.set_states(2, crate::tailwind::state::PRESSED);
+    let style = view_style_of(&batch, 2).unwrap();
+    assert_eq!(style.background_color, Color(0x0000_00ff));
+    assert_eq!(style.opacity, 0.7);
+    // The platform never tracks it.
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::TrackStates { .. }))
+    );
+    apply(&mut c, vec![selected(false)]);
     let batch = c.commit().unwrap();
     let style = view_style_of(&batch, 2).unwrap();
-    assert_eq!(style.background_color, Color(0xdddd_ddff));
-    assert!(style.effects.is_none());
-    c.set_states(2, 0);
-    let batch = c.commit().unwrap();
-    assert!(view_style_of(&batch, 2).unwrap().effects.is_some());
+    assert_eq!(style.background_color, Color(0xffff_ffff));
+    assert_eq!(style.opacity, 1.0);
 }
 
 #[test]
@@ -5486,7 +5551,7 @@ mod components {
                                 ""
                             }
                         })
-                        .on_change_text(move |text: &str| name.set(text.to_owned()))
+                        .on_change(move |text: &str| name.set(text.to_owned()))
                         .on_focus(move |_: &()| focused.set(true)),
                 ),
             )
@@ -5498,7 +5563,7 @@ mod components {
                 move || name.with(String::len) > 2,
                 move || {
                     modal()
-                        .transparent(true)
+                        .close_on_swipe(false)
                         .child(text(move || format!("Hi {}", name.get())))
                 },
             ))

@@ -8,7 +8,7 @@ group: start
 # 用 Rust 开发
 
 Native Shell 应用可以用 TSX 编写，也可以用 Rust，或者两者结合。三种方式运行在同一个引擎上：响应式图、渲染器、Taffy
-布局和 `nsh/ui/mobile` 组件始终是 Rust，各平台都用自己的原生 UI 渲染。不同的是你自己的代码用什么语言，以及应用是否带着
+布局以及原生模块（导航、对话框、键盘、状态栏）始终是 Rust，各平台都用自己的原生 UI 渲染。不同的是你自己的代码用什么语言，以及应用是否带着
 JavaScript 虚拟机。
 
 | | TSX | Rust | Rust + TSX |
@@ -43,7 +43,6 @@ nsh package --target web       # 或 ios、ios-simulator、android、macos、lin
 
 ```rust
 use nsh_core::ui::prelude::*;
-use nsh_ui_mobile::{Button, ButtonEvent, ButtonProps};
 
 /// TSX 通过 `app/native` 可以使用的组件。
 #[native_module("app/native")]
@@ -69,8 +68,16 @@ pub fn App() -> impl IntoElement {
         .child(text(move || format!("Count: {}", count.get())))
         .child(text(quote))
         .child(
-            Button::element(ButtonProps { title: "Tap".into(), ..ButtonProps::default() })
-                .on_event(move |_: &ButtonEvent| count.update(|c| *c += 1)),
+            // 按钮就是一个响应按压的视图，用主题的颜色绘制。
+            view()
+                .px(px(20.0))
+                .py(px(12.0))
+                .rounded(move || px(theme().radius))
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary_active))
+                .role(AccessibilityRole::Button)
+                .on_press(move |_: &()| count.update(|c| *c += 1))
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -90,7 +97,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-`"root"` 是组件在 crate 中的路径（`App`、`shell::Gallery`；有[多个 crate](#多个-crate) 时在第一个中）；`"theme"` 和 `"appearance"` 和 TSX 应用一样作用于它。
+`"root"` 是组件在 crate 中的路径（`App`、`shell::Gallery`；有[多个 crate](#多个-crate) 时在第一个中）；`"theme"` 是它的组件绘制时使用的[主题](#主题)，`"appearance"` 和 TSX 应用一样作用于它。
 有了它，对应用目录执行 `nsh run` 和 `nsh package` 时，会为目标平台构建应用自己的运行器，直接挂载根组件，不链接 QuickJS：
 
 | 目标 | 运行的内容 |
@@ -150,7 +157,7 @@ fn TitleBar() -> impl IntoElement {
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
 （`registry.module::<Portfolio>()`，在单元结构体及其 `impl` 上标注 `#[module]`）、类（`registry.class::<Ledger>()`，在结构体及其 `impl` 上标注
 `#[class]`）和资源；这个属性还会在 crate 根部生成 `pub fn registry()`，给测试和其他 Rust 代码使用同一个集合
-（`my_app_native::registry()`，与 `nsh_ui_mobile::registry()` 并列）。在 `#[module]` 或 `#[class]` 的 `impl` 中，`pub fn`（包括 `pub(crate)`）会被导出；没有可见性修饰的函数是
+（`my_app_native::registry()`，与 `nsh_base::registry()` 并列）。在 `#[module]` 或 `#[class]` 的 `impl` 中，`pub fn`（包括 `pub(crate)`）会被导出；没有可见性修饰的函数是
 辅助函数，只留在 Rust 中。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
 TSX：
 
@@ -202,7 +209,6 @@ impl Portfolio {
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
-import { Button } from "nsh/ui/mobile";
 import { Chart, Ledger, Portfolio } from "app/native";   // Rust
 
 const ledger = new Ledger();   // 状态保存在 Rust 中
@@ -213,7 +219,9 @@ function Overview() {
     <View className="p-4 gap-2">
       <Text>Balance: {balance()}</Text>
       <Chart symbol="NSH" range="1M" onSelect={(e) => balance.set(ledger.add(e.price))} />
-      <Button title="Upload" onPress={() => ledger.upload("https://example.com/ledger")} />
+      <View onPress={() => ledger.upload("https://example.com/ledger")} role="button" class="rounded-lg bg-blue-600 px-4 py-2 active:bg-blue-700">
+        <Text class="text-white">Upload</Text>
+      </View>
     </View>
   );
 }
@@ -316,13 +324,13 @@ TSX 入口用 `nsh-testing` 的特性 `bundle` 按 `nsh run` 的方式构建，�
 ```toml
 [dev-dependencies]
 nsh-testing = { version = "0.1", features = ["bundle"] }
-nsh-ui-mobile = "0.1"
+nsh-base = "0.1"
 ```
 
 ```rust
 #[test]
 fn the_module_formats_money() {
-    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let sets = vec![nsh_base::registry(), my_app_native::registry()];
     let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
     app.wait_for("Formatted at once: $1,234.50").unwrap();
 }
@@ -330,6 +338,79 @@ fn the_module_formats_money() {
 
 `nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_testing::start` 把批次交给自己维护屏幕模型的测试。
 `examples/rust-exports` 用这种方式测试它的 TSX 入口，`examples/gallery-rs` 测试它的 Rust 根组件。
+
+## 主题
+
+应用的外观由应用自己决定：NSH 提供基础元素和 `nsh_base` 中无样式的基础组件，你的 crate 是其上带样式的一层，即应用自己的组件库（[三层结构](./architecture.md#three-layers)）。Rust 组件的颜色、圆角和基础字号取自主题，即
+`nsh_core::ui::prelude` 中的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
+`.bg(move || theme().primary)` 这样的绑定会原生地改变颜色，不需要重新渲染。
+
+默认主题是 gpui-kit 的默认主题：中性的黑白配色，采用移动端的圆角。要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径
+（相对于 `nsh.json`），或者直接写入主题内容：
+
+```json
+{
+  "name": "My App",
+  "rust": ".",
+  "theme": "brand-theme.json"
+}
+```
+
+格式是 gpui-kit 的主题文件格式。`themes` 中的每一项设置一种外观的值（`mode`：`"light"` 或 `"dark"`；没有 `mode` 的项是浅色）：
+
+```json
+{
+  "themes": [
+    {
+      "mode": "light",
+      "radius": 8,
+      "radius.lg": 14,
+      "font.size": 16,
+      "colors": {
+        "primary.background": "#7c3aed",
+        "primary.foreground": "white",
+        "border": "neutral-200"
+      }
+    },
+    {
+      "mode": "dark",
+      "colors": {
+        "primary.background": "#a78bfa",
+        "primary.foreground": "neutral-950"
+      }
+    }
+  ]
+}
+```
+
+- 你的主题叠加在默认主题之上，只需列出要修改的部分。
+- 颜色可以是 CSS 颜色（`#7c3aed`、`rgb(…)`、`white`），也可以是 Tailwind 默认调色板中的名称（`neutral-900`、`red-500`）。
+  `nsh.json` 中 `tailwind` 键的颜色用于 `class` 字符串。
+- `radius`（`theme().radius`）是控件的圆角，`radius.lg`（`theme().radius_lg`）是卡片、底部面板等大面积表面的圆角，
+  `font.size`（`theme().font_size`）是基础字号，单位都是点。
+- 省略的按下颜色（`primary.active.background`、`secondary.active.background`、`danger.active.background` 等）由基础颜色推导：
+  浅色模式下暗 12%，深色模式下亮 12%。
+- gpui-kit 桌面组件的键（侧边栏、标题栏等）会被接受并搁置，所以 gpui-kit 的主题文件可以原样使用。
+- 打包器在构建时检查主题：文件缺失、JSON 无效、未知的 `mode` 或不是颜色的值都会让构建失败，并报告 `nsh.json: theme: …` 错误。
+
+主题的键及其默认的浅色和深色值：
+
+| 键 | 浅色 | 深色 | 用途 |
+|---|---|---|---|
+| `background` | `white` | `neutral-950` | 页面、列表和输入框的背景 |
+| `foreground` | `neutral-950` | `neutral-50` | `background` 上的文字 |
+| `border` | `neutral-200` | `neutral-800` | 分隔线和边框 |
+| `primary.background` / `.active.background` / `.foreground` | `neutral-900` / `neutral-950` / `neutral-50` | `neutral-50` / `neutral-200` / `neutral-900` | 主要操作（主按钮）、按下时，以及其上的文字；选中项和勾选标记 |
+| `secondary.background` / `.active.background` / `.foreground` | `neutral-200` / `neutral-300` / `neutral-900` | `neutral-800` / `#212121` / `neutral-50` | 次要操作、按下时，以及其上的文字 |
+| `danger.background` / `.active.background` / `.foreground` | `red-500` / `red-600` / `neutral-50` | `red-400` / `red-500` / `red-600` | 破坏性操作、按下时，以及其上的文字 |
+| `accent.background` | `neutral-100` | `neutral-800` | 高亮项，例如按下时的普通按钮 |
+| `muted.background` | `neutral-100` | `neutral-800` | 低调的表面：内嵌列表的页面、拖动条、清除按钮 |
+| `muted.foreground` | `neutral-500` | `neutral-400` | 次要文字：说明、标签、占位符 |
+| `group_box.background` / `.foreground` | `#f5f5f5` / `#171717` | `neutral-950` / `neutral-50` | 卡片等分组表面，以及其上的文字 |
+| `input.border` | `neutral-200` | `#2f2f2f` | 输入框的边框 |
+| `ring` | `neutral-400` | `neutral-500` | 获得焦点的输入框的边框 |
+| `list.active.background` | `#bfdbfe33` | `#1e40af33` | 按下时的列表行 |
+| `overlay` | `#0000000d` | `#00000033` | 底部面板和对话框后面的遮罩 |
 
 ## 多个 crate
 

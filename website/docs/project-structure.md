@@ -75,7 +75,8 @@ mount(App);
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 | `tailwind` | object | every build | Extends the Tailwind theme your `class` strings resolve against ([Tailwind](./tailwind.md#theme)). |
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
-| `theme` | string or object | every build | The theme of the `nsh/ui/mobile` components: a theme file's path relative to `nsh.json`, or the theme inline ([Components](../components/index.md)). |
+| `theme` | string or object | every build | The theme the app's Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme)). |
+| `statusBar` | object | every build, `package` | The status bar's default under every page and dialog (iOS and Android): `{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`, both optional. Packaged iOS apps show it from the launch screen on ([Status bar](../modules/nsh-base.md#status-bar)). |
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
 | `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
@@ -83,7 +84,7 @@ mount(App);
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `capabilities` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
 ```text
 error building App.tsx failed
@@ -91,7 +92,7 @@ nsh.json: tailwind: unknown theme key `colours`
 ```
 
 > [!WARNING]
-> `nsh package` and `nsh publish` read `nsh.json` strictly and currently reject keys they do not know, including `theme`. If you set a component theme, package from a copy of the app without it until this is fixed.
+> `nsh package` and `nsh publish` read `nsh.json` strictly and currently reject keys they do not know, including `theme`. If you set a theme, package from a copy of the app without it until this is fixed.
 
 ### capabilities
 
@@ -131,7 +132,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `globals.d.ts` | `If` and `Each`; `console`, timers, `requestAnimationFrame`, `fetch` and the other [global APIs](../modules/globals.md) |
 | `assets.d.ts` | What importing an image or font gives |
 | `list.d.ts`, `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/list`, `nsh/animated`, `nsh/device`, ...) |
-| `ui/mobile.d.ts` | `nsh/ui/mobile` |
+| `base.d.ts` | `nsh/base` |
 
 `lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh check`.
 
@@ -171,7 +172,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | Module | What it has |
 |---|---|
 | `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; `View`, `Text`, `Scroll`, `Input` ([reference](../modules/nsh.md)) |
-| `nsh/ui/mobile` | The mobile UI set: components, navigation, alerts, safe area ([Components](../components/index.md)) |
+| `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), safe areas (`SafeAreaView`, `safeArea`, `safeAreaInsets`), the system's alert dialog (`AlertDialog`), the software keyboard (`Keyboard`, `keyboardFrame`, `KeyboardAvoidingView`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/list` | `List`: virtualized, recycling lists |
 | `nsh/animated` | Native animations |
 | `nsh/canvas` | 2D drawing |
@@ -183,7 +184,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
-The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/ui/mobile"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
+The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
 
 ### npm packages
 

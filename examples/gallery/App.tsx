@@ -2,13 +2,13 @@ import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Platform, windowSize } from "nsh/device";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { Image } from "nsh/image";
+import { NavPage, NavStack } from "nsh/base";
 import { Storage } from "nsh/storage";
-import { Screen, Stack, StatusBar } from "nsh/ui/mobile";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, header, IconTile, isDark, lazy, mono, Press, radius, SIDEBAR } from "./ui";
+import { Appear, Badge, colors, desktop, header, IconTile, lazy, mono, PageHeader, Press, radius, SIDEBAR } from "./ui";
 
 /** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
@@ -50,8 +50,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
   {
     title: "Platform",
     demos: [
-      { name: "Mobile UI", detail: "nsh/ui/mobile in Rust: a ListView and a Group of the app's rows", icon: "mobile", screen: lazy(() => import("./demos/MobileUi").then((m) => m.MobileUi)) },
-      { name: "Components", detail: "Press feedback, sheet, layout animation, input accessory, modal options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
+      { name: "Components", detail: "Press feedback, sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
@@ -89,7 +88,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 
 function Home() {
   return (
-    <Screen title="Gallery" {...header}>
+    <NavPage title="Gallery" {...header} header={<PageHeader title="Gallery" root />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ padding: 16, paddingBottom: 40, gap: 20 }}>
           <Each of={groups}>
@@ -120,16 +119,16 @@ function Home() {
           </Each>
         </View>
       </Scroll>
-    </Screen>
+    </NavPage>
   );
 }
 
 /** The phone layout: the index, demos pushed over it. */
 function Phone() {
   // Back from the desktop layout: the demo it showed stays open.
-  if (untracked(wasDesktop)) nav.reset([untracked(nav.routes)[0], { name: "demo", demo: untracked(selected) }]);
+  if (untracked(wasDesktop)) nav.setRoutes([untracked(nav.routes)[0], { name: "demo", demo: untracked(selected) }]);
   return (
-    <Stack navigator={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
       {(route) => {
         switch (route.name) {
           case "home":
@@ -137,11 +136,11 @@ function Phone() {
           case "demo": {
             const Demo = route.demo.screen;
             return (
-              <Screen title={route.demo.name} {...header}>
+              <NavPage title={route.demo.name} {...header} header={<PageHeader title={route.demo.name} />}>
                 <View style={{ flex: 1, backgroundColor: colors.background }}>
                   <Demo />
                 </View>
-              </Screen>
+              </NavPage>
             );
           }
           case "page": {
@@ -150,7 +149,7 @@ function Phone() {
           }
         }
       }}
-    </Stack>
+    </NavStack>
   );
 }
 
@@ -161,7 +160,7 @@ const wasDesktop = signal(false);
 
 /** Shows a demo in the desktop layout, closing what it had pushed. */
 const select = (demo: DemoEntry) => {
-  if (nav.routes().length > 1) nav.popToTop();
+  if (nav.routes().length > 1) nav.popToRoot();
   selected.set(demo);
 };
 
@@ -172,7 +171,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
   return (
     <View
       onPress={() => select(props.demo)}
-      accessibilityRole="button"
+      role="button"
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
       class={active() ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"}
@@ -259,24 +258,24 @@ function Desktop() {
   const routes = untracked(nav.routes);
   const open = routes.find((r) => r.name === "demo");
   if (open) selected.set(open.demo);
-  if (routes.length > 1) nav.reset([routes[0]]);
+  if (routes.length > 1) nav.setRoutes([routes[0]]);
   wasDesktop.set(true);
   return (
     <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
       <Sidebar />
-      <Stack navigator={nav} style={{ flex: 1 }}>
+      <NavStack state={nav} style={{ flex: 1 }}>
         {(route) => {
           if (route.name !== "page") {
             return (
-              <Screen headerShown={false}>
+              <NavPage headerShown={false}>
                 <DemoPane />
-              </Screen>
+              </NavPage>
             );
           }
           const Page = route.page;
           return <Page />;
         }}
-      </Stack>
+      </NavStack>
     </View>
   );
 }
@@ -324,7 +323,6 @@ function App() {
   rememberDemo();
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <StatusBar barStyle={isDark() ? "light-content" : "dark-content"} />
       <TitleBar />
       <If when={desktop()} else={<Phone />}>
         <Desktop />

@@ -1,14 +1,14 @@
 // What a platform does besides drawing, as headless runs play it: going
-// back, dialogs, the clipboard, native animations, a modal; and a request
+// back, dialogs, the clipboard, native animations, a dialog; and a request
 // only a real platform answers.
 import { mount, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { Image } from "nsh/image";
-import { Alert, createNavigator, Modal, Screen, Stack } from "nsh/ui/mobile";
+import { AlertDialog, createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 
 type Route = { name: "home" } | { name: "detail" } | { name: "draft" };
-const nav = createNavigator<Route>({ name: "home" });
+const nav = createNavStack<Route>([{ name: "home" }]);
 
 function Press(props: { label: string; onPress: () => void }) {
   return (
@@ -26,7 +26,7 @@ function Home() {
   const shown = signal(0);
   const x = createAnimatedValue(0);
   return (
-    <Screen title="Home">
+    <NavPage title="Home">
       <View style={{ flex: 1 }}>
         <Text>{`Answer: ${answer()}`}</Text>
         <Text>{`Pasted: ${pasted()}`}</Text>
@@ -37,18 +37,26 @@ function Home() {
         <Press
           label="Delete"
           onPress={async () => {
-            const i = await Alert.alert("Delete?", "It is gone after.", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Delete", style: "destructive" },
-            ]);
-            answer.set(["Cancel", "Delete"][i] ?? "dismissed");
+            const chosen = await AlertDialog.show({
+              title: "Delete?",
+              description: "It is gone after.",
+              actions: [
+                { label: "Cancel", role: "cancel" },
+                { label: "Delete", role: "destructive" },
+              ],
+            });
+            answer.set(chosen ?? "dismissed");
           }}
         />
         <Press
           label="Update"
           onPress={async () => {
-            const i = await Alert.alert("Update", "Install it now?", [{ text: "Later" }, { text: "Install" }]);
-            answer.set(["Later", "Install"][i] ?? "dismissed");
+            const chosen = await AlertDialog.show({
+              title: "Update",
+              description: "Install it now?",
+              actions: [{ label: "Later" }, { label: "Install" }],
+            });
+            answer.set(chosen ?? "dismissed");
           }}
         />
         <Press label="Copy" onPress={() => Clipboard.setString("copied text")} />
@@ -56,38 +64,38 @@ function Home() {
         <Press label="Move" onPress={() => Animated.timing(x, { toValue: 100, duration: 300 }).start(() => moved.set("done"))} />
         <Press label="Measure" onPress={() => Image.getSize("https://example.com/a.png")} />
         <Press label="Sheet" onPress={() => sheet.set(true)} />
-        <Modal visible={sheet()} onRequestClose={() => sheet.set(false)} onShow={() => shown.set(shown() + 1)}>
+        <Dialog open={sheet()} onOpenChange={(open) => sheet.set(open)} onOpen={() => shown.set(shown() + 1)}>
           <Text>In the sheet</Text>
-        </Modal>
+        </Dialog>
       </View>
-    </Screen>
+    </NavPage>
   );
 }
 
 function Draft() {
   const asked = signal(false);
   return (
-    <Screen title="Draft" preventBack onBackRequest={() => asked.set(true)}>
+    <NavPage title="Draft" popOnBack={false} onBackPress={() => asked.set(true)}>
       <Text>{`Asked: ${asked() ? "yes" : "no"}`}</Text>
-    </Screen>
+    </NavPage>
   );
 }
 
 function App() {
   return (
-    <Stack navigator={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
       {(route) =>
         route.name === "home" ? (
           <Home />
         ) : route.name === "draft" ? (
           <Draft />
         ) : (
-          <Screen title="Detail">
+          <NavPage title="Detail">
             <Text>Detail body</Text>
-          </Screen>
+          </NavPage>
         )
       }
-    </Stack>
+    </NavStack>
   );
 }
 

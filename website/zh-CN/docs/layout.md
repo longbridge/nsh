@@ -118,7 +118,7 @@ NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 </View>
 ```
 
-在网格中，`justifyContent` 和 `alignContent` 默认是 CSS 的 `"normal"`：尺寸为 `auto` 的轨道会拉伸以填满容器，因此有高度但没有行模板的网格会把高度分给各行。显式设置的值（`"start"`、`"center"`、`"space-between"` 等）按 CSS 的方式放置轨道。
+在网格中，`justifyContent` 和 `alignContent` 默认是 CSS 的 `"normal"`：尺寸为 `auto` 的轨道会拉伸以填满容器，因此有高度但没有行模板的网格会把高度分给各行。显式设置的值（`"start"`、`"center"`、`"space-between"` 等）按 CSS 的方式放置轨道。Tailwind 类 `content-start`、`content-normal` 和 `place-content-start` 保持这个默认值；`alignContent: "start"` 把轨道放在起始处。
 
 `display: "block"` 使用 CSS 块布局（子元素依次堆叠，每个都与容器同宽），`display: "none"` 则把视图从布局中移除。
 
@@ -162,7 +162,7 @@ Tailwind 的断点（`sm:`、`md:` 等）以及 `portrait:` / `landscape:` 不�
 
 ## 安全区域
 
-根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。把页面包在 `nsh/ui/mobile` 的 [`SafeAreaView`](../components/safe-area-view.md) 中，它会按安全区域的 inset 为内容加内边距；也可以用 `safeArea()` / `useSafeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
+根视图覆盖整个屏幕，包括状态栏和主屏幕指示条下方的区域。把页面包在 `nsh/base` 的 [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 中，它会按安全区域的 inset 为内容加内边距；也可以用 `safeArea()` / `safeAreaInsets()` 读取 inset 自行处理。[导航栈](./navigation.md)中的页面本身已经位于标题栏下方。
 
 ## 从右到左
 

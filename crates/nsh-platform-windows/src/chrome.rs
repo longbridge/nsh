@@ -216,7 +216,7 @@ fn frame_changed(hwnd: HWND) {
     };
 }
 
-// -> Rect {- Commands -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- Commands ---------------------------------------------------------------------------
 
 /// A desktop command (on the root).
 pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
@@ -442,7 +442,7 @@ pub(crate) fn full_screen_changed(surface: &Surface) {
     surface.invalidate();
 }
 
-// -> Rect {- The hidden title bar -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- The hidden title bar ---------------------------------------------------------------
 
 /// `WM_NCCALCSIZE`: with the title bar hidden, the client area reaches the
 /// window's top.
@@ -731,7 +731,7 @@ pub(crate) fn draw(surface: &Surface, dc: &ID2D1DeviceContext, scale: f32) {
     }
 }
 
-// -> Rect {- Menus -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Menus ------------------------------------------------------------------------------
 
 type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemes = unsafe extern "system" fn();
@@ -1067,7 +1067,7 @@ pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
 }
 
-// -> Rect {- The dark menu bar -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- The dark menu bar ------------------------------------------------------------------
 
 fn colorref(c: u32) -> COLORREF {
     COLORREF(c)

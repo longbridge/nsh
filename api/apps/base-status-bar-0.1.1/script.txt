@@ -1,0 +1,31 @@
+# What a user does and sees (compat/apps.rs). The status bar is what the
+# platform is told to show: nsh.json's default under the layers of the
+# pages and dialogs in the tree, the latest winning field by field.
+expect Plain page
+# nsh.json's default alone: the root page sets none.
+statusbar foreground=dark hidden=true animated=false
+# A page over it sets `foreground` only: `hidden` stays nsh.json's.
+tap text:Push first
+expect First page
+statusbar foreground=light hidden=true animated=false
+# The next sets `hidden` only: the page below's `foreground` stays.
+tap text:Push second
+expect Second page
+statusbar foreground=light hidden=false animated=false
+# A dialog over the pages, animated.
+tap text:Open dialog
+expect Dialog content
+statusbar foreground=auto hidden=false animated=true
+# Closing it takes its layer away.
+tap text:Close dialog
+absent Dialog content
+statusbar foreground=light hidden=false animated=false
+# Popping takes the pages' away, down to nsh.json's default.
+tap text:Pop
+expect Routes: plain > first
+statusbar foreground=light hidden=true animated=false
+tap text:Pop
+expect Routes: plain
+statusbar foreground=dark hidden=true animated=false
+covers [props] statusBar
+covers [nsh:rt] setup

@@ -12,7 +12,7 @@
 //! proxy. The signature changes when the component's own code, or the
 //! module's code outside components, changes. Top-level `context()`
 //! calls go through `__nsh_hot.context` so contexts keep their identity;
-//! top-level `const`s made by `signal()` / `createNavigator()` go through
+//! top-level `const`s made by `signal()` / `createNavStack()` go through
 //! `__nsh_hot.keep`, so a module that runs again keeps their state (and a
 //! navigator its screens) while their initializer's code is the same. A
 //! function passed to a top-level `mount()` is a component too (named
@@ -42,7 +42,7 @@ const HOT: &str = "__nsh_hot";
 
 /// Calls whose top-level `const` results keep their state across runs of
 /// their module (`__nsh_hot.keep`).
-const KEPT: &[&str] = &["signal", "createNavigator"];
+const KEPT: &[&str] = &["signal", "createNavStack"];
 
 /// Whether a node contains JSX.
 #[derive(Default)]

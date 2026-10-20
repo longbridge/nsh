@@ -162,12 +162,12 @@ Tailwind 类 `truncate` 和 `line-clamp-*` 效果相同；同时设置时以属�
 
 ## 选择
 
-`selectable` 允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。`selectionColor` 设置高亮和选择柄的颜色。类 `select-text` 与 `selectable` 效果相同。
+`selectable` 允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。样式键 `selectionColor`（`selection:text-*`）设置高亮和选择柄的颜色。类 `select-text` 与 `selectable` 效果相同。
 
 在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`selectable={false}` 或类 `select-none` 让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
 
 ```tsx
-<Text selectable selectionColor="#7c3aed">{orderNumber}</Text>
+<Text selectable style={{ selectionColor: "#7c3aed" }}>{orderNumber}</Text>
 ```
 
 要在代码中复制（比如“复制”按钮），使用 [`nsh/clipboard`](../modules/nsh-clipboard.md)。
@@ -191,7 +191,7 @@ Tailwind 类 `truncate` 和 `line-clamp-*` 效果相同；同时设置时以属�
 
 ## 无障碍
 
-屏幕阅读器会朗读 `<Text>` 的内容。为充当标题的文字设置角色（`accessibilityRole="header"`），为链接设置 `accessibilityRole="link"`。参见[无障碍](./accessibility.md)。
+屏幕阅读器会朗读 `<Text>` 的内容。为充当标题的文字设置角色（`role="header"`），为链接设置 `role="link"`。参见[无障碍](./accessibility.md)。
 
 ## 相关内容
 

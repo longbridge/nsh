@@ -27,7 +27,7 @@ pub struct BundleOptions {
     /// otherwise the bundle holds the whole app, dynamically imported
     /// modules included.
     pub split: bool,
-    /// The UI sets the hosts serve, described (`nsh_ui_mobile::registry()`
+    /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
     pub ui_sets: Vec<nsh_core::ui::description::SetDescription>,
 }
@@ -89,7 +89,7 @@ pub struct Bundle {
     /// (`asset:/<path>` URIs refer to them).
     pub assets: Vec<PathBuf>,
     /// The native modules the app imports (`nsh`, `nsh/list`,
-    /// `nsh/ui/mobile`, an app's own UI set), sorted: what a host must
+    /// `nsh/base`, an app's own UI set), sorted: what a host must
     /// serve to run it.
     pub natives: Vec<String>,
     /// What the app declares it may reach (`nsh.json` `capabilities`);
@@ -254,8 +254,8 @@ impl ResolveSetup {
     }
 }
 
-/// The `"tailwind"`, `"theme"` and `"appearance"` of the `nsh.json` next to
-/// the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
+/// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
+/// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
 /// to `nsh.json`) or its content.
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let path = dir.join("nsh.json");
@@ -294,6 +294,11 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 ));
             }
         };
+    }
+    if let Some(status_bar) = config.get("statusBar") {
+        nsh_core::StatusBarSetting::from_json(status_bar)
+            .map_err(|e| BundleError::other(format!("nsh.json: statusBar: {e}")))?;
+        setup.status_bar = Some(status_bar.to_string());
     }
     Ok(Arc::new(setup))
 }
@@ -1073,23 +1078,23 @@ mod tests {
         let dir = single(
             "hot",
             "import { mount } from \"nsh\";\n\
-             import { Buton } from \"nsh/ui/mobile\";\n\
+             import { Buton } from \"nsh/base\";\n\
              mount(() => <Buton title=\"Go\" />);\n",
         );
-        let ui_sets = [nsh_ui_mobile::registry().into()];
+        let ui_sets = [nsh_base::registry().into()];
         let Err(error) = bundle_hot(&dir.join("App.tsx"), &ui_sets) else {
             panic!("bundled");
         };
         let error = error.plain;
         assert!(
-            error.contains("`nsh/ui/mobile` has no export `Buton`"),
+            error.contains("`nsh/base` has no export `Buton`"),
             "{error}"
         );
         assert!(error.contains("did you mean `Button`?"), "{error}");
         std::fs::write(
             dir.join("App.tsx"),
             "import { mount } from \"nsh\";\n\
-             import { Button } from \"nsh/ui/mobile\";\n\
+             import { Button } from \"nsh/base\";\n\
              mount(() => <Button title=\"Go\" />);\n",
         )
         .unwrap();

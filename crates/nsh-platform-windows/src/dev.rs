@@ -504,7 +504,7 @@ fn hide_error(ui: &RefCell<DevUi>) {
     }
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Drawing
 
 const WHITE: Color = Color::rgba(255, 255, 255, 255);
@@ -891,7 +891,7 @@ impl Hosted for ErrorOverlay {
     }
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Text helpers (pure, tested)
 
 /// The message as the overlay shows it: terminal color codes removed

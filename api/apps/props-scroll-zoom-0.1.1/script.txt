@@ -1,0 +1,21 @@
+# What a user does and sees (compat/apps.rs).
+expect Zoom
+# The zoom limits and how pinching behaves, as the platform receives them.
+prop id:photo minimumZoomScale 0.5
+prop id:photo maximumZoomScale 4
+prop id:photo bouncesZoom false
+prop id:photo pinchGestureEnabled false
+prop id:photo centerContent true
+# It is told to zoom to the app's scale, and again when that changes.
+prop id:photo zoomScale 2
+tap id:zoom
+prop id:photo zoomScale 1.5
+# Its offset feeds the animated value the app made (created at 7).
+prop id:photo scrollValue 7
+covers [props] minimumZoomScale
+covers [props] maximumZoomScale
+covers [props] bouncesZoom
+covers [props] pinchGestureEnabled
+covers [props] centerContent
+covers [props] zoomScale
+covers [props] scrollValue

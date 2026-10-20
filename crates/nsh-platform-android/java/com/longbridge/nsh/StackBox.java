@@ -160,23 +160,28 @@ final class StackBox extends FrameLayout implements Node {
         return shown.size() > 1 && top != null && !top.preventBack && isShown();
     }
 
-    /** Whether the top screen keeps the user (`preventBack`): back asks JS to leave. */
+    /** Whether the top screen keeps the user (`popOnBack` false): back only tells JS. */
     boolean preventsBack() {
         ScreenBox top = top();
         return top != null && top.preventBack && isShown();
     }
 
-    /** Whether a back gesture may drag the top screen away (`gestureEnabled`). */
+    /** Whether a back gesture may drag the top screen away (`popOnSwipe`). */
     boolean canSwipe() {
         ScreenBox top = top();
         return canPop() && top.gestureEnabled;
     }
 
-    /** The back button, the toolbar's arrow or a finished back gesture. */
+    /**
+     * The back button, the toolbar's arrow or a finished back gesture: the
+     * top screen hears of it (`onBackPress`) when it listens, and pops
+     * unless it keeps the user (`popOnBack` false).
+     */
     void back() {
         ScreenBox top = top();
-        if (top != null && preventsBack()) mounter.event(top.id, Native.BACK_REQUEST);
-        else pop();
+        if (top == null || !isShown()) return;
+        if (mounter.wants(top.id, Native.BACK_REQUEST)) mounter.event(top.id, Native.BACK_REQUEST);
+        if (!top.preventBack) pop();
     }
 
     private float backProgress = -1;
@@ -245,7 +250,7 @@ final class StackBox extends FrameLayout implements Node {
         final Toolbar toolbar;
         int animation;
         boolean gestureEnabled = true;
-        /** `preventBack`: the back buttons send `onBackRequest` instead of popping. */
+        /** `popOnBack` false: the back buttons only send `onBackPress`. */
         boolean preventBack;
         private final BackArrow arrow;
 
@@ -290,7 +295,8 @@ final class StackBox extends FrameLayout implements Node {
         /** Applies `encode.rs` `screen_config`. */
         void configure(Mounter m, String title, boolean shown, boolean transparent, int tint, int background,
                        int titleColor, boolean backVisible, boolean gesture, boolean preventBack, int animation,
-                       int left, int right, int titleView, float headerHeight, boolean canGoBack) {
+                       int left, int right, int titleView, float headerHeight, boolean canGoBack,
+                       String backTitle) {
             this.animation = animation;
             this.gestureEnabled = gesture;
             this.preventBack = preventBack;
@@ -309,14 +315,27 @@ final class StackBox extends FrameLayout implements Node {
             else toolbar.setBackgroundColor(background != 0 ? background : themeColor(getContext(), android.R.attr.colorBackground, 0xffffffff));
             arrow.setColor(foreground);
             toolbar.setNavigationIcon(backVisible && canGoBack ? arrow : null);
-            toolbar.setNavigationContentDescription(backVisible && canGoBack ? "Navigate up" : null);
-            // Header items: the core sized them; the toolbar places them.
+            toolbar.setNavigationContentDescription(backVisible && canGoBack ? upDescription(backTitle) : null);
+            // Header items: the core sized them; the toolbar places them. A `header`
+            // slot (the whole bar where NSH draws it) is never placed: the toolbar is the bar.
             for (int i = toolbar.getChildCount() - 1; i >= 0; i--) {
                 if (toolbar.getChildAt(i) instanceof Box) toolbar.removeViewAt(i);
             }
             add(m, left, android.view.Gravity.START);
             add(m, titleView, android.view.Gravity.START);
             add(m, right, android.view.Gravity.END);
+        }
+
+        /**
+         * What the up arrow reads as: the `headerBackTitle` of the screen it
+         * leads back to, else the system's own words for it (the action
+         * bar's, not in the public resources).
+         */
+        private static CharSequence upDescription(String backTitle) {
+            if (backTitle != null) return backTitle;
+            android.content.res.Resources system = android.content.res.Resources.getSystem();
+            int up = system.getIdentifier("action_bar_up_description", "string", "android");
+            return up != 0 ? system.getString(up) : null;
         }
 
         private void add(Mounter m, int itemId, int gravity) {

@@ -280,7 +280,7 @@ function Swatch() {
 | `<If when>` | 创建时 | `when` 的真假变化时 |
 | `<Each of>` 的行 | 它的 key 第一次出现时 | 从不；改为由 `item()` / `index()` 访问器变化 |
 
-环境同样是响应式的：[`nsh/device`](../modules/nsh-device.md) 中的 `windowSize()`、`colorScheme()`、`fontScale()`，以及 `nsh/ui/mobile` 中的 `safeArea()` / `keyboard()` 都是访问器，读取它们的 JSX 会跟随屏幕旋转、深色模式或键盘变化。
+环境同样是响应式的：[`nsh/device`](../modules/nsh-device.md) 中的 `windowSize()`、`colorScheme()`、`fontScale()`，[`nsh/base`](../modules/nsh-base.md) 中的 `safeArea()` 和 `keyboardFrame()` 都是访问器，读取它们的 JSX 会跟随屏幕旋转、深色模式或键盘变化。
 
 ## 常见错误
 

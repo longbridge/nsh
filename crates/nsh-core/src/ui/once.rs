@@ -53,7 +53,7 @@ impl<E: Event> Scope<E> {
 
     /// The edges system UI or a header covers where the component is: its
     /// screen's (below the header) or modal's, else the safe area (TS:
-    /// `useSafeAreaInsets()`). Reading subscribes.
+    /// `safeAreaInsets()`). Reading subscribes.
     pub fn insets(&self) -> crate::EdgeInsets {
         super::ambient::insets_of(self.host)
     }

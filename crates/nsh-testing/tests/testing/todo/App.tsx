@@ -24,8 +24,8 @@ function App() {
         testID="new-todo"
         placeholder="What to do?"
         value={draft()}
-        onChangeText={(text) => draft.set(text)}
-        onSubmitEditing={add}
+        onChange={(text) => draft.set(text)}
+        onSubmit={add}
       />
       <View onPress={add}>
         <Text>Add</Text>

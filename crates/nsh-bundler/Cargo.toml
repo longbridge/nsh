@@ -49,4 +49,4 @@ serde_json.workspace = true
 log.workspace = true
 
 [dev-dependencies]
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true

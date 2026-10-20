@@ -15,7 +15,7 @@ group: tools
 ### 1. JS 做得越少越好
 
 QuickJS 是一个解释器：体积小、启动快，但做重活时比原生代码慢得多。因此在 NSH 中，**只有你的应用代码是 JS**。响应式图
-（signal、computed 值、effect）、编译后的 JSX 所调用的渲染器、布局引擎、`nsh/ui/mobile` 的组件、列表虚拟化、动画以及
+（signal、computed 值、effect）、编译后的 JSX 所调用的渲染器、布局引擎、列表虚拟化、动画以及
 你导入的每个模块都是 Rust。解析、diff、布局和字符串处理都在原生侧完成。
 
 效果是可以测量的。同一个计数器应用分别跑在 NSH 早先的 JS 运行时和原生运行时上（release 构建）：
@@ -28,9 +28,9 @@ QuickJS 是一个解释器：体积小、启动快，但做重活时比原生代
 | 一次点击的 commit | ~22 µs | ~15 µs |
 | 滚动 1000 行列表，每个重新绑定帧的 JS 耗时 | ~150 µs | ~77 µs |
 
-组件也是如此：`nsh/ui/mobile` 中的 `Button`（Rust）与一个等价的 TSX 按钮对比，各 200 个：
+组件也是如此：用 Rust 组件编写的按钮与一个等价的 TSX 按钮对比，各 200 个：
 
-| | Rust `Button`：JS / core | TSX 按钮：JS / core |
+| | Rust 按钮：JS / core | TSX 按钮：JS / core |
 |---|---|---|
 | 首帧（ops） | 1.32 ms / 0.77 ms (1015) | 2.32 ms / 0.70 ms (2415) |
 | 更新全部 200 个标题（ops） | 0.42 ms / 0.42 ms (200) | 0.77 ms / 0.36 ms (600) |
@@ -203,7 +203,7 @@ nsh run App.tsx --target macos --fps --release
 - 动画：使用动画值，而不是每帧写入的 signal。
 - 滚动效果：使用 `scrollValue`，而不是 `onScroll`。
 - 处理函数：不在每次按键或每个滚动事件中做繁重工作；用 `computed` 缓存。
-- 组件：合适时优先使用 `nsh/ui/mobile` 的 Rust 组件；它们比用 TSX 写的等价组件花费更少的 JS。
+- 组件：把应用最常用的组件写成 Rust，放在应用自己的 crate 里（[用 Rust 开发](./rust.md)）；它们比用 TSX 写的等价组件花费更少的 JS。
 
 ## 另请参阅
 

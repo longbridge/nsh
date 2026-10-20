@@ -1,7 +1,7 @@
 import { Input, mount, Scroll, signal, Text, View, type YNode } from "nsh";
 import { ui } from "./palette";
 
-const field = () => ({ ...ui().inset, fontSize: 16, color: ui().text, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 });
+const field = () => ({ ...ui().inset, fontSize: 16, color: ui().text, placeholderColor: ui().faint, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 });
 const label = () => ({ fontSize: 13, color: ui().muted });
 
 function App() {
@@ -29,14 +29,13 @@ function App() {
         <Input
           style={field()}
           value={name()}
-          onChangeText={(t) => name.set(t)}
-          placeholderTextColor={ui().faint}
+          onChange={(t) => name.set(t)}
           placeholder="Ada Lovelace"
           autoCapitalize="words"
           autoComplete="name"
           returnKeyType="next"
-          blurOnSubmit={false}
-          onSubmitEditing={() => emailInput.focus()}
+          submitBehavior="submit"
+          onSubmit={() => emailInput.focus()}
           onFocus={() => focused.set("name")}
         />
 
@@ -45,16 +44,15 @@ function App() {
           ref={emailInput}
           style={field()}
           value={email()}
-          onChangeText={(t) => email.set(t.trim().toLowerCase())}
-          placeholderTextColor={ui().faint}
+          onChange={(t) => email.set(t.trim().toLowerCase())}
           placeholder="ada@example.com"
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
           autoComplete="email"
           returnKeyType="next"
-          blurOnSubmit={false}
-          onSubmitEditing={() => passwordInput.focus()}
+          submitBehavior="submit"
+          onSubmit={() => passwordInput.focus()}
           onFocus={() => focused.set("e-mail")}
         />
 
@@ -62,13 +60,12 @@ function App() {
         <Input
           ref={passwordInput}
           style={field()}
-          secureTextEntry
+          masked
           autoComplete="new-password"
-          placeholderTextColor={ui().faint}
           placeholder="At least 8 characters"
           returnKeyType="next"
-          blurOnSubmit={false}
-          onSubmitEditing={() => notesInput.focus()}
+          submitBehavior="submit"
+          onSubmit={() => notesInput.focus()}
           onFocus={() => focused.set("password")}
         />
 
@@ -76,7 +73,7 @@ function App() {
         <Input
           style={{ ...field(), letterSpacing: 8, textAlign: "center", fontSize: 22 }}
           value={code()}
-          onChangeText={(t) => code.set(t.replace(/[^0-9]/g, ""))}
+          onChange={(t) => code.set(t.replace(/[^0-9]/g, ""))}
           keyboardType="number-pad"
           autoComplete="one-time-code"
           maxLength={6}
@@ -89,9 +86,8 @@ function App() {
           multiline
           maxLength={200}
           value={notes()}
-          onChangeText={(t) => notes.set(t)}
+          onChange={(t) => notes.set(t)}
           onContentSizeChange={(e) => notesHeight.set(Math.min(e.height, 120))}
-          placeholderTextColor={ui().faint}
           placeholder="Return adds a line"
           style={{ ...field(), height: Math.max(notesHeight(), 22) + 20 }}
           onFocus={() => focused.set("notes")}
@@ -101,7 +97,7 @@ function App() {
 
         <View
           onPress={submit}
-          activeOpacity={0.6}
+          activeStyle={{ opacity: 0.6 }}
           style={{
             padding: 14,
             borderRadius: 10,

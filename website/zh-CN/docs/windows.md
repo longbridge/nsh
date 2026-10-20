@@ -8,7 +8,7 @@ group: platforms
 # Windows
 
 NSH 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
-渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Windows 上，
+渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Windows 上，
 `Platform.OS` 为 `"windows"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -112,13 +112,13 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 
 | 按键 | 作用 |
 |---|---|
-| Return | 在 `Input` 中按 `submitBehavior` 行事：提交（`onSubmitEditing`）、提交并离开输入框，或换行（多行输入框） |
+| Return | 在 `Input` 中按 `submitBehavior` 行事：提交（`onSubmit`）、提交并离开输入框，或换行（多行输入框） |
 | Shift+Return、Alt+Return | 在回车即提交的多行输入框中换行（Ctrl+Return 提交） |
-| Tab、Shift+Tab | 移到下一个 / 上一个文本框，只在最上层的模态窗口之内；与 Windows 的对话框一样，文本框中的文字会被选中 |
-| Escape | 离开有焦点的输入框；否则清除文本选区，再返回上一页或请求关闭最上层的模态窗口 |
+| Tab、Shift+Tab | 移到下一个 / 上一个文本框，只在最上层的对话框之内；与 Windows 的对话框一样，文本框中的文字会被选中 |
+| Escape | 离开有焦点的输入框；否则清除文本选区，再关闭最上层的对话框或返回上一页 |
 | Alt+Left、浏览器后退键、鼠标的后退键 | 返回上一页（在输入框中也是） |
 | Ctrl+方向键、Home / End、Ctrl+Home / End，加 Shift；Ctrl+Backspace / Delete | 在输入框中按词和行移动、选择、删除，与其他 Windows 应用一致 |
-| Ctrl+Z、Ctrl+Y、Ctrl+X / C / V / A；Shift+Delete、Ctrl+Insert、Shift+Insert | 撤销、重做、剪切、复制、粘贴、全选（密码输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 `selectable` 文本 |
+| Ctrl+Z、Ctrl+Y、Ctrl+X / C / V / A；Shift+Delete、Ctrl+Insert、Shift+Insert | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 `selectable` 文本 |
 | 方向键；Page Up / Down、Space、Shift+Space；Home / End、Ctrl+Home / End | 滚动有焦点的视图所在或鼠标下方的滚动视图：一行、一页、到开头 / 结尾（输入框有焦点时不滚动） |
 | F11、Alt+F4 | 全屏、关闭窗口（`nsh package` 和 `nsh run` 的应用） |
 | Ctrl+R、F5 | 重新加载最新的构建（`nsh run`） |
@@ -139,7 +139,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 - **文本**：头部和中间省略号只用于单行（多行时改为尾部省略号）；彩色 emoji 只支持 COLR 字体；小型大写字母只在字体提供时可用。
 - **文本输入**：键盘类型和自动填充不适用（没有软键盘）；Tab 在文本框之间切换。右键打开编辑菜单（撤销、剪切、复制、粘贴、删除、
   全选），可选中的文本右键也有菜单（复制、全选）。
-- **无障碍**（UI Automation）：导航栏的标题和按钮、对话框和 toast 不会暴露出来；标题（heading）的级别都报告为 1。
+- **无障碍**（UI Automation）：提示对话框和 toast 不会暴露出来；标题（heading）的级别都报告为 1。
 - **输入辅助视图**和**状态栏**（桌面上没有对应物）。
 
 ## 另见

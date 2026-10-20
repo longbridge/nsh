@@ -3,7 +3,7 @@
 `crates/nsh-platform-macos` renders NSH apps with AppKit views, Core Animation and CoreText. `crates/nsh-macos-host` is
 its development host (`nsh run --target macos`), `crates/nsh-macos-app` the release runner of `nsh package --target
 macos`. It follows the Linux backend's desktop design (`linux.md`: NSH picks views itself, scroll views keep offsets of
-their own, NSH draws screens, headers and modals, sheets are centered cards, `desktop={{…}}` props apply) with the iOS
+their own, NSH moves pages and dialogs, draws no header or dialog look of its own, `desktop={{…}}` props apply) with the iOS
 backend's Apple drawing (CoreText, Core Graphics, Core Animation layers, ImageIO, `NSURLSession`, AVFoundation, WebKit).
 Mac Catalyst (`nsh-platform-ios` on `aarch64-apple-ios-macabi`) stays the default `nsh run` target on macOS: it is
 UIKit, phone-style. In a checkout, `cargo run` runs the gallery here (`--target catalyst` for Catalyst). User-facing page: `website/docs/macos.md`.
@@ -32,17 +32,16 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   the top left (transforms are conjugated around the transform origin).
 - **Children live in a container** when the view needs one: scroll views always (the container's bounds origin is
   the scroll offset, as `NSClipView` scrolls, so a scroll is one call), and views that clip their children and cast a
-  shadow (clipping a layer clips its shadow). Hosted AppKit views (text fields, headers, videos, web views) are
-  `ViewState::natives`, above the children, except a sheet's scrim (hosted by the root, below its card); hit testing
-  follows the AppKit order of hosted views and children, so a click on the card reaches the card.
+  shadow (clipping a layer clips its shadow). Hosted AppKit views (text fields, videos, web views) are
+  `ViewState::natives`, above the children; hit testing follows the AppKit order of hosted views and children.
 - **Web views and videos are views among the others**, so window composition needs no surfaces of its own (unlike
   Windows' child windows): a `WKWebView` is a layer-backed subview of its node's view, and the layer WebKit's process
   draws into is composited by Core Animation with the rest. What is above it in the view tree draws over it (later
-  siblings, modals and sheets with their scrim, toasts; the dev status line, error overlay and FPS HUD are above the
+  siblings, dialogs, toasts; the dev status line, error overlay and FPS HUD are above the
   root), and its ancestors' clipping (corner radii, masks), opacity, transforms, hiding and scroll offsets apply to
   it. AppKit's input and in-process rendering do not follow the layers: the root's `hitTest:` decides with NSH's
   picking (Input, below), a page under a transformed ancestor is drawn transformed but gets mouse positions as if it
-  were not, and `renderInContext:` leaves pages and videos out (leaving screens and modals take the live views
+  were not, and `renderInContext:` leaves pages and videos out (leaving pages and dialogs take the live views
   along; `--script`'s `shot` shows pages, which WebKit draws for `cacheDisplayInRect:`, but not videos). `NSAlert` sheets are windows of their own, above everything.
 - **Drawing**: Core Animation draws backgrounds, borders, corners, shadows, gradients and images (`decor.rs`,
   `visual.rs`, `image.rs`, the iOS backend's design). Text and canvas views draw into a **content layer** of their own
@@ -111,7 +110,8 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   menu bar shows that (the development host has no bundle; `nsh run` passes it the app's name with `--name`). The standalone event loop
   ends when its window closes, a minimized one too; `windowWillClose:` schedules
   its stop after the close callback. `set_ui_sets`
-  replaces the default `nsh/ui/mobile` set for apps with Rust components of their own.
+  serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
+  `nsh_base::registry()` and its sets).
 
 ## How each area maps to AppKit
 
@@ -124,10 +124,10 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 | Scroll views | `scroll.rs` | Offsets of their own, shown by the container's bounds origin; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags never scroll (they are the app's: pans, responders, text selection); snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, and the indicator shows and is kept as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
 | Input | `input.rs` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onHoverIn` / `onHoverOut`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back |
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
-| Navigation | `navigation.rs` | Screens are child views, only the top one (and the one below during a transition) visible; headers are AppKit views (an `NSButton` back button with `chevron.left`, `NSTextField` titles, large titles, header items) of a fixed height reported to the core; a screen the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a modal; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button pop natively (a stack inside the newest modal first, else that modal is asked to close; without a modal, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
-| Modals | `navigation.rs` | Children of the root above the app's views, sliding up or fading in; page and form sheets are centered cards (720 / 540 points wide at most) over a scrim that dims the window, and clicking the scrim asks them to close |
+| Navigation | `navigation.rs` | Pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
+| Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
 | Transitions | `transition.rs` | `LayoutAnimation`, style transitions and keyframes on frame callbacks (Linux's) |
-| Dialogs, toasts | `system.rs` | `NSAlert` as a sheet on the window. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. Toasts are a view the root hosts at its bottom |
+| Alerts (`AlertDialog`), toasts | `system.rs` | `NSAlert` as a sheet on the window. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. Toasts are a view the root hosts at its bottom |
 | Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls` |
 | Web views | `native.rs` | `WKWebView` (iOS's bridge: `ReactNativeWebView.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollEnabled={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s `NSView` fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
@@ -155,7 +155,7 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   `InputConfig::submit()` says; Shift+Return breaks the line of a multiline input that submits, and a return with
   marked text only commits the composition), Option+Return and Ctrl+Return (a `\n` in a multiline input, nothing in
   a single line; `insertLineBreak:` alone would insert U+2028), Option+Tab (a tab character in a multiline input
-  only), Tab / Shift+Tab / Ctrl+Tab (`tab`: the next field or pressable view on screen within the newest modal, skipping the clip view
+  only), Tab / Shift+Tab / Ctrl+Tab (`tab`: the next field or pressable view on screen within the newest dialog, skipping the clip view
   of a text view, which hands the focus back to it) and Escape (leaves the field). Keys a field uses never reach the
   root, so Option+Left moves the caret and Cmd+[ does nothing there.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;

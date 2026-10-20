@@ -21,11 +21,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Theme, cleanup, computed,
     reactive::with_data,
     signal_with,
-    status_bar::{SharedStatusBars, StatusBarEntry, StatusBars},
     task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
 };
 use crate::{
-    Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size, StatusBarSetting,
+    Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
     platform::{Appearance, Idiom, Locale, Os},
@@ -39,8 +38,6 @@ pub(crate) type MeasureFn = Rc<dyn Fn(&CanvasFont, &str) -> f32>;
 #[derive(Default)]
 pub(crate) struct Ambient {
     executor: Option<Rc<Executor>>,
-    /// The status bar's layers.
-    status_bars: Option<SharedStatusBars>,
     env: Option<EnvSignals>,
     theme: Option<Signal<Arc<Theme>>>,
     globals: FxHashMap<TypeId, Box<dyn Any>>,
@@ -107,13 +104,10 @@ impl EnvSignals {
 // --- What the core sets ------------------------------------------------------
 
 impl super::Runtime {
-    /// The executor of tasks and actions, and the status bar's layers.
-    pub(crate) fn set_services(&self, executor: Rc<Executor>, status_bars: SharedStatusBars) {
+    /// The executor of tasks and actions.
+    pub(crate) fn set_services(&self, executor: Rc<Executor>) {
         let _entered = self.enter();
-        with_data(|d| {
-            d.ambient.executor = Some(executor);
-            d.ambient.status_bars = Some(status_bars);
-        });
+        with_data(|d| d.ambient.executor = Some(executor));
     }
 
     /// Where the app's storage is kept.
@@ -202,7 +196,7 @@ pub fn safe_area() -> EdgeInsets {
 }
 
 /// The software keyboard's height over the surface, 0 when hidden (TS:
-/// `keyboard().height`).
+/// `keyboardFrame().height`).
 pub fn keyboard_height() -> Points {
     env(|e| e.keyboard_height)
 }
@@ -327,7 +321,7 @@ pub fn global<G: Default + 'static>() -> Signal<G> {
 }
 
 /// The insets of the screen or modal the component on `host` is on, below
-/// its header, else the safe area (TS: `useSafeAreaInsets()`).
+/// its header, else the safe area (TS: `safeAreaInsets()`).
 pub(crate) fn insets_of(host: NodeId) -> EdgeInsets {
     let existing = with_data(|d| d.ambient.insets.get(&host).copied());
     let signal = existing.unwrap_or_else(|| {
@@ -479,24 +473,6 @@ pub fn force_rtl(force: bool) {
 /// (TS: `I18nManager.allowRTL`).
 pub fn allow_rtl(allow: bool) {
     act(Action::Direction(super::services::Direction::Allow(allow)));
-}
-
-/// Adds `setting` over the status bar's other settings while the current
-/// owner lives (the most recently added wins, field by field): the entry,
-/// to change it.
-pub fn add_status_bar(setting: StatusBarSetting) -> StatusBarEntry {
-    let globals =
-        with_data(|d| d.ambient.status_bars.clone()).expect("the core sets the status bars");
-    let entry = StatusBars::update(&globals, |bars| bars.add(setting));
-    cleanup(move || StatusBars::update(&globals, |bars| bars.remove(entry)));
-    entry
-}
-
-/// Changes a setting [`add_status_bar`] added.
-pub fn update_status_bar(entry: StatusBarEntry, setting: StatusBarSetting) {
-    let globals =
-        with_data(|d| d.ambient.status_bars.clone()).expect("the core sets the status bars");
-    StatusBars::update(&globals, |bars| bars.set(entry, setting));
 }
 
 // --- Tasks and timers --------------------------------------------------------

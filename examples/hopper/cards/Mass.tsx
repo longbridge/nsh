@@ -42,7 +42,7 @@ function Section() {
         undefined,
         (x, y) => drawn?.isPointInPath(TANK, x, y) ?? false,
       )}
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel="Propellant load"
       accessibilityValue={{ text: `${Math.round(load() * 100)} percent` }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}

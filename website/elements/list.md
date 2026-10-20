@@ -38,7 +38,7 @@ function agree on the item type, which TypeScript infers from `each`.
 
 For a short list whose rows should all exist (a settings page, a form), an [`<Each>`](./control-flow.md) inside a
 [`<Scroll>`](./scroll.md) is simpler. For a list styled as a grouped table, see
-[`ListView`](../components/list-view.md). The [lists guide](../docs/lists.md) covers patterns: infinite loading, chat,
+[a settings-style list](../docs/lists.md#a-settings-style-list). The [lists guide](../docs/lists.md) covers patterns: infinite loading, chat,
 sections.
 
 ## Rows are recycled
@@ -67,11 +67,12 @@ stay with the cell and show up on another item.
 | `inverted` | `boolean` | `false` | Laid out from the end, item 0 last (chat style): starts scrolled to the end and keeps its distance from the end as content changes. |
 | `maintainVisibleContentPosition` | `{ autoscrollToBottomThreshold?: number }` | | Not inverted: at the end of the content, or within that many points of it, the list stays at the end as the content grows or the viewport shrinks; scrolled further up, the visible content stays. |
 | `stickyHeaderIndices` | `number[]` | | Items that stick to the start while scrolled past (one column, not inverted). |
-| `contentContainerStyle` | `ListContentStyle` | | Padding and gaps of the content, in points: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap`. |
-| `ListHeaderComponent` | `ListSlot` | | Before the items: a component (`Header`) or an element (`<Header />`). |
-| `ListFooterComponent` | `ListSlot` | | After the items. |
-| `ListEmptyComponent` | `ListSlot` | | Shown instead of the items while `each` is empty. |
-| `ItemSeparatorComponent` | `ListSlot` | | Between items (one column). |
+| `contentStyle` | `ListContentStyle` | | Padding and gaps of the content, in points: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap`. |
+| `contentClass` | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
+| `header` | `ListSlot` | | Before the items: a component (`Header`) or an element (`<Header />`). |
+| `footer` | `ListSlot` | | After the items. |
+| `empty` | `ListSlot` | | Shown instead of the items while `each` is empty. |
+| `separator` | `ListSlot` | | Between items (one column). |
 | `initialScrollIndex` | `number` | | Scrolls to this item before the first frame. |
 | `keyExtractor` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. |
 | `onEndReached` | `() => void` | | The end is near: load more. |
@@ -90,6 +91,10 @@ stay with the cell and show up on another item.
 Lists also take the scrolling props of [`<Scroll>`](./scroll.md#scrolling): `pagingEnabled`, `snapToInterval`,
 `snapToOffsets`, `snapToAlignment`, `disableIntervalMomentum`, `decelerationRate`, `bounces`, `contentInset`,
 `contentOffset`, `keyboardShouldPersistTaps`, `scrollEventThrottle` and `scrollEnabled`. Lists do not zoom.
+
+The props every element takes ([common props](./index.md)) go to the list's scroll view as they are: `testID`,
+`accessibilityLabel` and the other accessibility props, `class` and `classList`, `onLayout`, touch and responder props.
+UI tests find a list by its `testID` as they find any view.
 
 `ViewabilityConfig`:
 
@@ -135,10 +140,10 @@ let list!: YNode;
   each={photos}
   numColumns={3}
   estimatedItemSize={120}
-  contentContainerStyle={{ padding: 12, gap: 8 }}
+  contentStyle={{ padding: 12, gap: 8 }}
   viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
   onViewableItemsChanged={({ viewableItems }) => visible.set(`${viewableItems.length} visible`)}
-  ListHeaderComponent={<Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>}
+  header={<Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>}
   style={{ flex: 1 }}
 >
   {(photo) => <Image src={photo().url} style={{ height: 120, borderRadius: 8 }} />}

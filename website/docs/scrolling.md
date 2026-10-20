@@ -38,10 +38,10 @@ function App() {
 mount(App);
 ```
 
-The child view above can also be the scroll view's own content container: `contentContainerStyle` (or `contentContainerClass`) wraps the children in a view with that style, which scrolls with them. `flexGrow: 1` makes it at least as tall as the viewport, so a short content can be centered and a long one still scrolls:
+The child view above can also be the scroll view's own content container: `contentStyle` (or `contentClass`) wraps the children in a view with that style, which scrolls with them. `flexGrow: 1` makes it at least as tall as the viewport, so a short content can be centered and a long one still scrolls:
 
 ```tsx
-<Scroll style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 16 }}>
+<Scroll style={{ flex: 1 }} contentStyle={{ flexGrow: 1, justifyContent: "center", padding: 16 }}>
   <If when={messages().length > 0} else={<Text>No messages yet</Text>}>
     <Each of={messages()}>{(m) => <Text>{m().text}</Text>}</Each>
   </If>
@@ -335,7 +335,7 @@ Two props decide how scrolling and taps interact with the keyboard:
 - `"handled"`: a tap on something that handles it (a button) goes through and the keyboard stays; a tap on empty space hides it. Usually the right choice for forms.
 - `"always"`: taps never hide the keyboard.
 
-Both are decided natively when the tap or drag happens; nothing waits for JS. To hide the keyboard from code, call `Keyboard.dismiss()` from `nsh/ui/mobile`.
+Both are decided natively when the tap or drag happens; nothing waits for JS. To hide the keyboard from code, call `Keyboard.dismiss()` from [`nsh/base`](../modules/nsh-base.md#keyboard).
 
 ## Nested scroll views
 

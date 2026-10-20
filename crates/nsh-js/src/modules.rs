@@ -2,7 +2,7 @@
 //! `nsh:rt`, `nsh/device`, `nsh/accessibility`, `nsh/keymap`, ...;
 //! [`nsh_core::js::NATIVE_MODULES`])
 //! and those of registries (`Registry::specifier`): the UI sets a host
-//! serves (`nsh/ui/mobile`) and the runtime's (`nsh/android`, ...), whose
+//! serves (`nsh/base`, an app's own) and the runtime's (`nsh/android`, ...), whose
 //! components, modules and re-exports become exports (`components.rs`).
 //! A module of both kinds (`nsh/accessibility`) has the exports of both.
 //!
@@ -996,7 +996,7 @@ mod tests {
     /// links against the names a VM serving the set exports.
     #[test]
     fn a_described_set_exports_what_its_registry_does() {
-        for registry in [nsh_ui_mobile::registry(), crate::classes::tests::registry()] {
+        for registry in [nsh_base::registry(), crate::classes::tests::registry()] {
             let specifier = registry.specifier().unwrap();
             let served = super::ModuleTable::new(std::slice::from_ref(&registry));
             let compiled = super::ModuleTable::compiling(&[(&registry).into()]);
@@ -1013,7 +1013,7 @@ mod tests {
             assert_eq!(compiled, served, "{specifier}");
         }
         let compiling = super::ModuleTable::compiling(&[]);
-        assert!(compiling.export_names("nsh/ui/mobile").is_none());
+        assert!(compiling.export_names("nsh/base").is_none());
         assert!(compiling.export_names("nsh").is_some());
     }
 }

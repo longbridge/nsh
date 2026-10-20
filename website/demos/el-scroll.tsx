@@ -35,7 +35,7 @@ function App() {
         <Text style={{ color: ui().muted }}>Vertical · y = {Math.round(y())}</Text>
         <View
           onPress={() => scroller.scrollTo({ y: 0, animated: true })}
-          activeOpacity={0.6}
+          activeStyle={{ opacity: 0.6 }}
           style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}
         >
           <Text style={{ color: ui().text }}>scrollTo top</Text>

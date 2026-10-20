@@ -53,7 +53,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();

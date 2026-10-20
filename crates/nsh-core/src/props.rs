@@ -28,7 +28,7 @@ pub enum PointerEvents {
     BoxOnly,
 }
 
-/// What an element is, for assistive technologies (`accessibilityRole`).
+/// What an element is, for assistive technologies (`role`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum AccessibilityRole {
     /// No particular role.
@@ -166,7 +166,7 @@ pub struct Accessibility {
     pub label: Option<Arc<str>>,
     /// `accessibilityHint`.
     pub hint: Option<Arc<str>>,
-    /// `accessibilityRole`.
+    /// `role`.
     pub role: AccessibilityRole,
     /// `accessibilityState`.
     pub state: AccessibilityState,
@@ -201,8 +201,8 @@ pub enum AccessibilityProp {
     /// `accessibilityHint`: what activating the element does.
     #[prop(js = "accessibilityHint")]
     Hint(Option<Arc<str>>),
-    /// `accessibilityRole` / `role`: what the element is.
-    #[prop(js = "accessibilityRole", js = "role", with = crate::js::host_values::role, reset = AccessibilityProp::Role(AccessibilityRole::None))]
+    /// `role`: what the element is.
+    #[prop(js = "role", with = crate::js::host_values::role, reset = AccessibilityProp::Role(AccessibilityRole::None))]
     Role(AccessibilityRole),
     /// `accessibilityState`.
     #[prop(js = "accessibilityState")]
@@ -248,8 +248,6 @@ pub struct ViewProps {
     pub pointer_events: PointerEvents,
     /// Extends the touch area beyond the view's bounds.
     pub hit_slop: EdgeInsets,
-    /// Opacity while pressed (native press feedback, no JS round trip).
-    pub active_opacity: Option<f32>,
     /// Milliseconds before a press becomes a long press (platform default
     /// when `None`).
     pub long_press_delay: Option<f32>,

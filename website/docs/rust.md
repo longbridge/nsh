@@ -8,7 +8,7 @@ group: start
 # Building with Rust
 
 Native Shell apps are written in TSX, in Rust, or in both. All three run on the same engine: the reactive graph, the
-renderer, Taffy layout and the `nsh/ui/mobile` components are Rust in every case, and every platform renders with its
+renderer, Taffy layout and the native modules (navigation, dialogs, the keyboard, the status bar) are Rust in every case, and every platform renders with its
 own UI. What differs is the language of your own code, and with it whether the app carries a JavaScript VM.
 
 | | TSX | Rust | Rust with TSX |
@@ -46,7 +46,6 @@ nsh package --target web       # or ios, ios-simulator, android, macos, linux, w
 
 ```rust
 use nsh_core::ui::prelude::*;
-use nsh_ui_mobile::{Button, ButtonEvent, ButtonProps};
 
 /// The components available to TSX through `app/native`.
 #[native_module("app/native")]
@@ -72,8 +71,16 @@ pub fn App() -> impl IntoElement {
         .child(text(move || format!("Count: {}", count.get())))
         .child(text(quote))
         .child(
-            Button::element(ButtonProps { title: "Tap".into(), ..ButtonProps::default() })
-                .on_event(move |_: &ButtonEvent| count.update(|c| *c += 1)),
+            // A button is a view that answers presses, drawn with the theme's colors.
+            view()
+                .px(px(20.0))
+                .py(px(12.0))
+                .rounded(move || px(theme().radius))
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary_active))
+                .role(AccessibilityRole::Button)
+                .on_press(move |_: &()| count.update(|c| *c += 1))
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -95,7 +102,7 @@ Listeners are closures of their event (`move |text: &str| ..`), and `move || ..`
 ```
 
 `"root"` is the component's path in the crate (`App`, `shell::Gallery`; in the first one with
-[several crates](#several-crates)); `"theme"` and `"appearance"` apply to it as they do to a TSX app. With it,
+[several crates](#several-crates)); `"theme"` is the [theme](#theme) its components draw with, and `"appearance"` applies to it as it does to a TSX app. With it,
 `nsh run` and `nsh package` of the app's directory build the app's own runner for the target, with the root mounted
 and no QuickJS linked in:
 
@@ -161,7 +168,7 @@ The crate's `#[native_module("app/native")]` function names what TSX may import:
 (`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, `#[module]` on a unit struct and its `impl`),
 classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets; the attribute also makes
 `pub fn registry()` at the crate's root, the same set for your tests and other Rust code (`my_app_native::registry()`,
-next to `nsh_ui_mobile::registry()`). In a `#[module]` or
+next to `nsh_base::registry()`). In a `#[module]` or
 `#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
 stay in Rust. Their TypeScript
 declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against
@@ -215,7 +222,6 @@ impl Portfolio {
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
-import { Button } from "nsh/ui/mobile";
 import { Chart, Ledger, Portfolio } from "app/native";   // Rust
 
 const ledger = new Ledger();   // its state lives in Rust
@@ -226,7 +232,9 @@ function Overview() {
     <View className="p-4 gap-2">
       <Text>Balance: {balance()}</Text>
       <Chart symbol="NSH" range="1M" onSelect={(e) => balance.set(ledger.add(e.price))} />
-      <Button title="Upload" onPress={() => ledger.upload("https://example.com/ledger")} />
+      <View onPress={() => ledger.upload("https://example.com/ledger")} role="button" class="rounded-lg bg-blue-600 px-4 py-2 active:bg-blue-700">
+        <Text class="text-white">Upload</Text>
+      </View>
     </View>
   );
 }
@@ -343,13 +351,13 @@ serve: NSH's, and each crate's `registry()`, which `#[native_module]` makes:
 ```toml
 [dev-dependencies]
 nsh-testing = { version = "0.1", features = ["bundle"] }
-nsh-ui-mobile = "0.1"
+nsh-base = "0.1"
 ```
 
 ```rust
 #[test]
 fn the_module_formats_money() {
-    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let sets = vec![nsh_base::registry(), my_app_native::registry()];
     let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
     app.wait_for("Formatted at once: $1,234.50").unwrap();
 }
@@ -358,6 +366,86 @@ fn the_module_formats_money() {
 `nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_testing::start` hands the
 batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way,
 `examples/gallery-rs` its Rust root.
+
+## Theme
+
+The look of an app is the app's own: NSH provides the primitives and the unstyled base components of `nsh_base`, and
+your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radii and base font size from a theme, `theme()` in
+`nsh_core::ui::prelude`, so one file restyles every component of the app. Each color has a light and a dark value;
+when the system switches appearance, a binding such as `.bg(move || theme().primary)` changes color natively, with no
+render.
+
+The default theme is gpui-kit's default theme, a neutral black-and-white palette, with mobile corner radii. To use
+your own, set `"theme"` in `nsh.json` to the path of a theme file, relative to `nsh.json`, or to the theme's content
+inline:
+
+```json
+{
+  "name": "My App",
+  "rust": ".",
+  "theme": "brand-theme.json"
+}
+```
+
+The format is gpui-kit's theme file format. Each entry in `themes` sets the values for one appearance (`mode`:
+`"light"` or `"dark"`; an entry without `mode` is light):
+
+```json
+{
+  "themes": [
+    {
+      "mode": "light",
+      "radius": 8,
+      "radius.lg": 14,
+      "font.size": 16,
+      "colors": {
+        "primary.background": "#7c3aed",
+        "primary.foreground": "white",
+        "border": "neutral-200"
+      }
+    },
+    {
+      "mode": "dark",
+      "colors": {
+        "primary.background": "#a78bfa",
+        "primary.foreground": "neutral-950"
+      }
+    }
+  ]
+}
+```
+
+- Your theme is applied over the default theme, so you list only what you change.
+- Colors are CSS colors (`#7c3aed`, `rgb(…)`, `white`) or names from Tailwind's default palette (`neutral-900`,
+  `red-500`). The colors of `nsh.json`'s `tailwind` key belong to `class` strings.
+- `radius` (`theme().radius`) is the corner radius of controls, `radius.lg` (`theme().radius_lg`) that of large
+  surfaces such as cards and sheets, and `font.size` (`theme().font_size`) the base font size. All are in points.
+- A pressed color you leave out (`primary.active.background`, `secondary.active.background`,
+  `danger.active.background`, ...) is derived from its base color: 12% darker in light mode, 12% lighter in dark
+  mode.
+- Keys for gpui-kit's desktop components (sidebars, title bars, ...) are accepted and left aside, so a gpui-kit theme
+  file works as it is.
+- The bundler checks the theme when it builds: a missing file, invalid JSON, an unknown `mode` or a value that is not
+  a color fails the build with an `nsh.json: theme: …` error.
+
+The theme's keys, with their default light and dark values:
+
+| Key | Light | Dark | Role |
+|---|---|---|---|
+| `background` | `white` | `neutral-950` | The background of pages, lists and inputs |
+| `foreground` | `neutral-950` | `neutral-50` | Text on `background` |
+| `border` | `neutral-200` | `neutral-800` | Dividers and borders |
+| `primary.background` / `.active.background` / `.foreground` | `neutral-900` / `neutral-950` / `neutral-50` | `neutral-50` / `neutral-200` / `neutral-900` | The main action (a primary button), pressed, and the text on it; selections and check marks |
+| `secondary.background` / `.active.background` / `.foreground` | `neutral-200` / `neutral-300` / `neutral-900` | `neutral-800` / `#212121` / `neutral-50` | Secondary actions, pressed, and the text on them |
+| `danger.background` / `.active.background` / `.foreground` | `red-500` / `red-600` / `neutral-50` | `red-400` / `red-500` / `red-600` | Destructive actions, pressed, and the text on them |
+| `accent.background` | `neutral-100` | `neutral-800` | A highlighted item, such as a plain button while pressed |
+| `muted.background` | `neutral-100` | `neutral-800` | Quiet surfaces: an inset list's page, a grabber, a clear button |
+| `muted.foreground` | `neutral-500` | `neutral-400` | Secondary text: captions, labels, placeholders |
+| `group_box.background` / `.foreground` | `#f5f5f5` / `#171717` | `neutral-950` / `neutral-50` | Grouped surfaces such as cards, and the text on them |
+| `input.border` | `neutral-200` | `#2f2f2f` | The border of inputs |
+| `ring` | `neutral-400` | `neutral-500` | The border of a focused input |
+| `list.active.background` | `#bfdbfe33` | `#1e40af33` | A list row while pressed |
+| `overlay` | `#0000000d` | `#00000033` | The backdrop behind sheets and dialogs |
 
 ## Several crates
 

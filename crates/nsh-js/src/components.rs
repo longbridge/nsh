@@ -41,7 +41,17 @@ type JsContext = qjs::JSContext;
 const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 
 /// What the props a component's host takes as a view are called.
-const HOST_PROPS: &[&str] = &["class", "classList", "style", "testID", "onLayout"];
+const HOST_PROPS: &[&str] = &[
+    "class",
+    "classList",
+    "style",
+    "activeStyle",
+    "hoverStyle",
+    "focusStyle",
+    "disabledStyle",
+    "testID",
+    "onLayout",
+];
 
 /// The components' part of a context's state.
 #[derive(Default)]

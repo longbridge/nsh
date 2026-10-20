@@ -166,8 +166,8 @@ allows them without allowing any remote page.
 
 ### `statusBar`
 
-`"statusBar": true` lets the app change the status bar (the `StatusBar` component and its functions in
-[`nsh/ui/mobile`](../components/status-bar.md)).
+`"statusBar": true` lets the app change the status bar (the `statusBar` of pages and dialogs in
+[`nsh/base`](../modules/nsh-base.md#status-bar), and `nsh.json`'s `"statusBar"` default).
 
 ### `clipboard`
 

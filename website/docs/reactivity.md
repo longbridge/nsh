@@ -280,7 +280,7 @@ Read a context in a component body (or in code that runs while components are be
 | `<If when>` | When created | The truthiness of `when` changes |
 | `<Each of>` row | When its key first appears | Never; its `item()` / `index()` accessors change instead |
 
-The environment is reactive the same way: `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh/device`](../modules/nsh-device.md) and `safeArea()` / `keyboard()` from `nsh/ui/mobile` are accessors, so JSX that reads them follows rotation, dark mode or the keyboard.
+The environment is reactive the same way: `windowSize()`, `colorScheme()` and `fontScale()` from [`nsh/device`](../modules/nsh-device.md), `safeArea()` and `keyboardFrame()` from [`nsh/base`](../modules/nsh-base.md) are accessors, so JSX that reads them follows rotation, dark mode or the keyboard.
 
 ## Common mistakes
 

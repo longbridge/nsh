@@ -7,8 +7,8 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_core::ui::{LayoutAnimation, prelude::*};
-use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
+use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
+use nsh_core::ui::{LayoutAnimation, SubmitBehavior, prelude::*};
 
 use crate::ui::{
     Appear, AppearProps, Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO,
@@ -612,9 +612,9 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .child(
             input()
                 .value(move || draft.get())
-                .on_change_text(move |text: &str| draft.set(text.to_owned()))
-                .on_submit_editing(move |_: &str| send())
-                .blur_on_submit(false)
+                .on_change(move |text: &str| draft.set(text.to_owned()))
+                .on_submit(move |_: &str| send())
+                .submit_behavior(SubmitBehavior::Submit)
                 .placeholder("Message")
                 .placeholder_color(|| color(colors::FAINT))
                 .selection_color(|| color(colors::ACCENT))

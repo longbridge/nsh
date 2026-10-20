@@ -64,7 +64,7 @@ map.command("zoomTo", { level: 3 });
 ```tsx
 import { mount, signal, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -145,7 +145,7 @@ impl Trading {
 
 let mut trading = Registry::ui_set("host/trading");
 trading.module::<Trading>();
-nsh_platform_gpui::set_ui_sets(vec![nsh_ui_mobile::registry(), trading]);
+nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
 `subscribe` 让宿主的数据与每个应用保持同步：它的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有订阅了的应用。

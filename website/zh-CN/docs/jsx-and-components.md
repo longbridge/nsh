@@ -22,7 +22,7 @@ NSH 应用用 JSX 描述界面，但其中没有 React，也没有虚拟 DOM。N
 | `<Scroll>` | `nsh` | `UIScrollView` / `ScrollView` | [Scroll](../elements/scroll.md) |
 | `<Input>` | `nsh` | `UITextField` / `UITextView` / `EditText` | [Input](../elements/input.md) |
 | `<List>` | `nsh/list` | 虚拟化、可复用单元格的列表 | [List](../elements/list.md) |
-| `<Canvas>`、`<WebView>`、`<Video>`、`<Modal>` | `nsh/canvas`、`nsh/webview`、`nsh/video`、`nsh/ui/mobile` | 绘图、网页、视频播放器、弹出层 | [元素](../elements/index.md) |
+| `<Canvas>`、`<WebView>`、`<Video>`、`<Dialog>` | `nsh/canvas`、`nsh/webview`、`nsh/video`、`nsh/base` | 绘图、网页、视频播放器、弹出层 | [元素](../elements/index.md) |
 | `<If>`、`<Each>` | 无：全局组件 | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
 ```tsx
@@ -49,6 +49,8 @@ x lowercase tag <view>: tags are PascalCase components: write <View> and
 > 文本只有放在 `<Text>` 中才会显示。直接写在 `<View>` 里的字符串不会创建原生视图，也不会显示。
 
 ## 组件
+
+应用的外观由应用自己决定。NSH 提供两层：基础元素（上面的元素、样式、Tailwind 类）和 [`nsh/base`](../modules/nsh-base.md) 中无样式的基础组件，后者负责导航、对话框、键盘、状态栏、安全区域等行为。第三层组件库属于你：按钮、卡片以及界面的其他部分，都是你在这两层之上编写的组件、应用在自己的 crate 中提供的 Rust 组件（[用 Rust 开发](./rust.md)），或社区提供的组件库（[三层结构](./architecture.md#three-layers)）。
 
 组件是一个接收 props 对象并返回 JSX 的函数：
 
@@ -216,7 +218,7 @@ function Search() {
 
 `const` 或 import 的绑定应当持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他值时，会在元素创建时报错，并说明该怎么写。
 
-ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`nsh/ui/mobile` 中的组件同样接受 `ref`。
+ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`SafeAreaView`、`KeyboardAvoidingView` 以及你自己 crate 中的 Rust 组件同样接受 `ref`。
 
 ## 展开 props
 
@@ -235,7 +237,7 @@ function Field(props: InputProps & { label: string }) {
   );
 }
 
-<Field label="Email" value={email()} onChangeText={(t) => email.set(t)} keyboardType="email-address" />
+<Field label="Email" value={email()} onChange={(t) => email.set(t)} keyboardType="email-address" />
 ```
 
 `split(props, keys)` 返回 `[picked, rest]`，两者都仍然读取原始 props（而解构 `{ label, ...rest } = props` 会把每个 prop 都读取一次）。在 JSX 中靠后的元素 props 会覆盖靠前的。
@@ -244,10 +246,18 @@ function Field(props: InputProps & { label: string }) {
 
 ## 标签与名称
 
-标签和平常一样，指向作用域中的绑定：`<Badge />`、`<Theme.Provider>`、导入的 `<Button>`。指向作用域中不存在的名称的标签会导致构建错误，全局的 `<If>` 和 `<Each>` 除外。
+标签和平常一样，指向作用域中的绑定：`<Badge />`、`<Theme.Provider>`、你自己的 `<Button>`。指向作用域中不存在的名称的标签会导致构建错误，全局的 `<If>` 和 `<Each>` 除外。
 
 ```tsx
-import { Button } from "nsh/ui/mobile";
+import { Text, View } from "nsh";
+
+function Button(props: { title: string; onPress: () => void }) {
+  return (
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} role="button" class="rounded-lg bg-blue-600 px-5 py-3">
+      <Text class="text-base font-semibold text-white">{props.title}</Text>
+    </View>
+  );
+}
 
 <Button title="Save" onPress={save} />
 ```
@@ -272,4 +282,5 @@ mount(() => (
 
 - [响应式](./reactivity.md)：signal、effect、context。
 - [元素](../elements/index.md)：所有宿主元素及其 props。
-- [组件](../components/index.md)：`nsh/ui/mobile` 中现成的组件。
+- [样式](./styling.md) 与 [Tailwind](./tailwind.md)：组件的外观。
+- [用 Rust 开发](./rust.md)：在应用自己的 crate 中用 Rust 编写的组件。

@@ -133,7 +133,7 @@ function App() {
           </Each>
           <View
             onPress={() => scroll.scrollTo({ y: 0 })}
-            activeOpacity={0.6}
+            activeStyle={{ opacity: 0.6 }}
             style={{
               padding: 14,
               borderRadius: 10,

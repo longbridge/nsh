@@ -3,16 +3,16 @@ import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/access
 import { LayoutAnimation } from "nsh/animated";
 import { PixelRatio, Platform } from "nsh/device";
 import { InputAccessoryView } from "nsh/ios";
-import { Button, Card, KeyboardAvoidingView, Modal, SafeAreaView, Screen } from "nsh/ui/mobile";
+import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";
 import {
   Appear,
   Badge,
-  Button as UiButton,
+  Button,
   Caption,
-  Card as UiCard,
+  Card,
   colors,
   DemoPage,
   finish,
@@ -22,6 +22,7 @@ import {
   Inset,
   isDark,
   mono,
+  PageHeader,
   Press,
   radius,
   Row,
@@ -40,12 +41,12 @@ function Field(props: InputProps) {
   const focused = signal(false);
   return (
     <Input
-      placeholderTextColor={colors.faint}
-      selectionColor={colors.accent}
       onFocus={() => focused.set(true)}
       onBlur={() => focused.set(false)}
       {...props}
       style={{
+        placeholderColor: colors.faint,
+        selectionColor: colors.accent,
         height: 48,
         paddingHorizontal: 14,
         fontSize: 15,
@@ -100,7 +101,7 @@ function LayoutAnimations() {
     change();
   };
   return (
-    <UiCard icon="animation" title="Layout animation" subtitle="configureNext, then change the tree" right={<Badge label={`${items().length}`} />}>
+    <Card icon="animation" title="Layout animation" subtitle="configureNext, then change the tree" right={<Badge label={`${items().length}`} />}>
       <Segmented options={presets} value={preset()} onChange={(p) => preset.set(p)} size="small" />
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, minHeight: 56 }}>
         <Each of={items()}>
@@ -123,35 +124,28 @@ function LayoutAnimations() {
         </Each>
       </View>
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <Cell><UiButton label="Add" icon="plus" onPress={() => animate(() => items.set([next++, ...items()]))} /></Cell>
-        <Cell><UiButton label="Shuffle" variant="secondary" onPress={() => animate(() => items.set([...items()].sort(() => Math.random() - 0.5)))} /></Cell>
-        <Cell><UiButton label="Remove" variant="secondary" disabled={items().length === 0} onPress={() => animate(() => items.set(items().slice(1)))} /></Cell>
+        <Cell><Button label="Add" icon="plus" onPress={() => animate(() => items.set([next++, ...items()]))} /></Cell>
+        <Cell><Button label="Shuffle" variant="secondary" onPress={() => animate(() => items.set([...items()].sort(() => Math.random() - 0.5)))} /></Cell>
+        <Cell><Button label="Remove" variant="secondary" disabled={items().length === 0} onPress={() => animate(() => items.set(items().slice(1)))} /></Cell>
       </View>
-    </UiCard>
+    </Card>
   );
 }
 
 function PressableSheet() {
   const sheet = signal(false);
   return (
-    <UiCard icon="components" title="Sheet" subtitle="A Tailwind active: variant opens it">
+    <Card icon="components" title="Sheet" subtitle="A Tailwind active: variant opens it">
       <View
         onPress={() => sheet.set(true)}
-        accessibilityRole="button"
+        role="button"
         style={{ boxShadow: finish.accent.boxShadow }}
         class="h-12 flex-row items-center justify-center gap-2 rounded-[12px] bg-[#c8f26d] transition active:scale-[0.97] active:bg-[#a9d14f]"
       >
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onAccent }}>Open a sheet</Text>
       </View>
       <Caption label="Scales and darkens while pressed" note="active:scale-[0.97]" />
-      <Modal
-        visible={sheet()}
-        ios={{ presentationStyle: "pageSheet" }}
-        desktop={{ presentationStyle: "pageSheet" }}
-        web={{ presentationStyle: "pageSheet" }}
-        animationType="slide"
-        onRequestClose={() => sheet.set(false)}
-      >
+      <Dialog open={sheet()} presentation="pageSheet" animation="slide" onOpenChange={(open) => sheet.set(open)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <View style={{ flex: 1, padding: 16, gap: 16 }}>
             <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
@@ -164,11 +158,11 @@ function PressableSheet() {
               </Text>
             </View>
             <View style={{ flex: 1 }} />
-            <UiButton label="Close" onPress={() => sheet.set(false)} />
+            <Button label="Close" onPress={() => sheet.set(false)} />
           </View>
         </SafeAreaView>
-      </Modal>
-    </UiCard>
+      </Dialog>
+    </Card>
   );
 }
 
@@ -201,14 +195,14 @@ function PressFeedback() {
   const last = signal("None yet");
   const disabled = signal(false);
   return (
-    <UiCard icon="gestures" title="Press feedback" subtitle={hint("Drawn natively while the finger is down", "Drawn natively while the button is down")}>
-      <View style={tile()} activeOpacity={0.4} onPress={() => last.set("Fading tile")}>
-        <Tile title="Fades while pressed" note="activeOpacity={0.4}" />
+    <Card icon="gestures" title="Press feedback" subtitle={hint("Drawn natively while the finger is down", "Drawn natively while the button is down")}>
+      <View style={tile()} activeStyle={{ opacity: 0.4 }} onPress={() => last.set("Fading tile")}>
+        <Tile title="Fades while pressed" note="activeStyle={{ opacity: 0.4 }}" />
       </View>
-      <View style={tile()} underlayColor={colors.raised} onPress={() => last.set("Underlay tile")}>
-        <Tile title="Lights up while pressed" note="underlayColor" />
+      <View style={tile()} activeStyle={{ backgroundColor: colors.raised }} onPress={() => last.set("Underlay tile")}>
+        <Tile title="Lights up while pressed" note="activeStyle={{ backgroundColor }}" />
       </View>
-      <View style={tile()} disabled={disabled()} underlayColor={tints.danger} class="disabled:opacity-40" onPress={() => last.set("Enabled tile")}>
+      <View style={tile()} disabled={disabled()} activeStyle={{ backgroundColor: tints.danger }} class="disabled:opacity-40" onPress={() => last.set("Enabled tile")}>
         <Tile title={disabled() ? "Takes no presses" : "Enabled"} note="disabled + disabled:opacity-40">
           <Badge label={disabled() ? "Off" : "On"} tone={disabled() ? "neutral" : "up"} />
         </Tile>
@@ -219,7 +213,7 @@ function PressFeedback() {
         </View>
         <Toggle value={disabled()} onChange={(v) => disabled.set(v)} label="Disable the third tile" />
       </View>
-    </UiCard>
+    </Card>
   );
 }
 
@@ -227,11 +221,11 @@ function Accessory() {
   const text = signal("");
   let input: YNode | undefined;
   return (
-    <UiCard icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
+    <Card icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
       <Field
         ref={(node) => (input = node)}
         value={text()}
-        onChangeText={(v) => text.set(v)}
+        onChange={(v) => text.set(v)}
         placeholder="Focus me"
         ios={{ inputAccessoryViewID: "counter" }}
       />
@@ -250,43 +244,41 @@ function Accessory() {
           }}
         >
           <Text style={{ flex: 1, fontSize: 13, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${text().length} characters`}</Text>
-          <UiButton label="Clear" variant="secondary" onPress={() => text.set("")} />
-          <UiButton label="Done" onPress={() => input?.blur()} />
+          <Button label="Clear" variant="secondary" onPress={() => text.set("")} />
+          <Button label="Done" onPress={() => input?.blur()} />
         </View>
       </InputAccessoryView>
-    </UiCard>
+    </Card>
   );
 }
 
 const behaviors = [
   { value: "padding", label: "padding" },
   { value: "height", label: "height" },
-  { value: "position", label: "position" },
 ] as const;
 
 const behaviorNote = {
   padding: "The bottom pads: the tinted background stays under the keyboard.",
   height: "The view shrinks: its background ends at the keyboard.",
-  position: "The inner content view moves up as a whole.",
 } as const;
 
 function AvoidingPage() {
-  const behavior = signal<"padding" | "height" | "position">("padding");
+  const behavior = signal<"padding" | "height">("padding");
   return (
-    <Screen title="KeyboardAvoidingView" {...header}>
-      <KeyboardAvoidingView behavior={behavior()} style={{ flex: 1, backgroundColor: tints.info }} contentContainerStyle={{ flex: 1 }}>
+    <NavPage title="KeyboardAvoidingView" {...header} header={<PageHeader title="KeyboardAvoidingView" />}>
+      <KeyboardAvoidingView behavior={behavior()} style={{ flex: 1, backgroundColor: tints.info }}>
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
-            <UiCard icon="form" title={`behavior="${behavior()}"`} subtitle="Focus the field at the bottom">
+            <Card icon="form" title={`behavior="${behavior()}"`} subtitle="Focus the field at the bottom">
               <Segmented options={behaviors} value={behavior()} onChange={(b) => behavior.set(b)} />
               <Text style={{ fontSize: 14, lineHeight: 20, color: colors.muted }}>{behaviorNote[behavior()]}</Text>
-            </UiCard>
+            </Card>
           </Appear>
           <View style={{ flex: 1 }} />
           <Field placeholder="Type here" />
         </View>
       </KeyboardAvoidingView>
-    </Screen>
+    </NavPage>
   );
 }
 
@@ -294,23 +286,23 @@ function ModalOptions() {
   const visible = signal(false);
   const translucent = signal(false);
   return (
-    <UiCard
+    <Card
       icon="system"
-      title="Modal options"
+      title="Dialog options"
       subtitle="statusBarTranslucent, orientations"
       right={<Toggle value={translucent()} onChange={(v) => translucent.set(v)} label="statusBarTranslucent" />}
     >
       <Text style={{ fontSize: 14, lineHeight: 20, color: colors.muted }}>
-        Android: translucent content reaches under the status bar. iOS: this modal allows portrait and landscape.
+        Android: translucent content reaches under the status bar. iOS: this dialog allows portrait and landscape.
       </Text>
       <Caption label="statusBarTranslucent" note={String(translucent())} />
-      <UiButton label="Open the modal" variant="secondary" onPress={() => visible.set(true)} />
-      <Modal
-        visible={visible()}
-        animationType="slide"
+      <Button label="Open the dialog" variant="secondary" onPress={() => visible.set(true)} />
+      <Dialog
+        open={visible()}
+        animation="slide"
         android={{ statusBarTranslucent: translucent() }}
         ios={{ supportedOrientations: ["portrait", "landscape"] }}
-        onRequestClose={() => visible.set(false)}
+        onOpenChange={(open) => visible.set(open)}
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
           <TitleBar />
@@ -318,16 +310,16 @@ function ModalOptions() {
             <View style={{ flexDirection: "row", paddingTop: 8 }}>
               <Badge label={translucent() ? "translucent" : "opaque bar"} tone="accent" />
             </View>
-            <Text style={{ fontSize: 28, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>A modal</Text>
+            <Text style={{ fontSize: 28, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>A dialog</Text>
             <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted }}>
               The olive background starts {translucent() ? "under" : "below"} the status bar on Android.
             </Text>
             <View style={{ flex: 1 }} />
-            <UiButton label="Close" onPress={() => visible.set(false)} />
+            <Button label="Close" onPress={() => visible.set(false)} />
           </SafeAreaView>
         </View>
-      </Modal>
-    </UiCard>
+      </Dialog>
+    </Card>
   );
 }
 
@@ -345,7 +337,7 @@ function PlatformInfo() {
   const announced = signal(0);
   let target: YNode | undefined;
   return (
-    <UiCard icon="spark" title="Platform" subtitle="Platform, PixelRatio, AccessibilityInfo" right={<Badge label={Platform.OS} tone="accent" />}>
+    <Card icon="spark" title="Platform" subtitle="Platform, PixelRatio, AccessibilityInfo" right={<Badge label={Platform.OS} tone="accent" />}>
       <View>
         <Each of={rows()}>
           {(row, i) => (
@@ -363,64 +355,19 @@ function PlatformInfo() {
       <View style={{ height: hairline, backgroundColor: colors.accent }} />
       <Caption label="The line above is one device pixel tall" note={`${hairline.toFixed(3)} pt`} />
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <Cell><UiButton
+        <Cell><Button
           label="Announce"
           onPress={() => {
             announced.set(announced() + 1);
             AccessibilityInfo.announceForAccessibility(`Announcement ${announced()}`);
           }}
         /></Cell>
-        <Cell><UiButton label="Focus the note" variant="secondary" onPress={() => target && AccessibilityInfo.setAccessibilityFocus(target)} /></Cell>
+        <Cell><Button label="Focus the note" variant="secondary" onPress={() => target && AccessibilityInfo.setAccessibilityFocus(target)} /></Cell>
       </View>
       <Text ref={(node) => (target = node)} style={{ fontSize: 13, lineHeight: 18, color: colors.faint }}>
         With VoiceOver or TalkBack on, the buttons above speak and move the reader here.
       </Text>
-    </UiCard>
-  );
-}
-
-/** The components of nsh/ui/mobile (Rust, `nsh-ui-mobile`). */
-function MobileComponents() {
-  const presses = signal(0);
-  return (
-    <UiCard icon="mobile" title="nsh/ui/mobile" subtitle="Rust components, the app's theme" right={<Badge label={`${presses()} ${presses() === 1 ? hint("tap", "click") : hint("taps", "clicks")}`} tone={presses() ? "accent" : "neutral"} />}>
-      <Button title="Primary" onPress={() => presses.set(presses() + 1)} />
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Button title="Secondary" variant="secondary" onPress={() => presses.set(presses() + 1)} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Button title="Danger" variant="danger" onPress={() => presses.set(presses() + 1)} />
-        </View>
-      </View>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Button title="Plain" variant="plain" onPress={() => presses.set(presses() + 1)} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Button title="Disabled" variant="secondary" disabled onPress={() => presses.set(presses() + 1)} />
-        </View>
-      </View>
-      <Card
-        header={<Text>Card with slots</Text>}
-        footer={
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <Button title="Reset" variant="secondary" onPress={() => presses.set(0)} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Button title="Add one" onPress={() => presses.set(presses() + 1)} />
-            </View>
-          </View>
-        }
-      >
-        <Text>The header, this body and the footer are JSX in a Rust component's slots and children.</Text>
-      </Card>
-      <Card variant="outlined">
-        <Text>An outlined card, children only.</Text>
-      </Card>
-      <Caption label="Colors come from the app's theme" note="theme.json" />
-    </UiCard>
+    </Card>
   );
 }
 
@@ -429,17 +376,16 @@ export function Components() {
     <DemoPage
       keyboardDismissMode="interactive"
       cards={[
-        MobileComponents,
         PressFeedback,
         PressableSheet,
         LayoutAnimations,
         Accessory,
         () => (
-          <UiCard title="Keyboard avoidance" subtitle="Content outside scroll views" flush>
+          <Card title="Keyboard avoidance" subtitle="Content outside scroll views" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow icon="form" title="KeyboardAvoidingView" note="padding / height / position" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
+              <LinkRow icon="form" title="KeyboardAvoidingView" note="padding / height" onPress={() => nav.push({ name: "page", page: AvoidingPage })} />
             </Inset>
-          </UiCard>
+          </Card>
         ),
         ModalOptions,
         PlatformInfo,

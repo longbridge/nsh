@@ -69,19 +69,36 @@ Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH �
 
 ### 操作步骤
 
-步骤用 **选择器** 指定视图：`id:<testID>`、`label:<accessibilityLabel>`、`text:<text>`、`view:<id>`（来自
-`--trace` 输出的视图 id），或者一个裸字符串，依次按 `testID`、标签、文字匹配。选择器找到的是用户最先会看到的视图：先在
-最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面。
+步骤用 **选择器** 指定视图，写法和 Playwright 一致：
+
+| 选择器 | 匹配 |
+|---|---|
+| `id:<testID>` | 设置了该 `testID` 的视图。 |
+| `label:<label>` | 设置了该 `accessibilityLabel` 的视图。 |
+| `text:<text>` | 内容为该文字的文本（忽略首尾空格），或者内容为该文字、空着时占位文字为该文字的输入框。 |
+| `role:<role>`、`role:<role>[<name>]` | 设置了该 `accessibilityRole` 的视图（`role:button`），并且名称为 `<name>`：它的标签，没有标签时取它内部的文字（`role:button[Save]`）。 |
+| `view:<id>` | `--trace` 输出中该 id 的视图。 |
+| 其他写法 | 依次按 `testID`、标签、文字匹配。 |
+
+`label:`、`text:` 和角色的名称也可以写正则：`text:/^Buy/i`。` >> ` 在前一部分匹配到的视图内部继续查找
+（`id:cart >> role:button[Remove]`），`nth=<n>` 只保留第 n 个匹配，从 0 开始（`text:Delete >> nth=1`）。选择器找到的是用户
+最先会看到的视图：先在最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面。作用于视图的步骤（`press`、`type`、
+`clear`、`submit`、`scroll`、`longPress`）要求恰好匹配一个视图：匹配到多个时步骤失败，错误信息会说明怎样缩小范围。
 
 | 步骤 | 说明 |
 |---|---|
-| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressIn`、`onPressOut`、`onPress`。 |
-| `await app.type(selector, text)` | 在输入框（或该视图内的第一个输入框；`text:` 也匹配输入框的内容或占位文字）已有内容的末尾逐键输入：输入框先获得焦点，然后每个字符触发一次 `onKeyPress` 和一次 `onChangeText`，不超过 `maxLength`。单行输入框中的 `\n` 相当于回车键。 |
-| `await app.submit(selector)` | 在输入框中按回车键，行为由它的 `submitBehavior` 决定：触发 `onSubmitEditing`（单行输入框随后失去焦点），或者在多行输入框中换行。 |
+| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressDown`、`onPressUp`、`onPress`。视图被禁用时 reject。 |
+| `await app.longPress(selector)` | 按住它，持续它的 `delayLongPress`（500 ms）：依次触发 `onPressDown`、`onLongPress`、`onPressUp`，之后不再触发 `onPress`。 |
+| `await app.clear(selector)` | 清空输入框，相当于全选后删除。 |
+| `await app.type(selector, text)` | 在输入框（或该视图内的第一个输入框；`text:` 也匹配输入框的内容或占位文字）已有内容的末尾逐键输入：输入框先获得焦点，然后每个字符触发一次 `onKeyPress` 和一次 `onChange`，不超过 `maxLength`。单行输入框中的 `\n` 相当于回车键。 |
+| `await app.submit(selector)` | 在输入框中按回车键，行为由它的 `submitBehavior` 决定：触发 `onSubmit`（单行输入框随后失去焦点），或者在多行输入框中换行。 |
 | `await app.scroll(selector, distance)` | 沿滚动视图或列表（该视图、它外层的滚动视图，或它内部的第一个）的方向拖动 `distance` 点，每帧 10 点，不超出内容范围。负数表示往回滚。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。 |
-| `await app.waitFor(selector, timeout?)` | 有视图匹配时 resolve；`timeout` 毫秒（5000）后 reject。 |
+| `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。 |
+| `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。 |
 | `app.shows(selector)` | 当前是否有视图匹配。 |
+| `app.count(selector)` | 当前匹配的视图个数。 |
+| `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求可编辑。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
@@ -118,6 +135,12 @@ Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH �
 | `toBe(expected)`、`toEqual(expected)` | 值逐个成员地等于 `expected`。 |
 | `toContain(item)` | 数组包含 `item`，或者字符串包含它。 |
 | `toBeTruthy()`、`toBeFalsy()` | 按 JS 的规则，值为真 / 为假。 |
+| `toMatch(pattern)` | 字符串包含 `pattern`（字符串），或者匹配它（`RegExp`）。 |
+| `toHaveLength(n)` | 数组有 `n` 项，或者字符串有 `n` 个 UTF-16 单元。 |
+| `toBeNull()` | 值为 `null`（或 `undefined`）。 |
+| `toBeGreaterThan(n)`、`toBeGreaterThanOrEqual(n)`、`toBeLessThan(n)`、`toBeLessThanOrEqual(n)` | 数字与 `n` 满足相应的大小关系。 |
+| `toThrow(message?)` | `expect(fn)`：调用 `fn` 会抛出异常；给了 `message` 时，异常消息要匹配它。 |
+| `rejects.toThrow(message?)` | `expect(fn)`：`fn` 返回的 promise 会 reject：`await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`。 |
 
 ### 从标准输入给出步骤
 
@@ -281,7 +304,7 @@ jobs:
 | iOS | 视图的 `accessibilityIdentifier`（在 XCUITest 中为 `app.otherElements["add-to-cart"]`）。 |
 | Android | 无障碍节点的 view id 资源名（在 UI Automator 中为 `By.res("add-to-cart")`）。 |
 
-`testID` 是每个元素以及 `nsh/ui/mobile` 中各组件都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
+`testID` 是每个元素以及每个 Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
 `accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `--trace` 的输出中，它出现在视图的 `ViewProps` item 里，
 形如 `test_id: Some("add-to-cart")`。
 

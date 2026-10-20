@@ -7,3 +7,4 @@ covers [nsh/canvas] Canvas
 covers [nsh/canvas] CanvasGradient
 covers [nsh/canvas] CanvasRenderingContext2D
 covers [nsh/canvas] Path2D
+covers [props] Canvas.draw

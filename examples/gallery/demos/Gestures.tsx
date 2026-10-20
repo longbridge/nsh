@@ -240,12 +240,12 @@ function PressEvents() {
   return (
     <Card icon="components" title="Press events" subtitle="In, press, long press and out; native feedback" right={<Badge label={`${count()}`} />}>
       <View
-        onPressIn={() => fire("pressIn")}
-        onPressOut={() => fire("pressOut")}
+        onPressDown={() => fire("pressIn")}
+        onPressUp={() => fire("pressOut")}
         onPress={() => fire("press")}
         onLongPress={() => fire("longPress")}
-        activeOpacity={0.55}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.55 }}
+        role="button"
         style={{
           height: 64,
           borderRadius: radius.control,
@@ -287,7 +287,7 @@ function PressEvents() {
           onPress={() => fire("ripple")}
           onLongPress={() => fire("fast long press")}
           delayLongPress={250}
-          underlayColor={colors.border}
+          activeStyle={{ backgroundColor: colors.border }}
           android={{ ripple: { color: alpha(colors.accentFill, 0.25) } }}
           style={{
             flex: 1,
@@ -309,15 +309,15 @@ function PressEvents() {
         <View
           onPress={() => fire("borderless")}
           android={{ ripple: { borderless: true, radius: 40 } }}
-          activeOpacity={0.4}
-          accessibilityRole="button"
+          activeStyle={{ opacity: 0.4 }}
+          role="button"
           accessibilityLabel="Star"
           style={{ width: 56, height: 56, alignItems: "center", justifyContent: "center" }}
         >
           <Icon name="star" size={24} tint={colors.warn} />
         </View>
       </View>
-      <Text onPress={() => fire("text")} activeOpacity={0.3} style={{ alignSelf: "flex-start", fontSize: 15, color: colors.accent, paddingVertical: 12 }}>
+      <Text onPress={() => fire("text")} activeStyle={{ opacity: 0.3 }} style={{ alignSelf: "flex-start", fontSize: 15, color: colors.accent, paddingVertical: 12 }}>
         Pressable text, dimmed while pressed
       </Text>
     </Card>
@@ -431,7 +431,7 @@ function Accessibility() {
         {(item, i) => (
           <View
             accessible
-            accessibilityRole="button"
+            role="button"
             accessibilityLabel={item().label}
             accessibilityHint={item().hint}
             onPress={() => last.set(item().label)}

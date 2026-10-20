@@ -2,9 +2,11 @@
 // reports as the user edits it: focus and blur, each key, the text after
 // each edit and the selection; the size of a multiline input's text as it
 // wraps onto more lines; a controlled input whose app changes what was
-// typed, which typing then continues from. Each handler shows what it gets
-// as text. Kept with `cargo xtask api --keep api/cases/events-input.tsx`;
-// its script checks each.
+// typed, which typing then continues from; what return submits; a masked,
+// a read-only input and one with a selection set by the app, and the colors
+// of placeholders and selections. Each handler shows what it gets as
+// text. Kept with `cargo xtask api --keep api/cases/events-input.tsx`; its
+// script checks each.
 import { Input, Text, View, mount, signal } from "nsh";
 
 function App() {
@@ -15,6 +17,7 @@ function App() {
   const size = signal("none");
   let first = -1;
   const upper = signal("");
+  const submitted = signal("nothing");
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Input
@@ -23,13 +26,15 @@ function App() {
         onFocus={() => focus.set("focused")}
         onBlur={() => focus.set(focus() + " blurred")}
         onKeyPress={(e) => keys.update((k) => [...k, e.key])}
-        onChangeText={(t) => text.set(t)}
+        onChange={(t) => text.set(t)}
+        onSubmit={(e) => submitted.set(e.text)}
         onSelectionChange={(e) => selection.set(`${e.start}-${e.end}`)}
       />
       <Text>Focus: {focus()}</Text>
       <Text>Keys: {keys().join(" ")}</Text>
       <Text>Text: {text()}</Text>
       <Text>Selection: {selection()}</Text>
+      <Text>Submitted: {submitted()}</Text>
       <Input
         testID="notes"
         multiline
@@ -48,9 +53,20 @@ function App() {
         testID="upper"
         value={upper()}
         style={{ width: 300, height: 40 }}
-        onChangeText={(t) => upper.set(t.toUpperCase())}
+        onChange={(t) => upper.set(t.toUpperCase())}
       />
       <Text>Upper: {upper()}</Text>
+      <Input
+        testID="secret"
+        masked
+        placeholder="Password"
+        selectedRange={{ start: 0, end: 2 }}
+        style={{ width: 300, height: 40, placeholderColor: "#888888", selectionColor: "#ff6600" }}
+      />
+      <Input testID="fixed" readonly defaultValue="Fixed" style={{ width: 300, height: 40 }} />
+      <Text testID="pick" selectable style={{ selectionColor: "#00aa00" }}>
+        Selectable
+      </Text>
     </View>
   );
 }

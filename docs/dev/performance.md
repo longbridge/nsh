@@ -30,14 +30,13 @@ after `nsh test --trace` timings and item counts (`nsh trace` before it, in the 
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
-- Rust components vs the same component in TSX (`component_bench`, `examples/bench`, release, minimum of the runs;
-  `TsButton.tsx` is the TSX Button `nsh/ui/mobile` had before components moved into Rust, restyled to draw exactly
-  like the Rust one), with the Rust Button running once (its props bound) and, in brackets, as it rendered again
-  and was diffed before:
+- Rust components vs the same component in TSX (`component_bench`, which writes its screens as `examples/bench` has them; release, minimum of the runs;
+  a button written as a Rust component and the same button in TSX, `TsButton.tsx`, styled to draw exactly alike),
+  with the Rust button running once (its props bound) and, in brackets, as it rendered again and was diffed before:
 
-  | | Rust Button: JS / core | TSX Button: JS / core |
+  | | Rust button: JS / core | TSX button: JS / core |
   |---|---|---|
-  | first frame, 200 Buttons (ops) | 0.42ms / 1.04ms [0.75ms] (1015) | 0.85ms / 0.64ms (2415) |
+  | first frame, 200 buttons (ops) | 0.42ms / 1.04ms [0.75ms] (1015) | 0.85ms / 0.64ms (2415) |
   | one update of all 200 titles (ops) | 0.15ms / 0.44ms [0.48ms] (200) | 0.13ms / 0.34ms (400) |
   | first frame, 1000-row list | 0.17ms / 0.23ms [0.19ms] | 0.23ms / 0.18ms |
   | scrolling the list, per rebinding frame | 1.5µs / 6.1µs [6.3µs] | 1.5µs / 5.3µs |
@@ -49,7 +48,7 @@ after `nsh test --trace` timings and item counts (`nsh trace` before it, in the 
   its text's and label's bindings, and a large view with one changing value costs what that value costs
   (`bench_view_tick`, below). The components' JS face must stay one effect per instance reading the props directly:
   the first version (Solid's `splitProps` / `mergeProps` / `spread` in the former JS runtime) cost 4.0ms of JS for
-  the same first frame, more than the TSX Button.
+  the same first frame, more than the TSX button.
 - Rust components run once (`cargo test --release -p nsh-core bench_view_tick -- --ignored --nocapture`, a view of
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view

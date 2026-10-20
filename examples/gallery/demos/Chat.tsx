@@ -2,8 +2,8 @@ import { batch, cleanup, computed, effect, Input, Scroll, signal, Text, View, ty
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { Platform } from "nsh/device";
+import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
 import { List } from "nsh/list";
-import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
 import { localReply, type Provider } from "./chat/local";
@@ -45,7 +45,7 @@ export function Chat() {
   const wide = desktop();
   /** Desktop: messages and the composer in a centered column. */
   const column: ViewStyle = wide ? { width: "100%", maxWidth: 820, alignSelf: "center" } : {};
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   let ids = 0;
   const nextId = () => `m${ids++}`;
 
@@ -542,7 +542,7 @@ export function Chat() {
               estimatedItemSize={140}
               initialScrollIndex={Math.max(0, messages().length - 1)}
               style={{ flex: 1 }}
-              contentContainerStyle={{ paddingTop: 8, paddingBottom: 16 }}
+              contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
               keyboardDismissMode="interactive"
               maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
               scrollEventThrottle={100}
@@ -678,8 +678,8 @@ export function Chat() {
                         if (row().id === "attach") attachment.set({ image: photo, file: { name: "trip-notes.pdf", size: "2.4 MB" } });
                         else play(row().id);
                       }}
-                      underlayColor={alpha(colors.text, 0.06)}
-                      accessibilityRole="button"
+                      activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
+                      role="button"
                       accessibilityLabel={row().label}
                       style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
                     >
@@ -720,7 +720,7 @@ export function Chat() {
         </If>
 
         {/* The composer. */}
-        <View style={{ ...column, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboard().height > 0 ? 0 : insets().bottom), gap: 8 }}>
+        <View style={{ ...column, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
           <If when={attachment()}>
             <Appear>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -745,20 +745,18 @@ export function Chat() {
           >
             <Input
               value={draft()}
-              onChangeText={(v) => draft.set(v)}
+              onChange={(v) => draft.set(v)}
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
               submitBehavior={Platform.isDesktop ? "submit" : "newline"}
-              onSubmitEditing={() => {
+              onSubmit={() => {
                 if (!streaming()) send();
               }}
               placeholder={`Message ${native ? provider() : model()}`}
-              placeholderTextColor={colors.faint}
-              selectionColor={colors.accent}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
+              style={{ placeholderColor: colors.faint, selectionColor: colors.accent, height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View
@@ -845,7 +843,7 @@ export function Chat() {
           {(chip) => (
             <View
               onPress={() => openChat(chip().id)}
-              accessibilityRole="button"
+              role="button"
               accessibilityLabel={chip().label}
               accessibilityState={{ selected: current() === chip().id }}
               class={current() === chip().id ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-card dark:active:bg-graphite-raised"}

@@ -50,7 +50,8 @@ mount(App);
 
 ## Props
 
-`ListProps<T>` combines the list's own props with the scrolling props shared with `<Scroll>`.
+`ListProps<T>` combines the list's own props with the scrolling props shared with `<Scroll>` and the props every
+element takes, which go to the list's scroll view.
 
 ### Data and rendering
 
@@ -63,13 +64,14 @@ mount(App);
 | `horizontal` | `boolean` | `false` | Scrolls sideways. |
 | `inverted` | `boolean` | `false` | Lays out from the end, item 0 last (chat style); starts scrolled to the end and keeps its distance from the end as content changes. |
 | `stickyHeaderIndices` | `number[]` | | Items that stick to the start while scrolled past (one column, not inverted). |
-| `ListHeaderComponent` | `ListSlot` | | Rendered before the items. |
-| `ListFooterComponent` | `ListSlot` | | Rendered after the items. |
-| `ListEmptyComponent` | `ListSlot` | | Shown instead of the items while `each` is empty. |
-| `ItemSeparatorComponent` | `ListSlot` | | Rendered between items (one column). |
+| `header` | `ListSlot` | | Rendered before the items. |
+| `footer` | `ListSlot` | | Rendered after the items. |
+| `empty` | `ListSlot` | | Shown instead of the items while `each` is empty. |
+| `separator` | `ListSlot` | | Rendered between items (one column). |
 | `keyExtractor` | `(item: T, index: number) => string` | `item.key`, `item.id`, or the index | The key of an item in viewability tokens. |
 | `initialScrollIndex` | `number` | | Scrolls to this item before the first frame. |
-| `contentContainerStyle` | `ListContentStyle` | | Padding and gaps of the content: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap` (numbers). |
+| `contentStyle` | `ListContentStyle` | | Padding and gaps of the content: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap` (numbers). |
+| `contentClass` | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (give it a size: `flex: 1` or a height). |
 | `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
 | `ref` | `YNode \| ((node: YNode) => void)` | | See [ref methods](#ref-methods). |
@@ -158,7 +160,7 @@ let list!: YNode;
 <View style={{ flex: 1 }}>
   <Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>
   <List ref={list} each={items} numColumns={3} estimatedItemSize={90} style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 12, gap: 8 }}>
+        contentStyle={{ padding: 12, gap: 8 }}>
     {(item) => <View style={{ height: 90, backgroundColor: "#e0e7ff" }}><Text>{item().title}</Text></View>}
   </List>
 </View>
@@ -174,7 +176,7 @@ A chat: newest message at the bottom, older messages loaded as you scroll up.
   inverted
   estimatedItemSize={44}
   style={{ flex: 1 }}
-  contentContainerStyle={{ padding: 12, gap: 6 }}
+  contentStyle={{ padding: 12, gap: 6 }}
   keyboardDismissMode="interactive"
   onEndReached={loadOlder}
   onEndReachedThreshold={0.5}
@@ -209,7 +211,7 @@ type ListItemsProps<T> = Pick<ListProps<T>,
   "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex"
   | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh"
   | "onEndReached" | "onEndReachedThreshold"
-  | "ListHeaderComponent" | "ListFooterComponent" | "ListEmptyComponent">;
+  | "header" | "footer" | "empty">;
 ```
 
-The data-and-rows half of `ListProps`: what you pass to a component that lays out a list itself, such as [`ListView`](../components/list-view.md) from `nsh/ui/mobile`.
+The data-and-rows half of `ListProps`: what you pass to a component of your own that lays out a list itself, such as a settings list that wraps `List` with its own padding and dividers.

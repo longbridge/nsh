@@ -21,7 +21,6 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
-    geometry::px,
     ui::{Registry, Root, prelude::timer},
 };
 use nsh_engine::{
@@ -323,12 +322,8 @@ impl Session {
         let default = EngineConfig::new(app);
         let config = EngineConfig {
             viewport: nsh_core::Size::new(
-                options
-                    .width
-                    .map_or(default.viewport.width, |w| px(w as f32)),
-                options
-                    .height
-                    .map_or(default.viewport.height, |h| px(h as f32)),
+                options.width.unwrap_or(default.viewport.width),
+                options.height.unwrap_or(default.viewport.height),
             ),
             trace: self.run.trace.is_some(),
             network: Some(network),
@@ -336,10 +331,10 @@ impl Session {
             storage: Some(storage.clone()),
             environment: Environment {
                 safe_area: Edges {
-                    top: px(safe_area.top as f32),
-                    right: px(safe_area.right as f32),
-                    bottom: px(safe_area.bottom as f32),
-                    left: px(safe_area.left as f32),
+                    top: safe_area.top,
+                    right: safe_area.right,
+                    bottom: safe_area.bottom,
+                    left: safe_area.left,
                 },
                 ..Default::default()
             },

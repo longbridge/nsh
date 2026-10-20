@@ -102,10 +102,9 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Text
 | `adjustsFontSizeToFit` | `boolean` | `false` | Shrink the font until the text fits its lines (`numberOfLines`) and its box. |
 | `minimumFontScale` | `number` | | How far `adjustsFontSizeToFit` shrinks at most (0..1; at least 0.1). |
 | `selectable` | `boolean` | | The user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. Unset, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `false` keeps it unselectable there too. |
-| `selectionColor` | `ColorValue` | | The highlight (and handles) of the selection of selectable text; the platform's accent by default. |
 | `onTextLayout` | `(e: { lines: TextLayoutLine[] }) => void` | | The laid-out lines after each layout. |
 
-The `select-text` Tailwind class is the same as `selectable`.
+The `select-text` Tailwind class is the same as `selectable`. The selection's highlight and handles take the style key `selectionColor` (`selection:text-*`), the platform's accent by default.
 
 ## Text styles
 

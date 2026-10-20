@@ -1,0 +1,14 @@
+# What a user does and sees (compat/apps.rs).
+platform android
+expect Translucent dialog
+expect Opaque dialog
+prop id:translucent android.statusBarTranslucent true
+noprop id:translucent supportedOrientations
+prop id:opaque statusBarTranslucent false
+# The back button: a close attempt without a reason is "cancel".
+event text:"Translucent dialog" onCancel
+expect Reason: cancel
+absent Translucent dialog
+expect Opaque dialog
+covers [nsh/base] Dialog
+covers [props] android.statusBarTranslucent

@@ -13,7 +13,7 @@
   views keep theirs with `showsIndicator={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
   desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
-- **Content container** (`<Scroll>`): `contentContainerStyle` / `contentContainerClass` are the renderer's
+- **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in
   the scroll view itself, so without it nothing changes (no extra view).
@@ -29,11 +29,13 @@
 - **List** props: `each`, `estimatedItemSize`, `numColumns`, `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
   distance from the end as content changes), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
-  below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `stickyHeaderIndices` (one column, not inverted), `ListHeaderComponent` /
-  `ListFooterComponent` / `ListEmptyComponent` / `ItemSeparatorComponent` (a component or an element), `contentContainerStyle`
-  (padding and gaps, numbers), `initialScrollIndex`, `onEndReached` + `onEndReachedThreshold`, `onViewableItemsChanged` +
+  below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `stickyHeaderIndices` (one column, not inverted), `header` /
+  `footer` / `empty` / `separator` (a component or an element), `contentStyle`
+  (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onEndReached` + `onEndReachedThreshold`, `onViewableItemsChanged` +
   `viewabilityConfig` (`itemVisiblePercentThreshold` / `viewAreaCoveragePercentThreshold` / `minimumViewTime`), `keyExtractor`,
-  `refreshing` / `onRefresh`, `scrollValue`. Positions, columns, sticky travel and viewability are all computed in the core; sticky cells
+  `refreshing` / `onRefresh`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
+  props, ...) goes to the scroll view as on a `<Scroll>` (`list.rs` `OWN`: the names are read once, when the list is
+  made; their values follow their getters). Positions, columns, sticky travel and viewability are all computed in the core; sticky cells
   are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset - start, 0, end - start)`).
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows

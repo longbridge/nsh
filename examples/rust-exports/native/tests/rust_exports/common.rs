@@ -10,7 +10,7 @@ use nsh_testing::Headless;
 /// The sets the app's hosts serve: the mobile UI, then the crate's
 /// (`nsh.json` `"rust"`), as `nsh` passes them.
 fn ui_sets() -> Vec<Registry> {
-    vec![nsh_ui_mobile::registry(), rust_exports_native::registry()]
+    vec![nsh_base::registry(), rust_exports_native::registry()]
 }
 
 /// `App.tsx` as bytecode, built once for every test.

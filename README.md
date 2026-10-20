@@ -14,6 +14,9 @@ Documentation, guides and live demos: **[nsh.dev](https://nsh.dev)**.
 
 - Write apps in Rust, TSX, or both, and render with each platform's own UI, sharing the same reactive engine,
   flexbox and grid layout, system text, input and accessibility.
+- Give your app its own look: NSH provides the primitives, Tailwind classes, a theme and an unstyled UI foundation
+  (`nsh/base`: navigation, safe areas, dialogs, the keyboard, the status bar), and your app draws its components from
+  them in TSX or Rust.
 - Embed in existing native apps alongside components such as maps and web views, or package as standalone apps
   and static websites.
 - Deliver TSX screens at run time with signed packages and host-controlled sandbox capabilities.

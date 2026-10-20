@@ -85,7 +85,7 @@ fn system_shows_the_environment_and_the_status_bar() {
         "Bottom",
         "Light scheme",
         "Status bar",
-        "barStyle: \"dark-content\"",
+        "foreground: \"dark\"",
         "Alerts and sheets",
         "None yet",
         "Frames and timers",
@@ -94,24 +94,11 @@ fn system_shows_the_environment_and_the_status_bar() {
     ] {
         assert!(shows(&screen, text), "{text}: {:?}", screen.texts);
     }
-    // The style follows the appearance until one is picked.
-    assert_eq!(
-        status_bar(&screen).map(|s| s.style),
-        Some(nsh_core::StatusBarStyle::Dark)
-    );
+    // Nothing sets the status bar until the preview opens.
+    assert_eq!(status_bar(&screen), None);
     crate::common::press(&engine, &rx, &mut screen, "Light");
     assert!(
-        shows(&screen, "barStyle: \"light-content\""),
-        "{:?}",
-        screen.texts
-    );
-    assert_eq!(
-        status_bar(&screen).map(|s| s.style),
-        Some(nsh_core::StatusBarStyle::Light)
-    );
-    crate::common::press(&engine, &rx, &mut screen, "Default");
-    assert!(
-        shows(&screen, "barStyle: \"default\""),
+        shows(&screen, "foreground: \"light\""),
         "{:?}",
         screen.texts
     );
@@ -135,7 +122,21 @@ fn system_shows_the_environment_and_the_status_bar() {
         .control()
         .dispatch_event(switch, EventKind::Press, EventPayload::None);
     crate::common::drain(&rx, &mut screen);
-    assert_eq!(status_bar(&screen).map(|s| s.hidden), Some(true));
+    assert_eq!(status_bar(&screen), None);
+
+    // The preview's dialog shows them while it is open.
+    crate::common::press(&engine, &rx, &mut screen, "Preview");
+    let shown = status_bar(&screen).expect("the dialog's status bar");
+    assert_eq!(
+        (shown.style, shown.hidden),
+        (nsh_core::StatusBarStyle::Light, true)
+    );
+    crate::common::press(&engine, &rx, &mut screen, "Close");
+    let shown = status_bar(&screen).expect("the default again");
+    assert_eq!(
+        (shown.style, shown.hidden),
+        (nsh_core::StatusBarStyle::Default, false)
+    );
 }
 
 #[test]

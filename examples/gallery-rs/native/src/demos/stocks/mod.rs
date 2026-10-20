@@ -43,8 +43,8 @@ use self::{
 use crate::{
     nav,
     ui::{
-        IconName, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors,
-        desktop, header, icon, lengths, motion, pane_width, pt,
+        IconName, PageHeader, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize,
+        colors, desktop, header, icon, lengths, motion, pane_width, pt, with_header,
     },
 };
 
@@ -165,12 +165,14 @@ fn open(live: &Live, index: usize) {
     nav::push(format!("stock:{code}"), move || {
         // The screen is outside the watchlist: it gets the market here.
         provide_context(live.clone());
-        header(screen().title(code))
-            .header_right(MarketButton::element(()))
-            .child(StockView::element(StockViewProps {
-                stock: index as u32,
-                ..StockViewProps::default()
-            }))
+        with_header(
+            header(screen().title(code)).header_right(MarketButton::element(())),
+            || PageHeader::new(code).right(MarketButton::element(())),
+        )
+        .child(StockView::element(StockViewProps {
+            stock: index as u32,
+            ..StockViewProps::default()
+        }))
     });
 }
 
@@ -762,7 +764,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .px_4()
         .on_press(move |_: &()| cx.emit(StockRowEvent::Press))
         // Pressed, the row shows the surface under its content.
-        .underlay(|| color(colors::SURFACE), 0.85)
+        .active(|s| s.bg(colors::SURFACE))
         .role(AccessibilityRole::Button)
         .label(name)
         .when(props.wide, |v| {

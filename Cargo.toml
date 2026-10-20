@@ -28,7 +28,7 @@ private_interfaces = "deny"
 nsh-animation = { version = "0.1.1", path = "crates/nsh-animation" }
 nsh-core = { version = "0.1.1", path = "crates/nsh-core" }
 nsh-package = { version = "0.1.1", path = "crates/nsh-package" }
-nsh-ui-mobile = { version = "0.1.1", path = "crates/nsh-ui-mobile" }
+nsh-base = { version = "0.1.1", path = "crates/nsh-base" }
 nsh-macros = { version = "0.1.1", path = "crates/nsh-macros" }
 nsh-js = { version = "0.1.1", path = "crates/nsh-js" }
 nsh-engine = { version = "0.1.1", path = "crates/nsh-engine", default-features = false }
@@ -76,6 +76,7 @@ slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
 ureq = "3.1"
+regex = "1"
 jni = "0.21"
 windows-sys = "0.61"
 dunce = "1"

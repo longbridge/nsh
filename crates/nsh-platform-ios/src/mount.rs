@@ -253,15 +253,12 @@ struct Slot {
     /// Values of the gesture nodes when the gesture began: pan x, pan y,
     /// pinch, rotation.
     gesture_start: [f32; 4],
-    /// `activeOpacity`: opacity while pressed.
-    active_opacity: Option<f32>,
     /// `delayLongPress` (milliseconds).
     long_press_delay: Option<f32>,
     /// A horizontal list laid out right to left: mirrored as a whole.
     mirrored: bool,
     /// A cell of such a list: mirrored back.
     in_mirrored: bool,
-    pressed: bool,
     scroll_value: Option<nsh_animation::NodeId>,
     /// How a scroll view scrolls (scroll views only).
     behavior: Option<Box<nsh_core::ScrollBehavior>>,
@@ -311,11 +308,9 @@ impl Slot {
             bindings: Vec::new(),
             values: GestureValues::default(),
             gesture_start: [0.0; 4],
-            active_opacity: None,
             long_press_delay: None,
             mirrored: false,
             in_mirrored: false,
-            pressed: false,
             scroll_value: None,
             behavior: None,
             horizontal: false,
@@ -2076,10 +2071,9 @@ impl Mounter {
         let own_press = any(&[
             EventKind::Press,
             EventKind::LongPress,
-            EventKind::PressIn,
-            EventKind::PressOut,
-        ]) || slot.active_opacity.is_some()
-            || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
+            EventKind::PressDown,
+            EventKind::PressUp,
+        ]) || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
         let (links, links_long_press) = match &slot.native {
             Native::Text(t) => (t.has_links(), t.links_long_press()),
             _ => (false, false),
@@ -2459,8 +2453,9 @@ impl Mounter {
         }
     }
 
-    /// The top screen of stack `id` if it keeps the user (`preventBack`).
-    pub(crate) fn stack_prevents_back(&self, id: NodeId) -> Option<NodeId> {
+    /// The top screen of stack `id`, whether it listens to `onBackPress`
+    /// and whether it keeps the user (`popOnBack` false).
+    pub(crate) fn stack_back_press(&self, id: NodeId) -> Option<(NodeId, bool, bool)> {
         let Some(Slot {
             native: Native::Stack(stack),
             ..
@@ -2473,8 +2468,16 @@ impl Mounter {
             .iter()
             .rev()
             .find(|s| !stack.popped.contains(s))?;
-        match self.slot(top).map(|s| &s.native) {
-            Some(Native::Screen(screen)) if screen.config.prevent_back => Some(top),
+        match self.slot(top) {
+            Some(Slot {
+                native: Native::Screen(screen),
+                events,
+                ..
+            }) => Some((
+                top,
+                events.contains(EventKind::BackRequest),
+                screen.config.prevent_back,
+            )),
             _ => None,
         }
     }
@@ -2525,7 +2528,6 @@ impl Mounter {
     fn set_view_props(&mut self, id: NodeId, props: ViewProps) {
         let (control, mtm) = (self.control.clone(), self.mtm);
         let Some(s) = self.slot_mut(id) else { return };
-        let active = props.active_opacity;
         s.long_press_delay = props.long_press_delay;
         let activation = props.pan_activation;
         toggle(
@@ -2560,11 +2562,6 @@ impl Mounter {
                 view.setAccessibilityElementsHidden(props.accessibility.hidden, mtm);
             }
         }
-        if s.active_opacity != active {
-            s.active_opacity = active;
-            let events = s.events;
-            self.set_events(id, events);
-        }
     }
 
     /// Only the label of the view's props changed.
@@ -2584,32 +2581,14 @@ impl Mounter {
     /// A finger went down on (or left) a pressable view.
     pub(crate) fn press_changed(&mut self, id: NodeId, pressed: bool) {
         self.report_state(id, nsh_core::tailwind::state::PRESSED, pressed);
-        let Some(s) = self.slot_mut(id) else { return };
-        s.pressed = pressed;
+        let Some(s) = self.slot(id) else { return };
         let event = if pressed {
-            EventKind::PressIn
+            EventKind::PressDown
         } else {
-            EventKind::PressOut
+            EventKind::PressUp
         };
         if s.events.contains(event) {
             self.control.dispatch_event(id, event, EventPayload::None);
-        }
-        let Some(s) = self.slot(id) else { return };
-        if s.active_opacity.is_some() {
-            // Native feedback: no JS round trip.
-            let view = s.native.view().retain();
-            let alpha = dynamic_opacity(s, &self.animator);
-            let block = block2::RcBlock::new(move || view.setAlpha(alpha as CGFloat));
-            let duration = if pressed { 0.1 } else { 0.25 };
-            UIView::animateWithDuration_delay_options_animations_completion(
-                duration,
-                0.0,
-                UIViewAnimationOptions::BeginFromCurrentState
-                    | UIViewAnimationOptions::AllowUserInteraction,
-                &block,
-                None,
-                self.mtm,
-            );
         }
     }
 
@@ -3036,8 +3015,7 @@ fn set_frame(view: &UIView, frame: Bounds<Points>) {
     ));
 }
 
-/// The opacity to show: the style's or its animated value, dimmed while
-/// pressed with `activeOpacity`.
+/// The opacity to show: the style's or its animated value.
 fn dynamic_background(slot: &Slot, animator: &Animator) -> (Color, bool) {
     let mut background = slot.style.background_color;
     let mut animated = false;
@@ -3059,10 +3037,7 @@ fn dynamic_opacity(slot: &Slot, animator: &Animator) -> f32 {
             opacity = animator.eval(node).number().clamp(0.0, 1.0);
         }
     }
-    match slot.active_opacity {
-        Some(active) if slot.pressed => opacity * active,
-        _ => opacity,
-    }
+    opacity
 }
 
 /// The transform list with animated entries, as a Core Animation matrix.

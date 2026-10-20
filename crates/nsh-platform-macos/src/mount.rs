@@ -195,8 +195,8 @@ impl Mounter {
                 }
                 let mut frame = *frame;
                 if view.kind() == ViewKind::Modal {
-                    // Where a modal sits is the platform's (a sheet is a
-                    // card inside the window): the core only sizes it.
+                    // Where a modal sits is the platform's (it covers the
+                    // window): the core only sizes it.
                     let old = view.state().frame;
                     (frame.origin.x.0, frame.origin.y.0) = (old.origin.x.0, old.origin.y.0);
                 }

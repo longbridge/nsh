@@ -50,7 +50,7 @@ const PAGE: &str = include_str!("web/index.html");
 /// The development host's page, which the dev server serves at `/`.
 const DEV_PAGE: &str = include_str!("web/dev.html");
 
-/// The UI sets the web runtime serves: the mobile UI, and for an app with
+/// The UI sets the web runtime serves: nsh's, and for an app with
 /// Rust components of its own the app's set too (its runtime is built with
 /// the sets this command line has, `rust_app::RustApp::web`).
 fn ui_sets() -> Vec<String> {
@@ -662,7 +662,7 @@ mod tests {
             "{page}"
         );
         assert!(!page.contains("{{"), "{page}");
-        assert!(page.contains("const UI_SETS = [\"nsh/ui/mobile\"];"));
+        assert!(page.contains("const UI_SETS = [\"nsh/base\"];"));
         fs::write(&runtime.wasm, "two").unwrap();
         assert_ne!(version(&dev_host(&runtime, false).unwrap().1), first);
         assert!(
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn urls_escape_what_names_may_hold() {
         assert_eq!(url_path("assets/a b/中.png"), "assets/a%20b/%E4%B8%AD.png");
-        assert_eq!(url_path("assets/@nsh-ui/x.ttf"), "assets/@nsh-ui/x.ttf");
+        assert_eq!(url_path("assets/@nsh-base/x.ttf"), "assets/@nsh-base/x.ttf");
     }
 
     #[test]

@@ -118,7 +118,7 @@ pub(crate) fn runtime() -> String {
     let types = types();
     // Released apps run hardened: what hardening removes is not theirs.
     let host = nsh_js::Host::with_options(nsh_js::HostOptions {
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_base::registry()],
         harden: true,
         ..Default::default()
     })
@@ -175,7 +175,7 @@ fn sorted(out: &mut String, text: &str) {
 /// the bundler adds (asset imports) and the standard library's upstream
 /// declarations, whose compatibility quickjs-stdlib owns.
 pub(crate) fn types() -> Vec<(String, String)> {
-    let mut files = nsh_js::type_definitions(&[nsh_ui_mobile::registry().into()]);
+    let mut files = nsh_js::type_definitions(&[nsh_base::registry().into()]);
     files.retain(|(path, _)| path != "standard/llrt-sources.d.ts");
     for (path, text) in &mut files {
         if path == "standard/index.d.ts" {

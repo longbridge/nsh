@@ -168,7 +168,7 @@ function Cards() {
           disableIntervalMomentum={oneStep()}
           showsIndicator={false}
           style={{ height: 128 }}
-          contentContainerStyle={{ gap, paddingHorizontal: 14 }}
+          contentStyle={{ gap, paddingHorizontal: 14 }}
         >
           {(i) => {
             const tone = () => tones[i() % tones.length];
@@ -438,9 +438,9 @@ export function Scrolling() {
             </Text>
             <Input
               placeholder={hint("Type here, then tap the button", "Type here, then click the button")}
-              placeholderTextColor={colors.faint}
-              selectionColor={colors.accent}
               style={{
+                placeholderColor: colors.faint,
+                selectionColor: colors.accent,
                 height: 44,
                 fontSize: 15,
                 color: colors.text,

@@ -11,7 +11,6 @@ use nsh_core::{
     nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
 };
-use nsh_ui_mobile::{Sheet, SheetEvent, SheetProps};
 
 use super::{
     book::{Depth, OrderBook},
@@ -23,7 +22,8 @@ use super::{
     ticket::{Side, Ticket, TicketEvent, TicketProps},
 };
 use crate::ui::{
-    Button, ButtonVariant, Finish, Finished, IconName, Stat, colors, icon, lengths, radius,
+    Button, ButtonVariant, Finish, Finished, IconName, Sheet, SheetEvent, SheetProps, Stat, colors,
+    icon, lengths, radius,
 };
 
 /// The props of a part of a stock's screen.
@@ -298,7 +298,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)
                 })
-                .on_request_close(move |_: &()| ticket.set(false))
+                .on_cancel(move |_: &()| ticket.set(false))
                 .child(
                     view()
                         .flex_1()

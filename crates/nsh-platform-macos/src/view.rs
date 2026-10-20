@@ -141,7 +141,7 @@ pub(crate) struct ViewState {
     pub(crate) states: u8,
     /// Extra translation (sticky list cells, screen transitions).
     pub(crate) shift: (f32, f32),
-    /// Extra opacity (press feedback, screen and modal transitions).
+    /// Extra opacity (screen and modal transitions).
     pub(crate) fade: f32,
     /// Scroll state (scroll views).
     pub(crate) scroll: Option<ScrollState>,

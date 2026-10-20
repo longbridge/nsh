@@ -64,10 +64,9 @@ final class Mounter {
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
     int appearance;
-    /** The status bar the app asked for last (style, hidden, background), applied again when the appearance changes. */
+    /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
-    private Integer barBackground;
 
     /** Dark appearance as shown: the app's, else the system's. */
     boolean night() {
@@ -78,7 +77,7 @@ final class Mounter {
 
     /** A screen's options (`encode.rs` `screen_config`). */
     static final class ScreenOptions {
-        String title;
+        String title, backTitle;
         boolean shown = true, transparent, backVisible = true, gesture = true, preventBack;
         int tint, background, titleColor, animation, left = -1, right = -1, titleView = -1;
         float headerHeight;
@@ -306,7 +305,10 @@ final class Mounter {
                 }
                 case APPEARANCE: {
                     appearance = b.getInt();
-                    if (barStyle == 0) SystemUi.statusBar(context, barStyle, barHidden, barBackground, night());
+                    if (barStyle == 0) {
+                        SystemUi.statusBar(context, barStyle, barHidden, night());
+                        for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
+                    }
                     break;
                 }
                 case LAYOUT_DIRECTION: {
@@ -407,13 +409,11 @@ final class Mounter {
                     ModalHost modal = modals.get(b.getInt());
                     int animation = b.getInt();
                     b.getInt(); // presentation: Android modals cover the window
-                    boolean transparent = b.getInt() != 0;
                     boolean translucent = b.getInt() != 0;
-                    boolean dismissible = b.getInt() != 0;
+                    boolean closeOnEscape = b.getInt() != 0;
                     if (modal != null) {
                         modal.animation = animation;
-                        modal.dismissible = dismissible;
-                        modal.transparent = transparent;
+                        modal.closeOnEscape = closeOnEscape;
                         modal.setStatusBarTranslucent(translucent);
                     }
                     break;
@@ -1144,9 +1144,8 @@ final class Mounter {
         v.setCameraDistance(density * density * distance * (float) Math.sqrt(5));
     }
 
-    /** Press feedback of a view: `activeOpacity`, `delayLongPress`, `android_ripple`. */
+    /** Press feedback of a view: `delayLongPress`, `android_ripple`. */
     static final class Feedback {
-        float activeOpacity = Float.NaN;
         int longPressDelay = -1;
         android.graphics.drawable.RippleDrawable ripple;
         boolean rippleForeground;
@@ -1163,7 +1162,7 @@ final class Mounter {
     /** Whether presses on {@code id} show feedback (so the view takes them). */
     boolean hasPressFeedback(int id) {
         Feedback f = feedback.get(id);
-        return tracksPress(id) || f != null && (!Float.isNaN(f.activeOpacity) || f.ripple != null);
+        return tracksPress(id) || f != null && f.ripple != null;
     }
 
     /** Shows (or ends) the press feedback of view {@code id}, pressed at ({@code x}, {@code y}). */
@@ -1171,9 +1170,6 @@ final class Mounter {
         reportState(id, STATE_PRESSED, pressed);
         Feedback f = feedback.get(id);
         if (f == null) return;
-        if (!Float.isNaN(f.activeOpacity)) {
-            v.animate().alpha(pressed ? baseOpacity(id) * f.activeOpacity : baseOpacity(id)).setDuration(pressed ? 100 : 250).start();
-        }
         if (f.ripple != null) {
             if (pressed) f.ripple.setHotspot(x, y);
             f.ripple.setState(pressed
@@ -1237,12 +1233,6 @@ final class Mounter {
         return 0x1f000000;
     }
 
-    /** The opacity a view returns to after a press (`activeOpacity`). */
-    float baseOpacity(int id) {
-        Dynamic d = statics.get(id);
-        return d != null ? d.opacity : 1;
-    }
-
     boolean hasHitSlop() {
         return slops.size() > 0;
     }
@@ -1256,7 +1246,6 @@ final class Mounter {
         View v = views.get(id);
         int pointerEvents = b.getInt();
         float[] slop = {b.getFloat() * density, b.getFloat() * density, b.getFloat() * density, b.getFloat() * density};
-        float activeOpacity = b.getFloat();
         A11y a = new A11y(this, id);
         a.accessible = b.getInt();
         a.label = string(objects, b.getInt());
@@ -1296,7 +1285,6 @@ final class Mounter {
         if (v == null) return;
         Feedback f = feedback.get(id);
         if (f == null) feedback.put(id, f = new Feedback());
-        f.activeOpacity = activeOpacity;
         f.longPressDelay = longPressDelay >= 0 ? Math.round(longPressDelay) : -1;
         setRipple(v, f, ripple, rippleColor, rippleRadius);
         // Feedback alone makes text and images take presses.
@@ -1484,6 +1472,7 @@ final class Mounter {
         o.right = b.getInt();
         o.titleView = b.getInt();
         o.headerHeight = b.getFloat();
+        o.backTitle = string(objects, b.getInt());
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
@@ -1511,10 +1500,13 @@ final class Mounter {
             ScreenOptions o = screenOptions.get(id);
             if (!(v instanceof StackBox.ScreenBox) || o == null) continue;
             View stack = views.get(hosts.get(id, -1));
-            boolean canGoBack = stack instanceof StackBox && ((StackBox) stack).screens.indexOf(id) > 0;
+            int index = stack instanceof StackBox ? ((StackBox) stack).screens.indexOf(id) : -1;
+            boolean canGoBack = index > 0;
+            // The up arrow is named after the screen it leads back to.
+            ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, canGoBack);
+                    o.headerHeight, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -1525,6 +1517,7 @@ final class Mounter {
                 modal.show();
                 shownModals.remove(modal);
                 shownModals.add(modal);
+                if (barStyle >= 0) modal.statusBar(barStyle, barHidden, night());
             } else {
                 modal.dismiss();
                 shownModals.remove(modal);
@@ -1534,7 +1527,7 @@ final class Mounter {
         updateBack();
     }
 
-    /** A screen's insets below its header, for `useSafeAreaInsets()`. */
+    /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();
         insets(id, top, host.safeRight(), host.safeBottom(), host.safeLeft());
@@ -1553,7 +1546,7 @@ final class Mounter {
 
     /**
      * Whether the back button means something to the app now. Decided from
-     * what is mounted (modals, stacks, `preventBack`, a `BackHandler`), never
+     * what is mounted (modals, stacks, `popOnBack`, a `BackHandler`), never
      * by asking JS: the system asks synchronously.
      */
     boolean wantsBack() {
@@ -1578,7 +1571,7 @@ final class Mounter {
         return null;
     }
 
-    /** A modal closed itself (`dismissible`): the back button no longer goes to it. */
+    /** A modal closed itself (`closeOnEscape`): the back button no longer goes to it. */
     void modalClosed(ModalHost modal) {
         shownModals.remove(modal);
         updateBack();
@@ -1789,11 +1782,10 @@ final class Mounter {
                 int style = b.getInt();
                 boolean hidden = b.getInt() != 0;
                 b.getInt(); // animated: the system animates bar changes
-                Integer background = optColor(b);
                 barStyle = style;
                 barHidden = hidden;
-                barBackground = background;
-                SystemUi.statusBar(context, style, hidden, background, night());
+                SystemUi.statusBar(context, style, hidden, night());
+                for (ModalHost m : shownModals) m.statusBar(style, hidden, night());
                 break;
             }
             case 12: {
@@ -2058,6 +2050,11 @@ final class Mounter {
 
     void event(int id, int kind) {
         Native.event(handle(), id, kind, null, 0, 0, 0);
+    }
+
+    /** `RequestClose` with what the user did (`cancel`, `swipe`). */
+    void requestClose(int id, String reason) {
+        eventMap(id, Native.REQUEST_CLOSE, new String[] {"reason"}, new Object[] {reason});
     }
 
     /** An event with an object payload. */

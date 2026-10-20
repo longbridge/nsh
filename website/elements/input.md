@@ -18,7 +18,7 @@ function NameField() {
   return (
     <Input
       value={name()}
-      onChangeText={(text) => name.set(text)}
+      onChange={(text) => name.set(text)}
       placeholder="Your name"
       autoCapitalize="words"
       returnKeyType="done"
@@ -30,13 +30,13 @@ function NameField() {
 
 ## Controlled and uncontrolled
 
-- **Controlled**: pass `value` and update it in `onChangeText`. JS can rewrite what the user typed (trim it, format it):
+- **Controlled**: pass `value` and update it in `onChange`. JS can rewrite what the user typed (trim it, format it):
   the text shows the edit at once and is corrected when the new `value` arrives. Each native edit carries a count, and a
   `value` from JS is applied only if it is based on the latest edit, so a slow JS turn never overwrites newer typing.
-- **Uncontrolled**: pass `defaultValue` (or nothing) and read the text from `onChangeText` or `onSubmitEditing`.
+- **Uncontrolled**: pass `defaultValue` (or nothing) and read the text from `onChange` or `onSubmit`.
 
 Rules that must hold while the user types are props, answered natively without asking JS: `maxLength` limits the length
-and `submitBehavior` (or `blurOnSubmit`) decides what return does. See [forms and the keyboard](../docs/forms-and-keyboard.md).
+and `submitBehavior` decides what return does. See [forms and the keyboard](../docs/forms-and-keyboard.md).
 
 ## Props
 
@@ -50,11 +50,10 @@ view styles apply):
 | `value` | `string` | | The text, controlled by JS. |
 | `defaultValue` | `string` | | The initial text. |
 | `placeholder` | `string` | | Shown while the input is empty. |
-| `placeholderTextColor` | `ColorValue` | | The placeholder's color. |
 | `multiline` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
 | `maxLength` | `number` | | The most characters the user can enter. |
-| `editable` | `boolean` | `true` | The user can change the text. |
-| `secureTextEntry` | `boolean` | `false` | The text is hidden (passwords). |
+| `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
+| `masked` | `boolean` | `false` | The text is hidden (passwords). |
 | `allowFontScaling` | `boolean` | `true` | Follow the system text size. |
 | `maxFontSizeMultiplier` | `number` | `0` | The upper bound of the system scale (0 is none). |
 
@@ -67,8 +66,7 @@ view styles apply):
 | `autoCapitalize` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | Automatic capitalization. |
 | `autoCorrect` | `boolean` | `true` | The system's corrections. |
 | `autoComplete` | `AutoComplete \| TextContentType` | | What the input holds, for autofill: `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"email"`, `"tel"`, `"postal-code"`, `"cc-number"`, `"off"`, … |
-| `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"` (single line), `"newline"` (multiline) | What return does: `"submit"` reports `onSubmitEditing` and keeps the focus, `"blurAndSubmit"` also unfocuses, `"newline"` inserts a line break (multiline only; a single line submits). A multiline input that submits still takes line breaks from Shift+Return or Option / Alt+Return on hardware keyboards. Wins over `blurOnSubmit`. |
-| `blurOnSubmit` | `boolean` | `true` | Return unfocuses a single-line input; `false` keeps the keyboard up (e.g. to send several messages). `submitBehavior` replaces it. |
+| `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"` (single line), `"newline"` (multiline) | What return does: `"submit"` reports `onSubmit` and keeps the focus, `"blurAndSubmit"` also unfocuses, `"newline"` inserts a line break (multiline only; a single line submits). A multiline input that submits still takes line breaks from Shift+Return or Option / Alt+Return on hardware keyboards. `"submit"` keeps the keyboard up (e.g. to send several messages). |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 
 ### Caret and selection
@@ -76,8 +74,21 @@ view styles apply):
 | Prop | Type | Description |
 |---|---|---|
 | `caretHidden` | `boolean` | No caret is drawn. |
-| `selectionColor` | `ColorValue` | The color of the caret and the selection. |
-| `selection` | `{ start: number; end?: number }` | The controlled selection, in UTF-16 units; `end` defaults to `start` (a caret). |
+| `selectedRange` | `{ start: number; end?: number }` | The controlled selection, in UTF-16 units; `end` defaults to `start` (a caret). |
+
+### Colors
+
+The placeholder's color and the color of the caret and the selection are style keys, with their Tailwind variants:
+
+| Style key | Class | Description |
+|---|---|---|
+| `placeholderColor` | `placeholder:text-*` | The placeholder's color. |
+| `selectionColor` | `selection:text-*` | The color of the caret and the selection. |
+
+```tsx
+<Input placeholder="Search" class="text-zinc-900 placeholder:text-zinc-400 selection:text-blue-600" />
+<Input placeholder="Search" style={{ placeholderColor: "#9ca3af", selectionColor: "#2563eb" }} />
+```
 
 ### iOS
 
@@ -95,8 +106,8 @@ view styles apply):
 
 | Event | Payload | When |
 |---|---|---|
-| `onChangeText` | `(text: string)` | The user changed the text. |
-| `onSubmitEditing` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
+| `onChange` | `(text: string)` | The user changed the text. |
+| `onSubmit` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | none | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
@@ -126,16 +137,17 @@ Moving focus to the next field on return:
 ```tsx
 let password!: YNode;
 <>
-  <Input returnKeyType="next" onSubmitEditing={() => password.focus()} />
-  <Input ref={password} secureTextEntry autoComplete="current-password" />
+  <Input returnKeyType="next" onSubmit={() => password.focus()} />
+  <Input ref={password} masked autoComplete="current-password" />
 </>;
 ```
 
-`Keyboard.dismiss()` from [`nsh/ui/mobile`](../components/keyboard.md) hides the keyboard whichever input has it.
+`Keyboard.dismiss()` from [`nsh/base`](../modules/nsh-base.md#keyboard) hides the keyboard whichever input has it.
 
 ## Platform notes
 
 - Inputs inside a [`<Scroll>`](./scroll.md#keyboard) are kept clear of the keyboard natively. Elsewhere use
   `KeyboardAvoidingView`.
-- `disabled` disables the input as well as applying `disabled:` classes.
+- `disabled` disables the input (no focus) as well as applying `disabled:` classes; a `readonly` input keeps its
+  focus and selection.
 - `inputAccessoryViewID` has no effect on Android, which has no keyboard accessory bar.

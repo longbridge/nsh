@@ -1,7 +1,8 @@
 # Reactive Rust components (design proposal)
 
 Status: implemented. `docs/dev/components.md` is the reference for the API as built; this page keeps the proposal
-and its reasons. Where the implementation differs from the proposal:
+and its reasons. The components it takes as examples (`Button`, `Stepper`, `Sheet` of `nsh-ui-mobile`) were NSH's own
+when it was written; NSH now ships capabilities and no styled components, and the same API writes an app's own. Where the implementation differs from the proposal:
 
 - **The shape.** `#[component] fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement`:
   `Scope` is typed by the event, not the component (it only emits, reads the insets and registers methods), and the
@@ -322,7 +323,7 @@ children holders, the JS glue, the declarations.
 
 ## Example: `Stepper`
 
-Today (`crates/nsh-ui-mobile/src/stepper.rs`, 230 lines): state in fields, `setup` and `props_changed` to keep the value
+At the time (`crates/nsh-ui-mobile/src/stepper.rs`, 230 lines): state in fields, `setup` and `props_changed` to keep the value
 in range, `Context` methods, a `spawn` with `this.update(..)` to repeat while held, and a render that runs again on
 every step.
 

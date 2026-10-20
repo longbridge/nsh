@@ -8,7 +8,7 @@ order: 1
 
 宿主元素是构成每个界面的原语：`<View>`、`<Text>`、`<Image>` 等，从 NSH 的模块导入。每个元素都对应一个原生视图（iOS 和 Mac Catalyst 上是
 UIView 子类，Android 上是 `View`），由 NSH 运行时创建并布局。应用显示的一切都由它们组成：
-[`nsh/ui/mobile`](../components/index.md) 的组件同样是用这些元素绘制的。
+应用的按钮、卡片、列表行和页面都是它自己的组件，用这些元素绘制，用 `style` 或 Tailwind 类设置样式，因此应用的外观完全由应用决定。
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
@@ -18,7 +18,7 @@ function App() {
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12 }}>
       <Text style={{ fontSize: 24 }}>已点击 {count()} 次</Text>
-      <View onPress={() => count.update((n) => n + 1)} activeOpacity={0.6} class="rounded-lg bg-blue-600 px-4 py-2">
+      <View onPress={() => count.update((n) => n + 1)} class="rounded-lg bg-blue-600 px-4 py-2 active:opacity-60">
         <Text class="text-white">点我</Text>
       </View>
     </View>
@@ -43,7 +43,7 @@ mount(App);
 | `<Canvas>` | `nsh/canvas` | 回放 2D 绘制的视图 | [Canvas](./canvas.md) |
 | `<WebView>` | `nsh/webview` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `nsh/video` | AVPlayerLayer / TextureView 上的 MediaPlayer | [Video](./video.md) |
-| `<Modal>` | `nsh/ui/mobile` | 模态呈现的 view controller / Dialog | [Modal](./modal.md) |
+| `<Dialog>` | `nsh/base` | 模态呈现的 view controller / Dialog | [Dialog](./dialog.md) |
 | `<InputAccessoryView>` | `nsh/ios` | 键盘上方的工具栏（仅 iOS） | [nsh/ios](../modules/nsh-ios.md) |
 | `<If>`、`<Each>` | 无：全局组件 | 无：控制流 | [控制流](./control-flow.md) |
 
@@ -65,22 +65,38 @@ mount(App);
 
 ### 按压与反馈
 
-按压处理在原生侧完成：由平台识别按压并显示反馈，JS 只在事后收到通知。只有最内层可按压的视图会响应；在滚动视图内，按下会等待约 130 ms，让滚动有机会先开始。
+按压处理在原生侧完成：由平台识别按压并应用应用设定的按压样式，JS 只在事后收到通知。只有最内层可按压的视图会响应；在滚动视图内，按下会等待约 130 ms，让滚动有机会先开始。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `onPress` | `() => void` | | 在视图内完成一次点击。 |
 | `onLongPress` | `() => void` | | 手指按住达到 `delayLongPress`。 |
-| `onPressIn` | `() => void` | | 手指在视图上按下。 |
-| `onPressOut` | `() => void` | | 手指抬起或移出。 |
+| `onPressDown` | `() => void` | | 手指在视图上按下。 |
+| `onPressUp` | `() => void` | | 手指抬起或移出。 |
 | `delayLongPress` | `number` | `500` | 按压变为长按前的毫秒数。 |
-| `activeOpacity` | `number` | | 按下时视图的不透明度。 |
-| `underlayColor` | `ColorValue` | | 按下时的背景色；子元素淡化到 `underlayOpacity`。 |
-| `underlayOpacity` | `number` | `0.85` | 显示 `underlayColor` 时子元素的不透明度。 |
 | `hitSlop` | `number \| { top?, right?, bottom?, left? }` | | 把触摸区域扩展到边界之外，单位为点。 |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `"auto"` | 视图及其子元素接收哪些触摸：`"none"` 都不接收，`"box-none"` 只有子元素接收，`"box-only"` 只有视图本身接收。 |
 
-视图被按下时，`active:` Tailwind 类同样会生效，无需经过 JS。
+按压反馈由应用决定：视图被按下时，`activeStyle`（或 `active:` 类）在原生侧生效，无需经过 JS（见下文）。
+
+<a id="state-styles"></a>
+
+### 状态样式
+
+视图处于某种状态时，在其自身的 `style` 和类之上、由原生侧应用的样式。每一个都是某个 Tailwind 变体的对象形式。后面的状态优先（hover、focus、active）；`disabledStyle` 优先于所有状态，视图被禁用时其他状态样式不生效。
+
+| 属性 | 类型 | 类变体 | 生效时机 |
+|---|---|---|---|
+| `activeStyle` | `StyleProp<ViewStyle>` | `active:` | 被按下时。 |
+| `hoverStyle` | `StyleProp<ViewStyle>` | `hover:` | 指针悬停在视图上时。 |
+| `focusStyle` | `StyleProp<ViewStyle>` | `focus:` | 视图获得焦点时。 |
+| `disabledStyle` | `StyleProp<ViewStyle>` | `disabled:` | `disabled` 时。 |
+
+```tsx
+<View onPress={save} activeStyle={{ opacity: 0.6 }} hoverStyle={{ backgroundColor: "#1d4ed8" }} class="rounded-lg bg-blue-600 px-4 py-2">
+  <Text class="text-white">Save</Text>
+</View>
+```
 
 ### 悬停
 
@@ -193,7 +209,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessible` | `boolean` | 视图对辅助技术而言是一个整体元素，子元素不再单独暴露。 |
 | `accessibilityLabel` | `string` | 屏幕阅读器朗读的内容。没有标签的视图会朗读其中的文本。 |
 | `accessibilityHint` | `string` | 激活该元素会发生什么。 |
-| `accessibilityRole` / `role` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
+| `role` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
 | `accessibilityState` | `{ disabled?, selected?, checked?, busy?, expanded? }` | 辅助技术报告的状态（`checked` 可以是 `"mixed"`）。 |
 | `accessibilityValue` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
@@ -209,7 +225,7 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 
 | 属性 | 说明 |
 |---|---|
-| `ios={{…}}` | iOS 和 Mac Catalyst。`<Input>`、`Modal` 和 `WebView` 有各自的键。 |
+| `ios={{…}}` | iOS 和 Mac Catalyst。`<Input>`、`Dialog` 和 `WebView` 有各自的键。 |
 | `android={{…}}` | Android。所有元素都支持 `ripple`、`elevation` 和 `accessibilityLiveRegion`（见下表）。 |
 | `desktop={{…}}` | 桌面平台和桌面浏览器；在移动端被忽略。所有元素都支持 `windowDrag`（见下表）。 |
 | `web={{…}}` | 浏览器；在其他平台被忽略。 |
@@ -260,4 +276,4 @@ let input!: YNode;
 
 ## 为什么处理函数不会阻塞 UI
 
-主线程从不等待 JS。当系统需要立即得到答复时（这段文本能否修改、返回键能否返回上一页、这个 sheet 能否关闭），NSH 会根据事先设置好的属性（`maxLength`、`preventBack`、`dismissible`、`pointerEvents` 等）在原生侧作答，事件随后才送达 JS。正因如此，这类行为都是属性，而不是处理函数的返回值。
+主线程从不等待 JS。当系统需要立即得到答复时（这段文本能否修改、返回键能否返回上一页、这个 sheet 能否关闭），NSH 会根据事先设置好的属性（`maxLength`、`popOnBack`、`closeOnSwipe`、`pointerEvents` 等）在原生侧作答，事件随后才送达 JS。正因如此，这类行为都是属性，而不是处理函数的返回值。

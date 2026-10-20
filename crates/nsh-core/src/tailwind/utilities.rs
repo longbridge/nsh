@@ -857,25 +857,25 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "grow" => setn(K::FlexGrow, 1.0),
         "shrink" => setn(K::FlexShrink, 1.0),
-        "justify-start" => sets(K::JustifyContent, "flex-start"),
-        "justify-normal" => sets(K::JustifyContent, "normal"),
+        "justify-start" | "justify-normal" => sets(K::JustifyContent, "flex-start"),
         "justify-end" => sets(K::JustifyContent, "flex-end"),
         "justify-center" => sets(K::JustifyContent, "center"),
         "justify-between" => sets(K::JustifyContent, "space-between"),
         "justify-around" => sets(K::JustifyContent, "space-around"),
         "justify-evenly" => sets(K::JustifyContent, "space-evenly"),
         "justify-stretch" => sets(K::JustifyContent, "stretch"),
-        "justify-items-start" => sets(K::JustifyItems, "start"),
-        "justify-items-end" => sets(K::JustifyItems, "end"),
+        "justify-items-start" => sets(K::JustifyItems, "flex-start"),
+        "justify-items-end" => sets(K::JustifyItems, "flex-end"),
         "justify-items-center" => sets(K::JustifyItems, "center"),
         "justify-items-stretch" | "justify-items-normal" => sets(K::JustifyItems, "stretch"),
         "justify-self-auto" => sets(K::JustifySelf, "auto"),
-        "justify-self-start" => sets(K::JustifySelf, "start"),
-        "justify-self-end" => sets(K::JustifySelf, "end"),
+        "justify-self-start" => sets(K::JustifySelf, "flex-start"),
+        "justify-self-end" => sets(K::JustifySelf, "flex-end"),
         "justify-self-center" => sets(K::JustifySelf, "center"),
         "justify-self-stretch" => sets(K::JustifySelf, "stretch"),
-        "content-start" => sets(K::AlignContent, "flex-start"),
-        "content-normal" => sets(K::AlignContent, "normal"),
+        // The default, as these classes have always resolved (api/tailwind.txt):
+        // `flex-start` outside grids, CSS's `normal` in grids.
+        "content-start" | "content-normal" => sets(K::AlignContent, "normal"),
         "content-end" => sets(K::AlignContent, "flex-end"),
         "content-center" => sets(K::AlignContent, "center"),
         "content-between" => sets(K::AlignContent, "space-between"),
@@ -901,7 +901,7 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "place-content-start" => {
             return Some(vec![
-                sets(K::AlignContent, "flex-start"),
+                sets(K::AlignContent, "normal"),
                 sets(K::JustifyContent, "flex-start"),
             ]);
         }
@@ -1397,29 +1397,27 @@ static PREFIXES: &[(&str, Handler)] = &[
     }),
     ("col", |_, v, n| {
         let line = match arbitrary(v) {
-            // Checked here: an invalid one is an unknown class (logged).
-            Some(a) => crate::grid::line(&a).map(|_| a)?,
+            // Left to the style, which logs an invalid one: the class
+            // stays known, as it always was.
+            Some(a) => a,
             None => line_index(v, n)?,
         };
         one(sets(K::GridColumn, &line))
     }),
     ("row", |_, v, n| {
         let line = match arbitrary(v) {
-            // Checked here: an invalid one is an unknown class (logged).
-            Some(a) => crate::grid::line(&a).map(|_| a)?,
+            // As `col`.
+            Some(a) => a,
             None => line_index(v, n)?,
         };
         one(sets(K::GridRow, &line))
     }),
     ("auto-cols", |_, v, _| {
-        let a = arbitrary(v)?;
-        crate::grid::auto_tracks(&a)?;
-        one(sets(K::GridAutoColumns, &a))
+        // As `col`: an invalid value is the style's to log.
+        one(sets(K::GridAutoColumns, &arbitrary(v)?))
     }),
     ("auto-rows", |_, v, _| {
-        let a = arbitrary(v)?;
-        crate::grid::auto_tracks(&a)?;
-        one(sets(K::GridAutoRows, &a))
+        one(sets(K::GridAutoRows, &arbitrary(v)?))
     }),
     ("order", |_, _, _| Some(Vec::new())),
     // Typography.

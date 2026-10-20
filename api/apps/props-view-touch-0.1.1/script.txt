@@ -1,0 +1,20 @@
+# What a user does and sees (compat/apps.rs): what the platform receives
+# for each view's touch handling.
+prop id:none pointerEvents none
+prop id:box-none pointerEvents box-none
+prop id:plain pointerEvents auto
+prop id:slop hitSlop top=10 right=10 bottom=10 left=10
+prop id:slop-sides hitSlop top=4 left=2
+prop id:plain hitSlop {}
+prop id:long delayLongPress 800
+listens id:long onLongPress
+noprop id:plain delayLongPress
+prop id:pan panActivation activeOffsetX=20 failOffsetY=10
+noprop id:plain panActivation
+prop id:unfocusable focusable false
+noprop id:plain focusable
+covers [props] pointerEvents
+covers [props] hitSlop
+covers [props] delayLongPress
+covers [props] panActivation
+covers [props] focusable

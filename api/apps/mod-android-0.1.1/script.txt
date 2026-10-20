@@ -8,4 +8,3 @@ expect Calls: done, remove function
 covers [nsh/android] isAvailable
 covers [nsh/android] BackHandler
 covers [nsh/android] Toast
-covers [nsh/android] setStatusBarBackgroundColor

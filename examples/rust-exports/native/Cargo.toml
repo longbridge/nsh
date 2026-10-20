@@ -17,4 +17,4 @@ nsh-core.workspace = true
 [dev-dependencies]
 nsh-engine.workspace = true
 nsh-testing = { workspace = true, features = ["bundle"] }
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true

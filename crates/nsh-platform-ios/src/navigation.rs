@@ -8,7 +8,8 @@
 //!
 //! UIKit asks some of this synchronously (may the swipe begin, may the back
 //! button pop, may the sheet close): the answers come from props already
-//! mounted (`gestureEnabled`, `preventBack`, `dismissible`), never from JS.
+//! mounted (`popOnSwipe`, `popOnBack`, `closeOnSwipe`, `closeOnEscape`),
+//! never from JS.
 
 use std::cell::Cell;
 
@@ -18,8 +19,9 @@ use nsh_core::{
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::ProtocolObject,
+    DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyClass, AnyObject, ProtocolObject},
 };
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
@@ -42,6 +44,25 @@ fn insets_payload(i: EdgeInsets) -> EventPayload {
         ("bottom", PayloadValue::Number(i.bottom.0 as f64)),
         ("left", PayloadValue::Number(i.left.0 as f64)),
     ])
+}
+
+/// `RequestClose`'s payload: what the user did (`"cancel"`, `"swipe"`).
+fn close_reason(reason: &str) -> EventPayload {
+    EventPayload::Map(vec![("reason", PayloadValue::Str(reason.to_owned()))])
+}
+
+/// A `UIKeyCommand` for Escape that calls `nshEscape:`.
+fn escape_command() -> Retained<AnyObject> {
+    let class = AnyClass::get(c"UIKeyCommand").expect("UIKeyCommand");
+    // SAFETY: a UIKit constant, and UIKeyCommand's documented factory.
+    unsafe {
+        msg_send![
+            class,
+            keyCommandWithInput: objc2_ui_kit::UIKeyInputEscape,
+            modifierFlags: 0isize,
+            action: objc2::sel!(nshEscape:)
+        ]
+    }
 }
 
 fn ui_color(c: Color) -> Retained<UIColor> {
@@ -124,7 +145,7 @@ impl ScreenController {
     }
 
     /// The screen's insets not covered by system UI or its header, for
-    /// `useSafeAreaInsets()` inside it; and where its content starts below
+    /// `safeAreaInsets()` inside it; and where its content starts below
     /// the header.
     pub(crate) fn report_insets(&self) {
         let Some(view) = self.view() else { return };
@@ -151,8 +172,13 @@ pub(crate) struct ModalIvars {
     reported: Cell<Option<(CGSize, EdgeInsets)>>,
     /// `supportedOrientations`; empty keeps the presenter's.
     orientations: Cell<UIInterfaceOrientationMask>,
-    /// `dismissible`: a swipe down closes the sheet natively.
-    pub(crate) dismissible: Cell<bool>,
+    /// `closeOnSwipe`: a swipe down closes the sheet natively.
+    close_on_swipe: Cell<bool>,
+    /// `closeOnEscape`: the Escape key (and VoiceOver's escape gesture)
+    /// closes it natively.
+    close_on_escape: Cell<bool>,
+    /// It appears and leaves with an animation.
+    animated: Cell<bool>,
     /// The user closed it natively; the app has not hidden it yet.
     closed: Cell<bool>,
 }
@@ -180,6 +206,29 @@ define_class!(
             let _: () = unsafe { msg_send![super(self), viewDidAppear: animated] };
             let id = self.ivars().id;
             self.ivars().control.dispatch_event(id, EventKind::Show, EventPayload::None);
+        }
+
+        /// Escape on a hardware keyboard.
+        #[unsafe(method_id(keyCommands))]
+        fn key_commands(&self) -> Option<Retained<NSArray<AnyObject>>> {
+            // SAFETY: calling the superclass implementation.
+            let inherited: Option<Retained<NSArray<AnyObject>>> =
+                unsafe { msg_send![super(self), keyCommands] };
+            let mut commands = inherited.map(|a| a.to_vec()).unwrap_or_default();
+            commands.push(escape_command());
+            Some(NSArray::from_retained_slice(&commands))
+        }
+
+        #[unsafe(method(nshEscape:))]
+        fn escape(&self, _sender: Option<&AnyObject>) {
+            self.cancel();
+        }
+
+        /// VoiceOver's escape gesture (a two-finger scrub).
+        #[unsafe(method(accessibilityPerformEscape))]
+        fn accessibility_perform_escape(&self) -> bool {
+            self.cancel();
+            true
         }
     }
 
@@ -211,32 +260,33 @@ define_class!(
     }
 
     unsafe impl UIAdaptivePresentationControllerDelegate for ModalController {
-        /// Answered from `dismissible`: close natively (reported when done),
-        /// or let `visible` decide (a swipe down only asks).
+        /// Answered from `closeOnSwipe`: close natively (reported when
+        /// done), or let `open` decide (a swipe down only asks).
         #[unsafe(method(presentationControllerShouldDismiss:))]
         fn should_dismiss(&self, _controller: &UIPresentationController) -> bool {
-            self.ivars().dismissible.get()
+            self.ivars().close_on_swipe.get()
         }
 
-        /// The user swiped a `dismissible` sheet away.
+        /// The user swiped a `closeOnSwipe` sheet away.
         #[unsafe(method(presentationControllerDidDismiss:))]
         fn did_dismiss(&self, _controller: &UIPresentationController) {
             let ivars = self.ivars();
             ivars.closed.set(true);
             ivars
                 .control
-                .dispatch_event(ivars.id, EventKind::RequestClose, EventPayload::None);
+                .dispatch_event(ivars.id, EventKind::RequestClose, close_reason("swipe"));
             ivars
                 .control
                 .dispatch_event(ivars.id, EventKind::Dismiss, EventPayload::None);
         }
 
+        /// A swipe down on a sheet that stays (`closeOnSwipe` false).
         #[unsafe(method(presentationControllerDidAttemptToDismiss:))]
         fn did_attempt_to_dismiss(&self, _controller: &UIPresentationController) {
             let id = self.ivars().id;
             self.ivars()
                 .control
-                .dispatch_event(id, EventKind::RequestClose, EventPayload::None);
+                .dispatch_event(id, EventKind::RequestClose, close_reason("swipe"));
         }
     }
 );
@@ -248,13 +298,49 @@ impl ModalController {
             control,
             reported: Cell::new(None),
             orientations: Cell::new(UIInterfaceOrientationMask::empty()),
-            dismissible: Cell::new(false),
+            close_on_swipe: Cell::new(false),
+            close_on_escape: Cell::new(false),
+            animated: Cell::new(true),
             closed: Cell::new(false),
         });
         // SAFETY: UIViewController's designated initializer.
         unsafe {
             msg_send![super(this), initWithNibName: Option::<&NSString>::None, bundle: Option::<&NSObject>::None]
         }
+    }
+
+    /// Applies the close flags (also while presented).
+    fn set_flags(&self, c: &ModalConfig) {
+        let ivars = self.ivars();
+        ivars.close_on_swipe.set(c.close_on_swipe);
+        ivars.close_on_escape.set(c.close_on_escape);
+        ivars.animated.set(c.animation != ModalAnimation::None);
+        // A sheet that stays only reports the swipe
+        // (`presentationControllerDidAttemptToDismiss:`).
+        self.setModalInPresentation(!c.close_on_swipe);
+    }
+
+    /// Escape: reported as `cancel`, and closed natively with
+    /// `closeOnEscape` (reported when done).
+    fn cancel(&self) {
+        let ivars = self.ivars();
+        // Not presented, or under another modal (the top one handles it).
+        if ivars.closed.get()
+            || self.presentingViewController().is_none()
+            || self.presentedViewController().is_some()
+        {
+            return;
+        }
+        let (id, control) = (ivars.id, ivars.control.clone());
+        control.dispatch_event(id, EventKind::RequestClose, close_reason("cancel"));
+        if !ivars.close_on_escape.get() {
+            return;
+        }
+        ivars.closed.set(true);
+        let block = block2::RcBlock::new(move || {
+            control.dispatch_event(id, EventKind::Dismiss, EventPayload::None);
+        });
+        self.dismissViewControllerAnimated_completion(ivars.animated.get(), Some(&block));
     }
 
     /// Lays the modal's content out at the size it is presented at.
@@ -303,17 +389,26 @@ define_class!(
     unsafe impl NSObjectProtocol for NavController {}
 
     impl NavController {
-        /// The header's back button: a screen with `preventBack` stays and
-        /// gets `onBackRequest`.
+        /// The header's back button: a screen listening to `onBackPress`
+        /// hears of it, and one with `popOnBack` false stays.
         #[unsafe(method(navigationBar:shouldPopItem:))]
         fn should_pop_item(&self, bar: &UINavigationBar, item: &UINavigationItem) -> bool {
             let ivars = self.ivars();
-            if !ivars.applying.get()
+            // The app's own pops, and the end of an interactive swipe
+            // (`popOnSwipe`, a transition already running), are no press.
+            let press = !ivars.applying.get() && self.transitionCoordinator().is_none();
+            let mut stay = false;
+            if press
                 && let Ok(m) = ivars.mounter.get(self.mtm()).try_borrow()
                 && let Some(m) = m.as_ref()
-                && let Some(screen) = m.stack_prevents_back(ivars.stack)
+                && let Some((screen, listens, prevent)) = m.stack_back_press(ivars.stack)
             {
-                m.dispatch(screen, EventKind::BackRequest);
+                if listens {
+                    m.dispatch(screen, EventKind::BackRequest);
+                }
+                stay = prevent;
+            }
+            if stay {
                 false
             } else {
                 // SAFETY: calling the superclass implementation.
@@ -540,6 +635,8 @@ impl ScreenHost {
     }
 
     /// Applies the header options; `item` returns the view of a header item.
+    /// The bar is UIKit's: a `header` slot (`header_view`, the whole bar
+    /// where NSH draws it) is never placed, so it stays out of sight.
     pub(crate) fn apply_header(&self, item: impl Fn(NodeId) -> Option<Retained<UIView>>) {
         let mtm = self.controller.mtm();
         let c = &self.config;
@@ -715,16 +812,17 @@ impl ModalHost {
             }
         }
         controller.ivars().orientations.set(mask);
-        controller.ivars().dismissible.set(c.dismissible);
-        controller.setModalPresentationStyle(match (c.presentation, c.transparent) {
-            (_, true) => UIModalPresentationStyle::OverFullScreen,
-            (ModalPresentation::FullScreen, false) => UIModalPresentationStyle::FullScreen,
-            (ModalPresentation::PageSheet, false) => UIModalPresentationStyle::PageSheet,
-            (ModalPresentation::FormSheet, false) => UIModalPresentationStyle::FormSheet,
+        controller.set_flags(&c);
+        // Full screen, the modal has no look of its own: the app's popup
+        // and backdrop show over what is behind. Sheets are the system's.
+        let sheet = c.presentation != ModalPresentation::FullScreen;
+        controller.setModalPresentationStyle(match c.presentation {
+            ModalPresentation::FullScreen => UIModalPresentationStyle::OverFullScreen,
+            ModalPresentation::PageSheet => UIModalPresentationStyle::PageSheet,
+            ModalPresentation::FormSheet => UIModalPresentationStyle::FormSheet,
         });
         // Catalyst's Mac idiom shows sheets as macOS sheets at a default
         // size that may not fit the window: fit them to it.
-        let sheet = !c.transparent && c.presentation != ModalPresentation::FullScreen;
         if sheet
             && objc2_ui_kit::UIDevice::currentDevice(from.mtm()).userInterfaceIdiom()
                 == objc2_ui_kit::UIUserInterfaceIdiom::Mac
@@ -741,10 +839,10 @@ impl ModalHost {
             _ => UIModalTransitionStyle::CoverVertical,
         });
         if let Some(view) = controller.view() {
-            let color = if c.transparent {
-                UIColor::clearColor()
-            } else {
+            let color = if sheet {
                 UIColor::systemBackgroundColor()
+            } else {
+                UIColor::clearColor()
             };
             view.setBackgroundColor(Some(&color));
         }
@@ -764,9 +862,9 @@ impl ModalHost {
         self.presented = true;
     }
 
-    /// Applies `config` (`dismissible` also while presented).
+    /// Applies `config` (the close flags also while presented).
     pub(crate) fn configure(&mut self, config: ModalConfig) {
-        self.controller.ivars().dismissible.set(config.dismissible);
+        self.controller.set_flags(&config);
         self.config = config;
     }
 

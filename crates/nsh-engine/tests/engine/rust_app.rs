@@ -226,13 +226,13 @@ fn rust_components_navigate_with_native_stacks() {
     assert!(deleted, "the popped screen goes");
 }
 
-/// Rust content in a Rust component of the mobile UI: a card's header
-/// and body.
+/// Rust content in a Rust component of a UI set: a card's header and
+/// body.
 #[component]
 fn WithCard() -> impl IntoElement {
     let taps = signal(0);
     view().flex_1().child(
-        nsh_ui_mobile::Card::element(nsh_ui_mobile::CardProps::default())
+        crate::test_ui::Card::element(crate::test_ui::CardProps::default())
             .fill("header", text("card header"))
             .child(
                 text(move || format!("card body {}", taps.get()))
@@ -473,11 +473,11 @@ fn ButtonRows() -> impl IntoElement {
         .child(text(move || format!("pressed {:?}", pressed.get())))
         .child(
             virtual_list(20, move |at| {
-                nsh_ui_mobile::Button::element(nsh_ui_mobile::ButtonProps {
+                crate::test_ui::Button::element(crate::test_ui::ButtonProps {
                     title: Prop::bind(move || format!("row {}", at.index()).into()),
                     ..Default::default()
                 })
-                .on_event(move |_: &nsh_ui_mobile::ButtonEvent| pressed.set(Some(at.index())))
+                .on_event(move |_: &crate::test_ui::ButtonEvent| pressed.set(Some(at.index())))
             })
             .flex_1(),
         )
@@ -538,7 +538,7 @@ fn WithSheet() -> impl IntoElement {
         .flex_1()
         .child(text("open").on_press(move |_: &()| open.set(true)))
         .child(
-            nsh_ui_mobile::Sheet::element(nsh_ui_mobile::SheetProps {
+            crate::test_ui::Sheet::element(crate::test_ui::SheetProps {
                 open: open.into(),
                 ..Default::default()
             })

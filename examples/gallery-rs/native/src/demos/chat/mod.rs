@@ -17,12 +17,12 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
+use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 use nsh_core::{
     LayoutAnimation, Points, Size,
     time::Instant,
     ui::{AccessibilityState, ScrollEvent, View, prelude::*},
 };
-use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 
 use self::{
     glyphs::{GlyphName, glyph},
@@ -1084,7 +1084,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         } else {
                             SubmitBehavior::Newline
                         })
-                        .on_submit_editing(move |_: &str| {
+                        .on_submit(move |_: &str| {
                             if !streaming.get_untracked() {
                                 chat.send();
                             }
@@ -1096,7 +1096,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .on_content_size_change(move |size: &Size<Points>| {
                             input_height.set((size.height.clamp(px(20.0), px(100.0))).0);
                         })
-                        .on_change_text(move |text: &str| draft.set(text.to_owned()))
+                        .on_change(move |text: &str| draft.set(text.to_owned()))
                         .h(move || px(input_height.get() + 20.0))
                         .text_size(px(15.0))
                         .line_height(px(20.0))
@@ -1329,7 +1329,7 @@ impl ChatState {
                             self.play(id);
                         }
                     })
-                    .underlay(|| color(colors::TEXT.opacity(0.06)), 0.85)
+                    .active(|s| s.bg(colors::TEXT.opacity(0.06)))
                     .role(AccessibilityRole::Button)
                     .label(label)
                     .flex_row()

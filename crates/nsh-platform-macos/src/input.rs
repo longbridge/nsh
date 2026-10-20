@@ -23,7 +23,8 @@
 //!
 //! Presses follow React Native and the other backends: the innermost view
 //! listening to press events gets them (or the pressable text span under
-//! the pointer); `activeOpacity` fades the view natively. A move beyond
+//! the pointer; how it looks while pressed is the app's `activeStyle`,
+//! applied by the core from the reported states). A move beyond
 //! 6 pt starts the innermost pan that takes that direction; beyond 10 pt
 //! the press is over. Mouse drags never scroll: dragging the content is a
 //! touchscreen's way to scroll, the mouse scrolls with the wheel, the
@@ -88,10 +89,6 @@ const ZOOM_IDLE: u64 = 300;
 const LONG_PRESS: f32 = 500.0;
 /// Velocities are measured over this many milliseconds.
 const VELOCITY_WINDOW: f64 = 100.0;
-/// Duration of the `activeOpacity` fade when pressed.
-const FADE_IN_MS: f64 = 100.0;
-/// Duration of the fade back.
-const FADE_OUT_MS: f64 = 250.0;
 /// The mouse's back button (`buttonNumber`), as Linux's button 8.
 const BACK_BUTTON: isize = 3;
 
@@ -120,8 +117,6 @@ pub(crate) struct Input {
     hovered: RefCell<Vec<NshView>>,
     /// Native gesture values by view.
     gestures: RefCell<FxHashMap<NodeId, (objc2::rc::Weak<ViewObj>, GestureValues)>>,
-    /// Running `activeOpacity` fades.
-    fades: RefCell<FxHashMap<NodeId, Fade>>,
     /// The JS responder blocks native scrolling and pans.
     js_block: Cell<bool>,
     /// Where the mouse last was (root coordinates), while over the root.
@@ -131,7 +126,7 @@ pub(crate) struct Input {
     repick: Cell<bool>,
     /// Next touch identifier.
     next_id: Cell<u32>,
-    /// Next press / fade / zoom generation (invalidates callbacks of
+    /// Next press / zoom generation (invalidates callbacks of
     /// earlier ones).
     next_gen: Cell<u64>,
 }
@@ -179,11 +174,9 @@ struct Press {
     /// The node that gets the events.
     node: NodeId,
     events: EventMask,
-    /// `activeOpacity` (none for spans).
-    feedback: Option<f32>,
     /// Milliseconds before a long press.
     long_delay: f32,
-    /// `onPressIn` was reported.
+    /// `onPressDown` was reported.
     pressed: bool,
     /// `onLongPress` was reported: the release is no press.
     long: bool,
@@ -269,13 +262,6 @@ struct Wheel {
     held: bool,
 }
 
-/// An `activeOpacity` fade.
-struct Fade {
-    /// The view's fade before the press.
-    base: f32,
-    generation: u64,
-}
-
 /// Estimates a pointer's velocity from its recent positions.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct VelocityTracker {
@@ -335,7 +321,6 @@ pub(crate) fn reset(surface: &Surface) {
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
     input.gestures.borrow_mut().clear();
-    input.fades.borrow_mut().clear();
     input.js_block.set(false);
 }
 
@@ -417,7 +402,7 @@ pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
 
 /// The view's props changed.
 pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
-    // `pointerEvents`, `hitSlop`, `activeOpacity` and `delayLongPress` are
+    // `pointerEvents`, `hitSlop` and `delayLongPress` are
     // read from the state when the pointer goes down.
     release_invalid_control_focus(surface, view);
 }
@@ -478,8 +463,8 @@ fn has_press(events: EventMask) -> bool {
     [
         EventKind::Press,
         EventKind::LongPress,
-        EventKind::PressIn,
-        EventKind::PressOut,
+        EventKind::PressDown,
+        EventKind::PressUp,
     ]
     .into_iter()
     .any(|k| events.contains(k))
@@ -709,7 +694,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
             let events = view.state().events;
-            for kind in [EventKind::PressIn, EventKind::PressOut, EventKind::Press] {
+            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
                 if events.contains(kind) {
                     press_event(surface, view.id(), kind);
                 }
@@ -942,7 +927,7 @@ fn pick_in(view: &NshView, p: (f32, f32)) -> Option<Hit> {
     if pe != PointerEvents::BoxOnly {
         // Hosted views and children in their AppKit order, topmost first:
         // hosted views are usually above the children, but not always (a
-        // sheet's card is above its scrim, which the root hosts).
+        // modal is above the image of one leaving, which the root hosts).
         let container = view.container_view();
         let subviews: Vec<_> = view.ns().subviews().iter().collect();
         for sub in subviews.into_iter().rev() {
@@ -1515,7 +1500,6 @@ fn find_press(
                 view: target.clone(),
                 node: link.node,
                 events: link.events,
-                feedback: None,
                 long_delay: s.props.long_press_delay.unwrap_or(LONG_PRESS),
                 pressed: false,
                 long: false,
@@ -1529,7 +1513,6 @@ fn find_press(
             view: v.clone(),
             node: s.id,
             events: s.events,
-            feedback: s.props.active_opacity.filter(|o| *o < 1.0),
             long_delay: s.props.long_press_delay.unwrap_or(LONG_PRESS),
             pressed: false,
             long: false,
@@ -1543,26 +1526,20 @@ fn press_in(surface: &Rc<Surface>, press: &mut Press) {
         return;
     }
     press.pressed = true;
-    if let Some(opacity) = press.feedback {
-        fade(surface, &press.view, Some(opacity));
-    }
-    if press.events.contains(EventKind::PressIn) {
-        press_event(surface, press.node, EventKind::PressIn);
+    if press.events.contains(EventKind::PressDown) {
+        press_event(surface, press.node, EventKind::PressDown);
     }
 }
 
-/// Ends a press: `onPressOut`, then `onPress` if `fire` (released inside)
+/// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
 /// and it was no long press.
 fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
     if !press.pressed {
         return;
     }
     press.pressed = false;
-    if press.feedback.is_some() {
-        fade(surface, &press.view, None);
-    }
-    if press.events.contains(EventKind::PressOut) {
-        press_event(surface, press.node, EventKind::PressOut);
+    if press.events.contains(EventKind::PressUp) {
+        press_event(surface, press.node, EventKind::PressUp);
     }
     if fire && !press.long && press.events.contains(EventKind::Press) {
         press_event(surface, press.node, EventKind::Press);
@@ -1591,56 +1568,6 @@ fn released_inside(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
         && ly >= -slop.top.0 - r
         && lx <= s.frame.size.width.0 + slop.right.0 + r
         && ly <= s.frame.size.height.0 + slop.bottom.0 + r
-}
-
-/// Fades `view` to `opacity` times its fade before the press, or back
-/// (`None`), over a few frames.
-fn fade(surface: &Rc<Surface>, view: &NshView, opacity: Option<f32>) {
-    let (id, from) = {
-        let s = view.state();
-        (s.id, s.fade)
-    };
-    let generation = surface.input.next_gen.get();
-    surface.input.next_gen.set(generation + 1);
-    let to = {
-        let mut fades = surface.input.fades.borrow_mut();
-        let entry = fades.entry(id).or_insert(Fade {
-            base: from,
-            generation,
-        });
-        entry.generation = generation;
-        opacity.map_or(entry.base, |o| entry.base * o)
-    };
-    let duration = if opacity.is_some() {
-        FADE_IN_MS
-    } else {
-        FADE_OUT_MS
-    };
-    let releasing = opacity.is_none();
-    let view = view.clone();
-    let mut start = None::<f64>;
-    surface.add_frame_callback(move |surface, now| {
-        let now = now * 1000.0;
-        {
-            let fades = surface.input.fades.borrow();
-            if fades.get(&id).is_none_or(|f| f.generation != generation) {
-                // A newer fade took over.
-                return false;
-            }
-        }
-        let t0 = *start.get_or_insert(now);
-        let k = ((now - t0) / duration).min(1.0) as f32;
-        let eased = 1.0 - (1.0 - k) * (1.0 - k);
-        view.state_mut().fade = from + (to - from) * eased;
-        view.place();
-        if k < 1.0 {
-            return true;
-        }
-        if releasing {
-            surface.input.fades.borrow_mut().remove(&id);
-        }
-        false
-    });
 }
 
 // --- Pans ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@ import { cleanup, resource, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { Toast } from "nsh/android";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
+import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
 import { keymap } from "nsh/keymap";
-import { ActionSheet, Alert, keyboard, safeArea, StatusBar } from "nsh/ui/mobile";
 import { Icon, type IconName } from "../icons";
 import {
   Appear,
@@ -54,7 +54,7 @@ function SafeAreaDiagram() {
     >
       <View style={{ height: band(safeArea().top), backgroundColor: tints.info }} />
       <View style={{ flex: 1, margin: 6, borderRadius: 6, borderWidth: 1, borderColor: colors.line, borderStyle: "dashed" }} />
-      <View style={{ height: band(keyboard().height), backgroundColor: tints.warn }} />
+      <View style={{ height: band(keyboardFrame().height), backgroundColor: tints.warn }} />
       <View style={{ height: band(safeArea().bottom), backgroundColor: tints.info }} />
     </View>
   );
@@ -76,7 +76,7 @@ function Environment() {
             <Figure value={`${Math.round(windowSize().width)} × ${Math.round(windowSize().height)}`} unit="pt" />
           </View>
           <View style={{ flexDirection: "row" }}>
-            <Stat label="Keyboard" value={`${Math.round(keyboard().height)} pt`} tone={keyboard().height > 0 ? "warn" : undefined} width="50%" />
+            <Stat label="Keyboard" value={`${Math.round(keyboardFrame().height)} pt`} tone={keyboardFrame().height > 0 ? "warn" : undefined} width="50%" />
             <Stat label="Font scale" value={`${fontScale().toFixed(2)}×`} width="50%" />
           </View>
         </View>
@@ -100,32 +100,46 @@ function Environment() {
   );
 }
 
-type BarStyle = "light-content" | "dark-content" | "default";
-
 function StatusBarCard() {
-  // Until one is picked, the style follows the appearance (light text on the dark page).
-  const picked = signal<BarStyle | null>(null);
-  const barStyle = () => picked() ?? (isDark() ? "light-content" : "dark-content");
+  // Until one is picked, the content follows the appearance (light content on the dark page).
+  const picked = signal<StatusBarForeground | null>(null);
+  const foreground = () => picked() ?? (isDark() ? "light" : "dark");
   const barHidden = signal(false);
+  const open = signal(false);
+  // The preview's background: the one its content is for.
+  const backdrop = () => (foreground() === "light" ? "#101113" : foreground() === "dark" ? "#f4f4f2" : colors.background);
   return (
-    <Card icon="mobile" title="Status bar" subtitle="StatusBar: style and visibility, animated">
-      <StatusBar barStyle={barStyle()} hidden={barHidden()} animated />
+    <Card icon="mobile" title="Status bar" subtitle="A dialog's statusBar: over the page's while it is open">
       <Segmented
         options={[
-          { value: "light-content", label: "Light" },
-          { value: "dark-content", label: "Dark" },
-          { value: "default", label: "Default" },
+          { value: "light", label: "Light" },
+          { value: "dark", label: "Dark" },
+          { value: "auto", label: "Auto" },
         ]}
-        value={barStyle()}
+        value={foreground()}
         onChange={(v) => picked.set(v)}
       />
       <Row>
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={{ fontSize: 15, color: colors.text }}>Hidden</Text>
-          <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>{`barStyle: "${barStyle()}"`}</Text>
+          <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>{`foreground: "${foreground()}"`}</Text>
         </View>
         <Toggle value={barHidden()} onChange={(v) => barHidden.set(v)} label="Hide the status bar" />
       </Row>
+      <Button label="Preview" icon="mobile" onPress={() => open.set(true)} />
+      <Dialog
+        open={open()}
+        animation="fade"
+        statusBar={{ foreground: foreground(), hidden: barHidden(), animated: true }}
+        onOpenChange={(o) => open.set(o)}
+      >
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16, backgroundColor: backdrop() }}>
+          <Text style={{ fontSize: 13, color: foreground() === "light" ? "#ffffff" : "#111214", fontFamily: mono }}>
+            {`statusBar: { foreground: "${foreground()}", hidden: ${barHidden()} }`}
+          </Text>
+          <Button label="Close" onPress={() => open.set(false)} />
+        </View>
+      </Dialog>
     </Card>
   );
 }
@@ -156,7 +170,7 @@ function Dialogs() {
     pop.spring(1, { stiffness: 380, damping: 18 });
   };
   return (
-    <Card icon="bell" title="Alerts and sheets" subtitle="Alert · ActionSheet · Toast" flush>
+    <Card icon="bell" title="Alerts and sheets" subtitle="AlertDialog · Toast" flush>
       <Inset gap={0} padding={12}>
         <ActionRow
           first
@@ -165,7 +179,7 @@ function Dialogs() {
           title="Alert"
           detail="One button"
           onPress={async () => {
-            await Alert.alert("Saved", "Your changes were saved.");
+            await AlertDialog.show({ title: "Saved", description: "Your changes were saved.", actions: [{ label: "OK" }] });
             show("OK", "up");
           }}
         />
@@ -175,16 +189,17 @@ function Dialogs() {
           title="Confirm"
           detail="Cancel and destructive buttons"
           onPress={async () => {
-            const i = await Alert.alert(
-              "Delete the photo?",
-              "This cannot be undone.",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive" },
+            const action = await AlertDialog.show({
+              title: "Delete the photo?",
+              description: "This cannot be undone.",
+              actions: [
+                { label: "Cancel", role: "cancel" },
+                { label: "Delete", role: "destructive" },
               ],
-              { cancelable: true },
-            );
-            const text = ["Cancel", "Delete"][i] ?? "dismissed";
+              closeOnEscape: true,
+              closeOnBackdropPress: true,
+            });
+            const text = action ?? "dismissed";
             show(text, text === "Delete" ? "danger" : "neutral");
           }}
         />
@@ -192,11 +207,14 @@ function Dialogs() {
           icon="star"
           tint={colors.info}
           title="Three buttons"
-          detail="Resolves to the index pressed"
+          detail="Resolves to the id of the action pressed"
           onPress={async () => {
-            const buttons = ["Later", "Never", "Install"];
-            const i = await Alert.alert("Update available", "Install it now?", [{ text: "Later" }, { text: "Never", style: "cancel" }, { text: "Install" }]);
-            show(buttons[i] ?? "dismissed", buttons[i] === "Install" ? "info" : "neutral");
+            const action = await AlertDialog.show({
+              title: "Update available",
+              description: "Install it now?",
+              actions: [{ label: "Later" }, { label: "Never", role: "cancel" }, { label: "Install", id: "install" }],
+            });
+            show(action === "install" ? "Install" : (action ?? "dismissed"), action === "install" ? "info" : "neutral");
           }}
         />
         <ActionRow
@@ -205,9 +223,12 @@ function Dialogs() {
           title="Action sheet"
           detail="Title, cancel and destructive options"
           onPress={async () => {
-            const options = ["Cancel", "Copy link", "Save", "Delete"];
-            const i = await ActionSheet.show({ title: "Share the photo", options, cancelButtonIndex: 0, destructiveButtonIndexes: [3] });
-            const text = options[i] ?? "dismissed";
+            const action = await AlertDialog.show({
+              title: "Share the photo",
+              presentation: "actionSheet",
+              actions: [{ label: "Cancel", role: "cancel" }, { label: "Copy link" }, { label: "Save" }, { label: "Delete", role: "destructive" }],
+            });
+            const text = action ?? "dismissed";
             show(text, text === "Delete" ? "danger" : "accent");
           }}
         />

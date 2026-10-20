@@ -2,7 +2,7 @@ import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { color } from "./theme";
 
 /** Glyphs drawn in a 20 × 20 box with the tint as stroke. */
-export type IconName = "hops" | "mass" | "plan" | "throttle" | "tilt" | "rcs" | "chevron" | "check" | "caret";
+export type IconName = "hops" | "mass" | "plan" | "throttle" | "tilt" | "rcs" | "chevron" | "back" | "check" | "caret";
 
 const path = (ctx: CanvasRenderingContext2D, points: [number, number][], close = false) => {
   ctx.beginPath();
@@ -57,6 +57,7 @@ const glyphs: Record<IconName, (ctx: CanvasRenderingContext2D) => void> = {
     for (const [x, y] of [[3, 3], [15, 3], [3, 15], [15, 15]]) ctx.strokeRect(x, y, 2.5, 2.5);
   },
   chevron: (ctx) => path(ctx, [[8, 5], [13, 10], [8, 15]]),
+  back: (ctx) => path(ctx, [[12, 5], [7, 10], [12, 15]]),
   check: (ctx) => path(ctx, [[4, 10.5], [8, 14.5], [16, 5.5]]),
   caret: (ctx) => path(ctx, [[6, 8], [10, 12], [14, 8]]),
 };

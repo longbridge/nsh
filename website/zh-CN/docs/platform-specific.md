@@ -7,7 +7,7 @@ group: platforms
 
 # 平台特定代码
 
-同一个 NSH 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行），还可以通过 [Web 运行时](./web.md)在浏览器中运行。应用的大部分代码根本不需要判断平台：元素、样式、布局、组件和模块在各处的行为都相同，`nsh/ui/mobile` 的组件由 NSH 自己绘制而不是借用各平台的控件，所以在各处看起来都一样。当某样东西确实只属于一个平台时，NSH 给它安排了明确的位置，让平台代码一目了然、范围可控：
+同一个 NSH 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行），还可以通过 [Web 运行时](./web.md)在浏览器中运行。应用的大部分代码根本不需要判断平台：元素、样式、布局和模块在各处的行为都相同，你用它们绘制的组件在各处看起来也都一样。当某样东西确实只属于一个平台时，NSH 给它安排了明确的位置，让平台代码一目了然、范围可控：
 
 | 位置 | 用途 |
 |---|---|
@@ -23,7 +23,7 @@ group: platforms
 ```tsx
 <View
   onPress={open}
-  activeOpacity={0.6}
+  activeStyle={{ opacity: 0.6 }}
   android={{ ripple: { color: "rgba(0,0,0,0.12)" }, elevation: 4 }}
   style={{ padding: 16, borderRadius: 12, backgroundColor: "#ffffff" }}
 >
@@ -35,9 +35,9 @@ group: platforms
   ios={{ textContentType: "oneTimeCode" }}
 />
 
-<Modal visible={open()} ios={{ presentationStyle: "pageSheet" }} android={{ statusBarTranslucent: true }}>
+<Dialog open={open()} ios={{ supportedOrientations: ["portrait"] }} android={{ statusBarTranslucent: true }}>
   …
-</Modal>
+</Dialog>
 ```
 
 这些对象和其他属性一样是响应式的；从对象中移除的键会被清除。
@@ -49,22 +49,17 @@ group: platforms
 | `android={{ ripple }}` | 所有元素 | 按下时的 Material 水波纹：`{ color?, borderless?, radius?, foreground? }`。 |
 | `android={{ elevation }}` | 所有元素 | 根据视图形状生成的 Material 阴影，单位为点。 |
 | `android={{ accessibilityLiveRegion }}` | 所有元素 | `"none"`、`"polite"` 或 `"assertive"`：TalkBack 播报视图的变化。 |
-| `android={{ statusBarTranslucent }}` | `Modal` | 模态视图的内容延伸到状态栏下方。 |
-| `android={{ backgroundColor }}` | `StatusBar` | 状态栏颜色（Android 15 全面屏之前）。 |
+| `android={{ statusBarTranslucent }}` | `Dialog` | 对话框的内容延伸到状态栏下方。 |
 | `ios={{ inputAccessoryViewID }}` | `<Input>` | 显示在键盘上方的 `InputAccessoryView`。 |
 | `ios={{ textContentType }}` | `<Input>` | iOS 对自动填充类型的叫法。 |
-| `ios={{ headerLargeTitle }}`、`ios={{ headerBackTitle }}` | `Screen` | 大标题；返回按钮上的文字。 |
-| `ios={{ presentationStyle }}`、`ios={{ supportedOrientations }}` | `Modal` | `"pageSheet"` / `"formSheet"` 表单样式；允许的方向。 |
+| `ios={{ supportedOrientations }}` | `Dialog` | 允许的方向。 |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | 滑动在页面历史中前进后退。 |
-| `desktop={{ headerLargeTitle }}`、`desktop={{ headerBackTitle }}` | `Screen` | 大标题；返回按钮上的文字。 |
-| `desktop={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"`：窗口中居中的卡片。 |
-| `web={{ presentationStyle }}` | `Modal` | 所有浏览器中的 `"pageSheet"` / `"formSheet"`：桌面和平板浏览器中是居中的卡片，手机浏览器中是停在顶部稍下方的表单。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 | `desktop={{ windowDrag }}` | 所有元素 | 按住它拖动窗口，像系统标题栏一样（见 [nsh/desktop](../modules/nsh-desktop.md#自定义标题栏)）。 |
 
-`desktop={{…}}` 在所有地方都可以使用；上面列出的是目前仅限桌面的属性。`web={{…}}` 同样在所有地方都可以使用，目前唯一的元素属性是 `Modal` 的 `presentationStyle`（[`StatusBar`](../components/status-bar.md) 接受 `web={{ themeColor }}`）。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
+`desktop={{…}}` 和 `web={{…}}` 在所有地方都可以使用。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
 
-在两个平台上都存在、只是效果略有不同的属性不做分组：`Alert.alert` 的 `cancelable` 选项两个平台都有（iOS 提示框本来就不会因点击外部而关闭），`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。
+两个及以上平台都有的功能是顶层属性，在有意义的平台上生效：`NavPage` 的 `title`、`headerStyle`、`headerLargeTitle` 和 `headerBackTitle` 设置 iOS 和 Android 的系统标题栏，它的 `header` 插槽是桌面和 Web 上的标题栏，`Dialog` 的 `presentation` 选择 iOS 的表单样式。`AlertDialog.show` 的 `closeOnBackdropPress`、`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。
 
 ## 平台模块
 
@@ -75,20 +70,19 @@ group: platforms
 | 导出 | 说明 |
 |---|---|
 | `Toast.show(message, duration?)` | 在屏幕底部显示 toast；`"short"`（默认）或 `"long"`。 |
-| `BackHandler.addEventListener("hardwareBackPress", listener)` | 在模态视图之后、导航栈之前监听返回键；处理了就返回 `true`。返回 `{ remove() }`。 |
+| `BackHandler.addEventListener("hardwareBackPress", listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。返回 `{ remove() }`。 |
 | `BackHandler.exitApp()` | 退出应用。 |
-| `setStatusBarBackgroundColor(color, animated?)` | `StatusBar` 组件所设置内容之下的状态栏颜色（全面屏之前，API 35）。 |
 | `isAvailable` | Android 上为 `true`。 |
 
 ```tsx
 import { cleanup } from "nsh";
 import { BackHandler, Toast } from "nsh/android";
 import { Platform } from "nsh/device";
-import { Alert } from "nsh/ui/mobile";
+import { AlertDialog } from "nsh/base";
 
 function saved() {
   if (Platform.OS === "android") Toast.show("Saved");
-  else Alert.alert("Saved");
+  else AlertDialog.show({ title: "Saved", actions: [{ label: "OK" }] });
 }
 
 function Player() {
@@ -103,7 +97,7 @@ function Player() {
 }
 ```
 
-返回键先由最上层的模态视图处理，然后是 `BackHandler` 监听器（最近添加的最先），再然后是最上层的导航栈，都没有处理时应用退出。见[导航](./navigation.md#android-返回键)。
+返回键先由最上层的对话框处理，然后是 `BackHandler` 监听器（最近添加的最先），再然后是最上层的导航栈，都没有处理时应用退出。见[导航](./navigation.md#android-返回键)。
 
 ### nsh/ios
 
@@ -127,18 +121,17 @@ function Player() {
 
 ### 状态栏
 
-状态栏在两个平台上都用 `nsh/ui/mobile` 中的 [`StatusBar`](../components/status-bar.md) 设置：`barStyle`（`"default"`、`"light-content"`、`"dark-content"`）、`hidden` 和 `animated`，Android 的颜色放在 `android={{ backgroundColor }}` 中。最近挂载的 `StatusBar` 按属性逐项生效，所以页面可以为自己渲染一个，页面消失后之前的设置会恢复。`StatusBar.setBarStyle()` 和 `StatusBar.setHidden()` 以命令式方式设置基础值。
+在两个平台上，状态栏都属于最上层的页面或对话框，和 UIKit 中由最上层视图控制器决定一样：[`NavPage` 和 `Dialog` 接受 `statusBar`](../modules/nsh-base.md#status-bar)，其中有 `foreground`（`"auto"`、深色背景用 `"light"`、浅色背景用 `"dark"`）、`hidden` 和 `animated`。最近显示的页面或对话框按字段逐项生效，它离开后下面那个重新生效。`nsh.json` 的 `"statusBar"` 是它们之下的应用默认值。
 
 ```tsx
 import { View } from "nsh";
-import { StatusBar } from "nsh/ui/mobile";
+import { NavPage } from "nsh/base";
 
 function PhotoViewer() {
   return (
-    <View style={{ flex: 1, backgroundColor: "#000000" }}>
-      <StatusBar barStyle="light-content" animated />
-      …
-    </View>
+    <NavPage headerShown={false} statusBar={{ foreground: "light", animated: true }}>
+      <View style={{ flex: 1, backgroundColor: "#000000" }}>…</View>
+    </NavPage>
   );
 }
 ```
@@ -205,7 +198,7 @@ const Spinner = Platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
 
 ## 优先使用共享的行为
 
-在添加平台判断之前，先想想这个差异对用户是否重要。元素和样式已经在应当不同的地方映射到各平台的原生行为（滚动物理效果、文字渲染、键盘、无障碍），在用户期望一致的地方（你的应用自己的外观）保持一致。平台判断最好留给用户依赖的平台惯例：Android 的返回键和 toast、iOS 的表单弹窗和大标题、自动填充的名称、水波纹与不透明度反馈。
+在添加平台判断之前，先想想这个差异对用户是否重要。元素和样式已经在应当不同的地方映射到各平台的原生行为（滚动物理效果、文字渲染、键盘、无障碍），在用户期望一致的地方（你的应用自己的外观）保持一致。平台判断最好留给用户依赖的平台惯例：Android 的返回键和 toast、iOS 的表单弹窗和大标题、自动填充的名称、Android 的水波纹。
 
 ## 相关内容
 

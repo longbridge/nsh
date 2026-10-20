@@ -38,7 +38,7 @@ log.workspace = true
 nsh-core.workspace = true
 nsh-animation.workspace = true
 nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 image = { workspace = true, features = ["gif", "webp", "jpeg", "bmp", "ico", "tiff"] }

@@ -48,4 +48,4 @@ flate2.workspace = true
 zstd.workspace = true
 # The typed API check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true

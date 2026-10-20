@@ -62,7 +62,7 @@ function Counter() {
       <Text style={{ fontSize: 48, fontWeight: "700" }}>{count()}</Text>
       <View
         onPress={() => count.update((n) => n + 1)}
-        activeOpacity={0.6}
+        activeStyle={{ opacity: 0.6 }}
         class="rounded-lg bg-blue-600 px-5 py-3"
       >
         <Text class="text-white text-lg">Tap</Text>
@@ -74,7 +74,7 @@ function Counter() {
 mount(Counter);
 ```
 
-`<View>` 在 iOS 上变成 `UIView`，在 Android 上变成 `ViewGroup`，在 macOS 上变成 `NSView`，在 Linux 上变成 GTK 控件，`<Text>` 变成原生文本视图，按钮的按压反馈（`activeOpacity`）在主线程上完成，不需要往返 JavaScript。点击时，`count.update` 只修改一个信号，只有读取 `count()` 的那段文本会更新：组件函数不会重新执行。
+`<View>` 在 iOS 上变成 `UIView`，在 Android 上变成 `ViewGroup`，在 macOS 上变成 `NSView`，在 Linux 上变成 GTK 控件，`<Text>` 变成原生文本视图，按钮的按压反馈（`activeStyle`）在主线程上完成，不需要往返 JavaScript。点击时，`count.update` 只修改一个信号，只有读取 `count()` 的那段文本会更新：组件函数不会重新执行。
 
 宿主应用只需几行原生代码就能显示它（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Windows](./windows.md#嵌入-win32-应用)、[Linux](./linux.md#嵌入-gtk-应用)）。在 iOS 上：
 
@@ -97,7 +97,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 由于 JavaScript 只描述界面、处理事件，解释器里的工作量很小。解析样式、解析 Tailwind 类名、差异比较、布局和文本处理都在 Rust 中完成。
 
 > [!NOTE]
-> 主线程从不等待 JavaScript。系统同步提出的问题（这个输入框还能再接受一个字符吗、用户可以侧滑返回吗、这个面板可以关闭吗）由原生层根据你事先设置的 props 直接回答，例如 `maxLength`、`preventBack` 或 `dismissible`。事件随后才会到达你的代码。
+> 主线程从不等待 JavaScript。系统同步提出的问题（这个输入框还能再接受一个字符吗、用户可以侧滑返回吗、这个面板可以关闭吗）由原生层根据你事先设置的 props 直接回答，例如 `maxLength`、`popOnBack` 或 `closeOnSwipe`。事件随后才会到达你的代码。
 
 ## 你能得到什么
 
@@ -108,7 +108,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 - **原生视图。** 嵌入原生地图、WebView 或视频播放器没有层级问题，无障碍使用平台自己的树，文本输入是系统的输入。
 - **细粒度响应式。** 与 Solid 类似的[信号](./reactivity.md)，在原生层实现。组件只运行一次，只有读取了变化信号的表达式会重新执行。
 - **样式与 Tailwind**，在原生层解析：flexbox、CSS grid、阴影、渐变、滤镜、过渡（[样式](./styling.md)、[Tailwind](./tailwind.md)）。
-- **移动端 UI 组件集**（`nsh/ui/mobile`），组件用 Rust 编写、由 NSH 绘制，在每个平台上外观一致：[Button](../components/button.md)、[Card](../components/card.md)、[ListView](../components/list-view.md)、[导航](../components/navigation.md) 等。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)），桌面 UI 套件也在路上。
+- **基础元素与基础组件，外观由应用决定。** 应用用基础元素（`View`、`Text`、`Input`、`List` 等）配合样式和 Tailwind 类绘制界面，并以 [`nsh/base`](../modules/nsh-base.md) 为依托，这些无样式的基础组件负责行为、状态和无障碍：导航栈和 modal、安全区域、系统提示框、键盘和状态栏。其上带样式的组件库由应用自己或社区提供（[三层结构](./architecture.md#three-layers)）。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)）。
 - **单一可执行文件的工具链。** 一个 `nsh` 可执行文件负责构建模块、生成类型声明、以热模块替换的方式提供开发服务、打包和签名。
 
 ## 运行平台

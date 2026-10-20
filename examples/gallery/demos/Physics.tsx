@@ -173,7 +173,7 @@ export function Physics() {
           onPanEnd={release}
           onPress={pulse}
           onLongPress={reset}
-          accessibilityRole="button"
+          role="button"
           accessibilityLabel="Draggable card"
           style={{
             width: CARD,

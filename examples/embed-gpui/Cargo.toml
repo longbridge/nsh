@@ -14,9 +14,9 @@ exclude = ["run"]
 
 [dependencies]
 nsh-platform-gpui = { path = "../../crates/gpui/nsh-platform-gpui" }
-# The host's own set (`host/trading`): `#[module]`, and NSH's UI set next to it.
+# The host's own set (`host/trading`): `#[module]`, and `nsh/base` next to it.
 nsh-core = { path = "../../crates/nsh-core" }
-nsh-ui-mobile = { path = "../../crates/nsh-ui-mobile" }
+nsh-base = { path = "../../crates/nsh-base" }
 # The desk the host and the apps share (`watch`).
 tokio = { version = "1", default-features = false, features = ["sync"] }
 # `gpui-fast`: GPUI Kit drawn by the same `gpui_fast` crate as nsh.
@@ -31,7 +31,7 @@ log = "0.4"
 nsh-bundler = { path = "../../crates/nsh-bundler", features = ["bundle"] }
 nsh-core = { path = "../../crates/nsh-core" }
 nsh-js = { path = "../../crates/nsh-js" }
-nsh-ui-mobile = { path = "../../crates/nsh-ui-mobile" }
+nsh-base = { path = "../../crates/nsh-base" }
 serde_json = "1"
 
 [profile.dev.package.quickjs-jit-sys]

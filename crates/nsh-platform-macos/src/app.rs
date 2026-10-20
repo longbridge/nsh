@@ -34,7 +34,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/ui/mobile`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -46,7 +46,7 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+        .unwrap_or_else(|| vec![nsh_base::registry()])
 }
 
 /// What [`run_app`] runs.
@@ -233,10 +233,8 @@ impl AppView {
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
-            header_heights: (
-                px(crate::navigation::HEADER_HEIGHTS.0),
-                px(crate::navigation::HEADER_HEIGHTS.1),
-            ),
+            // NSH draws no header: a page's `header` sits at its top.
+            header_heights: nsh_core::NO_NATIVE_HEADER,
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,

@@ -63,7 +63,7 @@ nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows
 - **`Platform.select`** 按操作系统取值，也可以按 `mobile` 和 `desktop` 整体取值；`Platform.OS` 是 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。
 - **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
 
-[`nsh/ui/mobile`](../components/index.md) 的组件由 NSH 绘制，所以在桌面上也能运行，样子和在手机上一样。桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的；桌面 UI 套件也在路上。
+应用的组件用 NSH 的基础元素绘制，所以在桌面上和在手机上一样运行，样子也相同。桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的。
 
 每个后端都列出了它尚不支持的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)。
 

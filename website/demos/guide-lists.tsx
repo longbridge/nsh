@@ -28,7 +28,7 @@ function Feed() {
       keyExtractor={(p) => String(p.id)}
       estimatedItemSize={56}
       style={{ flex: 1 }}
-      contentContainerStyle={{ padding: 12, gap: 8 }}
+      contentStyle={{ padding: 12, gap: 8 }}
       onEndReached={() => posts.update((p) => [...p, ...make(20)])}
       onEndReachedThreshold={0.5}
       refreshing={refreshing()}
@@ -44,7 +44,7 @@ function Feed() {
       onViewableItemsChanged={({ viewableItems }) =>
         visible.set(viewableItems.length ? `${viewableItems[0].index}–${viewableItems[viewableItems.length - 1].index}` : "")
       }
-      ListHeaderComponent={
+      header={
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 4 }}>
           <Text style={{ flex: 1, color: ui().muted }}>
             {posts().length} posts, visible {visible()}
@@ -71,7 +71,7 @@ function Feed() {
 function Grid() {
   const items = Array.from({ length: 300 }, (_, i) => ({ id: i, height: 60 + (i % 4) * 18 }));
   return (
-    <List each={items} numColumns={3} estimatedItemSize={80} style={{ flex: 1 }} contentContainerStyle={{ padding: 12, gap: 8 }}>
+    <List each={items} numColumns={3} estimatedItemSize={80} style={{ flex: 1 }} contentStyle={{ padding: 12, gap: 8 }}>
       {(item) => (
         <View style={{ height: item().height, borderRadius: 10, backgroundColor: tint(ui()[tints[item().id % tints.length]], 0.16), alignItems: "center", justifyContent: "center" }}>
           <Text style={{ fontWeight: "600", color: ui().text }}>{item().id}</Text>

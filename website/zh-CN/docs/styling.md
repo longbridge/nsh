@@ -249,12 +249,12 @@ Android 不支持斜切（skew）变换。
 
 ## 按压反馈
 
-按下状态由原生处理，无需与 JavaScript 往返：
+按压反馈是应用为按下状态设置的样式，由原生应用，无需与 JavaScript 往返；`hoverStyle`、`focusStyle` 和 `disabledStyle`（`hover:`、`focus:`、`disabled:`）设置其他状态的样式：
 
 | 属性 | 按下时的效果 |
 |---|---|
-| `activeOpacity={0.6}` | 视图淡化到该不透明度 |
-| `underlayColor="#eaeef2"` | 背景变为该颜色，子视图淡化到 `underlayOpacity`（默认 0.85） |
+| `activeStyle={{ opacity: 0.6 }}` | 视图淡化到该不透明度 |
+| `activeStyle={{ backgroundColor: "#eaeef2" }}` | 背景变为该颜色 |
 | `android={{ ripple: { color: "#0002" } }}` | Android 的 Material 水波纹 |
 | `class="active:bg-zinc-100 active:scale-95"` | 通过 Tailwind 的 `active:` 变体设置任意样式 |
 

@@ -5,7 +5,7 @@
 //! root's `BackPress` event comes when the app listens: the views'
 //! listeners run newest first until one returns true; then JS's, if it
 //! listens. When no one handles it, the core sends [`crate::Command::Back`]:
-//! the innermost stack pops (or asks, with `preventBack`), else the app
+//! the innermost stack pops (or asks, with `popOnBack` false), else the app
 //! exits. The root listens while a listener of either side exists, so with
 //! none the platform goes back on the spot, as `Command::Back` would.
 

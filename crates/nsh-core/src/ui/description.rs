@@ -91,7 +91,7 @@ pub struct AssetDescription {
 /// A UI set as data: everything the toolchain reads from a [`Registry`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetDescription {
-    /// The specifier apps import it by (`nsh/ui/mobile`, `gallery/native`).
+    /// The specifier apps import it by (`nsh/base`, `gallery/native`).
     pub specifier: String,
     /// Its exports, each name once, in the order a module declares them.
     pub exports: Vec<ExportDescription>,

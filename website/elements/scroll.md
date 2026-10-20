@@ -44,6 +44,8 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `View
 | `decelerationRate` | `"normal" \| "fast" \| number` | platform | How fast a fling slows down: the velocity kept per millisecond (`normal` 0.998, `fast` 0.99). |
 | `contentInset` | `{ top?, right?, bottom?, left? }` | | Room around the content. |
 | `contentOffset` | `{ x?, y? }` | | Where it starts. |
+| `contentStyle` | `ViewStyle` | | The style of a view around the children that scrolls with them; `flexGrow: 1` makes it at least as tall as the viewport (a centered empty state). |
+| `contentClass` | `string` | | The same as classes, e.g. `"grow justify-center p-4"`. |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard: `never` (the tap only dismisses it), `always` (it stays up), `handled` (it stays up when something handles the tap). |
 | `scrollValue` | `AnimatedValue` | | An animated value fed with the scroll offset (main axis), for scroll-linked animations. |
@@ -125,7 +127,7 @@ scroller.scrollTo({ y: 0, animated: true });
 
 Inputs inside a scroll view are kept clear of the keyboard natively: the scroll view gets a bottom inset and scrolls to
 the focused input, with no JS involved. For content outside scroll views use `KeyboardAvoidingView` from
-[`nsh/ui/mobile`](../components/keyboard-avoiding-view.md). See [forms and the keyboard](../docs/forms-and-keyboard.md).
+[`nsh/base`](../modules/nsh-base.md#keyboardavoidingview). See [forms and the keyboard](../docs/forms-and-keyboard.md).
 
 ## Right to left
 

@@ -24,7 +24,7 @@ function Apogees() {
           const n = last().length;
           if (width() > 0) picked.set(Math.min(n - 1, Math.max(0, Math.floor((x / width()) * n))));
         })}
-        accessibilityRole="adjustable"
+        role="adjustable"
         accessibilityLabel="Apogee of the last hops"
         accessibilityValue={{ text: `Hop ${hop().id}, ${Math.round(hop().apogee)} meters, ${hop().outcome}` }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
@@ -59,7 +59,7 @@ function Apogees() {
           Hop {hop().id} · <Text style={{ fontFamily: mono, color: color.text }}>{Math.round(hop().apogee)} m</Text> · {hop().note}
         </Text>
         <If when={picked() !== null}>
-          <Text onPress={() => picked.set(null)} hitSlop={8} accessibilityRole="button" style={{ fontSize: 13, color: color.accent }}>
+          <Text onPress={() => picked.set(null)} hitSlop={8} role="button" style={{ fontSize: 13, color: color.accent }}>
             Latest
           </Text>
         </If>
@@ -92,7 +92,7 @@ function Dispersion() {
           const r = Math.hypot(x - (s * 1.25) / 2, y - s / 2) / scale;
           zone.set(Math.round(Math.min(3, Math.max(0.3, r)) * 10) / 10);
         })}
-        accessibilityRole="adjustable"
+        role="adjustable"
         accessibilityLabel="Touchdown dispersion and landing zone"
         accessibilityValue={{ text: `zone ${zone().toFixed(1)} meters, ${inside()} percent inside` }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}

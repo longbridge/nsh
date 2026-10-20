@@ -10,7 +10,7 @@
 //! A view draws itself in [`crate::render`]: shadows and background
 //! ([`crate::decor`]), its content (text, image, canvas), its children
 //! (clipped to the rounded bounds when `overflow: hidden`), the items it
-//! hosts ([`ViewState::natives`]: text editors, headers, ...), then its
+//! hosts ([`ViewState::natives`]: text editors, web views, ...), then its
 //! border, as UIKit draws layer borders over the content.
 //!
 //! Changing what a view draws calls [`NshView::changed`], which walks up to

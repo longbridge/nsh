@@ -8,7 +8,7 @@ order: 15
 
 除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
 
-本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和[组件](../components/index.md)搭建，其余能力来自应用导入的[模块](./index.md)。
+本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和应用自己的组件搭建，其余能力来自应用导入的[模块](./index.md)。
 
 这些全局对象的 TypeScript 声明会生成到 `.nsh/types/nsh/globals.d.ts`（见[项目结构](../docs/project-structure.md)）。
 
@@ -178,7 +178,7 @@ channel.addEventListener("message", (e) => console.log((e as CustomEvent<string>
 channel.send("hello");
 ```
 
-它们与元素的事件（`onPress`、`onChangeText` 等）无关，后者是 props，参见[触摸与手势](../docs/touch-and-gestures.md)。
+它们与元素的事件（`onPress`、`onChange` 等）无关，后者是 props，参见[触摸与手势](../docs/touch-and-gestures.md)。
 
 `AbortSignal` 可以取消 `fetch` 请求和流的管道传输，也可以移除用 `{ signal }` 添加的监听器：
 

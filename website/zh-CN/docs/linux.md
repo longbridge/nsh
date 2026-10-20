@@ -7,8 +7,8 @@ group: platforms
 
 # Linux
 
-NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局和
-`nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Linux 上，`Platform.OS` 为
+NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局以及
+原生模块与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Linux 上，`Platform.OS` 为
 `"linux"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -112,13 +112,13 @@ fn main() -> gtk::glib::ExitCode {
 
 | 按键 | 作用 |
 |---|---|
-| Return | 在 `Input` 中按 `submitBehavior` 行事：提交（`onSubmitEditing`）、提交并离开输入框，或换行（多行输入框） |
+| Return | 在 `Input` 中按 `submitBehavior` 行事：提交（`onSubmit`）、提交并离开输入框，或换行（多行输入框） |
 | Shift+Return、Alt+Return | 在回车即提交的多行输入框中换行（Ctrl+Return 提交） |
-| Tab、Shift+Tab | 按屏幕顺序移到下一个 / 上一个输入框，只在最上层的模态窗口之内 |
-| Escape | 离开有焦点的输入框；否则清除文本选区，再返回上一页或请求关闭最上层的模态窗口 |
+| Tab、Shift+Tab | 按屏幕顺序移到下一个 / 上一个输入框，只在最上层的对话框之内 |
+| Escape | 离开有焦点的输入框；否则清除文本选区，再关闭最上层的对话框或返回上一页 |
 | Alt+Left、Back 键、鼠标的后退键 | 返回上一页（在输入框中也是） |
 | Ctrl+方向键、Home / End，加 Shift；Ctrl+Backspace / Delete | 在输入框中按词和行移动、选择、删除，与其他 GTK 应用一致 |
-| Ctrl+Z、Ctrl+Shift+Z、Ctrl+X / C / V / A | 撤销、重做、剪切、复制、粘贴、全选（密码输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 `selectable` 文本 |
+| Ctrl+Z、Ctrl+Shift+Z、Ctrl+X / C / V / A | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Ctrl+A / Ctrl+C 选择并复制 `selectable` 文本 |
 | 方向键；Page Up / Down、Space、Shift+Space；Home / End | 滚动有焦点的视图所在或鼠标下方的滚动视图：一行、一页、到开头 / 结尾（输入框有焦点时不滚动） |
 | Ctrl+W、F11、Ctrl+Q | 关闭窗口、全屏、退出（`nsh package` 和 `nsh run` 的应用） |
 | Ctrl+R | 重新加载最新的构建（`nsh run`） |

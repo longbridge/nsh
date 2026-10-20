@@ -6,7 +6,7 @@ order: 10
 
 # nsh/accessibility
 
-`nsh/accessibility` reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. The accessibility props of elements (`accessibilityLabel`, `accessibilityRole`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
+`nsh/accessibility` reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
 
 ```ts
 import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/accessibility";
@@ -80,7 +80,7 @@ function Saved() {
   cleanup(() => sub.remove());
   return (
     <View style={{ gap: 8 }}>
-      <Text onPress={save} accessibilityRole="button">Save</Text>
+      <Text onPress={save} role="button">Save</Text>
       <Text ref={note}>Your changes are kept on this device.</Text>
     </View>
   );

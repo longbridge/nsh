@@ -36,7 +36,7 @@ use windows::{
 use super::{Control, Exposed, Part, part};
 use crate::{geom::Mat4, surface::Surface, view::NshView};
 
-// -> Rect {- VARIANTs -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- VARIANTs --------------------------------------------------------------
 
 /// A VARIANT this module made; cleared when dropped (event values), or
 /// handed over to UIA with [`Var::into_raw`] (property values).
@@ -129,7 +129,7 @@ fn none<T>() -> Result<T> {
     Err(Error::empty())
 }
 
-// -> Rect {- Finding views -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// --- Finding views ---------------------------------------------------------
 
 /// The surface and the exposed view a provider stands for.
 struct Target {
@@ -177,7 +177,7 @@ fn runtime_id(id: NodeId) -> [i32; 2] {
     [UiaAppendRuntimeId as i32, id as i32]
 }
 
-// -> Rect {- Geometry -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Geometry --------------------------------------------------------------
 
 /// Where `child` goes in `parent`'s coordinates.
 fn local(parent: &NshView, child: &NshView) -> Option<Mat4> {
@@ -265,7 +265,7 @@ fn hit(view: &NshView, m: &Mat4, x: f32, y: f32) -> Option<NshView> {
     inside.then(|| view.clone())
 }
 
-// -> Rect {- Events -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Events ----------------------------------------------------------------
 
 /// Views came or went: the tree under the root is read again.
 pub(super) fn structure_changed(surface: &Rc<Surface>) {
@@ -441,7 +441,7 @@ pub(super) fn get_object(
     Some(unsafe { UiaReturnRawElementProvider(hwnd, wparam, lparam, &root) })
 }
 
-// -> Rect {- The root -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- The root --------------------------------------------------------------
 
 /// The window's content: the fragment root.
 #[implement(
@@ -544,7 +544,7 @@ impl IRawElementProviderFragmentRoot_Impl for Root_Impl {
     }
 }
 
-// -> Rect {- Elements -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
+// --- Elements --------------------------------------------------------------
 
 /// One exposed view.
 #[implement(

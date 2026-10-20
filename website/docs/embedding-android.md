@@ -163,7 +163,7 @@ again replaces the running app. The complete sample is
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
-| `handleBack()` | Lets the app handle a back press (closes modals, pops screens, runs `BackHandler` listeners); returns whether it did. |
+| `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
 | `destroy()` | Stops the app. The view can no longer be used. |
 
 > [!IMPORTANT]
@@ -255,7 +255,7 @@ config of the app may override it). The release `nsh.aar` does not.
 ## Activity setup
 
 - **Back button.** On Android 13 and newer, `NshView` registers its own back callback while the app wants back presses
-  (an open modal, a pushed screen, a `BackHandler` listener). On Android 12 and older, forward the press:
+  (an open dialog, a pushed page, a `BackHandler` listener). On Android 12 and older, forward the press:
 
   ```java
   @Override
@@ -270,7 +270,7 @@ config of the app may override it). The release `nsh.aar` does not.
   or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
-  `SafeAreaView` / `useSafeAreaInsets()`.
+  `SafeAreaView` / `safeAreaInsets()`.
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
   again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
 

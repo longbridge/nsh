@@ -69,7 +69,7 @@ pub(crate) struct Dom {
     rtl: Cell<Option<bool>>,
     /// The `onDismiss` handlers of modals the app removed, kept until the
     /// platform reports their dismissal, oldest first (owned): an app
-    /// removes a modal in `onRequestClose`, and the platform reports
+    /// removes a dialog in `onOpenChange` or `onCancel`, and the platform reports
     /// `onDismiss` once it has gone (after its animation).
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
     /// Whether the user's language is written right to left.
@@ -108,8 +108,8 @@ struct NodeData {
     /// Values of props that may hold native animation nodes (`style`,
     /// `pan`, ...), kept alive with the view (owned).
     retained: Vec<(&'static str, JsValue)>,
-    /// A `<Scroll>`'s content container (`contentContainerStyle` /
-    /// `contentContainerClass`), one of `children` that takes the others
+    /// A `<Scroll>`'s content container (`contentStyle` /
+    /// `contentClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
     content: NodeId,
     /// A Rust component's view or one of its slots (`component`,
@@ -1039,7 +1039,7 @@ fn content_of(ctx: *mut JsContext, parent: JsValue, child: JsValue) -> JsValue {
 
 /// The content container of `<Scroll>` `node` (borrowed), made on first
 /// use: a view the scroll view's children move into, styled by
-/// `contentContainerStyle` / `contentContainerClass` (React Native's
+/// `contentStyle` / `contentClass` (React Native's
 /// content container: `flexGrow: 1` with `justifyContent: "center"`
 /// centers what is shorter than the viewport and still scrolls what is
 /// longer).
@@ -1071,6 +1071,26 @@ fn scroll_content(ctx: *mut JsContext, node: JsValue) -> Result<JsValue, JsValue
     // The scroll view owns it now (as its child).
     unsafe { qjs::JS_FreeValue(ctx, content) };
     result.map(|()| content_of(ctx, node, UNDEFINED))
+}
+
+/// A state or part style prop's value (borrowed) as the core takes it:
+/// its declarations, none when it has none.
+fn part_style(
+    ctx: *mut JsContext,
+    name: &str,
+    value: JsValue,
+) -> Result<Option<std::sync::Arc<nsh_core::StylePatch>>, JsValue> {
+    // SAFETY: a context reference for the decoder, which reads a dup.
+    let cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(ctx)) };
+    let v = unsafe { Value::from_raw(cx, qjs::JS_DupValue(ctx, value)) };
+    let mut warnings = crate::protocol::Warnings::deferred();
+    let patch = crate::protocol::style_patch(&v, &mut warnings);
+    dom(ctx).shared.warnings.borrow_mut().merge(warnings);
+    match patch {
+        Ok(patch) => Ok((!patch.is_empty()).then(|| std::sync::Arc::new(patch))),
+        Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
+        Err(e) => Err(throw_type(ctx, &format!("nsh: prop `{name}`: {e}"))),
+    }
 }
 
 /// Removes node `child` from `parent` (nothing when it is not a child).
@@ -1192,16 +1212,40 @@ fn set_prop(
         "ios" | "android" | "desktop" | "web" => {
             return platform_props(ctx, node, name, value, prev);
         }
-        "contentContainerStyle" | "contentContainerClass"
-            if unsafe { (*p).tag } == Some(Tag::Scroll) =>
-        {
+        "contentStyle" | "contentClass" if unsafe { (*p).tag } == Some(Tag::Scroll) => {
             let content = scroll_content(ctx, node)?;
-            let name = if name == "contentContainerStyle" {
+            let name = if name == "contentStyle" {
                 "style"
             } else {
                 "class"
             };
             return set_prop(ctx, content, name, value, prev);
+        }
+        "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
+        | "headerStyle" => {
+            let patch = part_style(ctx, name, value)?;
+            let prop = match name {
+                "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
+                "hoverStyle" => nsh_core::Prop::HoverStyle(patch),
+                "focusStyle" => nsh_core::Prop::FocusStyle(patch),
+                "disabledStyle" => nsh_core::Prop::DisabledStyle(patch),
+                "selectedStyle" => nsh_core::Prop::SelectedStyle(patch),
+                _ => nsh_core::Prop::HeaderStyle(patch),
+            };
+            return dom(ctx).push(ctx, Op::SetProp { id, prop });
+        }
+        "headerClass" | "contentClass" => {
+            // SAFETY: an inline tag check.
+            let names: Box<str> = if unsafe { qjs::JS_IsString(value) } {
+                string_arg(ctx, value).unwrap_or_default().into()
+            } else {
+                Box::default()
+            };
+            let prop = match name {
+                "headerClass" => nsh_core::Prop::HeaderClass(names),
+                _ => nsh_core::Prop::ListContentClass(names),
+            };
+            return dom(ctx).push(ctx, Op::SetProp { id, prop });
         }
         _ => {}
     }
@@ -1215,7 +1259,7 @@ fn set_prop(
     if name.len() > 2
         && name.starts_with("on")
         && name.as_bytes()[2].is_ascii_uppercase()
-        && let Some(event) = EventKind::from_prop(name)
+        && let Some(event) = EventKind::from_handler(name)
     {
         return set_event(ctx, p, event, value);
     }
@@ -2898,9 +2942,10 @@ unsafe extern "C" fn unmount(
     result
 }
 
-/// `setup(tailwind, theme, appearance)`: the app's Tailwind theme and the
-/// theme of the Rust components (JSON strings, or null) and its
-/// appearance (`"light"` / `"dark"`, or null), before anything renders.
+/// `setup(tailwind, theme, appearance, statusBar)`: the app's Tailwind
+/// theme and the theme of the Rust components (JSON strings, or null), its
+/// appearance (`"light"` / `"dark"`, or null) and the status bar's default
+/// (`nsh.json` `"statusBar"` as JSON, or null), before anything renders.
 unsafe extern "C" fn setup(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -2916,6 +2961,21 @@ unsafe extern "C" fn setup(
         {
             return e;
         }
+    }
+    // Checked by the bundler; a hand-made bundle's wrong value is ignored.
+    let status_bar = string_arg(ctx, arg(argc, argv, 3))
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok());
+    if let Some(setting) = status_bar
+        && let Err(e) = push_op(
+            ctx,
+            Op::Command {
+                id: nsh_core::ROOT_ID,
+                command: nsh_core::Command::SetStatusBar(setting),
+            },
+        )
+    {
+        return e;
     }
     let appearance =
         crate::env::parse_appearance(&string_arg(ctx, arg(argc, argv, 2)).unwrap_or_default());
@@ -3193,7 +3253,7 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("each", Export::Function(each, 3), Ts::Internal),
     ("merge", Export::Function(merge, 2), Ts::Internal),
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
-    ("setup", Export::Function(setup, 3), Ts::Internal),
+    ("setup", Export::Function(setup, 4), Ts::Internal),
     ("font", Export::Function(font, 2), Ts::Internal),
     ("metaUrl", Export::Function(meta_url, 1), Ts::Internal),
     ("ref", Export::Function(ref_, 3), Ts::Internal),
@@ -3634,7 +3694,7 @@ mod tests {
         assert_eq!(reported(&host), ["1"]);
     }
 
-    /// `contentContainerStyle` moves a scroll view's children into a view
+    /// `contentStyle` moves a scroll view's children into a view
     /// it styles, whatever order props and children come in.
     #[test]
     fn scroll_content_container() {
@@ -3648,13 +3708,13 @@ mod tests {
             mount(() => {
                 const v = element("view");
                 const s = element("scroll");
-                prop(s, "contentContainerStyle", { flexGrow: 1 });
+                prop(s, "contentStyle", { flexGrow: 1 });
                 append(s, text("a"));
                 insert(s, () => (show() ? text("b") : null));
                 append(v, s);
                 const t = element("scroll");
                 append(t, text("c"));
-                prop(t, "contentContainerClass", "grow");
+                prop(t, "contentClass", "grow");
                 append(v, t);
                 return v;
             });

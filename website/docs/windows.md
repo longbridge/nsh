@@ -8,7 +8,7 @@ group: platforms
 # Windows
 
 NSH apps also run on Windows. The Windows backend draws them in Win32 windows with Direct2D and lays out text with
-DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the same
+DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the native modules are the same
 as on iOS and Android, so one bundle runs everywhere. On Windows, `Platform.OS` is `"windows"` and the
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
 [`nsh/desktop`](../modules/nsh-desktop.md).
@@ -123,13 +123,13 @@ effects setting and the locale the user's regional format. See [Device and envir
 
 | Keys | Do |
 |---|---|
-| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmitEditing`), submit and leave the field, or a new line (multiline inputs) |
+| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmit`), submit and leave the field, or a new line (multiline inputs) |
 | Shift+Return, Alt+Return | A new line in a multiline input whose return submits (Ctrl+Return submits) |
-| Tab, Shift+Tab | The next / previous text field, within the newest modal; the field's text is selected, as in Windows' dialogs |
-| Escape | Leaves the focused field; else clears a text selection, then goes back or asks the newest modal to close |
+| Tab, Shift+Tab | The next / previous text field, within the newest dialog; the field's text is selected, as in Windows' dialogs |
+| Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Alt+Left, Browser Back key, mouse back button | Go back (also from a field) |
 | Ctrl+arrows, Home / End, Ctrl+Home / End, with Shift; Ctrl+Backspace / Delete | Move, select and delete by word and line in a field, as in every Windows app |
-| Ctrl+Z, Ctrl+Y, Ctrl+X / C / V / A; Shift+Delete, Ctrl+Insert, Shift+Insert | Undo, redo, cut, copy, paste, select all (a secure field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
+| Ctrl+Z, Ctrl+Y, Ctrl+X / C / V / A; Shift+Delete, Ctrl+Insert, Shift+Insert | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
 | Arrows; Page Up / Down, Space, Shift+Space; Home / End, Ctrl+Home / End | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | F11, Alt+F4 | Full screen, close the window (`nsh package` and `nsh run` apps) |
 | Ctrl+R, F5 | Reload the latest build (`nsh run`) |
@@ -155,7 +155,7 @@ Different, or not supported:
 - **Text inputs**: keyboard types and autofill do not apply (there is no software keyboard); Tab moves between text
   fields. A right click opens the edit menu (Undo, Cut, Copy, Paste, Delete, Select All), as on selectable text (Copy,
   Select All).
-- **Accessibility** (UI Automation): headers' titles and buttons, dialogs and toasts are not exposed; headings report
+- **Accessibility** (UI Automation): alert dialogs and toasts are not exposed; headings report
   level 1.
 - **Input accessory views** and the **status bar** (no desktop equivalent).
 

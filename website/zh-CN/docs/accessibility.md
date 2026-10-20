@@ -21,7 +21,7 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 ```tsx
 <View
   onPress={play}
-  accessibilityRole="button"
+  role="button"
   accessibilityLabel="Play"
   accessibilityHint="Starts the song"
   style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
@@ -35,8 +35,8 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 | `accessible` | `boolean` | 视图作为一个整体元素提供给辅助技术；子元素不单独暴露。 |
 | `accessibilityLabel` | `string` | 屏幕阅读器朗读的内容，代替内部的文字。 |
 | `accessibilityHint` | `string` | 激活元素会发生什么，在停顿后朗读。 |
-| `accessibilityRole`（或 `role`） | `AccessibilityRole` | 元素是什么。 |
-| `accessibilityState` | `AccessibilityState` | 它的状态：禁用、选中、勾选、忙碌、展开。 |
+| `role` | `AccessibilityRole` | 元素是什么。 |
+| `accessibilityState` | `AccessibilityState` | 它的状态：禁用、选中、勾选、忙碌、展开。`selected` 同时让 `selected:` 类生效。 |
 | `accessibilityValue` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityActions` | `{ name, label? }[]` | 提供给辅助技术的操作。 |
 | `onAccessibilityAction` | `(e: { actionName }) => void` | 执行了某个操作。 |
@@ -49,7 +49,7 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 
 ### 角色
 
-`accessibilityRole` 告诉用户这是哪一类元素、如何操作。取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"` 和 `"grid"`。
+`role` 告诉用户这是哪一类元素、如何操作。取值有 `"none"`、`"button"`、`"link"`、`"search"`、`"image"`、`"imagebutton"`、`"keyboardkey"`、`"text"`、`"adjustable"`、`"header"`、`"summary"`、`"alert"`、`"checkbox"`、`"combobox"`、`"menu"`、`"menubar"`、`"menuitem"`、`"progressbar"`、`"radio"`、`"radiogroup"`、`"scrollbar"`、`"spinbutton"`、`"switch"`、`"tab"`、`"tablist"`、`"timer"`、`"toolbar"`、`"list"` 和 `"grid"`。
 
 最常用的几个：
 
@@ -60,7 +60,7 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 - `"image"` 用于有意义的图片，并加上标签；装饰性图片应当隐藏。
 
 ```tsx
-<Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: "700" }}>Settings</Text>
+<Text role="header" style={{ fontSize: 22, fontWeight: "700" }}>Settings</Text>
 ```
 
 ### 状态与值
@@ -69,7 +69,7 @@ NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst �
 // 用视图画出来的开关。
 <View
   onPress={() => on.set(!on())}
-  accessibilityRole="switch"
+  role="switch"
   accessibilityLabel="Wi-Fi"
   accessibilityState={{ checked: on() }}
   hitSlop={8}
@@ -92,7 +92,7 @@ function Quantity() {
   return (
     <View
       accessible
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel="Quantity"
       accessibilityValue={{ text: String(n()) }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
@@ -137,7 +137,7 @@ function Quantity() {
 `accessible` 让一个视图成为一个整体元素：带标题、副标题和价格的卡片会一次读完，而不需要用户在三段文字之间来回轻扫。
 
 ```tsx
-<View accessible onPress={open} accessibilityRole="button" style={{ padding: 16 }}>
+<View accessible onPress={open} role="button" style={{ padding: 16 }}>
   <Text>Blue jacket</Text>
   <Text>Size M</Text>
   <Text>$120</Text>

@@ -1,4 +1,5 @@
-//! Components written in Rust: the UI sets' components (`nsh-ui-mobile`),
+//! Components written in Rust: those of the runtime (`SafeAreaView`, ...) and
+//! of apps' own crates (their UI sets),
 //! run by the core on the engine thread.
 //!
 //! A [`Component`] is a function that runs once ([`Component::view`]) and
@@ -157,7 +158,6 @@ pub use self::{
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
-    status_bar::StatusBarEntry,
     style::{AdaptiveColor, BorderCurve, FontWeight, StyleRefinement, Styled, WritingDirection},
     system::{
         CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
@@ -320,6 +320,8 @@ pub mod prelude {
         SnapAlignment,
         Spring,
         Stack,
+        StatusBarSetting,
+        StatusBarStyle,
         Styled,
         SubmitBehavior,
         System,
@@ -384,7 +386,7 @@ pub mod prelude {
         Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Resource,
         ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Stored,
         ambient::{
-            Delay, KeyOptions, Spawned, add_status_bar, allow_rtl, animate_layout, animated_value,
+            Delay, KeyOptions, Spawned, allow_rtl, animate_layout, animated_value,
             announce_for_accessibility, clipboard_files, clipboard_has_image, clipboard_has_string,
             clipboard_image, clipboard_string, color, component_ref, dark, dialog,
             dismiss_keyboard, element_ref, fetch, font_scale, force_rtl, global, idiom, image_size,
@@ -392,8 +394,7 @@ pub mod prelude {
             next_frame, on_back_press, on_key, on_key_with, os, os_version, pixel_ratio,
             prefetch_image, reduce_motion, request_animation_frame, round_to_nearest_pixel, rtl,
             safe_area, screen_reader, set_clipboard, set_clipboard_image, set_color_scheme,
-            set_interval, set_timeout, spawn, theme, timer, timer_until, toast, update_status_bar,
-            window,
+            set_interval, set_timeout, spawn, theme, timer, timer_until, toast, window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context,
         resource, resource_with_value, signal, signal_with, stored, untracked, use_context,

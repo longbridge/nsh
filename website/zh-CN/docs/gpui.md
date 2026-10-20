@@ -9,7 +9,7 @@ group: platforms
 
 GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
 Windows 和 Linux 上表现一致。它的主要用途是嵌入：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在自己元素树的任意位置
-显示 NSH 模块。核心、响应式图、渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与其他所有平台完全相同，因此同一个 bundle 可以在所有
+显示 NSH 模块。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个 bundle 可以在所有
 平台上运行。`Platform.OS` 是它所运行的操作系统（`"macos"`、`"windows"` 或 `"linux"`），并会应用 `desktop={{…}}` 属性。
 
 [macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
@@ -110,7 +110,7 @@ gpui_platform::application().run(|cx| {
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 - `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)；你的应用判定它健康之后，用 `accept_package` 记录它。
-- `set_ui_sets(sets)` 替换默认的 `nsh/ui/mobile` 套件，用于带有自己 Rust 组件的应用，也用来提供你的应用自己的套件：应用通过
+- `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件，用于带有自己 Rust 组件的应用（[Rust](./rust.md)），也用来提供你的应用自己的套件：应用通过
   [`nativeModule`](../modules/nsh-native.md#nativemodule) 按名称使用其中的函数和类，并用标准的 `nsh build` 构建。仓库中的
   `examples/embed-gpui` 就这样在宿主中维护一个交易台，由两个嵌入的下单面板和宿主自己的控件共享。
 

@@ -27,7 +27,7 @@ animations stay smooth while JS is busy, why the main thread never waits for you
    children are set once; expressions that can change (they call a function or read a property) become bindings the
    renderer follows. Components become plain function calls with a props object whose changing props are getters.
 3. **rolldown** bundles your modules into one ES module. Imports of NSH's modules (`nsh`, `nsh/list`,
-   `nsh/ui/mobile`, ...) stay imports: those modules are native, served by the runtime. **The bundle contains only your
+   `nsh/base`, ...) stay imports: those modules are native, served by the runtime. **The bundle contains only your
    app's code**; the counter example is under 1 KB of JS.
 4. The bundle is compiled to **bytecode** (`bundle.nshc`), which loads faster than source, and a **source map**
    is composed across all steps so stack traces point at your `.tsx` lines.
@@ -52,7 +52,7 @@ Everything about your app's logic happens here:
 - **The renderer** your compiled JSX calls is native. It creates nodes and turns every change into an **op** pushed
   straight into a native queue: no JSON, no messages per prop.
 - **The core** keeps a shadow tree of all nodes. When a JS turn ends, it takes all queued ops at once and **commits**:
-  renders the Rust components (`nsh/ui/mobile`), rebuilds changed texts, lays out with **Taffy** (flexbox and grid, with a
+  renders the Rust components (`SafeAreaView`, `KeyboardAvoidingView`, the app's own), rebuilds changed texts, lays out with **Taffy** (flexbox and grid, with a
   column default and no shrinking), diffs frames and styles, and produces one **MountBatch**: the list of operations the native
   views need.
 
@@ -123,6 +123,20 @@ sticky headers, and recycles cells. When a cell needs a different item, the runt
 - **Hot module replacement** is native too: patches are applied by the runtime in well under a millisecond (see
   [Dev server and debugging](./dev-server-and-debugging.md)).
 
+## Three layers
+
+NSH's UI is built in three layers, as GPUI Kit's is:
+
+| Layer | NSH | GPUI Kit | What it is |
+|---|---|---|---|
+| Primitives | `nsh-core` and the runtime (`nsh`, `nsh/<module>`) | `gpui` | The host elements, styles, layout, rendering, reactivity, the environment |
+| Base components | `nsh-base` (`nsh/base`) | `gpui-base` | Unstyled components that own behavior, state, focus, the keyboard and accessibility, and take their look from the app |
+| Component library | your app's, or the community's | `gpui-component` | Styled components: buttons, cards, rows with a look |
+
+The first two layers are Native Shell. The third is yours: an app builds its own component library on `nsh/base` and
+the primitives, in TSX or as Rust components in [its own crate](./rust.md), uses one the community publishes, or
+styles its UI directly in the app.
+
 ## The crates
 
 NSH is a Rust workspace. You never build it to write apps (the distribution ships the CLI and prebuilt runtimes), but
@@ -130,8 +144,8 @@ the names show up in logs and docs:
 
 | Crate | What it is |
 |---|---|
-| `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the Rust components' framework and theme. |
-| `nsh-ui-mobile` | The components and modules of `nsh/ui/mobile` (`Button`, `Card`, `SafeAreaView`, `Alert`, ...), written in Rust. |
+| `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the Rust components' framework and theme; the runtime's Rust modules (`nsh/image`, ...). |
+| `nsh-base` | `nsh/base`, the unstyled base components (NSH's `gpui-base`): navigation, safe areas, dialogs, the keyboard and the status bar; Rust apps use it as `nsh_base`. |
 | `nsh-animation` | The native animation graph: values, interpolation, timing / spring / decay. |
 | `nsh-js` | The QuickJS host and NSH's runtime: the reactive graph, the renderer, every native module, the global APIs, hot module replacement, limits; and the TypeScript declarations of all of it. |
 | `nsh-engine` | The engine thread: drives `nsh-js` and `nsh-core` and hands one batch per frame to the platform. |
@@ -142,7 +156,7 @@ the names show up in logs and docs:
 | `nsh-platform-android` | The Android backend: `libnsh.so` and the Java runtime (`NshView`, the views, images, networking). |
 | `nsh-cli` | The `nsh` command. |
 
-The dependency direction is `nsh-core` ← `nsh-js` ← `nsh-engine` ← platforms. The core depends on no platform and no JS
+The dependency direction is `nsh-core` ← `nsh-js` ← `nsh-engine` ← platforms; `nsh-base` builds on `nsh-core`. The core depends on no platform and no JS
 engine, which is what lets `nsh test` run the real runtime headless on any machine.
 
 ## See also

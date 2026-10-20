@@ -373,6 +373,13 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `textDecorationThickness` | `number \| "auto" \| "from-font"` | 线的粗细。 |
 | `textUnderlineOffset` | `number \| "auto"` | 下划线与基线的距离。 |
 
+### 占位符与选区
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `placeholderColor` | `ColorValue` | `<Input>` 占位文字的颜色（`placeholder:text-*`）。 |
+| `selectionColor` | `ColorValue` | `<Input>` 的光标和选区、可选 `<Text>` 的选区高亮和选择柄（`selection:text-*`）；默认为平台的强调色。 |
+
 ### 文字阴影
 
 | 键 | 类型 | 说明 |
@@ -405,7 +412,6 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | 触摸穿透 | `pointerEvents` | `pointer-events-none`、`pointer-events-auto` |
 | 图片填充 | `<Image>` 的 `resizeMode` | `object-cover`、`object-contain` 等 |
 | 文字可选 | `<Text>` 的 `selectable` | `select-text`、`select-none` |
-| 占位符颜色 | `<Input>` 的 `placeholderTextColor` | `placeholder:text-*` |
 | Material 阴影（Android） | `android={{ elevation }}` | |
 
 ## 相关

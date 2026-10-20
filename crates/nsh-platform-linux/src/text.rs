@@ -1604,7 +1604,7 @@ fn pressed(view: &NshView, n: i32, x: f32, y: f32, modifiers: gtk::gdk::Modifier
         };
         let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = char_at(&state, x, y);
-        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
+        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressDown];
         let over_press = press.iter().any(|&k| state.events.contains(k))
             || char_index
                 .and_then(|i| drawn.text.link_at(i))

@@ -26,7 +26,7 @@ WORKFLOWS = {
     "core.yml": {
         "packages": [
             "nsh-core", "nsh-animation", "nsh-macros", "nsh-js", "nsh-engine",
-            "nsh-bundler", "nsh-package", "nsh-ui-mobile", "nsh-testing",
+            "nsh-bundler", "nsh-package", "nsh-base", "nsh-testing",
         ],
         "files": ["api/**", "examples/counter/**", "examples/gallery/**", "examples/bench/**"],
     },

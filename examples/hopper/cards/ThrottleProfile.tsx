@@ -171,7 +171,7 @@ function Timeline() {
             <View
               onPress={() => selectedPhase.set(phase().id)}
               hitSlop={6}
-              accessibilityRole="tab"
+              role="tab"
               accessibilityLabel={`${phase().name} at ${phase().at} seconds`}
               accessibilityState={{ selected: on() }}
               style={{ position: "absolute", top: 0, bottom: 0, left: left(), width: label }}
@@ -217,7 +217,7 @@ function Timeline() {
 function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) {
   return (
     <View
-      accessibilityRole="menu"
+      role="menu"
       style={{
         position: "absolute",
         right: 0,
@@ -238,8 +238,8 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
         {(option) => (
           <View
             onPress={() => props.onPick(option().name)}
-            underlayColor={color.lineStrong}
-            accessibilityRole="menuitem"
+            activeStyle={{ backgroundColor: color.lineStrong }}
+            role="menuitem"
             accessibilityState={{ checked: props.value === option().name }}
             style={{ flexDirection: "row", alignItems: "center", height: 40, paddingHorizontal: 14, gap: 8 }}
           >
@@ -296,7 +296,7 @@ export function ThrottleProfile() {
         </View>
         <View
           onPress={() => open.set(!open())}
-          accessibilityRole="button"
+          role="button"
           accessibilityLabel={`Easing: ${easingLabel(phase().easing)}`}
           accessibilityState={{ expanded: open() }}
           style={{

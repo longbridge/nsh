@@ -7,8 +7,8 @@ use std::sync::Arc;
 use super::host::{HostCx, HostInput, HostValue, field};
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
-    ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp, Viewability,
-    WebSource,
+    ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp, StatusBarSetting,
+    StatusBarStyle, Viewability, WebSource,
     geometry::{Points, point, size},
     mount::ModalConfig,
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
@@ -73,7 +73,7 @@ impl HostValue for WebSource {
     }
 }
 
-/// A list's `contentContainerStyle`: the padding properties (numbers) and
+/// A list's `contentStyle`: the padding properties (numbers) and
 /// `gap` / `rowGap` / `columnGap`.
 impl HostValue for ListContentStyle {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
@@ -96,13 +96,37 @@ impl HostValue for ListContentStyle {
 
     fn ts_type(types: &mut TsTypes) -> String {
         types.declare("ListContentStyle", |_| {
-            "/** Padding and gaps of a list's content (`contentContainerStyle`). */\n\
+            "/** Padding and gaps of a list's content (`contentStyle`). */\n\
              export interface ListContentStyle {\n  padding?: number;\n  paddingHorizontal?: number;\n  \
              paddingVertical?: number;\n  paddingTop?: number;\n  paddingRight?: number;\n  \
              paddingBottom?: number;\n  paddingLeft?: number;\n  gap?: number;\n  rowGap?: number;\n  \
              columnGap?: number;\n}"
                 .into()
         })
+    }
+}
+
+/// A page's or dialog's `statusBar`: `{ foreground, hidden, animated }`
+/// (`StatusBar`, declared with the navigation in `nsh/base`); the fields
+/// left out keep what is below. An unknown `foreground` is left out.
+impl HostValue for StatusBarSetting {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let flag = |key| input.field(key).and_then(|v| v.as_bool());
+        Some(StatusBarSetting {
+            style: input
+                .field("foreground")
+                .and_then(|v| v.as_string())
+                .and_then(|s| StatusBarStyle::from_name(&s)),
+            hidden: flag("hidden"),
+            animated: flag("animated"),
+        })
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "StatusBar".into()
     }
 }
 
@@ -433,14 +457,14 @@ pub(crate) fn ui_theme<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> 
     Some(Prop::UiTheme(input.as_string()?.into()))
 }
 
-/// `accessibilityRole`: one of the role names; others are no role (and a
+/// `role`: one of the role names; others are no role (and a
 /// warning).
 pub(crate) fn role<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<AccessibilityProp> {
     let role = AccessibilityRole::decode(input, cx);
     if role.is_none()
         && let Some(name) = input.as_string().filter(|n| !n.is_empty())
     {
-        cx.warn(format!("unknown accessibilityRole `{name}`"));
+        cx.warn(format!("unknown role `{name}`"));
     }
     Some(AccessibilityProp::Role(role.unwrap_or_default()))
 }

@@ -130,7 +130,7 @@ disposed or busy instance passed for a borrowed parameter (``Account.transfer: `
 
 ## Functions
 
-Rust exports functions through `#[module]` (an object, `Alert.alert(..)`, or `#[module(flat)]`, top-level
+Rust exports functions through `#[module]` (an object, `AlertDialog.show(..)`, or `#[module(flat)]`, top-level
 functions). Every call used to be an op ordered with the UI's, so every result was a promise. The class's split
 applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`) of each function with
 a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):

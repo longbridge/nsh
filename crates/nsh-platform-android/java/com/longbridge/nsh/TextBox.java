@@ -254,10 +254,11 @@ final class TextBox extends android.view.ViewGroup implements Node {
                         .setAlphabeticShortcut('c');
                 menu.add(android.view.Menu.NONE, android.R.id.selectAll, 1, android.R.string.selectAll)
                         .setAlphabeticShortcut('a');
-                // The system's own "Share" label (TextView's), not in the public resources.
-                int share = android.content.res.Resources.getSystem().getIdentifier("share", "string", "android");
-                menu.add(android.view.Menu.NONE, android.R.id.shareText, 2,
-                        share != 0 ? android.content.res.Resources.getSystem().getString(share) : "Share");
+                // The system's own "Share" label (TextView's), not in the public resources;
+                // without it there is no item (labels are never NSH's own words).
+                android.content.res.Resources system = android.content.res.Resources.getSystem();
+                int share = system.getIdentifier("share", "string", "android");
+                if (share != 0) menu.add(android.view.Menu.NONE, android.R.id.shareText, 2, system.getString(share));
                 return true;
             }
 

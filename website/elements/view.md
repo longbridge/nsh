@@ -31,7 +31,7 @@ function App() {
       >
         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#8250df" }} />
         <Text style={{ flex: 1, fontSize: 16 }}>A card</Text>
-        <View onPress={() => liked.set(!liked())} activeOpacity={0.5} hitSlop={8}>
+        <View onPress={() => liked.set(!liked())} activeStyle={{ opacity: 0.5 }} hitSlop={8}>
           <Text style={{ fontSize: 22 }}>{liked() ? "♥" : "♡"}</Text>
         </View>
       </View>
@@ -53,23 +53,26 @@ The Tailwind `flex` class follows CSS rather than the style default: `class="fle
 ## Props
 
 `<View>` has no props of its own beyond the [common props](./index.md#common-props): `style` (`ViewStyle`), `class`,
-`classList`, `disabled`, the press props (`onPress`, `onLongPress`, `onPressIn`, `onPressOut`, `delayLongPress`,
-`activeOpacity`, `underlayColor`, `underlayOpacity`, `hitSlop`, `pointerEvents`), `onHoverIn` / `onHoverMove` / `onHoverOut`, `onContextMenu`,
+`classList`, `disabled`, the press props (`onPress`, `onLongPress`, `onPressDown`, `onPressUp`, `delayLongPress`,
+`hitSlop`, `pointerEvents`), the state styles (`activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`), `onHoverIn` / `onHoverMove` / `onHoverOut`, `onContextMenu`,
 `onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `onLayout`, `ref`, `nativeID`,
 `testID`, the gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the
 accessibility props and `ios` / `android` / `desktop`.
 
 ## Press feedback
 
-A pressable view is any view with a press handler. Three kinds of feedback run natively while the finger is down, with no
-JS round trip:
+A pressable view is any view with a press handler. Its feedback is the app's: a style while pressed, applied natively
+while the finger is down, with no JS round trip. `hoverStyle`, `focusStyle` and `disabledStyle` do the same for the
+other states:
 
 ```tsx
 // Fade the whole view.
-<View onPress={open} activeOpacity={0.6}>…</View>
+<View onPress={open} activeStyle={{ opacity: 0.6 }}>…</View>
 
-// Show a background and fade the children (default 0.85).
-<View onPress={open} underlayColor="#e5e7eb" underlayOpacity={0.7}>…</View>
+// Show a background; group-active: styles the children.
+<View onPress={open} class="group" activeStyle={{ backgroundColor: "#e5e7eb" }}>
+  <Text class="group-active:opacity-70">Open</Text>
+</View>
 
 // Change any style while pressed with active: classes.
 <View onPress={open} class="bg-blue-600 active:bg-blue-800 active:scale-95">…</View>
@@ -90,7 +93,7 @@ On Android, `android={{ ripple: { color: "#0000001f" } }}` adds the material rip
 |---|---|---|
 | `onPress` | none | A tap ended inside the view. |
 | `onLongPress` | none | The finger stayed down for `delayLongPress` (500 ms). |
-| `onPressIn` / `onPressOut` | none | A finger went down / lifted or left. |
+| `onPressDown` / `onPressUp` | none | A finger went down / lifted or left. |
 | `onHoverIn` / `onHoverOut` | none | The mouse came over the view (or a view inside it) / left it or the window ([hover](./index.md#hover)). |
 | `onHoverMove` | `HoverEvent` | The mouse moved over the view with no button down: `locationX` / `locationY`, `pageX` / `pageY`, the modifier keys; at most once a frame. |
 | `onContextMenu` | `ContextMenuEvent` | The secondary button was pressed over the view ([context menus](./index.md#context-menus)). |

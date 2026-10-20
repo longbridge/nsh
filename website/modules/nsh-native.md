@@ -64,7 +64,7 @@ The badge here is a native view of the host app, registered as `embed.badge`. NS
 ```tsx
 import { mount, signal, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -145,7 +145,7 @@ impl Trading {
 
 let mut trading = Registry::ui_set("host/trading");
 trading.module::<Trading>();
-nsh_platform_gpui::set_ui_sets(vec![nsh_ui_mobile::registry(), trading]);
+nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
 `subscribe` is how the host keeps every app in step with its own data: its task waits for the host's changes and posts each one to the app, so a change made by the host, or by any app through another function, reaches every app that subscribed.

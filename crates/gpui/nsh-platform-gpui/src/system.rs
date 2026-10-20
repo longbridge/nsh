@@ -2079,15 +2079,9 @@ impl Hosted for DialogItem {
 /// button's index; -1 when dismissed (a click outside or Escape, when
 /// cancelable); Escape presses the cancel button when there is one.
 fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let styles: Vec<DialogButtonStyle> = buttons.iter().map(|b| b.style).collect();
     let cancel = styles.iter().position(|s| *s == DialogButtonStyle::Cancel);
     let fs = surface.environment.get().font_scale;

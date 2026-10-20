@@ -49,6 +49,7 @@ mod split;
 mod storage;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod system;
+mod test_ui;
 mod theme;
 mod websocket;
 

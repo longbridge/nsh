@@ -31,7 +31,7 @@ export type RecursiveArray<T> = readonly (T | RecursiveArray<T>)[];
 export type StyleProp<T> = T | RecursiveArray<T | false | null | undefined> | false | null | undefined;
 
 /** Props every host element accepts. */
-export interface CommonProps extends TouchProps, HostProps {
+export interface CommonProps extends TouchProps, HostProps, StateStyleProps {
   ref?: YNode | ((node: YNode) => void);
   children?: JSX.Element;
   /** iOS-only props (ignored elsewhere). */
@@ -43,6 +43,21 @@ export interface CommonProps extends TouchProps, HostProps {
   desktop?: DesktopProps;
   /** Web-only props (ignored elsewhere). */
   web?: WebProps;
+}
+
+/** Styles while the element is in a state, over its own `style` and
+ * classes, applied natively (no JS runs): as the `<state>:` classes.
+ * Later states win (hover, focus, active); `disabledStyle` wins over all,
+ * and the others do not apply while disabled. */
+export interface StateStyleProps {
+  /** While pressed (`active:`). */
+  activeStyle?: StyleProp<ViewStyle>;
+  /** While a pointer is over it (`hover:`). */
+  hoverStyle?: StyleProp<ViewStyle>;
+  /** While it has focus (`focus:`). */
+  focusStyle?: StyleProp<ViewStyle>;
+  /** While `disabled` (`disabled:`). */
+  disabledStyle?: StyleProp<ViewStyle>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */
@@ -82,14 +97,14 @@ export interface ImageProps extends CommonProps, ImageHostProps {
 /** `<Scroll>` */
 export interface ScrollProps extends CommonProps, ScrollingHostProps, ScrollHostProps {
   style?: StyleProp<ViewStyle>;
-  /** The style of a view around the content (React Native's content
-   * container): it scrolls with the content, `flexGrow: 1` makes it at
-   * least as tall as the viewport (a centered empty state). Without it or
-   * `contentContainerClass`, the children are the scroll view's own. */
-  contentContainerStyle?: StyleProp<ViewStyle>;
-  /** The classes of the content container (`contentContainerStyle`), e.g.
+  /** The style of a view around the content: it scrolls with the
+   * content, `flexGrow: 1` makes it at least as tall as the viewport (a
+   * centered empty state). Without it or `contentClass`, the children are
+   * the scroll view's own. */
+  contentStyle?: StyleProp<ViewStyle>;
+  /** The classes of the content (`contentStyle`), e.g.
    * `"grow justify-center p-4"`. */
-  contentContainerClass?: string;
+  contentClass?: string;
 }
 
 /** `<Input>` */
@@ -102,9 +117,9 @@ export interface InputProps extends CommonProps, InputHostProps {
 export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
 
 /** What JS sets on a Rust component's host itself: the app's classes
- * (appended to the component's own), its inline style, its test id, layout
+ * (appended to the component's own), its inline and state styles, its test id, layout
  * events and the ref (`ref.command(name, args)`). */
-export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "testID" | "onLayout" | "ref">;
+export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "onLayout" | "ref">;
 
 export interface Insets {
   top: number;
@@ -202,7 +217,7 @@ fn element_types() -> String {
     out
 }
 
-/// The file of module `specifier` (`nsh/ui/mobile` -> `nsh/ui/mobile.d.ts`).
+/// The file of module `specifier` (`nsh/base` -> `nsh/base.d.ts`).
 fn path_of(specifier: &str) -> String {
     match specifier {
         "nsh" => "nsh/index.d.ts".to_owned(),
@@ -287,7 +302,7 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         exports(&mut body, m.exports);
         files.push((path_of(m.name), body));
     }
-    // The registries that are modules of their own (`nsh/image`).
+    // The registries that are modules of their own (`nsh/base`, `nsh/image`).
     for registry in registries {
         let Some(specifier) = registry.specifier() else {
             continue;
@@ -299,7 +314,7 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         registry_part(&mut body, registry, &[]);
         files.push((path_of(specifier), body));
     }
-    // The UI sets (`nsh/ui/mobile`, an app's own).
+    // The UI sets (`nsh/base`, an app's own).
     for set in ui_sets {
         if MODULES.iter().any(|m| m.name == set.specifier) {
             continue;
@@ -503,7 +518,7 @@ fn relative(from: &str, to: &str) -> String {
 }
 
 /// The files of `.nsh/types` for apps whose hosts serve `ui_sets`
-/// (`nsh/ui/mobile`, an app's own, as data: their declarations come with
+/// (`nsh/base`, an app's own, as data: their declarations come with
 /// them), as (path relative to it, contents): one per
 /// module apps import, `nsh/types.d.ts` (the element types `nsh` exports),
 /// `nsh/jsx-runtime.d.ts` (where TypeScript finds the JSX namespace:
@@ -699,11 +714,8 @@ declare const text: "export default ignored";
     #[test]
     fn paths_are_relative() {
         assert_eq!(relative("nsh/list.d.ts", "nsh/types.d.ts"), "./types");
-        assert_eq!(relative("nsh/ui/mobile.d.ts", "nsh/types.d.ts"), "../types");
-        assert_eq!(
-            relative("nsh/types.d.ts", "nsh/ui/mobile.d.ts"),
-            "./ui/mobile"
-        );
+        assert_eq!(relative("nsh/acme/ui.d.ts", "nsh/types.d.ts"), "../types");
+        assert_eq!(relative("nsh/types.d.ts", "nsh/acme/ui.d.ts"), "./acme/ui");
     }
 
     #[test]
@@ -724,7 +736,7 @@ declare const text: "export default ignored";
     /// A name a file imports is declared in one file only.
     #[test]
     fn imports_are_unambiguous() {
-        let files = bodies(&[nsh_ui_mobile::registry().into()]);
+        let files = bodies(&[nsh_base::registry().into()]);
         let mut owners: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         for (path, body) in &files {
             for name in exported_names(body) {
@@ -863,17 +875,16 @@ declare const text: "export default ignored";
     }
 
     /// What each module exports at run time is what its declarations say
-    /// (with a set of classes besides the UI set).
+    /// (with a set of classes besides the UI sets).
     #[test]
     fn declarations_match_the_modules() {
-        let ui = nsh_ui_mobile::registry();
-        let classes = crate::classes::tests::registry();
+        let sets = vec![nsh_base::registry(), crate::classes::tests::registry()];
         let host = crate::Host::with_options(crate::HostOptions {
-            ui_sets: vec![ui.clone(), classes.clone()],
+            ui_sets: sets.clone(),
             ..crate::HostOptions::default()
         })
         .unwrap();
-        let files = bodies(&[ui.into(), classes.into()]);
+        let files = bodies(&sets.iter().cloned().map(Into::into).collect::<Vec<_>>());
         assert!(
             files.iter().any(|(path, body)| path == "test/classes.d.ts"
                 && body.contains("export declare class Tally {")),

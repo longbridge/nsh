@@ -23,6 +23,7 @@ export type IconName =
   | "stocks"
   | "chat"
   | "chevron"
+  | "back"
   | "check"
   | "plus"
   | "arrow-up"
@@ -170,6 +171,7 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [7, 10.5, 11, 10.5]);
   },
   chevron: (c) => line(c, [7.5, 5, 12.5, 10, 7.5, 15]),
+  back: (c) => line(c, [12.5, 5, 7.5, 10, 12.5, 15]),
   check: (c) => line(c, [4.5, 10.5, 8.5, 14, 15.5, 6]),
   plus: (c) => {
     line(c, [10, 4, 10, 16]);

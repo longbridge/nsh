@@ -38,8 +38,7 @@ pub fn registries() -> &'static [Registry] {
         let mut android = Registry::runtime("nsh/android");
         android
             .module::<android::Toast>()
-            .module::<android::BackHandler>()
-            .module::<android::Android>();
+            .module::<android::BackHandler>();
         let mut accessibility = Registry::runtime("nsh/accessibility");
         accessibility.module::<accessibility::AccessibilityInfo>();
         let mut image = Registry::runtime("nsh/image");

@@ -1,6 +1,6 @@
 ---
 title: nsh/android
-description: Android 专有 API：isAvailable、Toast、BackHandler 和 setStatusBarBackgroundColor。
+description: Android 专有 API：isAvailable、Toast 和 BackHandler。
 order: 12
 ---
 
@@ -9,7 +9,7 @@ order: 12
 `nsh/android` 包含只有 Android 才有的 API。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在其他平台上它的函数什么也不做，`isAvailable` 告诉你当前是否在 Android 上。
 
 ```ts
-import { BackHandler, isAvailable, setStatusBarBackgroundColor, Toast } from "nsh/android";
+import { BackHandler, isAvailable, Toast } from "nsh/android";
 ```
 
 元素和组件的 Android 专有*属性*不在这里：它们放在 `android={{…}}` 属性中（例如 `<View android={{ elevation: 4, ripple: … }} />`）。见[平台专有代码](../docs/platform-specific.md)。
@@ -35,10 +35,12 @@ const Toast: {
 ```ts
 import { Platform } from "nsh/device";
 import { Toast } from "nsh/android";
-import { Alert } from "nsh/ui/mobile";
+import { AlertDialog } from "nsh/base";
 
 const notify = (message: string) =>
-  Platform.OS === "android" ? Toast.show(message) : Alert.alert("Done", message);
+  Platform.OS === "android"
+    ? Toast.show(message)
+    : AlertDialog.show({ title: "Done", description: message, actions: [{ label: "OK" }] });
 ```
 
 ## BackHandler
@@ -50,7 +52,7 @@ const BackHandler: {
 };
 ```
 
-系统返回键和返回手势。模态框和导航栈先处理返回操作（关闭模态框、导航栈出栈）；只有它们都不处理时，`BackHandler` 的监听器才会运行。
+系统返回键和返回手势。对话框和导航栈先处理返回操作（关闭对话框、导航栈出栈）；只有它们都不处理时，`BackHandler` 的监听器才会运行。
 
 | 成员 | 说明 |
 |---|---|
@@ -60,15 +62,16 @@ const BackHandler: {
 ```tsx
 import { cleanup, signal } from "nsh";
 import { BackHandler } from "nsh/android";
-import { Alert } from "nsh/ui/mobile";
+import { AlertDialog } from "nsh/base";
 
 function Editor() {
   const dirty = signal(false);
   const sub = BackHandler.addEventListener("hardwareBackPress", () => {
     if (!dirty()) return false; // 交给应用返回或退出
-    Alert.alert("Discard changes?", undefined, [{ text: "Keep" }, { text: "Discard", style: "destructive" }]).then(
-      (i) => i === 1 && BackHandler.exitApp(),
-    );
+    AlertDialog.show({
+      title: "Discard changes?",
+      actions: [{ label: "Keep", role: "cancel" }, { label: "Discard", role: "destructive", id: "discard" }],
+    }).then((id) => id === "discard" && BackHandler.exitApp());
     return true;
   });
   cleanup(() => sub.remove());
@@ -77,18 +80,6 @@ function Editor() {
 ```
 
 > [!NOTE]
-> 监听器在系统已经派发了返回操作之后才运行：主线程从不等待 JS。只要注册了至少一个监听器，模态框和导航栈不处理的返回操作就由 NSH 接管；没有监听器返回 `true` 时，由 NSH 自己退出应用。
+> 监听器在系统已经派发了返回操作之后才运行：主线程从不等待 JS。只要注册了至少一个监听器，对话框和导航栈不处理的返回操作就由 NSH 接管；没有监听器返回 `true` 时，由 NSH 自己退出应用。
 
-## setStatusBarBackgroundColor
-
-```ts
-function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): void;
-```
-
-设置状态栏颜色，作为已渲染的 `<StatusBar android={{ backgroundColor }}>` 组件之下的基础值（最后挂载的 `StatusBar` 优先于该基础值）。它只在强制全面屏（edge-to-edge，API 35）之前的 Android 版本上生效；从 API 35 起状态栏是透明的，内容绘制在它下面。
-
-```ts
-setStatusBarBackgroundColor("#1e293b", true);
-```
-
-组件见 [`StatusBar`](../components/status-bar.md)。
+状态栏在 iOS 和 Android 上都由 `nsh/base` 中[页面和对话框](./nsh-base.md#status-bar)的 `statusBar` 设置。

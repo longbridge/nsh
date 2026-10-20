@@ -968,6 +968,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "error" => "error",
                 "text" => "text",
                 "has" => "has",
+                "reason" => "reason",
                 _ => continue,
             };
             if let Some(v) = read(&mut env, i) {

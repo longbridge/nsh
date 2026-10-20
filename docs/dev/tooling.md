@@ -6,8 +6,8 @@
   are removed). None of it is checked in, and nothing in it depends on the app's code: `nsh_js::type_definitions(ui_sets)`
   (the UI sets as data: `nsh_core::ui::description::SetDescription`, each with its generated declarations)
   makes the declarations of everything NSH serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
-  the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/list.d.ts`, `nsh/ui/mobile.d.ts`,
-  ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
+  the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/list.d.ts`, `nsh/base.d.ts`,
+  an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
   frames, the web APIs and the control flow components `If` / `Each`), and from the bundler `nsh/assets.d.ts` (what
@@ -132,8 +132,8 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - Hosts that cannot run the app: several hosts on one session is intended (a phone joining), but a host serves only the
   UI sets it was built with, and dev hosts keep reconnecting, so a host built for another app (an Android host left on
   the emulator, whose `adb reverse` still reaches this port) can connect. The hello reports the host's platform and
-  the specifiers of the UI sets it serves (`HostPlatform`, `ui_sets`: iOS `set_ui_sets` or the mobile UI, Android
-  `ui_sets!` or the mobile UI); each bundle is published with the UI sets it imports (`Built::ui_sets`: the bundle's
+  the specifiers of the UI sets it serves (`HostPlatform`, `ui_sets`: iOS `set_ui_sets`, Android `ui_sets!`; `nsh/base`
+  for the prebuilt hosts); each bundle is published with the UI sets it imports (`Built::ui_sets`: the bundle's
   native imports that are UI sets, `Bundle::natives` / `HotBundle::natives`). The server checks every host against
   the latest bundle, on connect and on each new one: a host missing any gets neither the bundle nor its patch (nor
   build errors, which would hide why) but `ServerMessage::CannotRun`, which it shows over the app ("This host cannot run
@@ -162,7 +162,7 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   keyed by module and name, with a signature of their code plus the module's other code: a proxy is a memo over a
   version signal, so instances render again only when their signature changed (or a dependency module changed) and the
   rest of the app keeps its state. Top-level `context()` results keep their identity (taking the new default), and
-  top-level `const`s made by `signal()` or `createNavigator()` (matched by the callee's name, as `context`) keep their
+  top-level `const`s made by `signal()` or `createNavStack()` (matched by the callee's name, as `context`) keep their
   value while their initializer's code is the same (`__nsh_hot.keep`, keyed by module and name; a changed initializer
   starts afresh). A function passed to a top-level `mount()` is a component too (`mount#<n>`). When a module runs
   again, a `mount` call with the same component as its previous run's next one (the same proxy: `mount(App)`, or the
@@ -197,12 +197,20 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
-The steps name views with selectors: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>` (an input's text or,
-while it is empty, its placeholder too), `view:<id>` or a bare string (testID, then label, then text), the first match
-where a user would look first: the top modal, then the rest in tree order below the root, of a stack only its top
-screen. Each step sends what a platform would, to the views that report it:
+The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
+`label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`
+with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
+text); `label:`, `text:` and names take `/regex/flags`, ` >> ` looks inside the previous part's matches, `nth=<n>`
+keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
+order below the root, of a stack only its top screen. Steps acting on a view are strict, as Playwright's: the matches
+are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
+and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
+(the accessibility state) fails too. Each step sends what a platform would, to the views that report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`;
+- `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
+  `delayLongPress` (500 ms) `LongPress` and `PressOut`;
+- `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
 - `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
   `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
   break in a single line is the return key;
@@ -212,7 +220,9 @@ screen. Each step sends what a platform would, to the views that report it:
   points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
   `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
-- `wait`, `wait_for` / `wait_until` (until a selector matches), `idle` (until quiet for a while).
+- `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
+  screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
+  of its JS condition), `idle` (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
 for 100 ms and no native animation runs (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
@@ -339,7 +349,7 @@ The attribute (`nsh-macros` `native_module.rs`) checks the specifier at compile 
 `nsh` or `nsh/...`) and makes a hidden entry of a fixed name, `__nsh_native_module() -> Registry`
 (`Registry::ui_set(specifier)`, then the function), which the generated code below calls, and a public, documented
 `pub fn registry() -> Registry` making the same set, for the crate's tests and other Rust code
-(`rust_exports_native::registry()` next to `nsh_ui_mobile::registry()`; the hidden entry calls it). A second one in the crate
+(`rust_exports_native::registry()` next to `nsh_base::registry()`; the hidden entry calls it). A second one in the crate
 fails as that name defined twice; one outside the crate's root fails at the attribute (a glob of `crate::*` in a
 block finds the entry or a stand-in whose bound reports where it goes: `#[diagnostic::on_unimplemented]`). The
 generated code links each listed crate under a name of its own (`app_<package>`, `-` as `_`: `app_gallery_native`)
@@ -363,9 +373,9 @@ program that describes them, builds the hosts and runners with them, and does ev
     `"rust"`'s order its specifier, exports with their kinds, TypeScript declarations, re-exported runtime values and
     types, the values nsh-js makes for it, the files it ships and the exports TS sees without a doc comment, which
     `nsh` warns of as it writes `.nsh/types`);
-  - `test` (`nsh-testing` without `bundle`, the mobile UI and the app's sets, and a Rust app's root): the headless
+  - `test` (`nsh-testing` without `bundle`, `nsh/base` and the app's sets, and a Rust app's root): the headless
     runner of `nsh test` (`nsh_testing::runner`);
-  - the hosts and runners, passing the sets after the mobile UI's (`vec![nsh_ui_mobile::registry(), set_app_charts(),
+  - the hosts and runners, passing the sets after `nsh/base`'s (`vec![nsh_base::registry(), set_app_charts(),
     set_app_storage()]`): `ios-host` / `ios-app` (the development host and the release runner:
     `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`), `linux-host` / `linux-app`,
     `macos-host` / `macos-app` and `windows-host` / `windows-app` (the same on Linux, macOS and Windows,
@@ -396,9 +406,9 @@ program that describes them, builds the hosts and runners with them, and does ev
   ("building the Rust crate …": Cargo decides whether the app's Rust code changed) and runs it when the program is
   new, keeping its output in `.nsh/rust/description.json` with the program's size and time (`RustApp::describe`). The
   description must be in this `nsh`'s format and of its version, with one set per crate and a specifier each that is
-  neither one of nsh's modules (`nsh`, `nsh/...`, the runtime's registries, `nsh/ui/mobile`) nor another crate's; a
+  neither one of nsh's modules (`nsh`, `nsh/...`, the runtime's registries, `nsh/base`) nor another crate's; a
   program that panics (a component registered twice) fails the command with its output. From then on the command
-  runs in the prebuilt `nsh` with the mobile UI and those sets (`main.rs` `set_app_sets`): the bundler keeps their
+  runs in the prebuilt `nsh` with `nsh/base` and those sets (`main.rs` `set_app_sets`): the bundler keeps their
   imports and hints at their components, bytecode links against their exports' names (`ModuleTable::compiling`,
   `native-pipeline.md`), `.nsh/types` declares each set (`.nsh/types/<specifier>.d.ts` from its declarations, found
   through tsconfig's `"*"` path, which falls back to `node_modules`), the dev server serves their files and tells hosts
@@ -417,7 +427,7 @@ program that describes them, builds the hosts and runners with them, and does ev
   stay hot. After a restart a failing build reports the error and waits for the next change (`RustApp::wait_after`).
 - **Rust apps.** With `"root": "<path in the crate>"` in `nsh.json` (in the first crate `"rust"` lists), the app's
   directory resolves to its `nsh.json` (`entry::resolve`; a named `App.tsx` stays the TSX entry), and the app runs with
-  no JS: `rust_app::RootConfig` (with `"theme"`, `"appearance"` and `"id"`) adds the members `rust-linux`,
+  no JS: `rust_app::RootConfig` (with `"theme"`, `"appearance"`, `"statusBar"` and `"id"`) adds the members `rust-linux`,
   `rust-macos`, `rust-windows`, `rust-ios` (each the platform's release runner library without its feature `js`, whose
   `run_rust` mounts the generated `app_root()`), `rust-android` (`nsh::ui_sets!` and `nsh::main!`,
   `nsh-platform-android` without `js`; the APK's manifest gets the `com.longbridge.nsh.RUST` meta-data `AppActivity`

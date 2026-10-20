@@ -120,7 +120,7 @@ fn drain(rx: &Receiver<MountBatch>, screen: &mut Screen) {
 
 fn update(dir: &Path, previous: &mut nsh_bundler::HotBundle, n: u32) -> Option<HotUpdate> {
     let next =
-        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_base::registry().into()]).unwrap();
     let patch = next.patch(previous);
     *previous = next;
     match patch {
@@ -154,7 +154,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
     .unwrap();
 
     let mut bundle =
-        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_base::registry().into()]).unwrap();
     let (code, map) = bundle.script();
     let (tx, rx) = crossbeam_channel::unbounded();
     let (failed_tx, failed) = crossbeam_channel::unbounded();
@@ -244,17 +244,17 @@ fn edits_replace_modules_and_keep_unrelated_state() {
     )
     .unwrap();
     let next =
-        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_base::registry().into()]).unwrap();
     assert!(matches!(next.patch(&bundle), nsh_bundler::HotPatch::Reload));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 const NAV_APP: &str = r#"
 import { mount, signal, Text, View } from "nsh";
-import { Screen, Stack, createNavigator } from "nsh/ui/mobile";
+import { NavPage, NavStack, createNavStack } from "nsh/base";
 
 type Route = { name: string };
-const nav = createNavigator<Route>({ name: "home" });
+const nav = createNavStack<Route>([{ name: "home" }]);
 const taps = signal(0);
 
 function Label(props: { route: string }) {
@@ -270,17 +270,17 @@ function App() {
   return (
     <View style={{ flex: 1 }}>
     <Local />
-    <Stack navigator={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
       {(route) => (
-        <Screen title={route.name}>
+        <NavPage title={route.name}>
           <View>
             <Text onPress={() => nav.push({ name: `page${nav.routes().length}` })}>push {route.name}</Text>
             <Text onPress={() => taps.set(taps() + 1)}>taps {taps()}</Text>
             <Label route={route.name} />
           </View>
-        </Screen>
+        </NavPage>
       )}
-    </Stack>
+    </NavStack>
     </View>
   );
 }
@@ -301,7 +301,7 @@ fn entry_edits_keep_navigation_and_state() {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("App.tsx"), &app).unwrap();
-        let sets = [nsh_ui_mobile::registry()];
+        let sets = [nsh_base::registry()];
         let described: Vec<_> = sets.iter().map(Into::into).collect();
         let mut bundle = nsh_bundler::bundle_hot(&dir.join("App.tsx"), &described).unwrap();
         let (code, map) = bundle.script();
@@ -370,8 +370,8 @@ fn entry_edits_keep_navigation_and_state() {
         // components' own state starts afresh), from the kept navigator and
         // signal: the pushed screen stays.
         let edited = edited.replace(
-            "<Stack navigator={nav} style={{ flex: 1 }}>",
-            "<Stack navigator={nav} style={{ flex: 1, gap: 1 }}>",
+            "<NavStack state={nav} style={{ flex: 1 }}>",
+            "<NavStack state={nav} style={{ flex: 1, gap: 1 }}>",
         );
         std::fs::write(dir.join("App.tsx"), &edited).unwrap();
         control.hot_update(update(&dir, &mut bundle, 2).unwrap());

@@ -79,7 +79,7 @@ thread_local! {
     /// [`nsh_key`] while a key event is being handled. Apart from [`APP`]
     /// so that matching never needs the engine.
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
-    /// The UI sets apps import ([`set_ui_sets`]; by default the mobile UI).
+    /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
     static UI_SETS: RefCell<Option<Vec<nsh_core::ui::Registry>>> = const { RefCell::new(None) };
     /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
     static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::ui::Root>>> = const { RefCell::new(None) };
@@ -91,22 +91,22 @@ thread_local! {
 /// What [`ui_sets!`] gives.
 pub use nsh_core::ui::Registry;
 
-/// Sets the UI sets the apps started from now on serve: the mobile UI and
+/// Sets the UI sets the apps started from now on serve: `nsh/base` and
 /// an app's own Rust components (`nsh.json` `"rust"`). A runtime built for
 /// the app ([`ui_sets!`]) passes them before the page starts anything.
 pub fn set_ui_sets(sets: Vec<Registry>) {
     UI_SETS.with(|s| *s.borrow_mut() = Some(sets));
 }
 
-/// The UI sets engines serve: [`set_ui_sets`]'s, else the mobile UI.
+/// The UI sets engines serve: [`set_ui_sets`]'s, else nsh's own.
 fn ui_sets() -> Vec<Registry> {
     UI_SETS
         .with(|s| s.borrow().clone())
-        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+        .unwrap_or_else(|| vec![nsh_base::registry()])
 }
 
 /// Makes this module an app's web runtime that serves `$sets` (an
-/// expression giving the `Vec<Registry>` of the mobile UI and the app's own
+/// expression giving the `Vec<Registry>` of `nsh/base` and the app's own
 /// Rust components): `nsh` builds one for apps with `"rust"` in `nsh.json`.
 /// It exports `nsh_app_init`, which `nsh.js` calls once the module is
 /// instantiated.
@@ -128,7 +128,7 @@ pub fn set_root(root: impl Fn() -> nsh_core::ui::Root + 'static) {
 }
 
 /// Makes this module the web runtime of a Rust app (`nsh.json` `"root"`):
-/// it serves `$sets` (the mobile UI and the app's own set) and runs the
+/// it serves `$sets` (`nsh/base` and the app's own set) and runs the
 /// root component `$root` makes (an expression giving a
 /// [`nsh_core::ui::Root`]) when the page calls [`nsh_start_rust`]. Built
 /// without the feature `js`, the module has no QuickJS: the app is Rust
@@ -516,13 +516,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
-        // A desktop browser's headers are as tall as the desktop backends'
-        // (`navigation::HEADER_HEIGHTS` there).
-        header_heights: if environment.idiom == Idiom::Desktop {
-            (px(47.0), px(94.0))
-        } else {
-            (px(44.0), px(96.0))
-        },
+        // NSH draws no header: a page's `header` sits at its top.
+        header_heights: nsh_core::NO_NATIVE_HEADER,
         limits,
         ui_sets: ui_sets(),
         runtime: None,

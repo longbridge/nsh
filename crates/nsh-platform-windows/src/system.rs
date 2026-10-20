@@ -128,7 +128,7 @@ thread_local! {
     static NEXT_SERIAL: Cell<u64> = const { Cell::new(1) };
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // The environment
 
 /// What the system's settings say.
@@ -142,7 +142,7 @@ struct Settings {
     locale: Locale,
 }
 
-/// Makes the system look dark (or light) from now on (`-> Rect {script`).
+/// Makes the system look dark (or light) from now on (`--script`).
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SIMULATED.with(|s| s.set(Some(dark)));
 }
@@ -430,7 +430,7 @@ fn accent(dark: bool) -> Color {
     if dark { dark_shade } else { light }
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Commands
 
 /// A command not addressed to a kind of view.
@@ -524,7 +524,7 @@ fn dialog_answer(id: u32, index: i32) -> EventPayload {
     ])
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Overlays
 
 /// A dialog or toast over a surface.
@@ -732,7 +732,7 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     });
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Drawing helpers
 
 /// One piece of text laid out by DirectWrite.
@@ -943,7 +943,7 @@ impl Palette {
     }
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Dialog layout
 
 /// Sizes of dialogs (points), after Windows 11's content dialog.
@@ -1223,7 +1223,7 @@ fn step_focus(order: &[usize], current: Option<usize>, step: isize) -> Option<us
     Some(order[next as usize])
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Dialogs
 
 /// What a press on a dialog started on.
@@ -1619,15 +1619,9 @@ impl Hosted for DialogItem {
 /// button's index; -1 when dismissed (a click outside or Escape, when
 /// cancelable); Escape presses the cancel button when there is one.
 fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let styles: Vec<DialogButtonStyle> = buttons.iter().map(|b| b.style).collect();
     let cancel = styles.iter().position(|s| *s == DialogButtonStyle::Cancel);
     let fs = surface.environment.get().font_scale;
@@ -1716,7 +1710,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // Toasts
 
 /// A short message at the bottom of the surface; never takes the pointer.
@@ -1803,7 +1797,7 @@ fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
     });
 }
 
-// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
+// ---------------------------------------------------------------------------
 // The clipboard
 
 /// Puts `text` on the clipboard (Unicode text).

@@ -1,51 +1,65 @@
 ---
 title: Navigation
-description: Native navigation stacks with createNavigator, Stack and Screen, header options, keeping the user on a screen with preventBack, modals, and the Android back button.
+description: Native navigation stacks with createNavStack, NavStack and NavPage, headers on every platform, keeping the user on a page with popOnBack, dialogs, and the Android back button.
 order: 41
 group: ui
 ---
 
 # Navigation
 
-`nsh/ui/mobile` provides a native navigation stack and native modals. A `Stack` is a UINavigationController on iOS, with its header, swipe back and large titles, and a stack with a toolbar and predictive back on Android. You keep the list of routes in a navigator; the stack renders each route as a screen and keeps it mounted, with its state, while it is in the stack.
+`nsh/base` provides a native navigation stack and native dialogs. A `NavStack` is a UINavigationController on iOS, with its header, swipe back and large titles, and a stack with a toolbar and predictive back on Android; on the desktops and the web, each page shows the header your app draws. You keep the routes in the stack's state; the stack renders each route as a page and keeps it mounted, with its state, while it is in the stack.
 
 ```tsx
 import { mount, Scroll, Text, View } from "nsh";
-import { createNavigator, Screen, Stack } from "nsh/ui/mobile";
+import { createNavStack, NavPage, NavStack } from "nsh/base";
 
 type Route = { name: "inbox" } | { name: "message"; id: number };
 
-const nav = createNavigator<Route>({ name: "inbox" });
+const nav = createNavStack<Route>([{ name: "inbox" }]);
+
+// The page's header on the desktops and the web; iOS and Android show the system's, from `title`.
+function Header(props: { title: string }) {
+  return (
+    <View class="h-12 flex-row items-center gap-3 border-b border-gray-200 px-4">
+      <If when={nav.routes().length > 1}>
+        <Text role="button" onPress={() => nav.pop()} class="text-blue-600 active:opacity-60">
+          Back
+        </Text>
+      </If>
+      <Text style={{ fontSize: 17, fontWeight: "600" }}>{props.title}</Text>
+    </View>
+  );
+}
 
 function Inbox() {
   return (
-    <Screen title="Inbox">
+    <NavPage title="Inbox" header={<Header title="Inbox" />}>
       <Scroll style={{ flex: 1 }}>
         <Each of={[1, 2, 3, 4, 5]}>
           {(id) => (
-            <View onPress={() => nav.push({ name: "message", id: id() })} underlayColor="#eaeef2" style={{ padding: 16 }}>
+            <View onPress={() => nav.push({ name: "message", id: id() })} class="p-4 active:bg-gray-100">
               <Text>Message {id()}</Text>
             </View>
           )}
         </Each>
       </Scroll>
-    </Screen>
+    </NavPage>
   );
 }
 
 function Message(props: { id: number }) {
   return (
-    <Screen title={`Message ${props.id}`}>
+    <NavPage title={`Message ${props.id}`} header={<Header title={`Message ${props.id}`} />}>
       <View style={{ flex: 1, padding: 16 }}>
         <Text>The body of message {props.id}.</Text>
       </View>
-    </Screen>
+    </NavPage>
   );
 }
 
 function App() {
   return (
-    <Stack navigator={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
       {(route) => {
         switch (route.name) {
           case "inbox":
@@ -54,222 +68,217 @@ function App() {
             return <Message id={route.id} />;
         }
       }}
-    </Stack>
+    </NavStack>
   );
 }
 
 mount(App);
 ```
 
-## The navigator
+## The stack's state
 
-`createNavigator(initial)` creates the stack of routes. A route is any value you like (a string, an object, a discriminated union as above); routes are compared by identity, so push a new object for each screen. Create the navigator once, at module level or in your root component, and import it wherever screens navigate.
+`createNavStack(routes)` creates the stack's state from an array of routes, bottom to top. A route is any value you like (a string, an object, a discriminated union as above), and each push is a page of its own, the same route pushed twice included. Create the state once, at module level or in your root component, and import it wherever pages navigate.
 
 | Member | Description |
 |---|---|
 | `routes()` | The routes, bottom to top (reactive). |
-| `push(route)` | Pushes a screen. |
-| `pop(count?)` | Pops `count` screens (default 1); at least one stays. |
-| `popToTop()` | Pops back to the first screen. |
-| `replace(route)` | Replaces the top screen. |
-| `reset(routes)` | Replaces all screens, e.g. after signing in. |
-| `remove(route)` | Removes a route wherever it is. |
+| `push(route)` | Pushes a page. |
+| `pop(count?)` | Pops `count` pages (default 1); at least one stays. |
+| `popToRoot()` | Pops back to the first page. |
+| `replace(route)` | Replaces the top page. |
+| `setRoutes(routes)` | Replaces the pages, e.g. after signing in; a route that stays (the same value) keeps its page and its state. |
+| `remove(route)` | Removes the topmost page of `route`, wherever it is. |
 
-`createNavigator` also takes an array, to start several screens deep: `createNavigator<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`.
+To start several pages deep, pass more routes: `createNavStack<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`.
 
-When the user leaves a screen natively (the back button in the header, a swipe back on iOS, Android's back button or gesture), the stack removes that route from the navigator for you, so `routes()` always matches what is on screen.
+When the user leaves a page natively (the back button in the header, a swipe back on iOS, Android's back button or gesture, the desktops' back keys and mouse button, the browser's back button), the stack removes that route from its state for you, so `routes()` always matches what is on screen.
 
-A route carries what the screen needs. The gallery app pushes routes that hold the screen component itself, which keeps the route type small when there are many screens:
+A route carries what the page needs. The gallery app pushes routes that hold the page component itself, which keeps the route type small when there are many pages:
 
 ```ts
 import { type JSX } from "nsh";
-import { createNavigator } from "nsh/ui/mobile";
+import { createNavStack } from "nsh/base";
 
 export type Route = { name: "home" } | { name: "page"; page: () => JSX.Element };
-export const nav = createNavigator<Route>({ name: "home" });
+export const nav = createNavStack<Route>([{ name: "home" }]);
 
 // Elsewhere: nav.push({ name: "page", page: Settings });
 ```
 
-## Stack
+## NavStack
 
 | Prop | Type | Description |
 |---|---|---|
-| `navigator` | `Navigator<R>` | The routes to show. |
-| `children` | `(route: R, index: Accessor<number>) => JSX.Element` | Renders a route; return a `<Screen>` for header options. |
-| `style` | `StyleProp<ViewStyle>` | The stack's own style (usually `flex: 1`). |
+| `state` | `NavStackState<R>` | The routes to show. |
+| `children` | `(route: R, index: Accessor<number>) => JSX.Element` | Renders a route; return a `<NavPage>` for its header. |
+| `style`, `class` | | The stack's own style (usually `flex: 1`). |
 
-The render function runs once per route, when it is pushed; `route` is the plain value, `index()` its current position. What it returns becomes the screen's content. Return a `<Screen>` to set the header; anything else is wrapped in a screen with default options.
+The render function runs once per route, when it is pushed; `route` is the plain value, `index()` its current position. What it returns becomes the page's content. Return a `<NavPage>` to set the header; anything else is wrapped in a page with default options.
 
-Screens stay mounted while their route is in the stack: going back shows the previous screen exactly as it was left, with its scroll position, inputs and signals. A screen's [`cleanup`](./reactivity.md) handlers run when its route leaves the stack.
+Pages stay mounted while their route is in the stack: going back shows the previous page exactly as it was left, with its scroll position, inputs and signals. A page's [`cleanup`](./reactivity.md) handlers run when its route leaves the stack.
 
-## Screen and the header
+## NavPage and the header
 
-`Screen` wraps a screen's content and carries its header options. All options are reactive: change a signal and the header follows.
+`NavPage` wraps a page's content and carries its header. iOS and Android show their system header, set up by `title` and the `header*` props. The desktops and the web show the page's `header` slot, your own JSX, at the top of the page: as wide as the page, as tall as it lays out, with the content below it. Give a page both, as the example above does, and it looks at home everywhere. All props are reactive: change a signal and the header follows.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `title` | `string` | | The header's title. |
-| `headerShown` | `boolean` | `true` | The header shows. |
-| `headerTransparent` | `boolean` | `false` | The content extends under the header. |
-| `headerTintColor` | `ColorValue` | | The back button and bar buttons. |
-| `headerBackgroundColor` | `ColorValue` | | The header's background. |
-| `headerTitleColor` | `ColorValue` | | The title. |
-| `headerBackVisible` | `boolean` | `true` | The back button shows. |
-| `headerLeft` | `JSX.Element` | | Views at the start of the header (replace the back button). |
-| `headerRight` | `JSX.Element` | | Views at the end of the header. |
-| `headerTitle` | `JSX.Element` | | Views replacing the title. |
-| `animation` | `"default" \| "fade" \| "none"` | `"default"` | How the screen enters and leaves. |
-| `gestureEnabled` | `boolean` | `true` | The interactive back gesture (iOS swipe back, Android predictive back). The back buttons pop either way. |
-| `preventBack` | `boolean` | `false` | The user cannot leave; back calls `onBackRequest` instead. |
-| `onBackRequest` | `() => void` | | The user tried to leave a screen with `preventBack`. |
-| `onDismiss` | `() => void` | | The user left the screen natively; its route is already removed. |
-| `ios={{ headerLargeTitle }}` | `boolean` | | iOS: a large title that shrinks into the bar as the content scrolls. |
-| `ios={{ headerBackTitle }}` | `string` | | iOS: the label of the back button that leads back to this screen. |
-| `style` | `StyleProp<ViewStyle>` | | The screen's content view. |
+| `header` | `JSX.Element` | | The desktops and the web: the page's header, drawn by the app (a title, a back button, toolbar buttons). |
+| `title` | `string` | | iOS and Android: the system header's title. |
+| `headerShown` | `boolean` | `true` | iOS and Android: the system header shows. |
+| `headerTransparent` | `boolean` | `false` | iOS and Android: the content extends under the header. |
+| `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
+| `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
+| `headerBackVisible` | `boolean` | `true` | iOS and Android: the back button shows. |
+| `headerLeft` | `JSX.Element` | | iOS and Android: views at the start of the header (they replace the back button). |
+| `headerRight` | `JSX.Element` | | iOS and Android: views at the end of the header. |
+| `headerTitle` | `JSX.Element` | | iOS and Android: views replacing the title. |
+| `headerLargeTitle` | `boolean` | `false` | iOS: a large title that shrinks into the bar as the content scrolls. |
+| `headerBackTitle` | `string` | | The label of the back button that leads back to this page (iOS; Android's up arrow says it to screen readers). |
+| `animation` | `"default" \| "slide" \| "fade" \| "none"` | `"default"` | How the page enters and leaves. |
+| `statusBar` | `{ foreground?, hidden?, animated? }` | | iOS and Android: the status bar while the page is on top ([Status bar](../modules/nsh-base.md#status-bar)). |
+| `popOnSwipe` | `boolean` | `true` | The interactive back gesture (iOS swipe back, Android predictive back) pops. The back buttons pop either way. |
+| `popOnBack` | `boolean` | `true` | Every way back pops the page: the back buttons, Android's back, the desktops' back keys, the browser's back button and the swipe. |
+| `onBackPress` | `() => void` | | The user pressed back on the page, whether or not `popOnBack` let it pop. |
+| `onDismiss` | `() => void` | | The user popped the page; its route is already removed. |
+| `style`, `class` | | | The page's content view. |
 
 Header items are ordinary views, so they can be pressable and reactive:
 
 ```tsx
 function Compose() {
   const text = signal("");
+  const cancel = () => (
+    <Text onPress={() => nav.pop()} style={{ fontSize: 17, color: "#0969da" }}>
+      Cancel
+    </Text>
+  );
+  const sendButton = () => (
+    <Text
+      onPress={() => send(text())}
+      style={{ fontSize: 17, fontWeight: "600", color: text() ? "#0969da" : "#8c959f" }}
+    >
+      Send
+    </Text>
+  );
   return (
-    <Screen
+    <NavPage
       title="New message"
-      headerLeft={<Text onPress={() => nav.pop()} style={{ fontSize: 17, color: "#0969da" }}>Cancel</Text>}
-      headerRight={
-        <Text
-          onPress={() => send(text())}
-          style={{ fontSize: 17, fontWeight: "600", color: text() ? "#0969da" : "#8c959f" }}
-        >
-          Send
-        </Text>
+      headerLeft={cancel()}
+      headerRight={sendButton()}
+      header={
+        <View class="h-12 flex-row items-center justify-between px-4">
+          {cancel()}
+          <Text style={{ fontSize: 17, fontWeight: "600" }}>New message</Text>
+          {sendButton()}
+        </View>
       }
     >
-      <Input multiline value={text()} onChangeText={(t) => text.set(t)} style={{ flex: 1, padding: 16, fontSize: 17 }} />
-    </Screen>
+      <Input multiline value={text()} onChange={(t) => text.set(t)} style={{ flex: 1, padding: 16, fontSize: 17 }} />
+    </NavPage>
   );
 }
 ```
 
-A colored header:
+A colored system header:
 
 ```tsx
-<Screen title="Profile" headerBackgroundColor="#1a7f37" headerTintColor="#ffffff" headerTitleColor="#ffffff">
+<NavPage title="Profile" headerStyle={{ backgroundColor: "#1a7f37", color: "#ffffff", tintColor: "#ffffff" }}>
   …
-</Screen>
+</NavPage>
 ```
 
-A screen without a header still has the system bars around it; pad its content with [`SafeAreaView`](../components/safe-area-view.md):
+A page that shows no header still has the system bars around it; pad its content with [`SafeAreaView`](../modules/nsh-base.md#safeareaview):
 
 ```tsx
-<Screen headerShown={false}>
+<NavPage headerShown={false}>
   <SafeAreaView style={{ flex: 1, padding: 16 }}>…</SafeAreaView>
-</Screen>
+</NavPage>
 ```
 
 ### Safe areas under the header
 
-Inside a screen, `useSafeAreaInsets()` and `SafeAreaView` report the insets below the header, not the whole surface's. With `headerTransparent`, the content starts at the top of the screen and the top inset is the header's height, so `SafeAreaView` keeps text clear of it while a background image fills the whole screen. With `ios={{ headerLargeTitle: true }}`, put a scroll view directly in the screen so the title can collapse as it scrolls.
+Inside a page, `safeAreaInsets()` and `SafeAreaView` report the insets below the system header, not the whole surface's. With `headerTransparent`, the content starts at the top of the page and the top inset is the header's height, so `SafeAreaView` keeps text clear of it while a background image fills the whole page. With `headerLargeTitle`, put a scroll view directly in the page so the title can collapse as it scrolls. On the desktops and the web, the content starts below the page's `header`.
 
-## Keeping the user on a screen: preventBack
+## Keeping the user on a page: popOnBack
 
-To ask before discarding unsaved changes, set `preventBack` while there is something to lose and handle `onBackRequest`:
+To ask before discarding unsaved changes, set `popOnBack` to `false` while there is something to lose, handle `onBackPress`, and pop once the user agrees:
 
 ```tsx
 import { Input, signal } from "nsh";
-import { Alert, Screen } from "nsh/ui/mobile";
+import { AlertDialog, NavPage } from "nsh/base";
 
 function EditNote() {
   const text = signal("");
+  const dirty = () => text().length > 0;
   const confirm = async () => {
-    const choice = await Alert.alert("Discard your changes?", undefined, [
-      { text: "Keep editing", style: "cancel" },
-      { text: "Discard", style: "destructive" },
-    ]);
-    if (choice === 1) nav.pop();
+    const choice = await AlertDialog.show({
+      title: "Discard your changes?",
+      actions: [
+        { label: "Keep editing", role: "cancel" },
+        { label: "Discard", role: "destructive", id: "discard" },
+      ],
+    });
+    if (choice === "discard") nav.pop();
   };
   return (
-    <Screen title="Edit" preventBack={text().length > 0} onBackRequest={confirm}>
-      <Input value={text()} onChangeText={(t) => text.set(t)} placeholder="A note" style={{ margin: 16, fontSize: 17 }} />
-    </Screen>
+    <NavPage title="Edit" popOnBack={!dirty()} onBackPress={() => dirty() && confirm()}>
+      <Input value={text()} onChange={(t) => text.set(t)} placeholder="A note" style={{ margin: 16, fontSize: 17 }} />
+    </NavPage>
   );
 }
 ```
 
-With `preventBack` on, the swipe back is disabled and the back buttons (in the header, Android's back button and gesture) call `onBackRequest` instead of popping. `nav.pop()` from code still pops.
+With `popOnBack={false}`, the page stays on every way back (the back buttons, Android's back button and gesture, the desktops' back keys, the browser's back button, the swipe), and `onBackPress` tells you the user tried. `nav.pop()` from code pops as always.
 
 > [!IMPORTANT]
-> `preventBack` is a prop, not a callback that returns true or false, because the main thread never waits for JS. When the user starts a swipe or presses back, the system asks right away whether the screen may go, and NSH answers natively from the props it already has. Set `preventBack` as soon as there is something to lose (as above, from the text), not when the user tries to leave.
+> `popOnBack` is a prop, not a callback that returns true or false, because the main thread never waits for JS. When the user starts a swipe or presses back, the system asks right away whether the page may go, and NSH answers natively from the props it already has. Set `popOnBack` as soon as there is something to lose (as above, from the text), before the user tries to leave.
 
-`gestureEnabled={false}` is the lighter option: it only turns off the interactive gesture (iOS swipe back, Android's predictive back animation), and the back buttons still pop.
+`popOnSwipe={false}` is the lighter option: it turns off only the interactive gesture (iOS swipe back, Android's predictive back animation), and the back buttons still pop.
 
-## Modals
+## Dialogs
 
-`Modal` presents content over everything else, in its own native window layer: a presented view controller on iOS, a dialog on Android. Render it where its state lives and control it with `visible`:
+`Dialog` presents content over everything else, in its own native window layer: a presented view controller on iOS, a dialog window on Android, a layer over the whole window on the desktops and the web. Its look is yours: `class` and `style` style the popup that holds its children, and `backdropClass` or `backdropStyle` add a backdrop behind it. Render it where its state lives and control it with `open`:
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Modal, SafeAreaView } from "nsh/ui/mobile";
+import { Dialog } from "nsh/base";
 
-function Settings() {
+function Files() {
   const open = signal(false);
   return (
     <View style={{ flex: 1 }}>
       <View onPress={() => open.set(true)} style={{ padding: 16 }}>
-        <Text>Edit profile</Text>
+        <Text>Delete the file</Text>
       </View>
-      <Modal visible={open()} animationType="slide" ios={{ presentationStyle: "pageSheet" }} onRequestClose={() => open.set(false)}>
-        <SafeAreaView style={{ flex: 1, padding: 20, gap: 12 }}>
-          <Text style={{ fontSize: 22, fontWeight: "700" }}>Profile</Text>
-          <View onPress={() => open.set(false)}>
-            <Text style={{ color: "#0969da" }}>Done</Text>
-          </View>
-        </SafeAreaView>
-      </Modal>
+      <Dialog
+        open={open()}
+        animation="fade"
+        onOpenChange={(next) => open.set(next)}
+        backdropClass="bg-black/40"
+        class="m-auto w-80 gap-3 rounded-2xl bg-white p-5"
+      >
+        <Text style={{ fontSize: 20, fontWeight: "700" }}>Delete the file?</Text>
+        <View onPress={() => open.set(false)}>
+          <Text style={{ color: "#cf222e" }}>Delete</Text>
+        </View>
+      </Dialog>
     </View>
   );
 }
 ```
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `visible` | `boolean` | `true` | Shown while true. |
-| `animationType` | `"slide" \| "fade" \| "none"` | | How it appears. |
-| `transparent` | `boolean` | `false` | The background shows what is behind (dialogs, custom sheets). |
-| `dismissible` | `boolean` | `false` | The user closes it natively (iOS sheet swiped down, Android back), then `onRequestClose` and `onDismiss` follow. |
-| `onRequestClose` | `() => void` | | The user asked to close it: set `visible` to false. |
-| `onShow` | `() => void` | | It has appeared. |
-| `onDismiss` | `() => void` | | It has gone. |
-| `ios={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | iOS: sheets keep what is behind visible. |
-| `desktop={{ presentationStyle }}`, `web={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | Desktops and browsers: sheets are cards centered over the dimmed window (in phone browsers: a sheet from just below the top); Escape or a click outside asks to close. |
-| `ios={{ supportedOrientations }}` | `("portrait" \| "landscape" \| …)[]` | the presenter's | iOS: the orientations it allows. |
-| `android={{ statusBarTranslucent }}` | `boolean` | `false` | Android: the content reaches under the status bar. |
+Escape, Android's back button, a press on the backdrop and a swipe down on a sheet close it natively (`closeOnEscape`, `closeOnBackdropPress` and `closeOnSwipe`, each `true` by default); `onOpenChange(false, reason)` then tells you, so set `open` to `false` there. To confirm first, set a flag to `false` and handle `onCancel`, which reports every attempt, then close the dialog yourself. On iOS, `presentation="pageSheet"` or `"formSheet"` presents a sheet that keeps what is behind visible.
 
-Modals are **controlled** by default: a swipe down on an iOS sheet or Android's back button only asks, through `onRequestClose`, and the modal stays until you set `visible` to false. That lets you confirm first. With `dismissible`, the platform closes it right away and then tells you; use it for sheets that hold nothing to lose. As with `preventBack`, the choice is a prop because the system asks whether the sheet may close on the spot.
-
-A transparent modal makes a custom dialog:
-
-```tsx
-<Modal visible={open()} transparent animationType="fade" onRequestClose={() => open.set(false)}>
-  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: 32 }}>
-    <View style={{ alignSelf: "stretch", backgroundColor: "#ffffff", borderRadius: 14, padding: 20, gap: 12 }}>
-      <Text style={{ fontSize: 20, fontWeight: "700" }}>Delete the file?</Text>
-      <View onPress={() => open.set(false)}><Text style={{ color: "#cf222e" }}>Delete</Text></View>
-    </View>
-  </View>
-</Modal>
-```
-
-Inside a modal, `SafeAreaView` and `useSafeAreaInsets()` give the modal's own insets. For system dialogs (an alert with buttons, an action sheet) use [`Alert`](../components/alert.md) and [`ActionSheet`](../components/action-sheet.md); for a panel that slides up over a dimmed backdrop and follows the finger, use [`Sheet`](../components/sheet.md).
+See [Dialog](../elements/dialog.md) for every prop. Inside a dialog, `SafeAreaView` and `safeAreaInsets()` give the dialog's own insets. For system dialogs (an alert with actions, an action sheet) use [`AlertDialog`](../modules/nsh-base.md#alertdialog) from `nsh/base`.
 
 ## The Android back button
 
 On Android, the back button (or gesture) is handled in this order:
 
-1. The top modal: `onRequestClose` (or it closes, with `dismissible`).
+1. The top dialog: it calls `onCancel`, and closes with `closeOnEscape` (the default).
 2. Your `BackHandler` listeners from `nsh/android`, most recently added first.
-3. The top stack: it pops its top screen, or calls `onBackRequest` with `preventBack`.
+3. The top stack: its top page calls `onBackPress`, and pops while `popOnBack` is `true`.
 4. Nothing handled it: the app exits.
 
 A listener returns `true` when it handled the press, which keeps the stack from popping. While a listener is registered,
@@ -296,11 +305,11 @@ function Editor() {
 
 ## Tabs and other layouts
 
-`nsh/ui/mobile` has no tab bar component. A tab bar is a row of pressable views and a signal holding the selected tab; render the selected tab's content with a function child or [`<If>`](../elements/control-flow.md). To keep each tab's state while switching, give each tab its own `Stack` and navigator and keep all of them mounted, hiding the inactive ones with `display: "none"`.
+A tab bar is your own UI, drawn from primitives: a row of pressable views and a signal holding the selected tab; render the selected tab's content with a function child or [`<If>`](../elements/control-flow.md). To keep each tab's state while switching, give each tab its own `NavStack` and state and keep all of them mounted, hiding the inactive ones with `display: "none"`.
 
 ## Related
 
-- [Navigation components](../components/navigation.md): the `createNavigator`, `Stack`, `Screen` and `Modal` reference.
-- [`SafeAreaView`](../components/safe-area-view.md) and [`StatusBar`](../components/status-bar.md).
-- [`Alert`](../components/alert.md), [`ActionSheet`](../components/action-sheet.md) and [`Sheet`](../components/sheet.md).
+- [`nsh/base`](../modules/nsh-base.md): the `createNavStack`, `NavStack`, `NavPage`, `Dialog` and `SafeAreaView` reference.
+- [The status bar](../modules/nsh-base.md#status-bar) of pages and dialogs.
+- [`AlertDialog`](../modules/nsh-base.md#alertdialog).
 - [`nsh/android`](../modules/nsh-android.md): `BackHandler`.

@@ -123,7 +123,7 @@ final class EmbedController: UIViewController {
         }
     }
 
-    // Let the embedded app's StatusBar decide the status bar.
+    // Let the embedded app's pages and dialogs decide the status bar.
     override var preferredStatusBarStyle: UIStatusBarStyle { NshAppView.preferredStatusBarStyle }
     override var prefersStatusBarHidden: Bool { NshAppView.prefersStatusBarHidden }
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
@@ -154,7 +154,7 @@ final class EmbedController: UIViewController {
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | 在主线程之外验证指定 URL 的包，然后运行它。被拒绝时抛出原因；正在运行的应用保持不变。 |
 | `connectDevServer(_ url: URL) throws` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用不含开发支持的 `NativeShell.xcframework` 时会抛出错误。 |
 | `register(component:_:)` | 注册一个[原生组件](./native-components.md)。 |
-| `static preferredStatusBarStyle`、`prefersStatusBarHidden`、`preferredStatusBarUpdateAnimation` | 正在运行的应用通过 `StatusBar` 请求的状态栏设置：在宿主视图控制器的对应重写中返回它们。 |
+| `static preferredStatusBarStyle`、`prefersStatusBarHidden`、`preferredStatusBarUpdateAnimation` | 正在运行的应用请求的状态栏设置（其页面和对话框的 `statusBar`、`nsh.json` 的默认值）：在宿主视图控制器的对应重写中返回它们。 |
 
 > [!IMPORTANT]
 > `bundle.nshc`（字节码）只能从应用包内部加载。QuickJS 不校验字节码，其他来源的字节码可能破坏内存：对于应用包之外的文件，请加载
@@ -264,9 +264,9 @@ try app.loadBundle(at: bundledURL)
 
 - **线程。** `NshAppView` 隔离在 main actor 上。`NshTrust`、`NshPackage` 和 `NshComponentContext` 是线程安全的。JS
   引擎运行在自己的线程上；主线程从不等待它。
-- **状态栏。** 嵌入应用的 `StatusBar` 会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
-- **安全区域。** 应用照常使用 [`nsh/ui/mobile`](../components/safe-area-view.md) 中的 `SafeAreaView` 或
-  `useSafeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
+- **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
+- **安全区域。** 应用照常使用 [`nsh/base`](../modules/nsh-base.md#safeareaview) 中的 `SafeAreaView` 或
+  `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
 
 ## 另请参阅

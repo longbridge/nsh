@@ -35,7 +35,7 @@ pub enum ClientMessage {
         /// (`None`: a host that does not say).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         platform: Option<HostPlatform>,
-        /// The UI sets the host serves, by specifier (`nsh/ui/mobile`, an
+        /// The UI sets the host serves, by specifier (an
         /// app's own `gallery/native`): bundles importing others are not
         /// sent to it ([`ServerMessage::CannotRun`]). `None`: a host that
         /// does not say, which gets every bundle.
@@ -222,7 +222,7 @@ mod tests {
             }
         ));
         let hello: ClientMessage = serde_json::from_str(
-            r#"{"type":"hello","protocol":2,"bytecode_version":"x","device":"Mac","platform":"vision","ui_sets":["nsh/ui/mobile"]}"#,
+            r#"{"type":"hello","protocol":2,"bytecode_version":"x","device":"Mac","platform":"vision","ui_sets":["app/native","app/charts"]}"#,
         )
         .unwrap();
         assert!(matches!(
@@ -231,7 +231,7 @@ mod tests {
                 platform: Some(HostPlatform::Other),
                 ui_sets: Some(sets),
                 ..
-            } if sets == ["nsh/ui/mobile"]
+            } if sets == ["app/native", "app/charts"]
         ));
     }
 }

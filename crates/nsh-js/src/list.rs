@@ -45,7 +45,8 @@ const FORWARDED: &[&str] = &[
     "inverted",
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
-    "contentContainerStyle",
+    "contentStyle",
+    "contentClass",
     "viewabilityConfig",
     "pagingEnabled",
     "snapToInterval",
@@ -66,6 +67,25 @@ const FORWARDED: &[&str] = &[
     "onMomentumScrollEnd",
 ];
 
+/// The props the list itself uses: every other prop the app passes (the
+/// test id, accessibility, classes, touch and layout events, ...) goes to
+/// the scroll view as it would on a `<Scroll>`, as React Native's
+/// `FlatList` passes the rest to its `ScrollView`.
+const OWN: &[&str] = &[
+    "each",
+    "children",
+    "ref",
+    "keyExtractor",
+    "estimatedItemSize",
+    "onEndReachedThreshold",
+    "initialScrollIndex",
+    "onViewableItemsChanged",
+    "ListHeaderComponent",
+    "ListFooterComponent",
+    "ListEmptyComponent",
+    "ItemSeparatorComponent",
+];
+
 /// What the app passes a Rust component's rows (`listItemsProps` of the
 /// JS glue): the data and the rows; the component lays them out.
 pub(crate) const ITEMS_PROPS: &[&str] = &[
@@ -80,9 +100,9 @@ pub(crate) const ITEMS_PROPS: &[&str] = &[
     "onRefresh",
     "onEndReached",
     "onEndReachedThreshold",
-    "ListHeaderComponent",
-    "ListFooterComponent",
-    "ListEmptyComponent",
+    "header",
+    "footer",
+    "empty",
 ];
 
 struct Cell {
@@ -243,19 +263,21 @@ pub(crate) fn render(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsV
     let r = reactive::render_effect(ctx, func);
     // SAFETY: the effect keeps its own value.
     unsafe { qjs::JS_FreeValue(ctx, r) };
-    // The forwarded props, the estimated size and the end threshold.
+    // The forwarded props, the estimated size, the end threshold and the
+    // host props passed on.
+    let rest = rest_names(ctx, props).map_err(fail)?;
     // SAFETY: a new array of the previous values.
     let prev = unsafe { qjs::JS_NewArray(ctx) };
-    let func = native(ctx, forward_run, 0, &mut [node, props, prev]);
-    // SAFETY: the function keeps a dup.
-    unsafe { qjs::JS_FreeValue(ctx, prev) };
+    let func = native(ctx, forward_run, 0, &mut [node, props, prev, rest]);
+    // SAFETY: the function keeps dups.
+    unsafe {
+        qjs::JS_FreeValue(ctx, prev);
+        qjs::JS_FreeValue(ctx, rest);
+    }
     let r = reactive::render_effect(ctx, func);
     unsafe { qjs::JS_FreeValue(ctx, r) };
     // Header and footer cells (always rendered), and the empty one.
-    for (role, key) in [
-        ("header", "ListHeaderComponent"),
-        ("footer", "ListFooterComponent"),
-    ] {
+    for (role, key) in [("header", "header"), ("footer", "footer")] {
         if has(ctx, props, key) {
             let owner = extra_cell(ctx, id, role, key).map_err(fail)?;
             if let Some(d) = lists(ctx).map.borrow_mut().get_mut(&id) {
@@ -263,7 +285,7 @@ pub(crate) fn render(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsV
             }
         }
     }
-    if has(ctx, props, "ListEmptyComponent") {
+    if has(ctx, props, "empty") {
         // SAFETY: a placeholder for the empty cell's state (owner, node).
         let state = unsafe { qjs::JS_NewArray(ctx) };
         let func = native(ctx, empty_run, 0, &mut [node, props, state]);
@@ -428,41 +450,126 @@ unsafe extern "C" fn forward_run(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values; the array keeps dups of the values.
+    // SAFETY: four data values; the array keeps dups of the values.
     unsafe {
-        let (node, props, prev) = (*data, *data.add(1), *data.add(2));
+        let (node, props, prev, rest) = (*data, *data.add(1), *data.add(2), *data.add(3));
         let names = FORWARDED.iter().map(|&n| (n, n)).chain([
             ("estimatedItemSize", "estimatedItemSize"),
             ("endReachedThreshold", "onEndReachedThreshold"),
         ]);
-        for (i, (wire, key)) in names.enumerate() {
-            let mut value = get(ctx, props, key);
-            if qjs::JS_IsException(value) {
-                return value;
+        let mut at = 0;
+        for (wire, key) in names {
+            if let Err(e) = forward(ctx, node, props, prev, at, wire, key) {
+                return e;
             }
-            if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
-                value = match wire {
-                    "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
-                    "endReachedThreshold" => qjs::JS_NewFloat64(1.0),
-                    _ => value,
-                };
+            at += 1;
+        }
+        for i in 0..length(ctx, rest) {
+            let name = qjs::JS_GetPropertyInt64(ctx, rest, i);
+            let s = qjs::JS_ToCString(ctx, name);
+            qjs::JS_FreeValue(ctx, name);
+            if s.is_null() {
+                return qjs::JS_EXCEPTION;
             }
-            let old = qjs::JS_GetPropertyUint32(ctx, prev, i as u32);
-            let first = qjs::JS_IsUndefined(old)
-                && !matches!(wire, "estimatedItemSize" | "endReachedThreshold");
-            let result =
-                if qjs::JS_IsStrictEqual(ctx, old, value) || first && qjs::JS_IsUndefined(value) {
-                    Ok(())
-                } else {
-                    dom::set_prop_with_prev(ctx, node, wire, value, old)
-                };
-            qjs::JS_FreeValue(ctx, old);
-            qjs::JS_SetPropertyUint32(ctx, prev, i as u32, value);
+            let result = match CStr::from_ptr(s).to_str() {
+                Ok(key) => forward(ctx, node, props, prev, at, key, key),
+                Err(_) => Ok(()),
+            };
+            qjs::JS_FreeCString(ctx, s);
             if let Err(e) = result {
                 return e;
             }
+            at += 1;
         }
         UNDEFINED
+    }
+}
+
+/// Sends prop `wire` of the list (`props[key]`) when it changed from the
+/// value kept at `prev[at]`.
+fn forward(
+    ctx: *mut JsContext,
+    node: JsValue,
+    props: JsValue,
+    prev: JsValue,
+    at: u32,
+    wire: &str,
+    key: &str,
+) -> Result<(), JsValue> {
+    let mut value = get(ctx, props, key);
+    // SAFETY: inline checks and reads of live values; `prev` keeps the
+    // value, the old one is freed.
+    unsafe {
+        if qjs::JS_IsException(value) {
+            return Err(value);
+        }
+        if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
+            value = match wire {
+                "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
+                "endReachedThreshold" => qjs::JS_NewFloat64(1.0),
+                _ => value,
+            };
+        }
+        let old = qjs::JS_GetPropertyUint32(ctx, prev, at);
+        let first = qjs::JS_IsUndefined(old)
+            && !matches!(wire, "estimatedItemSize" | "endReachedThreshold");
+        let result =
+            if qjs::JS_IsStrictEqual(ctx, old, value) || first && qjs::JS_IsUndefined(value) {
+                Ok(())
+            } else {
+                dom::set_prop_with_prev(ctx, node, wire, value, old)
+            };
+        qjs::JS_FreeValue(ctx, old);
+        qjs::JS_SetPropertyUint32(ctx, prev, at, value);
+        result
+    }
+}
+
+/// The names of the props in `props` (borrowed) the list passes on to its
+/// scroll view (all but its own and the ones it forwards by name), as an
+/// array (owned). Read once: compiled JSX gives a list the same props for
+/// its whole life, their values change behind getters.
+fn rest_names(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsValue> {
+    // SAFETY: a new array; an enumeration of a live object's own names,
+    // freed after use.
+    unsafe {
+        let out = qjs::JS_NewArray(ctx);
+        if !qjs::JS_IsObject(props) {
+            return Ok(out);
+        }
+        let mut tab: *mut qjs::JSPropertyEnum = ptr::null_mut();
+        let mut len: u32 = 0;
+        if qjs::JS_GetOwnPropertyNames(
+            ctx,
+            &mut tab,
+            &mut len,
+            props,
+            (qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) as c_int,
+        ) != 0
+        {
+            qjs::JS_FreeValue(ctx, out);
+            return Err(qjs::JS_EXCEPTION);
+        }
+        let mut n = 0;
+        for j in 0..len as usize {
+            let name = qjs::JS_AtomToString(ctx, (*tab.add(j)).atom);
+            let s = qjs::JS_ToCString(ctx, name);
+            let pass = !s.is_null()
+                && CStr::from_ptr(s)
+                    .to_str()
+                    .is_ok_and(|name| !OWN.contains(&name) && !FORWARDED.contains(&name));
+            if !s.is_null() {
+                qjs::JS_FreeCString(ctx, s);
+            }
+            if pass {
+                qjs::JS_SetPropertyUint32(ctx, out, n, name);
+                n += 1;
+            } else {
+                qjs::JS_FreeValue(ctx, name);
+            }
+        }
+        qjs::JS_FreePropertyEnum(ctx, tab, len);
+        Ok(out)
     }
 }
 
@@ -575,7 +682,7 @@ unsafe extern "C" fn empty_run(
                     cell_node = cell;
                     set(ctx, cell, "slot", new_string(ctx, "empty"))?;
                     dom::insert_node(ctx, list, cell, None)?;
-                    let key = new_string(ctx, "ListEmptyComponent");
+                    let key = new_string(ctx, "empty");
                     let reader = native(ctx, slot_run, 0, &mut [props, key]);
                     qjs::JS_FreeValue(ctx, key);
                     let r = dom::insert_value_at(ctx, cell, reader, None);
@@ -692,7 +799,7 @@ fn make_cell(ctx: *mut JsContext, list: NodeId, slot: u32, first: u32) -> Result
                 return Err(content);
             }
         }
-        let r = if has(ctx, props, "ItemSeparatorComponent") {
+        let r = if has(ctx, props, "separator") {
             // SAFETY: a placeholder for the separator once made.
             let holder = unsafe { qjs::JS_NewArray(ctx) };
             let between = native(ctx, separated_run, 0, &mut [content, props, index, holder]);
@@ -782,7 +889,7 @@ unsafe extern "C" fn separated_run(
         let each = get(ctx, props, "each");
         let len = length(ctx, each);
         qjs::JS_FreeValue(ctx, each);
-        let component = get(ctx, props, "ItemSeparatorComponent");
+        let component = get(ctx, props, "separator");
         let shown =
             (n as i64) < len - 1 && !qjs::JS_IsNull(component) && !qjs::JS_IsUndefined(component);
         if !shown {
@@ -1058,20 +1165,28 @@ export interface ViewabilityConfig {
   minimumViewTime?: number;
 }
 
-export interface ListProps<T> extends ScrollingHostProps, ListHostProps {
+/** A list's props: its own, and those of the scroll view it is (the test
+ * id, accessibility, classes, touch and layout events, ...), which it
+ * passes on as they are. */
+export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHostProps, ListHostProps {
   each: readonly T[];
-  ListHeaderComponent?: ListSlot;
-  ListFooterComponent?: ListSlot;
+  /** Above the items, scrolling with them. */
+  header?: ListSlot;
+  /** Below the items, scrolling with them. */
+  footer?: ListSlot;
   /** Shown instead of the items while `each` is empty. */
-  ListEmptyComponent?: ListSlot;
+  empty?: ListSlot;
   /** Rendered between items (one column). */
-  ItemSeparatorComponent?: ListSlot;
+  separator?: ListSlot;
   /** Scrolls to this item before the first frame. */
   initialScrollIndex?: number;
   /** Key of an item in `onViewableItemsChanged` tokens (default: `item.key`, `item.id`, or the index). */
   keyExtractor?: (item: T, index: number) => string;
   onViewableItemsChanged?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;
+  /** Padding and gaps of the content as classes (`p-*`, `gap-*`);
+   * `contentStyle` wins over them. */
+  contentClass?: string;
   /** The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). */
   testID?: string;
   /** How close to the end (in viewports) `onEndReached` fires; default 1. */
@@ -1085,5 +1200,5 @@ export interface ListProps<T> extends ScrollingHostProps, ListHostProps {
 /** What an app passes to a Rust component that lays out a list of rows
  * (an `Items` prop): the data and the rows; the component decides the
  * layout. */
-export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onEndReached" | "onEndReachedThreshold" | "ListHeaderComponent" | "ListFooterComponent" | "ListEmptyComponent">;
+export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onEndReached" | "onEndReachedThreshold" | "header" | "footer" | "empty">;
 "#;

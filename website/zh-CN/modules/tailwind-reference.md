@@ -240,7 +240,8 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 
 | Class | 设置 |
 |---|---|
-| `placeholder:text-<color>` | `placeholderTextColor` |
+| `placeholder:text-<color>` | `placeholderColor` |
+| `selection:text-<color>` | `selectionColor`（输入框的光标和选区、可选文本的选区高亮） |
 | `caret-<color>` | 光标颜色 |
 
 ## 背景
@@ -425,6 +426,9 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `focus-within:` | 元素自身或其后代获得焦点 |
 | `disabled:` | 元素设置了 `disabled` 属性 |
 | `enabled:` | 元素没有设置 `disabled` 属性 |
+| `selected:` | 元素处于选中状态：`Button` 的 `selected`，或 `accessibilityState.selected` |
+
+这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle` 和 `disabledStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
 
 `disabled` 适用于任何元素：它会让 `disabled:` 生效，并移除元素的按压处理器，因此也不会显示按压反馈。
 
@@ -449,6 +453,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `group-focus:`、`group-focus-visible:` | 获得焦点 |
 | `group-focus-within:` | 自身或内部获得焦点 |
 | `group-disabled:` | 禁用 |
+| `group-selected:` | 选中 |
 
 ```tsx
 <View onPress={open} class="group/row flex-row items-center gap-3 p-3 active:bg-zinc-100">
@@ -471,9 +476,9 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 <Each of={items()}>{(item) => <Text class="border-b border-zinc-200 py-3 last:border-b-0">{item().name}</Text>}</Each>
 ```
 
-### 占位符
+### 占位符与选区
 
-`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`。
+`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 的选区（包括光标）或可选 `<Text>` 的选区，同样只接受文字颜色：`selection:text-violet-500`（样式键 `selectionColor`）。
 
 ### 重要标记
 
@@ -534,7 +539,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> Tailwind 主题只影响应用自己的类。`nsh/ui/mobile` 的组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见 [组件](../components/index.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
+> Tailwind 主题只影响应用自己的类。Rust 组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见[用 Rust 开发](../docs/rust.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
 
 ## 相关
 

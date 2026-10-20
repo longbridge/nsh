@@ -54,7 +54,7 @@ cargo run          # 同一个根组件，直接在桌面后端上运行
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 function App() {
   const count = signal(0);
@@ -63,8 +63,8 @@ function App() {
       <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
@@ -79,10 +79,10 @@ mount(App);
 逐行来看：
 
 - **`import { mount, signal, Text, View } from "nsh"`**：`nsh` 是核心模块，提供 [signals](./reactivity.md)、`mount`、其他响应式原语，以及宿主元素 `View` 和 `Text`。它由原生运行时提供，不会被打包。
-- **`import { SafeAreaView } from "nsh/ui/mobile"`**：移动端 UI 组件集。[`SafeAreaView`](../components/safe-area-view.md) 会为内容加上内边距，使其避开刘海、状态栏和 Home 指示条；桌面上安全区域为 0，它不会加内边距。
+- **`import { SafeAreaView } from "nsh/base"`**：应用界面的无样式基础（导航栈、模态框、安全区域、对话框、键盘和状态栏），各平台通用。[`SafeAreaView`](../modules/nsh-base.md#safeareaview) 会为内容加上内边距，使其避开刘海、状态栏和 Home 指示条；桌面上安全区域为 0，它不会加内边距。
 - **`function App()`** 是一个组件：返回 JSX 的函数。它只运行**一次**。`signal(0)` 创建一个会随时间变化的值。
 - **`{count()}`** 在 JSX 中读取 signal。编译器看到这是一次调用，就让这段文本跟随该 signal：`count` 变化时，运行时只更新这一段文本，其他什么都不动。
-- **`<View onPress>`** 是一个响应按压的原生视图；`activeOpacity` 让它在按下时以原生方式变淡。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 NSH 的模块导入；只有 `If` 和 `Each` 无需导入。
+- **`<View onPress>`** 是一个响应按压的原生视图；`activeStyle` 是它按下时的样式，由原生应用。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 NSH 的模块导入；只有 `If` 和 `Each` 无需导入。这个按钮属于应用自己：NSH 提供基本元素和各项能力，应用用它们绘制自己的界面，可以用 `style`、Tailwind 类，或应用自己的 Rust 组件。
 - **`style={{ … }}`** 接受由 camelCase 样式属性组成的对象，数字的单位是点。布局是 flexbox，子元素默认按列排列（[布局](./layout.md)）。
 - **`mount(App)`** 把组件渲染到应用的界面上。
 
@@ -170,7 +170,7 @@ nsh run my-app/App.tsx
 ```tsx
 function TapButton(props: { onPress: () => void }) {
   return (
-    <View onPress={props.onPress} activeOpacity={0.6} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
       <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
     </View>
   );

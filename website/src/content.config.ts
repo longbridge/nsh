@@ -26,10 +26,8 @@ function section(base: string) {
 export const collections = {
   docs: section('./docs'),
   elements: section('./elements'),
-  components: section('./components'),
   modules: section('./modules'),
   'zh-docs': section('./zh-CN/docs'),
   'zh-elements': section('./zh-CN/elements'),
-  'zh-components': section('./zh-CN/components'),
   'zh-modules': section('./zh-CN/modules'),
 };

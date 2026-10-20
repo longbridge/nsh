@@ -29,9 +29,9 @@ requestAnimationFrame ───────────┘                      
 - **样式在 Rust 里转成 CSS。** 背景、边框、圆角、阴影（`shadow*` 和 `boxShadow`）、渐变、滤镜、`backdropFilter`、变换、`transformOrigin`、`outline`、`mixBlendMode`、过渡和内置的关键帧动画都会变成 CSS 属性。Tailwind 类、`active:`、`hover:`、`focus:` 状态和 `dark:` 与设备上一样在原生侧解析。
 - **文本在 Rust 里排版**，字体度量来自浏览器（`CanvasRenderingContext2D.measureText`），再按排版确定的位置逐段绘制，所以测量的就是绘制的。换行发生在空格之后、CJK 字符前后和 `\n` 处；`numberOfLines` 会截断并加省略号。
 - **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的动画值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
-- **输入**：带 `activeOpacity` 的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带标题栏的 `Stack` 和 `Screen`、`Modal`。
-- **系统界面绘制在页面内**：`Alert` 和 `ActionSheet` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
-- **模态视图**按浏览器所像的平台呈现：`pageSheet` 和 `formSheet`（`desktop={{ presentationStyle }}` 或 `web={{ presentationStyle }}`）在桌面和平板浏览器中是居中于变暗页面上的卡片，尺寸与桌面后端相同，可用 Escape、浏览器的返回按钮或点击卡片外部关闭（都会通过 `onRequestClose` 询问）；在手机浏览器中则像 iPhone 的表单一样从底部升起，停在顶部稍下方。`fullScreen` 和透明的模态视图覆盖整个应用；`animationType`、`onShow` 和 `onDismiss` 与设备上一致。
+- **输入**：带 `activeStyle` / `active:` 反馈的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带页面 `header` 的 `NavStack` 和 `NavPage`、`Dialog`。
+- **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
+- **对话框**与桌面后端一样，是覆盖整个应用的一层，显示应用的弹出层和背景。Escape、浏览器的返回按钮和点击背景会关闭它（`closeOnEscape`、`closeOnBackdropPress`），`animation`、`onOpen`、`onClose`、`onCancel` 和 `onOpenChange` 与设备上一致。
 
 ## 键盘、鼠标和触摸
 
@@ -39,9 +39,9 @@ requestAnimationFrame ───────────┘                      
 
 - **滚轮和触控板**滚动沿其方向、还能继续滚动的最内层滚动视图（没有可滚动的纵向视图时，纵向滚轮也会滚动横向列表），并且直到这次滚动结束都停留在这个视图上；滚轮的每一格平滑滑动，分页和吸附的视图每次滚动移动一页。Ctrl + 滚轮和触控板捏合会捏合带原生捏合值的视图，而不是缩放页面。和桌面平台一样，用鼠标拖动不会滚动：鼠标拖动交给拖拽手势、响应者系统和文字选择。滚动视图像桌面平台一样上报 `onScrollBeginDrag` / `onScrollEndDrag`、`onMomentumScrollBegin` / `End` 和 `onScrollEnd`。
 - **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（焦点环和 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`nsh/keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
-- **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会弹出最内层的栈，或请求关闭最上层的模态框，和 Android 返回键一样；`preventBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，每个压入的页面和弹出的模态框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。
+- **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会关闭最上层的对话框或弹出最内层的栈，和 Android 返回键一样；`popOnBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，每个压入的页面和打开的对话框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。
 - **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。
-- **无障碍**：`accessibilityRole`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`AccessibilityInfo.announceForAccessibility` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。模态框或提示框下面的视图不可交互。
+- **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`AccessibilityInfo.announceForAccessibility` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
 - **选择和菜单**：在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素里的文字（带按压或触摸处理的视图：按钮、可按压的列表行、标签栏）以及设置了 `selectable={false}` 或 `select-none` 的文字除外；在上面拖动鼠标会选择文字，Ctrl/Cmd+C 按行复制，Ctrl/Cmd+A 全选选区所在的这段文字。在手机和平板浏览器中，只有 `selectable` 文字可以选择，和原生应用一样。浏览器的右键菜单只在可选文字和输入框里出现。
 
 
@@ -59,7 +59,7 @@ nsh package App.tsx --target web --run     # 并在本机提供服务（打开�
 | `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
-| `nsh.<digest>.wasm` | 引擎、核心、移动端组件和不含编译器的 QuickJS（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB） |
+| `nsh.<digest>.wasm` | 引擎、核心、运行时的模块和不含编译器的 QuickJS（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB） |
 | `app.<digest>.nshc` | 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
 | `harden.<digest>.nshc` | [沙箱](./sandbox-and-capabilities.md)的加固脚本，同样编译成字节码（1.4 KB） |
 | `chunks/<name>.<digest>.nshc` | `import()` 加载的代码，同样是字节码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
@@ -147,7 +147,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 [在线试用](/zh-CN/playground)页面可以在浏览器里编辑并运行应用：页面用 NSH 自己的 JSX 编译器（编进 `nsh-playground.wasm`，不需要 rolldown）编译 TSX，每次停止输入后立即运行。本站每个演示都有「在线编辑」链接；「分享」会把代码直接放进链接里，不经过任何服务器存储。
 
-在线试用的应用只有一个模块：可以导入 NSH 的模块（`nsh`、`nsh/*`、`nsh/ui/mobile`），但不能导入其他文件或包。`console.log` 的输出和错误显示在手机下方。
+在线试用的应用只有一个模块：可以导入 NSH 的模块（`nsh` 和 `nsh/*`），但不能导入其他文件或包。`console.log` 的输出和错误显示在手机下方。
 
 编译器也是一个 Rust 函数：`nsh_bundler::compile_module(name, source, ui_sets)`，不开启该 crate 的 `bundle` 特性也能使用。
 
@@ -163,7 +163,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   assetBase: "./assets/",   // `asset:/…` URI（导入的图片）从这里加载
   // dark: true,            // 强制外观；不设置时跟随系统
   // idiom: "phone",        // 强制 "phone"、"pad" 或 "desktop"；不设置时由指针和尺寸决定
-  // history: false,        // 页面和模态框是否作为浏览器历史记录；默认只在应用占据整个页面时开启，iframe 里不开启
+  // history: false,        // 页面和对话框是否作为浏览器历史记录；默认只在应用占据整个页面时开启，iframe 里不开启
 });
 player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
@@ -183,7 +183,7 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 `Platform.OS` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `Platform.constants.interfaceIdiom`：
 
-- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `Platform.isDesktop` 为 `true`，`Platform.select` 选 `desktop`，`desktop={{…}}` 属性生效，标题栏高度与桌面后端相同。
+- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `Platform.isDesktop` 为 `true`，`Platform.select` 选 `desktop`，`desktop={{…}}` 属性生效。
 - `"pad"`：短边至少 600 点的触摸屏；其余为 `"phone"`。两者都属于移动端：`Platform.select` 选 `mobile`。
 
 界面风格在应用启动时确定，运行期间不变，与其他平台一致；变窄的桌面窗口仍是桌面，按自己的 `windowSize()` 布局。`web={{…}}` 属性、`Platform.select({ web })` 和 `web:` 类只在浏览器中生效；`ios={{…}}`、`native` 和 `ios:` 在浏览器中不生效。
@@ -199,9 +199,9 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 | `PixelRatio.get()` | `devicePixelRatio`（随缩放和屏幕变化） |
 | `colorScheme()` | `prefers-color-scheme` |
 | `safeArea()` | 与容器重叠部分的 `env(safe-area-inset-*)`（手机上 `viewport-fit=cover` 的页面） |
-| `keyboard()` | 屏幕键盘遮住容器的高度（`visualViewport`） |
+| `keyboardFrame()` | 屏幕键盘遮住容器的高度（`visualViewport`） |
 
-`Platform.Version` 为 `"0.0"`，`screenReaderEnabled()` 始终为 `false`（浏览器不提供这一信息）。[`StatusBar`](../components/status-bar.md) 的 `web={{ themeColor }}` 设置页面的 `<meta name="theme-color">`，也就是浏览器给页面周围的栏使用的颜色。
+`Platform.Version` 为 `"0.0"`，`screenReaderEnabled()` 始终为 `false`（浏览器不提供这一信息）。页面周围的栏属于浏览器；页面的 [`statusBar`](../modules/nsh-base.md#status-bar) 用于手机。
 
 ## 网络
 

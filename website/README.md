@@ -26,13 +26,12 @@ Set `PUBLIC_SITE_BASE=/sub/path/` to build for a sub-path.
 
 ## Writing documentation
 
-Content is Markdown in four sections, each in English and Chinese:
+Content is Markdown in three sections, each in English and Chinese:
 
 | Directory | URL | Nav label |
 | --- | --- | --- |
 | `docs/*.md` | `/docs/<file>` | Guide · 指南 |
 | `elements/*.md` | `/elements/<file>` | Elements · 元素 |
-| `components/*.md` | `/components/<file>` | Components · 组件 |
 | `modules/*.md` | `/modules/<file>` | API |
 | `zh-CN/<section>/*.md` | `/zh-CN/<section>/<file>` | |
 
@@ -142,8 +141,8 @@ bun run play       # = cargo xtask web: nsh.wasm, nsh.js, index.html, demos/*.ns
 
 Run it again after changing a demo or the runtime. Embedded demos follow
 the page's theme (`?theme=`, then a message on each change) and take their
-colours from `demos/palette.ts`; `demos/nsh.json` gives `nsh/ui/mobile`
-components the matching light and dark theme (`demos/graphite-theme.json`).
+colours from `demos/palette.ts`; `demos/nsh.json` gives Rust components the matching light and dark
+theme (`demos/graphite-theme.json`).
 The playground compiles in the browser, without that theme. The
 player is built separately from the site. Whether it exists is decided
 at build time: without `public/play/index.html`, pages show the demo's source
@@ -155,7 +154,7 @@ player, or editing a demo, invalidates Astro's content cache automatically
 
 | Path | Role |
 | --- | --- |
-| `src/content.config.ts` | The eight collections (four sections × two locales) and the schema |
+| `src/content.config.ts` | The six collections (three sections × two locales) and the schema |
 | `src/lib/sections.ts` | Section labels, page lists in sidebar order, routes |
 | `src/lib/remark-*.js`, `rehype-heading-anchors.js` | Title removal, callouts, `.md` links, demo insertion, heading anchors |
 | `src/lib/demo.js` | Demo sources, the demo frame and the demo panel markup |

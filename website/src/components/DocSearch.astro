@@ -7,8 +7,8 @@ const { lang = 'en' } = Astro.props;
 const isZh = lang === 'zh-CN';
 
 const copy = isZh
-  ? { label: '搜索', title: '搜索文档', emptyTitle: '搜索文档', emptyBody: '查找指南、元素、组件与 API。', navigate: '选择', enter: '打开', esc: '关闭' }
-  : { label: 'Search', title: 'Search documentation', emptyTitle: 'Search documentation', emptyBody: 'Find guides, elements, components and API references.', navigate: 'Navigate', enter: 'Open', esc: 'Close' };
+  ? { label: '搜索', title: '搜索文档', emptyTitle: '搜索文档', emptyBody: '查找指南、元素与 API。', navigate: '选择', enter: '打开', esc: '关闭' }
+  : { label: 'Search', title: 'Search documentation', emptyTitle: 'Search documentation', emptyBody: 'Find guides, elements and API references.', navigate: 'Navigate', enter: 'Open', esc: 'Close' };
 ---
 
 <div class="docsearch">

@@ -752,6 +752,11 @@ pub struct TextStyle {
     /// `textAlignVertical`: where text shorter than its box sits, 0% top
     /// (`auto`, `top`), 50% `center`, 100% `bottom`.
     pub align_vertical: Option<Percentage>,
+    /// `placeholderColor`: an input's placeholder (not inherited).
+    pub placeholder_color: Option<Color>,
+    /// `selectionColor`: an input's caret and selection, a selectable
+    /// text's selection highlight (not inherited).
+    pub selection_color: Option<Color>,
 }
 
 impl TextStyle {
@@ -1221,6 +1226,8 @@ style_keys! {
     TextShadowRadius = "textShadowRadius": Text "number",
     TextTransform = "textTransform": Text "\"none\" | \"uppercase\" | \"lowercase\" | \"capitalize\"",
     TextAlign = "textAlign": Text "\"auto\" | \"left\" | \"center\" | \"right\" | \"justify\"",
+    PlaceholderColor = "placeholderColor": Text "ColorValue" "An input's placeholder (`placeholder:text-*`).",
+    SelectionColor = "selectionColor": Text "ColorValue" "An input's caret and selection, a selectable text's selection highlight (`selection:text-*`).",
 }
 
 /// A style property value as read from JS.
@@ -2177,6 +2184,8 @@ impl Style {
                 }
             }
             StyleKey::TextDecorationColor => self.text.decoration_color = color(value)?,
+            StyleKey::PlaceholderColor => self.text.placeholder_color = color(value)?,
+            StyleKey::SelectionColor => self.text.selection_color = color(value)?,
             StyleKey::TextAlignVertical => {
                 self.text.align_vertical = match keyword(value)? {
                     None => None,

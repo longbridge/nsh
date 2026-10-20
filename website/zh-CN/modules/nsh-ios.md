@@ -58,7 +58,7 @@ function Note() {
       <Input
         ref={(n) => (input = n)}
         value={text()}
-        onChangeText={(v) => text.set(v)}
+        onChange={(v) => text.set(v)}
         placeholder="Write a note"
         ios={{ inputAccessoryViewID: "note-bar" }}
       />

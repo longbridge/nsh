@@ -249,12 +249,12 @@ Sizes and positions are layout, not style, and do not transition; animate layout
 
 ## Press feedback
 
-Pressed states are handled natively, without a round trip to JavaScript:
+Press feedback is the app's styles for the pressed state, applied natively without a round trip to JavaScript; `hoverStyle`, `focusStyle` and `disabledStyle` (`hover:`, `focus:`, `disabled:`) style the other states:
 
 | Prop | Effect while pressed |
 |---|---|
-| `activeOpacity={0.6}` | The view fades to this opacity |
-| `underlayColor="#eaeef2"` | The background becomes this color and the children fade to `underlayOpacity` (default 0.85) |
+| `activeStyle={{ opacity: 0.6 }}` | The view fades to this opacity |
+| `activeStyle={{ backgroundColor: "#eaeef2" }}` | The background becomes this color |
 | `android={{ ripple: { color: "#0002" } }}` | Android's material ripple |
 | `class="active:bg-zinc-100 active:scale-95"` | Any style, through Tailwind's `active:` variant |
 

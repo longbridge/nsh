@@ -60,15 +60,15 @@ mod tests {
         let code = super::compile_module(
             "App.tsx",
             "import { mount, signal, View } from \"nsh\";\n\
-             import { Button } from \"nsh/ui/mobile\";\n\
+             import { SafeAreaView } from \"nsh/base\";\n\
              const n: number = 1;\n\
-             function App() { const c = signal(n); return <View><Button title=\"x\" onPress={() => c.set(2)} /></View>; }\n\
+             function App() { const c = signal(n); return <SafeAreaView><View onPress={() => c.set(2)} /></SafeAreaView>; }\n\
              mount(App);\n",
-            &[nsh_ui_mobile::registry().into()],
+            &[nsh_base::registry().into()],
         )
         .unwrap();
         assert!(code.contains("from \"nsh:rt\""), "{code}");
-        assert!(code.contains("from \"nsh/ui/mobile\""), "{code}");
+        assert!(code.contains("from \"nsh/base\""), "{code}");
         assert!(!code.contains(": number"), "types are removed: {code}");
         assert!(!code.contains("<View"), "JSX is compiled: {code}");
     }

@@ -58,13 +58,8 @@ const SLIDE_MS = 300;
 const FADE_MS = 200;
 const PARALLAX = 0.3;
 const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
-/** Press feedback (`activeOpacity`): in and out, easing out
- * quadratically (1 - (1 - t)^2, exactly), as the Linux backend. */
-const PRESS_IN_MS = 100;
 /** How far back a pointer's velocity is measured (ms). */
 const VELOCITY_WINDOW = 100;
-const PRESS_OUT_MS = 250;
-const EASE_OUT_QUAD = "cubic-bezier(0.333,0.667,0.667,1)";
 
 /** View kinds whose frames, appearing and disappearing are navigation's. */
 const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
@@ -137,7 +132,6 @@ const KEYFRAMES = `
 .nsh-inert { pointer-events: none; }
 .nsh-clip { overflow: clip; }
 .nsh-stuck { z-index: 5; }
-.nsh-v.nsh-slotted { position: relative; }
 .nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
 img.nsh-fill { pointer-events: none; }
 .nsh-fit-cover { object-fit: cover; }
@@ -171,29 +165,11 @@ img.nsh-fill { pointer-events: none; }
 .nsh-desktop .nsh-press .nsh-autoselect, .nsh-desktop .nsh-press .nsh-autoselect *,
 .nsh-desktop .nsh-autoselect.nsh-press, .nsh-desktop .nsh-autoselect.nsh-press * { -webkit-user-select: none; user-select: none; }
 .nsh-autoselect ::selection { background: var(--nsh-selection, Highlight); }
-.nsh-header { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center;
-  justify-content: center; font: 600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  border-bottom: 0.5px solid rgba(0,0,0,.15); z-index: 10; }
-.nsh-header-back { position: absolute; left: 4px; top: 0; bottom: 0; display: flex; align-items: center;
-  padding: 0 8px; font-weight: 400; cursor: pointer; background: none; border: 0; color: inherit; font: inherit; font-weight: 400; }
-.nsh-header-right { position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center; }
+/* A page's header (the app's view): above the page's content. */
+.nsh-page-header { z-index: 1; }
 .nsh-screen { isolation: isolate; }
+/* Modals: transparent layers over the root; what shows is the app's. */
 .nsh-modal { transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease; z-index: 100; }
-/* Modals: opaque ones cover the root; sheets are cards over a scrim that
-   dims what is behind (the desktop backends' and iOS's colors). */
-.nsh-modal-opaque { background: #fff; }
-.nsh-dark .nsh-modal-opaque { background: #000; }
-.nsh-modal-scrim { position: absolute; inset: 0; z-index: 100; background: rgba(0,0,0,.32); transition: opacity .3s ease; }
-.nsh-dark .nsh-modal-scrim { background: rgba(0,0,0,.5); }
-.nsh-modal-sheet { background: #fff; border-radius: 12px; overflow: clip; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-/* The hairline edge, over the content. */
-.nsh-modal-sheet::after { content: ""; position: absolute; inset: 0; border: 1px solid rgba(0,0,0,.1); border-radius: inherit;
-  pointer-events: none; z-index: 2147483647; }
-.nsh-dark .nsh-modal-sheet { background: #242426; }
-.nsh-dark .nsh-modal-sheet::after { border-color: rgba(255,255,255,.1); }
-.nsh-modal-sheet.nsh-modal-top { border-radius: 10px 10px 0 0; box-shadow: none; }
-.nsh-modal-sheet.nsh-modal-top::after { content: none; }
-.nsh-dark .nsh-modal-sheet.nsh-modal-top { background: #1c1c1e; }
 .nsh-dialog-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.35); display: flex;
   align-items: center; justify-content: center; z-index: 1000; }
 .nsh-dialog { width: 270px; border-radius: 14px; background: rgba(245,245,245,.97); color: #000; text-align: center;
@@ -1270,7 +1246,7 @@ class Player {
       el._frameAnimation = a;
     }
     if (el._kind === "canvas") this.drawSoon(el);
-    if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h);
+    if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h, this.screenInsets(screen));
   }
 
   placeFrame(el) {
@@ -2488,72 +2464,39 @@ class Player {
 
   // Navigation
 
-  op_scr([, id, title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView, animation]) {
+  op_scr([, id, height, preventBack, header, animation]) {
     const el = this.view(id);
     if (!el) return;
-    el._screen = { title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView, animation };
-    this.renderHeader(el);
+    el._screen = { height, preventBack, header, animation };
+    this.placeHeader(el);
+    const stack = el.parentNode;
+    if (stack?._kind === "stack" && stack._frame) this.reportRoot(el, stack._frame[2], stack._frame[3], this.screenInsets(el));
   }
 
-  renderHeader(screen) {
-    const c = screen._screen;
-    if (!c) return;
-    let header = screen._header;
-    if (!c.shown || c.height <= 0) {
-      header?.remove();
-      screen._header = null;
-      return;
-    }
-    if (!header) {
-      header = document.createElement("div");
-      screen._header = header;
-    }
-    header.textContent = "";
-    const background = c.background ?? (this.shownDark ? "#1c1c1e" : "#f9f9f9");
-    const color = c.titleColor ?? (this.shownDark ? "#fff" : "#000");
-    header.className = `nsh-header ${cssClass(`height:${c.height}px;background:${background};color:${color};`)}`;
-    const title = document.createElement("span");
-    title.textContent = c.title ?? "";
-    const titleView = c.titleView != null ? this.view(c.titleView) : null;
-    if (titleView) {
-      titleView.classList.add("nsh-slotted");
-      header.append(titleView);
-    } else {
-      header.append(title);
-    }
-    const stack = screen.parentNode;
-    const screens = stack ? [...stack.children].filter((s) => s._kind === "screen") : [];
-    const index = screens.indexOf(screen);
-    const leftView = c.left != null ? this.view(c.left) : null;
-    if (leftView) {
-      const slot = document.createElement("div");
-      slot.className = "nsh-header-back";
-      leftView.classList.add("nsh-slotted");
-      slot.append(leftView);
-      header.append(slot);
-    } else if (index > 0 && c.backVisible) {
-      const back = document.createElement("button");
-      back.className = `nsh-header-back ${cssClass(`color:${c.tint ?? "#007aff"};`)}`;
-      back.textContent = "‹ Back";
-      back.addEventListener("click", () => this.goBack(screen));
-      header.append(back);
-    }
-    const rightView = c.right != null ? this.view(c.right) : null;
-    if (rightView) {
-      const slot = document.createElement("div");
-      slot.className = "nsh-header-right";
-      rightView.classList.add("nsh-slotted");
-      slot.append(rightView);
-      header.append(slot);
-    }
-    screen.append(header);
+  /** Puts screen `screen`'s `header` (the app's view, which the core
+   * places at its top) in it, above its content; NSH draws no header. */
+  placeHeader(screen) {
+    const id = screen._screen?.header;
+    const header = id != null ? this.view(id) : null;
+    if (screen._header && screen._header !== header) screen._header.remove();
+    screen._header = header;
+    if (!header) return;
+    header.classList.add("nsh-page-header");
+    if (header.parentNode !== screen) screen.append(header);
   }
 
+  /** The insets of screen `screen`'s content: the page's safe area, but
+   * the top's when its `header` covers it. */
+  screenInsets(screen) {
+    const safe = this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
+    return screen._screen?.header != null ? [0, safe[1], safe[2], safe[3]] : safe;
+  }
+
+  /** Back on screen `screen`: `onBackPress` when the app listens, then
+   * it pops unless `popOnBack` is false. */
   goBack(screen) {
-    if (screen._screen?.preventBack) {
-      this.event(screen._id, "onBackRequest");
-      return;
-    }
+    if (screen._events?.has("onBackRequest")) this.event(screen._id, "onBackRequest");
+    if (screen._screen?.preventBack) return;
     const stack = screen.parentNode;
     const screens = stack ? [...stack.children].filter((s) => s._kind === "screen") : [];
     const below = screens[screens.indexOf(screen) - 1];
@@ -2813,9 +2756,9 @@ class Player {
       }
       // A slide leaves the one under it shifted (`moveScreens`).
       if (top) screen.style.transform = "";
-      this.renderHeader(screen);
+      this.placeHeader(screen);
     });
-    if (added && stack._frame) this.reportRoot(added, stack._frame[2], stack._frame[3]);
+    if (added && stack._frame) this.reportRoot(added, stack._frame[2], stack._frame[3], this.screenInsets(added));
     this.syncHistorySoon();
   }
 
@@ -2826,88 +2769,21 @@ class Player {
 
   // Modals
 
-  op_mc([, id, animation, transparent, dismissible, presentation]) {
+  op_mc([, id, animation, closeOnEscape]) {
     const el = this.view(id);
     if (!el) return;
-    el._modal = { animation, transparent, dismissible, presentation };
-    // Its presentation decides its frame and whether a scrim dims the root.
+    el._modal = { animation, closeOnEscape };
     if (el.isConnected && !el._leaving) this.placeModal(el);
-    else this.styleModal(el);
   }
 
-  /**
-   * How modal `el` is presented, as the platform the idiom is like does:
-   * `"card"` for a page or form sheet with the desktop or pad idiom (a card
-   * centered over the dimmed root, as the desktop backends and iPads show
-   * one), `"top"` for one in a phone browser (a card up to just below the
-   * top, as on iPhones), else `null`: it covers the root (transparent ones
-   * too, as on iOS).
-   */
-  sheetKind(el) {
-    const m = el._modal;
-    if (!m || m.transparent || !m.presentation || m.presentation === "fullScreen") return null;
-    return this.idiom === "phone" ? "top" : "card";
-  }
-
-  /** Classes of modal `el`: an opaque background, or a sheet's card. */
-  styleModal(el) {
-    const kind = this.sheetKind(el);
-    el.classList.toggle("nsh-modal-opaque", !kind && !el._modal?.transparent);
-    el.classList.toggle("nsh-modal-sheet", !!kind);
-    el.classList.toggle("nsh-modal-top", kind === "top");
-  }
-
-  /**
-   * Where modal `el` sits in the root, and the insets system UI covers in
-   * it: the whole root with its safe area, or a sheet's card. Cards are as
-   * wide as the root allows up to 720 (page sheets) or 540 × 620 (form
-   * sheets), with a margin of 32 (less in small roots), as on Linux and
-   * macOS; a phone's starts 10 below the safe area's top.
-   */
-  modalFrame(el) {
-    const [w, h] = this.size;
-    const safe = this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
-    const kind = this.sheetKind(el);
-    if (!kind) return { frame: [0, 0, w, h], insets: safe };
-    if (kind === "top") {
-      const y = safe[0] + 10;
-      return { frame: [0, y, w, Math.max(0, h - y)], insets: [0, safe[1], safe[2], safe[3]] };
-    }
-    const form = el._modal.presentation === "formSheet";
-    const margin = (extent) => Math.max(8, Math.min(32, Math.round(extent * 0.05)));
-    const cw = Math.round(Math.max(0, Math.min(w - 2 * margin(w), form ? 540 : 720)));
-    const ch = Math.round(Math.max(0, Math.min(h - 2 * margin(h), form ? 620 : Infinity)));
-    return { frame: [Math.round((w - cw) / 2), Math.round((h - ch) / 2), cw, ch], insets: [0, 0, 0, 0] };
-  }
-
-  /** Sizes presented modal `el` (and its scrim) and reports its size. */
+  /** Sizes presented modal `el` to the root (a transparent layer over it,
+   * whatever its presentation) and reports its size and the safe area. */
   placeModal(el) {
-    this.styleModal(el);
-    const { frame, insets } = this.modalFrame(el);
+    const [w, h] = this.size;
+    const insets = this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
+    const frame = [0, 0, w, h];
     el._frame = frame;
     this.placeFrame(el);
-    if (this.sheetKind(el)) {
-      if (!el._scrim) {
-        const scrim = (el._scrim = document.createElement("div"));
-        scrim.className = "nsh-modal-scrim";
-        // Clicking it asks the sheet to close, as going back does; only
-        // clicks pressed on it count (not the one of the press that
-        // presented the sheet).
-        let down = false;
-        scrim.addEventListener("pointerdown", (e) => {
-          down = true;
-          e.stopPropagation();
-        });
-        scrim.addEventListener("click", () => {
-          if (down && !el._leaving) this.requestClose(el);
-          down = false;
-        });
-        if (el.isConnected) el.before(scrim);
-      }
-    } else if (el._scrim) {
-      el._scrim.remove();
-      el._scrim = null;
-    }
     const key = `${frame[2]},${frame[3]},${insets}`;
     if (el._reported !== key) {
       el._reported = key;
@@ -2928,7 +2804,6 @@ class Player {
     const below = this.size[1] - (el._frame?.[1] ?? 0);
     if (motion === "slide") el.style.transform = `translateY(${below}px)`;
     if (motion === "fade") el.style.opacity = "0";
-    if (el._scrim) el._scrim.style.opacity = "0";
   }
 
   present(el) {
@@ -2944,21 +2819,14 @@ class Player {
     el.setAttribute("aria-modal", "true");
     this.root.append(el);
     this.placeModal(el);
-    const scrim = el._scrim;
     el.style.transition = "none";
-    if (scrim) scrim.style.transition = "none";
     this.hideModal(el, motion);
-    if (scrim && motion === "none") scrim.style.opacity = "";
     this.scopeFocus();
     this.syncHistorySoon();
     requestAnimationFrame(() => requestAnimationFrame(() => {
       el.style.transition = "";
       el.style.transform = "";
       el.style.opacity = "";
-      if (scrim) {
-        scrim.style.transition = "";
-        scrim.style.opacity = "";
-      }
       setTimeout(() => this.event(el._id, "onShow"), motion === "none" ? 0 : 350);
     }));
   }
@@ -2969,9 +2837,6 @@ class Player {
     el._leaving = true;
     const motion = this.modalMotion(el);
     this.hideModal(el, motion);
-    const scrim = el._scrim;
-    el._scrim = null;
-    scrim?.classList.add("nsh-inert");
     this.scopeFocus();
     this.syncHistorySoon();
     const restore = el._restoreFocus;
@@ -2981,16 +2846,16 @@ class Player {
         el.remove();
         this.dropLeftWith(el);
       }
-      scrim?.remove();
       if (!reported) this.event(el._id, "onDismiss");
     }, motion === "none" ? 0 : 350);
   }
 
-  /** Going back or Escape on a modal: it asks to close (`onRequestClose`);
-   * a `dismissible` one closes natively, then reports `onDismiss`. */
+  /** Going back or Escape on a modal: it asks to close (`onRequestClose`,
+   * reason `"cancel"`); with `closeOnEscape` it closes natively, then
+   * reports `onDismiss`. */
   requestClose(el) {
-    this.event(el._id, "onRequestClose");
-    if (el._modal?.dismissible && !el._leaving) {
+    this.event(el._id, "onRequestClose", { reason: "cancel" });
+    if ((el._modal?.closeOnEscape ?? true) && !el._leaving) {
       el._closed = true;
       this.event(el._id, "onDismiss");
       this.dismiss(el, true);
@@ -3002,7 +2867,7 @@ class Player {
   scopeFocus() {
     const top = this.dialogs?.[this.dialogs.length - 1] ?? this.topModal();
     for (const child of this.root.children) {
-      if (child === this.live || child.classList.contains("nsh-error") || child.classList.contains("nsh-modal-scrim")) continue;
+      if (child === this.live || child.classList.contains("nsh-error")) continue;
       child.inert = (child._kind === "modal" && !!child._leaving) || (!!top && child !== top);
     }
   }
@@ -3214,7 +3079,6 @@ class Player {
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
-      case "statusBar": this.setThemeColor(args[0]); break;
       case "back": this.defaultBack(); break;
       case "exitApp": {
         const app = this.app;
@@ -3239,23 +3103,7 @@ class Player {
     }
   }
 
-  /** `StatusBar`'s `web={{ themeColor }}`: the page's theme color ("" for the page's own). */
-  setThemeColor(color) {
-    let meta = document.querySelector('meta[name="theme-color"]:not([media])');
-    if (!meta && !color) return;
-    if (!meta) {
-      meta = document.createElement("meta");
-      meta.name = "theme-color";
-      meta._nshAdded = true;
-      document.head.append(meta);
-    }
-    if (meta._nshOriginal === undefined) meta._nshOriginal = meta.getAttribute("content");
-    if (color) meta.content = color;
-    else if (meta._nshAdded) {
-      meta.remove();
-    } else if (meta._nshOriginal === null) meta.removeAttribute("content");
-    else meta.content = meta._nshOriginal;
-  }
+
 
   /**
    * `Clipboard.setString`. The async Clipboard API needs a secure context
@@ -3654,7 +3502,8 @@ class Player {
    * presses the cancel button if any (`keyDown`, `_cancel`).
    */
   dialog(dialogId, title, message, buttons, styles, cancelable, sheet) {
-    const list = buttons.length ? buttons : ["OK"];
+    // `AlertDialog` always brings the app's actions: no label of NSH's own.
+    const list = buttons;
     const style = (i) => styles[i] ?? "default";
     const desktop = this.desktopUI;
     const backdrop = document.createElement("div");
@@ -4316,8 +4165,6 @@ class Player {
   pressIn(p) {
     const el = p.press;
     p.pressed = true;
-    const opacity = el._props?.activeOpacity;
-    if (opacity != null && opacity < 1) this.pressFade(el, opacity);
     if (el._events.has("onPressIn")) this.event(el._id, "onPressIn");
     if (el._events.has("onLongPress")) {
       p.longTimer = setTimeout(() => {
@@ -4327,29 +4174,11 @@ class Player {
     }
   }
 
-  /** Fades pressed view `el` to `opacity` times its own (null: back to
-   * its own), over the view's style, which it leaves alone. */
-  pressFade(el, opacity) {
-    const shown = getComputedStyle(el).opacity;
-    el._pressFade?.cancel();
-    el._pressFade = null;
-    // Its own opacity, without the feedback.
-    const own = Number(getComputedStyle(el).opacity);
-    if (opacity == null) {
-      const a = el.animate([{ opacity: shown, offset: 0 }], { duration: PRESS_OUT_MS, easing: EASE_OUT_QUAD });
-      a.onfinish = () => { if (el._pressFade === a) el._pressFade = null; };
-      el._pressFade = a;
-      return;
-    }
-    el._pressFade = el.animate([{ opacity: shown }, { opacity: own * opacity }], { duration: PRESS_IN_MS, easing: EASE_OUT_QUAD, fill: "forwards" });
-  }
-
   pressOut(p, inside) {
     const el = p.press;
     if (!el || !p.pressed) return;
     p.pressed = false;
     clearTimeout(p.longTimer);
-    if (el._pressFade) this.pressFade(el, null);
     if (el._events.has("onPressOut")) this.event(el._id, "onPressOut");
     if (inside && !p.long && el._events.has("onPress")) this.event(el._id, "onPress");
   }

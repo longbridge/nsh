@@ -217,13 +217,13 @@ export function Photos() {
             each={photos()}
             estimatedItemSize={76}
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 24 }}
+            contentStyle={{ paddingBottom: 24 }}
             scrollValue={scrollY}
             refreshing={refreshing()}
             onRefresh={refresh}
             onEndReached={loadMore}
-            ListHeaderComponent={phoneHero}
-            ListFooterComponent={footer()}
+            header={phoneHero}
+            footer={footer()}
           >
             {(photo) => <PhotoRow photo={photo()} />}
           </List>
@@ -240,13 +240,13 @@ export function Photos() {
               numColumns={n}
               estimatedItemSize={tile}
               style={{ flex: 1 }}
-              contentContainerStyle={{ padding: 24, gap: 16 }}
+              contentStyle={{ padding: 24, gap: 16 }}
               scrollValue={scrollY}
               refreshing={refreshing()}
               onRefresh={refresh}
               onEndReached={loadMore}
-              ListHeaderComponent={hero()}
-              ListFooterComponent={footer()}
+              header={hero()}
+              footer={footer()}
             >
               {(photo) => <PhotoTile photo={photo()} />}
             </List>

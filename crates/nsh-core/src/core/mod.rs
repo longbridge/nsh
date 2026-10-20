@@ -24,14 +24,13 @@ use crate::{
     },
     ops::{
         CellSlot, Command, EventKind, EventMask, EventPayload, HeaderSlot, ImageProp, ImageSource,
-        KeyboardDismissMode, ModalProp, NativeProp, NodeId, Op, PayloadValue, Prop, ROOT_ID,
-        ResizeMode, ScreenProp, ScrollProp, Tag,
+        KeyboardDismissMode, ModalAnimation, ModalProp, NativeProp, NodeId, Op, PayloadValue, Prop,
+        ROOT_ID, ResizeMode, ScreenAnimation, ScreenProp, ScrollProp, Tag,
     },
     props::{AccessibilityProp, EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
     style::{EllipsizeMode, Style, StylePatch, TextAlign, TextStyle, ViewStyle},
     tailwind::{ClassEnvironment, ClassList, ClassProps, Tailwind},
     text::{AttributedText, MeasureCache, ResolvedTextStyle, TextEngine, TextLayout},
-    ui::status_bar::StatusBars,
 };
 
 /// Slab index of a node. Internal links use keys, never ids, to avoid the
@@ -107,6 +106,11 @@ struct RootState {
     slot: HeaderSlot,
     /// `nativeID` (input accessories).
     native_id: Option<Box<str>>,
+    /// `statusBar` (screens and modals).
+    status_bar: Option<crate::StatusBarSetting>,
+    /// Its entry in the surface's status bars, while the node is in the
+    /// tree ([`Core::sync_status_bars`]).
+    status_bar_entry: Option<crate::ui::status_bar::StatusBarEntry>,
 }
 
 /// Paragraph settings of a text block (or input).
@@ -367,8 +371,9 @@ struct Node {
     states: u8,
     /// States the platform reports for the view.
     tracked: u8,
-    /// `underlayColor` and `underlayOpacity`.
-    underlay: Option<Box<(crate::Color, f32)>>,
+    /// What only some nodes have: state styles, the styles of a page's
+    /// header or a list's content ([`classes::NodeParts`]).
+    parts: Option<Box<classes::NodeParts>>,
     /// A child's classes read their position among siblings.
     positional_children: bool,
     /// The inset padding and margin components set: added to the style's.
@@ -475,7 +480,7 @@ impl Node {
             class_props: None,
             states: 0,
             tracked: 0,
-            underlay: None,
+            parts: None,
             positional_children: false,
             insets: None,
             events: EventMask::default(),
@@ -634,6 +639,12 @@ pub struct Core<M: TextEngine> {
     commands: Vec<(NodeId, Command)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
+    /// The screens and modals with a `statusBar`, in the order they got
+    /// it: few, so attaching and detaching only flag them for the commit.
+    status_bar_nodes: Vec<Key>,
+    /// The tree changed with `status_bar_nodes` in it: the commit checks
+    /// which are in the tree.
+    status_bars_moved: bool,
     /// The user's preferred text size (1.0 is the default).
     font_scale: f32,
     queue: Vec<Key>,
@@ -710,6 +721,8 @@ impl<M: TextEngine> Core<M> {
             batches: 0,
             commands: Vec::new(),
             layout_animation: None,
+            status_bar_nodes: Vec::new(),
+            status_bars_moved: false,
             font_scale: 1.0,
             queue: Vec::new(),
             needs_layout: true,
@@ -1102,7 +1115,7 @@ impl<M: TextEngine> Core<M> {
                 id: crate::ROOT_ID,
                 command: Command::SetStatusBar(patch),
             } => {
-                StatusBars::update(&self.components.status_bars, |bars| bars.set_base(patch));
+                self.components.status_bars.set_base(patch);
                 Ok(())
             }
             // JS's responder blocks native scroll views as the components'
@@ -1196,7 +1209,8 @@ impl<M: TextEngine> Core<M> {
         self.update_lists(relayout);
         self.flush_text();
         // What this turn's status bar settings add up to, once.
-        if let Some(config) = StatusBars::take_changed(&self.components.status_bars) {
+        self.sync_status_bars();
+        if let Some(config) = self.components.status_bars.take_changed() {
             self.commands
                 .push((crate::ROOT_ID, Command::StatusBar(config)));
         }
@@ -1839,6 +1853,10 @@ impl<M: TextEngine> Core<M> {
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
+        if let Prop::Screen(ScreenProp::StatusBar(setting)) = prop {
+            self.set_status_bar(key, setting);
+            return Ok(());
+        }
         let node = &mut self.nodes[key as usize];
         let mut flags = 0;
         match prop {
@@ -2192,31 +2210,37 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW;
                 }
             }
-            Prop::UnderlayColor(color) => {
-                let opacity = node
-                    .underlay
-                    .as_ref()
-                    .map_or(crate::ops::UNDERLAY_OPACITY, |u| u.1);
-                let underlay = color.map(|c| Box::new((c, opacity)));
-                if node.underlay != underlay {
-                    node.underlay = underlay;
-                    self.underlay_changed(key);
-                }
+            Prop::ActiveStyle(patch) => {
+                self.set_part_style(key, classes::Part::Active, patch);
+                return Ok(());
             }
-            Prop::UnderlayOpacity(opacity) => {
-                if let Some(u) = node.underlay.as_mut()
-                    && u.1 != opacity
-                {
-                    u.1 = opacity;
-                    self.underlay_changed(key);
-                }
+            Prop::HoverStyle(patch) => {
+                self.set_part_style(key, classes::Part::Hover, patch);
+                return Ok(());
             }
-            Prop::ActiveOpacity(value) => {
-                let props = node.props.get_or_insert_default();
-                if props.active_opacity != value {
-                    props.active_opacity = value;
-                    flags |= dirty::VIEW_PROPS;
-                }
+            Prop::FocusStyle(patch) => {
+                self.set_part_style(key, classes::Part::Focus, patch);
+                return Ok(());
+            }
+            Prop::DisabledStyle(patch) => {
+                self.set_part_style(key, classes::Part::Disabled, patch);
+                return Ok(());
+            }
+            Prop::SelectedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Selected, patch);
+                return Ok(());
+            }
+            Prop::HeaderStyle(patch) => {
+                self.set_part_style(key, classes::Part::Header, patch);
+                return Ok(());
+            }
+            Prop::HeaderClass(names) => {
+                self.set_part_class(key, classes::Part::Header, &names);
+                return Ok(());
+            }
+            Prop::ListContentClass(names) => {
+                self.set_part_class(key, classes::Part::Content, &names);
+                return Ok(());
             }
             Prop::TestId(value) => {
                 let props = node.props.get_or_insert_default();
@@ -2262,6 +2286,8 @@ impl<M: TextEngine> Core<M> {
                     AccessibilityProp::LiveRegion(v) => a.live_region = v,
                     AccessibilityProp::Actions(v) => a.actions = v,
                 }
+                let selected =
+                    (a.state.selected != before.state.selected).then_some(a.state.selected);
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -2269,11 +2295,29 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
+                if let Some(selected) = selected {
+                    if flags != 0 {
+                        self.mark(key, flags);
+                    }
+                    self.set_selected(key, selected);
+                    return Ok(());
+                }
             }
             Prop::KeyboardDismissMode(mode) => {
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.keyboard_dismiss = mode;
                     flags |= dirty::SCROLL;
+                }
+            }
+            // `animation` on a dialog: the value pages and dialogs share.
+            Prop::Screen(ScreenProp::Animation(a)) if node.kind == Kind::Modal => {
+                if let Some(root) = node.root.as_mut() {
+                    root.modal.animation = match a {
+                        ScreenAnimation::Default => ModalAnimation::Slide,
+                        ScreenAnimation::Fade => ModalAnimation::Fade,
+                        ScreenAnimation::None => ModalAnimation::None,
+                    };
+                    flags |= dirty::MODAL;
                 }
             }
             Prop::Screen(prop) => {
@@ -2284,14 +2328,13 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderShown(v) => c.header_shown = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
-                        ScreenProp::HeaderTintColor(v) => c.tint_color = v,
-                        ScreenProp::HeaderBackgroundColor(v) => c.background_color = v,
-                        ScreenProp::HeaderTitleColor(v) => c.title_color = v,
                         ScreenProp::HeaderBackTitle(v) => c.back_title = v,
                         ScreenProp::HeaderBackVisible(v) => c.back_visible = v,
-                        ScreenProp::GestureEnabled(v) => c.gesture_enabled = v,
-                        ScreenProp::PreventBack(v) => c.prevent_back = v,
+                        ScreenProp::PopOnSwipe(v) => c.gesture_enabled = v,
+                        ScreenProp::PopOnBack(v) => c.prevent_back = !v,
                         ScreenProp::Animation(v) => c.animation = v,
+                        // Taken by `set_prop`.
+                        ScreenProp::StatusBar(_) => {}
                     }
                     // Header changes move the content.
                     root.laid_out = None;
@@ -2320,10 +2363,11 @@ impl<M: TextEngine> Core<M> {
                     match prop {
                         ModalProp::Animation(v) => c.animation = v,
                         ModalProp::Presentation(v) => c.presentation = v,
-                        ModalProp::Transparent(v) => c.transparent = v,
                         ModalProp::StatusBarTranslucent(v) => c.status_bar_translucent = v,
                         ModalProp::Orientations(v) => c.orientations = v,
-                        ModalProp::Dismissible(v) => c.dismissible = v,
+                        ModalProp::CloseOnEscape(v) => c.close_on_escape = v,
+                        ModalProp::CloseOnBackdropPress(v) => c.close_on_backdrop_press = v,
+                        ModalProp::CloseOnSwipe(v) => c.close_on_swipe = v,
                     }
                     flags |= dirty::MODAL;
                 }
@@ -2452,12 +2496,8 @@ impl<M: TextEngine> Core<M> {
                         c.max_length = len;
                         false
                     }
-                    Prop::Editable(on) => {
-                        c.editable = on;
-                        false
-                    }
-                    Prop::BlurOnSubmit(on) => {
-                        c.blur_on_submit = on;
+                    Prop::Readonly(on) => {
+                        c.editable = !on;
                         false
                     }
                     Prop::SubmitBehavior(behavior) => {
@@ -2546,6 +2586,7 @@ impl<M: TextEngine> Core<M> {
         self.set_inline(child, inline);
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.update_direction(child);
         self.groups_changed(child, parent);
         if self.nodes[child as usize]
@@ -2632,6 +2673,7 @@ impl<M: TextEngine> Core<M> {
         }
         self.nodes[key as usize].parent = NO_KEY;
         self.groups_changed(key, parent);
+        self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
@@ -2705,6 +2747,61 @@ impl<M: TextEngine> Core<M> {
         self.needs_layout = true;
     }
 
+    /// A page's or dialog's `statusBar`: changed in place while the node
+    /// is in the tree (so it keeps its place among the others); its entry
+    /// is added or removed by [`Core::sync_status_bars`].
+    fn set_status_bar(&mut self, key: Key, setting: Option<crate::StatusBarSetting>) {
+        let Some(root) = self.nodes[key as usize].root.as_mut() else {
+            return;
+        };
+        root.status_bar = setting;
+        let entry = root.status_bar_entry;
+        match (setting, entry) {
+            (Some(s), Some(e)) => self.components.status_bars.set(e, s),
+            (Some(_), None) => {
+                if !self.status_bar_nodes.contains(&key) {
+                    self.status_bar_nodes.push(key);
+                }
+                self.status_bars_moved = true;
+            }
+            (None, entry) => {
+                if let Some(e) = entry {
+                    self.components.status_bars.remove(e);
+                    if let Some(root) = self.nodes[key as usize].root.as_mut() {
+                        root.status_bar_entry = None;
+                    }
+                }
+                self.status_bar_nodes.retain(|&k| k != key);
+            }
+        }
+    }
+
+    /// The `statusBar` of each screen and modal in the tree has an entry,
+    /// added in the order they got their setting; the others have none
+    /// (once per commit, after the tree changed).
+    fn sync_status_bars(&mut self) {
+        if !std::mem::take(&mut self.status_bars_moved) {
+            return;
+        }
+        for i in 0..self.status_bar_nodes.len() {
+            let key = self.status_bar_nodes[i];
+            let in_tree = self.is_ancestor(self.root, key);
+            let Some(root) = self.nodes[key as usize].root.as_mut() else {
+                continue;
+            };
+            match (in_tree, root.status_bar_entry, root.status_bar) {
+                (true, None, Some(setting)) => {
+                    root.status_bar_entry = Some(self.components.status_bars.add(setting));
+                }
+                (false, Some(entry), _) => {
+                    root.status_bar_entry = None;
+                    self.components.status_bars.remove(entry);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn release(&mut self, id: NodeId) -> Result<(), ApplyError> {
         let key = self.key(id)?;
         if key == self.root {
@@ -2724,6 +2821,14 @@ impl<M: TextEngine> Core<M> {
         }
         if node.kind.is_root() {
             self.roots.retain(|&k| k != key);
+        }
+        if let Some(root) = node.root.as_ref()
+            && root.status_bar.is_some()
+        {
+            if let Some(entry) = root.status_bar_entry {
+                self.components.status_bars.remove(entry);
+            }
+            self.status_bar_nodes.retain(|&k| k != key);
         }
         // Children are released by their own ops (the whole subtree became
         // unreachable in JS); orphan them so they never point at a dead key.
@@ -3149,10 +3254,8 @@ impl<M: TextEngine> Core<M> {
             if flags & dirty::MODAL != 0
                 && let Some(root) = &node.root
             {
-                self.mount.push(MountItem::ModalConfig {
-                    id,
-                    config: root.modal,
-                });
+                let config = root.modal;
+                self.mount.push(MountItem::ModalConfig { id, config });
             }
             if let Some(input) = &node.input {
                 if flags & dirty::INPUT != 0 {
@@ -3161,9 +3264,20 @@ impl<M: TextEngine> Core<M> {
                         .accessory_id
                         .as_deref()
                         .and_then(|name| self.accessories.get(name).copied());
+                    // An explicit prop (Rust), then the style key, then
+                    // the classes (`placeholder:text-*`, `caret-*`,
+                    // `selection:text-*`).
+                    config.placeholder_color = config
+                        .placeholder_color
+                        .or(node.text_style.placeholder_color);
+                    config.selection_color =
+                        config.selection_color.or(node.text_style.selection_color);
                     if let Some(c) = node.class_props.as_deref() {
                         config.placeholder_color = config.placeholder_color.or(c.placeholder_color);
-                        config.selection_color = config.selection_color.or(c.caret_color);
+                        config.selection_color = config
+                            .selection_color
+                            .or(c.selection_color)
+                            .or(c.caret_color);
                     }
                     config.style = scaled(
                         self.inherited_text_style(key).inherit(&node.text_style),
@@ -3340,7 +3454,11 @@ impl<M: TextEngine> Core<M> {
                 .paragraph
                 .selectable
                 .or(class.and_then(|c| c.selectable)),
-            selection_color: node.paragraph.selection_color,
+            selection_color: node
+                .paragraph
+                .selection_color
+                .or(node.text_style.selection_color)
+                .or(class.and_then(|c| c.selection_color)),
             ..AttributedText::default()
         };
         let base = inherited.inherit(&node.text_style);
@@ -3638,7 +3756,58 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The platform draws a header of its own above screens (iOS,
+    /// Android); without one ([`crate::NO_NATIVE_HEADER`]) a screen's
+    /// `header` slot is placed at its top.
+    fn native_header(&self) -> bool {
+        self.header_heights != crate::NO_NATIVE_HEADER
+    }
+
+    /// The size of screen `key`: its stack's (`None` outside a stack).
+    fn screen_size(&self, key: Key) -> Option<Size<Points>> {
+        let parent = self.nodes[key as usize].parent;
+        let p = self.nodes.get(parent as usize)?;
+        let stack_layout = p.layout.filter(|_| p.kind == Kind::Stack)?;
+        let s = self.layout.layout(stack_layout).ok()?.size;
+        Some(size_pt(s.width, s.height))
+    }
+
+    /// The `header` slot item of screen `key`, once created.
+    fn header_slot(&self, key: Key) -> Option<Key> {
+        self.nodes[key as usize]
+            .children
+            .iter()
+            .copied()
+            .find(|&c| {
+                let n = &self.nodes[c as usize];
+                n.kind == Kind::HeaderItem
+                    && n.created
+                    && n.root
+                        .as_ref()
+                        .is_some_and(|r| r.slot == HeaderSlot::Header)
+            })
+    }
+
+    /// Without a native header: the height of screen `key`'s `header` slot,
+    /// laid out first (as wide as the screen), 0 without one.
+    fn drawn_header(&mut self, key: Key) -> f32 {
+        let Some(item) = self.header_slot(key) else {
+            return 0.0;
+        };
+        self.layout_detached(item);
+        self.nodes[item as usize]
+            .layout
+            .and_then(|l| self.layout.layout(l).ok())
+            .map_or(0.0, |l| l.size.height)
+    }
+
     fn layout_detached(&mut self, key: Key) {
+        let native_header = self.native_header();
+        let drawn_header = if !native_header && self.nodes[key as usize].kind == Kind::Screen {
+            self.drawn_header(key)
+        } else {
+            0.0
+        };
         let node = &self.nodes[key as usize];
         let (Some(layout), kind, parent) = (node.layout, node.kind, node.parent) else {
             return;
@@ -3646,16 +3815,16 @@ impl<M: TextEngine> Core<M> {
         let root = node.root.as_ref().expect("root state");
         let (size, header, available) = match kind {
             Kind::Screen => {
-                let p = &self.nodes[parent as usize];
-                let Some(stack_layout) = p.layout.filter(|_| p.kind == Kind::Stack) else {
+                let Some(size) = self.screen_size(key) else {
                     return;
                 };
-                let s = self.layout.layout(stack_layout).expect("taffy layout").size;
                 let c = &root.screen;
                 let measured = root
                     .header
                     .filter(|_| !c.large_title && !c.header_transparent);
-                let header = if !c.header_shown {
+                let header = if !native_header {
+                    drawn_header
+                } else if !c.header_shown {
                     0.0
                 } else if let Some(measured) = measured {
                     measured
@@ -3667,8 +3836,22 @@ impl<M: TextEngine> Core<M> {
                     };
                     bar.0 + self.top_overlap(parent)
                 };
-                let size = size_pt(s.width, s.height);
                 (size, header, definite(size))
+            }
+            // A screen's `header` without a native header: as wide as the
+            // screen, as tall as its content.
+            Kind::HeaderItem if !native_header && root.slot == HeaderSlot::Header => {
+                let Some(screen) = self.screen_size(parent) else {
+                    return;
+                };
+                (
+                    size_pt(screen.width.0, 0.0),
+                    0.0,
+                    taffy::Size {
+                        width: AvailableSpace::Definite(screen.width.0),
+                        height: AvailableSpace::MaxContent,
+                    },
+                )
             }
             Kind::Modal => {
                 let size = root.reported.unwrap_or(self.viewport);
@@ -3696,15 +3879,21 @@ impl<M: TextEngine> Core<M> {
         if !changed && !self.layout.dirty(layout).unwrap_or(true) {
             return;
         }
-        if kind == Kind::InputAccessory {
+        if kind == Kind::InputAccessory || (kind == Kind::HeaderItem && size.width > Points::ZERO) {
             let mut style = self.layout.style(layout).expect("taffy style").clone();
             style.size.width = taffy::Dimension::length(size.width.0);
             self.layout.set_style(layout, style).expect("taffy style");
         } else if kind != Kind::HeaderItem {
             let config_padding = match kind {
                 // Large titles and transparent headers lay the content out
-                // under the header (scroll views inset themselves natively).
-                Kind::Screen if root.screen.header_transparent || root.screen.large_title => 0.0,
+                // under the native header (scroll views inset themselves
+                // natively).
+                Kind::Screen
+                    if native_header
+                        && (root.screen.header_transparent || root.screen.large_title) =>
+                {
+                    0.0
+                }
                 _ => header,
             };
             let mut style = self.nodes[key as usize]
@@ -3760,8 +3949,15 @@ impl<M: TextEngine> Core<M> {
                 HeaderSlot::Left => &mut config.left,
                 HeaderSlot::Right => &mut config.right,
                 HeaderSlot::Title => &mut config.title_view,
+                HeaderSlot::Header => &mut config.header_view,
             };
             *target = Some(child.id);
+        }
+        if let Some(style) = self.part_resolved(key, classes::Part::Header) {
+            let background = style.view.background_color;
+            config.background_color = (background.0 & 0xff != 0).then_some(background);
+            config.title_color = style.text.color;
+            config.tint_color = style.view.tint_color;
         }
         Some(config)
     }
@@ -4706,8 +4902,8 @@ fn directed_align(align: TextAlign, rtl: bool) -> TextAlign {
 const PRESSES: [EventKind; 4] = [
     EventKind::Press,
     EventKind::LongPress,
-    EventKind::PressIn,
-    EventKind::PressOut,
+    EventKind::PressDown,
+    EventKind::PressUp,
 ];
 
 /// The background a nested text's view style gives its characters.

@@ -118,7 +118,7 @@ Templates name their lines in brackets, one or several names per line, and items
 </View>
 ```
 
-In a grid, `justifyContent` and `alignContent` default to CSS's `"normal"`: tracks sized `auto` stretch to fill the container, so a grid with a height and no row template shares that height among its rows. A value set explicitly (`"start"`, `"center"`, `"space-between"`, ...) places the tracks as it does in CSS.
+In a grid, `justifyContent` and `alignContent` default to CSS's `"normal"`: tracks sized `auto` stretch to fill the container, so a grid with a height and no row template shares that height among its rows. A value set explicitly (`"start"`, `"center"`, `"space-between"`, ...) places the tracks as it does in CSS. The Tailwind classes `content-start`, `content-normal` and `place-content-start` keep this default; `alignContent: "start"` packs the tracks at the start.
 
 `display: "block"` uses CSS block layout (children stacked, each as wide as the container), and `display: "none"` removes the view from layout.
 
@@ -162,7 +162,7 @@ Tailwind's breakpoints (`sm:`, `md:`, ...) and `portrait:` / `landscape:` give t
 
 ## Safe areas
 
-The root view covers the whole screen, under the status bar and the home indicator. Wrap screens in [`SafeAreaView`](../components/safe-area-view.md) from `nsh/ui/mobile`, which pads its content by the safe area insets, or read the insets with `safeArea()` / `useSafeAreaInsets()` and apply them yourself. Screens of a [navigation stack](./navigation.md) already sit below their header.
+The root view covers the whole screen, under the status bar and the home indicator. Wrap screens in [`SafeAreaView`](../modules/nsh-base.md#safeareaview) from `nsh/base`, which pads its content by the safe area insets, or read the insets with `safeArea()` / `safeAreaInsets()` and apply them yourself. Screens of a [navigation stack](./navigation.md) already sit below their header.
 
 ## Right to left
 

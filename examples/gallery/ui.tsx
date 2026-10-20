@@ -3,6 +3,8 @@ import { computed, effect, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, Platform, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
+import { Button as BaseButton, Dialog, safeArea } from "nsh/base";
+import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 
 /** Whether the gallery shows its dark palette (reactive: reading it subscribes). */
@@ -265,18 +267,76 @@ export const toneTint = (tone: Tone) => (tone === "neutral" ? colors.raised : ti
 export const mono = "monospace";
 export const radius = { card: 16, inset: 12, control: 10 } as const;
 
-/** Header props of every screen. */
+/** The system header's colors on every page (iOS, Android). */
 export const header = {
-  get headerBackgroundColor() {
-    return colors.background;
-  },
-  get headerTitleColor() {
-    return colors.text;
-  },
-  get headerTintColor() {
-    return colors.accent;
+  get headerStyle() {
+    return { backgroundColor: colors.background, color: colors.text, tintColor: colors.accent };
   },
 };
+
+/**
+ * A page's header where the app draws it (desktops, the web: `<NavPage
+ * header>`): a back button while the page is above another, the title, and
+ * `right`. Phones show their system header with the page's `title` instead.
+ */
+export function PageHeader(props: {
+  title: string;
+  /** The bottom page of its stack: no back button. */
+  root?: boolean;
+  /** What back does (default: pop the page). */
+  onBack?: () => void;
+  /** Replaces the back button. */
+  left?: JSX.Element;
+  /** Replaces the title. */
+  center?: JSX.Element;
+  right?: JSX.Element;
+  /** The bar's fill (default the page's background). */
+  background?: string;
+  /** The back button's color (default the accent). */
+  tint?: string;
+  /** Over the content (a transparent header): no fill, no hairline. */
+  transparent?: boolean;
+}) {
+  const back = () => !props.left && !props.root && nav.routes().length > 1;
+  const tint = () => props.tint ?? colors.accent;
+  return (
+    <View
+      style={{
+        height: 52,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 12,
+        backgroundColor: props.transparent ? "transparent" : (props.background ?? colors.background),
+        borderBottomWidth: props.transparent || props.background ? 0 : 1,
+        borderBottomColor: colors.line,
+      }}
+    >
+      {props.left}
+      <If when={back()}>
+        <View
+          onPress={() => (props.onBack ? props.onBack() : nav.pop())}
+          role="button"
+          accessibilityLabel="Back"
+          hitSlop={6}
+          class="hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"
+          style={{ height: 32, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 10, borderRadius: radius.control, cursor: "pointer" }}
+        >
+          <Icon name="back" size={18} tint={tint()} />
+          <Text style={{ fontSize: 14, fontWeight: "500", color: tint() }}>Back</Text>
+        </View>
+      </If>
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", paddingHorizontal: back() || props.left ? 0 : 4 }}>
+        {props.center ?? (
+          <Text numberOfLines={1} style={{ flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>
+            {props.title}
+          </Text>
+        )}
+      </View>
+      {props.right}
+    </View>
+  );
+}
 
 /**
  * Instructions for the device's input: `touch` on phones and tablets,
@@ -335,7 +395,7 @@ export function Press(props: {
   /** How far it shrinks (default 0.97). */
   scale?: number;
   style?: ViewStyle;
-  accessibilityRole?: "button" | "tab" | "switch" | "link";
+  role?: "button" | "tab" | "switch" | "link";
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; checked?: boolean; disabled?: boolean };
   hitSlop?: number;
@@ -347,9 +407,9 @@ export function Press(props: {
       onPress={props.onPress}
       onLongPress={props.onLongPress}
       disabled={props.disabled}
-      onPressIn={() => s.spring(props.scale ?? 0.97, motion.press)}
-      onPressOut={() => s.spring(1, motion.press)}
-      accessibilityRole={props.accessibilityRole ?? "button"}
+      onPressDown={() => s.spring(props.scale ?? 0.97, motion.press)}
+      onPressUp={() => s.spring(1, motion.press)}
+      role={props.role ?? "button"}
       accessibilityLabel={props.accessibilityLabel}
       accessibilityState={props.accessibilityState}
       hitSlop={props.hitSlop}
@@ -549,7 +609,7 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
   return (
     <View
       onPress={props.onPress}
-      underlayColor={props.onPress ? colors.raised : undefined}
+      activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
         minHeight: 48,
         flexDirection: "row",
@@ -580,12 +640,22 @@ export function Button(props: {
   flex?: number;
   onPress: () => void;
 }) {
+  // `nsh/base`'s Button gives the behavior (presses, disabled, the button
+  // role); the look below is the gallery's own.
+  const scale = createAnimatedValue(1);
   const variant = () => props.variant ?? "primary";
   const bg = () =>
     props.color ?? (variant() === "primary" ? colors.light : variant() === "accent" ? colors.accentFill : variant() === "ghost" ? "transparent" : colors.raised);
   const fg = () => (props.color ? "#ffffff" : variant() === "primary" ? colors.onLight : variant() === "accent" ? colors.onAccent : colors.text);
   return (
-    <Press onPress={props.onPress} disabled={props.disabled} accessibilityLabel={props.label} style={props.flex ? { flex: props.flex } : undefined}>
+    <BaseButton
+      onPress={props.onPress}
+      onPressDown={() => scale.spring(0.97, motion.press)}
+      onPressUp={() => scale.spring(1, motion.press)}
+      disabled={props.disabled}
+      accessibilityLabel={props.label}
+      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }] }}
+    >
       <View
         style={{
           height: 44,
@@ -613,7 +683,7 @@ export function Button(props: {
         </If>
         <Text style={{ fontSize: 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
       </View>
-    </Press>
+    </BaseButton>
   );
 }
 
@@ -688,7 +758,7 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
         t.spring(last ? 1 : 0, motion.settle);
         props.onChange(last);
       }}
-      accessibilityRole="switch"
+      role="switch"
       accessibilityLabel={props.label}
       accessibilityState={{ checked: props.value }}
       hitSlop={8}
@@ -746,7 +816,7 @@ export function Segmented<T extends string>(props: {
   return (
     <View
       onLayout={(e) => width.set(e.width)}
-      accessibilityRole="tablist"
+      role="tablist"
       style={{
         height,
         flexDirection: "row",
@@ -777,7 +847,7 @@ export function Segmented<T extends string>(props: {
         {(option) => (
           <View
             onPress={() => props.onChange(option().value)}
-            accessibilityRole="tab"
+            role="tab"
             accessibilityState={{ selected: props.value === option().value }}
             style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 }}
           >
@@ -906,8 +976,8 @@ export function lazy(load: () => Promise<() => JSX.Element>): () => JSX.Element 
       },
     ));
   function Loaded() {
-    const Screen = screen!;
-    return <Screen />;
+    const Page = screen!;
+    return <Page />;
   }
   return function Lazy() {
     start();
@@ -926,5 +996,38 @@ function Loading(props: { failed: string }) {
         {props.failed || "Loading…"}
       </Text>
     </View>
+  );
+}
+
+/**
+ * A panel that slides up from the bottom over a dimmed backdrop while
+ * `open`; a tap on the backdrop, Escape or the back button closes it (`onClose`:
+ * set `open` to false).
+ */
+export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
+  return (
+    <Dialog open={props.open} animation="slide" onOpenChange={(open) => !open && props.onClose()}>
+      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <View
+          accessibilityLabel="Close"
+          onPress={props.onClose}
+          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }}
+        />
+        <View
+          style={{
+            gap: 12,
+            paddingTop: 8,
+            paddingHorizontal: 16,
+            paddingBottom: safeArea().bottom + 16,
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+            backgroundColor: colors.surface,
+          }}
+        >
+          <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
+          {props.children}
+        </View>
+      </View>
+    </Dialog>
   );
 }

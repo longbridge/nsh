@@ -3,7 +3,10 @@
 //! (`<app>/bundle.js`; packages always carry their source, which runs when
 //! their bytecode is not this runtime's) and a script of what a user does
 //! and sees (`<app>/script.txt`), one step per line (with the assets it
-//! imports, `<app>/assets/`):
+//! imports, `<app>/assets/`, and what the build wrote of an app that
+//! declares `capabilities` in `nsh.json`: `<app>/capabilities.json` and its
+//! id, `<app>/app.json`, which the app then runs with, as a package's do,
+//! its data directory a new empty one):
 //!
 //! - `viewport <width> <height>`: before anything else, the screen's size
 //!   (390 × 844 by default);
@@ -46,9 +49,9 @@
 //!   handler's payload keys; a value is a number, `true`, `false` or a
 //!   string, quoted when it has spaces or looks like a number), none
 //!   without keys. A key given more than once makes a list (`onFileDrop`'s
-//!   `uris`). `onHoverMove`'s `pageX` / `pageY` default to the view's
-//!   position on screen plus `locationX` / `locationY`, its modifier keys
-//!   to false;
+//!   `uris`). `onHoverMove` and `onContextMenu` get their typed payload:
+//!   `pageX` / `pageY` default to the listening view's position on screen
+//!   plus `locationX` / `locationY`, the modifier keys to false;
 //! - `touch start <selector> <x> <y>`, `touch move <x> <y>`,
 //!   `touch end [<x> <y>]`, `touch cancel [<x> <y>]`: one finger goes
 //!   down on the first view on screen the selector names at `<x> <y>` in
@@ -58,7 +61,7 @@
 //!   timestamp `16 * n` (ms);
 //! - `type <selector> <text>`: the user types `<text>` (the rest of the
 //!   line) into the input the selector names, one character at a time:
-//!   `onKeyPress` (`key`), `onChangeText` (the whole text) and
+//!   `onKeyPress` (`key`), `onChange` (the whole text) and
 //!   `onSelectionChange` (the caret after it) for each. It types after
 //!   the input's text: the value the app last set, or what earlier `type`
 //!   steps typed since;
@@ -66,31 +69,57 @@
 //!   `Enter`, ...), the text unchanged;
 //! - `scroll <selector> <x> <y>`: the scroll view the selector names
 //!   scrolled to content offset `<x> <y>` (`onScroll` then reports it,
-//!   with the sizes the core knows);
+//!   with the sizes the core knows, and its `contentOffset` reads it);
+//! - `fontscale <scale>`: before anything else (with `viewport`), the
+//!   user's text size (1 by default), which scales the fonts of texts and
+//!   inputs;
+//! - `state <selector> <state>...`: the platform reports the interaction
+//!   states of the first view on screen the selector names (itself): it
+//!   is now `pressed`, `hovered` and / or `focused`, and in no other
+//!   (`none`: in none). A platform reports only the states the core asked
+//!   it to track (`activeStyle`, `hover:`, ...), so the step waits for the
+//!   view to track the states it names and fails when it does not;
+//! - `origin <selector> <x> <y>`: the first view on screen the selector
+//!   names is at `<x> <y>` on the surface: its frames' origins added up,
+//!   scroll offsets aside (a list's row, whose frame is its cell's), waits
+//!   for it;
+//! - `keyboard <height> <duration>`: the software keyboard shows at
+//!   `<height>` points over the bottom of the surface, animated over
+//!   `<duration>` seconds (`0 0`: it hides);
+//! - `statusbar <key>=<value>...`: the status bar the platform was last
+//!   told to show reads `<value>` for each `<key>` given (`foreground`:
+//!   `auto`, `light` or `dark`; `hidden`, `animated`: `true` or `false`;
+//!   compat/values.rs), waits for it;
 //! - `covers <item>`: no step, a claim: the script checks what `<item>` (a
 //!   part of the API as `api/uncovered.txt` names it) does (compat/coverage.rs
 //!   verifies it).
 //!
-//! A selector is one word (`id:<testID>`, `label:<label>`, `text:<text>`);
+//! A selector is one word (`id:<testID>`, `label:<label>`, `text:<text>`,
+//! and `scroll:<selector>`, the nearest scroll view around the view the
+//! inner selector names: a list, by one of its rows);
 //! the steps after `frame` also take the part after `:` quoted, for one
 //! with spaces: `text:"Taps: 0"`. Any error the app reports fails it. `NSH_API_DUMP=1` prints the texts
 //! on screen after each step, for writing scripts.
 
 use std::{
     collections::HashMap,
-    path::Path,
-    sync::{Arc, Mutex, OnceLock},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread::ThreadId,
     time::{Duration, Instant},
 };
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
-    ApproxTextEngine, EventKind, EventPayload, HoverEvent, MountBatch, MountItem, NodeId,
-    PayloadValue, Points, Size, TouchEvent, TouchPhase, TouchPoint,
+    ApproxTextEngine, ContextMenuEvent, EventKind, EventPayload, HoverEvent, MountBatch, MountItem,
+    NodeId, PayloadValue, Points, Size, TouchEvent, TouchPhase, TouchPoint,
     geometry::{DevicePixels, point, px},
     keymap::Modifiers,
     platform::{Environment, Idiom, Os},
+    tailwind::state,
 };
 use nsh_engine::{Assets, Bundle, Engine, EngineConfig, EngineControl, MountSink};
 
@@ -202,6 +231,7 @@ impl Views {
                 }
                 _ => {}
             }
+            values::animated(Some(item));
             if let Some(id) = Mounted::target(item) {
                 self.nodes.entry(id).or_default().mounted.apply(item);
             }
@@ -252,6 +282,9 @@ impl Views {
 
     /// The first view on screen `selector` names.
     fn find_view(&self, selector: &str) -> Option<NodeId> {
+        if let Some(inner) = selector.strip_prefix("scroll:") {
+            return self.scroll_around(inner);
+        }
         let is = |value: &Option<Arc<str>>, want: &str| value.as_deref() == Some(want);
         let test: Box<dyn Fn(&View) -> bool> = if let Some(want) = selector.strip_prefix("id:") {
             Box::new(move |v| is(&v.test_id, want))
@@ -267,6 +300,18 @@ impl Views {
         self.attached()
             .into_iter()
             .find(|id| self.nodes.get(id).is_some_and(&test))
+    }
+
+    /// The nearest scroll view around the first view on screen `selector`
+    /// names (a list has no `testID` of its own: its rows name it).
+    fn scroll_around(&self, selector: &str) -> Option<NodeId> {
+        let mut id = self.find_view(selector)?;
+        loop {
+            id = self.nodes.get(&id)?.parent?;
+            if self.nodes.get(&id)?.mounted.is_scroll() {
+                return Some(id);
+            }
+        }
     }
 
     /// The mounted state of the first view on screen `selector` names, and
@@ -308,6 +353,7 @@ impl Run {
         viewport: Size<Points>,
         environment: Environment,
         assets: &Path,
+        data_dir: Option<PathBuf>,
     ) -> Run {
         crate::logs::capture();
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -324,9 +370,9 @@ impl Run {
             environment,
             header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
             limits: nsh_engine::Limits::default(),
-            ui_sets: vec![nsh_ui_mobile::registry()],
+            ui_sets: vec![nsh_base::registry()],
             runtime: None,
-            data_dir: None,
+            data_dir,
             storage: None,
         };
         let sink = Sink {
@@ -407,7 +453,48 @@ impl Run {
 pub(crate) fn run_app(dir: &Path) -> Result<(), String> {
     let code = std::fs::read_to_string(dir.join("bundle.js")).map_err(|e| e.to_string())?;
     let script = std::fs::read_to_string(dir.join("script.txt")).map_err(|e| e.to_string())?;
-    run(code, &script, &dir.join("assets")).map_err(|f| f.message)
+    run(code, &script, dir).map_err(|f| f.message)
+}
+
+/// `code` as the bundle of the fixture app in `dir`: with the capabilities
+/// it declared and its id, when its build wrote them.
+fn bundle(code: String, dir: &Path) -> Result<(Bundle, bool), String> {
+    let bundle = Bundle::source(code);
+    let Ok(json) = std::fs::read_to_string(dir.join("capabilities.json")) else {
+        return Ok((bundle, false));
+    };
+    let id = std::fs::read_to_string(dir.join("app.json"))
+        .ok()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+        .and_then(|v| v.get("id")?.as_str().map(str::to_owned));
+    let bundle = bundle
+        .with_app_id(id.as_deref())
+        .with_capabilities_json(Some(&json))
+        .map_err(|e| format!("{}: {e}", dir.join("capabilities.json").display()))?;
+    Ok((bundle, true))
+}
+
+/// A new, empty data directory for one run of an app, removed with it.
+struct DataDir(PathBuf);
+
+impl DataDir {
+    fn new() -> DataDir {
+        static RUNS: AtomicUsize = AtomicUsize::new(0);
+        let dir = crate::temporary_root().join(format!(
+            "nsh-compat-data-{}-{}",
+            std::process::id(),
+            RUNS.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        DataDir(dir)
+    }
+}
+
+impl Drop for DataDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Why a script failed.
@@ -436,8 +523,9 @@ impl From<&str> for Failure {
     }
 }
 
-/// Runs the bundle `code` with its `assets` through `script`.
-pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failure> {
+/// Runs the bundle `code` of the fixture app in `dir` (its assets and
+/// declared capabilities) through `script`.
+pub(crate) fn run(code: String, script: &str, dir: &Path) -> Result<(), Failure> {
     let dump = std::env::var_os("NSH_API_DUMP").is_some();
     let mut lines = script
         .lines()
@@ -474,12 +562,28 @@ pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failu
             if desktop {
                 environment.idiom = Idiom::Desktop;
             }
+        } else if let Some(scale) = line.strip_prefix("fontscale ") {
+            environment.font_scale = scale
+                .trim()
+                .parse()
+                .map_err(|_| format!("`{line}`: fontscale <scale>"))?;
         } else {
             break;
         }
         lines.next();
     }
-    let mut run = Run::start(Bundle::source(code), viewport, environment, assets);
+    values::animated(None);
+    let (bundle, declares) = bundle(code, dir)?;
+    // Declared before the run, so dropped after its engine, which may
+    // still write there.
+    let data = declares.then(DataDir::new);
+    let mut run = Run::start(
+        bundle,
+        viewport,
+        environment,
+        &dir.join("assets"),
+        data.as_ref().map(|d| d.0.clone()),
+    );
     if !run.until(EXPECT_WAIT, |v| !v.attached().is_empty()) {
         return Err(Failure {
             check: None,
@@ -607,8 +711,8 @@ pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failu
             "listens" => {
                 let (selector, event) = selector(arg);
                 let event = event.trim();
-                let kind = EventKind::from_prop(event)
-                    .ok_or_else(|| format!("`{line}`: `{event}` is no event"))?;
+                let kind =
+                    event_kind(event).ok_or_else(|| format!("`{line}`: `{event}` is no event"))?;
                 let listens =
                     |v: &Views| v.mounted(&selector).is_some_and(|(m, _)| m.listens(kind));
                 if !run.until(EXPECT_WAIT, listens) {
@@ -624,8 +728,8 @@ pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failu
                 let (selector, rest) = selector(arg);
                 let rest = rest.trim();
                 let (name, fields) = rest.split_once(' ').unwrap_or((rest, ""));
-                let kind = EventKind::from_prop(name)
-                    .ok_or_else(|| format!("`{line}`: `{name}` is no event"))?;
+                let kind =
+                    event_kind(name).ok_or_else(|| format!("`{line}`: `{name}` is no event"))?;
                 let fields = parse_fields(fields).map_err(|e| format!("`{line}`: {e}"))?;
                 run.settle(TAP_WAIT);
                 let Some(id) = run
@@ -739,6 +843,99 @@ pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failu
                     return failed("no such view".into(), &run);
                 };
                 run.control.scroll(id, point(px(x), px(y)), 0);
+                if let Some(view) = run.views.nodes.get_mut(&id) {
+                    view.mounted.scrolled(x, y);
+                }
+            }
+            "origin" => {
+                let (selector, at) = selector(arg);
+                let [x, y] = numbers::<2>(at)
+                    .ok_or_else(|| format!("`{line}`: origin <selector> <x> <y>"))?;
+                let at = |v: &Views| v.find_view(&selector).map(|id| page_origin(v, id));
+                let fits = |v: &Views| {
+                    at(v).is_some_and(|(left, top)| (left - x).abs() < 0.5 && (top - y).abs() < 0.5)
+                };
+                if !run.until(EXPECT_WAIT, fits) {
+                    let what = match at(&run.views) {
+                        Some((left, top)) => format!("at {left} {top}"),
+                        None => "no such view".to_owned(),
+                    };
+                    return failed(what, &run);
+                }
+            }
+            "state" => {
+                let (selector, names) = selector(arg);
+                let mut states = 0;
+                for name in names.split_whitespace() {
+                    states |= match name {
+                        "pressed" => state::PRESSED,
+                        "hovered" => state::HOVERED,
+                        "focused" => state::FOCUSED,
+                        "none" => 0,
+                        _ => {
+                            return Err(format!(
+                                "`{line}`: state <selector> pressed|hovered|focused|none..."
+                            )
+                            .into());
+                        }
+                    };
+                }
+                let tracks = |v: &Views| {
+                    v.find_view(&selector)
+                        .filter(|id| v.nodes.get(id).is_some_and(|n| n.mounted.tracks(states)))
+                };
+                if !run.until(EXPECT_WAIT, |v| tracks(v).is_some()) {
+                    return failed(format!("the platform does not track `{names}`"), &run);
+                }
+                let id = tracks(&run.views).unwrap();
+                run.control.set_states(id, states);
+            }
+            "keyboard" => {
+                let [height, duration] = numbers::<2>(arg)
+                    .ok_or_else(|| format!("`{line}`: keyboard <height> <duration>"))?;
+                environment.keyboard_height = px(height);
+                environment.keyboard_duration = duration;
+                run.control.set_environment(environment);
+            }
+            "statusbar" => {
+                let want = parse_fields(arg).map_err(|e| format!("`{line}`: {e}"))?;
+                if want.is_empty() {
+                    return Err(format!("`{line}`: statusbar <key>=<value>...").into());
+                }
+                let want: Vec<(String, String)> = want
+                    .into_iter()
+                    .map(|(k, f)| {
+                        let v = match f {
+                            Field::Bool(b) => b.to_string(),
+                            Field::Str(s) => s,
+                            Field::Number(n) => values::num(n as f32),
+                        };
+                        (k, v)
+                    })
+                    .collect();
+                for (key, _) in &want {
+                    if !["foreground", "hidden", "animated"].contains(&key.as_str()) {
+                        return Err(format!("`{line}`: no status bar key `{key}`").into());
+                    }
+                }
+                let read = |v: &Views| v.nodes.get(&ROOT)?.mounted.status_bar();
+                let fits = |v: &Views| {
+                    read(v).is_some_and(|got| {
+                        want.iter()
+                            .all(|(k, v)| got.get(k.as_str()).is_some_and(|g| g == v))
+                    })
+                };
+                if !run.until(EXPECT_WAIT, fits) {
+                    let what = match read(&run.views) {
+                        None => "the platform was told no status bar".to_owned(),
+                        Some(got) => {
+                            let got: Vec<String> =
+                                got.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                            format!("the status bar is {}", got.join(" "))
+                        }
+                    };
+                    return failed(what, &run);
+                }
             }
             "covers" => continue,
             other => return Err(format!("unknown step `{other}`").into()),
@@ -873,6 +1070,25 @@ fn parse_fields(text: &str) -> Result<Vec<(String, Field)>, String> {
     Ok(out)
 }
 
+/// The event a script's `on…` name reports: a host element's handler as
+/// apps write it (`onChange`), a handler of `nsh/base`'s `NavPage` and
+/// `Dialog` (the runtime's own listeners of the platform's events), or the
+/// platform protocol's name (`onChangeText`).
+fn event_kind(name: &str) -> Option<EventKind> {
+    EventKind::from_handler(name)
+        .or(match name {
+            // `NavPage`.
+            "onDismiss" => Some(EventKind::Dismiss),
+            "onBackPress" => Some(EventKind::BackRequest),
+            // `Dialog`.
+            "onCancel" | "onOpenChange" => Some(EventKind::RequestClose),
+            "onOpen" => Some(EventKind::Show),
+            "onClose" => Some(EventKind::Dismiss),
+            _ => None,
+        })
+        .or_else(|| EventKind::from_prop(name))
+}
+
 /// The payload of an `event` step, as the platforms make it for `kind`.
 fn event_payload(
     views: &Views,
@@ -886,31 +1102,42 @@ fn event_payload(
     let keys: Vec<&str> = fields.iter().map(|(k, _)| k.as_str()).collect();
     let only = |want: &[&str]| keys.len() == want.len() && want.iter().all(|k| keys.contains(k));
     Ok(match kind {
-        EventKind::HoverMove => {
+        // Both payloads are a position and the modifiers.
+        EventKind::HoverMove | EventKind::ContextMenu => {
             let (left, top) = page_origin(views, id);
-            let (x, y) = (
+            let (location_x, location_y) = (
                 num("locationX").unwrap_or(0.0),
                 num("locationY").unwrap_or(0.0),
             );
             let flag = |key: &str| matches!(get(key), Some(Field::Bool(true)));
-            EventPayload::Hover(HoverEvent {
-                location: point(px(x), px(y)),
-                page: point(
-                    px(num("pageX").unwrap_or(left + x)),
-                    px(num("pageY").unwrap_or(top + y)),
-                ),
-                modifiers: Modifiers {
-                    ctrl: flag("ctrlKey"),
-                    alt: flag("altKey"),
-                    shift: flag("shiftKey"),
-                    cmd: flag("metaKey"),
-                },
-            })
+            let (page_x, page_y) = (
+                num("pageX").unwrap_or(left + location_x),
+                num("pageY").unwrap_or(top + location_y),
+            );
+            let modifiers = Modifiers {
+                ctrl: flag("ctrlKey"),
+                alt: flag("altKey"),
+                shift: flag("shiftKey"),
+                cmd: flag("metaKey"),
+            };
+            if kind == EventKind::HoverMove {
+                EventPayload::Hover(HoverEvent {
+                    location: point(px(location_x), px(location_y)),
+                    page: point(px(page_x), px(page_y)),
+                    modifiers,
+                })
+            } else {
+                EventPayload::ContextMenu(ContextMenuEvent {
+                    location: point(px(location_x), px(location_y)),
+                    page: point(px(page_x), px(page_y)),
+                    modifiers,
+                })
+            }
         }
         _ if fields.is_empty() => EventPayload::None,
         EventKind::ChangeText => {
             let Some(Field::Str(text)) = get("text") else {
-                return Err("onChangeText takes text=<string>".into());
+                return Err("onChange takes text=<string>".into());
             };
             let typed = device.typed.entry(id).or_default();
             typed.0 = text.clone();

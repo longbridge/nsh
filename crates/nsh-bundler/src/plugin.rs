@@ -47,7 +47,8 @@ pub(crate) struct NshPlugin {
     pub(crate) split: bool,
 }
 
-/// The `"tailwind"` and `"theme"` of the app's `nsh.json`.
+/// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
+/// app's `nsh.json`.
 #[derive(Debug, Default)]
 pub(crate) struct ThemeSetup {
     /// The Tailwind theme as JSON, for the runtime (`None`: the default).
@@ -58,6 +59,8 @@ pub(crate) struct ThemeSetup {
     pub(crate) ui: Option<String>,
     /// `"appearance"`: `"light"` or `"dark"` (`None`: the system's).
     pub(crate) appearance: Option<&'static str>,
+    /// `"statusBar"`, checked, as JSON: the status bar's default.
+    pub(crate) status_bar: Option<String>,
 }
 
 /// File types imported as image assets.
@@ -100,19 +103,25 @@ fn density(path: &Path) -> f64 {
 }
 
 impl NshPlugin {
-    /// The entry's first statement, giving the renderer the app's themes.
+    /// The entry's first statement, giving the renderer the app's themes,
+    /// appearance and status bar.
     fn prologue(&self) -> Option<String> {
         let json = |v: &Option<String>| match v {
             Some(json) => serde_json::Value::String(json.clone()).to_string(),
             None => "null".to_owned(),
         };
         let setup = &self.tailwind;
-        (setup.json.is_some() || setup.ui.is_some() || setup.appearance.is_some()).then(|| {
+        (setup.json.is_some()
+            || setup.ui.is_some()
+            || setup.appearance.is_some()
+            || setup.status_bar.is_some())
+        .then(|| {
             format!(
-                "_$setup({}, {}, {});",
+                "_$setup({}, {}, {}, {});",
                 json(&setup.json),
                 json(&setup.ui),
-                json(&setup.appearance.map(str::to_owned))
+                json(&setup.appearance.map(str::to_owned)),
+                json(&setup.status_bar)
             )
         })
     }

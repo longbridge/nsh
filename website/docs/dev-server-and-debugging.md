@@ -104,8 +104,8 @@ What happens to your app:
   screen stays where it was, with the same input text and scroll position.
 - **Modules that changed run again**, and so do the modules importing a changed module that cannot take the update
   by itself, up to the entry. Module-level code therefore runs again, except for what keeps its state:
-- **Top-level signals and navigators keep their state**: a `const` made by `signal(…)` or `createNavigator(…)` at the
-  top of a module keeps its value (a navigator its screens) across edits, as long as its own initializer is the same;
+- **Top-level signals and navigation stacks keep their state**: a `const` made by `signal(…)` or `createNavStack(…)` at the
+  top of a module keeps its value (a stack its pages) across edits, as long as its own initializer is the same;
   change the initializer (`signal(0)` to `signal(10)`) to start afresh.
 - **Top-level `context()` objects keep their identity**, taking the new default value, so providers and consumers in
   different modules keep matching.

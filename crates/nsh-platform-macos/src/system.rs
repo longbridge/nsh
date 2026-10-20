@@ -542,15 +542,9 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         (None, Some(message)) => alert.setMessageText(&NSString::from_str(message)),
         (None, None) => {}
     }
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let cancel = buttons
         .iter()
         .position(|b| b.style == DialogButtonStyle::Cancel);

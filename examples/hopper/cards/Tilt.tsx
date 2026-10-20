@@ -23,7 +23,7 @@ function Chart(props: { cursor: number; onScrub: (t: number) => void }) {
         const w = width() - pad.left - pad.right;
         if (w > 0) props.onScrub(Math.round(Math.min(HOP_LENGTH, Math.max(0, ((x - pad.left) / w) * HOP_LENGTH)) * 10) / 10);
       })}
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel="Tilt during the hop"
       accessibilityValue={{ text: `${tiltAt(props.cursor).toFixed(1)} degrees at ${props.cursor.toFixed(1)} seconds` }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}

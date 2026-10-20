@@ -482,19 +482,31 @@ fn grid() {
     assert_eq!(s.layout.grid_column.start, named("a"));
     assert_eq!(s.layout.grid_column.end, named("b"));
     assert_eq!(s.layout.grid_row.start, named("main"));
-    // Tailwind's `start` / `end` / `normal` are CSS's.
-    let s = styled("justify-items-end justify-self-start content-normal justify-normal");
-    assert_eq!(s.layout.justify_items, taffy::AlignItems::END);
-    assert_eq!(s.layout.justify_self, Some(taffy::AlignItems::START));
-    assert_eq!(s.layout.align_content, taffy::AlignContent::NORMAL);
-    assert_eq!(s.layout.justify_content, taffy::AlignContent::NORMAL);
-    // Invalid arbitrary placements and tracks are unknown classes (logged).
+    // These classes resolve as they always have (api/tailwind.txt): the
+    // flex keywords, and `content-start` / `content-normal` the default
+    // (`flex-start` outside grids, CSS's `normal` in grids).
+    let s = styled("justify-items-end justify-self-start content-start justify-normal");
+    assert_eq!(s.layout.justify_items, taffy::AlignItems::FLEX_END);
+    assert_eq!(s.layout.justify_self, Some(taffy::AlignItems::FLEX_START));
+    assert_eq!(
+        s.layout.align_content,
+        Style::default().layout.align_content
+    );
+    assert_eq!(s.layout.justify_content, taffy::AlignContent::FLEX_START);
+    // Invalid arbitrary placements and tracks stay known classes that set
+    // nothing (the style logs them); a negative named line is unknown.
     let theme = Theme::default();
     let list = parse(
         &theme,
         "col-[1_2] row-start-[1a] auto-rows-[3zz] -col-start-[a]",
     );
-    assert_eq!(list.unknown().len(), 4, "{:?}", list.unknown());
+    assert_eq!(list.unknown().len(), 2, "{:?}", list.unknown());
+    let s = styled("col-[1_2] auto-rows-[3zz]");
+    assert_eq!(s.layout.grid_column, Style::default().layout.grid_column);
+    assert_eq!(
+        s.layout.grid_auto_rows,
+        Style::default().layout.grid_auto_rows
+    );
 }
 
 #[test]
@@ -583,13 +595,14 @@ fn unknown_classes_are_reported() {
 #[test]
 fn placeholder_and_props() {
     let (_, props) = styled_with(
-        "placeholder:text-zinc-400 caret-blue-500 line-clamp-2 pointer-events-none object-contain select-none",
+        "placeholder:text-zinc-400 selection:text-blue-500 caret-blue-500 line-clamp-2 pointer-events-none object-contain select-none",
         ClassEnvironment::default(),
         (390.0, 844.0),
         0,
     );
     assert_eq!(props.placeholder_color, Some(Color(0x9f9f_a9ff)));
     assert_eq!(props.caret_color, Some(Color(0x2b7f_ffff)));
+    assert_eq!(props.selection_color, Some(Color(0x2b7f_ffff)));
     assert_eq!(props.number_of_lines, Some(2));
     assert_eq!(
         props.pointer_events,

@@ -104,7 +104,7 @@ pub(crate) struct RustApp {
     /// Where nsh's crates come from.
     nsh: Nsh,
     /// The crates `nsh.json` `"rust"` lists, in its order: each is a UI set
-    /// of its own, after the mobile UI.
+    /// of its own, after nsh's.
     crates: Vec<AppCrate>,
     /// The directories of the app's Rust code: the crates' and those of the
     /// local crates they depend on by path ([`path_dependencies`]), watched
@@ -288,6 +288,8 @@ pub(crate) struct RootConfig {
     /// The app's id (`nsh.json` `"id"`), which names where it keeps its
     /// data.
     app_id: Option<String>,
+    /// `"statusBar"` (JSON, checked): the status bar's default.
+    status_bar: Option<String>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -486,7 +488,7 @@ fn toml_string(line: &str, key: &str) -> Option<String> {
 }
 
 /// The `"root"` of the app's `config` (its `nsh.json`, in `dir`) with its
-/// `"theme"` and `"appearance"`.
+/// `"theme"`, `"appearance"` and `"statusBar"`.
 fn root_config(
     dir: &Path,
     config: &serde_json::Value,
@@ -531,11 +533,20 @@ fn root_config(
             bail!("nsh.json: appearance: {other:?} is not \"light\", \"dark\" or \"system\"")
         }
     };
+    let status_bar = match config.get("statusBar") {
+        None => None,
+        Some(v) => {
+            nsh_core::StatusBarSetting::from_json(v)
+                .map_err(|e| anyhow::anyhow!("nsh.json: statusBar: {e}"))?;
+            Some(v.to_string())
+        }
+    };
     Ok(RootConfig {
         component,
         theme,
         appearance,
         app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
+        status_bar,
     })
 }
 
@@ -545,7 +556,7 @@ const NSH_CRATES: &[&str] = &[
     "nsh-animation",
     "nsh-macros",
     "nsh-core",
-    "nsh-ui-mobile",
+    "nsh-base",
     "nsh-package",
     "nsh-js",
     "nsh-engine",
@@ -862,18 +873,18 @@ opt-level = 3
             &ws.join("android/Cargo.toml"),
             &format!(
                 "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
-                 [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-ui-mobile = {}\n{app}\n",
+                 [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-base = {}\n{app}\n",
                 package("android"),
                 self.android_lib(false),
                 src("nsh-core"),
                 src("nsh-platform-android"),
-                src("nsh-ui-mobile"),
+                src("nsh-base"),
             ),
         )?;
         write(
             &ws.join("android/lib.rs"),
             &format!(
-                "//! The app's `libnsh.so`: the Android runtime with the mobile UI and the\n//! app's Rust components.\n\n\
+                "//! The app's `libnsh.so`: the Android runtime with `nsh/base` and the\n//! app's Rust components.\n\n\
                  #[cfg(target_os = \"android\")]\nnsh::ui_sets!({sets});\n{}",
                 self.app_sets("#[cfg(target_os = \"android\")]\n")
             ),
@@ -916,7 +927,7 @@ opt-level = 3
     }
 
     /// Writes the crate `<ws>/test`: the app's headless runner (`nsh test`,
-    /// `nsh_testing::runner`) with the mobile UI and the app's sets, and a
+    /// `nsh_testing::runner`) with `nsh/base` and the app's sets, and a
     /// Rust app's root. It bundles nothing (`nsh-testing` with `js`, without
     /// `bundle`): `nsh` builds the entries it asks for.
     fn write_test(&self, ws: &Path) -> anyhow::Result<()> {
@@ -925,12 +936,12 @@ opt-level = 3
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n\
-                 nsh-core = {}\nnsh-testing = {}\nnsh-ui-mobile = {}\n{}\n",
+                 nsh-core = {}\nnsh-testing = {}\nnsh-base = {}\n{}\n",
                 self.bin("test"),
                 self.bin("test"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-testing", ", features = [\"js\"]"),
-                self.nsh.dep("nsh-ui-mobile", ""),
+                self.nsh.dep("nsh-base", ""),
                 self.dependencies(),
             ),
         )?;
@@ -942,7 +953,7 @@ opt-level = 3
             &ws.join("test/main.rs"),
             &format!(
                 "//! The app's headless runner (`nsh test`): its test files and the apps\n\
-                 //! they open, with the mobile UI and the app's Rust components.\n\n\
+                 //! they open, with `nsh/base` and the app's Rust components.\n\n\
                  fn main() -> std::process::ExitCode {{\n    \
                  nsh_testing::runner({}, {make_root})\n}}\n{}{root_fn}",
                 self.sets(),
@@ -968,13 +979,13 @@ opt-level = 3
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
-                 [dependencies]\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_os = \"android\")'.dependencies]\n\
                  nsh-platform-android = {}\n",
                 self.bin("rust-android"),
                 self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-ui-mobile", ""),
+                self.nsh.dep("nsh-base", ""),
                 self.nsh
                     .dep("nsh-platform-android", ", default-features = false"),
             ),
@@ -983,11 +994,11 @@ opt-level = 3
             &ws.join("rust-android/lib.rs"),
             &format!(
                 "//! The Rust app's `libnsh.so`: its root, which `AppActivity` runs, with\n\
-                 //! the mobile UI and the app's components; no JS runtime.\n\n\
+                 //! `nsh/base` and the app's components; no JS runtime.\n\n\
                  {android}nsh::ui_sets!({sets});\n{android}nsh::main!(app_root());\n\n\
                  // Off Android it is empty, as nsh-platform-android is.\n\
                  #[cfg(not(target_os = \"android\"))]\nuse nsh_core as _;\n\
-                 #[cfg(not(target_os = \"android\"))]\nuse nsh_ui_mobile as _;\n{}{}",
+                 #[cfg(not(target_os = \"android\"))]\nuse nsh_base as _;\n{}{}",
                 self.app_sets(android),
                 self.root_fn(android, root),
             ),
@@ -998,13 +1009,13 @@ opt-level = 3
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
-                 [dependencies]\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\n\
                  nsh-platform-web = {}\n",
                 self.bin("rust-web"),
                 self.rust_web_lib(),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-ui-mobile", ""),
+                self.nsh.dep("nsh-base", ""),
                 self.nsh
                     .dep("nsh-platform-web", ", default-features = false"),
             ),
@@ -1014,11 +1025,11 @@ opt-level = 3
             &ws.join("rust-web/lib.rs"),
             &format!(
                 "//! The Rust app's web runtime: its root, which `nsh.js` runs, with the\n\
-                 //! mobile UI and the app's components; no QuickJS.\n\n\
+                 //! `nsh/base` and the app's components; no QuickJS.\n\n\
                  {wasm}nsh_platform_web::rust_app!({sets}, app_root());\n\n\
                  // Off WebAssembly it is empty, as nsh-platform-web is.\n\
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_core as _;\n\
-                 #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_ui_mobile as _;\n{}{}",
+                 #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_base as _;\n{}{}",
                 self.app_sets(wasm),
                 self.root_fn(wasm, root),
             ),
@@ -1075,14 +1086,14 @@ opt-level = 3
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n\
                  [dependencies]\n{lib} = {}\n\
-                 nsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 nsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
                 self.bin(dir),
                 self.bin(dir),
                 self.nsh
                     .dep(lib, &format!(", default-features = false{features}")),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-ui-mobile", ""),
+                self.nsh.dep("nsh-base", ""),
                 self.nsh.dep(platform, ", default-features = false"),
             ),
         )?;
@@ -1103,7 +1114,7 @@ opt-level = 3
         write(
             &ws.join(dir).join("main.rs"),
             &format!(
-                "//! The Rust app's executable: its root with the mobile UI and the app's\n\
+                "//! The Rust app's executable: its root with `nsh/base` and the app's\n\
                  //! components, on {lib}'s runner; no JS runtime.\n{subsystem}\n\
                  fn main(){ret} {{\n    \
                  #[cfg({os})]\n    {{\n        \
@@ -1131,7 +1142,7 @@ opt-level = 3
     }
 
     /// Writes the crate `<ws>/web`: the web runtime (`nsh-platform-web`, a
-    /// WebAssembly module) with the mobile UI and the app's set, which
+    /// WebAssembly module) with `nsh/base` and the app's set, which
     /// `nsh.js` registers through the module's `nsh_app_init`.
     fn write_web(&self, ws: &Path) -> anyhow::Result<()> {
         let src = |c: &str| self.nsh.dep(c, "");
@@ -1145,12 +1156,12 @@ opt-level = 3
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [features]\n# The runtime of published apps: bytecode only (nsh-platform-web).\n\
                  bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\n\
-                 [dependencies]\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\nnsh-platform-web = {}\n",
                 self.bin("web"),
                 self.web_lib(),
                 src("nsh-core"),
-                src("nsh-ui-mobile"),
+                src("nsh-base"),
                 src("nsh-platform-web"),
             ),
         )?;
@@ -1161,11 +1172,11 @@ opt-level = 3
         write(
             &ws.join("web/lib.rs"),
             &format!(
-                "//! The app's web runtime: `nsh.wasm` with the mobile UI and the app's\n//! Rust components.\n\n\
+                "//! The app's web runtime: `nsh.wasm` with `nsh/base` and the app's\n//! Rust components.\n\n\
                  {wasm}nsh_platform_web::ui_sets!({sets});\n{}\n\
                  // Off WebAssembly it is empty, as nsh-platform-web is.\n\
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_core as _;\n\
-                 #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_ui_mobile as _;\n",
+                 #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_base as _;\n",
                 self.app_sets(wasm)
             ),
         )
@@ -1331,7 +1342,7 @@ opt-level = 3
         write(&path, &manifest)
     }
     /// Writes the crate `<ws>/<dir>`: the development host or release runner
-    /// `lib` (`nsh-linux-host`, ...) with the mobile UI and the app's set.
+    /// `lib` (`nsh-linux-host`, ...) with `nsh/base` and the app's set.
     fn write_host(&self, ws: &Path, dir: &str, lib: &str, what: &str) -> anyhow::Result<()> {
         let src = |c: &str| self.nsh.dep(c, "");
         let app = self.dependencies();
@@ -1362,13 +1373,13 @@ opt-level = 3
             &ws.join(dir).join("Cargo.toml"),
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
-                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
                 self.bin(dir),
                 self.bin(dir),
                 src(lib),
                 src("nsh-core"),
-                src("nsh-ui-mobile"),
+                src("nsh-base"),
                 src(platform),
             ),
         )?;
@@ -1383,7 +1394,7 @@ opt-level = 3
         write(
             &ws.join(dir).join("main.rs"),
             &format!(
-                "//! The {name} {what} with the mobile UI and the app's Rust components.\n{subsystem}\n\
+                "//! The {name} {what} with `nsh/base` and the app's Rust components.\n{subsystem}\n\
                  fn main(){exit} {{\n    #[cfg({os})]\n    {platform}::set_ui_sets({sets});\n    {lib}::main()\n}}\n{}",
                 self.app_sets(&format!("#[cfg({os})]\n"))
             ),
@@ -1667,10 +1678,10 @@ impl RustApp {
         lines.join("\n")
     }
 
-    /// The UI sets of the generated code: the mobile UI, then the app's,
-    /// one per crate ([`Self::app_sets`]).
+    /// The UI sets of the generated code: `nsh/base`, then the app's, one per
+    /// crate ([`Self::app_sets`]).
     fn sets(&self) -> String {
-        let mut sets = vec!["nsh_ui_mobile::registry()".to_owned()];
+        let mut sets = vec!["nsh_base::registry()".to_owned()];
         sets.extend(self.crates.iter().map(|c| format!("{}()", set_fn(c))));
         format!("vec![{}]", sets.join(", "))
     }
@@ -1703,7 +1714,7 @@ impl RustApp {
     }
 
     /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-    /// `"appearance"`: a component of the first crate `"rust"` lists), for
+    /// `"appearance"`, `"statusBar"`: a component of the first crate `"rust"` lists), for
     /// the generated code, under `cfg`.
     fn root_fn(&self, cfg: &str, root: &RootConfig) -> String {
         let krate = self.crates.first().map(AppCrate::name).unwrap_or_default();
@@ -1718,7 +1729,7 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`, `"id"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"statusBar"`, `"id"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!("nsh_core::ui::Root::of::<{krate}::{}>()", root.component);
@@ -1742,8 +1753,29 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
             "\n        .appearance(nsh_core::ui::Appearance::{variant})"
         ));
     }
+    if let Some(setting) = root
+        .status_bar
+        .as_deref()
+        .and_then(|json| serde_json::from_str(json).ok())
+        .and_then(|v| nsh_core::StatusBarSetting::from_json(&v).ok())
+    {
+        let mut make_setting = "nsh_core::StatusBarSetting::default()".to_owned();
+        if let Some(style) = setting.style {
+            let variant = match style {
+                nsh_core::StatusBarStyle::Default => "Default",
+                nsh_core::StatusBarStyle::Light => "Light",
+                nsh_core::StatusBarStyle::Dark => "Dark",
+            };
+            make_setting.push_str(&format!(".foreground(nsh_core::StatusBarStyle::{variant})"));
+        }
+        if let Some(hidden) = setting.hidden {
+            make_setting.push_str(&format!(".hidden({hidden})"));
+        }
+        make.push_str(&format!("\n        .status_bar({make_setting})"));
+    }
     format!(
-        "\n/// The app's root (`nsh.json` `\"root\"`), with its theme and appearance.\n\
+        "\n/// The app's root (`nsh.json` `\"root\"`), with its theme, appearance and\n\
+         /// status bar.\n\
          {cfg}fn app_root() -> nsh_core::ui::Root {{\n    {make}\n}}\n"
     )
 }
@@ -1964,6 +1996,7 @@ mod tests {
                 theme: None,
                 appearance: None,
                 app_id: None,
+                status_bar: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
@@ -2188,6 +2221,37 @@ mod tests {
             )
             .is_err()
         );
+        let root = super::root_config(
+            &dir,
+            &config(r#"{ "root": "App", "statusBar": { "foreground": "light" } }"#),
+            &ws,
+        )
+        .unwrap();
+        assert_eq!(
+            root.status_bar.as_deref(),
+            Some(r#"{"foreground":"light"}"#)
+        );
+        for (bad, message) in [
+            (r#""light""#, "nsh.json: statusBar: expected an object"),
+            (
+                r#"{ "foreground": "dim" }"#,
+                "nsh.json: statusBar: foreground: \"dim\" is not",
+            ),
+            (
+                r#"{ "hidden": "yes" }"#,
+                "nsh.json: statusBar: hidden: \"yes\" is not true or false",
+            ),
+            (
+                r#"{ "style": "light" }"#,
+                "nsh.json: statusBar: unknown key \"style\"",
+            ),
+        ] {
+            let json = format!(r#"{{ "root": "App", "statusBar": {bad} }}"#);
+            let err = super::root_config(&dir, &config(&json), &ws)
+                .unwrap_err()
+                .to_string();
+            assert!(err.starts_with(message), "{err}");
+        }
         let code = super::root_fn(
             "#[cfg(x)]\n",
             "app_native",
@@ -2196,6 +2260,7 @@ mod tests {
                 theme: Some("/app/theme.json".into()),
                 appearance: Some("dark".into()),
                 app_id: Some("com.example.app".into()),
+                status_bar: Some(r#"{"foreground":"light","hidden":false}"#.into()),
             },
         );
         for line in [
@@ -2204,6 +2269,7 @@ mod tests {
             "include_str!(\"/app/theme.json\")",
             ".appearance(nsh_core::ui::Appearance::Dark)",
             ".app_id(\"com.example.app\")",
+            ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
         }
@@ -2221,6 +2287,7 @@ mod tests {
                 theme: None,
                 appearance: None,
                 app_id: None,
+                status_bar: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -2260,12 +2327,12 @@ mod tests {
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
         let web = read("rust-web/lib.rs");
-        assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_ui_mobile::registry(), set_app_app_native()], app_root());"), "{web}");
+        assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_base::registry(), set_app_app_native()], app_root());"), "{web}");
         assert!(read("rust-web/Cargo.toml").contains("default-features = false"));
         assert!(read("rust-web/build.rs").contains("-zstack-size=8388608"));
         // Its headless runner opens the root for the tests.
         let test = read("test/main.rs");
-        assert!(test.contains("nsh_testing::runner(vec![nsh_ui_mobile::registry(), set_app_app_native()], Some(app_root))"), "{test}");
+        assert!(test.contains("nsh_testing::runner(vec![nsh_base::registry(), set_app_app_native()], Some(app_root))"), "{test}");
         assert!(
             test.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
             "{test}"
@@ -2291,7 +2358,7 @@ mod tests {
         let test = std::fs::read_to_string(app.workspace.join("test/main.rs")).unwrap();
         assert!(
             test.contains(
-                "nsh_testing::runner(vec![nsh_ui_mobile::registry(), set_app_app_native()], None)"
+                "nsh_testing::runner(vec![nsh_base::registry(), set_app_app_native()], None)"
             ) && !test.contains("app_root"),
             "{test}"
         );
@@ -2384,19 +2451,16 @@ mod tests {
         let caret = format!("nsh-core = \"{this}\"\nserde = \"1\"\n");
         assert_eq!(of(&[("a", caret)]), Ok(Nsh::Registry));
         // Another version: the error says what to do.
-        let error = of(&[("a", "nsh-ui-mobile = \"=0.0.1\"\n".into())]).unwrap_err();
-        assert!(error.contains("a asks for nsh-ui-mobile =0.0.1"), "{error}");
-        assert!(
-            error.contains(&format!("nsh-ui-mobile = \"{this}\"")),
-            "{error}"
-        );
+        let error = of(&[("a", "nsh-base = \"=0.0.1\"\n".into())]).unwrap_err();
+        assert!(error.contains("a asks for nsh-base =0.0.1"), "{error}");
+        assert!(error.contains(&format!("nsh-base = \"{this}\"")), "{error}");
         // By path: the checkout the crates are in, GPUI's a level deeper.
         let source = Ok(Nsh::Source(checkout.clone()));
         assert_eq!(of(&[("a", by_path("nsh-core"))]), source);
         let gpui = by_path("gpui/nsh-platform-gpui")
             .replace("gpui/nsh-platform-gpui =", "nsh-platform-gpui =");
         assert_eq!(
-            of(&[("a", format!("{}{gpui}", by_path("nsh-ui-mobile")))]),
+            of(&[("a", format!("{}{gpui}", by_path("nsh-base")))]),
             source
         );
         // One place only.
@@ -2458,7 +2522,7 @@ mod tests {
         ] {
             let code = read(file);
             for line in [
-                "vec![nsh_ui_mobile::registry(), set_app_app_native()]".to_owned(),
+                "vec![nsh_base::registry(), set_app_app_native()]".to_owned(),
                 format!(
                     "{cfg}fn set_app_app_native() -> nsh_core::ui::Registry {{\n    #[allow(unused_imports)]\n    use app_app_native::*;\n    __nsh_native_module() // the crate app-native (nsh.json \"rust\")\n}}"
                 ),
@@ -2507,12 +2571,13 @@ mod tests {
                 theme: None,
                 appearance: None,
                 app_id: None,
+                status_bar: None,
             }),
         );
         app.write_workspace().unwrap();
         app.gpui_workspace().unwrap();
         let read = |file: &str| std::fs::read_to_string(app.workspace.join(file)).unwrap();
-        let sets = "vec![nsh_ui_mobile::registry(), set_app_charts(), set_app_app_storage()]";
+        let sets = "vec![nsh_base::registry(), set_app_charts(), set_app_app_storage()]";
         for dir in [
             "test",
             "ios-host",
@@ -2645,7 +2710,7 @@ mod tests {
                 .starts_with("the description of the Rust crates: the description is in format 0")
         );
         // A specifier of nsh's own or of another crate.
-        for nsh in ["nsh/ui/mobile", "nsh", "nsh/image"] {
+        for nsh in ["nsh/base", "nsh", "nsh/image"] {
             let error = read(&text(vec![set(nsh)]), &["charts"]).unwrap_err();
             assert!(
                 error.contains(&format!(

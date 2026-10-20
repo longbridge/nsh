@@ -63,7 +63,7 @@ Most of an app needs no platform checks: elements, styles, layout and modules be
 - **`Platform.select`** takes a value per OS, or for `mobile` and `desktop` as a whole; `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`.
 - **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
-The components of [`nsh/ui/mobile`](../components/index.md) are drawn by NSH, so they also run on desktops, looking as they do on phones. A desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is; a desktop UI set is on the way.
+An app's components are drawn with NSH's primitives, so they run on desktops as well as on phones, looking the same on both. A desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is.
 
 Each backend lists what it does not support yet: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences).
 
