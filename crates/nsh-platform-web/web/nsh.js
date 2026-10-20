@@ -2261,19 +2261,19 @@ class Player {
       canvas.width = pw;
       canvas.height = ph;
     }
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    ctx.save();
+    const cx = canvas.getContext("2d");
+    cx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    cx.clearRect(0, 0, w, h);
+    cx.save();
     const slots = el._slots;
     const v = (n) => (Array.isArray(n) && n[0] === "$" ? (slots[n[1]] ?? 0) : n);
     const paint = (p) => {
       if (Array.isArray(p) && p[0] === "$") return slots[p[1]] ?? "transparent";
       if (p && typeof p === "object" && p.g) {
         const a = p.args;
-        const g = p.g === "linear" ? ctx.createLinearGradient(a[0], a[1], a[2], a[3])
-          : p.g === "radial" ? ctx.createRadialGradient(a[0], a[1], a[2], a[3], a[4], a[5])
-            : ctx.createConicGradient(a[0], a[1], a[2]);
+        const g = p.g === "linear" ? cx.createLinearGradient(a[0], a[1], a[2], a[3])
+          : p.g === "radial" ? cx.createRadialGradient(a[0], a[1], a[2], a[3], a[4], a[5])
+            : cx.createConicGradient(a[0], a[1], a[2]);
         for (const [offset, color] of p.stops) g.addColorStop(Math.min(1, Math.max(0, offset)), color);
         return g;
       }
@@ -2291,36 +2291,36 @@ class Player {
       try {
         if (name.startsWith("=")) {
           const prop = name.slice(1);
-          ctx[prop] = prop.endsWith("Style") ? paint(args[0]) : v(args[0]);
+          cx[prop] = prop.endsWith("Style") ? paint(args[0]) : v(args[0]);
         } else if (name === "fill" || name === "clip") {
-          if (args[0]) ctx[name](path(args[0]), args[1]);
-          else ctx[name](args[1]);
+          if (args[0]) cx[name](path(args[0]), args[1]);
+          else cx[name](args[1]);
         } else if (name === "stroke") {
-          if (args[0]) ctx.stroke(path(args[0]));
-          else ctx.stroke();
+          if (args[0]) cx.stroke(path(args[0]));
+          else cx.stroke();
         } else if (name === "shadowOffset") {
-          ctx.shadowOffsetX = args[0];
-          ctx.shadowOffsetY = args[1];
+          cx.shadowOffsetX = args[0];
+          cx.shadowOffsetY = args[1];
         } else if (name === "roundRect") {
-          ctx.roundRect(...args.slice(0, 4).map(v), args[4].map(v));
+          cx.roundRect(...args.slice(0, 4).map(v), args[4].map(v));
         } else if (name === "drawImage") {
           const img = this.canvasImage(args[0], el);
           if (!img) continue;
           const dest = args.slice(2).map(v);
-          if (args[1]) ctx.drawImage(img, ...args[1], ...dest);
-          else ctx.drawImage(img, ...dest);
+          if (args[1]) cx.drawImage(img, ...args[1], ...dest);
+          else cx.drawImage(img, ...dest);
         } else if (name === "fillText" || name === "strokeText") {
-          ctx[name](args[0], ...args.slice(1).map(v));
+          cx[name](args[0], ...args.slice(1).map(v));
         } else if (name === "setLineDash") {
-          ctx.setLineDash(args[0]);
-        } else if (typeof ctx[name] === "function") {
-          ctx[name](...args.map(v));
+          cx.setLineDash(args[0]);
+        } else if (typeof cx[name] === "function") {
+          cx[name](...args.map(v));
         }
       } catch (err) {
         console.warn("[nsh] canvas", name, err);
       }
     }
-    ctx.restore();
+    cx.restore();
   }
 
   canvasImage(uri, el) {

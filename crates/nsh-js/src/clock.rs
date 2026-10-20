@@ -18,12 +18,12 @@ use crate::web::{
 };
 
 /// Installs them when the current thread's clock is manual.
-pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+pub(crate) fn install(cx: &Ctx<'_>) -> rquickjs::Result<()> {
     if !nsh_core::time::manual() {
         return Ok(());
     }
-    let ctx = ctx.as_raw().as_ptr();
-    replace(ctx).map_err(|_| rquickjs::Error::Exception)
+    let cx = cx.as_raw().as_ptr();
+    replace(cx).map_err(|_| rquickjs::Error::Exception)
 }
 
 /// What a property is: QuickJS' flags, throwing when it cannot be defined.
@@ -33,35 +33,35 @@ const HIDDEN: c_int =
 const FROZEN: c_int = qjs::JS_PROP_THROW as c_int;
 
 /// Defines `key` on `obj` as `flags` say.
-fn define(ctx: js::Ctx, obj: Raw, key: &std::ffi::CStr, value: V, flags: c_int) -> R<()> {
+fn define(cx: js::Ctx, obj: Raw, key: &std::ffi::CStr, value: V, flags: c_int) -> R<()> {
     // SAFETY: the property takes the value.
-    match unsafe { qjs::JS_DefinePropertyValueStr(ctx, obj, key.as_ptr(), value.take(), flags) } {
+    match unsafe { qjs::JS_DefinePropertyValueStr(cx, obj, key.as_ptr(), value.take(), flags) } {
         r if r > 0 => Ok(()),
         _ => Err(js::Throw),
     }
 }
 
-fn replace(ctx: js::Ctx) -> R<()> {
-    let global = js::global(ctx);
+fn replace(cx: js::Ctx) -> R<()> {
+    let global = js::global(cx);
     // `performance`: QuickJS makes its members read-only, so it is a new
     // object of the same shape, its time origin the clock's start.
-    let performance = js::new_object(ctx)?;
+    let performance = js::new_object(cx)?;
     define(
-        ctx,
+        cx,
         performance.raw(),
         c"now",
-        js::function(ctx, c"now", performance_now, 0)?,
+        js::function(cx, c"now", performance_now, 0)?,
         READ_ONLY,
     )?;
     define(
-        ctx,
+        cx,
         performance.raw(),
         c"timeOrigin",
         V::num(nsh_core::time::unix_ms()),
         READ_ONLY,
     )?;
     define(
-        ctx,
+        cx,
         global.raw(),
         c"performance",
         performance,
@@ -70,15 +70,15 @@ fn replace(ctx: js::Ctx) -> R<()> {
             | qjs::JS_PROP_CONFIGURABLE
             | qjs::JS_PROP_THROW) as c_int,
     )?;
-    web::web(ctx).clock_origin = Some(nsh_core::time::now());
+    web::web(cx).clock_origin = Some(nsh_core::time::now());
     // `Date`.
-    let original = js::get(ctx, global.raw(), "Date")?;
+    let original = js::get(cx, global.raw(), "Date")?;
     // SAFETY: a constructor-or-function, as the intrinsic `Date` is: QuickJS
     // passes the new target as `this` when constructed, `undefined` when
     // called.
-    let date = V::checked(ctx, unsafe {
+    let date = V::checked(cx, unsafe {
         qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(date),
             c"Date".as_ptr(),
             7,
@@ -86,29 +86,29 @@ fn replace(ctx: js::Ctx) -> R<()> {
             0,
         )
     })?;
-    let prototype = js::get(ctx, original.raw(), "prototype")?;
+    let prototype = js::get(cx, original.raw(), "prototype")?;
     // As the intrinsic's: neither writable, enumerable nor configurable.
-    define(ctx, date.raw(), c"prototype", prototype.clone_ref(), FROZEN)?;
+    define(cx, date.raw(), c"prototype", prototype.clone_ref(), FROZEN)?;
     define(
-        ctx,
+        cx,
         prototype.raw(),
         c"constructor",
         date.clone_ref(),
         HIDDEN,
     )?;
     for name in [c"UTC", c"parse"] {
-        let member = js::get(ctx, original.raw(), name.to_str().unwrap_or_default())?;
-        define(ctx, date.raw(), name, member, HIDDEN)?;
+        let member = js::get(cx, original.raw(), name.to_str().unwrap_or_default())?;
+        define(cx, date.raw(), name, member, HIDDEN)?;
     }
     define(
-        ctx,
+        cx,
         date.raw(),
         c"now",
-        js::function(ctx, c"now", date_now, 0)?,
+        js::function(cx, c"now", date_now, 0)?,
         HIDDEN,
     )?;
-    define(ctx, global.raw(), c"Date", date, HIDDEN)?;
-    web::web(ctx).date = original;
+    define(cx, global.raw(), c"Date", date, HIDDEN)?;
+    web::web(cx).date = original;
     Ok(())
 }
 
@@ -119,37 +119,37 @@ fn now_ms() -> f64 {
 
 native! {
     /// `performance.now()`: milliseconds since the clock's start.
-    fn performance_now(ctx, this, args) {
-        let origin = web::web(ctx).clock_origin.unwrap_or_else(nsh_core::time::now);
+    fn performance_now(cx, this, args) {
+        let origin = web::web(cx).clock_origin.unwrap_or_else(nsh_core::time::now);
         Ok(V::num(nsh_core::time::now().saturating_duration_since(origin).as_secs_f64() * 1000.0))
     }
 }
 
 native! {
     /// `Date.now()`.
-    fn date_now(ctx, this, args) {
+    fn date_now(cx, this, args) {
         Ok(V::num(now_ms()))
     }
 }
 
 /// `Date(...)` and `new Date(...)`: the original's, at the clock's time
 /// when given none.
-unsafe extern "C" fn date(ctx: js::Ctx, new_target: Raw, argc: c_int, argv: *mut Raw) -> Raw {
+unsafe extern "C" fn date(cx: js::Ctx, new_target: Raw, argc: c_int, argv: *mut Raw) -> Raw {
     // SAFETY: QuickJS passes `argc` live arguments.
     let args = unsafe { Args::new(argc, argv) };
-    match construct(ctx, new_target, args) {
+    match construct(cx, new_target, args) {
         Ok(v) => v.take(),
         Err(_) => qjs::JS_EXCEPTION,
     }
 }
 
-fn construct(ctx: js::Ctx, new_target: Raw, args: Args<'_>) -> R<V> {
-    let original = web::web(ctx).date.clone_ref();
+fn construct(cx: js::Ctx, new_target: Raw, args: Args<'_>) -> R<V> {
+    let original = web::web(cx).date.clone_ref();
     let now = V::num(now_ms());
     if js::is_undefined(new_target) {
         // Called: the time now as a string, whatever the arguments.
-        let today = js::construct(ctx, original.raw(), &[now.raw()])?;
-        return js::invoke(ctx, today.raw(), "toString", &[]);
+        let today = js::construct(cx, original.raw(), &[now.raw()])?;
+        return js::invoke(cx, today.raw(), "toString", &[]);
     }
     let given: Vec<Raw> = (0..args.len()).map(|i| args.get(i)).collect();
     let args = if given.is_empty() {
@@ -158,9 +158,9 @@ fn construct(ctx: js::Ctx, new_target: Raw, args: Args<'_>) -> R<V> {
         given
     };
     // SAFETY: live values; the new target makes subclasses' instances.
-    V::checked(ctx, unsafe {
+    V::checked(cx, unsafe {
         qjs::JS_CallConstructor2(
-            ctx,
+            cx,
             original.raw(),
             new_target,
             args.len() as c_int,

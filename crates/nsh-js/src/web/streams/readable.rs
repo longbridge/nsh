@@ -65,61 +65,61 @@ impl js::Trace for ReadRequest {
 }
 
 impl ReadRequest {
-    fn chunk(self, ctx: Ctx, chunk: Raw) {
+    fn chunk(self, cx: Ctx, chunk: Raw) {
         let r = match self {
             ReadRequest::Promise(d) => {
-                js::iter_result(ctx, V::dup(ctx, chunk), false).map(|r| d.resolve(ctx, r.raw()))
+                js::iter_result(cx, V::dup(cx, chunk), false).map(|r| d.resolve(cx, r.raw()))
             }
             ReadRequest::Steps { chunk: f, .. } => {
-                js::call(ctx, f.raw(), js::UNDEFINED, &[chunk]).map(drop)
+                js::call(cx, f.raw(), js::UNDEFINED, &[chunk]).map(drop)
             }
         };
         if r.is_err() {
-            js::report_exception(ctx);
+            js::report_exception(cx);
         }
     }
 
     /// The end (`value`: undefined, or a read-into request's empty view).
-    fn close(self, ctx: Ctx, value: Raw) {
+    fn close(self, cx: Ctx, value: Raw) {
         let r = match self {
             ReadRequest::Promise(d) => {
-                js::iter_result(ctx, V::dup(ctx, value), true).map(|r| d.resolve(ctx, r.raw()))
+                js::iter_result(cx, V::dup(cx, value), true).map(|r| d.resolve(cx, r.raw()))
             }
             ReadRequest::Steps { close, .. } => {
-                js::call(ctx, close.raw(), js::UNDEFINED, &[value]).map(drop)
+                js::call(cx, close.raw(), js::UNDEFINED, &[value]).map(drop)
             }
         };
         if r.is_err() {
-            js::report_exception(ctx);
+            js::report_exception(cx);
         }
     }
 
-    fn error(self, ctx: Ctx, e: Raw) {
+    fn error(self, cx: Ctx, e: Raw) {
         let r = match self {
             ReadRequest::Promise(d) => {
-                d.reject(ctx, e);
+                d.reject(cx, e);
                 Ok(())
             }
             ReadRequest::Steps { error, .. } => {
-                js::call(ctx, error.raw(), js::UNDEFINED, &[e]).map(drop)
+                js::call(cx, error.raw(), js::UNDEFINED, &[e]).map(drop)
             }
         };
         if r.is_err() {
-            js::report_exception(ctx);
+            js::report_exception(cx);
         }
     }
 
     /// A request of three Rust closures (each called with the argument).
     pub(crate) fn steps(
-        ctx: Ctx,
+        cx: Ctx,
         captures: Vec<V>,
         chunk: impl Fn(Ctx, &[V], Raw) -> R<()> + 'static,
         close: impl Fn(Ctx, &[V], Raw) -> R<()> + 'static,
         error: impl Fn(Ctx, &[V], Raw) -> R<()> + 'static,
     ) -> R<ReadRequest> {
         let mk = |captures: Vec<V>, f: Step| {
-            js::closure(ctx, captures, move |ctx, c, args| {
-                f(ctx, c, args.get(0))?;
+            js::closure(cx, captures, move |cx, c, args| {
+                f(cx, c, args.get(0))?;
                 Ok(V::undefined())
             })
         };
@@ -257,90 +257,90 @@ impl Object for ByobRequest {}
 
 // --- Access ---------------------------------------------------------------
 
-pub(crate) fn stream<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, Stream>> {
-    data::<Stream>(ctx, v, "ReadableStream")
+pub(crate) fn stream<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, Stream>> {
+    data::<Stream>(cx, v, "ReadableStream")
 }
 
-fn dc<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, DefaultController>> {
-    data::<DefaultController>(ctx, v, "ReadableStreamDefaultController")
+fn dc<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, DefaultController>> {
+    data::<DefaultController>(cx, v, "ReadableStreamDefaultController")
 }
 
-fn bc<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, ByteController>> {
-    data::<ByteController>(ctx, v, "ReadableByteStreamController")
+fn bc<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, ByteController>> {
+    data::<ByteController>(cx, v, "ReadableByteStreamController")
 }
 
-fn common<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, ReaderCommon>> {
-    if is::<DefaultReader>(ctx, v) {
-        Ok(RefMut::map(data::<DefaultReader>(ctx, v, "reader")?, |r| {
+fn common<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, ReaderCommon>> {
+    if is::<DefaultReader>(cx, v) {
+        Ok(RefMut::map(data::<DefaultReader>(cx, v, "reader")?, |r| {
             &mut r.common
         }))
     } else {
         Ok(RefMut::map(
-            data::<ByobReader>(ctx, v, "ReadableStreamBYOBReader")?,
+            data::<ByobReader>(cx, v, "ReadableStreamBYOBReader")?,
             |r| &mut r.common,
         ))
     }
 }
 
-pub(crate) fn is_stream(ctx: Ctx, v: Raw) -> bool {
-    is::<Stream>(ctx, v)
+pub(crate) fn is_stream(cx: Ctx, v: Raw) -> bool {
+    is::<Stream>(cx, v)
 }
 
-fn is_byte_controller(ctx: Ctx, v: Raw) -> bool {
-    is::<ByteController>(ctx, v)
+fn is_byte_controller(cx: Ctx, v: Raw) -> bool {
+    is::<ByteController>(cx, v)
 }
 
-fn state(ctx: Ctx, s: Raw) -> R<State> {
-    Ok(stream(ctx, s)?.state)
+fn state(cx: Ctx, s: Raw) -> R<State> {
+    Ok(stream(cx, s)?.state)
 }
 
-pub(crate) fn state_of(ctx: Ctx, s: Raw) -> R<State> {
-    state(ctx, s)
+pub(crate) fn state_of(cx: Ctx, s: Raw) -> R<State> {
+    state(cx, s)
 }
 
-pub(crate) fn stored_error(ctx: Ctx, s: Raw) -> R<V> {
-    Ok(stream(ctx, s)?.stored_error.clone_ref())
+pub(crate) fn stored_error(cx: Ctx, s: Raw) -> R<V> {
+    Ok(stream(cx, s)?.stored_error.clone_ref())
 }
 
-fn reader_of(ctx: Ctx, s: Raw) -> R<V> {
-    Ok(stream(ctx, s)?.reader.clone_ref())
+fn reader_of(cx: Ctx, s: Raw) -> R<V> {
+    Ok(stream(cx, s)?.reader.clone_ref())
 }
 
-pub(crate) fn controller_of(ctx: Ctx, s: Raw) -> R<V> {
-    Ok(stream(ctx, s)?.controller.clone_ref())
+pub(crate) fn controller_of(cx: Ctx, s: Raw) -> R<V> {
+    Ok(stream(cx, s)?.controller.clone_ref())
 }
 
 /// IsReadableStreamLocked.
-pub(crate) fn is_locked(ctx: Ctx, s: Raw) -> R<bool> {
-    Ok(!stream(ctx, s)?.reader.is_undefined())
+pub(crate) fn is_locked(cx: Ctx, s: Raw) -> R<bool> {
+    Ok(!stream(cx, s)?.reader.is_undefined())
 }
 
 /// Whether the stream was ever read or canceled.
-pub(crate) fn is_disturbed(ctx: Ctx, s: Raw) -> R<bool> {
-    Ok(stream(ctx, s)?.disturbed)
+pub(crate) fn is_disturbed(cx: Ctx, s: Raw) -> R<bool> {
+    Ok(stream(cx, s)?.disturbed)
 }
 
-fn has_default_reader(ctx: Ctx, s: Raw) -> R<bool> {
-    let r = reader_of(ctx, s)?;
-    Ok(is::<DefaultReader>(ctx, r.raw()))
+fn has_default_reader(cx: Ctx, s: Raw) -> R<bool> {
+    let r = reader_of(cx, s)?;
+    Ok(is::<DefaultReader>(cx, r.raw()))
 }
 
-fn has_byob_reader(ctx: Ctx, s: Raw) -> R<bool> {
-    let r = reader_of(ctx, s)?;
-    Ok(is::<ByobReader>(ctx, r.raw()))
+fn has_byob_reader(cx: Ctx, s: Raw) -> R<bool> {
+    let r = reader_of(cx, s)?;
+    Ok(is::<ByobReader>(cx, r.raw()))
 }
 
-fn num_requests(ctx: Ctx, s: Raw) -> R<usize> {
-    let r = reader_of(ctx, s)?;
+fn num_requests(cx: Ctx, s: Raw) -> R<usize> {
+    let r = reader_of(cx, s)?;
     if r.is_undefined() {
         return Ok(0);
     }
-    Ok(common(ctx, r.raw())?.requests.len())
+    Ok(common(cx, r.raw())?.requests.len())
 }
 
-fn new_stream(ctx: Ctx, new_target: Raw) -> R<V> {
+fn new_stream(cx: Ctx, new_target: Raw) -> R<V> {
     instance(
-        ctx,
+        cx,
         new_target,
         Class::ReadableStream,
         Stream {
@@ -356,9 +356,9 @@ fn new_stream(ctx: Ctx, new_target: Raw) -> R<V> {
 // --- Stream operations ----------------------------------------------------
 
 /// ReadableStreamClose.
-fn close_stream(ctx: Ctx, s: Raw) -> R<()> {
+fn close_stream(cx: Ctx, s: Raw) -> R<()> {
     let reader = {
-        let mut st = stream(ctx, s)?;
+        let mut st = stream(cx, s)?;
         st.state = State::Closed;
         st.reader.clone_ref()
     };
@@ -366,9 +366,9 @@ fn close_stream(ctx: Ctx, s: Raw) -> R<()> {
         return Ok(());
     }
     // A BYOB reader's requests are answered by its controller.
-    let default = is::<DefaultReader>(ctx, reader.raw());
+    let default = is::<DefaultReader>(cx, reader.raw());
     let (closed, requests) = {
-        let mut c = common(ctx, reader.raw())?;
+        let mut c = common(cx, reader.raw())?;
         let requests = if default {
             std::mem::take(&mut c.requests)
         } else {
@@ -376,43 +376,43 @@ fn close_stream(ctx: Ctx, s: Raw) -> R<()> {
         };
         (c.closed.resolve.clone_ref(), requests)
     };
-    let _ = js::call(ctx, closed.raw(), js::UNDEFINED, &[js::UNDEFINED]);
+    let _ = js::call(cx, closed.raw(), js::UNDEFINED, &[js::UNDEFINED]);
     for r in requests {
-        r.close(ctx, js::UNDEFINED);
+        r.close(cx, js::UNDEFINED);
     }
     Ok(())
 }
 
 /// ReadableStreamError.
-fn error_stream(ctx: Ctx, s: Raw, e: Raw) -> R<()> {
+fn error_stream(cx: Ctx, s: Raw, e: Raw) -> R<()> {
     let reader = {
-        let mut st = stream(ctx, s)?;
+        let mut st = stream(cx, s)?;
         st.state = State::Errored;
-        st.stored_error = V::dup(ctx, e);
+        st.stored_error = V::dup(cx, e);
         st.reader.clone_ref()
     };
     if reader.is_undefined() {
         return Ok(());
     }
     let (closed, requests) = {
-        let mut c = common(ctx, reader.raw())?;
+        let mut c = common(cx, reader.raw())?;
         (
             (c.closed.reject.clone_ref(), c.closed.promise.clone_ref()),
             std::mem::take(&mut c.requests),
         )
     };
-    let _ = js::call(ctx, closed.0.raw(), js::UNDEFINED, &[e]);
-    js::mark_handled(ctx, closed.1.raw());
+    let _ = js::call(cx, closed.0.raw(), js::UNDEFINED, &[e]);
+    js::mark_handled(cx, closed.1.raw());
     for r in requests {
-        r.error(ctx, e);
+        r.error(cx, e);
     }
     Ok(())
 }
 
 /// ReadableStreamCancel.
-pub(crate) fn cancel_stream(ctx: Ctx, s: Raw, reason: Raw) -> R<V> {
+pub(crate) fn cancel_stream(cx: Ctx, s: Raw, reason: Raw) -> R<V> {
     let (st, err, reader, controller) = {
-        let mut st = stream(ctx, s)?;
+        let mut st = stream(cx, s)?;
         st.disturbed = true;
         (
             st.state,
@@ -422,41 +422,41 @@ pub(crate) fn cancel_stream(ctx: Ctx, s: Raw, reason: Raw) -> R<V> {
         )
     };
     match st {
-        State::Closed => return js::resolved(ctx, js::UNDEFINED),
-        State::Errored => return js::rejected(ctx, err.raw()),
+        State::Closed => return js::resolved(cx, js::UNDEFINED),
+        State::Errored => return js::rejected(cx, err.raw()),
         State::Readable => {}
     }
-    close_stream(ctx, s)?;
-    if !reader.is_undefined() && is::<ByobReader>(ctx, reader.raw()) {
-        let requests = std::mem::take(&mut common(ctx, reader.raw())?.requests);
+    close_stream(cx, s)?;
+    if !reader.is_undefined() && is::<ByobReader>(cx, reader.raw()) {
+        let requests = std::mem::take(&mut common(cx, reader.raw())?.requests);
         for r in requests {
-            r.close(ctx, js::UNDEFINED);
+            r.close(cx, js::UNDEFINED);
         }
     }
-    let source_cancel = if is_byte_controller(ctx, controller.raw()) {
-        bc_cancel_steps(ctx, controller.raw(), reason)?
+    let source_cancel = if is_byte_controller(cx, controller.raw()) {
+        bc_cancel_steps(cx, controller.raw(), reason)?
     } else {
-        dc_cancel_steps(ctx, controller.raw(), reason)?
+        dc_cancel_steps(cx, controller.raw(), reason)?
     };
-    let undefined = js::closure(ctx, Vec::new(), |_, _, _| Ok(V::undefined()))?;
-    js::then(ctx, source_cancel.raw(), undefined.raw(), js::UNDEFINED)
+    let undefined = js::closure(cx, Vec::new(), |_, _, _| Ok(V::undefined()))?;
+    js::then(cx, source_cancel.raw(), undefined.raw(), js::UNDEFINED)
 }
 
-fn add_request(ctx: Ctx, s: Raw, request: ReadRequest) -> R<()> {
-    let reader = reader_of(ctx, s)?;
-    common(ctx, reader.raw())?.requests.push_back(request);
+fn add_request(cx: Ctx, s: Raw, request: ReadRequest) -> R<()> {
+    let reader = reader_of(cx, s)?;
+    common(cx, reader.raw())?.requests.push_back(request);
     Ok(())
 }
 
 /// ReadableStreamFulfillReadRequest / ReadIntoRequest.
-fn fulfill_request(ctx: Ctx, s: Raw, chunk: Raw, done: bool) -> R<()> {
-    let reader = reader_of(ctx, s)?;
-    let request = common(ctx, reader.raw())?.requests.pop_front();
+fn fulfill_request(cx: Ctx, s: Raw, chunk: Raw, done: bool) -> R<()> {
+    let reader = reader_of(cx, s)?;
+    let request = common(cx, reader.raw())?.requests.pop_front();
     if let Some(r) = request {
         if done {
-            r.close(ctx, chunk);
+            r.close(cx, chunk);
         } else {
-            r.chunk(ctx, chunk);
+            r.chunk(cx, chunk);
         }
     }
     Ok(())
@@ -464,57 +464,57 @@ fn fulfill_request(ctx: Ctx, s: Raw, chunk: Raw, done: bool) -> R<()> {
 
 // --- Default controller ---------------------------------------------------
 
-fn dc_stream(ctx: Ctx, c: Raw) -> R<V> {
-    Ok(dc(ctx, c)?.stream.clone_ref())
+fn dc_stream(cx: Ctx, c: Raw) -> R<V> {
+    Ok(dc(cx, c)?.stream.clone_ref())
 }
 
 /// ReadableStreamDefaultControllerCanCloseOrEnqueue.
-pub(crate) fn dc_can_close_or_enqueue(ctx: Ctx, c: Raw) -> R<bool> {
+pub(crate) fn dc_can_close_or_enqueue(cx: Ctx, c: Raw) -> R<bool> {
     let (close_requested, s) = {
-        let d = dc(ctx, c)?;
+        let d = dc(cx, c)?;
         (d.close_requested, d.stream.clone_ref())
     };
-    Ok(!close_requested && state(ctx, s.raw())? == State::Readable)
+    Ok(!close_requested && state(cx, s.raw())? == State::Readable)
 }
 
 /// ReadableStreamDefaultControllerGetDesiredSize.
-pub(crate) fn dc_desired_size(ctx: Ctx, c: Raw) -> R<Option<f64>> {
+pub(crate) fn dc_desired_size(cx: Ctx, c: Raw) -> R<Option<f64>> {
     let (hwm, total, s) = {
-        let d = dc(ctx, c)?;
+        let d = dc(cx, c)?;
         (d.hwm, d.queue.total, d.stream.clone_ref())
     };
-    Ok(match state(ctx, s.raw())? {
+    Ok(match state(cx, s.raw())? {
         State::Errored => None,
         State::Closed => Some(0.0),
         State::Readable => Some(hwm - total),
     })
 }
 
-fn dc_should_call_pull(ctx: Ctx, c: Raw) -> R<bool> {
-    if !dc_can_close_or_enqueue(ctx, c)? {
+fn dc_should_call_pull(cx: Ctx, c: Raw) -> R<bool> {
+    if !dc_can_close_or_enqueue(cx, c)? {
         return Ok(false);
     }
     let (started, s) = {
-        let d = dc(ctx, c)?;
+        let d = dc(cx, c)?;
         (d.started, d.stream.clone_ref())
     };
     if !started {
         return Ok(false);
     }
-    if is_locked(ctx, s.raw())? && num_requests(ctx, s.raw())? > 0 {
+    if is_locked(cx, s.raw())? && num_requests(cx, s.raw())? > 0 {
         return Ok(true);
     }
-    Ok(dc_desired_size(ctx, c)?.is_some_and(|d| d > 0.0))
+    Ok(dc_desired_size(cx, c)?.is_some_and(|d| d > 0.0))
 }
 
 /// ReadableStreamDefaultControllerHasBackpressure.
-pub(crate) fn dc_has_backpressure(ctx: Ctx, c: Raw) -> R<bool> {
-    Ok(!dc_should_call_pull(ctx, c)?)
+pub(crate) fn dc_has_backpressure(cx: Ctx, c: Raw) -> R<bool> {
+    Ok(!dc_should_call_pull(cx, c)?)
 }
 
-fn dc_clear_algorithms(ctx: Ctx, c: Raw) -> R<()> {
+fn dc_clear_algorithms(cx: Ctx, c: Raw) -> R<()> {
     let old = {
-        let mut d = dc(ctx, c)?;
+        let mut d = dc(cx, c)?;
         (
             std::mem::take(&mut d.pull),
             std::mem::take(&mut d.cancel),
@@ -525,12 +525,12 @@ fn dc_clear_algorithms(ctx: Ctx, c: Raw) -> R<()> {
     Ok(())
 }
 
-fn dc_call_pull_if_needed(ctx: Ctx, c: Raw) -> R<()> {
-    if !dc_should_call_pull(ctx, c)? {
+fn dc_call_pull_if_needed(cx: Ctx, c: Raw) -> R<()> {
+    if !dc_should_call_pull(cx, c)? {
         return Ok(());
     }
     let pull = {
-        let mut d = dc(ctx, c)?;
+        let mut d = dc(cx, c)?;
         if d.pulling {
             d.pull_again = true;
             return Ok(());
@@ -538,97 +538,97 @@ fn dc_call_pull_if_needed(ctx: Ctx, c: Raw) -> R<()> {
         d.pulling = true;
         d.pull.clone_ref()
     };
-    let p = pull.promise(ctx, &[c])?;
+    let p = pull.promise(cx, &[c])?;
     js::upon(
-        ctx,
+        cx,
         p.raw(),
-        vec![V::dup(ctx, c)],
-        |ctx, cap, _| {
+        vec![V::dup(cx, c)],
+        |cx, cap, _| {
             let again = {
-                let mut d = dc(ctx, cap[0].raw())?;
+                let mut d = dc(cx, cap[0].raw())?;
                 d.pulling = false;
                 std::mem::replace(&mut d.pull_again, false)
             };
             if again {
-                dc_call_pull_if_needed(ctx, cap[0].raw())?;
+                dc_call_pull_if_needed(cx, cap[0].raw())?;
             }
             Ok(())
         },
-        |ctx, cap, e| dc_error(ctx, cap[0].raw(), e),
+        |cx, cap, e| dc_error(cx, cap[0].raw(), e),
     )
 }
 
 /// ReadableStreamDefaultControllerClose.
-pub(crate) fn dc_close(ctx: Ctx, c: Raw) -> R<()> {
-    if !dc_can_close_or_enqueue(ctx, c)? {
+pub(crate) fn dc_close(cx: Ctx, c: Raw) -> R<()> {
+    if !dc_can_close_or_enqueue(cx, c)? {
         return Ok(());
     }
     let (empty, s) = {
-        let mut d = dc(ctx, c)?;
+        let mut d = dc(cx, c)?;
         d.close_requested = true;
         (d.queue.is_empty(), d.stream.clone_ref())
     };
     if empty {
-        dc_clear_algorithms(ctx, c)?;
-        close_stream(ctx, s.raw())?;
+        dc_clear_algorithms(cx, c)?;
+        close_stream(cx, s.raw())?;
     }
     Ok(())
 }
 
 /// ReadableStreamDefaultControllerEnqueue.
-pub(crate) fn dc_enqueue(ctx: Ctx, c: Raw, chunk: Raw) -> R<()> {
-    if !dc_can_close_or_enqueue(ctx, c)? {
+pub(crate) fn dc_enqueue(cx: Ctx, c: Raw, chunk: Raw) -> R<()> {
+    if !dc_can_close_or_enqueue(cx, c)? {
         return Ok(());
     }
-    let s = dc_stream(ctx, c)?;
-    if is_locked(ctx, s.raw())? && num_requests(ctx, s.raw())? > 0 {
-        fulfill_request(ctx, s.raw(), chunk, false)?;
+    let s = dc_stream(cx, c)?;
+    if is_locked(cx, s.raw())? && num_requests(cx, s.raw())? > 0 {
+        fulfill_request(cx, s.raw(), chunk, false)?;
     } else {
-        let size = dc(ctx, c)?.size.clone_ref();
-        let n = match chunk_size(ctx, &size, chunk) {
+        let size = dc(cx, c)?.size.clone_ref();
+        let n = match chunk_size(cx, &size, chunk) {
             Ok(n) => n,
             Err(t) => {
-                let e = js::take_exception(ctx);
-                dc_error(ctx, c, e.raw())?;
-                return Err(js::throw(ctx, e)).or(Err(t));
+                let e = js::take_exception(cx);
+                dc_error(cx, c, e.raw())?;
+                return Err(js::throw(cx, e)).or(Err(t));
             }
         };
-        let r = dc(ctx, c)?.queue.enqueue(ctx, V::dup(ctx, chunk), n);
+        let r = dc(cx, c)?.queue.enqueue(cx, V::dup(cx, chunk), n);
         if let Err(t) = r {
-            let e = js::take_exception(ctx);
-            dc_error(ctx, c, e.raw())?;
-            return Err(js::throw(ctx, e)).or(Err(t));
+            let e = js::take_exception(cx);
+            dc_error(cx, c, e.raw())?;
+            return Err(js::throw(cx, e)).or(Err(t));
         }
     }
-    dc_call_pull_if_needed(ctx, c)
+    dc_call_pull_if_needed(cx, c)
 }
 
 /// ReadableStreamDefaultControllerError.
-pub(crate) fn dc_error(ctx: Ctx, c: Raw, e: Raw) -> R<()> {
-    let s = dc_stream(ctx, c)?;
-    if state(ctx, s.raw())? != State::Readable {
+pub(crate) fn dc_error(cx: Ctx, c: Raw, e: Raw) -> R<()> {
+    let s = dc_stream(cx, c)?;
+    if state(cx, s.raw())? != State::Readable {
         return Ok(());
     }
-    let old = dc(ctx, c)?.queue.reset();
+    let old = dc(cx, c)?.queue.reset();
     drop(old);
-    dc_clear_algorithms(ctx, c)?;
-    error_stream(ctx, s.raw(), e)
+    dc_clear_algorithms(cx, c)?;
+    error_stream(cx, s.raw(), e)
 }
 
-fn dc_cancel_steps(ctx: Ctx, c: Raw, reason: Raw) -> R<V> {
+fn dc_cancel_steps(cx: Ctx, c: Raw, reason: Raw) -> R<V> {
     let (old, cancel) = {
-        let mut d = dc(ctx, c)?;
+        let mut d = dc(cx, c)?;
         (d.queue.reset(), d.cancel.clone_ref())
     };
     drop(old);
-    let result = cancel.promise(ctx, &[reason])?;
-    dc_clear_algorithms(ctx, c)?;
+    let result = cancel.promise(cx, &[reason])?;
+    dc_clear_algorithms(cx, c)?;
     Ok(result)
 }
 
-fn dc_pull_steps(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
+fn dc_pull_steps(cx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
     let (chunk, s, close_requested, empty) = {
-        let mut d = dc(ctx, c)?;
+        let mut d = dc(cx, c)?;
         let chunk = d.queue.dequeue();
         (
             chunk,
@@ -640,16 +640,16 @@ fn dc_pull_steps(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
     match chunk {
         Some(chunk) => {
             if close_requested && empty {
-                dc_clear_algorithms(ctx, c)?;
-                close_stream(ctx, s.raw())?;
+                dc_clear_algorithms(cx, c)?;
+                close_stream(cx, s.raw())?;
             } else {
-                dc_call_pull_if_needed(ctx, c)?;
+                dc_call_pull_if_needed(cx, c)?;
             }
-            request.chunk(ctx, chunk.raw());
+            request.chunk(cx, chunk.raw());
         }
         None => {
-            add_request(ctx, s.raw(), request)?;
-            dc_call_pull_if_needed(ctx, c)?;
+            add_request(cx, s.raw(), request)?;
+            dc_call_pull_if_needed(cx, c)?;
         }
     }
     Ok(())
@@ -657,7 +657,7 @@ fn dc_pull_steps(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
 
 /// SetUpReadableStreamDefaultController.
 fn setup_default_controller(
-    ctx: Ctx,
+    cx: Ctx,
     s: Raw,
     start: Algo,
     pull: Algo,
@@ -666,11 +666,11 @@ fn setup_default_controller(
     size: V,
 ) -> R<V> {
     let c = instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::ReadableStreamDefaultController,
         DefaultController {
-            stream: V::dup(ctx, s),
+            stream: V::dup(cx, s),
             queue: SizedQueue::default(),
             started: false,
             close_requested: false,
@@ -682,49 +682,49 @@ fn setup_default_controller(
             cancel,
         },
     )?;
-    stream(ctx, s)?.controller = c.clone_ref();
-    let start_result = start.call(ctx, &[c.raw()])?;
-    let p = js::resolved(ctx, start_result.raw())?;
+    stream(cx, s)?.controller = c.clone_ref();
+    let start_result = start.call(cx, &[c.raw()])?;
+    let p = js::resolved(cx, start_result.raw())?;
     js::upon(
-        ctx,
+        cx,
         p.raw(),
         vec![c.clone_ref()],
-        |ctx, cap, _| {
-            dc(ctx, cap[0].raw())?.started = true;
-            dc_call_pull_if_needed(ctx, cap[0].raw())
+        |cx, cap, _| {
+            dc(cx, cap[0].raw())?.started = true;
+            dc_call_pull_if_needed(cx, cap[0].raw())
         },
-        |ctx, cap, e| dc_error(ctx, cap[0].raw(), e),
+        |cx, cap, e| dc_error(cx, cap[0].raw(), e),
     )?;
     Ok(c)
 }
 
 /// CreateReadableStream: a default stream with native algorithms.
 pub(crate) fn new_default_stream(
-    ctx: Ctx,
+    cx: Ctx,
     start: Algo,
     pull: Algo,
     cancel: Algo,
     hwm: f64,
     size: V,
 ) -> R<(V, V)> {
-    let s = new_stream(ctx, js::UNDEFINED)?;
-    let c = setup_default_controller(ctx, s.raw(), start, pull, cancel, hwm, size)?;
+    let s = new_stream(cx, js::UNDEFINED)?;
+    let c = setup_default_controller(cx, s.raw(), start, pull, cancel, hwm, size)?;
     Ok((s, c))
 }
 
 // --- Byte controller ------------------------------------------------------
 
-fn bc_stream(ctx: Ctx, c: Raw) -> R<V> {
-    Ok(bc(ctx, c)?.stream.clone_ref())
+fn bc_stream(cx: Ctx, c: Raw) -> R<V> {
+    Ok(bc(cx, c)?.stream.clone_ref())
 }
 
 /// ReadableByteStreamControllerGetDesiredSize.
-fn bc_desired_size(ctx: Ctx, c: Raw) -> R<Option<f64>> {
+fn bc_desired_size(cx: Ctx, c: Raw) -> R<Option<f64>> {
     let (hwm, total, s) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         (b.hwm, b.total, b.stream.clone_ref())
     };
-    Ok(match state(ctx, s.raw())? {
+    Ok(match state(cx, s.raw())? {
         State::Errored => None,
         State::Closed => Some(0.0),
         State::Readable => Some(hwm - total as f64),
@@ -732,36 +732,36 @@ fn bc_desired_size(ctx: Ctx, c: Raw) -> R<Option<f64>> {
 }
 
 /// The desired size of either controller (`None`: errored).
-pub(crate) fn desired_size(ctx: Ctx, c: Raw) -> R<Option<f64>> {
-    if is_byte_controller(ctx, c) {
-        bc_desired_size(ctx, c)
+pub(crate) fn desired_size(cx: Ctx, c: Raw) -> R<Option<f64>> {
+    if is_byte_controller(cx, c) {
+        bc_desired_size(cx, c)
     } else {
-        dc_desired_size(ctx, c)
+        dc_desired_size(cx, c)
     }
 }
 
-fn bc_should_call_pull(ctx: Ctx, c: Raw) -> R<bool> {
+fn bc_should_call_pull(cx: Ctx, c: Raw) -> R<bool> {
     let (s, close_requested, started) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         (b.stream.clone_ref(), b.close_requested, b.started)
     };
-    if state(ctx, s.raw())? != State::Readable || close_requested || !started {
+    if state(cx, s.raw())? != State::Readable || close_requested || !started {
         return Ok(false);
     }
-    if (has_default_reader(ctx, s.raw())? || has_byob_reader(ctx, s.raw())?)
-        && num_requests(ctx, s.raw())? > 0
+    if (has_default_reader(cx, s.raw())? || has_byob_reader(cx, s.raw())?)
+        && num_requests(cx, s.raw())? > 0
     {
         return Ok(true);
     }
-    Ok(bc_desired_size(ctx, c)?.is_some_and(|d| d > 0.0))
+    Ok(bc_desired_size(cx, c)?.is_some_and(|d| d > 0.0))
 }
 
-fn bc_call_pull_if_needed(ctx: Ctx, c: Raw) -> R<()> {
-    if !bc_should_call_pull(ctx, c)? {
+fn bc_call_pull_if_needed(cx: Ctx, c: Raw) -> R<()> {
+    if !bc_should_call_pull(cx, c)? {
         return Ok(());
     }
     let pull = {
-        let mut b = bc(ctx, c)?;
+        let mut b = bc(cx, c)?;
         if b.pulling {
             b.pull_again = true;
             return Ok(());
@@ -769,42 +769,42 @@ fn bc_call_pull_if_needed(ctx: Ctx, c: Raw) -> R<()> {
         b.pulling = true;
         b.pull.clone_ref()
     };
-    let p = pull.promise(ctx, &[c])?;
+    let p = pull.promise(cx, &[c])?;
     js::upon(
-        ctx,
+        cx,
         p.raw(),
-        vec![V::dup(ctx, c)],
-        |ctx, cap, _| {
+        vec![V::dup(cx, c)],
+        |cx, cap, _| {
             let again = {
-                let mut b = bc(ctx, cap[0].raw())?;
+                let mut b = bc(cx, cap[0].raw())?;
                 b.pulling = false;
                 std::mem::replace(&mut b.pull_again, false)
             };
             if again {
-                bc_call_pull_if_needed(ctx, cap[0].raw())?;
+                bc_call_pull_if_needed(cx, cap[0].raw())?;
             }
             Ok(())
         },
-        |ctx, cap, e| bc_error(ctx, cap[0].raw(), e),
+        |cx, cap, e| bc_error(cx, cap[0].raw(), e),
     )
 }
 
-fn bc_clear_algorithms(ctx: Ctx, c: Raw) -> R<()> {
+fn bc_clear_algorithms(cx: Ctx, c: Raw) -> R<()> {
     let old = {
-        let mut b = bc(ctx, c)?;
+        let mut b = bc(cx, c)?;
         (std::mem::take(&mut b.pull), std::mem::take(&mut b.cancel))
     };
     drop(old);
     Ok(())
 }
 
-fn bc_invalidate_byob_request(ctx: Ctx, c: Raw) -> R<()> {
-    let request = bc(ctx, c)?.byob_request.take_out();
+fn bc_invalidate_byob_request(cx: Ctx, c: Raw) -> R<()> {
+    let request = bc(cx, c)?.byob_request.take_out();
     if request.is_undefined() || request.is_nullish() {
         return Ok(());
     }
     let old = {
-        let mut r = data::<ByobRequest>(ctx, request.raw(), "ReadableStreamBYOBRequest")?;
+        let mut r = data::<ByobRequest>(cx, request.raw(), "ReadableStreamBYOBRequest")?;
         (
             r.controller.take_out(),
             std::mem::replace(&mut r.view, V::null()),
@@ -814,16 +814,16 @@ fn bc_invalidate_byob_request(ctx: Ctx, c: Raw) -> R<()> {
     Ok(())
 }
 
-fn bc_clear_pending(ctx: Ctx, c: Raw) -> R<()> {
-    bc_invalidate_byob_request(ctx, c)?;
-    let old = std::mem::take(&mut bc(ctx, c)?.pending);
+fn bc_clear_pending(cx: Ctx, c: Raw) -> R<()> {
+    bc_invalidate_byob_request(cx, c)?;
+    let old = std::mem::take(&mut bc(cx, c)?.pending);
     drop(old);
     Ok(())
 }
 
-fn bc_reset_queue(ctx: Ctx, c: Raw) -> R<()> {
+fn bc_reset_queue(cx: Ctx, c: Raw) -> R<()> {
     let old = {
-        let mut b = bc(ctx, c)?;
+        let mut b = bc(cx, c)?;
         b.total = 0;
         std::mem::take(&mut b.queue)
     };
@@ -832,43 +832,43 @@ fn bc_reset_queue(ctx: Ctx, c: Raw) -> R<()> {
 }
 
 /// ReadableByteStreamControllerError.
-pub(crate) fn bc_error(ctx: Ctx, c: Raw, e: Raw) -> R<()> {
-    let s = bc_stream(ctx, c)?;
-    if state(ctx, s.raw())? != State::Readable {
+pub(crate) fn bc_error(cx: Ctx, c: Raw, e: Raw) -> R<()> {
+    let s = bc_stream(cx, c)?;
+    if state(cx, s.raw())? != State::Readable {
         return Ok(());
     }
-    bc_clear_pending(ctx, c)?;
-    bc_reset_queue(ctx, c)?;
-    bc_clear_algorithms(ctx, c)?;
-    error_stream(ctx, s.raw(), e)
+    bc_clear_pending(cx, c)?;
+    bc_reset_queue(cx, c)?;
+    bc_clear_algorithms(cx, c)?;
+    error_stream(cx, s.raw(), e)
 }
 
 /// ReadableByteStreamControllerClose.
-pub(crate) fn bc_close(ctx: Ctx, c: Raw) -> R<()> {
-    let s = bc_stream(ctx, c)?;
+pub(crate) fn bc_close(cx: Ctx, c: Raw) -> R<()> {
+    let s = bc_stream(cx, c)?;
     let (close_requested, total, misaligned) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         let misaligned = b.pending.front().is_some_and(|p| p.filled % p.element != 0);
         (b.close_requested, b.total, misaligned)
     };
-    if close_requested || state(ctx, s.raw())? != State::Readable {
+    if close_requested || state(cx, s.raw())? != State::Readable {
         return Ok(());
     }
     if total > 0 {
-        bc(ctx, c)?.close_requested = true;
+        bc(cx, c)?.close_requested = true;
         return Ok(());
     }
     if misaligned {
-        let e = js::type_error_value(ctx, "a partial element is left in the BYOB request");
-        bc_error(ctx, c, e.raw())?;
-        return Err(js::throw(ctx, e));
+        let e = js::type_error_value(cx, "a partial element is left in the BYOB request");
+        bc_error(cx, c, e.raw())?;
+        return Err(js::throw(cx, e));
     }
-    bc_clear_algorithms(ctx, c)?;
-    close_stream(ctx, s.raw())
+    bc_clear_algorithms(cx, c)?;
+    close_stream(cx, s.raw())
 }
 
-fn bc_enqueue_chunk(ctx: Ctx, c: Raw, buffer: V, offset: usize, len: usize) -> R<()> {
-    let mut b = bc(ctx, c)?;
+fn bc_enqueue_chunk(cx: Ctx, c: Raw, buffer: V, offset: usize, len: usize) -> R<()> {
+    let mut b = bc(cx, c)?;
     b.queue.push_back(ByteChunk {
         buffer,
         offset,
@@ -878,43 +878,43 @@ fn bc_enqueue_chunk(ctx: Ctx, c: Raw, buffer: V, offset: usize, len: usize) -> R
     Ok(())
 }
 
-fn bc_enqueue_cloned_chunk(ctx: Ctx, c: Raw, buffer: Raw, offset: usize, len: usize) -> R<()> {
+fn bc_enqueue_cloned_chunk(cx: Ctx, c: Raw, buffer: Raw, offset: usize, len: usize) -> R<()> {
     // SAFETY: copied before any JS runs.
-    let bytes = unsafe { js::bytes_of(ctx, buffer) }
+    let bytes = unsafe { js::bytes_of(cx, buffer) }
         .and_then(|b| b.get(offset..offset + len))
         .map(<[u8]>::to_vec);
     let Some(bytes) = bytes else {
-        let e = js::type_error_value(ctx, "the buffer is detached");
-        bc_error(ctx, c, e.raw())?;
-        return Err(js::throw(ctx, e));
+        let e = js::type_error_value(cx, "the buffer is detached");
+        bc_error(cx, c, e.raw())?;
+        return Err(js::throw(cx, e));
     };
-    let clone = js::array_buffer(ctx, &bytes)?;
-    bc_enqueue_chunk(ctx, c, clone, 0, len)
+    let clone = js::array_buffer(cx, &bytes)?;
+    bc_enqueue_chunk(cx, c, clone, 0, len)
 }
 
-fn bc_shift_pending(ctx: Ctx, c: Raw) -> R<Option<PullInto>> {
-    Ok(bc(ctx, c)?.pending.pop_front())
+fn bc_shift_pending(cx: Ctx, c: Raw) -> R<Option<PullInto>> {
+    Ok(bc(cx, c)?.pending.pop_front())
 }
 
 /// ReadableByteStreamControllerEnqueueDetachedPullIntoToQueue.
-fn bc_enqueue_detached_pull_into(ctx: Ctx, c: Raw) -> R<()> {
-    let first = bc(ctx, c)?
+fn bc_enqueue_detached_pull_into(cx: Ctx, c: Raw) -> R<()> {
+    let first = bc(cx, c)?
         .pending
         .front()
         .map(|p| (p.buffer.clone_ref(), p.offset, p.filled));
     if let Some((buffer, offset, filled)) = first
         && filled > 0
     {
-        bc_enqueue_cloned_chunk(ctx, c, buffer.raw(), offset, filled)?;
+        bc_enqueue_cloned_chunk(cx, c, buffer.raw(), offset, filled)?;
     }
-    bc_shift_pending(ctx, c)?;
+    bc_shift_pending(cx, c)?;
     Ok(())
 }
 
 /// ReadableByteStreamControllerFillPullIntoDescriptorFromQueue (on the
 /// first pending descriptor, or `desc`).
-fn bc_fill_from_queue(ctx: Ctx, c: Raw, desc: &mut PullInto) -> R<bool> {
-    let mut b = bc(ctx, c)?;
+fn bc_fill_from_queue(cx: Ctx, c: Raw, desc: &mut PullInto) -> R<bool> {
+    let mut b = bc(cx, c)?;
     let max_copy = b.total.min(desc.len - desc.filled);
     let max_filled = desc.filled + max_copy;
     let mut remaining = max_copy;
@@ -933,8 +933,8 @@ fn bc_fill_from_queue(ctx: Ctx, c: Raw, desc: &mut PullInto) -> R<bool> {
         // SAFETY: two distinct buffers (a chunk was transferred into the
         // queue), copied before any JS runs.
         unsafe {
-            let src = js::bytes_of(ctx, head.buffer.raw()).unwrap_or_default();
-            let dst = js::bytes_mut(ctx, desc.buffer.raw()).unwrap_or_default();
+            let src = js::bytes_of(cx, head.buffer.raw()).unwrap_or_default();
+            let dst = js::bytes_mut(cx, desc.buffer.raw()).unwrap_or_default();
             if let (Some(s), Some(d)) = (
                 src.get(head.offset..head.offset + n),
                 dst.get_mut(dest..dest + n),
@@ -957,34 +957,34 @@ fn bc_fill_from_queue(ctx: Ctx, c: Raw, desc: &mut PullInto) -> R<bool> {
 }
 
 /// ReadableByteStreamControllerConvertPullIntoDescriptor.
-fn convert_pull_into(ctx: Ctx, desc: &PullInto) -> R<V> {
-    let buffer = js::transfer(ctx, desc.buffer.raw())?;
+fn convert_pull_into(cx: Ctx, desc: &PullInto) -> R<V> {
+    let buffer = js::transfer(cx, desc.buffer.raw())?;
     let length = if desc.kind.is_some() {
         desc.filled / desc.element
     } else {
         desc.filled
     };
-    js::new_view(ctx, desc.kind, buffer.raw(), desc.offset, length)
+    js::new_view(cx, desc.kind, buffer.raw(), desc.offset, length)
 }
 
 /// ReadableByteStreamControllerHandleQueueDrain.
-fn bc_handle_queue_drain(ctx: Ctx, c: Raw) -> R<()> {
+fn bc_handle_queue_drain(cx: Ctx, c: Raw) -> R<()> {
     let (total, close_requested, s) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         (b.total, b.close_requested, b.stream.clone_ref())
     };
     if total == 0 && close_requested {
-        bc_clear_algorithms(ctx, c)?;
-        close_stream(ctx, s.raw())
+        bc_clear_algorithms(cx, c)?;
+        close_stream(cx, s.raw())
     } else {
-        bc_call_pull_if_needed(ctx, c)
+        bc_call_pull_if_needed(cx, c)
     }
 }
 
 /// ReadableByteStreamControllerFillReadRequestFromQueue.
-fn bc_fill_read_request(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
+fn bc_fill_read_request(cx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
     let entry = {
-        let mut b = bc(ctx, c)?;
+        let mut b = bc(cx, c)?;
         let e = b.queue.pop_front();
         if let Some(e) = &e {
             b.total -= e.len;
@@ -992,47 +992,47 @@ fn bc_fill_read_request(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
         e
     };
     let Some(entry) = entry else { return Ok(()) };
-    bc_handle_queue_drain(ctx, c)?;
+    bc_handle_queue_drain(cx, c)?;
     let view = js::new_view(
-        ctx,
+        cx,
         Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
         entry.buffer.raw(),
         entry.offset,
         entry.len,
     )?;
-    request.chunk(ctx, view.raw());
+    request.chunk(cx, view.raw());
     Ok(())
 }
 
 /// ReadableByteStreamControllerProcessReadRequestsUsingQueue.
-fn bc_process_read_requests(ctx: Ctx, c: Raw) -> R<()> {
-    let s = bc_stream(ctx, c)?;
+fn bc_process_read_requests(cx: Ctx, c: Raw) -> R<()> {
+    let s = bc_stream(cx, c)?;
     loop {
-        let reader = reader_of(ctx, s.raw())?;
-        if reader.is_undefined() || bc(ctx, c)?.total == 0 {
+        let reader = reader_of(cx, s.raw())?;
+        if reader.is_undefined() || bc(cx, c)?.total == 0 {
             return Ok(());
         }
-        let Some(request) = common(ctx, reader.raw())?.requests.pop_front() else {
+        let Some(request) = common(cx, reader.raw())?.requests.pop_front() else {
             return Ok(());
         };
-        bc_fill_read_request(ctx, c, request)?;
+        bc_fill_read_request(cx, c, request)?;
     }
 }
 
 /// ReadableByteStreamControllerProcessPullIntoDescriptorsUsingQueue.
-fn bc_process_pull_intos(ctx: Ctx, c: Raw) -> R<Vec<PullInto>> {
+fn bc_process_pull_intos(cx: Ctx, c: Raw) -> R<Vec<PullInto>> {
     let mut filled = Vec::new();
     loop {
-        if bc(ctx, c)?.total == 0 {
+        if bc(cx, c)?.total == 0 {
             break;
         }
-        let Some(mut desc) = bc(ctx, c)?.pending.pop_front() else {
+        let Some(mut desc) = bc(cx, c)?.pending.pop_front() else {
             break;
         };
-        if bc_fill_from_queue(ctx, c, &mut desc)? {
+        if bc_fill_from_queue(cx, c, &mut desc)? {
             filled.push(desc);
         } else {
-            bc(ctx, c)?.pending.push_front(desc);
+            bc(cx, c)?.pending.push_front(desc);
             break;
         }
     }
@@ -1040,74 +1040,74 @@ fn bc_process_pull_intos(ctx: Ctx, c: Raw) -> R<Vec<PullInto>> {
 }
 
 /// ReadableByteStreamControllerCommitPullIntoDescriptor.
-fn commit_pull_into(ctx: Ctx, s: Raw, desc: PullInto) -> R<()> {
-    let done = state(ctx, s)? == State::Closed;
-    let view = convert_pull_into(ctx, &desc)?;
-    fulfill_request(ctx, s, view.raw(), done)
+fn commit_pull_into(cx: Ctx, s: Raw, desc: PullInto) -> R<()> {
+    let done = state(cx, s)? == State::Closed;
+    let view = convert_pull_into(cx, &desc)?;
+    fulfill_request(cx, s, view.raw(), done)
 }
 
 /// ReadableByteStreamControllerEnqueue.
-pub(crate) fn bc_enqueue(ctx: Ctx, c: Raw, chunk: Raw) -> R<()> {
-    let s = bc_stream(ctx, c)?;
-    if bc(ctx, c)?.close_requested || state(ctx, s.raw())? != State::Readable {
+pub(crate) fn bc_enqueue(cx: Ctx, c: Raw, chunk: Raw) -> R<()> {
+    let s = bc_stream(cx, c)?;
+    if bc(cx, c)?.close_requested || state(cx, s.raw())? != State::Readable {
         return Ok(());
     }
-    let view = js::view(ctx, chunk)
-        .ok_or_else(|| js::type_error(ctx, "chunk must be an ArrayBufferView"))?;
-    if js::is_detached(ctx, view.buffer.raw()) {
-        return Err(js::type_error(ctx, "the chunk's buffer is detached"));
+    let view = js::view(cx, chunk)
+        .ok_or_else(|| js::type_error(cx, "chunk must be an ArrayBufferView"))?;
+    if js::is_detached(cx, view.buffer.raw()) {
+        return Err(js::type_error(cx, "the chunk's buffer is detached"));
     }
     let (offset, len) = (view.offset, view.length);
-    let transferred = js::transfer(ctx, view.buffer.raw())?;
-    let first = bc(ctx, c)?
+    let transferred = js::transfer(cx, view.buffer.raw())?;
+    let first = bc(cx, c)?
         .pending
         .front()
         .map(|p| (p.buffer.clone_ref(), p.reader));
     if let Some((buffer, reader_type)) = first {
-        if js::is_detached(ctx, buffer.raw()) {
-            return Err(js::type_error(ctx, "the BYOB request's buffer is detached"));
+        if js::is_detached(cx, buffer.raw()) {
+            return Err(js::type_error(cx, "the BYOB request's buffer is detached"));
         }
-        bc_invalidate_byob_request(ctx, c)?;
-        let moved = js::transfer(ctx, buffer.raw())?;
-        if let Some(p) = bc(ctx, c)?.pending.front_mut() {
+        bc_invalidate_byob_request(cx, c)?;
+        let moved = js::transfer(cx, buffer.raw())?;
+        if let Some(p) = bc(cx, c)?.pending.front_mut() {
             p.buffer = moved;
         }
         if reader_type == ReaderType::None {
-            bc_enqueue_detached_pull_into(ctx, c)?;
+            bc_enqueue_detached_pull_into(cx, c)?;
         }
     }
-    if has_default_reader(ctx, s.raw())? {
-        bc_process_read_requests(ctx, c)?;
-        if num_requests(ctx, s.raw())? == 0 {
-            bc_enqueue_chunk(ctx, c, transferred, offset, len)?;
+    if has_default_reader(cx, s.raw())? {
+        bc_process_read_requests(cx, c)?;
+        if num_requests(cx, s.raw())? == 0 {
+            bc_enqueue_chunk(cx, c, transferred, offset, len)?;
         } else {
-            if !bc(ctx, c)?.pending.is_empty() {
-                bc_shift_pending(ctx, c)?;
+            if !bc(cx, c)?.pending.is_empty() {
+                bc_shift_pending(cx, c)?;
             }
             let view = js::new_view(
-                ctx,
+                cx,
                 Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
                 transferred.raw(),
                 offset,
                 len,
             )?;
-            fulfill_request(ctx, s.raw(), view.raw(), false)?;
+            fulfill_request(cx, s.raw(), view.raw(), false)?;
         }
-    } else if has_byob_reader(ctx, s.raw())? {
-        bc_enqueue_chunk(ctx, c, transferred, offset, len)?;
-        for desc in bc_process_pull_intos(ctx, c)? {
-            commit_pull_into(ctx, s.raw(), desc)?;
+    } else if has_byob_reader(cx, s.raw())? {
+        bc_enqueue_chunk(cx, c, transferred, offset, len)?;
+        for desc in bc_process_pull_intos(cx, c)? {
+            commit_pull_into(cx, s.raw(), desc)?;
         }
     } else {
-        bc_enqueue_chunk(ctx, c, transferred, offset, len)?;
+        bc_enqueue_chunk(cx, c, transferred, offset, len)?;
     }
-    bc_call_pull_if_needed(ctx, c)
+    bc_call_pull_if_needed(cx, c)
 }
 
 /// ReadableByteStreamControllerGetBYOBRequest.
-fn bc_byob_request(ctx: Ctx, c: Raw) -> R<V> {
+fn bc_byob_request(cx: Ctx, c: Raw) -> R<V> {
     let (existing, first) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         (
             b.byob_request.clone_ref(),
             b.pending
@@ -1122,213 +1122,213 @@ fn bc_byob_request(ctx: Ctx, c: Raw) -> R<V> {
         return Ok(V::null());
     };
     let view = js::new_view(
-        ctx,
+        cx,
         Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
         buffer.raw(),
         offset,
         len,
     )?;
     let request = instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::ReadableStreamBYOBRequest,
         ByobRequest {
-            controller: V::dup(ctx, c),
+            controller: V::dup(cx, c),
             view,
         },
     )?;
-    bc(ctx, c)?.byob_request = request.clone_ref();
+    bc(cx, c)?.byob_request = request.clone_ref();
     Ok(request)
 }
 
-fn bc_fill_head(ctx: Ctx, c: Raw, size: usize) -> R<()> {
-    if let Some(p) = bc(ctx, c)?.pending.front_mut() {
+fn bc_fill_head(cx: Ctx, c: Raw, size: usize) -> R<()> {
+    if let Some(p) = bc(cx, c)?.pending.front_mut() {
         p.filled += size;
     }
     Ok(())
 }
 
 /// ReadableByteStreamControllerRespondInClosedState.
-fn bc_respond_closed(ctx: Ctx, c: Raw) -> R<()> {
-    let reader_type = bc(ctx, c)?.pending.front().map(|p| p.reader);
+fn bc_respond_closed(cx: Ctx, c: Raw) -> R<()> {
+    let reader_type = bc(cx, c)?.pending.front().map(|p| p.reader);
     if reader_type == Some(ReaderType::None) {
-        bc_shift_pending(ctx, c)?;
+        bc_shift_pending(cx, c)?;
     }
-    let s = bc_stream(ctx, c)?;
-    if has_byob_reader(ctx, s.raw())? {
+    let s = bc_stream(cx, c)?;
+    if has_byob_reader(cx, s.raw())? {
         let mut filled = Vec::new();
-        while filled.len() < num_requests(ctx, s.raw())? {
-            match bc_shift_pending(ctx, c)? {
+        while filled.len() < num_requests(cx, s.raw())? {
+            match bc_shift_pending(cx, c)? {
                 Some(d) => filled.push(d),
                 None => break,
             }
         }
         for desc in filled {
-            commit_pull_into(ctx, s.raw(), desc)?;
+            commit_pull_into(cx, s.raw(), desc)?;
         }
     }
     Ok(())
 }
 
 /// ReadableByteStreamControllerRespondInReadableState.
-fn bc_respond_readable(ctx: Ctx, c: Raw, written: usize) -> R<()> {
-    bc_fill_head(ctx, c, written)?;
-    let s = bc_stream(ctx, c)?;
+fn bc_respond_readable(cx: Ctx, c: Raw, written: usize) -> R<()> {
+    bc_fill_head(cx, c, written)?;
+    let s = bc_stream(cx, c)?;
     let (reader_type, filled, min) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         let p = b
             .pending
             .front()
-            .ok_or_else(|| js::type_error(ctx, "no pending read"))?;
+            .ok_or_else(|| js::type_error(cx, "no pending read"))?;
         (p.reader, p.filled, p.min)
     };
     if reader_type == ReaderType::None {
-        bc_enqueue_detached_pull_into(ctx, c)?;
-        for desc in bc_process_pull_intos(ctx, c)? {
-            commit_pull_into(ctx, s.raw(), desc)?;
+        bc_enqueue_detached_pull_into(cx, c)?;
+        for desc in bc_process_pull_intos(cx, c)? {
+            commit_pull_into(cx, s.raw(), desc)?;
         }
         return Ok(());
     }
     if filled < min {
         return Ok(());
     }
-    let Some(mut desc) = bc_shift_pending(ctx, c)? else {
+    let Some(mut desc) = bc_shift_pending(cx, c)? else {
         return Ok(());
     };
     let remainder = desc.filled % desc.element;
     if remainder > 0 {
         let end = desc.offset + desc.filled;
-        bc_enqueue_cloned_chunk(ctx, c, desc.buffer.raw(), end - remainder, remainder)?;
+        bc_enqueue_cloned_chunk(cx, c, desc.buffer.raw(), end - remainder, remainder)?;
     }
     desc.filled -= remainder;
-    let filled = bc_process_pull_intos(ctx, c)?;
-    commit_pull_into(ctx, s.raw(), desc)?;
+    let filled = bc_process_pull_intos(cx, c)?;
+    commit_pull_into(cx, s.raw(), desc)?;
     for d in filled {
-        commit_pull_into(ctx, s.raw(), d)?;
+        commit_pull_into(cx, s.raw(), d)?;
     }
     Ok(())
 }
 
 /// ReadableByteStreamControllerRespondInternal.
-fn bc_respond_internal(ctx: Ctx, c: Raw, written: usize) -> R<()> {
-    bc_invalidate_byob_request(ctx, c)?;
-    let s = bc_stream(ctx, c)?;
-    if state(ctx, s.raw())? == State::Closed {
-        bc_respond_closed(ctx, c)?;
+fn bc_respond_internal(cx: Ctx, c: Raw, written: usize) -> R<()> {
+    bc_invalidate_byob_request(cx, c)?;
+    let s = bc_stream(cx, c)?;
+    if state(cx, s.raw())? == State::Closed {
+        bc_respond_closed(cx, c)?;
     } else {
-        bc_respond_readable(ctx, c, written)?;
+        bc_respond_readable(cx, c, written)?;
     }
-    bc_call_pull_if_needed(ctx, c)
+    bc_call_pull_if_needed(cx, c)
 }
 
 /// ReadableByteStreamControllerRespond.
-fn bc_respond(ctx: Ctx, c: Raw, written: usize) -> R<()> {
-    let s = bc_stream(ctx, c)?;
+fn bc_respond(cx: Ctx, c: Raw, written: usize) -> R<()> {
+    let s = bc_stream(cx, c)?;
     let (buffer, filled, len) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         let p = b
             .pending
             .front()
-            .ok_or_else(|| js::type_error(ctx, "no pending read"))?;
+            .ok_or_else(|| js::type_error(cx, "no pending read"))?;
         (p.buffer.clone_ref(), p.filled, p.len)
     };
-    if state(ctx, s.raw())? == State::Closed {
+    if state(cx, s.raw())? == State::Closed {
         if written != 0 {
             return Err(js::type_error(
-                ctx,
+                cx,
                 "bytesWritten must be 0 for a closed stream",
             ));
         }
     } else {
         if written == 0 {
-            return Err(js::type_error(ctx, "bytesWritten must be greater than 0"));
+            return Err(js::type_error(cx, "bytesWritten must be greater than 0"));
         }
         if filled + written > len {
-            return Err(js::range_error(ctx, "bytesWritten is out of range"));
+            return Err(js::range_error(cx, "bytesWritten is out of range"));
         }
     }
-    let moved = js::transfer(ctx, buffer.raw())?;
-    if let Some(p) = bc(ctx, c)?.pending.front_mut() {
+    let moved = js::transfer(cx, buffer.raw())?;
+    if let Some(p) = bc(cx, c)?.pending.front_mut() {
         p.buffer = moved;
     }
-    bc_respond_internal(ctx, c, written)
+    bc_respond_internal(cx, c, written)
 }
 
 /// ReadableByteStreamControllerRespondWithNewView.
-fn bc_respond_with_new_view(ctx: Ctx, c: Raw, view: Raw) -> R<()> {
-    let v = js::view(ctx, view)
-        .ok_or_else(|| js::type_error(ctx, "view must be an ArrayBufferView"))?;
-    if js::is_detached(ctx, v.buffer.raw()) {
-        return Err(js::type_error(ctx, "the view's buffer is detached"));
+fn bc_respond_with_new_view(cx: Ctx, c: Raw, view: Raw) -> R<()> {
+    let v =
+        js::view(cx, view).ok_or_else(|| js::type_error(cx, "view must be an ArrayBufferView"))?;
+    if js::is_detached(cx, v.buffer.raw()) {
+        return Err(js::type_error(cx, "the view's buffer is detached"));
     }
-    let s = bc_stream(ctx, c)?;
+    let s = bc_stream(cx, c)?;
     let (offset, filled, buffer_len, len) = {
-        let b = bc(ctx, c)?;
+        let b = bc(cx, c)?;
         let p = b
             .pending
             .front()
-            .ok_or_else(|| js::type_error(ctx, "no pending read"))?;
+            .ok_or_else(|| js::type_error(cx, "no pending read"))?;
         (p.offset, p.filled, p.buffer_len, p.len)
     };
-    let closed = state(ctx, s.raw())? == State::Closed;
+    let closed = state(cx, s.raw())? == State::Closed;
     if closed && v.length != 0 {
         return Err(js::type_error(
-            ctx,
+            cx,
             "the view must be empty for a closed stream",
         ));
     }
     if !closed && v.length == 0 {
-        return Err(js::type_error(ctx, "the view must not be empty"));
+        return Err(js::type_error(cx, "the view must not be empty"));
     }
     // SAFETY: reading a live ArrayBuffer's length.
-    let view_buffer_len = unsafe { js::bytes_of(ctx, v.buffer.raw()) }.map_or(0, <[u8]>::len);
+    let view_buffer_len = unsafe { js::bytes_of(cx, v.buffer.raw()) }.map_or(0, <[u8]>::len);
     if offset + filled != v.offset {
         return Err(js::range_error(
-            ctx,
+            cx,
             "the view's offset does not match the request",
         ));
     }
     if buffer_len != view_buffer_len {
         return Err(js::range_error(
-            ctx,
+            cx,
             "the view's buffer length does not match the request",
         ));
     }
     if filled + v.length > len {
-        return Err(js::range_error(ctx, "the view is too long"));
+        return Err(js::range_error(cx, "the view is too long"));
     }
-    let moved = js::transfer(ctx, v.buffer.raw())?;
-    if let Some(p) = bc(ctx, c)?.pending.front_mut() {
+    let moved = js::transfer(cx, v.buffer.raw())?;
+    if let Some(p) = bc(cx, c)?.pending.front_mut() {
         p.buffer = moved;
     }
-    bc_respond_internal(ctx, c, v.length)
+    bc_respond_internal(cx, c, v.length)
 }
 
-fn bc_cancel_steps(ctx: Ctx, c: Raw, reason: Raw) -> R<V> {
-    bc_clear_pending(ctx, c)?;
-    bc_reset_queue(ctx, c)?;
-    let cancel = bc(ctx, c)?.cancel.clone_ref();
-    let result = cancel.promise(ctx, &[reason])?;
-    bc_clear_algorithms(ctx, c)?;
+fn bc_cancel_steps(cx: Ctx, c: Raw, reason: Raw) -> R<V> {
+    bc_clear_pending(cx, c)?;
+    bc_reset_queue(cx, c)?;
+    let cancel = bc(cx, c)?.cancel.clone_ref();
+    let result = cancel.promise(cx, &[reason])?;
+    bc_clear_algorithms(cx, c)?;
     Ok(result)
 }
 
-fn bc_pull_steps(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
-    let s = bc_stream(ctx, c)?;
-    if bc(ctx, c)?.total > 0 {
-        return bc_fill_read_request(ctx, c, request);
+fn bc_pull_steps(cx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
+    let s = bc_stream(cx, c)?;
+    if bc(cx, c)?.total > 0 {
+        return bc_fill_read_request(cx, c, request);
     }
-    let auto_allocate = bc(ctx, c)?.auto_allocate;
+    let auto_allocate = bc(cx, c)?.auto_allocate;
     if let Some(size) = auto_allocate {
-        let buffer = match js::array_buffer(ctx, &vec![0; size]) {
+        let buffer = match js::array_buffer(cx, &vec![0; size]) {
             Ok(b) => b,
             Err(_) => {
-                let e = js::take_exception(ctx);
-                request.error(ctx, e.raw());
+                let e = js::take_exception(cx);
+                request.error(cx, e.raw());
                 return Ok(());
             }
         };
-        bc(ctx, c)?.pending.push_back(PullInto {
+        bc(cx, c)?.pending.push_back(PullInto {
             buffer,
             buffer_len: size,
             offset: 0,
@@ -1340,12 +1340,12 @@ fn bc_pull_steps(ctx: Ctx, c: Raw, request: ReadRequest) -> R<()> {
             reader: ReaderType::Default,
         });
     }
-    add_request(ctx, s.raw(), request)?;
-    bc_call_pull_if_needed(ctx, c)
+    add_request(cx, s.raw(), request)?;
+    bc_call_pull_if_needed(cx, c)
 }
 
-fn bc_release_steps(ctx: Ctx, c: Raw) -> R<()> {
-    let mut b = bc(ctx, c)?;
+fn bc_release_steps(cx: Ctx, c: Raw) -> R<()> {
+    let mut b = bc(cx, c)?;
     if let Some(mut first) = b.pending.pop_front() {
         first.reader = ReaderType::None;
         let rest = std::mem::take(&mut b.pending);
@@ -1357,24 +1357,24 @@ fn bc_release_steps(ctx: Ctx, c: Raw) -> R<()> {
 }
 
 /// ReadableByteStreamControllerPullInto.
-fn bc_pull_into(ctx: Ctx, c: Raw, view: Raw, min: usize, request: ReadRequest) -> R<()> {
-    let s = bc_stream(ctx, c)?;
-    let v = js::view(ctx, view)
-        .ok_or_else(|| js::type_error(ctx, "view must be an ArrayBufferView"))?;
+fn bc_pull_into(cx: Ctx, c: Raw, view: Raw, min: usize, request: ReadRequest) -> R<()> {
+    let s = bc_stream(cx, c)?;
+    let v =
+        js::view(cx, view).ok_or_else(|| js::type_error(cx, "view must be an ArrayBufferView"))?;
     let (element, kind) = match v.kind {
         Some(k) => (v.element.max(1), Some(k)),
         None => (1, None),
     };
-    let buffer = match js::transfer(ctx, v.buffer.raw()) {
+    let buffer = match js::transfer(cx, v.buffer.raw()) {
         Ok(b) => b,
         Err(_) => {
-            let e = js::take_exception(ctx);
-            request.error(ctx, e.raw());
+            let e = js::take_exception(cx);
+            request.error(cx, e.raw());
             return Ok(());
         }
     };
     // SAFETY: reading the new buffer's length.
-    let buffer_len = unsafe { js::bytes_of(ctx, buffer.raw()) }.map_or(0, <[u8]>::len);
+    let buffer_len = unsafe { js::bytes_of(cx, buffer.raw()) }.map_or(0, <[u8]>::len);
     let mut desc = PullInto {
         buffer,
         buffer_len,
@@ -1386,37 +1386,37 @@ fn bc_pull_into(ctx: Ctx, c: Raw, view: Raw, min: usize, request: ReadRequest) -
         kind,
         reader: ReaderType::Byob,
     };
-    if !bc(ctx, c)?.pending.is_empty() {
-        bc(ctx, c)?.pending.push_back(desc);
-        return add_request(ctx, s.raw(), request);
+    if !bc(cx, c)?.pending.is_empty() {
+        bc(cx, c)?.pending.push_back(desc);
+        return add_request(cx, s.raw(), request);
     }
-    if state(ctx, s.raw())? == State::Closed {
-        let empty = js::new_view(ctx, kind, desc.buffer.raw(), desc.offset, 0)?;
-        request.close(ctx, empty.raw());
+    if state(cx, s.raw())? == State::Closed {
+        let empty = js::new_view(cx, kind, desc.buffer.raw(), desc.offset, 0)?;
+        request.close(cx, empty.raw());
         return Ok(());
     }
-    if bc(ctx, c)?.total > 0 {
-        if bc_fill_from_queue(ctx, c, &mut desc)? {
-            let filled = convert_pull_into(ctx, &desc)?;
-            bc_handle_queue_drain(ctx, c)?;
-            request.chunk(ctx, filled.raw());
+    if bc(cx, c)?.total > 0 {
+        if bc_fill_from_queue(cx, c, &mut desc)? {
+            let filled = convert_pull_into(cx, &desc)?;
+            bc_handle_queue_drain(cx, c)?;
+            request.chunk(cx, filled.raw());
             return Ok(());
         }
-        if bc(ctx, c)?.close_requested {
-            let e = js::type_error_value(ctx, "the stream is closing");
-            bc_error(ctx, c, e.raw())?;
-            request.error(ctx, e.raw());
+        if bc(cx, c)?.close_requested {
+            let e = js::type_error_value(cx, "the stream is closing");
+            bc_error(cx, c, e.raw())?;
+            request.error(cx, e.raw());
             return Ok(());
         }
     }
-    bc(ctx, c)?.pending.push_back(desc);
-    add_request(ctx, s.raw(), request)?;
-    bc_call_pull_if_needed(ctx, c)
+    bc(cx, c)?.pending.push_back(desc);
+    add_request(cx, s.raw(), request)?;
+    bc_call_pull_if_needed(cx, c)
 }
 
 /// SetUpReadableByteStreamController.
 fn setup_byte_controller(
-    ctx: Ctx,
+    cx: Ctx,
     s: Raw,
     start: Algo,
     pull: Algo,
@@ -1425,11 +1425,11 @@ fn setup_byte_controller(
     auto_allocate: Option<usize>,
 ) -> R<V> {
     let c = instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::ReadableByteStreamController,
         ByteController {
-            stream: V::dup(ctx, s),
+            stream: V::dup(cx, s),
             queue: VecDeque::new(),
             total: 0,
             started: false,
@@ -1444,191 +1444,191 @@ fn setup_byte_controller(
             cancel,
         },
     )?;
-    stream(ctx, s)?.controller = c.clone_ref();
-    let start_result = start.call(ctx, &[c.raw()])?;
-    let p = js::resolved(ctx, start_result.raw())?;
+    stream(cx, s)?.controller = c.clone_ref();
+    let start_result = start.call(cx, &[c.raw()])?;
+    let p = js::resolved(cx, start_result.raw())?;
     js::upon(
-        ctx,
+        cx,
         p.raw(),
         vec![c.clone_ref()],
-        |ctx, cap, _| {
-            bc(ctx, cap[0].raw())?.started = true;
-            bc_call_pull_if_needed(ctx, cap[0].raw())
+        |cx, cap, _| {
+            bc(cx, cap[0].raw())?.started = true;
+            bc_call_pull_if_needed(cx, cap[0].raw())
         },
-        |ctx, cap, e| bc_error(ctx, cap[0].raw(), e),
+        |cx, cap, e| bc_error(cx, cap[0].raw(), e),
     )?;
     Ok(c)
 }
 
 /// CreateReadableByteStream with native algorithms: the stream and its
 /// controller.
-pub(crate) fn new_byte_stream(ctx: Ctx, pull: Algo, cancel: Algo, hwm: f64) -> R<(V, V)> {
-    let s = new_stream(ctx, js::UNDEFINED)?;
-    let c = setup_byte_controller(ctx, s.raw(), Algo::default(), pull, cancel, hwm, None)?;
+pub(crate) fn new_byte_stream(cx: Ctx, pull: Algo, cancel: Algo, hwm: f64) -> R<(V, V)> {
+    let s = new_stream(cx, js::UNDEFINED)?;
+    let c = setup_byte_controller(cx, s.raw(), Algo::default(), pull, cancel, hwm, None)?;
     Ok((s, c))
 }
 
 /// Enqueues `bytes` on byte stream controller `c` (native sources).
-pub(crate) fn enqueue_bytes(ctx: Ctx, c: Raw, bytes: &[u8]) -> R<()> {
-    let view = js::uint8_array(ctx, bytes)?;
-    bc_enqueue(ctx, c, view.raw())
+pub(crate) fn enqueue_bytes(cx: Ctx, c: Raw, bytes: &[u8]) -> R<()> {
+    let view = js::uint8_array(cx, bytes)?;
+    bc_enqueue(cx, c, view.raw())
 }
 
 /// Closes either controller (native sources), and responds to a pending
 /// BYOB read with the end.
-pub(crate) fn close_controller(ctx: Ctx, c: Raw) -> R<()> {
-    if is_byte_controller(ctx, c) {
-        bc_close(ctx, c)?;
-        if !bc(ctx, c)?.pending.is_empty() {
-            bc_respond(ctx, c, 0)?;
+pub(crate) fn close_controller(cx: Ctx, c: Raw) -> R<()> {
+    if is_byte_controller(cx, c) {
+        bc_close(cx, c)?;
+        if !bc(cx, c)?.pending.is_empty() {
+            bc_respond(cx, c, 0)?;
         }
         Ok(())
     } else {
-        dc_close(ctx, c)
+        dc_close(cx, c)
     }
 }
 
 /// Errors either controller.
-pub(crate) fn error_controller(ctx: Ctx, c: Raw, e: Raw) -> R<()> {
-    if is_byte_controller(ctx, c) {
-        bc_error(ctx, c, e)
+pub(crate) fn error_controller(cx: Ctx, c: Raw, e: Raw) -> R<()> {
+    if is_byte_controller(cx, c) {
+        bc_error(cx, c, e)
     } else {
-        dc_error(ctx, c, e)
+        dc_error(cx, c, e)
     }
 }
 
 // --- Readers --------------------------------------------------------------
 
-fn pending_closed(ctx: Ctx) -> R<Deferred> {
-    Deferred::new(ctx)
+fn pending_closed(cx: Ctx) -> R<Deferred> {
+    Deferred::new(cx)
 }
 
-fn rejected_closed(ctx: Ctx, e: Raw) -> R<Deferred> {
-    let d = Deferred::new(ctx)?;
-    d.reject(ctx, e);
-    js::mark_handled(ctx, d.promise.raw());
+fn rejected_closed(cx: Ctx, e: Raw) -> R<Deferred> {
+    let d = Deferred::new(cx)?;
+    d.reject(cx, e);
+    js::mark_handled(cx, d.promise.raw());
     Ok(d)
 }
 
 /// ReadableStreamReaderGenericInitialize's closed promise for `s`.
-fn initial_closed(ctx: Ctx, s: Raw) -> R<Deferred> {
+fn initial_closed(cx: Ctx, s: Raw) -> R<Deferred> {
     let (st, err) = {
-        let st = stream(ctx, s)?;
+        let st = stream(cx, s)?;
         (st.state, st.stored_error.clone_ref())
     };
     match st {
-        State::Readable => pending_closed(ctx),
+        State::Readable => pending_closed(cx),
         State::Closed => {
-            let d = Deferred::new(ctx)?;
-            d.resolve(ctx, js::UNDEFINED);
+            let d = Deferred::new(cx)?;
+            d.resolve(cx, js::UNDEFINED);
             Ok(d)
         }
-        State::Errored => rejected_closed(ctx, err.raw()),
+        State::Errored => rejected_closed(cx, err.raw()),
     }
 }
 
 /// AcquireReadableStreamDefaultReader (with `new_target` for the
 /// constructor).
-fn new_default_reader(ctx: Ctx, new_target: Raw, s: Raw) -> R<V> {
-    if !is_stream(ctx, s) {
-        return Err(js::type_error(ctx, "not a ReadableStream"));
+fn new_default_reader(cx: Ctx, new_target: Raw, s: Raw) -> R<V> {
+    if !is_stream(cx, s) {
+        return Err(js::type_error(cx, "not a ReadableStream"));
     }
-    if is_locked(ctx, s)? {
-        return Err(js::type_error(ctx, "the ReadableStream is locked"));
+    if is_locked(cx, s)? {
+        return Err(js::type_error(cx, "the ReadableStream is locked"));
     }
-    let closed = initial_closed(ctx, s)?;
+    let closed = initial_closed(cx, s)?;
     let r = instance(
-        ctx,
+        cx,
         new_target,
         Class::ReadableStreamDefaultReader,
         DefaultReader {
             common: ReaderCommon {
-                stream: V::dup(ctx, s),
+                stream: V::dup(cx, s),
                 closed,
                 requests: VecDeque::new(),
             },
         },
     )?;
-    stream(ctx, s)?.reader = r.clone_ref();
+    stream(cx, s)?.reader = r.clone_ref();
     Ok(r)
 }
 
-pub(crate) fn acquire_default_reader(ctx: Ctx, s: Raw) -> R<V> {
-    new_default_reader(ctx, js::UNDEFINED, s)
+pub(crate) fn acquire_default_reader(cx: Ctx, s: Raw) -> R<V> {
+    new_default_reader(cx, js::UNDEFINED, s)
 }
 
 /// AcquireReadableStreamBYOBReader.
-fn new_byob_reader(ctx: Ctx, new_target: Raw, s: Raw) -> R<V> {
-    if !is_stream(ctx, s) {
-        return Err(js::type_error(ctx, "not a ReadableStream"));
+fn new_byob_reader(cx: Ctx, new_target: Raw, s: Raw) -> R<V> {
+    if !is_stream(cx, s) {
+        return Err(js::type_error(cx, "not a ReadableStream"));
     }
-    if is_locked(ctx, s)? {
-        return Err(js::type_error(ctx, "the ReadableStream is locked"));
+    if is_locked(cx, s)? {
+        return Err(js::type_error(cx, "the ReadableStream is locked"));
     }
-    let controller = controller_of(ctx, s)?;
-    if !is_byte_controller(ctx, controller.raw()) {
-        return Err(js::type_error(ctx, "a BYOB reader needs a byte stream"));
+    let controller = controller_of(cx, s)?;
+    if !is_byte_controller(cx, controller.raw()) {
+        return Err(js::type_error(cx, "a BYOB reader needs a byte stream"));
     }
-    let closed = initial_closed(ctx, s)?;
+    let closed = initial_closed(cx, s)?;
     let r = instance(
-        ctx,
+        cx,
         new_target,
         Class::ReadableStreamBYOBReader,
         ByobReader {
             common: ReaderCommon {
-                stream: V::dup(ctx, s),
+                stream: V::dup(cx, s),
                 closed,
                 requests: VecDeque::new(),
             },
         },
     )?;
-    stream(ctx, s)?.reader = r.clone_ref();
+    stream(cx, s)?.reader = r.clone_ref();
     Ok(r)
 }
 
 /// ReadableStreamReaderGenericRelease.
-fn generic_release(ctx: Ctx, reader: Raw) -> R<()> {
-    let s = common(ctx, reader)?.stream.clone_ref();
-    let e = js::type_error_value(ctx, "the reader was released");
-    let readable = state(ctx, s.raw())? == State::Readable;
+fn generic_release(cx: Ctx, reader: Raw) -> R<()> {
+    let s = common(cx, reader)?.stream.clone_ref();
+    let e = js::type_error_value(cx, "the reader was released");
+    let readable = state(cx, s.raw())? == State::Readable;
     if readable {
         let (reject, promise) = {
-            let c = common(ctx, reader)?;
+            let c = common(cx, reader)?;
             (c.closed.reject.clone_ref(), c.closed.promise.clone_ref())
         };
-        let _ = js::call(ctx, reject.raw(), js::UNDEFINED, &[e.raw()]);
-        js::mark_handled(ctx, promise.raw());
+        let _ = js::call(cx, reject.raw(), js::UNDEFINED, &[e.raw()]);
+        js::mark_handled(cx, promise.raw());
     } else {
-        let d = rejected_closed(ctx, e.raw())?;
-        let old = std::mem::replace(&mut common(ctx, reader)?.closed, d);
+        let d = rejected_closed(cx, e.raw())?;
+        let old = std::mem::replace(&mut common(cx, reader)?.closed, d);
         drop(old);
     }
-    let controller = controller_of(ctx, s.raw())?;
-    if is_byte_controller(ctx, controller.raw()) {
-        bc_release_steps(ctx, controller.raw())?;
+    let controller = controller_of(cx, s.raw())?;
+    if is_byte_controller(cx, controller.raw()) {
+        bc_release_steps(cx, controller.raw())?;
     }
-    let old_reader = stream(ctx, s.raw())?.reader.take_out();
-    let old_stream = common(ctx, reader)?.stream.take_out();
+    let old_reader = stream(cx, s.raw())?.reader.take_out();
+    let old_stream = common(cx, reader)?.stream.take_out();
     drop((old_reader, old_stream));
     Ok(())
 }
 
 /// ReadableStreamDefaultReaderRelease / BYOBReaderRelease.
-pub(crate) fn release_reader(ctx: Ctx, reader: Raw) -> R<()> {
-    generic_release(ctx, reader)?;
-    let e = js::type_error_value(ctx, "the reader was released");
-    let requests = std::mem::take(&mut common(ctx, reader)?.requests);
+pub(crate) fn release_reader(cx: Ctx, reader: Raw) -> R<()> {
+    generic_release(cx, reader)?;
+    let e = js::type_error_value(cx, "the reader was released");
+    let requests = std::mem::take(&mut common(cx, reader)?.requests);
     for r in requests {
-        r.error(ctx, e.raw());
+        r.error(cx, e.raw());
     }
     Ok(())
 }
 
 /// ReadableStreamDefaultReaderRead.
-pub(crate) fn default_reader_read(ctx: Ctx, reader: Raw, request: ReadRequest) -> R<()> {
-    let s = common(ctx, reader)?.stream.clone_ref();
+pub(crate) fn default_reader_read(cx: Ctx, reader: Raw, request: ReadRequest) -> R<()> {
+    let s = common(cx, reader)?.stream.clone_ref();
     let (st, err, controller) = {
-        let mut st = stream(ctx, s.raw())?;
+        let mut st = stream(cx, s.raw())?;
         st.disturbed = true;
         (
             st.state,
@@ -1637,13 +1637,13 @@ pub(crate) fn default_reader_read(ctx: Ctx, reader: Raw, request: ReadRequest) -
         )
     };
     match st {
-        State::Closed => request.close(ctx, js::UNDEFINED),
-        State::Errored => request.error(ctx, err.raw()),
+        State::Closed => request.close(cx, js::UNDEFINED),
+        State::Errored => request.error(cx, err.raw()),
         State::Readable => {
-            if is_byte_controller(ctx, controller.raw()) {
-                bc_pull_steps(ctx, controller.raw(), request)?;
+            if is_byte_controller(cx, controller.raw()) {
+                bc_pull_steps(cx, controller.raw(), request)?;
             } else {
-                dc_pull_steps(ctx, controller.raw(), request)?;
+                dc_pull_steps(cx, controller.raw(), request)?;
             }
         }
     }
@@ -1651,10 +1651,10 @@ pub(crate) fn default_reader_read(ctx: Ctx, reader: Raw, request: ReadRequest) -
 }
 
 /// ReadableStreamBYOBReaderRead.
-fn byob_reader_read(ctx: Ctx, reader: Raw, view: Raw, min: usize, request: ReadRequest) -> R<()> {
-    let s = common(ctx, reader)?.stream.clone_ref();
+fn byob_reader_read(cx: Ctx, reader: Raw, view: Raw, min: usize, request: ReadRequest) -> R<()> {
+    let s = common(cx, reader)?.stream.clone_ref();
     let (st, err, controller) = {
-        let mut st = stream(ctx, s.raw())?;
+        let mut st = stream(cx, s.raw())?;
         st.disturbed = true;
         (
             st.state,
@@ -1663,109 +1663,109 @@ fn byob_reader_read(ctx: Ctx, reader: Raw, view: Raw, min: usize, request: ReadR
         )
     };
     if st == State::Errored {
-        request.error(ctx, err.raw());
+        request.error(cx, err.raw());
         return Ok(());
     }
-    bc_pull_into(ctx, controller.raw(), view, min, request)
+    bc_pull_into(cx, controller.raw(), view, min, request)
 }
 
 /// A reader's stream (`None` when released).
-pub(crate) fn reader_stream_of(ctx: Ctx, reader: Raw) -> R<Option<V>> {
-    let s = common(ctx, reader)?.stream.clone_ref();
+pub(crate) fn reader_stream_of(cx: Ctx, reader: Raw) -> R<Option<V>> {
+    let s = common(cx, reader)?.stream.clone_ref();
     Ok((!s.is_undefined()).then_some(s))
 }
 
 /// The reader's stream (`TypeError` when released).
-fn reader_stream(ctx: Ctx, reader: Raw) -> R<V> {
-    let s = common(ctx, reader)?.stream.clone_ref();
+fn reader_stream(cx: Ctx, reader: Raw) -> R<V> {
+    let s = common(cx, reader)?.stream.clone_ref();
     if s.is_undefined() {
-        return Err(js::type_error(ctx, "the reader was released"));
+        return Err(js::type_error(cx, "the reader was released"));
     }
     Ok(s)
 }
 
 native!(
-    fn default_reader_constructor(ctx, this, args) {
-        new_default_reader(ctx, this, args.get(0))
+    fn default_reader_constructor(cx, this, args) {
+        new_default_reader(cx, this, args.get(0))
     }
 );
 
 native!(
-    fn byob_reader_constructor(ctx, this, args) {
-        new_byob_reader(ctx, this, args.get(0))
+    fn byob_reader_constructor(cx, this, args) {
+        new_byob_reader(cx, this, args.get(0))
     }
 );
 
 native!(
-    fn reader_closed(ctx, this, args) {
-        Ok(common(ctx, this)?.closed.promise.clone_ref())
+    fn reader_closed(cx, this, args) {
+        Ok(common(cx, this)?.closed.promise.clone_ref())
     }
 );
 
 native!(
-    fn reader_cancel(ctx, this, args) {
-        js::promise_of(ctx, || {
-            let s = reader_stream(ctx, this)?;
-            cancel_stream(ctx, s.raw(), args.get(0))
+    fn reader_cancel(cx, this, args) {
+        js::promise_of(cx, || {
+            let s = reader_stream(cx, this)?;
+            cancel_stream(cx, s.raw(), args.get(0))
         })
     }
 );
 
 native!(
-    fn default_reader_read_method(ctx, this, args) {
-        data::<DefaultReader>(ctx, this, "ReadableStreamDefaultReader")?;
-        js::promise_of(ctx, || {
-            reader_stream(ctx, this)?;
-            let d = Deferred::new(ctx)?;
+    fn default_reader_read_method(cx, this, args) {
+        data::<DefaultReader>(cx, this, "ReadableStreamDefaultReader")?;
+        js::promise_of(cx, || {
+            reader_stream(cx, this)?;
+            let d = Deferred::new(cx)?;
             let promise = d.promise.clone_ref();
-            default_reader_read(ctx, this, ReadRequest::Promise(d))?;
+            default_reader_read(cx, this, ReadRequest::Promise(d))?;
             Ok(promise)
         })
     }
 );
 
 native!(
-    fn reader_release_lock(ctx, this, args) {
-        if common(ctx, this)?.stream.is_undefined() {
+    fn reader_release_lock(cx, this, args) {
+        if common(cx, this)?.stream.is_undefined() {
             return Ok(V::undefined());
         }
-        release_reader(ctx, this)?;
+        release_reader(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn byob_reader_read_method(ctx, this, args) {
-        data::<ByobReader>(ctx, this, "ReadableStreamBYOBReader")?;
-        js::promise_of(ctx, || {
+    fn byob_reader_read_method(cx, this, args) {
+        data::<ByobReader>(cx, this, "ReadableStreamBYOBReader")?;
+        js::promise_of(cx, || {
             let view = args.get(0);
-            let v = js::view(ctx, view).ok_or_else(|| js::type_error(ctx, "read needs an ArrayBufferView"))?;
+            let v = js::view(cx, view).ok_or_else(|| js::type_error(cx, "read needs an ArrayBufferView"))?;
             if v.length == 0 {
-                return Err(js::type_error(ctx, "the view is empty"));
+                return Err(js::type_error(cx, "the view is empty"));
             }
             // SAFETY: reading the buffer's length.
-            let buffer_len = unsafe { js::bytes_of(ctx, v.buffer.raw()) }.map_or(0, <[u8]>::len);
-            if buffer_len == 0 || js::is_detached(ctx, v.buffer.raw()) {
-                return Err(js::type_error(ctx, "the view's buffer is empty or detached"));
+            let buffer_len = unsafe { js::bytes_of(cx, v.buffer.raw()) }.map_or(0, <[u8]>::len);
+            if buffer_len == 0 || js::is_detached(cx, v.buffer.raw()) {
+                return Err(js::type_error(cx, "the view's buffer is empty or detached"));
             }
             let options = args.get(1);
             let min = if js::is_object(options) {
-                let m = js::get(ctx, options, "min")?;
-                if m.is_undefined() { 1 } else { js::to_index(ctx, m.raw())? as usize }
+                let m = js::get(cx, options, "min")?;
+                if m.is_undefined() { 1 } else { js::to_index(cx, m.raw())? as usize }
             } else {
                 1
             };
             if min == 0 {
-                return Err(js::type_error(ctx, "min must be greater than 0"));
+                return Err(js::type_error(cx, "min must be greater than 0"));
             }
             let limit = if v.kind.is_some() { v.length / v.element.max(1) } else { v.length };
             if min > limit {
-                return Err(js::range_error(ctx, "min is larger than the view"));
+                return Err(js::range_error(cx, "min is larger than the view"));
             }
-            reader_stream(ctx, this)?;
-            let d = Deferred::new(ctx)?;
+            reader_stream(cx, this)?;
+            let d = Deferred::new(cx)?;
             let promise = d.promise.clone_ref();
-            byob_reader_read(ctx, this, view, min, ReadRequest::Promise(d))?;
+            byob_reader_read(cx, this, view, min, ReadRequest::Promise(d))?;
             Ok(promise)
         })
     }
@@ -1774,8 +1774,8 @@ native!(
 // --- Controllers' methods -------------------------------------------------
 
 native!(
-    fn dc_desired_size_get(ctx, this, args) {
-        Ok(match dc_desired_size(ctx, this)? {
+    fn dc_desired_size_get(cx, this, args) {
+        Ok(match dc_desired_size(cx, this)? {
             Some(n) => V::num(n),
             None => V::null(),
         })
@@ -1783,42 +1783,42 @@ native!(
 );
 
 native!(
-    fn dc_close_method(ctx, this, args) {
-        if !dc_can_close_or_enqueue(ctx, this)? {
-            return Err(js::type_error(ctx, "the stream cannot be closed"));
+    fn dc_close_method(cx, this, args) {
+        if !dc_can_close_or_enqueue(cx, this)? {
+            return Err(js::type_error(cx, "the stream cannot be closed"));
         }
-        dc_close(ctx, this)?;
+        dc_close(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn dc_enqueue_method(ctx, this, args) {
-        if !dc_can_close_or_enqueue(ctx, this)? {
-            return Err(js::type_error(ctx, "the stream cannot be enqueued to"));
+    fn dc_enqueue_method(cx, this, args) {
+        if !dc_can_close_or_enqueue(cx, this)? {
+            return Err(js::type_error(cx, "the stream cannot be enqueued to"));
         }
-        dc_enqueue(ctx, this, args.get(0))?;
+        dc_enqueue(cx, this, args.get(0))?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn dc_error_method(ctx, this, args) {
-        dc(ctx, this)?;
-        dc_error(ctx, this, args.get(0))?;
+    fn dc_error_method(cx, this, args) {
+        dc(cx, this)?;
+        dc_error(cx, this, args.get(0))?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn bc_byob_request_get(ctx, this, args) {
-        bc_byob_request(ctx, this)
+    fn bc_byob_request_get(cx, this, args) {
+        bc_byob_request(cx, this)
     }
 );
 
 native!(
-    fn bc_desired_size_get(ctx, this, args) {
-        Ok(match bc_desired_size(ctx, this)? {
+    fn bc_desired_size_get(cx, this, args) {
+        Ok(match bc_desired_size(cx, this)? {
             Some(n) => V::num(n),
             None => V::null(),
         })
@@ -1826,87 +1826,87 @@ native!(
 );
 
 native!(
-    fn bc_close_method(ctx, this, args) {
-        let s = bc_stream(ctx, this)?;
-        if bc(ctx, this)?.close_requested {
-            return Err(js::type_error(ctx, "the stream is already closing"));
+    fn bc_close_method(cx, this, args) {
+        let s = bc_stream(cx, this)?;
+        if bc(cx, this)?.close_requested {
+            return Err(js::type_error(cx, "the stream is already closing"));
         }
-        if state(ctx, s.raw())? != State::Readable {
-            return Err(js::type_error(ctx, "the stream is not readable"));
+        if state(cx, s.raw())? != State::Readable {
+            return Err(js::type_error(cx, "the stream is not readable"));
         }
-        bc_close(ctx, this)?;
+        bc_close(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn bc_enqueue_method(ctx, this, args) {
+    fn bc_enqueue_method(cx, this, args) {
         let chunk = args.get(0);
-        let v = js::view(ctx, chunk).ok_or_else(|| js::type_error(ctx, "chunk must be an ArrayBufferView"))?;
+        let v = js::view(cx, chunk).ok_or_else(|| js::type_error(cx, "chunk must be an ArrayBufferView"))?;
         if v.length == 0 {
-            return Err(js::type_error(ctx, "the chunk is empty"));
+            return Err(js::type_error(cx, "the chunk is empty"));
         }
         // SAFETY: reading the buffer's length.
-        if unsafe { js::bytes_of(ctx, v.buffer.raw()) }.map_or(0, <[u8]>::len) == 0 {
-            return Err(js::type_error(ctx, "the chunk's buffer is empty"));
+        if unsafe { js::bytes_of(cx, v.buffer.raw()) }.map_or(0, <[u8]>::len) == 0 {
+            return Err(js::type_error(cx, "the chunk's buffer is empty"));
         }
-        let s = bc_stream(ctx, this)?;
-        if bc(ctx, this)?.close_requested {
-            return Err(js::type_error(ctx, "the stream is closing"));
+        let s = bc_stream(cx, this)?;
+        if bc(cx, this)?.close_requested {
+            return Err(js::type_error(cx, "the stream is closing"));
         }
-        if state(ctx, s.raw())? != State::Readable {
-            return Err(js::type_error(ctx, "the stream is not readable"));
+        if state(cx, s.raw())? != State::Readable {
+            return Err(js::type_error(cx, "the stream is not readable"));
         }
-        bc_enqueue(ctx, this, chunk)?;
+        bc_enqueue(cx, this, chunk)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn bc_error_method(ctx, this, args) {
-        bc(ctx, this)?;
-        bc_error(ctx, this, args.get(0))?;
+    fn bc_error_method(cx, this, args) {
+        bc(cx, this)?;
+        bc_error(cx, this, args.get(0))?;
         Ok(V::undefined())
     }
 );
 
-fn byob_request<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, ByobRequest>> {
-    data::<ByobRequest>(ctx, v, "ReadableStreamBYOBRequest")
+fn byob_request<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, ByobRequest>> {
+    data::<ByobRequest>(cx, v, "ReadableStreamBYOBRequest")
 }
 
 native!(
-    fn byob_request_view(ctx, this, args) {
-        Ok(byob_request(ctx, this)?.view.clone_ref())
+    fn byob_request_view(cx, this, args) {
+        Ok(byob_request(cx, this)?.view.clone_ref())
     }
 );
 
 native!(
-    fn byob_request_respond(ctx, this, args) {
-        let written = js::to_index(ctx, args.get(0))? as usize;
+    fn byob_request_respond(cx, this, args) {
+        let written = js::to_index(cx, args.get(0))? as usize;
         let (controller, view) = {
-            let r = byob_request(ctx, this)?;
+            let r = byob_request(cx, this)?;
             (r.controller.clone_ref(), r.view.clone_ref())
         };
         if controller.is_undefined() {
-            return Err(js::type_error(ctx, "the request was already answered"));
+            return Err(js::type_error(cx, "the request was already answered"));
         }
-        if let Some(v) = js::view(ctx, view.raw())
-            && js::is_detached(ctx, v.buffer.raw())
+        if let Some(v) = js::view(cx, view.raw())
+            && js::is_detached(cx, v.buffer.raw())
         {
-            return Err(js::type_error(ctx, "the view's buffer is detached"));
+            return Err(js::type_error(cx, "the view's buffer is detached"));
         }
-        bc_respond(ctx, controller.raw(), written)?;
+        bc_respond(cx, controller.raw(), written)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn byob_request_respond_with_new_view(ctx, this, args) {
-        let controller = byob_request(ctx, this)?.controller.clone_ref();
+    fn byob_request_respond_with_new_view(cx, this, args) {
+        let controller = byob_request(cx, this)?.controller.clone_ref();
         if controller.is_undefined() {
-            return Err(js::type_error(ctx, "the request was already answered"));
+            return Err(js::type_error(cx, "the request was already answered"));
         }
-        bc_respond_with_new_view(ctx, controller.raw(), args.get(0))?;
+        bc_respond_with_new_view(cx, controller.raw(), args.get(0))?;
         Ok(V::undefined())
     }
 );
@@ -1914,40 +1914,40 @@ native!(
 // --- ReadableStream -------------------------------------------------------
 
 native!(
-    fn stream_constructor(ctx, this, args) {
+    fn stream_constructor(cx, this, args) {
         let source = args.get(0);
         if !js::is_nullish(source) && !js::is_object(source) {
-            return Err(js::type_error(ctx, "the underlying source must be an object"));
+            return Err(js::type_error(cx, "the underlying source must be an object"));
         }
-        let strategy = QueuingStrategy::read(ctx, args.get(1))?;
-        let source_v = V::dup(ctx, source);
+        let strategy = QueuingStrategy::read(cx, args.get(1))?;
+        let source_v = V::dup(cx, source);
         let auto = if js::is_object(source) {
-            let a = js::get(ctx, source, "autoAllocateChunkSize")?;
-            if a.is_undefined() { None } else { Some(js::to_index(ctx, a.raw())? as usize) }
+            let a = js::get(cx, source, "autoAllocateChunkSize")?;
+            if a.is_undefined() { None } else { Some(js::to_index(cx, a.raw())? as usize) }
         } else {
             None
         };
-        let cancel = method(ctx, source, "cancel")?;
-        let pull = method(ctx, source, "pull")?;
-        let start = method(ctx, source, "start")?;
+        let cancel = method(cx, source, "cancel")?;
+        let pull = method(cx, source, "pull")?;
+        let start = method(cx, source, "start")?;
         let kind = if js::is_object(source) {
-            let t = js::get(ctx, source, "type")?;
-            js::opt_string(ctx, t.raw())?
+            let t = js::get(cx, source, "type")?;
+            js::opt_string(cx, t.raw())?
         } else {
             None
         };
-        let s = new_stream(ctx, this)?;
+        let s = new_stream(cx, this)?;
         match kind.as_deref() {
             Some("bytes") => {
                 if !strategy.size.is_undefined() {
-                    return Err(js::range_error(ctx, "a byte stream has no size algorithm"));
+                    return Err(js::range_error(cx, "a byte stream has no size algorithm"));
                 }
-                let hwm = strategy.high_water_mark(ctx, 0.0)?;
+                let hwm = strategy.high_water_mark(cx, 0.0)?;
                 if auto == Some(0) {
-                    return Err(js::type_error(ctx, "autoAllocateChunkSize must be greater than 0"));
+                    return Err(js::type_error(cx, "autoAllocateChunkSize must be greater than 0"));
                 }
                 setup_byte_controller(
-                    ctx,
+                    cx,
                     s.raw(),
                     Algo::method(start, &source_v),
                     Algo::method(pull, &source_v),
@@ -1957,9 +1957,9 @@ native!(
                 )?;
             }
             None => {
-                let hwm = strategy.high_water_mark(ctx, 1.0)?;
+                let hwm = strategy.high_water_mark(cx, 1.0)?;
                 setup_default_controller(
-                    ctx,
+                    cx,
                     s.raw(),
                     Algo::method(start, &source_v),
                     Algo::method(pull, &source_v),
@@ -1969,7 +1969,7 @@ native!(
                 )?;
             }
             Some(other) => {
-                return Err(js::type_error(ctx, &format!("invalid stream type `{other}`")));
+                return Err(js::type_error(cx, &format!("invalid stream type `{other}`")));
             }
         }
         Ok(s)
@@ -1977,135 +1977,135 @@ native!(
 );
 
 native!(
-    fn stream_locked(ctx, this, args) {
-        Ok(V::bool(is_locked(ctx, this)?))
+    fn stream_locked(cx, this, args) {
+        Ok(V::bool(is_locked(cx, this)?))
     }
 );
 
 native!(
-    fn stream_cancel(ctx, this, args) {
-        js::promise_of(ctx, || {
-            if is_locked(ctx, this)? {
-                return Err(js::type_error(ctx, "the ReadableStream is locked"));
+    fn stream_cancel(cx, this, args) {
+        js::promise_of(cx, || {
+            if is_locked(cx, this)? {
+                return Err(js::type_error(cx, "the ReadableStream is locked"));
             }
-            cancel_stream(ctx, this, args.get(0))
+            cancel_stream(cx, this, args.get(0))
         })
     }
 );
 
 native!(
-    fn stream_get_reader(ctx, this, args) {
-        stream(ctx, this)?;
+    fn stream_get_reader(cx, this, args) {
+        stream(cx, this)?;
         let options = args.get(0);
         let mode = if js::is_object(options) {
-            let m = js::get(ctx, options, "mode")?;
-            js::opt_string(ctx, m.raw())?
+            let m = js::get(cx, options, "mode")?;
+            js::opt_string(cx, m.raw())?
         } else if js::is_nullish(options) {
             None
         } else {
-            return Err(js::type_error(ctx, "getReader options must be an object"));
+            return Err(js::type_error(cx, "getReader options must be an object"));
         };
         match mode.as_deref() {
-            None => acquire_default_reader(ctx, this),
-            Some("byob") => new_byob_reader(ctx, js::UNDEFINED, this),
-            Some(other) => Err(js::type_error(ctx, &format!("invalid reader mode `{other}`"))),
+            None => acquire_default_reader(cx, this),
+            Some("byob") => new_byob_reader(cx, js::UNDEFINED, this),
+            Some(other) => Err(js::type_error(cx, &format!("invalid reader mode `{other}`"))),
         }
     }
 );
 
 /// The options of `pipeTo` / `pipeThrough`.
-fn pipe_options(ctx: Ctx, options: Raw) -> R<(bool, bool, bool, Option<V>)> {
+fn pipe_options(cx: Ctx, options: Raw) -> R<(bool, bool, bool, Option<V>)> {
     if js::is_nullish(options) {
         return Ok((false, false, false, None));
     }
     if !js::is_object(options) {
-        return Err(js::type_error(ctx, "pipe options must be an object"));
+        return Err(js::type_error(cx, "pipe options must be an object"));
     }
-    let flag = |name| js::get(ctx, options, name).map(|v| js::to_bool(ctx, v.raw()));
+    let flag = |name| js::get(cx, options, name).map(|v| js::to_bool(cx, v.raw()));
     let (prevent_abort, prevent_cancel, prevent_close) = (
         flag("preventAbort")?,
         flag("preventCancel")?,
         flag("preventClose")?,
     );
-    let signal = js::get(ctx, options, "signal")?;
+    let signal = js::get(cx, options, "signal")?;
     let signal = if signal.is_undefined() {
         None
-    } else if crate::web::event::is_signal(ctx, signal.raw()) {
+    } else if crate::web::event::is_signal(cx, signal.raw()) {
         Some(signal)
     } else {
-        return Err(js::type_error(ctx, "signal is not an AbortSignal"));
+        return Err(js::type_error(cx, "signal is not an AbortSignal"));
     };
     Ok((prevent_close, prevent_abort, prevent_cancel, signal))
 }
 
 native!(
-    fn stream_pipe_through(ctx, this, args) {
-        stream(ctx, this)?;
+    fn stream_pipe_through(cx, this, args) {
+        stream(cx, this)?;
         let transform = args.get(0);
         if !js::is_object(transform) {
-            return Err(js::type_error(ctx, "pipeThrough needs { writable, readable }"));
+            return Err(js::type_error(cx, "pipeThrough needs { writable, readable }"));
         }
-        let readable = js::get(ctx, transform, "readable")?;
-        if !is_stream(ctx, readable.raw()) {
-            return Err(js::type_error(ctx, "readable is not a ReadableStream"));
+        let readable = js::get(cx, transform, "readable")?;
+        if !is_stream(cx, readable.raw()) {
+            return Err(js::type_error(cx, "readable is not a ReadableStream"));
         }
-        let writable = js::get(ctx, transform, "writable")?;
-        if !writable::is_stream(ctx, writable.raw()) {
-            return Err(js::type_error(ctx, "writable is not a WritableStream"));
+        let writable = js::get(cx, transform, "writable")?;
+        if !writable::is_stream(cx, writable.raw()) {
+            return Err(js::type_error(cx, "writable is not a WritableStream"));
         }
-        let (prevent_close, prevent_abort, prevent_cancel, signal) = pipe_options(ctx, args.get(1))?;
-        if is_locked(ctx, this)? {
-            return Err(js::type_error(ctx, "the ReadableStream is locked"));
+        let (prevent_close, prevent_abort, prevent_cancel, signal) = pipe_options(cx, args.get(1))?;
+        if is_locked(cx, this)? {
+            return Err(js::type_error(cx, "the ReadableStream is locked"));
         }
-        if writable::is_locked(ctx, writable.raw())? {
-            return Err(js::type_error(ctx, "the WritableStream is locked"));
+        if writable::is_locked(cx, writable.raw())? {
+            return Err(js::type_error(cx, "the WritableStream is locked"));
         }
-        let p = pipe_to(ctx, this, writable.raw(), prevent_close, prevent_abort, prevent_cancel, signal)?;
-        js::mark_handled(ctx, p.raw());
+        let p = pipe_to(cx, this, writable.raw(), prevent_close, prevent_abort, prevent_cancel, signal)?;
+        js::mark_handled(cx, p.raw());
         Ok(readable)
     }
 );
 
 native!(
-    fn stream_pipe_to(ctx, this, args) {
-        js::promise_of(ctx, || {
-            stream(ctx, this)?;
+    fn stream_pipe_to(cx, this, args) {
+        js::promise_of(cx, || {
+            stream(cx, this)?;
             let dest = args.get(0);
-            if !writable::is_stream(ctx, dest) {
-                return Err(js::type_error(ctx, "pipeTo needs a WritableStream"));
+            if !writable::is_stream(cx, dest) {
+                return Err(js::type_error(cx, "pipeTo needs a WritableStream"));
             }
-            let (prevent_close, prevent_abort, prevent_cancel, signal) = pipe_options(ctx, args.get(1))?;
-            if is_locked(ctx, this)? {
-                return Err(js::type_error(ctx, "the ReadableStream is locked"));
+            let (prevent_close, prevent_abort, prevent_cancel, signal) = pipe_options(cx, args.get(1))?;
+            if is_locked(cx, this)? {
+                return Err(js::type_error(cx, "the ReadableStream is locked"));
             }
-            if writable::is_locked(ctx, dest)? {
-                return Err(js::type_error(ctx, "the WritableStream is locked"));
+            if writable::is_locked(cx, dest)? {
+                return Err(js::type_error(cx, "the WritableStream is locked"));
             }
-            pipe_to(ctx, this, dest, prevent_close, prevent_abort, prevent_cancel, signal)
+            pipe_to(cx, this, dest, prevent_close, prevent_abort, prevent_cancel, signal)
         })
     }
 );
 
 native!(
-    fn stream_tee(ctx, this, args) {
-        stream(ctx, this)?;
-        let controller = controller_of(ctx, this)?;
-        let (a, b) = if is_byte_controller(ctx, controller.raw()) {
-            byte_tee(ctx, this)?
+    fn stream_tee(cx, this, args) {
+        stream(cx, this)?;
+        let controller = controller_of(cx, this)?;
+        let (a, b) = if is_byte_controller(cx, controller.raw()) {
+            byte_tee(cx, this)?
         } else {
-            default_tee(ctx, this)?
+            default_tee(cx, this)?
         };
-        js::new_array(ctx, vec![a, b])
+        js::new_array(cx, vec![a, b])
     }
 );
 
 /// ReadableStreamTee for callers (`Response.clone()`, ...).
-pub(crate) fn tee(ctx: Ctx, s: Raw) -> R<(V, V)> {
-    let controller = controller_of(ctx, s)?;
-    if is_byte_controller(ctx, controller.raw()) {
-        byte_tee(ctx, s)
+pub(crate) fn tee(cx: Ctx, s: Raw) -> R<(V, V)> {
+    let controller = controller_of(cx, s)?;
+    if is_byte_controller(cx, controller.raw()) {
+        byte_tee(cx, s)
     } else {
-        default_tee(ctx, s)
+        default_tee(cx, s)
     }
 }
 
@@ -2122,22 +2122,22 @@ impl<T: js::Trace + 'static> js::Trace for Internal<T> {
 
 impl<T: js::Trace + 'static> Object for Internal<T> {}
 
-pub(crate) fn new_internal<T: js::Trace + 'static>(ctx: Ctx, state: T) -> R<V> {
-    instance(ctx, js::UNDEFINED, Class::Internal, Internal(state))
+pub(crate) fn new_internal<T: js::Trace + 'static>(cx: Ctx, state: T) -> R<V> {
+    instance(cx, js::UNDEFINED, Class::Internal, Internal(state))
 }
 
-pub(crate) fn internal<'a, T: js::Trace + 'static>(ctx: Ctx, v: Raw) -> R<RefMut<'a, T>> {
+pub(crate) fn internal<'a, T: js::Trace + 'static>(cx: Ctx, v: Raw) -> R<RefMut<'a, T>> {
     Ok(RefMut::map(
-        data::<Internal<T>>(ctx, v, "internal state")?,
+        data::<Internal<T>>(cx, v, "internal state")?,
         |i| &mut i.0,
     ))
 }
 
 /// `queueMicrotask(f)`.
-fn microtask(ctx: Ctx, f: V) -> R<()> {
-    let g = js::global(ctx);
-    let q = js::get(ctx, g.raw(), "queueMicrotask")?;
-    js::call(ctx, q.raw(), js::UNDEFINED, &[f.raw()])?;
+fn microtask(cx: Ctx, f: V) -> R<()> {
+    let g = js::global(cx);
+    let q = js::get(cx, g.raw(), "queueMicrotask")?;
+    js::call(cx, q.raw(), js::UNDEFINED, &[f.raw()])?;
     Ok(())
 }
 
@@ -2169,16 +2169,16 @@ trace!(Tee {
     cancel
 });
 
-fn tee_state<'a>(ctx: Ctx, t: Raw) -> R<RefMut<'a, Tee>> {
-    internal::<Tee>(ctx, t)
+fn tee_state<'a>(cx: Ctx, t: Raw) -> R<RefMut<'a, Tee>> {
+    internal::<Tee>(cx, t)
 }
 
-fn new_tee(ctx: Ctx, s: Raw, reader: V) -> R<V> {
-    let cancel = Deferred::new(ctx)?;
+fn new_tee(cx: Ctx, s: Raw, reader: V) -> R<V> {
+    let cancel = Deferred::new(cx)?;
     new_internal(
-        ctx,
+        cx,
         Tee {
-            stream: V::dup(ctx, s),
+            stream: V::dup(cx, s),
             reader,
             reading: false,
             read_again: false,
@@ -2196,17 +2196,17 @@ fn new_tee(ctx: Ctx, s: Raw, reader: V) -> R<V> {
 }
 
 /// A branch's cancel algorithm (`second`: of branch 2).
-fn tee_cancel(ctx: Ctx, t: &V, second: bool) -> R<V> {
-    js::closure(ctx, vec![t.clone_ref()], move |ctx, c, args| {
+fn tee_cancel(cx: Ctx, t: &V, second: bool) -> R<V> {
+    js::closure(cx, vec![t.clone_ref()], move |cx, c, args| {
         let t = c[0].raw();
         let (both, s, promise) = {
-            let mut st = tee_state(ctx, t)?;
+            let mut st = tee_state(cx, t)?;
             if second {
                 st.canceled_2 = true;
-                st.reason_2 = V::dup(ctx, args.get(0));
+                st.reason_2 = V::dup(cx, args.get(0));
             } else {
                 st.canceled_1 = true;
-                st.reason_1 = V::dup(ctx, args.get(0));
+                st.reason_1 = V::dup(cx, args.get(0));
             }
             let both = st.canceled_1 && st.canceled_2;
             let reasons = both.then(|| (st.reason_1.clone_ref(), st.reason_2.clone_ref()));
@@ -2217,81 +2217,81 @@ fn tee_cancel(ctx: Ctx, t: &V, second: bool) -> R<V> {
             )
         };
         if let Some((r1, r2)) = both {
-            let composite = js::new_array(ctx, vec![r1, r2])?;
-            let result = cancel_stream(ctx, s.raw(), composite.raw())?;
-            let resolve = tee_state(ctx, t)?.cancel.resolve.clone_ref();
-            js::call(ctx, resolve.raw(), js::UNDEFINED, &[result.raw()])?;
+            let composite = js::new_array(cx, vec![r1, r2])?;
+            let result = cancel_stream(cx, s.raw(), composite.raw())?;
+            let resolve = tee_state(cx, t)?.cancel.resolve.clone_ref();
+            js::call(cx, resolve.raw(), js::UNDEFINED, &[result.raw()])?;
         }
         Ok(promise)
     })
 }
 
-fn tee_resolve_cancel_if_needed(ctx: Ctx, t: Raw) -> R<()> {
+fn tee_resolve_cancel_if_needed(cx: Ctx, t: Raw) -> R<()> {
     let (needed, resolve) = {
-        let st = tee_state(ctx, t)?;
+        let st = tee_state(cx, t)?;
         (
             !st.canceled_1 || !st.canceled_2,
             st.cancel.resolve.clone_ref(),
         )
     };
     if needed {
-        js::call(ctx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
+        js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
     }
     Ok(())
 }
 
 /// ReadableStreamDefaultTee (without cloning).
-fn default_tee(ctx: Ctx, s: Raw) -> R<(V, V)> {
-    let reader = acquire_default_reader(ctx, s)?;
-    let t = new_tee(ctx, s, reader.clone_ref())?;
-    let pull = js::closure(ctx, vec![t.clone_ref()], |ctx, c, _| {
-        default_tee_pull(ctx, c[0].raw())?;
-        js::resolved(ctx, js::UNDEFINED)
+fn default_tee(cx: Ctx, s: Raw) -> R<(V, V)> {
+    let reader = acquire_default_reader(cx, s)?;
+    let t = new_tee(cx, s, reader.clone_ref())?;
+    let pull = js::closure(cx, vec![t.clone_ref()], |cx, c, _| {
+        default_tee_pull(cx, c[0].raw())?;
+        js::resolved(cx, js::UNDEFINED)
     })?;
     let pull = Algo::native(pull);
     let (b1, _) = new_default_stream(
-        ctx,
+        cx,
         Algo::default(),
         pull.clone_ref(),
-        Algo::native(tee_cancel(ctx, &t, false)?),
+        Algo::native(tee_cancel(cx, &t, false)?),
         1.0,
         V::undefined(),
     )?;
     let (b2, _) = new_default_stream(
-        ctx,
+        cx,
         Algo::default(),
         pull,
-        Algo::native(tee_cancel(ctx, &t, true)?),
+        Algo::native(tee_cancel(cx, &t, true)?),
         1.0,
         V::undefined(),
     )?;
     {
-        let mut st = tee_state(ctx, t.raw())?;
+        let mut st = tee_state(cx, t.raw())?;
         st.branch_1 = b1.clone_ref();
         st.branch_2 = b2.clone_ref();
     }
-    let closed = common(ctx, reader.raw())?.closed.promise.clone_ref();
+    let closed = common(cx, reader.raw())?.closed.promise.clone_ref();
     js::upon(
-        ctx,
+        cx,
         closed.raw(),
         vec![t.clone_ref()],
         |_, _, _| Ok(()),
-        |ctx, c, e| {
+        |cx, c, e| {
             let (b1, b2) = {
-                let st = tee_state(ctx, c[0].raw())?;
+                let st = tee_state(cx, c[0].raw())?;
                 (st.branch_1.clone_ref(), st.branch_2.clone_ref())
             };
-            dc_error(ctx, controller_of(ctx, b1.raw())?.raw(), e)?;
-            dc_error(ctx, controller_of(ctx, b2.raw())?.raw(), e)?;
-            tee_resolve_cancel_if_needed(ctx, c[0].raw())
+            dc_error(cx, controller_of(cx, b1.raw())?.raw(), e)?;
+            dc_error(cx, controller_of(cx, b2.raw())?.raw(), e)?;
+            tee_resolve_cancel_if_needed(cx, c[0].raw())
         },
     )?;
     Ok((b1, b2))
 }
 
-fn default_tee_pull(ctx: Ctx, t: Raw) -> R<()> {
+fn default_tee_pull(cx: Ctx, t: Raw) -> R<()> {
     let reader = {
-        let mut st = tee_state(ctx, t)?;
+        let mut st = tee_state(cx, t)?;
         if st.reading {
             st.read_again = true;
             return Ok(());
@@ -2300,47 +2300,43 @@ fn default_tee_pull(ctx: Ctx, t: Raw) -> R<()> {
         st.reader.clone_ref()
     };
     let request = ReadRequest::steps(
-        ctx,
-        vec![V::dup(ctx, t)],
-        |ctx, c, chunk| {
-            let task = js::closure(
-                ctx,
-                vec![c[0].clone_ref(), V::dup(ctx, chunk)],
-                |ctx, c, _| {
-                    let t = c[0].raw();
-                    let (b1, b2, canceled_1, canceled_2) = {
-                        let mut st = tee_state(ctx, t)?;
-                        st.read_again = false;
-                        (
-                            st.branch_1.clone_ref(),
-                            st.branch_2.clone_ref(),
-                            st.canceled_1,
-                            st.canceled_2,
-                        )
-                    };
-                    if !canceled_1 {
-                        dc_enqueue(ctx, controller_of(ctx, b1.raw())?.raw(), c[1].raw())?;
-                    }
-                    if !canceled_2 {
-                        dc_enqueue(ctx, controller_of(ctx, b2.raw())?.raw(), c[1].raw())?;
-                    }
-                    let again = {
-                        let mut st = tee_state(ctx, t)?;
-                        st.reading = false;
-                        st.read_again
-                    };
-                    if again {
-                        default_tee_pull(ctx, t)?;
-                    }
-                    Ok(V::undefined())
-                },
-            )?;
-            microtask(ctx, task)
+        cx,
+        vec![V::dup(cx, t)],
+        |cx, c, chunk| {
+            let task = js::closure(cx, vec![c[0].clone_ref(), V::dup(cx, chunk)], |cx, c, _| {
+                let t = c[0].raw();
+                let (b1, b2, canceled_1, canceled_2) = {
+                    let mut st = tee_state(cx, t)?;
+                    st.read_again = false;
+                    (
+                        st.branch_1.clone_ref(),
+                        st.branch_2.clone_ref(),
+                        st.canceled_1,
+                        st.canceled_2,
+                    )
+                };
+                if !canceled_1 {
+                    dc_enqueue(cx, controller_of(cx, b1.raw())?.raw(), c[1].raw())?;
+                }
+                if !canceled_2 {
+                    dc_enqueue(cx, controller_of(cx, b2.raw())?.raw(), c[1].raw())?;
+                }
+                let again = {
+                    let mut st = tee_state(cx, t)?;
+                    st.reading = false;
+                    st.read_again
+                };
+                if again {
+                    default_tee_pull(cx, t)?;
+                }
+                Ok(V::undefined())
+            })?;
+            microtask(cx, task)
         },
-        |ctx, c, _| {
+        |cx, c, _| {
             let t = c[0].raw();
             let (b1, b2, canceled_1, canceled_2) = {
-                let mut st = tee_state(ctx, t)?;
+                let mut st = tee_state(cx, t)?;
                 st.reading = false;
                 (
                     st.branch_1.clone_ref(),
@@ -2350,62 +2346,62 @@ fn default_tee_pull(ctx: Ctx, t: Raw) -> R<()> {
                 )
             };
             if !canceled_1 {
-                dc_close(ctx, controller_of(ctx, b1.raw())?.raw())?;
+                dc_close(cx, controller_of(cx, b1.raw())?.raw())?;
             }
             if !canceled_2 {
-                dc_close(ctx, controller_of(ctx, b2.raw())?.raw())?;
+                dc_close(cx, controller_of(cx, b2.raw())?.raw())?;
             }
-            tee_resolve_cancel_if_needed(ctx, t)
+            tee_resolve_cancel_if_needed(cx, t)
         },
-        |ctx, c, _| {
-            tee_state(ctx, c[0].raw())?.reading = false;
+        |cx, c, _| {
+            tee_state(cx, c[0].raw())?.reading = false;
             Ok(())
         },
     )?;
-    default_reader_read(ctx, reader.raw(), request)
+    default_reader_read(cx, reader.raw(), request)
 }
 
 /// ReadableByteStreamTee.
-fn byte_tee(ctx: Ctx, s: Raw) -> R<(V, V)> {
-    let reader = acquire_default_reader(ctx, s)?;
-    let t = new_tee(ctx, s, reader.clone_ref())?;
+fn byte_tee(cx: Ctx, s: Raw) -> R<(V, V)> {
+    let reader = acquire_default_reader(cx, s)?;
+    let t = new_tee(cx, s, reader.clone_ref())?;
     let pull = |second: bool| {
-        js::closure(ctx, vec![t.clone_ref()], move |ctx, c, _| {
-            byte_tee_pull(ctx, c[0].raw(), second)?;
-            js::resolved(ctx, js::UNDEFINED)
+        js::closure(cx, vec![t.clone_ref()], move |cx, c, _| {
+            byte_tee_pull(cx, c[0].raw(), second)?;
+            js::resolved(cx, js::UNDEFINED)
         })
     };
     let (b1, _) = new_byte_stream(
-        ctx,
+        cx,
         Algo::native(pull(false)?),
-        Algo::native(tee_cancel(ctx, &t, false)?),
+        Algo::native(tee_cancel(cx, &t, false)?),
         0.0,
     )?;
     let (b2, _) = new_byte_stream(
-        ctx,
+        cx,
         Algo::native(pull(true)?),
-        Algo::native(tee_cancel(ctx, &t, true)?),
+        Algo::native(tee_cancel(cx, &t, true)?),
         0.0,
     )?;
     {
-        let mut st = tee_state(ctx, t.raw())?;
+        let mut st = tee_state(cx, t.raw())?;
         st.branch_1 = b1.clone_ref();
         st.branch_2 = b2.clone_ref();
     }
-    forward_reader_error(ctx, t.raw(), reader.raw())?;
+    forward_reader_error(cx, t.raw(), reader.raw())?;
     Ok((b1, b2))
 }
 
-fn forward_reader_error(ctx: Ctx, t: Raw, reader: Raw) -> R<()> {
-    let closed = common(ctx, reader)?.closed.promise.clone_ref();
+fn forward_reader_error(cx: Ctx, t: Raw, reader: Raw) -> R<()> {
+    let closed = common(cx, reader)?.closed.promise.clone_ref();
     js::upon(
-        ctx,
+        cx,
         closed.raw(),
-        vec![V::dup(ctx, t), V::dup(ctx, reader)],
+        vec![V::dup(cx, t), V::dup(cx, reader)],
         |_, _, _| Ok(()),
-        |ctx, c, e| {
+        |cx, c, e| {
             let (current, b1, b2) = {
-                let st = tee_state(ctx, c[0].raw())?;
+                let st = tee_state(cx, c[0].raw())?;
                 (
                     st.reader.clone_ref(),
                     st.branch_1.clone_ref(),
@@ -2415,16 +2411,16 @@ fn forward_reader_error(ctx: Ctx, t: Raw, reader: Raw) -> R<()> {
             if !js::same(current.raw(), c[1].raw()) {
                 return Ok(());
             }
-            bc_error(ctx, controller_of(ctx, b1.raw())?.raw(), e)?;
-            bc_error(ctx, controller_of(ctx, b2.raw())?.raw(), e)?;
-            tee_resolve_cancel_if_needed(ctx, c[0].raw())
+            bc_error(cx, controller_of(cx, b1.raw())?.raw(), e)?;
+            bc_error(cx, controller_of(cx, b2.raw())?.raw(), e)?;
+            tee_resolve_cancel_if_needed(cx, c[0].raw())
         },
     )
 }
 
-fn byte_tee_pull(ctx: Ctx, t: Raw, second: bool) -> R<()> {
+fn byte_tee_pull(cx: Ctx, t: Raw, second: bool) -> R<()> {
     let branch = {
-        let mut st = tee_state(ctx, t)?;
+        let mut st = tee_state(cx, t)?;
         if st.reading {
             if second {
                 st.read_again_2 = true;
@@ -2440,35 +2436,35 @@ fn byte_tee_pull(ctx: Ctx, t: Raw, second: bool) -> R<()> {
             st.branch_1.clone_ref()
         }
     };
-    let controller = controller_of(ctx, branch.raw())?;
-    let request = bc_byob_request(ctx, controller.raw())?;
+    let controller = controller_of(cx, branch.raw())?;
+    let request = bc_byob_request(cx, controller.raw())?;
     if request.is_nullish() {
-        byte_tee_pull_default(ctx, t)
+        byte_tee_pull_default(cx, t)
     } else {
-        let view = byob_request(ctx, request.raw())?.view.clone_ref();
-        byte_tee_pull_byob(ctx, t, view.raw(), second)
+        let view = byob_request(cx, request.raw())?.view.clone_ref();
+        byte_tee_pull_byob(cx, t, view.raw(), second)
     }
 }
 
 /// After a chunk: the pulls asked for meanwhile.
-fn byte_tee_again(ctx: Ctx, t: Raw) -> R<()> {
+fn byte_tee_again(cx: Ctx, t: Raw) -> R<()> {
     let (a1, a2) = {
-        let mut st = tee_state(ctx, t)?;
+        let mut st = tee_state(cx, t)?;
         st.reading = false;
         (st.read_again_1, st.read_again_2)
     };
     if a1 {
-        byte_tee_pull(ctx, t, false)
+        byte_tee_pull(cx, t, false)
     } else if a2 {
-        byte_tee_pull(ctx, t, true)
+        byte_tee_pull(cx, t, true)
     } else {
         Ok(())
     }
 }
 
-fn byte_tee_error_both(ctx: Ctx, t: Raw, e: Raw) -> R<()> {
+fn byte_tee_error_both(cx: Ctx, t: Raw, e: Raw) -> R<()> {
     let (b1, b2, s, resolve) = {
-        let st = tee_state(ctx, t)?;
+        let st = tee_state(cx, t)?;
         (
             st.branch_1.clone_ref(),
             st.branch_2.clone_ref(),
@@ -2476,82 +2472,78 @@ fn byte_tee_error_both(ctx: Ctx, t: Raw, e: Raw) -> R<()> {
             st.cancel.resolve.clone_ref(),
         )
     };
-    bc_error(ctx, controller_of(ctx, b1.raw())?.raw(), e)?;
-    bc_error(ctx, controller_of(ctx, b2.raw())?.raw(), e)?;
-    let result = cancel_stream(ctx, s.raw(), e)?;
-    js::call(ctx, resolve.raw(), js::UNDEFINED, &[result.raw()])?;
+    bc_error(cx, controller_of(cx, b1.raw())?.raw(), e)?;
+    bc_error(cx, controller_of(cx, b2.raw())?.raw(), e)?;
+    let result = cancel_stream(cx, s.raw(), e)?;
+    js::call(cx, resolve.raw(), js::UNDEFINED, &[result.raw()])?;
     Ok(())
 }
 
 /// A copy of `chunk` (an ArrayBufferView) as a Uint8Array.
-fn clone_as_uint8(ctx: Ctx, chunk: Raw) -> R<V> {
-    let bytes = js::buffer_source(ctx, chunk)
-        .ok_or_else(|| js::type_error(ctx, "not an ArrayBufferView"))?;
-    js::uint8_array(ctx, &bytes)
+fn clone_as_uint8(cx: Ctx, chunk: Raw) -> R<V> {
+    let bytes =
+        js::buffer_source(cx, chunk).ok_or_else(|| js::type_error(cx, "not an ArrayBufferView"))?;
+    js::uint8_array(cx, &bytes)
 }
 
-fn byte_tee_pull_default(ctx: Ctx, t: Raw) -> R<()> {
+fn byte_tee_pull_default(cx: Ctx, t: Raw) -> R<()> {
     let (reader, s) = {
-        let st = tee_state(ctx, t)?;
+        let st = tee_state(cx, t)?;
         (st.reader.clone_ref(), st.stream.clone_ref())
     };
-    let reader = if is::<ByobReader>(ctx, reader.raw()) {
-        release_reader(ctx, reader.raw())?;
-        let r = acquire_default_reader(ctx, s.raw())?;
-        tee_state(ctx, t)?.reader = r.clone_ref();
-        forward_reader_error(ctx, t, r.raw())?;
+    let reader = if is::<ByobReader>(cx, reader.raw()) {
+        release_reader(cx, reader.raw())?;
+        let r = acquire_default_reader(cx, s.raw())?;
+        tee_state(cx, t)?.reader = r.clone_ref();
+        forward_reader_error(cx, t, r.raw())?;
         r
     } else {
         reader
     };
     let request = ReadRequest::steps(
-        ctx,
-        vec![V::dup(ctx, t)],
-        |ctx, c, chunk| {
-            let task = js::closure(
-                ctx,
-                vec![c[0].clone_ref(), V::dup(ctx, chunk)],
-                |ctx, c, _| {
-                    let t = c[0].raw();
-                    let (b1, b2, canceled_1, canceled_2) = {
-                        let mut st = tee_state(ctx, t)?;
-                        st.read_again_1 = false;
-                        st.read_again_2 = false;
-                        (
-                            st.branch_1.clone_ref(),
-                            st.branch_2.clone_ref(),
-                            st.canceled_1,
-                            st.canceled_2,
-                        )
-                    };
-                    let chunk_1 = c[1].clone_ref();
-                    let mut chunk_2 = c[1].clone_ref();
-                    if !canceled_1 && !canceled_2 {
-                        match clone_as_uint8(ctx, c[1].raw()) {
-                            Ok(clone) => chunk_2 = clone,
-                            Err(_) => {
-                                let e = js::take_exception(ctx);
-                                byte_tee_error_both(ctx, t, e.raw())?;
-                                return Ok(V::undefined());
-                            }
+        cx,
+        vec![V::dup(cx, t)],
+        |cx, c, chunk| {
+            let task = js::closure(cx, vec![c[0].clone_ref(), V::dup(cx, chunk)], |cx, c, _| {
+                let t = c[0].raw();
+                let (b1, b2, canceled_1, canceled_2) = {
+                    let mut st = tee_state(cx, t)?;
+                    st.read_again_1 = false;
+                    st.read_again_2 = false;
+                    (
+                        st.branch_1.clone_ref(),
+                        st.branch_2.clone_ref(),
+                        st.canceled_1,
+                        st.canceled_2,
+                    )
+                };
+                let chunk_1 = c[1].clone_ref();
+                let mut chunk_2 = c[1].clone_ref();
+                if !canceled_1 && !canceled_2 {
+                    match clone_as_uint8(cx, c[1].raw()) {
+                        Ok(clone) => chunk_2 = clone,
+                        Err(_) => {
+                            let e = js::take_exception(cx);
+                            byte_tee_error_both(cx, t, e.raw())?;
+                            return Ok(V::undefined());
                         }
                     }
-                    if !canceled_1 {
-                        bc_enqueue(ctx, controller_of(ctx, b1.raw())?.raw(), chunk_1.raw())?;
-                    }
-                    if !canceled_2 {
-                        bc_enqueue(ctx, controller_of(ctx, b2.raw())?.raw(), chunk_2.raw())?;
-                    }
-                    byte_tee_again(ctx, t)?;
-                    Ok(V::undefined())
-                },
-            )?;
-            microtask(ctx, task)
+                }
+                if !canceled_1 {
+                    bc_enqueue(cx, controller_of(cx, b1.raw())?.raw(), chunk_1.raw())?;
+                }
+                if !canceled_2 {
+                    bc_enqueue(cx, controller_of(cx, b2.raw())?.raw(), chunk_2.raw())?;
+                }
+                byte_tee_again(cx, t)?;
+                Ok(V::undefined())
+            })?;
+            microtask(cx, task)
         },
-        |ctx, c, _| {
+        |cx, c, _| {
             let t = c[0].raw();
             let (b1, b2, canceled_1, canceled_2) = {
-                let mut st = tee_state(ctx, t)?;
+                let mut st = tee_state(cx, t)?;
                 st.reading = false;
                 (
                     st.branch_1.clone_ref(),
@@ -2560,46 +2552,46 @@ fn byte_tee_pull_default(ctx: Ctx, t: Raw) -> R<()> {
                     st.canceled_2,
                 )
             };
-            let (c1, c2) = (controller_of(ctx, b1.raw())?, controller_of(ctx, b2.raw())?);
+            let (c1, c2) = (controller_of(cx, b1.raw())?, controller_of(cx, b2.raw())?);
             if !canceled_1 {
-                bc_close(ctx, c1.raw())?;
+                bc_close(cx, c1.raw())?;
             }
             if !canceled_2 {
-                bc_close(ctx, c2.raw())?;
+                bc_close(cx, c2.raw())?;
             }
-            if !bc(ctx, c1.raw())?.pending.is_empty() {
-                bc_respond(ctx, c1.raw(), 0)?;
+            if !bc(cx, c1.raw())?.pending.is_empty() {
+                bc_respond(cx, c1.raw(), 0)?;
             }
-            if !bc(ctx, c2.raw())?.pending.is_empty() {
-                bc_respond(ctx, c2.raw(), 0)?;
+            if !bc(cx, c2.raw())?.pending.is_empty() {
+                bc_respond(cx, c2.raw(), 0)?;
             }
-            tee_resolve_cancel_if_needed(ctx, t)
+            tee_resolve_cancel_if_needed(cx, t)
         },
-        |ctx, c, _| {
-            tee_state(ctx, c[0].raw())?.reading = false;
+        |cx, c, _| {
+            tee_state(cx, c[0].raw())?.reading = false;
             Ok(())
         },
     )?;
-    default_reader_read(ctx, reader.raw(), request)
+    default_reader_read(cx, reader.raw(), request)
 }
 
-fn byte_tee_pull_byob(ctx: Ctx, t: Raw, view: Raw, second: bool) -> R<()> {
+fn byte_tee_pull_byob(cx: Ctx, t: Raw, view: Raw, second: bool) -> R<()> {
     let (reader, s) = {
-        let st = tee_state(ctx, t)?;
+        let st = tee_state(cx, t)?;
         (st.reader.clone_ref(), st.stream.clone_ref())
     };
-    let reader = if is::<DefaultReader>(ctx, reader.raw()) {
-        release_reader(ctx, reader.raw())?;
-        let r = new_byob_reader(ctx, js::UNDEFINED, s.raw())?;
-        tee_state(ctx, t)?.reader = r.clone_ref();
-        forward_reader_error(ctx, t, r.raw())?;
+    let reader = if is::<DefaultReader>(cx, reader.raw()) {
+        release_reader(cx, reader.raw())?;
+        let r = new_byob_reader(cx, js::UNDEFINED, s.raw())?;
+        tee_state(cx, t)?.reader = r.clone_ref();
+        forward_reader_error(cx, t, r.raw())?;
         r
     } else {
         reader
     };
     // Which branch reads with its own buffer, and the other.
-    let branches = move |ctx: Ctx, t: Raw| -> R<(V, V, bool, bool)> {
-        let st = tee_state(ctx, t)?;
+    let branches = move |cx: Ctx, t: Raw| -> R<(V, V, bool, bool)> {
+        let st = tee_state(cx, t)?;
         Ok(if second {
             (
                 st.branch_2.clone_ref(),
@@ -2617,77 +2609,77 @@ fn byte_tee_pull_byob(ctx: Ctx, t: Raw, view: Raw, second: bool) -> R<()> {
         })
     };
     let request = ReadRequest::steps(
-        ctx,
-        vec![V::dup(ctx, t)],
-        move |ctx, c, chunk| {
+        cx,
+        vec![V::dup(cx, t)],
+        move |cx, c, chunk| {
             let task = js::closure(
-                ctx,
-                vec![c[0].clone_ref(), V::dup(ctx, chunk)],
-                move |ctx, c, _| {
+                cx,
+                vec![c[0].clone_ref(), V::dup(cx, chunk)],
+                move |cx, c, _| {
                     let t = c[0].raw();
                     {
-                        let mut st = tee_state(ctx, t)?;
+                        let mut st = tee_state(cx, t)?;
                         st.read_again_1 = false;
                         st.read_again_2 = false;
                     }
-                    let (byob, other, byob_canceled, other_canceled) = branches(ctx, t)?;
-                    let byob_c = controller_of(ctx, byob.raw())?;
+                    let (byob, other, byob_canceled, other_canceled) = branches(cx, t)?;
+                    let byob_c = controller_of(cx, byob.raw())?;
                     if !other_canceled {
-                        let clone = match clone_as_uint8(ctx, c[1].raw()) {
+                        let clone = match clone_as_uint8(cx, c[1].raw()) {
                             Ok(clone) => clone,
                             Err(_) => {
-                                let e = js::take_exception(ctx);
-                                byte_tee_error_both(ctx, t, e.raw())?;
+                                let e = js::take_exception(cx);
+                                byte_tee_error_both(cx, t, e.raw())?;
                                 return Ok(V::undefined());
                             }
                         };
                         if !byob_canceled {
-                            bc_respond_with_new_view(ctx, byob_c.raw(), c[1].raw())?;
+                            bc_respond_with_new_view(cx, byob_c.raw(), c[1].raw())?;
                         }
-                        bc_enqueue(ctx, controller_of(ctx, other.raw())?.raw(), clone.raw())?;
+                        bc_enqueue(cx, controller_of(cx, other.raw())?.raw(), clone.raw())?;
                     } else if !byob_canceled {
-                        bc_respond_with_new_view(ctx, byob_c.raw(), c[1].raw())?;
+                        bc_respond_with_new_view(cx, byob_c.raw(), c[1].raw())?;
                     }
-                    byte_tee_again(ctx, t)?;
+                    byte_tee_again(cx, t)?;
                     Ok(V::undefined())
                 },
             )?;
-            microtask(ctx, task)
+            microtask(cx, task)
         },
-        move |ctx, c, chunk| {
+        move |cx, c, chunk| {
             let t = c[0].raw();
-            tee_state(ctx, t)?.reading = false;
-            let (byob, other, byob_canceled, other_canceled) = branches(ctx, t)?;
+            tee_state(cx, t)?.reading = false;
+            let (byob, other, byob_canceled, other_canceled) = branches(cx, t)?;
             let (byob_c, other_c) = (
-                controller_of(ctx, byob.raw())?,
-                controller_of(ctx, other.raw())?,
+                controller_of(cx, byob.raw())?,
+                controller_of(cx, other.raw())?,
             );
             if !byob_canceled {
-                bc_close(ctx, byob_c.raw())?;
+                bc_close(cx, byob_c.raw())?;
             }
             if !other_canceled {
-                bc_close(ctx, other_c.raw())?;
+                bc_close(cx, other_c.raw())?;
             }
             if !js::is_undefined(chunk) {
                 if !byob_canceled {
-                    bc_respond_with_new_view(ctx, byob_c.raw(), chunk)?;
+                    bc_respond_with_new_view(cx, byob_c.raw(), chunk)?;
                 }
-                if !other_canceled && !bc(ctx, other_c.raw())?.pending.is_empty() {
-                    bc_respond(ctx, other_c.raw(), 0)?;
+                if !other_canceled && !bc(cx, other_c.raw())?.pending.is_empty() {
+                    bc_respond(cx, other_c.raw(), 0)?;
                 }
             }
             if !byob_canceled || !other_canceled {
-                let resolve = tee_state(ctx, t)?.cancel.resolve.clone_ref();
-                js::call(ctx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
+                let resolve = tee_state(cx, t)?.cancel.resolve.clone_ref();
+                js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
             }
             Ok(())
         },
-        |ctx, c, _| {
-            tee_state(ctx, c[0].raw())?.reading = false;
+        |cx, c, _| {
+            tee_state(cx, c[0].raw())?.reading = false;
             Ok(())
         },
     )?;
-    byob_reader_read(ctx, reader.raw(), view, 1, request)
+    byob_reader_read(cx, reader.raw(), view, 1, request)
 }
 
 // --- pipeTo ---------------------------------------------------------------
@@ -2717,13 +2709,13 @@ trace!(Pipe {
     promise
 });
 
-fn pipe<'a>(ctx: Ctx, p: Raw) -> R<RefMut<'a, Pipe>> {
-    internal::<Pipe>(ctx, p)
+fn pipe<'a>(cx: Ctx, p: Raw) -> R<RefMut<'a, Pipe>> {
+    internal::<Pipe>(cx, p)
 }
 
 /// ReadableStreamPipeTo.
 pub(crate) fn pipe_to(
-    ctx: Ctx,
+    cx: Ctx,
     source: Raw,
     dest: Raw,
     prevent_close: bool,
@@ -2731,16 +2723,16 @@ pub(crate) fn pipe_to(
     prevent_cancel: bool,
     signal: Option<V>,
 ) -> R<V> {
-    let reader = acquire_default_reader(ctx, source)?;
-    let writer = writable::acquire_writer(ctx, dest)?;
-    stream(ctx, source)?.disturbed = true;
-    let promise = Deferred::new(ctx)?;
+    let reader = acquire_default_reader(cx, source)?;
+    let writer = writable::acquire_writer(cx, dest)?;
+    stream(cx, source)?.disturbed = true;
+    let promise = Deferred::new(cx)?;
     let result = promise.promise.clone_ref();
     let p = new_internal(
-        ctx,
+        cx,
         Pipe {
-            source: V::dup(ctx, source),
-            dest: V::dup(ctx, dest),
+            source: V::dup(cx, source),
+            dest: V::dup(cx, dest),
             reader: reader.clone_ref(),
             writer: writer.clone_ref(),
             prevent_close,
@@ -2749,169 +2741,169 @@ pub(crate) fn pipe_to(
             signal: signal.as_ref().map_or_else(V::undefined, V::clone_ref),
             abort_algorithm: 0,
             shutting_down: false,
-            current_write: js::resolved(ctx, js::UNDEFINED)?,
+            current_write: js::resolved(cx, js::UNDEFINED)?,
             promise,
         },
     )?;
     if let Some(signal) = &signal {
-        let abort = js::closure(ctx, vec![p.clone_ref()], |ctx, c, _| {
-            pipe_abort(ctx, c[0].raw())?;
+        let abort = js::closure(cx, vec![p.clone_ref()], |cx, c, _| {
+            pipe_abort(cx, c[0].raw())?;
             Ok(V::undefined())
         })?;
-        if crate::web::event::aborted(ctx, signal.raw())? {
-            pipe_abort(ctx, p.raw())?;
+        if crate::web::event::aborted(cx, signal.raw())? {
+            pipe_abort(cx, p.raw())?;
             return Ok(result);
         }
-        let id = crate::web::event::add_algorithm(ctx, signal.raw(), abort)?;
-        pipe(ctx, p.raw())?.abort_algorithm = id;
+        let id = crate::web::event::add_algorithm(cx, signal.raw(), abort)?;
+        pipe(cx, p.raw())?.abort_algorithm = id;
     }
     // Errors and closings are propagated as they are or become.
-    let reader_closed = common(ctx, reader.raw())?.closed.promise.clone_ref();
+    let reader_closed = common(cx, reader.raw())?.closed.promise.clone_ref();
     js::upon(
-        ctx,
+        cx,
         reader_closed.raw(),
         vec![p.clone_ref()],
-        |ctx, c, _| pipe_source_closed(ctx, c[0].raw()),
-        |ctx, c, e| pipe_source_errored(ctx, c[0].raw(), e),
+        |cx, c, _| pipe_source_closed(cx, c[0].raw()),
+        |cx, c, e| pipe_source_errored(cx, c[0].raw(), e),
     )?;
-    let writer_closed = writable::writer_closed(ctx, writer.raw())?;
+    let writer_closed = writable::writer_closed(cx, writer.raw())?;
     js::upon(
-        ctx,
+        cx,
         writer_closed.raw(),
         vec![p.clone_ref()],
         |_, _, _| Ok(()),
-        |ctx, c, e| pipe_dest_errored(ctx, c[0].raw(), e),
+        |cx, c, e| pipe_dest_errored(cx, c[0].raw(), e),
     )?;
     // The current states.
-    let source_state = state(ctx, source)?;
-    let dest_state = writable::state_of(ctx, dest)?;
+    let source_state = state(cx, source)?;
+    let dest_state = writable::state_of(cx, dest)?;
     if source_state == State::Errored {
-        let e = stored_error(ctx, source)?;
-        pipe_source_errored(ctx, p.raw(), e.raw())?;
+        let e = stored_error(cx, source)?;
+        pipe_source_errored(cx, p.raw(), e.raw())?;
     } else if dest_state == WState::Errored {
-        let e = writable::stored_error(ctx, dest)?;
-        pipe_dest_errored(ctx, p.raw(), e.raw())?;
+        let e = writable::stored_error(cx, dest)?;
+        pipe_dest_errored(cx, p.raw(), e.raw())?;
     } else if source_state == State::Closed {
-        pipe_source_closed(ctx, p.raw())?;
+        pipe_source_closed(cx, p.raw())?;
     }
-    if writable::close_queued_or_in_flight(ctx, dest)?
-        || writable::state_of(ctx, dest)? == WState::Closed
+    if writable::close_queued_or_in_flight(cx, dest)?
+        || writable::state_of(cx, dest)? == WState::Closed
     {
-        pipe_dest_closed(ctx, p.raw())?;
+        pipe_dest_closed(cx, p.raw())?;
     }
-    pipe_loop(ctx, p.raw())?;
+    pipe_loop(cx, p.raw())?;
     Ok(result)
 }
 
 /// One step of the loop: when the destination is ready, a read, and the
 /// write of what it reads.
-fn pipe_loop(ctx: Ctx, p: Raw) -> R<()> {
+fn pipe_loop(cx: Ctx, p: Raw) -> R<()> {
     let writer = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         if st.shutting_down {
             return Ok(());
         }
         st.writer.clone_ref()
     };
-    let ready = writable::writer_ready(ctx, writer.raw())?;
+    let ready = writable::writer_ready(cx, writer.raw())?;
     js::upon(
-        ctx,
+        cx,
         ready.raw(),
-        vec![V::dup(ctx, p)],
-        |ctx, c, _| {
+        vec![V::dup(cx, p)],
+        |cx, c, _| {
             let p = c[0].raw();
             let reader = {
-                let st = pipe(ctx, p)?;
+                let st = pipe(cx, p)?;
                 if st.shutting_down {
                     return Ok(());
                 }
                 st.reader.clone_ref()
             };
             let request = ReadRequest::steps(
-                ctx,
-                vec![V::dup(ctx, p)],
-                |ctx, c, chunk| {
+                cx,
+                vec![V::dup(cx, p)],
+                |cx, c, chunk| {
                     let p = c[0].raw();
-                    let writer = pipe(ctx, p)?.writer.clone_ref();
-                    let w = writable::writer_write(ctx, writer.raw(), chunk)?;
-                    js::mark_handled(ctx, w.raw());
-                    pipe(ctx, p)?.current_write = w;
-                    pipe_loop(ctx, p)
+                    let writer = pipe(cx, p)?.writer.clone_ref();
+                    let w = writable::writer_write(cx, writer.raw(), chunk)?;
+                    js::mark_handled(cx, w.raw());
+                    pipe(cx, p)?.current_write = w;
+                    pipe_loop(cx, p)
                 },
                 |_, _, _| Ok(()),
                 |_, _, _| Ok(()),
             )?;
-            default_reader_read(ctx, reader.raw(), request)
+            default_reader_read(cx, reader.raw(), request)
         },
         |_, _, _| Ok(()),
     )
 }
 
-fn pipe_source_errored(ctx: Ctx, p: Raw, e: Raw) -> R<()> {
+fn pipe_source_errored(cx: Ctx, p: Raw, e: Raw) -> R<()> {
     let (prevent_abort, dest) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (st.prevent_abort, st.dest.clone_ref())
     };
     if prevent_abort {
-        pipe_shutdown(ctx, p, Some(V::dup(ctx, e)))
+        pipe_shutdown(cx, p, Some(V::dup(cx, e)))
     } else {
-        let action = js::closure(ctx, vec![dest, V::dup(ctx, e)], |ctx, c, _| {
-            writable::abort_stream(ctx, c[0].raw(), c[1].raw())
+        let action = js::closure(cx, vec![dest, V::dup(cx, e)], |cx, c, _| {
+            writable::abort_stream(cx, c[0].raw(), c[1].raw())
         })?;
-        pipe_shutdown_with_action(ctx, p, action, Some(V::dup(ctx, e)))
+        pipe_shutdown_with_action(cx, p, action, Some(V::dup(cx, e)))
     }
 }
 
-fn pipe_dest_errored(ctx: Ctx, p: Raw, e: Raw) -> R<()> {
+fn pipe_dest_errored(cx: Ctx, p: Raw, e: Raw) -> R<()> {
     let (prevent_cancel, source) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (st.prevent_cancel, st.source.clone_ref())
     };
     if prevent_cancel {
-        pipe_shutdown(ctx, p, Some(V::dup(ctx, e)))
+        pipe_shutdown(cx, p, Some(V::dup(cx, e)))
     } else {
-        let action = js::closure(ctx, vec![source, V::dup(ctx, e)], |ctx, c, _| {
-            cancel_stream(ctx, c[0].raw(), c[1].raw())
+        let action = js::closure(cx, vec![source, V::dup(cx, e)], |cx, c, _| {
+            cancel_stream(cx, c[0].raw(), c[1].raw())
         })?;
-        pipe_shutdown_with_action(ctx, p, action, Some(V::dup(ctx, e)))
+        pipe_shutdown_with_action(cx, p, action, Some(V::dup(cx, e)))
     }
 }
 
-fn pipe_source_closed(ctx: Ctx, p: Raw) -> R<()> {
+fn pipe_source_closed(cx: Ctx, p: Raw) -> R<()> {
     let (prevent_close, writer) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (st.prevent_close, st.writer.clone_ref())
     };
     if prevent_close {
-        pipe_shutdown(ctx, p, None)
+        pipe_shutdown(cx, p, None)
     } else {
-        let action = js::closure(ctx, vec![writer], |ctx, c, _| {
-            writable::writer_close_with_error_propagation(ctx, c[0].raw())
+        let action = js::closure(cx, vec![writer], |cx, c, _| {
+            writable::writer_close_with_error_propagation(cx, c[0].raw())
         })?;
-        pipe_shutdown_with_action(ctx, p, action, None)
+        pipe_shutdown_with_action(cx, p, action, None)
     }
 }
 
-fn pipe_dest_closed(ctx: Ctx, p: Raw) -> R<()> {
-    let e = js::type_error_value(ctx, "the destination is closed");
+fn pipe_dest_closed(cx: Ctx, p: Raw) -> R<()> {
+    let e = js::type_error_value(cx, "the destination is closed");
     let (prevent_cancel, source) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (st.prevent_cancel, st.source.clone_ref())
     };
     if prevent_cancel {
-        pipe_shutdown(ctx, p, Some(e))
+        pipe_shutdown(cx, p, Some(e))
     } else {
-        let action = js::closure(ctx, vec![source, e.clone_ref()], |ctx, c, _| {
-            cancel_stream(ctx, c[0].raw(), c[1].raw())
+        let action = js::closure(cx, vec![source, e.clone_ref()], |cx, c, _| {
+            cancel_stream(cx, c[0].raw(), c[1].raw())
         })?;
-        pipe_shutdown_with_action(ctx, p, action, Some(e))
+        pipe_shutdown_with_action(cx, p, action, Some(e))
     }
 }
 
 /// The signal aborted the pipe.
-fn pipe_abort(ctx: Ctx, p: Raw) -> R<()> {
+fn pipe_abort(cx: Ctx, p: Raw) -> R<()> {
     let (signal, prevent_abort, prevent_cancel, source, dest) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (
             st.signal.clone_ref(),
             st.prevent_abort,
@@ -2920,59 +2912,57 @@ fn pipe_abort(ctx: Ctx, p: Raw) -> R<()> {
             st.dest.clone_ref(),
         )
     };
-    let error = crate::web::event::reason(ctx, signal.raw())?;
+    let error = crate::web::event::reason(cx, signal.raw())?;
     let action = js::closure(
-        ctx,
+        cx,
         vec![source, dest, error.clone_ref()],
-        move |ctx, c, _| {
+        move |cx, c, _| {
             let mut actions = Vec::new();
             if !prevent_abort {
-                actions.push(
-                    if writable::state_of(ctx, c[1].raw())? == WState::Writable {
-                        writable::abort_stream(ctx, c[1].raw(), c[2].raw())?
-                    } else {
-                        js::resolved(ctx, js::UNDEFINED)?
-                    },
-                );
-            }
-            if !prevent_cancel {
-                actions.push(if state(ctx, c[0].raw())? == State::Readable {
-                    cancel_stream(ctx, c[0].raw(), c[2].raw())?
+                actions.push(if writable::state_of(cx, c[1].raw())? == WState::Writable {
+                    writable::abort_stream(cx, c[1].raw(), c[2].raw())?
                 } else {
-                    js::resolved(ctx, js::UNDEFINED)?
+                    js::resolved(cx, js::UNDEFINED)?
                 });
             }
-            let all = js::new_array(ctx, actions)?;
-            let g = js::global(ctx);
-            let promise = js::get(ctx, g.raw(), "Promise")?;
-            js::invoke(ctx, promise.raw(), "all", &[all.raw()])
+            if !prevent_cancel {
+                actions.push(if state(cx, c[0].raw())? == State::Readable {
+                    cancel_stream(cx, c[0].raw(), c[2].raw())?
+                } else {
+                    js::resolved(cx, js::UNDEFINED)?
+                });
+            }
+            let all = js::new_array(cx, actions)?;
+            let g = js::global(cx);
+            let promise = js::get(cx, g.raw(), "Promise")?;
+            js::invoke(cx, promise.raw(), "all", &[all.raw()])
         },
     )?;
-    pipe_shutdown_with_action(ctx, p, action, Some(error))
+    pipe_shutdown_with_action(cx, p, action, Some(error))
 }
 
 /// Waits for the writes in flight unless the destination cannot take
 /// them, then runs `rest`.
-fn pipe_after_writes(ctx: Ctx, p: Raw, rest: V) -> R<()> {
+fn pipe_after_writes(cx: Ctx, p: Raw, rest: V) -> R<()> {
     let (dest, current) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (st.dest.clone_ref(), st.current_write.clone_ref())
     };
-    if writable::state_of(ctx, dest.raw())? == WState::Writable
-        && !writable::close_queued_or_in_flight(ctx, dest.raw())?
+    if writable::state_of(cx, dest.raw())? == WState::Writable
+        && !writable::close_queued_or_in_flight(cx, dest.raw())?
     {
-        let p = js::then(ctx, current.raw(), rest.raw(), rest.raw())?;
-        js::mark_handled(ctx, p.raw());
+        let p = js::then(cx, current.raw(), rest.raw(), rest.raw())?;
+        js::mark_handled(cx, p.raw());
         Ok(())
     } else {
-        js::call(ctx, rest.raw(), js::UNDEFINED, &[])?;
+        js::call(cx, rest.raw(), js::UNDEFINED, &[])?;
         Ok(())
     }
 }
 
-fn pipe_shutdown_with_action(ctx: Ctx, p: Raw, action: V, error: Option<V>) -> R<()> {
+fn pipe_shutdown_with_action(cx: Ctx, p: Raw, action: V, error: Option<V>) -> R<()> {
     {
-        let mut st = pipe(ctx, p)?;
+        let mut st = pipe(cx, p)?;
         if st.shutting_down {
             return Ok(());
         }
@@ -2980,27 +2970,23 @@ fn pipe_shutdown_with_action(ctx: Ctx, p: Raw, action: V, error: Option<V>) -> R
     }
     let is_error = error.is_some();
     let error = error.unwrap_or_default();
-    let rest = js::closure(
-        ctx,
-        vec![V::dup(ctx, p), action, error],
-        move |ctx, c, _| {
-            let result = js::promise_of(ctx, || js::call(ctx, c[1].raw(), js::UNDEFINED, &[]))?;
-            js::upon(
-                ctx,
-                result.raw(),
-                vec![c[0].clone_ref(), c[2].clone_ref()],
-                move |ctx, c, _| pipe_finalize(ctx, c[0].raw(), is_error.then(|| c[1].clone_ref())),
-                |ctx, c, e| pipe_finalize(ctx, c[0].raw(), Some(V::dup(ctx, e))),
-            )?;
-            Ok(V::undefined())
-        },
-    )?;
-    pipe_after_writes(ctx, p, rest)
+    let rest = js::closure(cx, vec![V::dup(cx, p), action, error], move |cx, c, _| {
+        let result = js::promise_of(cx, || js::call(cx, c[1].raw(), js::UNDEFINED, &[]))?;
+        js::upon(
+            cx,
+            result.raw(),
+            vec![c[0].clone_ref(), c[2].clone_ref()],
+            move |cx, c, _| pipe_finalize(cx, c[0].raw(), is_error.then(|| c[1].clone_ref())),
+            |cx, c, e| pipe_finalize(cx, c[0].raw(), Some(V::dup(cx, e))),
+        )?;
+        Ok(V::undefined())
+    })?;
+    pipe_after_writes(cx, p, rest)
 }
 
-fn pipe_shutdown(ctx: Ctx, p: Raw, error: Option<V>) -> R<()> {
+fn pipe_shutdown(cx: Ctx, p: Raw, error: Option<V>) -> R<()> {
     {
-        let mut st = pipe(ctx, p)?;
+        let mut st = pipe(cx, p)?;
         if st.shutting_down {
             return Ok(());
         }
@@ -3008,19 +2994,19 @@ fn pipe_shutdown(ctx: Ctx, p: Raw, error: Option<V>) -> R<()> {
     }
     let is_error = error.is_some();
     let rest = js::closure(
-        ctx,
-        vec![V::dup(ctx, p), error.unwrap_or_default()],
-        move |ctx, c, _| {
-            pipe_finalize(ctx, c[0].raw(), is_error.then(|| c[1].clone_ref()))?;
+        cx,
+        vec![V::dup(cx, p), error.unwrap_or_default()],
+        move |cx, c, _| {
+            pipe_finalize(cx, c[0].raw(), is_error.then(|| c[1].clone_ref()))?;
             Ok(V::undefined())
         },
     )?;
-    pipe_after_writes(ctx, p, rest)
+    pipe_after_writes(cx, p, rest)
 }
 
-fn pipe_finalize(ctx: Ctx, p: Raw, error: Option<V>) -> R<()> {
+fn pipe_finalize(cx: Ctx, p: Raw, error: Option<V>) -> R<()> {
     let (writer, reader, signal, id, resolve, reject) = {
-        let st = pipe(ctx, p)?;
+        let st = pipe(cx, p)?;
         (
             st.writer.clone_ref(),
             st.reader.clone_ref(),
@@ -3030,16 +3016,16 @@ fn pipe_finalize(ctx: Ctx, p: Raw, error: Option<V>) -> R<()> {
             st.promise.reject.clone_ref(),
         )
     };
-    writable::writer_release(ctx, writer.raw())?;
-    if !common(ctx, reader.raw())?.stream.is_undefined() {
-        release_reader(ctx, reader.raw())?;
+    writable::writer_release(cx, writer.raw())?;
+    if !common(cx, reader.raw())?.stream.is_undefined() {
+        release_reader(cx, reader.raw())?;
     }
     if !signal.is_undefined() {
-        crate::web::event::remove_algorithm(ctx, signal.raw(), id)?;
+        crate::web::event::remove_algorithm(cx, signal.raw(), id)?;
     }
     match error {
-        Some(e) => js::call(ctx, reject.raw(), js::UNDEFINED, &[e.raw()])?,
-        None => js::call(ctx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?,
+        Some(e) => js::call(cx, reject.raw(), js::UNDEFINED, &[e.raw()])?,
+        None => js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?,
     };
     Ok(())
 }
@@ -3057,23 +3043,23 @@ trace!(AsyncIter { reader, ongoing });
 
 impl Object for AsyncIter {}
 
-fn async_iter<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, AsyncIter>> {
-    data::<AsyncIter>(ctx, v, "ReadableStream async iterator")
+fn async_iter<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, AsyncIter>> {
+    data::<AsyncIter>(cx, v, "ReadableStream async iterator")
 }
 
 native!(
-    fn stream_values(ctx, this, args) {
-        stream(ctx, this)?;
+    fn stream_values(cx, this, args) {
+        stream(cx, this)?;
         let options = args.get(0);
         let prevent_cancel = if js::is_object(options) {
-            let p = js::get(ctx, options, "preventCancel")?;
-            js::to_bool(ctx, p.raw())
+            let p = js::get(cx, options, "preventCancel")?;
+            js::to_bool(cx, p.raw())
         } else {
             false
         };
-        let reader = acquire_default_reader(ctx, this)?;
+        let reader = acquire_default_reader(cx, this)?;
         instance(
-            ctx,
+            cx,
             js::UNDEFINED,
             Class::ReadableStreamAsyncIterator,
             AsyncIter {
@@ -3087,123 +3073,123 @@ native!(
 );
 
 /// The next steps of `next()`: `{ value, done }`'s promise.
-fn async_iter_next_steps(ctx: Ctx, it: Raw) -> R<V> {
+fn async_iter_next_steps(cx: Ctx, it: Raw) -> R<V> {
     let (finished, reader) = {
-        let i = async_iter(ctx, it)?;
+        let i = async_iter(cx, it)?;
         (i.finished, i.reader.clone_ref())
     };
     if finished {
-        let r = js::iter_result(ctx, V::undefined(), true)?;
-        return js::resolved(ctx, r.raw());
+        let r = js::iter_result(cx, V::undefined(), true)?;
+        return js::resolved(cx, r.raw());
     }
-    if common(ctx, reader.raw())?.stream.is_undefined() {
-        let e = js::type_error_value(ctx, "the iterator's reader was released");
-        return js::rejected(ctx, e.raw());
+    if common(cx, reader.raw())?.stream.is_undefined() {
+        let e = js::type_error_value(cx, "the iterator's reader was released");
+        return js::rejected(cx, e.raw());
     }
-    let d = Deferred::new(ctx)?;
+    let d = Deferred::new(cx)?;
     let request = ReadRequest::steps(
-        ctx,
-        vec![V::dup(ctx, it), d.resolve.clone_ref(), d.reject.clone_ref()],
-        |ctx, c, chunk| {
-            async_iter(ctx, c[0].raw())?.ongoing = V::undefined();
-            let r = js::iter_result(ctx, V::dup(ctx, chunk), false)?;
-            js::call(ctx, c[1].raw(), js::UNDEFINED, &[r.raw()])?;
+        cx,
+        vec![V::dup(cx, it), d.resolve.clone_ref(), d.reject.clone_ref()],
+        |cx, c, chunk| {
+            async_iter(cx, c[0].raw())?.ongoing = V::undefined();
+            let r = js::iter_result(cx, V::dup(cx, chunk), false)?;
+            js::call(cx, c[1].raw(), js::UNDEFINED, &[r.raw()])?;
             Ok(())
         },
-        |ctx, c, _| {
+        |cx, c, _| {
             let reader = {
-                let mut i = async_iter(ctx, c[0].raw())?;
+                let mut i = async_iter(cx, c[0].raw())?;
                 i.ongoing = V::undefined();
                 i.finished = true;
                 i.reader.clone_ref()
             };
-            release_reader(ctx, reader.raw())?;
-            let r = js::iter_result(ctx, V::undefined(), true)?;
-            js::call(ctx, c[1].raw(), js::UNDEFINED, &[r.raw()])?;
+            release_reader(cx, reader.raw())?;
+            let r = js::iter_result(cx, V::undefined(), true)?;
+            js::call(cx, c[1].raw(), js::UNDEFINED, &[r.raw()])?;
             Ok(())
         },
-        |ctx, c, e| {
+        |cx, c, e| {
             let reader = {
-                let mut i = async_iter(ctx, c[0].raw())?;
+                let mut i = async_iter(cx, c[0].raw())?;
                 i.ongoing = V::undefined();
                 i.finished = true;
                 i.reader.clone_ref()
             };
-            release_reader(ctx, reader.raw())?;
-            js::call(ctx, c[2].raw(), js::UNDEFINED, &[e])?;
+            release_reader(cx, reader.raw())?;
+            js::call(cx, c[2].raw(), js::UNDEFINED, &[e])?;
             Ok(())
         },
     )?;
-    default_reader_read(ctx, reader.raw(), request)?;
+    default_reader_read(cx, reader.raw(), request)?;
     Ok(d.promise)
 }
 
 /// The return steps of `return(value)`.
-fn async_iter_return_steps(ctx: Ctx, it: Raw, value: Raw) -> R<V> {
+fn async_iter_return_steps(cx: Ctx, it: Raw, value: Raw) -> R<V> {
     let (finished, reader, prevent_cancel) = {
-        let mut i = async_iter(ctx, it)?;
+        let mut i = async_iter(cx, it)?;
         let f = i.finished;
         i.finished = true;
         (f, i.reader.clone_ref(), i.prevent_cancel)
     };
-    let done = js::iter_result(ctx, V::dup(ctx, value), true)?;
+    let done = js::iter_result(cx, V::dup(cx, value), true)?;
     if finished {
-        return js::resolved(ctx, done.raw());
+        return js::resolved(cx, done.raw());
     }
-    if common(ctx, reader.raw())?.stream.is_undefined() {
-        return js::resolved(ctx, done.raw());
+    if common(cx, reader.raw())?.stream.is_undefined() {
+        return js::resolved(cx, done.raw());
     }
     let result = if prevent_cancel {
-        release_reader(ctx, reader.raw())?;
-        js::resolved(ctx, js::UNDEFINED)?
+        release_reader(cx, reader.raw())?;
+        js::resolved(cx, js::UNDEFINED)?
     } else {
-        let s = common(ctx, reader.raw())?.stream.clone_ref();
-        let r = cancel_stream(ctx, s.raw(), value)?;
-        release_reader(ctx, reader.raw())?;
+        let s = common(cx, reader.raw())?.stream.clone_ref();
+        let r = cancel_stream(cx, s.raw(), value)?;
+        release_reader(cx, reader.raw())?;
         r
     };
-    let give_done = js::closure(ctx, vec![done], |_, c, _| Ok(c[0].clone_ref()))?;
-    js::then(ctx, result.raw(), give_done.raw(), js::UNDEFINED)
+    let give_done = js::closure(cx, vec![done], |_, c, _| Ok(c[0].clone_ref()))?;
+    js::then(cx, result.raw(), give_done.raw(), js::UNDEFINED)
 }
 
 native!(
-    fn async_iter_next(ctx, this, args) {
-        js::promise_of(ctx, || {
-            let ongoing = async_iter(ctx, this)?.ongoing.clone_ref();
+    fn async_iter_next(cx, this, args) {
+        js::promise_of(cx, || {
+            let ongoing = async_iter(cx, this)?.ongoing.clone_ref();
             let next = if ongoing.is_undefined() {
-                async_iter_next_steps(ctx, this)?
+                async_iter_next_steps(cx, this)?
             } else {
-                let steps = js::closure(ctx, vec![V::dup(ctx, this)], |ctx, c, _| async_iter_next_steps(ctx, c[0].raw()))?;
-                js::then(ctx, ongoing.raw(), steps.raw(), steps.raw())?
+                let steps = js::closure(cx, vec![V::dup(cx, this)], |cx, c, _| async_iter_next_steps(cx, c[0].raw()))?;
+                js::then(cx, ongoing.raw(), steps.raw(), steps.raw())?
             };
-            async_iter(ctx, this)?.ongoing = next.clone_ref();
+            async_iter(cx, this)?.ongoing = next.clone_ref();
             Ok(next)
         })
     }
 );
 
 native!(
-    fn async_iter_return(ctx, this, args) {
-        js::promise_of(ctx, || {
+    fn async_iter_return(cx, this, args) {
+        js::promise_of(cx, || {
             let value = args.get(0);
-            let ongoing = async_iter(ctx, this)?.ongoing.clone_ref();
+            let ongoing = async_iter(cx, this)?.ongoing.clone_ref();
             let result = if ongoing.is_undefined() {
-                async_iter_return_steps(ctx, this, value)?
+                async_iter_return_steps(cx, this, value)?
             } else {
-                let steps = js::closure(ctx, vec![V::dup(ctx, this), V::dup(ctx, value)], |ctx, c, _| {
-                    async_iter_return_steps(ctx, c[0].raw(), c[1].raw())
+                let steps = js::closure(cx, vec![V::dup(cx, this), V::dup(cx, value)], |cx, c, _| {
+                    async_iter_return_steps(cx, c[0].raw(), c[1].raw())
                 })?;
-                js::then(ctx, ongoing.raw(), steps.raw(), steps.raw())?
+                js::then(cx, ongoing.raw(), steps.raw(), steps.raw())?
             };
-            async_iter(ctx, this)?.ongoing = result.clone_ref();
+            async_iter(cx, this)?.ongoing = result.clone_ref();
             Ok(result)
         })
     }
 );
 
 native!(
-    fn async_iter_self(ctx, this, args) {
-        Ok(V::dup(ctx, this))
+    fn async_iter_self(cx, this, args) {
+        Ok(V::dup(cx, this))
     }
 );
 
@@ -3219,125 +3205,125 @@ struct FromIter {
 trace!(FromIter { iterator, next });
 
 native!(
-    fn stream_from(ctx, this, args) {
+    fn stream_from(cx, this, args) {
         let iterable = args.get(0);
         if js::is_nullish(iterable) {
-            return Err(js::type_error(ctx, "ReadableStream.from needs an iterable"));
+            return Err(js::type_error(cx, "ReadableStream.from needs an iterable"));
         }
-        let async_method = js::get_atom(ctx, iterable, rquickjs::qjs::JS_ATOM_Symbol_asyncIterator as _)?;
+        let async_method = js::get_atom(cx, iterable, rquickjs::qjs::JS_ATOM_Symbol_asyncIterator as _)?;
         let (method, sync) = if js::is_nullish(async_method.raw()) {
-            let m = js::get_atom(ctx, iterable, rquickjs::qjs::JS_ATOM_Symbol_iterator as _)?;
-            if !js::is_function(ctx, m.raw()) {
-                return Err(js::type_error(ctx, "the value is not iterable"));
+            let m = js::get_atom(cx, iterable, rquickjs::qjs::JS_ATOM_Symbol_iterator as _)?;
+            if !js::is_function(cx, m.raw()) {
+                return Err(js::type_error(cx, "the value is not iterable"));
             }
             (m, true)
         } else {
-            if !js::is_function(ctx, async_method.raw()) {
-                return Err(js::type_error(ctx, "Symbol.asyncIterator is not a function"));
+            if !js::is_function(cx, async_method.raw()) {
+                return Err(js::type_error(cx, "Symbol.asyncIterator is not a function"));
             }
             (async_method, false)
         };
-        let iterator = js::call(ctx, method.raw(), iterable, &[])?;
+        let iterator = js::call(cx, method.raw(), iterable, &[])?;
         if !js::is_object(iterator.raw()) {
-            return Err(js::type_error(ctx, "the iterator is not an object"));
+            return Err(js::type_error(cx, "the iterator is not an object"));
         }
-        let next = js::get(ctx, iterator.raw(), "next")?;
-        let state = new_internal(ctx, FromIter { iterator, next, sync })?;
-        let pull = js::closure(ctx, vec![state.clone_ref()], |ctx, c, args| {
-            let controller = V::dup(ctx, args.get(0));
+        let next = js::get(cx, iterator.raw(), "next")?;
+        let state = new_internal(cx, FromIter { iterator, next, sync })?;
+        let pull = js::closure(cx, vec![state.clone_ref()], |cx, c, args| {
+            let controller = V::dup(cx, args.get(0));
             let (iterator, next, sync) = {
-                let s = internal::<FromIter>(ctx, c[0].raw())?;
+                let s = internal::<FromIter>(cx, c[0].raw())?;
                 (s.iterator.clone_ref(), s.next.clone_ref(), s.sync)
             };
-            let result = match js::call(ctx, next.raw(), iterator.raw(), &[]) {
+            let result = match js::call(cx, next.raw(), iterator.raw(), &[]) {
                 Ok(r) => r,
-                Err(_) => return js::rejected_with_exception(ctx),
+                Err(_) => return js::rejected_with_exception(cx),
             };
-            let p = js::resolved(ctx, result.raw())?;
-            let on_result = js::closure(ctx, vec![controller], move |ctx, c, args| {
+            let p = js::resolved(cx, result.raw())?;
+            let on_result = js::closure(cx, vec![controller], move |cx, c, args| {
                 let r = args.get(0);
                 if !js::is_object(r) {
-                    return Err(js::type_error(ctx, "the iterator result is not an object"));
+                    return Err(js::type_error(cx, "the iterator result is not an object"));
                 }
-                let done = js::get(ctx, r, "done")?;
-                if js::to_bool(ctx, done.raw()) {
-                    dc_close(ctx, c[0].raw())?;
+                let done = js::get(cx, r, "done")?;
+                if js::to_bool(cx, done.raw()) {
+                    dc_close(cx, c[0].raw())?;
                     return Ok(V::undefined());
                 }
-                let value = js::get(ctx, r, "value")?;
+                let value = js::get(cx, r, "value")?;
                 if sync {
                     // Async-from-sync: the value is awaited.
-                    let enqueue = js::closure(ctx, vec![c[0].clone_ref()], |ctx, c, args| {
-                        dc_enqueue(ctx, c[0].raw(), args.get(0))?;
+                    let enqueue = js::closure(cx, vec![c[0].clone_ref()], |cx, c, args| {
+                        dc_enqueue(cx, c[0].raw(), args.get(0))?;
                         Ok(V::undefined())
                     })?;
-                    return js::then(ctx, value.raw(), enqueue.raw(), js::UNDEFINED);
+                    return js::then(cx, value.raw(), enqueue.raw(), js::UNDEFINED);
                 }
-                dc_enqueue(ctx, c[0].raw(), value.raw())?;
+                dc_enqueue(cx, c[0].raw(), value.raw())?;
                 Ok(V::undefined())
             })?;
-            js::then(ctx, p.raw(), on_result.raw(), js::UNDEFINED)
+            js::then(cx, p.raw(), on_result.raw(), js::UNDEFINED)
         })?;
-        let cancel = js::closure(ctx, vec![state], |ctx, c, args| {
-            let iterator = internal::<FromIter>(ctx, c[0].raw())?.iterator.clone_ref();
-            js::promise_of(ctx, || {
-                let Some(ret) = js::get_method(ctx, iterator.raw(), "return")? else {
+        let cancel = js::closure(cx, vec![state], |cx, c, args| {
+            let iterator = internal::<FromIter>(cx, c[0].raw())?.iterator.clone_ref();
+            js::promise_of(cx, || {
+                let Some(ret) = js::get_method(cx, iterator.raw(), "return")? else {
                     return Ok(V::undefined());
                 };
-                let r = js::call(ctx, ret.raw(), iterator.raw(), &[args.get(0)])?;
-                let p = js::resolved(ctx, r.raw())?;
-                let check = js::closure(ctx, Vec::new(), |ctx, _, args| {
+                let r = js::call(cx, ret.raw(), iterator.raw(), &[args.get(0)])?;
+                let p = js::resolved(cx, r.raw())?;
+                let check = js::closure(cx, Vec::new(), |cx, _, args| {
                     if !js::is_object(args.get(0)) {
-                        return Err(js::type_error(ctx, "the iterator's return result is not an object"));
+                        return Err(js::type_error(cx, "the iterator's return result is not an object"));
                     }
                     Ok(V::undefined())
                 })?;
-                js::then(ctx, p.raw(), check.raw(), js::UNDEFINED)
+                js::then(cx, p.raw(), check.raw(), js::UNDEFINED)
             })
         })?;
-        let (s, _) = new_default_stream(ctx, Algo::default(), Algo::native(pull), Algo::native(cancel), 0.0, V::undefined())?;
+        let (s, _) = new_default_stream(cx, Algo::default(), Algo::native(pull), Algo::native(cancel), 0.0, V::undefined())?;
         Ok(s)
     }
 );
 
 /// Reads all of `s` (a byte stream, or a stream of byte chunks): a
 /// promise of a Uint8Array (`fetch` bodies).
-pub(crate) fn read_all_bytes(ctx: Ctx, s: Raw) -> R<V> {
-    let reader = acquire_default_reader(ctx, s)?;
-    let d = Deferred::new(ctx)?;
+pub(crate) fn read_all_bytes(cx: Ctx, s: Raw) -> R<V> {
+    let reader = acquire_default_reader(cx, s)?;
+    let d = Deferred::new(cx)?;
     let promise = d.promise.clone_ref();
     let acc = std::rc::Rc::new(std::cell::RefCell::new(Vec::<u8>::new()));
-    read_all_step(ctx, reader, d, acc)?;
+    read_all_step(cx, reader, d, acc)?;
     Ok(promise)
 }
 
 fn read_all_step(
-    ctx: Ctx,
+    cx: Ctx,
     reader: V,
     d: Deferred,
     acc: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
 ) -> R<()> {
     let (a1, a2) = (acc.clone(), acc);
     let request = ReadRequest::steps(
-        ctx,
+        cx,
         vec![
             reader.clone_ref(),
             d.promise.clone_ref(),
             d.resolve.clone_ref(),
             d.reject.clone_ref(),
         ],
-        move |ctx, c, chunk| {
+        move |cx, c, chunk| {
             let Some(bytes) =
-                (unsafe { js::bytes_of(ctx, chunk) }).filter(|_| js::view(ctx, chunk).is_some())
+                (unsafe { js::bytes_of(cx, chunk) }).filter(|_| js::view(cx, chunk).is_some())
             else {
                 let e = js::type_error_value(
-                    ctx,
+                    cx,
                     "the body stream gave a chunk that is not a Uint8Array",
                 );
                 let reader = c[0].clone_ref();
-                let s = common(ctx, reader.raw())?.stream.clone_ref();
-                let _ = cancel_stream(ctx, s.raw(), e.raw());
-                js::call(ctx, c[3].raw(), js::UNDEFINED, &[e.raw()])?;
+                let s = common(cx, reader.raw())?.stream.clone_ref();
+                let _ = cancel_stream(cx, s.raw(), e.raw());
+                js::call(cx, c[3].raw(), js::UNDEFINED, &[e.raw()])?;
                 return Ok(());
             };
             a1.borrow_mut().extend_from_slice(bytes);
@@ -3346,20 +3332,20 @@ fn read_all_step(
                 resolve: c[2].clone_ref(),
                 reject: c[3].clone_ref(),
             };
-            read_all_step(ctx, c[0].clone_ref(), d, a1.clone())
+            read_all_step(cx, c[0].clone_ref(), d, a1.clone())
         },
-        move |ctx, c, _| {
+        move |cx, c, _| {
             let bytes = std::mem::take(&mut *a2.borrow_mut());
-            let out = js::uint8_array(ctx, &bytes)?;
-            js::call(ctx, c[2].raw(), js::UNDEFINED, &[out.raw()])?;
+            let out = js::uint8_array(cx, &bytes)?;
+            js::call(cx, c[2].raw(), js::UNDEFINED, &[out.raw()])?;
             Ok(())
         },
-        |ctx, c, e| {
-            js::call(ctx, c[3].raw(), js::UNDEFINED, &[e])?;
+        |cx, c, e| {
+            js::call(cx, c[3].raw(), js::UNDEFINED, &[e])?;
             Ok(())
         },
     )?;
-    default_reader_read(ctx, reader.raw(), request)
+    default_reader_read(cx, reader.raw(), request)
 }
 
 pub(crate) const SPECS: &[Spec] = &[

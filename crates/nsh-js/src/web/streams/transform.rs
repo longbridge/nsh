@@ -47,16 +47,16 @@ trace!(Controller {
 
 impl Object for Controller {}
 
-fn stream<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, Stream>> {
-    data::<Stream>(ctx, v, "TransformStream")
+fn stream<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, Stream>> {
+    data::<Stream>(cx, v, "TransformStream")
 }
 
-fn controller<'a>(ctx: Ctx, v: Raw) -> R<RefMut<'a, Controller>> {
-    data::<Controller>(ctx, v, "TransformStreamDefaultController")
+fn controller<'a>(cx: Ctx, v: Raw) -> R<RefMut<'a, Controller>> {
+    data::<Controller>(cx, v, "TransformStreamDefaultController")
 }
 
-fn parts(ctx: Ctx, s: Raw) -> R<(V, V, V)> {
-    let st = stream(ctx, s)?;
+fn parts(cx: Ctx, s: Raw) -> R<(V, V, V)> {
+    let st = stream(cx, s)?;
     Ok((
         st.readable.clone_ref(),
         st.writable.clone_ref(),
@@ -65,39 +65,39 @@ fn parts(ctx: Ctx, s: Raw) -> R<(V, V, V)> {
 }
 
 /// The controller of the readable side.
-fn readable_controller(ctx: Ctx, s: Raw) -> R<V> {
-    let r = stream(ctx, s)?.readable.clone_ref();
-    readable::controller_of(ctx, r.raw())
+fn readable_controller(cx: Ctx, s: Raw) -> R<V> {
+    let r = stream(cx, s)?.readable.clone_ref();
+    readable::controller_of(cx, r.raw())
 }
 
-fn readable_controller_of(ctx: Ctx, r: Raw) -> R<V> {
-    readable::controller_of(ctx, r)
+fn readable_controller_of(cx: Ctx, r: Raw) -> R<V> {
+    readable::controller_of(cx, r)
 }
 
 /// SetBackpressure.
-fn set_backpressure(ctx: Ctx, s: Raw, backpressure: bool) -> R<()> {
+fn set_backpressure(cx: Ctx, s: Raw, backpressure: bool) -> R<()> {
     let old = {
-        let mut st = stream(ctx, s)?;
-        let old = st.backpressure_change.replace(Deferred::new(ctx)?);
+        let mut st = stream(cx, s)?;
+        let old = st.backpressure_change.replace(Deferred::new(cx)?);
         st.backpressure = Some(backpressure);
         old
     };
     if let Some(d) = old {
-        d.resolve(ctx, js::UNDEFINED);
+        d.resolve(cx, js::UNDEFINED);
     }
     Ok(())
 }
 
-fn unblock_write(ctx: Ctx, s: Raw) -> R<()> {
-    if stream(ctx, s)?.backpressure == Some(true) {
-        set_backpressure(ctx, s, false)?;
+fn unblock_write(cx: Ctx, s: Raw) -> R<()> {
+    if stream(cx, s)?.backpressure == Some(true) {
+        set_backpressure(cx, s, false)?;
     }
     Ok(())
 }
 
-fn clear_algorithms(ctx: Ctx, c: Raw) -> R<()> {
+fn clear_algorithms(cx: Ctx, c: Raw) -> R<()> {
     let old = {
-        let mut ct = controller(ctx, c)?;
+        let mut ct = controller(cx, c)?;
         (
             std::mem::take(&mut ct.transform),
             std::mem::take(&mut ct.flush),
@@ -109,69 +109,69 @@ fn clear_algorithms(ctx: Ctx, c: Raw) -> R<()> {
 }
 
 /// TransformStreamErrorWritableAndUnblockWrite.
-fn error_writable_and_unblock(ctx: Ctx, s: Raw, e: Raw) -> R<()> {
-    let (_, w, c) = parts(ctx, s)?;
-    clear_algorithms(ctx, c.raw())?;
-    let wc = writable::controller_of(ctx, w.raw())?;
-    writable::error_if_needed(ctx, wc.raw(), e)?;
-    unblock_write(ctx, s)
+fn error_writable_and_unblock(cx: Ctx, s: Raw, e: Raw) -> R<()> {
+    let (_, w, c) = parts(cx, s)?;
+    clear_algorithms(cx, c.raw())?;
+    let wc = writable::controller_of(cx, w.raw())?;
+    writable::error_if_needed(cx, wc.raw(), e)?;
+    unblock_write(cx, s)
 }
 
 /// TransformStreamError.
-fn error_stream(ctx: Ctx, s: Raw, e: Raw) -> R<()> {
-    let rc = readable_controller(ctx, s)?;
-    readable::dc_error(ctx, rc.raw(), e)?;
-    error_writable_and_unblock(ctx, s, e)
+fn error_stream(cx: Ctx, s: Raw, e: Raw) -> R<()> {
+    let rc = readable_controller(cx, s)?;
+    readable::dc_error(cx, rc.raw(), e)?;
+    error_writable_and_unblock(cx, s, e)
 }
 
 /// TransformStreamDefaultControllerEnqueue.
-pub(crate) fn enqueue(ctx: Ctx, c: Raw, chunk: Raw) -> R<()> {
-    let s = controller(ctx, c)?.stream.clone_ref();
-    let rc = readable_controller(ctx, s.raw())?;
-    if !readable::dc_can_close_or_enqueue(ctx, rc.raw())? {
+pub(crate) fn enqueue(cx: Ctx, c: Raw, chunk: Raw) -> R<()> {
+    let s = controller(cx, c)?.stream.clone_ref();
+    let rc = readable_controller(cx, s.raw())?;
+    if !readable::dc_can_close_or_enqueue(cx, rc.raw())? {
         return Err(js::type_error(
-            ctx,
+            cx,
             "the readable side cannot be enqueued to",
         ));
     }
-    if readable::dc_enqueue(ctx, rc.raw(), chunk).is_err() {
-        let e = js::take_exception(ctx);
-        error_writable_and_unblock(ctx, s.raw(), e.raw())?;
-        let r = stream(ctx, s.raw())?.readable.clone_ref();
-        let stored = readable::stored_error(ctx, r.raw())?;
-        return Err(js::throw(ctx, stored));
+    if readable::dc_enqueue(cx, rc.raw(), chunk).is_err() {
+        let e = js::take_exception(cx);
+        error_writable_and_unblock(cx, s.raw(), e.raw())?;
+        let r = stream(cx, s.raw())?.readable.clone_ref();
+        let stored = readable::stored_error(cx, r.raw())?;
+        return Err(js::throw(cx, stored));
     }
-    let bp = readable::dc_has_backpressure(ctx, rc.raw())?;
-    if Some(bp) != stream(ctx, s.raw())?.backpressure {
-        set_backpressure(ctx, s.raw(), true)?;
+    let bp = readable::dc_has_backpressure(cx, rc.raw())?;
+    if Some(bp) != stream(cx, s.raw())?.backpressure {
+        set_backpressure(cx, s.raw(), true)?;
     }
     Ok(())
 }
 
 /// TransformStreamDefaultControllerTerminate.
-fn terminate(ctx: Ctx, c: Raw) -> R<()> {
-    let s = controller(ctx, c)?.stream.clone_ref();
-    let rc = readable_controller(ctx, s.raw())?;
-    readable::dc_close(ctx, rc.raw())?;
-    let e = js::type_error_value(ctx, "the TransformStream was terminated");
-    error_writable_and_unblock(ctx, s.raw(), e.raw())
+fn terminate(cx: Ctx, c: Raw) -> R<()> {
+    let s = controller(cx, c)?.stream.clone_ref();
+    let rc = readable_controller(cx, s.raw())?;
+    readable::dc_close(cx, rc.raw())?;
+    let e = js::type_error_value(cx, "the TransformStream was terminated");
+    error_writable_and_unblock(cx, s.raw(), e.raw())
 }
 
 /// TransformStreamDefaultControllerPerformTransform.
-fn perform_transform(ctx: Ctx, c: Raw, chunk: Raw) -> R<V> {
-    let transform = controller(ctx, c)?.transform.clone_ref();
-    let p = transform.promise(ctx, &[chunk, c])?;
-    let s = controller(ctx, c)?.stream.clone_ref();
-    let on_error = js::closure(ctx, vec![s], |ctx, cap, args| {
-        error_stream(ctx, cap[0].raw(), args.get(0))?;
-        Err(js::throw(ctx, V::dup(ctx, args.get(0))))
+fn perform_transform(cx: Ctx, c: Raw, chunk: Raw) -> R<V> {
+    let transform = controller(cx, c)?.transform.clone_ref();
+    let p = transform.promise(cx, &[chunk, c])?;
+    let s = controller(cx, c)?.stream.clone_ref();
+    let on_error = js::closure(cx, vec![s], |cx, cap, args| {
+        error_stream(cx, cap[0].raw(), args.get(0))?;
+        Err(js::throw(cx, V::dup(cx, args.get(0))))
     })?;
-    js::then(ctx, p.raw(), js::UNDEFINED, on_error.raw())
+    js::then(cx, p.raw(), js::UNDEFINED, on_error.raw())
 }
 
-fn sink_write(ctx: Ctx, s: Raw, chunk: Raw) -> R<V> {
+fn sink_write(cx: Ctx, s: Raw, chunk: Raw) -> R<V> {
     let (backpressure, change, c) = {
-        let st = stream(ctx, s)?;
+        let st = stream(cx, s)?;
         (
             st.backpressure,
             st.backpressure_change
@@ -184,25 +184,25 @@ fn sink_write(ctx: Ctx, s: Raw, chunk: Raw) -> R<V> {
         && let Some(change) = change
     {
         let then = js::closure(
-            ctx,
-            vec![V::dup(ctx, s), c, V::dup(ctx, chunk)],
-            |ctx, cap, _| {
-                let w = stream(ctx, cap[0].raw())?.writable.clone_ref();
-                if writable::state_of(ctx, w.raw())? == WState::Erroring {
-                    let e = writable::stored_error(ctx, w.raw())?;
-                    return Err(js::throw(ctx, e));
+            cx,
+            vec![V::dup(cx, s), c, V::dup(cx, chunk)],
+            |cx, cap, _| {
+                let w = stream(cx, cap[0].raw())?.writable.clone_ref();
+                if writable::state_of(cx, w.raw())? == WState::Erroring {
+                    let e = writable::stored_error(cx, w.raw())?;
+                    return Err(js::throw(cx, e));
                 }
-                perform_transform(ctx, cap[1].raw(), cap[2].raw())
+                perform_transform(cx, cap[1].raw(), cap[2].raw())
             },
         )?;
-        return js::then(ctx, change.raw(), then.raw(), js::UNDEFINED);
+        return js::then(cx, change.raw(), then.raw(), js::UNDEFINED);
     }
-    perform_transform(ctx, c.raw(), chunk)
+    perform_transform(cx, c.raw(), chunk)
 }
 
 /// The finish promise of an algorithm that settles the other side.
 fn finish_with(
-    ctx: Ctx,
+    cx: Ctx,
     c: Raw,
     run: impl FnOnce(&Controller) -> Algo,
     args: &[Raw],
@@ -210,13 +210,13 @@ fn finish_with(
     on_err: impl Fn(Ctx, &[V], Raw) -> R<()> + 'static,
     captures: Vec<V>,
 ) -> R<V> {
-    if let Some(d) = &controller(ctx, c)?.finish {
+    if let Some(d) = &controller(cx, c)?.finish {
         return Ok(d.promise.clone_ref());
     }
-    let d = Deferred::new(ctx)?;
+    let d = Deferred::new(cx)?;
     let result = d.promise.clone_ref();
     let algo = {
-        let mut ct = controller(ctx, c)?;
+        let mut ct = controller(cx, c)?;
         let a = run(&ct);
         ct.finish = Some(Deferred {
             promise: d.promise.clone_ref(),
@@ -225,119 +225,117 @@ fn finish_with(
         });
         a
     };
-    let p = algo.promise(ctx, args)?;
-    clear_algorithms(ctx, c)?;
+    let p = algo.promise(cx, args)?;
+    clear_algorithms(cx, c)?;
     let mut caps = captures;
     caps.push(d.resolve.clone_ref());
     caps.push(d.reject.clone_ref());
     js::upon(
-        ctx,
+        cx,
         p.raw(),
         caps,
-        move |ctx, cap, _| {
+        move |cx, cap, _| {
             let n = cap.len();
-            match on_ok(ctx, &cap[..n - 2]) {
-                Ok(()) => {
-                    js::call(ctx, cap[n - 2].raw(), js::UNDEFINED, &[js::UNDEFINED]).map(drop)
-                }
+            match on_ok(cx, &cap[..n - 2]) {
+                Ok(()) => js::call(cx, cap[n - 2].raw(), js::UNDEFINED, &[js::UNDEFINED]).map(drop),
                 Err(_) => {
-                    let e = js::take_exception(ctx);
-                    js::call(ctx, cap[n - 1].raw(), js::UNDEFINED, &[e.raw()]).map(drop)
+                    let e = js::take_exception(cx);
+                    js::call(cx, cap[n - 1].raw(), js::UNDEFINED, &[e.raw()]).map(drop)
                 }
             }
         },
-        move |ctx, cap, e| {
+        move |cx, cap, e| {
             let n = cap.len();
-            on_err(ctx, &cap[..n - 2], e)?;
-            js::call(ctx, cap[n - 1].raw(), js::UNDEFINED, &[e]).map(drop)
+            on_err(cx, &cap[..n - 2], e)?;
+            js::call(cx, cap[n - 1].raw(), js::UNDEFINED, &[e]).map(drop)
         },
     )?;
     Ok(result)
 }
 
-fn sink_abort(ctx: Ctx, s: Raw, reason: Raw) -> R<V> {
-    let (r, _, c) = parts(ctx, s)?;
+fn sink_abort(cx: Ctx, s: Raw, reason: Raw) -> R<V> {
+    let (r, _, c) = parts(cx, s)?;
     finish_with(
-        ctx,
+        cx,
         c.raw(),
         |ct| ct.cancel.clone_ref(),
         &[reason],
-        |ctx, cap| {
+        |cx, cap| {
             let r = cap[0].raw();
-            if readable::state_of(ctx, r)? == State::Errored {
-                let e = readable::stored_error(ctx, r)?;
-                return Err(js::throw(ctx, e));
+            if readable::state_of(cx, r)? == State::Errored {
+                let e = readable::stored_error(cx, r)?;
+                return Err(js::throw(cx, e));
             }
-            let rc = readable_controller_of(ctx, r)?;
-            readable::dc_error(ctx, rc.raw(), cap[1].raw())
+            let rc = readable_controller_of(cx, r)?;
+            readable::dc_error(cx, rc.raw(), cap[1].raw())
         },
-        |ctx, cap, e| {
-            let rc = readable_controller_of(ctx, cap[0].raw())?;
-            readable::dc_error(ctx, rc.raw(), e)
+        |cx, cap, e| {
+            let rc = readable_controller_of(cx, cap[0].raw())?;
+            readable::dc_error(cx, rc.raw(), e)
         },
-        vec![r, V::dup(ctx, reason)],
+        vec![r, V::dup(cx, reason)],
     )
 }
 
-fn sink_close(ctx: Ctx, s: Raw) -> R<V> {
-    let (r, _, c) = parts(ctx, s)?;
+fn sink_close(cx: Ctx, s: Raw) -> R<V> {
+    let (r, _, c) = parts(cx, s)?;
     finish_with(
-        ctx,
+        cx,
         c.raw(),
         |ct| ct.flush.clone_ref(),
         &[c.raw()],
-        |ctx, cap| {
+        |cx, cap| {
             let r = cap[0].raw();
-            if readable::state_of(ctx, r)? == State::Errored {
-                let e = readable::stored_error(ctx, r)?;
-                return Err(js::throw(ctx, e));
+            if readable::state_of(cx, r)? == State::Errored {
+                let e = readable::stored_error(cx, r)?;
+                return Err(js::throw(cx, e));
             }
-            let rc = readable_controller_of(ctx, r)?;
-            readable::dc_close(ctx, rc.raw())
+            let rc = readable_controller_of(cx, r)?;
+            readable::dc_close(cx, rc.raw())
         },
-        |ctx, cap, e| {
-            let rc = readable_controller_of(ctx, cap[0].raw())?;
-            readable::dc_error(ctx, rc.raw(), e)
+        |cx, cap, e| {
+            let rc = readable_controller_of(cx, cap[0].raw())?;
+            readable::dc_error(cx, rc.raw(), e)
         },
         vec![r],
     )
 }
 
-fn source_cancel(ctx: Ctx, s: Raw, reason: Raw) -> R<V> {
-    let (_, w, c) = parts(ctx, s)?;
+fn source_cancel(cx: Ctx, s: Raw, reason: Raw) -> R<V> {
+    let (_, w, c) = parts(cx, s)?;
     finish_with(
-        ctx,
+        cx,
         c.raw(),
         |ct| ct.cancel.clone_ref(),
         &[reason],
-        |ctx, cap| {
+        |cx, cap| {
             let w = cap[0].raw();
-            if writable::state_of(ctx, w)? == WState::Errored {
-                let e = writable::stored_error(ctx, w)?;
-                return Err(js::throw(ctx, e));
+            if writable::state_of(cx, w)? == WState::Errored {
+                let e = writable::stored_error(cx, w)?;
+                return Err(js::throw(cx, e));
             }
-            let wc = writable::controller_of(ctx, w)?;
-            writable::error_if_needed(ctx, wc.raw(), cap[2].raw())?;
-            unblock_write(ctx, cap[1].raw())
+            let wc = writable::controller_of(cx, w)?;
+            writable::error_if_needed(cx, wc.raw(), cap[2].raw())?;
+            unblock_write(cx, cap[1].raw())
         },
-        |ctx, cap, e| {
-            let wc = writable::controller_of(ctx, cap[0].raw())?;
-            writable::error_if_needed(ctx, wc.raw(), e)?;
-            unblock_write(ctx, cap[1].raw())
+        |cx, cap, e| {
+            let wc = writable::controller_of(cx, cap[0].raw())?;
+            writable::error_if_needed(cx, wc.raw(), e)?;
+            unblock_write(cx, cap[1].raw())
         },
-        vec![w, V::dup(ctx, s), V::dup(ctx, reason)],
+        vec![w, V::dup(cx, s), V::dup(cx, reason)],
     )
 }
 
-fn source_pull(ctx: Ctx, s: Raw) -> R<V> {
-    set_backpressure(ctx, s, false)?;
-    let change = stream(ctx, s)?
+fn source_pull(cx: Ctx, s: Raw) -> R<V> {
+    set_backpressure(cx, s, false)?;
+    let change = stream(cx, s)?
         .backpressure_change
         .as_ref()
         .map(|d| d.promise.clone_ref());
     match change {
         Some(p) => Ok(p),
-        None => js::resolved(ctx, js::UNDEFINED),
+        None => js::resolved(cx, js::UNDEFINED),
     }
 }
 
@@ -371,7 +369,7 @@ impl Sides {
 /// InitializeTransformStream and the controller's setup: a transform
 /// stream of `transformer`, started when the returned promise resolves.
 pub(crate) fn new_transform(
-    ctx: Ctx,
+    cx: Ctx,
     new_target: Raw,
     class: Class,
     transformer: Transformer,
@@ -389,7 +387,7 @@ pub(crate) fn new_transform(
         readable_size,
     } = sides;
     let s = instance(
-        ctx,
+        cx,
         new_target,
         class,
         Stream {
@@ -400,17 +398,17 @@ pub(crate) fn new_transform(
             controller: V::undefined(),
         },
     )?;
-    let start = Deferred::new(ctx)?;
+    let start = Deferred::new(cx)?;
     let start_promise = start.promise.clone_ref();
-    let start_algo = js::closure(ctx, vec![start_promise], |_, c, _| Ok(c[0].clone_ref()))?;
-    let write = js::closure(ctx, vec![s.clone_ref()], |ctx, c, args| {
-        sink_write(ctx, c[0].raw(), args.get(0))
+    let start_algo = js::closure(cx, vec![start_promise], |_, c, _| Ok(c[0].clone_ref()))?;
+    let write = js::closure(cx, vec![s.clone_ref()], |cx, c, args| {
+        sink_write(cx, c[0].raw(), args.get(0))
     })?;
-    let abort = js::closure(ctx, vec![s.clone_ref()], |ctx, c, args| {
-        sink_abort(ctx, c[0].raw(), args.get(0))
+    let abort = js::closure(cx, vec![s.clone_ref()], |cx, c, args| {
+        sink_abort(cx, c[0].raw(), args.get(0))
     })?;
-    let close = js::closure(ctx, vec![s.clone_ref()], |ctx, c, _| {
-        sink_close(ctx, c[0].raw())
+    let close = js::closure(cx, vec![s.clone_ref()], |cx, c, _| {
+        sink_close(cx, c[0].raw())
     })?;
     let sink = writable::Sink {
         start: Algo::native(start_algo.clone_ref()),
@@ -418,15 +416,15 @@ pub(crate) fn new_transform(
         close: Algo::native(close),
         abort: Algo::native(abort),
     };
-    let (w, _) = writable::new_writable_stream(ctx, sink, writable_hwm, writable_size)?;
-    let pull = js::closure(ctx, vec![s.clone_ref()], |ctx, c, _| {
-        source_pull(ctx, c[0].raw())
+    let (w, _) = writable::new_writable_stream(cx, sink, writable_hwm, writable_size)?;
+    let pull = js::closure(cx, vec![s.clone_ref()], |cx, c, _| {
+        source_pull(cx, c[0].raw())
     })?;
-    let cancel_source = js::closure(ctx, vec![s.clone_ref()], |ctx, c, args| {
-        source_cancel(ctx, c[0].raw(), args.get(0))
+    let cancel_source = js::closure(cx, vec![s.clone_ref()], |cx, c, args| {
+        source_cancel(cx, c[0].raw(), args.get(0))
     })?;
     let (r, _) = readable::new_default_stream(
-        ctx,
+        cx,
         Algo::native(start_algo),
         Algo::native(pull),
         Algo::native(cancel_source),
@@ -434,13 +432,13 @@ pub(crate) fn new_transform(
         readable_size,
     )?;
     {
-        let mut st = stream(ctx, s.raw())?;
+        let mut st = stream(cx, s.raw())?;
         st.readable = r;
         st.writable = w;
     }
-    set_backpressure(ctx, s.raw(), true)?;
+    set_backpressure(cx, s.raw(), true)?;
     let c = instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::TransformStreamDefaultController,
         Controller {
@@ -451,43 +449,43 @@ pub(crate) fn new_transform(
             finish: None,
         },
     )?;
-    stream(ctx, s.raw())?.controller = c.clone_ref();
+    stream(cx, s.raw())?.controller = c.clone_ref();
     Ok((s, c, start))
 }
 
 native!(
     /// The default transform: chunks pass through.
-    fn identity_transform(ctx, this, args) {
-        enqueue(ctx, args.get(1), args.get(0))?;
+    fn identity_transform(cx, this, args) {
+        enqueue(cx, args.get(1), args.get(0))?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn stream_constructor(ctx, this, args) {
+    fn stream_constructor(cx, this, args) {
         let transformer = args.get(0);
         if !js::is_nullish(transformer) && !js::is_object(transformer) {
-            return Err(js::type_error(ctx, "the transformer must be an object"));
+            return Err(js::type_error(cx, "the transformer must be an object"));
         }
-        let writable_strategy = QueuingStrategy::read(ctx, args.get(1))?;
-        let readable_strategy = QueuingStrategy::read(ctx, args.get(2))?;
-        let t = V::dup(ctx, transformer);
-        let cancel = method(ctx, transformer, "cancel")?;
-        let flush = method(ctx, transformer, "flush")?;
+        let writable_strategy = QueuingStrategy::read(cx, args.get(1))?;
+        let readable_strategy = QueuingStrategy::read(cx, args.get(2))?;
+        let t = V::dup(cx, transformer);
+        let cancel = method(cx, transformer, "cancel")?;
+        let flush = method(cx, transformer, "flush")?;
         if js::is_object(transformer) {
             for key in ["readableType", "writableType"] {
-                let v = js::get(ctx, transformer, key)?;
+                let v = js::get(cx, transformer, key)?;
                 if !v.is_undefined() {
-                    return Err(js::range_error(ctx, &format!("{key} is not supported")));
+                    return Err(js::range_error(cx, &format!("{key} is not supported")));
                 }
             }
         }
-        let start = method(ctx, transformer, "start")?;
-        let transform = method(ctx, transformer, "transform")?;
-        let readable_hwm = readable_strategy.high_water_mark(ctx, 0.0)?;
-        let writable_hwm = writable_strategy.high_water_mark(ctx, 1.0)?;
+        let start = method(cx, transformer, "start")?;
+        let transform = method(cx, transformer, "transform")?;
+        let readable_hwm = readable_strategy.high_water_mark(cx, 0.0)?;
+        let writable_hwm = writable_strategy.high_water_mark(cx, 1.0)?;
         let transform = if transform.is_undefined() {
-            Algo::native(js::function(ctx, c"transform", identity_transform, 2)?)
+            Algo::native(js::function(cx, c"transform", identity_transform, 2)?)
         } else {
             Algo::method(transform, &t)
         };
@@ -502,30 +500,30 @@ native!(
             readable_hwm,
             readable_size: readable_strategy.size,
         };
-        let (s, c, start_promise) = new_transform(ctx, this, Class::TransformStream, transformer, sides)?;
-        let started = Algo::method(start, &t).call(ctx, &[c.raw()])?;
-        start_promise.resolve(ctx, started.raw());
+        let (s, c, start_promise) = new_transform(cx, this, Class::TransformStream, transformer, sides)?;
+        let started = Algo::method(start, &t).call(cx, &[c.raw()])?;
+        start_promise.resolve(cx, started.raw());
         Ok(s)
     }
 );
 
 native!(
-    fn stream_readable(ctx, this, args) {
-        Ok(stream(ctx, this)?.readable.clone_ref())
+    fn stream_readable(cx, this, args) {
+        Ok(stream(cx, this)?.readable.clone_ref())
     }
 );
 
 native!(
-    fn stream_writable(ctx, this, args) {
-        Ok(stream(ctx, this)?.writable.clone_ref())
+    fn stream_writable(cx, this, args) {
+        Ok(stream(cx, this)?.writable.clone_ref())
     }
 );
 
 native!(
-    fn controller_desired_size(ctx, this, args) {
-        let s = controller(ctx, this)?.stream.clone_ref();
-        let rc = readable_controller(ctx, s.raw())?;
-        Ok(match readable::dc_desired_size(ctx, rc.raw())? {
+    fn controller_desired_size(cx, this, args) {
+        let s = controller(cx, this)?.stream.clone_ref();
+        let rc = readable_controller(cx, s.raw())?;
+        Ok(match readable::dc_desired_size(cx, rc.raw())? {
             Some(n) => V::num(n),
             None => V::null(),
         })
@@ -533,23 +531,23 @@ native!(
 );
 
 native!(
-    fn controller_enqueue(ctx, this, args) {
-        enqueue(ctx, this, args.get(0))?;
+    fn controller_enqueue(cx, this, args) {
+        enqueue(cx, this, args.get(0))?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn controller_error(ctx, this, args) {
-        let s = controller(ctx, this)?.stream.clone_ref();
-        error_stream(ctx, s.raw(), args.get(0))?;
+    fn controller_error(cx, this, args) {
+        let s = controller(cx, this)?.stream.clone_ref();
+        error_stream(cx, s.raw(), args.get(0))?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn controller_terminate(ctx, this, args) {
-        terminate(ctx, this)?;
+    fn controller_terminate(cx, this, args) {
+        terminate(cx, this)?;
         Ok(V::undefined())
     }
 );

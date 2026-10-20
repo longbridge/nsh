@@ -51,30 +51,30 @@ impl Keymap {
     }
 }
 
-fn keymap<'a>(ctx: Ctx) -> &'a Keymap {
+fn keymap<'a>(cx: Ctx) -> &'a Keymap {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).keymap }
+    unsafe { &(*crate::state::state(cx)).keymap }
 }
 
-fn os(ctx: Ctx) -> nsh_core::platform::Os {
+fn os(cx: Ctx) -> nsh_core::platform::Os {
     // SAFETY: the state's renderer, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).dom }.os()
+    unsafe { &(*crate::state::state(cx)).dom }.os()
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
 /// the app's OS, or for a browser the platform it runs on.
-fn apple(ctx: Ctx) -> bool {
-    apple_keys(os(ctx), crate::env::current(ctx).apple_keyboard)
+fn apple(cx: Ctx) -> bool {
+    apple_keys(os(cx), crate::env::current(cx).apple_keyboard)
 }
 
 /// The `keymap` object.
-fn make(ctx: Ctx) -> Raw {
+fn make(cx: Ctx) -> Raw {
     let made = (|| -> R<V> {
-        let obj = js::new_object(ctx)?;
-        let bind = js::function(ctx, c"bind", bind, 3)?;
-        js::define(ctx, obj.raw(), "bind", bind, true)?;
-        let label = js::function(ctx, c"label", label, 1)?;
-        js::define(ctx, obj.raw(), "label", label, true)?;
+        let obj = js::new_object(cx)?;
+        let bind = js::function(cx, c"bind", bind, 3)?;
+        js::define(cx, obj.raw(), "bind", bind, true)?;
+        let label = js::function(cx, c"label", label, 1)?;
+        js::define(cx, obj.raw(), "label", label, true)?;
         Ok(obj)
     })();
     made.map_or(qjs::JS_EXCEPTION, V::take)
@@ -82,24 +82,24 @@ fn make(ctx: Ctx) -> Raw {
 
 /// The options: `when` (`undefined`, `"always"` or `"notEditing"`) and
 /// `repeat`.
-fn parse_options(ctx: Ctx, options: Raw) -> R<(When, bool)> {
+fn parse_options(cx: Ctx, options: Raw) -> R<(When, bool)> {
     if js::is_nullish(options) {
         return Ok((When::Auto, false));
     }
     if !js::is_object(options) {
-        return Err(type_error(ctx, "keymap.bind: options must be an object"));
+        return Err(type_error(cx, "keymap.bind: options must be an object"));
     }
-    let repeat = js::to_bool(ctx, js::get(ctx, options, "repeat")?.raw());
-    let value = js::get(ctx, options, "when")?;
+    let repeat = js::to_bool(cx, js::get(cx, options, "repeat")?.raw());
+    let value = js::get(cx, options, "when")?;
     if value.is_undefined() {
         return Ok((When::Auto, repeat));
     }
-    let when = match js::to_string(ctx, value.raw())?.as_str() {
+    let when = match js::to_string(cx, value.raw())?.as_str() {
         "always" => When::Always,
         "notEditing" => When::NotEditing,
         other => {
             return Err(type_error(
-                ctx,
+                cx,
                 &format!("keymap.bind: when must be \"always\" or \"notEditing\", not {other:?}"),
             ));
         }
@@ -110,55 +110,55 @@ fn parse_options(ctx: Ctx, options: Raw) -> R<(When, bool)> {
 native! {
     /// `label(keystroke)`: the keystroke as hints show it here (`⇧⌘L`,
     /// `Ctrl+Shift+L`).
-    fn label(ctx, _this, args) {
-        let text = js::to_string(ctx, args.get(0))?;
-        let keystroke = Keystroke::parse_with(&text, apple(ctx))
-            .map_err(|e| type_error(ctx, &format!("keymap.label: {e}")))?;
-        js::string(ctx, &keystroke.label(os(ctx), apple(ctx)))
+    fn label(cx, _this, args) {
+        let text = js::to_string(cx, args.get(0))?;
+        let keystroke = Keystroke::parse_with(&text, apple(cx))
+            .map_err(|e| type_error(cx, &format!("keymap.label: {e}")))?;
+        js::string(cx, &keystroke.label(os(cx), apple(cx)))
     }
 }
 
 native! {
     /// `bind(keystroke, handler, options?)` or `bind({ keystroke: handler },
     /// options?)`: returns a function that removes the bindings.
-    fn bind(ctx, _this, args) {
+    fn bind(cx, _this, args) {
         let first = args.get(0);
-        let (pairs, options) = if js::is_object(first) && !js::is_function(ctx, first) {
-            (js::record(ctx, first)?, args.get(1))
+        let (pairs, options) = if js::is_object(first) && !js::is_function(cx, first) {
+            (js::record(cx, first)?, args.get(1))
         } else {
-            let text = match js::opt_string(ctx, first)? {
+            let text = match js::opt_string(cx, first)? {
                 Some(text) if !js::is_nullish(first) => text,
                 _ => {
                     return Err(type_error(
-                        ctx,
+                        cx,
                         "keymap.bind: expected a keystroke (\"mod+k\") or an object of keystrokes and handlers",
                     ));
                 }
             };
-            (vec![(text, V::dup(ctx, args.get(1)))], args.get(2))
+            (vec![(text, V::dup(cx, args.get(1)))], args.get(2))
         };
-        let (when, repeat) = parse_options(ctx, options)?;
-        let (os, apple) = (os(ctx), apple(ctx));
+        let (when, repeat) = parse_options(cx, options)?;
+        let (os, apple) = (os(cx), apple(cx));
         // Every binding is checked before any is made.
         let mut parsed = Vec::with_capacity(pairs.len());
         for (text, handler) in pairs {
             let keystroke = Keystroke::parse_with(&text, apple)
-                .map_err(|e| type_error(ctx, &format!("keymap.bind: {e}")))?;
+                .map_err(|e| type_error(cx, &format!("keymap.bind: {e}")))?;
             if let Some(why) = keystroke.reserved(os) {
                 return Err(type_error(
-                    ctx,
+                    cx,
                     &format!("keymap.bind: {text:?} cannot be bound: {why}"),
                 ));
             }
-            if !js::is_function(ctx, handler.raw()) {
+            if !js::is_function(cx, handler.raw()) {
                 return Err(type_error(
-                    ctx,
+                    cx,
                     &format!("keymap.bind: the handler of {text:?} is not a function"),
                 ));
             }
             parsed.push((text, keystroke, handler));
         }
-        let k = keymap(ctx);
+        let k = keymap(cx);
         let first_id = k.next.get() + 1;
         let count = parsed.len() as u32;
         k.next.set(first_id + count);
@@ -174,23 +174,23 @@ native! {
             },
         ));
         if was_empty && count > 0 {
-            let on = js::function(ctx, c"onKeyCommand", on_key_command, 1)?;
-            crate::dom::set_handler(ctx, ROOT_ID, EventKind::KeyCommand, on.raw())
+            let on = js::function(cx, c"onKeyCommand", on_key_command, 1)?;
+            crate::dom::set_handler(cx, ROOT_ID, EventKind::KeyCommand, on.raw())
                 .map_err(|_| js::Throw)?;
         }
-        send(ctx)?;
-        let unbind = closure(ctx, Vec::new(), move |ctx, _, _| {
-            unbind(ctx, first_id..first_id + count)?;
+        send(cx)?;
+        let unbind = closure(cx, Vec::new(), move |cx, _, _| {
+            unbind(cx, first_id..first_id + count)?;
             Ok(V::undefined())
         })?;
-        undo_with_owner(ctx, &unbind);
+        undo_with_owner(cx, &unbind);
         Ok(unbind)
     }
 }
 
 /// Removes the bindings with ids in `ids` (once: later calls find none).
-fn unbind(ctx: Ctx, ids: std::ops::Range<u32>) -> R<()> {
-    let k = keymap(ctx);
+fn unbind(cx: Ctx, ids: std::ops::Range<u32>) -> R<()> {
+    let k = keymap(cx);
     let (gone, empty) = {
         let mut bindings = k.bindings.borrow_mut();
         let gone: Vec<Binding> = bindings.extract_if(.., |b| ids.contains(&b.id)).collect();
@@ -202,29 +202,29 @@ fn unbind(ctx: Ctx, ids: std::ops::Range<u32>) -> R<()> {
     // The handlers are freed with no borrow held.
     drop(gone);
     if empty {
-        crate::dom::set_handler(ctx, ROOT_ID, EventKind::KeyCommand, UNDEFINED)
+        crate::dom::set_handler(cx, ROOT_ID, EventKind::KeyCommand, UNDEFINED)
             .map_err(|_| js::Throw)?;
     }
-    send(ctx)
+    send(cx)
 }
 
 /// The function undoing a binding runs when the current owner (a
 /// component, an effect) goes, or, at a module's top level, when hot
 /// module replacement runs the module again.
-fn undo_with_owner(ctx: Ctx, unbind: &V) {
-    if crate::reactive::has_owner(ctx) {
+fn undo_with_owner(cx: Ctx, unbind: &V) {
+    if crate::reactive::has_owner(cx) {
         let mut f = unbind.raw();
         // SAFETY: one borrowed argument; the result is a new reference.
-        let r = unsafe { crate::reactive::on_cleanup(ctx, UNDEFINED, 1, &mut f) };
-        drop(V::own(ctx, r));
+        let r = unsafe { crate::reactive::on_cleanup(cx, UNDEFINED, 1, &mut f) };
+        drop(V::own(cx, r));
     } else {
-        crate::hot::undo_on_rerun(ctx, unbind.clone_ref());
+        crate::hot::undo_on_rerun(cx, unbind.clone_ref());
     }
 }
 
 /// Sends the table to the platform.
-fn send(ctx: Ctx) -> R<()> {
-    let table = keymap(ctx)
+fn send(cx: Ctx) -> R<()> {
+    let table = keymap(cx)
         .bindings
         .borrow()
         .iter()
@@ -234,13 +234,13 @@ fn send(ctx: Ctx) -> R<()> {
         id: ROOT_ID,
         prop: Prop::Keymap(Arc::new(nsh_core::keymap::Keymap::new(table))),
     };
-    crate::dom::push_op(ctx, op).map_err(|_| js::Throw)
+    crate::dom::push_op(cx, op).map_err(|_| js::Throw)
 }
 
 /// The root's `onKeyCommand(id)`: runs the binding's handler with its
 /// keystroke (as written).
 unsafe extern "C" fn on_key_command(
-    ctx: Ctx,
+    cx: Ctx,
     _this: Raw,
     argc: std::ffi::c_int,
     argv: *mut Raw,
@@ -248,8 +248,8 @@ unsafe extern "C" fn on_key_command(
     // SAFETY: QuickJS passes `argc` live arguments.
     let args = unsafe { Args::new(argc, argv) };
     let run = || -> R<V> {
-        let id = js::to_number(ctx, args.get(0))? as u32;
-        let found = keymap(ctx)
+        let id = js::to_number(cx, args.get(0))? as u32;
+        let found = keymap(cx)
             .bindings
             .borrow()
             .iter()
@@ -259,8 +259,8 @@ unsafe extern "C" fn on_key_command(
         let Some((handler, text)) = found else {
             return Ok(V::undefined());
         };
-        let text = js::string(ctx, &text)?;
-        js::call(ctx, handler.raw(), UNDEFINED, &[text.raw()])
+        let text = js::string(cx, &text)?;
+        js::call(cx, handler.raw(), UNDEFINED, &[text.raw()])
     };
     run().map_or(qjs::JS_EXCEPTION, V::take)
 }

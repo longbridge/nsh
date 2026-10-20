@@ -166,137 +166,136 @@ pub(crate) struct Touches {
     gesture: Cell<PanGesture>,
 }
 
-fn touches<'a>(ctx: *mut JsContext) -> &'a Touches {
+fn touches<'a>(cx: *mut JsContext) -> &'a Touches {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).touches }
+    unsafe { &(*crate::state::state(cx)).touches }
 }
 
 fn number(v: f64) -> JsValue {
     qjs::JS_NewFloat64(v)
 }
 
-fn set(ctx: *mut JsContext, obj: JsValue, key: &CStr, v: JsValue) {
+fn set(cx: *mut JsContext, obj: JsValue, key: &CStr, v: JsValue) {
     // SAFETY: the object takes `v`.
-    unsafe { qjs::JS_SetPropertyStr(ctx, obj, key.as_ptr(), v) };
+    unsafe { qjs::JS_SetPropertyStr(cx, obj, key.as_ptr(), v) };
 }
 
-fn get(ctx: *mut JsContext, obj: JsValue, key: &CStr) -> JsValue {
+fn get(cx: *mut JsContext, obj: JsValue, key: &CStr) -> JsValue {
     // SAFETY: a property read of a live value.
     unsafe {
         if !qjs::JS_IsObject(obj) {
             return UNDEFINED;
         }
-        qjs::JS_GetPropertyStr(ctx, obj, key.as_ptr())
+        qjs::JS_GetPropertyStr(cx, obj, key.as_ptr())
     }
 }
 
-fn get_number(ctx: *mut JsContext, obj: JsValue, key: &CStr) -> f64 {
-    let v = get(ctx, obj, key);
+fn get_number(cx: *mut JsContext, obj: JsValue, key: &CStr) -> f64 {
+    let v = get(cx, obj, key);
     let mut n = 0f64;
     // SAFETY: converting and freeing a value got.
     unsafe {
-        qjs::JS_ToFloat64(ctx, &mut n, v);
-        qjs::JS_FreeValue(ctx, v);
+        qjs::JS_ToFloat64(cx, &mut n, v);
+        qjs::JS_FreeValue(cx, v);
     }
     n
 }
 
-fn free(ctx: *mut JsContext, v: JsValue) {
+fn free(cx: *mut JsContext, v: JsValue) {
     // SAFETY: an owned value.
-    unsafe { qjs::JS_FreeValue(ctx, v) };
+    unsafe { qjs::JS_FreeValue(cx, v) };
 }
 
 /// A touch point as JS sees it.
-fn point(ctx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
+fn point(cx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
     // SAFETY: a new object.
-    let o = unsafe { qjs::JS_NewObject(ctx) };
-    set(ctx, o, c"identifier", number(p.id as f64));
-    set(ctx, o, c"target", number(p.target as f64));
-    set(ctx, o, c"pageX", number(p.page.x.0 as f64));
-    set(ctx, o, c"pageY", number(p.page.y.0 as f64));
-    set(ctx, o, c"locationX", number(p.location.x.0 as f64));
-    set(ctx, o, c"locationY", number(p.location.y.0 as f64));
-    set(ctx, o, c"timestamp", number(timestamp));
+    let o = unsafe { qjs::JS_NewObject(cx) };
+    set(cx, o, c"identifier", number(p.id as f64));
+    set(cx, o, c"target", number(p.target as f64));
+    set(cx, o, c"pageX", number(p.page.x.0 as f64));
+    set(cx, o, c"pageY", number(p.page.y.0 as f64));
+    set(cx, o, c"locationX", number(p.location.x.0 as f64));
+    set(cx, o, c"locationY", number(p.location.y.0 as f64));
+    set(cx, o, c"timestamp", number(timestamp));
     o
 }
 
-fn array(ctx: *mut JsContext, mut values: Vec<JsValue>) -> JsValue {
+fn array(cx: *mut JsContext, mut values: Vec<JsValue>) -> JsValue {
     // SAFETY: the array takes the values.
-    unsafe { qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr()) }
+    unsafe { qjs::JS_NewArrayFrom(cx, values.len() as c_int, values.as_mut_ptr()) }
 }
 
 /// `e.stopPropagation()`.
 unsafe extern "C" fn stop_propagation(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    set(ctx, this, c"stopped", qjs::JS_TRUE);
+    set(cx, this, c"stopped", qjs::JS_TRUE);
     UNDEFINED
 }
 
 /// The event handlers get: about `about`, with `touches` down and
 /// `changed`.
 fn event(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     about: &TouchPoint,
     touches: &[&TouchPoint],
     changed: &[&TouchPoint],
     timestamp: f64,
 ) -> JsValue {
     // SAFETY: a new object taking its fields.
-    let e = unsafe { qjs::JS_NewObject(ctx) };
-    set(ctx, e, c"identifier", number(about.id as f64));
-    set(ctx, e, c"locationX", number(about.location.x.0 as f64));
-    set(ctx, e, c"locationY", number(about.location.y.0 as f64));
-    set(ctx, e, c"pageX", number(about.page.x.0 as f64));
-    set(ctx, e, c"pageY", number(about.page.y.0 as f64));
-    set(ctx, e, c"target", number(about.target as f64));
-    set(ctx, e, c"timestamp", number(timestamp));
-    let list =
-        |ps: &[&TouchPoint]| array(ctx, ps.iter().map(|p| point(ctx, p, timestamp)).collect());
-    set(ctx, e, c"touches", list(touches));
-    set(ctx, e, c"changedTouches", list(changed));
-    set(ctx, e, c"stopped", qjs::JS_FALSE);
+    let e = unsafe { qjs::JS_NewObject(cx) };
+    set(cx, e, c"identifier", number(about.id as f64));
+    set(cx, e, c"locationX", number(about.location.x.0 as f64));
+    set(cx, e, c"locationY", number(about.location.y.0 as f64));
+    set(cx, e, c"pageX", number(about.page.x.0 as f64));
+    set(cx, e, c"pageY", number(about.page.y.0 as f64));
+    set(cx, e, c"target", number(about.target as f64));
+    set(cx, e, c"timestamp", number(timestamp));
+    let list = |ps: &[&TouchPoint]| array(cx, ps.iter().map(|p| point(cx, p, timestamp)).collect());
+    set(cx, e, c"touches", list(touches));
+    set(cx, e, c"changedTouches", list(changed));
+    set(cx, e, c"stopped", qjs::JS_FALSE);
     set(
-        ctx,
+        cx,
         e,
         c"stopPropagation",
-        reactive::new_function(ctx, c"stopPropagation", stop_propagation, 0),
+        reactive::new_function(cx, c"stopPropagation", stop_propagation, 0),
     );
     // SAFETY: a dup the object holds (a cycle the GC collects).
-    set(ctx, e, c"nativeEvent", unsafe { qjs::JS_DupValue(ctx, e) });
+    set(cx, e, c"nativeEvent", unsafe { qjs::JS_DupValue(cx, e) });
     e
 }
 
-fn stopped(ctx: *mut JsContext, e: JsValue) -> bool {
-    let v = get(ctx, e, c"stopped");
+fn stopped(cx: *mut JsContext, e: JsValue) -> bool {
+    let v = get(cx, e, c"stopped");
     // SAFETY: an inline check of a value got, then freed.
-    let s = unsafe { qjs::JS_ToBool(ctx, v) == 1 };
-    free(ctx, v);
+    let s = unsafe { qjs::JS_ToBool(cx, v) == 1 };
+    free(cx, v);
     s
 }
 
 /// Calls node `id`'s handler `prop` with `e`; its result (owned).
-fn call(ctx: *mut JsContext, id: NodeId, prop: u8, e: JsValue) -> Result<JsValue, JsValue> {
-    call_with(ctx, id, prop, &mut [e])
+fn call(cx: *mut JsContext, id: NodeId, prop: u8, e: JsValue) -> Result<JsValue, JsValue> {
+    call_with(cx, id, prop, &mut [e])
 }
 
 /// Calls node `id`'s handler `prop` with `args` (borrowed); its result
 /// (owned).
 fn call_with(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     id: NodeId,
     prop: u8,
     args: &mut [JsValue],
 ) -> Result<JsValue, JsValue> {
-    let Some(f) = dom::touch_handler(ctx, id, prop) else {
+    let Some(f) = dom::touch_handler(cx, id, prop) else {
         return Ok(UNDEFINED);
     };
     // SAFETY: an owned function, called then freed.
-    let r = unsafe { qjs::JS_Call(ctx, f, UNDEFINED, args.len() as c_int, args.as_mut_ptr()) };
-    free(ctx, f);
+    let r = unsafe { qjs::JS_Call(cx, f, UNDEFINED, args.len() as c_int, args.as_mut_ptr()) };
+    free(cx, f);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(r) } {
         Err(r)
@@ -306,69 +305,69 @@ fn call_with(
 }
 
 /// Calls `prop` with `args` and tells whether it returned `true`.
-fn asks(ctx: *mut JsContext, id: NodeId, prop: u8, args: &mut [JsValue]) -> Result<bool, JsValue> {
-    let r = call_with(ctx, id, prop, args)?;
+fn asks(cx: *mut JsContext, id: NodeId, prop: u8, args: &mut [JsValue]) -> Result<bool, JsValue> {
+    let r = call_with(cx, id, prop, args)?;
     // SAFETY: an inline check of an owned value.
     let yes = unsafe { qjs::JS_IsBool(r) && qjs::JS_VALUE_GET_BOOL(r) };
-    free(ctx, r);
+    free(cx, r);
     Ok(yes)
 }
 
-fn run(ctx: *mut JsContext, id: NodeId, prop: u8, e: JsValue) -> Result<(), JsValue> {
-    call(ctx, id, prop, e).map(|r| free(ctx, r))
+fn run(cx: *mut JsContext, id: NodeId, prop: u8, e: JsValue) -> Result<(), JsValue> {
+    call(cx, id, prop, e).map(|r| free(cx, r))
 }
 
 /// `name` on `path` (innermost first): capture outside in, then bubble.
-fn two_phase(ctx: *mut JsContext, path: &[NodeId], name: &str, e: JsValue) -> Result<(), JsValue> {
+fn two_phase(cx: *mut JsContext, path: &[NodeId], name: &str, e: JsValue) -> Result<(), JsValue> {
     let capture = index(&format!("{name}Capture"));
     let bubble = index(name);
     for &id in path.iter().rev() {
-        if stopped(ctx, e) {
+        if stopped(cx, e) {
             return Ok(());
         }
-        run(ctx, id, capture, e)?;
+        run(cx, id, capture, e)?;
     }
     for &id in path {
-        if stopped(ctx, e) {
+        if stopped(cx, e) {
             return Ok(());
         }
-        run(ctx, id, bubble, e)?;
+        run(cx, id, bubble, e)?;
     }
     Ok(())
 }
 
-fn command(ctx: *mut JsContext, id: NodeId, command: Command) -> Result<(), JsValue> {
-    dom::push_op(ctx, Op::Command { id, command })
+fn command(cx: *mut JsContext, id: NodeId, command: Command) -> Result<(), JsValue> {
+    dom::push_op(cx, Op::Command { id, command })
 }
 
-fn grant(ctx: *mut JsContext, id: NodeId, e: JsValue) -> Result<(), JsValue> {
-    let t = touches(ctx);
+fn grant(cx: *mut JsContext, id: NodeId, e: JsValue) -> Result<(), JsValue> {
+    let t = touches(cx);
     t.responder.set(Some(id));
-    let block = asks(ctx, id, index("onResponderGrant"), &mut [e])?;
+    let block = asks(cx, id, index("onResponderGrant"), &mut [e])?;
     if block {
-        command(ctx, id, Command::SetJsResponder { block: true })?;
+        command(cx, id, Command::SetJsResponder { block: true })?;
     } else if t.blocks.get() {
-        command(ctx, 1, Command::ClearJsResponder)?;
+        command(cx, 1, Command::ClearJsResponder)?;
     }
     t.blocks.set(block);
     Ok(())
 }
 
-fn release(ctx: *mut JsContext) -> Result<(), JsValue> {
-    let t = touches(ctx);
+fn release(cx: *mut JsContext) -> Result<(), JsValue> {
+    let t = touches(cx);
     t.responder.set(None);
     if t.blocks.replace(false) {
-        command(ctx, 1, Command::ClearJsResponder)?;
+        command(cx, 1, Command::ClearJsResponder)?;
     }
     Ok(())
 }
 
 /// The negotiation's `gestureState` (owned): the gesture since the first
 /// finger went down.
-fn gesture_state(ctx: *mut JsContext) -> JsValue {
-    let g = touches(ctx).gesture.get();
+fn gesture_state(cx: *mut JsContext) -> JsValue {
+    let g = touches(cx).gesture.get();
     // SAFETY: a new object taking its fields.
-    let o = unsafe { qjs::JS_NewObject(ctx) };
+    let o = unsafe { qjs::JS_NewObject(cx) };
     for (k, v) in [
         (c"moveX", g.position.x.0),
         (c"moveY", g.position.y.0),
@@ -379,10 +378,10 @@ fn gesture_state(ctx: *mut JsContext) -> JsValue {
         (c"vx", g.vx),
         (c"vy", g.vy),
     ] {
-        set(ctx, o, k, number(v as f64));
+        set(cx, o, k, number(v as f64));
     }
     set(
-        ctx,
+        cx,
         o,
         c"numberActiveTouches",
         number(g.active_touches as f64),
@@ -394,11 +393,11 @@ fn gesture_state(ctx: *mut JsContext) -> JsValue {
 /// `onStartShouldSetResponder` or `onMoveShouldSetResponder`), from the
 /// views around both the target and the current responder, the responder
 /// itself and views waiting for their pan excluded.
-fn negotiate(ctx: *mut JsContext, kind: &str, path: &[NodeId], e: JsValue) -> Result<(), JsValue> {
-    let responder = touches(ctx).responder.get();
+fn negotiate(cx: *mut JsContext, kind: &str, path: &[NodeId], e: JsValue) -> Result<(), JsValue> {
+    let responder = touches(cx).responder.get();
     let mut from = 0;
     if let Some(r) = responder {
-        while from < path.len() && !dom::is_ancestor_of(ctx, path[from], r) {
+        while from < path.len() && !dom::is_ancestor_of(cx, path[from], r) {
             from += 1;
         }
         if path.get(from) == Some(&r) {
@@ -411,14 +410,14 @@ fn negotiate(ctx: *mut JsContext, kind: &str, path: &[NodeId], e: JsValue) -> Re
     // Made for the first handler asked.
     let mut gs = UNDEFINED;
     let mut ask = |id: NodeId, prop: u8| -> Result<bool, JsValue> {
-        if dom::pan_gated(ctx, id) || !dom::touch_handler_exists(ctx, id, prop) {
+        if dom::pan_gated(cx, id) || !dom::touch_handler_exists(cx, id, prop) {
             return Ok(false);
         }
         // SAFETY: an inline tag check.
         if unsafe { qjs::JS_IsUndefined(gs) } {
-            gs = gesture_state(ctx);
+            gs = gesture_state(cx);
         }
-        asks(ctx, id, prop, &mut [e, gs])
+        asks(cx, id, prop, &mut [e, gs])
     };
     let mut wanting = None;
     let mut result = Ok(());
@@ -450,36 +449,36 @@ fn negotiate(ctx: *mut JsContext, kind: &str, path: &[NodeId], e: JsValue) -> Re
             }
         }
     }
-    free(ctx, gs);
+    free(cx, gs);
     result?;
     match wanting {
-        Some(wanting) if Some(wanting) != responder => take_over(ctx, wanting, e),
+        Some(wanting) if Some(wanting) != responder => take_over(cx, wanting, e),
         _ => Ok(()),
     }
 }
 
 /// View `wanting` wants the touches: it becomes the responder unless the
 /// current one refuses to let go.
-fn take_over(ctx: *mut JsContext, wanting: NodeId, e: JsValue) -> Result<(), JsValue> {
-    if let Some(r) = touches(ctx).responder.get() {
+fn take_over(cx: *mut JsContext, wanting: NodeId, e: JsValue) -> Result<(), JsValue> {
+    if let Some(r) = touches(cx).responder.get() {
         let request = index("onResponderTerminationRequest");
-        if dom::touch_handler_exists(ctx, r, request) {
-            let r_ok = call(ctx, r, request, e)?;
+        if dom::touch_handler_exists(cx, r, request) {
+            let r_ok = call(cx, r, request, e)?;
             // SAFETY: an inline check of an owned value.
             let refused = unsafe { qjs::JS_IsBool(r_ok) && !qjs::JS_VALUE_GET_BOOL(r_ok) };
-            free(ctx, r_ok);
+            free(cx, r_ok);
             if refused {
-                return run(ctx, wanting, index("onResponderReject"), e);
+                return run(cx, wanting, index("onResponderReject"), e);
             }
         }
-        run(ctx, r, index("onResponderTerminate"), e)?;
+        run(cx, r, index("onResponderTerminate"), e)?;
     }
-    grant(ctx, wanting, e)
+    grant(cx, wanting, e)
 }
 
 /// Delivers a touch event to the JS handlers along its path.
-pub(crate) fn dispatch(ctx: *mut JsContext, touch: &TouchEvent) -> Result<(), JsValue> {
-    let t = touches(ctx);
+pub(crate) fn dispatch(cx: *mut JsContext, touch: &TouchEvent) -> Result<(), JsValue> {
+    let t = touches(cx);
     let phase = touch.phase;
     for p in &touch.points {
         if phase == TouchPhase::Start && p.changed {
@@ -487,7 +486,7 @@ pub(crate) fn dispatch(ctx: *mut JsContext, touch: &TouchEvent) -> Result<(), Js
                 .path
                 .iter()
                 .copied()
-                .filter(|&id| dom::listens_to_touches(ctx, id))
+                .filter(|&id| dom::listens_to_touches(cx, id))
                 .collect();
             t.paths.borrow_mut().insert(p.id, path);
         }
@@ -511,7 +510,7 @@ pub(crate) fn dispatch(ctx: *mut JsContext, touch: &TouchEvent) -> Result<(), Js
         return Ok(());
     };
     let path = t.paths.borrow().get(&about.id).cloned().unwrap_or_default();
-    let e = event(ctx, about, &down, &changed, touch.timestamp);
+    let e = event(cx, about, &down, &changed, touch.timestamp);
     let result = (|| -> Result<(), JsValue> {
         let raw = match phase {
             TouchPhase::Start => "onTouchStart",
@@ -519,43 +518,43 @@ pub(crate) fn dispatch(ctx: *mut JsContext, touch: &TouchEvent) -> Result<(), Js
             TouchPhase::End => "onTouchEnd",
             TouchPhase::Cancel => "onTouchCancel",
         };
-        two_phase(ctx, &path, raw, e)?;
-        set(ctx, e, c"stopped", qjs::JS_FALSE);
+        two_phase(cx, &path, raw, e)?;
+        set(cx, e, c"stopped", qjs::JS_FALSE);
         // A pan the platform activated: its view takes the touches.
         if let Some(id) = touch.activated
-            && dom::pan_gated(ctx, id)
-            && dom::listens_to_touches(ctx, id)
-            && touches(ctx).responder.get() != Some(id)
+            && dom::pan_gated(cx, id)
+            && dom::listens_to_touches(cx, id)
+            && touches(cx).responder.get() != Some(id)
         {
-            take_over(ctx, id, e)?;
+            take_over(cx, id, e)?;
         }
         match phase {
-            TouchPhase::Start => negotiate(ctx, "onStartShouldSetResponder", &path, e)?,
-            TouchPhase::Move => negotiate(ctx, "onMoveShouldSetResponder", &path, e)?,
+            TouchPhase::Start => negotiate(cx, "onStartShouldSetResponder", &path, e)?,
+            TouchPhase::Move => negotiate(cx, "onMoveShouldSetResponder", &path, e)?,
             _ => {}
         }
-        if let Some(r) = touches(ctx).responder.get() {
+        if let Some(r) = touches(cx).responder.get() {
             if phase == TouchPhase::Cancel {
-                run(ctx, r, index("onResponderTerminate"), e)?;
-                release(ctx)?;
+                run(cx, r, index("onResponderTerminate"), e)?;
+                release(cx)?;
             } else {
                 let handler = match phase {
                     TouchPhase::Start => "onResponderStart",
                     TouchPhase::Move => "onResponderMove",
                     _ => "onResponderEnd",
                 };
-                run(ctx, r, index(handler), e)?;
+                run(cx, r, index(handler), e)?;
                 if phase == TouchPhase::End && down.is_empty() {
-                    release(ctx)?;
-                    run(ctx, r, index("onResponderRelease"), e)?;
+                    release(cx)?;
+                    run(cx, r, index("onResponderRelease"), e)?;
                 }
             }
         }
         Ok(())
     })();
-    free(ctx, e);
+    free(cx, e);
     if lifted {
-        let mut paths = touches(ctx).paths.borrow_mut();
+        let mut paths = touches(cx).paths.borrow_mut();
         for p in &changed {
             paths.remove(&p.id);
         }
@@ -584,19 +583,19 @@ const PAN_HANDLERS: [&CStr; 12] = [
 /// `PanResponder.create(config)`: `{ panHandlers }` tracking a pan's
 /// gesture state (`dx`, `vx`, ...) across the responder's events.
 unsafe extern "C" fn pan_create(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let config = arg(argc, argv, 0);
-    let t = touches(ctx);
+    let t = touches(cx);
     let id = t.pan_states.get() + 1;
     t.pan_states.set(id);
     // SAFETY: new objects; the handlers keep dups of `data`.
     unsafe {
-        let gs = qjs::JS_NewObject(ctx);
-        set(ctx, gs, c"stateID", number(id as f64));
+        let gs = qjs::JS_NewObject(cx);
+        set(cx, gs, c"stateID", number(id as f64));
         for key in [
             c"moveX",
             c"moveY",
@@ -608,62 +607,62 @@ unsafe extern "C" fn pan_create(
             c"vy",
             c"numberActiveTouches",
         ] {
-            set(ctx, gs, key, number(0.0));
+            set(cx, gs, key, number(0.0));
         }
         // The centroid, time and touch count of the last update.
-        let last = qjs::JS_NewObject(ctx);
-        let handlers = qjs::JS_NewObject(ctx);
+        let last = qjs::JS_NewObject(cx);
+        let handlers = qjs::JS_NewObject(cx);
         for (magic, name) in PAN_HANDLERS.iter().enumerate() {
             let mut data = [config, gs, last];
             let f = qjs::JS_NewCFunctionData(
-                ctx,
+                cx,
                 Some(pan_handler),
                 1,
                 magic as c_int,
                 3,
                 data.as_mut_ptr(),
             );
-            set(ctx, handlers, name, f);
+            set(cx, handlers, name, f);
         }
-        free(ctx, gs);
-        free(ctx, last);
-        let r = qjs::JS_NewObject(ctx);
-        set(ctx, r, c"panHandlers", handlers);
+        free(cx, gs);
+        free(cx, last);
+        let r = qjs::JS_NewObject(cx);
+        set(cx, r, c"panHandlers", handlers);
         r
     }
 }
 
 /// The centroid of `e.touches`.
-fn centroid(ctx: *mut JsContext, e: JsValue) -> (f64, f64, usize) {
-    let list = get(ctx, e, c"touches");
+fn centroid(cx: *mut JsContext, e: JsValue) -> (f64, f64, usize) {
+    let list = get(cx, e, c"touches");
     let mut len: i64 = 0;
     let (mut x, mut y) = (0.0, 0.0);
     // SAFETY: reads of live values, freed after.
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(ctx, list, &mut len) == 0 {
+        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
             for i in 0..len.max(0) {
-                let p = qjs::JS_GetPropertyInt64(ctx, list, i);
-                x += get_number(ctx, p, c"pageX");
-                y += get_number(ctx, p, c"pageY");
-                qjs::JS_FreeValue(ctx, p);
+                let p = qjs::JS_GetPropertyInt64(cx, list, i);
+                x += get_number(cx, p, c"pageX");
+                y += get_number(cx, p, c"pageY");
+                qjs::JS_FreeValue(cx, p);
             }
         }
-        qjs::JS_FreeValue(ctx, list);
+        qjs::JS_FreeValue(cx, list);
     }
     let n = len.max(1) as f64;
     (x / n, y / n, len.max(0) as usize)
 }
 
-fn remember(ctx: *mut JsContext, last: JsValue, x: f64, y: f64, time: f64, count: usize) {
-    set(ctx, last, c"x", number(x));
-    set(ctx, last, c"y", number(y));
-    set(ctx, last, c"t", number(time));
-    set(ctx, last, c"n", number(count as f64));
+fn remember(cx: *mut JsContext, last: JsValue, x: f64, y: f64, time: f64, count: usize) {
+    set(cx, last, c"x", number(x));
+    set(cx, last, c"y", number(y));
+    set(cx, last, c"t", number(time));
+    set(cx, last, c"n", number(count as f64));
 }
 
 /// A grant or a first finger: the gesture starts here.
-fn reset(ctx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
-    let (x, y, n) = centroid(ctx, e);
+fn reset(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
+    let (x, y, n) = centroid(cx, e);
     for (k, v) in [
         (c"moveX", x),
         (c"moveY", y),
@@ -674,68 +673,68 @@ fn reset(ctx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
         (c"vx", 0.0),
         (c"vy", 0.0),
     ] {
-        set(ctx, gs, k, number(v));
+        set(cx, gs, k, number(v));
     }
-    set(ctx, gs, c"numberActiveTouches", number(n as f64));
-    remember(ctx, last, x, y, get_number(ctx, e, c"timestamp"), n);
+    set(cx, gs, c"numberActiveTouches", number(n as f64));
+    remember(cx, last, x, y, get_number(cx, e, c"timestamp"), n);
 }
 
 /// Moves the gesture to `e`'s touches (a finger going down or up makes
 /// the centroid jump, which is no movement).
-fn update(ctx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
-    let time = get_number(ctx, e, c"timestamp");
+fn update(cx: *mut JsContext, gs: JsValue, last: JsValue, e: JsValue) {
+    let time = get_number(cx, e, c"timestamp");
     let (lx, ly, lt, ln) = (
-        get_number(ctx, last, c"x"),
-        get_number(ctx, last, c"y"),
-        get_number(ctx, last, c"t"),
-        get_number(ctx, last, c"n") as usize,
+        get_number(cx, last, c"x"),
+        get_number(cx, last, c"y"),
+        get_number(cx, last, c"t"),
+        get_number(cx, last, c"n") as usize,
     );
-    let (x, y, n) = centroid(ctx, e);
+    let (x, y, n) = centroid(cx, e);
     if time == lt && n == ln {
         return;
     }
-    set(ctx, gs, c"numberActiveTouches", number(n as f64));
+    set(cx, gs, c"numberActiveTouches", number(n as f64));
     if n == ln {
         let dt = (time - lt).max(1.0);
-        set(ctx, gs, c"dx", number(get_number(ctx, gs, c"dx") + x - lx));
-        set(ctx, gs, c"dy", number(get_number(ctx, gs, c"dy") + y - ly));
+        set(cx, gs, c"dx", number(get_number(cx, gs, c"dx") + x - lx));
+        set(cx, gs, c"dy", number(get_number(cx, gs, c"dy") + y - ly));
         // Smoothed over a few samples.
         set(
-            ctx,
+            cx,
             gs,
             c"vx",
-            number(get_number(ctx, gs, c"vx") * 0.3 + (x - lx) / dt * 0.7),
+            number(get_number(cx, gs, c"vx") * 0.3 + (x - lx) / dt * 0.7),
         );
         set(
-            ctx,
+            cx,
             gs,
             c"vy",
-            number(get_number(ctx, gs, c"vy") * 0.3 + (y - ly) / dt * 0.7),
+            number(get_number(cx, gs, c"vy") * 0.3 + (y - ly) / dt * 0.7),
         );
     }
-    set(ctx, gs, c"moveX", number(x));
-    set(ctx, gs, c"moveY", number(y));
-    remember(ctx, last, x, y, time, n);
+    set(cx, gs, c"moveX", number(x));
+    set(cx, gs, c"moveY", number(y));
+    remember(cx, last, x, y, time, n);
 }
 
 /// Calls the config's `name(e, gs)`; `None` when it has none.
 fn callback(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     config: JsValue,
     name: &CStr,
     e: JsValue,
     gs: JsValue,
 ) -> Option<JsValue> {
-    let f = get(ctx, config, name);
+    let f = get(cx, config, name);
     // SAFETY: an inline check; the call's arguments are borrowed.
     unsafe {
-        if !qjs::JS_IsFunction(ctx, f) {
-            qjs::JS_FreeValue(ctx, f);
+        if !qjs::JS_IsFunction(cx, f) {
+            qjs::JS_FreeValue(cx, f);
             return None;
         }
         let mut args = [e, gs];
-        let r = qjs::JS_Call(ctx, f, UNDEFINED, 2, args.as_mut_ptr());
-        qjs::JS_FreeValue(ctx, f);
+        let r = qjs::JS_Call(cx, f, UNDEFINED, 2, args.as_mut_ptr());
+        qjs::JS_FreeValue(cx, f);
         Some(r)
     }
 }
@@ -754,15 +753,15 @@ fn answer(r: Option<JsValue>, default: bool) -> JsValue {
     }
 }
 
-fn next_state(ctx: *mut JsContext, gs: JsValue) {
-    let t = touches(ctx);
+fn next_state(cx: *mut JsContext, gs: JsValue) {
+    let t = touches(cx);
     let id = t.pan_states.get() + 1;
     t.pan_states.set(id);
-    set(ctx, gs, c"stateID", number(id as f64));
+    set(cx, gs, c"stateID", number(id as f64));
 }
 
 unsafe extern "C" fn pan_handler(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -779,56 +778,56 @@ unsafe extern "C" fn pan_handler(
     match magic {
         // onStartShouldSetResponderCapture
         0 => {
-            let (_, _, n) = centroid(ctx, e);
+            let (_, _, n) = centroid(cx, e);
             if n == 1 {
-                reset(ctx, gs, last, e);
+                reset(cx, gs, last, e);
             }
-            set(ctx, gs, c"numberActiveTouches", number(n as f64));
-            let r = callback(ctx, config, c"onStartShouldSetPanResponderCapture", e, gs);
+            set(cx, gs, c"numberActiveTouches", number(n as f64));
+            let r = callback(cx, config, c"onStartShouldSetPanResponderCapture", e, gs);
             answer(r, false)
         }
         1 => answer(
-            callback(ctx, config, c"onStartShouldSetPanResponder", e, gs),
+            callback(cx, config, c"onStartShouldSetPanResponder", e, gs),
             false,
         ),
         2 => {
-            update(ctx, gs, last, e);
+            update(cx, gs, last, e);
             answer(
-                callback(ctx, config, c"onMoveShouldSetPanResponderCapture", e, gs),
+                callback(cx, config, c"onMoveShouldSetPanResponderCapture", e, gs),
                 false,
             )
         }
         3 => {
-            update(ctx, gs, last, e);
+            update(cx, gs, last, e);
             answer(
-                callback(ctx, config, c"onMoveShouldSetPanResponder", e, gs),
+                callback(cx, config, c"onMoveShouldSetPanResponder", e, gs),
                 false,
             )
         }
         // onResponderGrant: the gesture starts at the grant.
         4 => {
-            reset(ctx, gs, last, e);
-            if let Some(r) = callback(ctx, config, c"onPanResponderGrant", e, gs) {
+            reset(cx, gs, last, e);
+            if let Some(r) = callback(cx, config, c"onPanResponderGrant", e, gs) {
                 // SAFETY: an inline tag check.
                 if unsafe { qjs::JS_IsException(r) } {
                     return r;
                 }
-                free(ctx, r);
+                free(cx, r);
             }
             answer(
-                callback(ctx, config, c"onShouldBlockNativeResponder", e, gs),
+                callback(cx, config, c"onShouldBlockNativeResponder", e, gs),
                 true,
             )
         }
-        5 => ignore(callback(ctx, config, c"onPanResponderReject", e, gs)),
+        5 => ignore(callback(cx, config, c"onPanResponderReject", e, gs)),
         6..=8 => {
-            update(ctx, gs, last, e);
+            update(cx, gs, last, e);
             let name = match magic {
                 6 => c"onPanResponderStart",
                 7 => c"onPanResponderMove",
                 _ => c"onPanResponderEnd",
             };
-            ignore(callback(ctx, config, name, e, gs))
+            ignore(callback(cx, config, name, e, gs))
         }
         9 | 10 => {
             let name = if magic == 9 {
@@ -836,25 +835,25 @@ unsafe extern "C" fn pan_handler(
             } else {
                 c"onPanResponderTerminate"
             };
-            let r = ignore(callback(ctx, config, name, e, gs));
-            next_state(ctx, gs);
+            let r = ignore(callback(cx, config, name, e, gs));
+            next_state(cx, gs);
             r
         }
         _ => answer(
-            callback(ctx, config, c"onPanResponderTerminationRequest", e, gs),
+            callback(cx, config, c"onPanResponderTerminationRequest", e, gs),
             true,
         ),
     }
 }
 
-fn pan_responder(ctx: *mut JsContext) -> JsValue {
+fn pan_responder(cx: *mut JsContext) -> JsValue {
     // SAFETY: a new object taking the function.
-    let o = unsafe { qjs::JS_NewObject(ctx) };
+    let o = unsafe { qjs::JS_NewObject(cx) };
     set(
-        ctx,
+        cx,
         o,
         c"create",
-        reactive::new_function(ctx, c"create", pan_create, 1),
+        reactive::new_function(cx, c"create", pan_create, 1),
     );
     o
 }

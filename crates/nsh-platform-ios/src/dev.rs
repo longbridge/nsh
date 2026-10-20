@@ -109,6 +109,7 @@ impl DevSession {
                 .iter()
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
+            tests: false,
         };
         let started = DevClient::start(url, host, move |event| {
             match event {
@@ -224,6 +225,8 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         DevEvent::Disconnected => {
             show_status(ui, container, "Dev server disconnected — reconnecting…")
         }
+        // No test agent here (`HostInfo::tests` is false): no steps come.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => {
             show_error(ui, container, "Build failed", &message, false)

@@ -60,14 +60,14 @@ impl Default for Menus {
 }
 
 /// Resolves the promise of the context menu shown, if there is one.
-fn resolve_closed(ctx: *mut JsContext) {
-    let resolve = menus(ctx).closed.replace(UNDEFINED);
+fn resolve_closed(cx: *mut JsContext) {
+    let resolve = menus(cx).closed.replace(UNDEFINED);
     if !nullish(resolve) {
         // SAFETY: an owned resolving function, called then freed.
         unsafe {
-            let r = qjs::JS_Call(ctx, resolve, UNDEFINED, 0, ptr::null_mut());
-            qjs::JS_FreeValue(ctx, r);
-            qjs::JS_FreeValue(ctx, resolve);
+            let r = qjs::JS_Call(cx, resolve, UNDEFINED, 0, ptr::null_mut());
+            qjs::JS_FreeValue(cx, r);
+            qjs::JS_FreeValue(cx, resolve);
         }
     }
 }
@@ -89,20 +89,20 @@ impl Menus {
     }
 }
 
-fn menus<'a>(ctx: *mut JsContext) -> &'a Menus {
+fn menus<'a>(cx: *mut JsContext) -> &'a Menus {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).menus }
+    unsafe { &(*crate::state::state(cx)).menus }
 }
 
-fn os(ctx: *mut JsContext) -> Os {
+fn os(cx: *mut JsContext) -> Os {
     // SAFETY: the state's renderer, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).dom }.os()
+    unsafe { &(*crate::state::state(cx)).dom }.os()
 }
 
-fn throw(ctx: *mut JsContext, message: &str) -> JsValue {
+fn throw(cx: *mut JsContext, message: &str) -> JsValue {
     let message = std::ffi::CString::new(message).unwrap_or_default();
     // SAFETY: throws on a live context; `%s` keeps the message literal.
-    unsafe { qjs::JS_ThrowTypeError(ctx, c"%s".as_ptr(), message.as_ptr()) }
+    unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) }
 }
 
 /// `undefined` or `null`.
@@ -117,31 +117,31 @@ fn is_object(v: JsValue) -> bool {
 }
 
 /// Property `key` of `object` (owned).
-fn get(ctx: *mut JsContext, object: JsValue, key: &CStr) -> JsValue {
+fn get(cx: *mut JsContext, object: JsValue, key: &CStr) -> JsValue {
     // SAFETY: a read of a live object.
-    unsafe { qjs::JS_GetPropertyStr(ctx, object, key.as_ptr()) }
+    unsafe { qjs::JS_GetPropertyStr(cx, object, key.as_ptr()) }
 }
 
-fn free(ctx: *mut JsContext, v: JsValue) {
+fn free(cx: *mut JsContext, v: JsValue) {
     // SAFETY: an owned value.
-    unsafe { qjs::JS_FreeValue(ctx, v) };
+    unsafe { qjs::JS_FreeValue(cx, v) };
 }
 
 /// String property `key`, if it is set.
-fn string(ctx: *mut JsContext, object: JsValue, key: &CStr) -> Option<String> {
-    let v = get(ctx, object, key);
+fn string(cx: *mut JsContext, object: JsValue, key: &CStr) -> Option<String> {
+    let v = get(cx, object, key);
     let s = if nullish(v) {
         None
     } else {
-        dom::string_arg(ctx, v)
+        dom::string_arg(cx, v)
     };
-    free(ctx, v);
+    free(cx, v);
     s
 }
 
 /// The role named `name`, as `MenuRole`'s conversion reads it.
-fn menu_role(ctx: *mut JsContext, name: &str) -> Option<MenuRole> {
-    let host = crate::classes::host_outside_calls(ctx);
+fn menu_role(cx: *mut JsContext, name: &str) -> Option<MenuRole> {
+    let host = crate::classes::host_outside_calls(cx);
     let value = nsh_core::ui::JsHost::new_string(&host, name).ok()?;
     let value = nsh_core::ui::JsOwned::new(&host, value);
     let role = <MenuRole as nsh_core::ui::JsValue>::from_js(value.get()).ok();
@@ -150,21 +150,21 @@ fn menu_role(ctx: *mut JsContext, name: &str) -> Option<MenuRole> {
 }
 
 /// Boolean property `key`, if it is set.
-fn flag(ctx: *mut JsContext, object: JsValue, key: &CStr) -> Option<bool> {
-    let v = get(ctx, object, key);
+fn flag(cx: *mut JsContext, object: JsValue, key: &CStr) -> Option<bool> {
+    let v = get(cx, object, key);
     let b = if nullish(v) {
         None
     } else {
         // SAFETY: `ToBoolean` of a live value.
-        Some(unsafe { qjs::JS_ToBool(ctx, v) } == 1)
+        Some(unsafe { qjs::JS_ToBool(cx, v) } == 1)
     };
-    free(ctx, v);
+    free(cx, v);
     b
 }
 
 /// Decodes menus, keeping their functions.
 struct Decoder {
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     mac: bool,
     /// The items' functions (id, owned function).
     functions: Vec<(u32, JsValue)>,
@@ -173,20 +173,20 @@ struct Decoder {
 impl Decoder {
     /// The items of array `list`.
     fn items(&mut self, list: JsValue) -> Result<Vec<MenuItem>, String> {
-        let ctx = self.ctx;
+        let cx = self.cx;
         // SAFETY: an inline tag check.
         if !unsafe { qjs::JS_IsArray(list) } {
             return Err("a menu is an array of items".into());
         }
         let mut len: i64 = 0;
         // SAFETY: the length of a live array.
-        unsafe { qjs::JS_GetLength(ctx, list, &mut len) };
+        unsafe { qjs::JS_GetLength(cx, list, &mut len) };
         let mut out = Vec::with_capacity(len.max(0) as usize);
         for i in 0..len.max(0) {
             // SAFETY: an element of a live array (owned).
-            let v = unsafe { qjs::JS_GetPropertyInt64(ctx, list, i) };
+            let v = unsafe { qjs::JS_GetPropertyInt64(cx, list, i) };
             let item = self.item(v);
-            free(ctx, v);
+            free(cx, v);
             if let Some(item) = item? {
                 out.push(item);
             }
@@ -197,53 +197,53 @@ impl Decoder {
     /// One item; `None` for items that are nothing (`null`, `false`: a
     /// condition left them out).
     fn item(&mut self, v: JsValue) -> Result<Option<MenuItem>, String> {
-        let ctx = self.ctx;
+        let cx = self.cx;
         if !is_object(v) {
             // SAFETY: `ToBoolean` of a live value.
-            return if unsafe { qjs::JS_ToBool(ctx, v) } == 0 {
+            return if unsafe { qjs::JS_ToBool(cx, v) } == 0 {
                 Ok(None)
             } else {
                 Err("a menu item is an object".into())
             };
         }
-        if string(ctx, v, c"type").as_deref() == Some("separator") {
+        if string(cx, v, c"type").as_deref() == Some("separator") {
             return Ok(Some(MenuItem::Separator));
         }
-        let label = string(ctx, v, c"label");
-        let enabled = flag(ctx, v, c"enabled").unwrap_or(true);
-        let submenu = get(ctx, v, c"submenu");
+        let label = string(cx, v, c"label");
+        let enabled = flag(cx, v, c"enabled").unwrap_or(true);
+        let submenu = get(cx, v, c"submenu");
         if !nullish(submenu) {
             let items = self.items(submenu);
-            free(ctx, submenu);
+            free(cx, submenu);
             return Ok(Some(MenuItem::Submenu {
                 label: label.ok_or("a submenu needs a label")?,
                 enabled,
                 items: items?,
             }));
         }
-        let role = match string(ctx, v, c"role") {
+        let role = match string(cx, v, c"role") {
             Some(name) => {
-                Some(menu_role(ctx, &name).ok_or_else(|| format!("unknown menu role `{name}`"))?)
+                Some(menu_role(cx, &name).ok_or_else(|| format!("unknown menu role `{name}`"))?)
             }
             None => None,
         };
         if label.is_none() && role.is_none() {
             return Err("a menu item needs a label or a role".into());
         }
-        let shortcut = match string(ctx, v, c"shortcut") {
+        let shortcut = match string(cx, v, c"shortcut") {
             Some(text) => Some(Shortcut::parse(&text, self.mac).map_err(|e| e.to_string())?),
             None => role.and_then(|r| r.shortcut(self.mac)),
         };
-        let on_select = get(ctx, v, c"onSelect");
+        let on_select = get(cx, v, c"onSelect");
         // SAFETY: an inline check.
-        let id = if unsafe { qjs::JS_IsFunction(ctx, on_select) } {
-            let m = menus(ctx);
+        let id = if unsafe { qjs::JS_IsFunction(cx, on_select) } {
+            let m = menus(cx);
             let id = m.next.get() + 1;
             m.next.set(id);
             self.functions.push((id, on_select));
             id
         } else {
-            free(ctx, on_select);
+            free(cx, on_select);
             0
         };
         Ok(Some(MenuItem::Action(MenuAction {
@@ -251,45 +251,45 @@ impl Decoder {
             label: label.unwrap_or_default(),
             shortcut,
             enabled,
-            checked: flag(ctx, v, c"checked"),
+            checked: flag(cx, v, c"checked"),
             role,
         })))
     }
 
     fn free(self) {
         for (_, f) in self.functions {
-            free(self.ctx, f);
+            free(self.cx, f);
         }
     }
 }
 
 /// Decodes `list` into items and their functions; throws on a bad menu.
-fn decode(ctx: *mut JsContext, list: JsValue) -> Result<(Arc<[MenuItem]>, Functions), JsValue> {
+fn decode(cx: *mut JsContext, list: JsValue) -> Result<(Arc<[MenuItem]>, Functions), JsValue> {
     let mut decoder = Decoder {
-        ctx,
-        mac: os(ctx) == Os::MacOs,
+        cx,
+        mac: os(cx) == Os::MacOs,
         functions: Vec::new(),
     };
     match decoder.items(list) {
         Ok(items) => Ok((items.into(), std::mem::take(&mut decoder.functions))),
         Err(message) => {
             decoder.free();
-            Err(throw(ctx, &format!("nsh/desktop: {message}")))
+            Err(throw(cx, &format!("nsh/desktop: {message}")))
         }
     }
 }
 
 /// Keeps `functions` in `slot`, freeing the ones they replace.
-fn keep(ctx: *mut JsContext, slot: &RefCell<Vec<(u32, JsValue)>>, functions: Vec<(u32, JsValue)>) {
+fn keep(cx: *mut JsContext, slot: &RefCell<Vec<(u32, JsValue)>>, functions: Vec<(u32, JsValue)>) {
     let old = slot.replace(functions);
     for (_, f) in old {
-        free(ctx, f);
+        free(cx, f);
     }
 }
 
-fn send(ctx: *mut JsContext, command: DesktopCommand) -> Result<(), JsValue> {
+fn send(cx: *mut JsContext, command: DesktopCommand) -> Result<(), JsValue> {
     dom::push_op(
-        ctx,
+        cx,
         Op::Command {
             id: ROOT_ID,
             command: Command::Desktop(Box::new(command)),
@@ -298,14 +298,14 @@ fn send(ctx: *mut JsContext, command: DesktopCommand) -> Result<(), JsValue> {
 }
 
 /// Sets the root's `onMenu` handler, once.
-fn listen(ctx: *mut JsContext) -> Result<(), JsValue> {
-    let m = menus(ctx);
+fn listen(cx: *mut JsContext) -> Result<(), JsValue> {
+    let m = menus(cx);
     if m.listening.get() {
         return Ok(());
     }
-    let on = reactive::new_function(ctx, c"onMenu", on_menu, 1);
-    let r = dom::set_handler(ctx, ROOT_ID, EventKind::Menu, on);
-    free(ctx, on);
+    let on = reactive::new_function(cx, c"onMenu", on_menu, 1);
+    let r = dom::set_handler(cx, ROOT_ID, EventKind::Menu, on);
+    free(cx, on);
     r?;
     m.listening.set(true);
     Ok(())
@@ -313,23 +313,23 @@ fn listen(ctx: *mut JsContext) -> Result<(), JsValue> {
 
 /// `Menu.setApplicationMenu(items | null)`.
 unsafe extern "C" fn set_application_menu(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    if !os(ctx).is_desktop() {
+    if !os(cx).is_desktop() {
         return UNDEFINED;
     }
     let list = arg(argc, argv, 0);
     let result = if nullish(list) {
-        keep(ctx, &menus(ctx).app, Vec::new());
-        send(ctx, DesktopCommand::SetMenu(None))
+        keep(cx, &menus(cx).app, Vec::new());
+        send(cx, DesktopCommand::SetMenu(None))
     } else {
-        match decode(ctx, list) {
+        match decode(cx, list) {
             Ok((items, functions)) => {
-                keep(ctx, &menus(ctx).app, functions);
-                listen(ctx).and_then(|()| send(ctx, DesktopCommand::SetMenu(Some(items))))
+                keep(cx, &menus(cx).app, functions);
+                listen(cx).and_then(|()| send(cx, DesktopCommand::SetMenu(Some(items))))
             }
             Err(e) => Err(e),
         }
@@ -339,55 +339,55 @@ unsafe extern "C" fn set_application_menu(
 
 /// `Menu.popup(items, at?)`.
 unsafe extern "C" fn popup(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let mut funcs = [UNDEFINED; 2];
     // SAFETY: a new promise and its resolving functions (owned).
-    let promise = unsafe { qjs::JS_NewPromiseCapability(ctx, funcs.as_mut_ptr()) };
-    free(ctx, funcs[1]);
-    if !os(ctx).is_desktop() {
+    let promise = unsafe { qjs::JS_NewPromiseCapability(cx, funcs.as_mut_ptr()) };
+    free(cx, funcs[1]);
+    if !os(cx).is_desktop() {
         // Nothing shows: settled at once.
         // SAFETY: an owned resolving function, called then freed.
         unsafe {
-            let r = qjs::JS_Call(ctx, funcs[0], UNDEFINED, 0, ptr::null_mut());
-            qjs::JS_FreeValue(ctx, r);
+            let r = qjs::JS_Call(cx, funcs[0], UNDEFINED, 0, ptr::null_mut());
+            qjs::JS_FreeValue(cx, r);
         }
-        free(ctx, funcs[0]);
+        free(cx, funcs[0]);
         return promise;
     }
-    let (items, functions) = match decode(ctx, arg(argc, argv, 0)) {
+    let (items, functions) = match decode(cx, arg(argc, argv, 0)) {
         Ok(decoded) => decoded,
         Err(e) => {
-            free(ctx, funcs[0]);
-            free(ctx, promise);
+            free(cx, funcs[0]);
+            free(cx, promise);
             return e;
         }
     };
-    keep(ctx, &menus(ctx).popup, functions);
+    keep(cx, &menus(cx).popup, functions);
     // One context menu at a time: one shown before is closed by now.
-    resolve_closed(ctx);
-    menus(ctx).closed.set(funcs[0]);
+    resolve_closed(cx);
+    menus(cx).closed.set(funcs[0]);
     let at = arg(argc, argv, 1);
     let at = if is_object(at) {
         let number = |key: &CStr| {
-            let v = get(ctx, at, key);
+            let v = get(cx, at, key);
             let mut n = 0f64;
             // SAFETY: `ToNumber` of a live value.
-            unsafe { qjs::JS_ToFloat64(ctx, &mut n, v) };
-            free(ctx, v);
+            unsafe { qjs::JS_ToFloat64(cx, &mut n, v) };
+            free(cx, v);
             n as f32
         };
         Some(point(Points(number(c"x")), Points(number(c"y"))))
     } else {
         None
     };
-    match listen(ctx).and_then(|()| send(ctx, DesktopCommand::PopupMenu { items, at })) {
+    match listen(cx).and_then(|()| send(cx, DesktopCommand::PopupMenu { items, at })) {
         Ok(()) => promise,
         Err(e) => {
-            free(ctx, promise);
+            free(cx, promise);
             e
         }
     }
@@ -395,53 +395,53 @@ unsafe extern "C" fn popup(
 
 /// The root's `onMenu`: calls the chosen item's function.
 unsafe extern "C" fn on_menu(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let e = arg(argc, argv, 0);
-    let v = get(ctx, e, c"id");
+    let v = get(cx, e, c"id");
     let mut id = 0f64;
     // SAFETY: `ToNumber` of a live value.
-    unsafe { qjs::JS_ToFloat64(ctx, &mut id, v) };
-    free(ctx, v);
+    unsafe { qjs::JS_ToFloat64(cx, &mut id, v) };
+    free(cx, v);
     let id = id as u32;
     // A context menu closed (after its chosen item was reported).
-    if flag(ctx, e, c"closed") == Some(true) {
-        resolve_closed(ctx);
+    if flag(cx, e, c"closed") == Some(true) {
+        resolve_closed(cx);
         return UNDEFINED;
     }
-    let m = menus(ctx);
+    let m = menus(cx);
     let f = [&m.app, &m.popup].into_iter().find_map(|slot| {
         slot.borrow()
             .iter()
             .find(|(i, _)| *i == id)
             // SAFETY: a dup for the call.
-            .map(|&(_, f)| unsafe { qjs::JS_DupValue(ctx, f) })
+            .map(|&(_, f)| unsafe { qjs::JS_DupValue(cx, f) })
     });
     let Some(f) = f else { return UNDEFINED };
     // SAFETY: a call of an owned function, freed after it.
     unsafe {
-        let r = qjs::JS_Call(ctx, f, UNDEFINED, 0, ptr::null_mut());
-        qjs::JS_FreeValue(ctx, f);
+        let r = qjs::JS_Call(cx, f, UNDEFINED, 0, ptr::null_mut());
+        qjs::JS_FreeValue(cx, f);
         if qjs::JS_IsException(r) {
             return r;
         }
-        qjs::JS_FreeValue(ctx, r);
+        qjs::JS_FreeValue(cx, r);
     }
     UNDEFINED
 }
 
 /// `Menu`: an object of its functions.
-fn menu(ctx: *mut JsContext) -> JsValue {
+fn menu(cx: *mut JsContext) -> JsValue {
     // SAFETY: a new object taking the functions.
     unsafe {
-        let o = qjs::JS_NewObject(ctx);
-        let set = reactive::new_function(ctx, c"setApplicationMenu", set_application_menu, 1);
-        qjs::JS_SetPropertyStr(ctx, o, c"setApplicationMenu".as_ptr(), set);
-        let pop = reactive::new_function(ctx, c"popup", popup, 2);
-        qjs::JS_SetPropertyStr(ctx, o, c"popup".as_ptr(), pop);
+        let o = qjs::JS_NewObject(cx);
+        let set = reactive::new_function(cx, c"setApplicationMenu", set_application_menu, 1);
+        qjs::JS_SetPropertyStr(cx, o, c"setApplicationMenu".as_ptr(), set);
+        let pop = reactive::new_function(cx, c"popup", popup, 2);
+        qjs::JS_SetPropertyStr(cx, o, c"popup".as_ptr(), pop);
         o
     }
 }
@@ -450,8 +450,8 @@ fn menu(ctx: *mut JsContext) -> JsValue {
 pub(crate) const EXPORTS: &[Item] = &[
     (
         "isAvailable",
-        Export::Value(|ctx| {
-            if os(ctx).is_desktop() {
+        Export::Value(|cx| {
+            if os(cx).is_desktop() {
                 qjs::JS_TRUE
             } else {
                 qjs::JS_FALSE
@@ -580,8 +580,8 @@ mod tests {
             .filter(|n| !n.is_empty())
             .collect();
         let host = crate::Host::new().unwrap();
-        let mut roles: Vec<String> = host.with_raw(|ctx| {
-            let js = crate::classes::host_outside_calls(ctx);
+        let mut roles: Vec<String> = host.with_raw(|cx| {
+            let js = crate::classes::host_outside_calls(cx);
             MenuRole::ALL
                 .iter()
                 .map(|r| r.to_js(&js).unwrap().get().as_string().unwrap())

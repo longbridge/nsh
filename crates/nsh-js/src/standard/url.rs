@@ -36,19 +36,19 @@ impl<'js> JsClass<'js> for FileUrlConstructor<'js> {
     const NAME: &'static str = "NshFileUrlConstructor";
     const KIND: ClassKind = ClassKind::Callable;
     type Mutable = Readable;
-    fn prototype(ctx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
-        Ok(Some(Function::prototype(ctx.clone())))
+    fn prototype(cx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
+        Ok(Some(Function::prototype(cx.clone())))
     }
     fn constructor(_: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
         Ok(None)
     }
     fn call<'a>(this: &JsCell<'js, Self>, params: Params<'a, 'js>) -> Result<Value<'js>> {
-        let ctx = params.ctx();
+        let cx = params.ctx();
         let input = params
             .arg(0)
-            .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        let path = String::from_js(ctx, input)?;
-        path_to_file_url(ctx, &this.borrow().0, path).map(Value::from_object)
+            .unwrap_or_else(|| Value::new_undefined(cx.clone()));
+        let path = String::from_js(cx, input)?;
+        path_to_file_url(cx, &this.borrow().0, path).map(Value::from_object)
     }
 }
 const METHODS: &[&str] = &[
@@ -63,47 +63,44 @@ const METHODS: &[&str] = &[
 ];
 
 fn path_to_file_url<'js>(
-    ctx: &Ctx<'js>,
+    cx: &Ctx<'js>,
     constructor: &Constructor<'js>,
     path: String,
 ) -> Result<Object<'js>> {
     #[cfg(not(target_arch = "wasm32"))]
-    let href = quickjs_jit_stdlib::url::path_to_file_url(ctx.clone(), path, Opt(None))?.href();
+    let href = quickjs_jit_stdlib::url::path_to_file_url(cx.clone(), path, Opt(None))?.href();
     #[cfg(target_arch = "wasm32")]
     let href = {
-        let _ = ctx;
+        let _ = cx;
         browser::file_href(&path)
     };
     constructor.construct((href,))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn file_url_to_path<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<String> {
-    quickjs_jit_stdlib::url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
+fn file_url_to_path<'js>(cx: Ctx<'js>, input: Coerced<String>) -> Result<String> {
+    quickjs_jit_stdlib::url::file_url_to_path(cx.clone(), input.0.into_js(&cx)?)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_url<'js>(
-    ctx: &Ctx<'js>,
+    cx: &Ctx<'js>,
     input: &str,
 ) -> Result<Class<'js, quickjs_jit_stdlib::url::url_class::URL<'js>>> {
     Class::instance(
-        ctx.clone(),
-        quickjs_jit_stdlib::url::url_class::URL::from_str(ctx.clone(), input)?,
+        cx.clone(),
+        quickjs_jit_stdlib::url::url_class::URL::from_str(cx.clone(), input)?,
     )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn format<'js>(ctx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) -> Result<String> {
-    quickjs_jit_stdlib::url::url_format(native_url(&ctx, &input.0)?, options)
+fn format<'js>(cx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) -> Result<String> {
+    quickjs_jit_stdlib::url::url_format(native_url(&cx, &input.0)?, options)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn url_to_http_options<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<Object<'js>> {
-    quickjs_jit_stdlib::url::url_class::url_to_http_options(
-        ctx.clone(),
-        native_url(&ctx, &input.0)?,
-    )
+fn url_to_http_options<'js>(cx: Ctx<'js>, input: Coerced<String>) -> Result<Object<'js>> {
+    quickjs_jit_stdlib::url::url_class::url_to_http_options(cx.clone(), native_url(&cx, &input.0)?)
 }
 
 impl ModuleDef for UrlModule {
@@ -114,12 +111,12 @@ impl ModuleDef for UrlModule {
         }
         Ok(())
     }
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
-        let module = Object::new(ctx.clone())?;
-        module.set("URL", ctx.globals().get::<_, Value>("URL")?)?;
+    fn evaluate<'js>(cx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
+        let module = Object::new(cx.clone())?;
+        module.set("URL", cx.globals().get::<_, Value>("URL")?)?;
         module.set(
             "URLSearchParams",
-            ctx.globals().get::<_, Value>("URLSearchParams")?,
+            cx.globals().get::<_, Value>("URLSearchParams")?,
         )?;
         module.set(
             "domainToASCII",
@@ -129,10 +126,10 @@ impl ModuleDef for UrlModule {
             "domainToUnicode",
             Func::from(|domain: String| domain_to_unicode(&domain)),
         )?;
-        let constructor: Constructor = ctx.globals().get("URL")?;
+        let constructor: Constructor = cx.globals().get("URL")?;
         module.set(
             "pathToFileURL",
-            Class::instance(ctx.clone(), FileUrlConstructor(constructor))?.into_inner(),
+            Class::instance(cx.clone(), FileUrlConstructor(constructor))?.into_inner(),
         )?;
         module.set("fileURLToPath", Func::from(file_url_to_path))?;
         module.set("format", Func::from(format))?;
@@ -153,8 +150,8 @@ mod tests {
         host.with_raw(|raw| {
             // SAFETY: with_raw holds this live runtime's context lock, and no
             // value from the temporary Ctx escapes the closure.
-            let ctx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new(raw).unwrap()) };
-            let globals = ctx.globals();
+            let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new(raw).unwrap()) };
+            let globals = cx.globals();
             let names = [
                 "Blob",
                 "File",
@@ -165,7 +162,7 @@ mod tests {
                 "AbortController",
             ];
             let before = names.map(|name| globals.get::<_, rquickjs::Value>(name).unwrap());
-            super::super::install(&ctx).unwrap();
+            super::super::install(&cx).unwrap();
             for (name, before) in names.into_iter().zip(before) {
                 let after = globals.get::<_, rquickjs::Value>(name).unwrap();
                 assert_eq!(

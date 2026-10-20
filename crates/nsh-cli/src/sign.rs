@@ -187,7 +187,7 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
     let bytes = build(&contents, &key, &cert)?;
     let out = options
         .out
-        .unwrap_or_else(|| PathBuf::from("out").join(format!("{id}-{build_number}.nshpkg")));
+        .unwrap_or_else(|| PathBuf::from(".nsh/out").join(format!("{id}-{build_number}.nshpkg")));
     write(&out, &bytes)?;
     if let Some(map) = &separate_map {
         let path = map_path(&out);

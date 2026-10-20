@@ -8,7 +8,7 @@
 //! dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        development host, packaged app runner
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
-//! dist/nsh/runtime/gpui/{nsh-gpui-host,nsh-gpui-app}[.exe]     development host, packaged app runner (GPUI)
+//! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
 //! dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          the web runtimes (published apps', the dev host's)
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
@@ -21,8 +21,8 @@
 //! GTK 4, Pango and, for web views, WebKitGTK 6.0 must be installed;
 //! without WebKitGTK's development files it is built with placeholders for
 //! web views and needs only GTK); the Windows runtime likewise, on
-//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI runtime is
-//! built for this machine on each of the three. The web runtime is built
+//! Windows only (where the CLI is `bin/nsh.exe`). The GPUI development host
+//! is built for this machine on each of the three. The web runtime is built
 //! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
 //! (`docs/dev/web.md`).
 
@@ -105,33 +105,29 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         }
     }
 
-    // One build each: built together, cargo would unify the host's `dev`
-    // and `shot` (GPUI's test support) into the release runner.
+    // GPUI is the backend for embedding in GPUI apps: its development
+    // host only, no release runner.
     if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
-        for (package, what) in [
-            ("nsh-gpui-host", "the development host for GPUI"),
-            ("nsh-gpui-app", "the release runner for GPUI"),
-        ] {
-            // The GPUI backend is a workspace of its own (`crates/gpui`),
-            // built into the same `target/`.
-            cargo(
-                &[
-                    "build",
-                    "--release",
-                    "--manifest-path",
-                    "crates/gpui/Cargo.toml",
-                    "--target-dir",
-                    "target",
-                    "-p",
-                    package,
-                ],
-                what,
-            )?;
-            copy(
-                &release.join("release").join(exe(package)),
-                &out.join("runtime/gpui").join(exe(package)),
-            )?;
-        }
+        let package = "nsh-gpui-host";
+        // The GPUI backend is a workspace of its own (`crates/gpui`), built
+        // into the same `target/`.
+        cargo(
+            &[
+                "build",
+                "--release",
+                "--manifest-path",
+                "crates/gpui/Cargo.toml",
+                "--target-dir",
+                "target",
+                "-p",
+                package,
+            ],
+            "the development host for GPUI",
+        )?;
+        copy(
+            &release.join("release").join(exe(package)),
+            &out.join("runtime/gpui").join(exe(package)),
+        )?;
     }
 
     // The web runtimes: the same files on every machine. Published apps'

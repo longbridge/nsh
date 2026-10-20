@@ -214,6 +214,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
+| `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
 render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on screen when the next
@@ -253,6 +254,33 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 | `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
 | `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
 | `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
+
+### On a real platform
+
+`nsh test --target macos` runs the same tests on the platform's development host instead of headless: each `open`
+starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's own input
+at the views their selectors name, as Playwright does in a browser:
+
+- a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
+  `scroll` is a trackpad gesture over the scroll view, `back` is the key a user presses (Escape);
+- a view off screen is scrolled into view first, a gesture at a time;
+- selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
+  they find the same views;
+- dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
+  when the test says nothing) presses its button;
+- `app.screenshot(path)` takes a picture of the window.
+
+```sh
+nsh test --target macos                       # the app's tests in macOS windows
+nsh test tests/form.test.tsx --target macos   # one file
+```
+
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. Time is real: a `clock`
+moves as the system's does, so `app.clock.runFor(ms)` waits that long, and `fastForward` and `setSystemTime`, which
+real time cannot do, reject. What a real platform cannot be given yet makes `open` reject rather than being left
+out: stubbed `network` routes, `storage`, `clipboard`, `locale`, `reducedMotion` and `safeArea`; requests go to the
+network. `app.storage()` and `app.requests()` are headless only. An app with Rust crates of its own runs its tests
+headless for now.
 
 ### Steps from standard input
 

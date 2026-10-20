@@ -856,9 +856,9 @@ declare const text: "export default ignored";
             })
             .unwrap();
         let rt = rquickjs::Runtime::new().unwrap();
-        let ctx = rquickjs::Context::full(&rt).unwrap();
-        let bare: Vec<String> = ctx.with(|ctx| {
-            let list: String = ctx
+        let cx = rquickjs::Context::full(&rt).unwrap();
+        let bare: Vec<String> = cx.with(|cx| {
+            let list: String = cx
                 .eval("Object.getOwnPropertyNames(globalThis).join(' ')")
                 .unwrap();
             names(&list)

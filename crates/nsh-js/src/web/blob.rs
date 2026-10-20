@@ -90,16 +90,16 @@ impl Object for File {
 }
 
 /// The blob part of `v` (a `Blob` or a `File`).
-pub(crate) fn blob_of(ctx: Ctx, v: Raw) -> R<Option<Blob>> {
-    if !is_blob(ctx, v) {
+pub(crate) fn blob_of(cx: Ctx, v: Raw) -> R<Option<Blob>> {
+    if !is_blob(cx, v) {
         return Ok(None);
     }
-    Ok(Some(role(ctx, v, "Blob", |o| o.blob())?.clone()))
+    Ok(Some(role(cx, v, "Blob", |o| o.blob())?.clone()))
 }
 
 /// Whether `v` is a `Blob` (or a `File`).
-pub(crate) fn is_blob(ctx: Ctx, v: Raw) -> bool {
-    super::is::<Blob>(ctx, v) || super::is::<File>(ctx, v)
+pub(crate) fn is_blob(cx: Ctx, v: Raw) -> bool {
+    super::is::<Blob>(cx, v) || super::is::<File>(cx, v)
 }
 
 /// A type as `Blob` keeps it: lower case, empty unless printable ASCII.
@@ -113,21 +113,21 @@ fn normalize_type(t: &str) -> String {
 
 /// The bytes of a `BlobPart` sequence (`endings: "native"` turns line
 /// breaks into `\n`, the native one here).
-fn blob_parts(ctx: Ctx, parts: Raw, native_endings: bool) -> R<Vec<u8>> {
+fn blob_parts(cx: Ctx, parts: Raw, native_endings: bool) -> R<Vec<u8>> {
     let mut out = Vec::new();
     if js::is_undefined(parts) {
         return Ok(out);
     }
     if !js::is_object(parts) {
-        return Err(js::type_error(ctx, "blobParts must be a sequence"));
+        return Err(js::type_error(cx, "blobParts must be a sequence"));
     }
-    js::for_each(ctx, parts, |part| {
-        if let Some(b) = blob_of(ctx, part.raw())? {
+    js::for_each(cx, parts, |part| {
+        if let Some(b) = blob_of(cx, part.raw())? {
             out.extend_from_slice(b.bytes());
-        } else if let Some(bytes) = js::buffer_source(ctx, part.raw()) {
+        } else if let Some(bytes) = js::buffer_source(cx, part.raw()) {
             out.extend_from_slice(&bytes);
         } else {
-            let s = js::to_string(ctx, part.raw())?;
+            let s = js::to_string(cx, part.raw())?;
             if native_endings {
                 out.extend_from_slice(s.replace("\r\n", "\n").replace('\r', "\n").as_bytes());
             } else {
@@ -140,29 +140,29 @@ fn blob_parts(ctx: Ctx, parts: Raw, native_endings: bool) -> R<Vec<u8>> {
 }
 
 /// `{ type, endings }` (and `lastModified` for files).
-fn bag(ctx: Ctx, options: Raw) -> R<(String, bool, Option<f64>)> {
+fn bag(cx: Ctx, options: Raw) -> R<(String, bool, Option<f64>)> {
     if js::is_nullish(options) {
         return Ok((String::new(), false, None));
     }
     if !js::is_object(options) {
-        return Err(js::type_error(ctx, "options must be an object"));
+        return Err(js::type_error(cx, "options must be an object"));
     }
-    let endings = js::get(ctx, options, "endings")?;
-    let native = match js::opt_string(ctx, endings.raw())?.as_deref() {
+    let endings = js::get(cx, options, "endings")?;
+    let native = match js::opt_string(cx, endings.raw())?.as_deref() {
         None | Some("transparent") => false,
         Some("native") => true,
         Some(other) => {
-            return Err(js::type_error(ctx, &format!("invalid endings `{other}`")));
+            return Err(js::type_error(cx, &format!("invalid endings `{other}`")));
         }
     };
-    let last = js::get(ctx, options, "lastModified")?;
+    let last = js::get(cx, options, "lastModified")?;
     let last = if last.is_undefined() {
         None
     } else {
-        Some(js::to_number(ctx, last.raw())?.trunc())
+        Some(js::to_number(cx, last.raw())?.trunc())
     };
-    let t = js::get(ctx, options, "type")?;
-    let t = js::opt_string(ctx, t.raw())?.unwrap_or_default();
+    let t = js::get(cx, options, "type")?;
+    let t = js::opt_string(cx, t.raw())?.unwrap_or_default();
     Ok((normalize_type(&t), native, last))
 }
 
@@ -172,14 +172,14 @@ pub(crate) fn now_ms() -> f64 {
 }
 
 /// A new `Blob` object.
-pub(crate) fn new_blob(ctx: Ctx, blob: Blob) -> R<V> {
-    instance(ctx, js::UNDEFINED, Class::Blob, blob)
+pub(crate) fn new_blob(cx: Ctx, blob: Blob) -> R<V> {
+    instance(cx, js::UNDEFINED, Class::Blob, blob)
 }
 
 /// A new `File` object.
-pub(crate) fn new_file(ctx: Ctx, blob: Blob, name: String, last_modified: f64) -> R<V> {
+pub(crate) fn new_file(cx: Ctx, blob: Blob, name: String, last_modified: f64) -> R<V> {
     instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::File,
         File {
@@ -191,114 +191,114 @@ pub(crate) fn new_file(ctx: Ctx, blob: Blob, name: String, last_modified: f64) -
 }
 
 native!(
-    fn blob_constructor(ctx, this, args) {
-        let (mime, native, _) = bag(ctx, args.get(1))?;
-        let bytes = blob_parts(ctx, args.get(0), native)?;
-        instance(ctx, this, Class::Blob, Blob::new(bytes, mime))
+    fn blob_constructor(cx, this, args) {
+        let (mime, native, _) = bag(cx, args.get(1))?;
+        let bytes = blob_parts(cx, args.get(0), native)?;
+        instance(cx, this, Class::Blob, Blob::new(bytes, mime))
     }
 );
 
 native!(
-    fn file_constructor(ctx, this, args) {
+    fn file_constructor(cx, this, args) {
         if args.len() < 2 {
-            return Err(js::type_error(ctx, "File needs bits and a name"));
+            return Err(js::type_error(cx, "File needs bits and a name"));
         }
-        let (mime, native, last) = bag(ctx, args.get(2))?;
-        let bytes = blob_parts(ctx, args.get(0), native)?;
-        let name = js::to_string(ctx, args.get(1))?;
+        let (mime, native, last) = bag(cx, args.get(2))?;
+        let bytes = blob_parts(cx, args.get(0), native)?;
+        let name = js::to_string(cx, args.get(1))?;
         let file = File {
             blob: Blob::new(bytes, mime),
             name,
             last_modified: last.unwrap_or_else(now_ms),
         };
-        instance(ctx, this, Class::File, file)
+        instance(cx, this, Class::File, file)
     }
 );
 
-fn blob<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Blob>> {
-    role(ctx, v, "Blob", |o| o.blob())
+fn blob<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Blob>> {
+    role(cx, v, "Blob", |o| o.blob())
 }
 
 native!(
-    fn blob_size(ctx, this, args) {
-        Ok(V::num(blob(ctx, this)?.len() as f64))
+    fn blob_size(cx, this, args) {
+        Ok(V::num(blob(cx, this)?.len() as f64))
     }
 );
 
 native!(
-    fn blob_type(ctx, this, args) {
-        let t = blob(ctx, this)?.mime.clone();
-        js::string(ctx, &t)
+    fn blob_type(cx, this, args) {
+        let t = blob(cx, this)?.mime.clone();
+        js::string(cx, &t)
     }
 );
 
 native!(
-    fn blob_slice(ctx, this, args) {
+    fn blob_slice(cx, this, args) {
         let num = |v: Raw| -> R<Option<f64>> {
-            if js::is_undefined(v) { Ok(None) } else { js::to_number(ctx, v).map(Some) }
+            if js::is_undefined(v) { Ok(None) } else { js::to_number(cx, v).map(Some) }
         };
         let (start, end) = (num(args.get(0))?, num(args.get(1))?);
-        let mime = normalize_type(&js::opt_string(ctx, args.get(2))?.unwrap_or_default());
-        let sliced = blob(ctx, this)?.slice(start, end, mime);
-        new_blob(ctx, sliced)
+        let mime = normalize_type(&js::opt_string(cx, args.get(2))?.unwrap_or_default());
+        let sliced = blob(cx, this)?.slice(start, end, mime);
+        new_blob(cx, sliced)
     }
 );
 
 native!(
-    fn blob_array_buffer(ctx, this, args) {
-        js::promise_of(ctx, || {
-            let b = blob(ctx, this)?.clone();
-            js::array_buffer(ctx, b.bytes())
+    fn blob_array_buffer(cx, this, args) {
+        js::promise_of(cx, || {
+            let b = blob(cx, this)?.clone();
+            js::array_buffer(cx, b.bytes())
         })
     }
 );
 
 native!(
-    fn blob_bytes(ctx, this, args) {
-        js::promise_of(ctx, || {
-            let b = blob(ctx, this)?.clone();
-            js::uint8_array(ctx, b.bytes())
+    fn blob_bytes(cx, this, args) {
+        js::promise_of(cx, || {
+            let b = blob(cx, this)?.clone();
+            js::uint8_array(cx, b.bytes())
         })
     }
 );
 
 native!(
-    fn blob_text(ctx, this, args) {
-        js::promise_of(ctx, || {
-            let b = blob(ctx, this)?.clone();
-            js::string(ctx, &String::from_utf8_lossy(b.bytes()))
+    fn blob_text(cx, this, args) {
+        js::promise_of(cx, || {
+            let b = blob(cx, this)?.clone();
+            js::string(cx, &String::from_utf8_lossy(b.bytes()))
         })
     }
 );
 
 native!(
-    fn blob_stream(ctx, this, args) {
-        let b = blob(ctx, this)?.clone();
-        super::streams::bytes_stream(ctx, b.bytes().to_vec())
+    fn blob_stream(cx, this, args) {
+        let b = blob(cx, this)?.clone();
+        super::streams::bytes_stream(cx, b.bytes().to_vec())
     }
 );
 
-fn file<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, File>> {
-    data::<File>(ctx, v, "File")
+fn file<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, File>> {
+    data::<File>(cx, v, "File")
 }
 
 native!(
-    fn file_name(ctx, this, args) {
-        let n = file(ctx, this)?.name.clone();
-        js::string(ctx, &n)
+    fn file_name(cx, this, args) {
+        let n = file(cx, this)?.name.clone();
+        js::string(cx, &n)
     }
 );
 
 native!(
-    fn file_last_modified(ctx, this, args) {
-        Ok(V::num(file(ctx, this)?.last_modified))
+    fn file_last_modified(cx, this, args) {
+        Ok(V::num(file(cx, this)?.last_modified))
     }
 );
 
 native!(
-    fn file_relative_path(ctx, this, args) {
-        file(ctx, this)?;
-        js::string(ctx, "")
+    fn file_relative_path(cx, this, args) {
+        file(cx, this)?;
+        js::string(cx, "")
     }
 );
 
@@ -321,15 +321,15 @@ pub(crate) struct BlobUrls {
     map: Vec<(String, Blob)>,
 }
 
-fn blob_urls<'a>(ctx: Ctx) -> &'a mut BlobUrls {
+fn blob_urls<'a>(cx: Ctx) -> &'a mut BlobUrls {
     // SAFETY: a projection of the state's field, briefly.
-    unsafe { &mut (*crate::state::state(ctx)).web.blob_urls }
+    unsafe { &mut (*crate::state::state(cx)).web.blob_urls }
 }
 
 /// The blob `url` names (`blob:…`), if registered.
-pub(crate) fn resolve_blob_url(ctx: Ctx, url: &str) -> Option<Blob> {
+pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<Blob> {
     let url = url.split('#').next().unwrap_or(url);
-    blob_urls(ctx)
+    blob_urls(cx)
         .map
         .iter()
         .find(|(u, _)| u == url)
@@ -337,19 +337,19 @@ pub(crate) fn resolve_blob_url(ctx: Ctx, url: &str) -> Option<Blob> {
 }
 
 native!(
-    fn create_object_url(ctx, this, args) {
-        let b = blob_of(ctx, args.get(0))?
-            .ok_or_else(|| js::type_error(ctx, "createObjectURL needs a Blob"))?;
+    fn create_object_url(cx, this, args) {
+        let b = blob_of(cx, args.get(0))?
+            .ok_or_else(|| js::type_error(cx, "createObjectURL needs a Blob"))?;
         let url = format!("blob:nsh://app/{}", random_hex());
-        blob_urls(ctx).map.push((url.clone(), b));
-        js::string(ctx, &url)
+        blob_urls(cx).map.push((url.clone(), b));
+        js::string(cx, &url)
     }
 );
 
 native!(
-    fn revoke_object_url(ctx, this, args) {
-        let url = js::to_string(ctx, args.get(0))?;
-        blob_urls(ctx).map.retain(|(u, _)| *u != url);
+    fn revoke_object_url(cx, this, args) {
+        let url = js::to_string(cx, args.get(0))?;
+        blob_urls(cx).map.retain(|(u, _)| *u != url);
         Ok(V::undefined())
     }
 );
@@ -371,9 +371,9 @@ impl js::Trace for FormValue {
 }
 
 impl FormValue {
-    fn to_js(&self, ctx: Ctx) -> R<V> {
+    fn to_js(&self, cx: Ctx) -> R<V> {
         match self {
-            FormValue::Str(s) => js::string(ctx, s),
+            FormValue::Str(s) => js::string(cx, s),
             FormValue::File(f) => Ok(f.clone_ref()),
         }
     }
@@ -394,75 +394,75 @@ trace!(FormData { entries });
 
 impl Object for FormData {}
 
-fn form<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, FormData>> {
-    data::<FormData>(ctx, v, "FormData")
+fn form<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, FormData>> {
+    data::<FormData>(cx, v, "FormData")
 }
 
 /// Whether `v` is a `FormData`.
-pub(crate) fn is_form_data(ctx: Ctx, v: Raw) -> bool {
-    super::is::<FormData>(ctx, v)
+pub(crate) fn is_form_data(cx: Ctx, v: Raw) -> bool {
+    super::is::<FormData>(cx, v)
 }
 
 /// The entry `append` / `set` make of `value` (and `filename`).
-fn form_value(ctx: Ctx, value: Raw, filename: Raw) -> R<FormValue> {
-    let Some(b) = blob_of(ctx, value)? else {
-        return Ok(FormValue::Str(js::to_string(ctx, value)?));
+fn form_value(cx: Ctx, value: Raw, filename: Raw) -> R<FormValue> {
+    let Some(b) = blob_of(cx, value)? else {
+        return Ok(FormValue::Str(js::to_string(cx, value)?));
     };
-    let is_file = super::is::<File>(ctx, value);
+    let is_file = super::is::<File>(cx, value);
     if is_file && js::is_undefined(filename) {
-        return Ok(FormValue::File(V::dup(ctx, value)));
+        return Ok(FormValue::File(V::dup(cx, value)));
     }
     let (name, last) = if is_file {
-        let f = file(ctx, value)?;
+        let f = file(cx, value)?;
         (f.name.clone(), f.last_modified)
     } else {
         ("blob".to_owned(), now_ms())
     };
-    let name = js::opt_string(ctx, filename)?.unwrap_or(name);
-    Ok(FormValue::File(new_file(ctx, b, name, last)?))
+    let name = js::opt_string(cx, filename)?.unwrap_or(name);
+    Ok(FormValue::File(new_file(cx, b, name, last)?))
 }
 
 native!(
-    fn form_constructor(ctx, this, args) {
+    fn form_constructor(cx, this, args) {
         if !js::is_undefined(args.get(0)) {
-            return Err(js::type_error(ctx, "FormData has no form elements here"));
+            return Err(js::type_error(cx, "FormData has no form elements here"));
         }
-        instance(ctx, this, Class::FormData, FormData { entries: Vec::new() })
+        instance(cx, this, Class::FormData, FormData { entries: Vec::new() })
     }
 );
 
 /// A new `FormData` with `entries`.
-pub(crate) fn new_form_data(ctx: Ctx, entries: Vec<(String, FormValue)>) -> R<V> {
-    instance(ctx, js::UNDEFINED, Class::FormData, FormData { entries })
+pub(crate) fn new_form_data(cx: Ctx, entries: Vec<(String, FormValue)>) -> R<V> {
+    instance(cx, js::UNDEFINED, Class::FormData, FormData { entries })
 }
 
-fn two_or_three(ctx: Ctx, args: js::Args<'_>) -> R<()> {
+fn two_or_three(cx: Ctx, args: js::Args<'_>) -> R<()> {
     if args.len() < 2 {
-        return Err(js::type_error(ctx, "a name and a value are required"));
+        return Err(js::type_error(cx, "a name and a value are required"));
     }
-    if args.len() > 2 && !js::is_undefined(args.get(2)) && !is_blob(ctx, args.get(1)) {
-        return Err(js::type_error(ctx, "a filename needs a Blob value"));
+    if args.len() > 2 && !js::is_undefined(args.get(2)) && !is_blob(cx, args.get(1)) {
+        return Err(js::type_error(cx, "a filename needs a Blob value"));
     }
     Ok(())
 }
 
 native!(
-    fn form_append(ctx, this, args) {
-        two_or_three(ctx, args)?;
-        let name = js::to_string(ctx, args.get(0))?;
-        let value = form_value(ctx, args.get(1), args.get(2))?;
-        form(ctx, this)?.entries.push((name, value));
+    fn form_append(cx, this, args) {
+        two_or_three(cx, args)?;
+        let name = js::to_string(cx, args.get(0))?;
+        let value = form_value(cx, args.get(1), args.get(2))?;
+        form(cx, this)?.entries.push((name, value));
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn form_set(ctx, this, args) {
-        two_or_three(ctx, args)?;
-        let name = js::to_string(ctx, args.get(0))?;
-        let value = form_value(ctx, args.get(1), args.get(2))?;
+    fn form_set(cx, this, args) {
+        two_or_three(cx, args)?;
+        let name = js::to_string(cx, args.get(0))?;
+        let value = form_value(cx, args.get(1), args.get(2))?;
         let removed = {
-            let mut f = form(ctx, this)?;
+            let mut f = form(cx, this)?;
             match f.entries.iter().position(|(n, _)| *n == name) {
                 Some(i) => {
                     let old = std::mem::replace(&mut f.entries[i].1, value);
@@ -492,10 +492,10 @@ native!(
 );
 
 native!(
-    fn form_delete(ctx, this, args) {
-        let name = js::to_string(ctx, args.get(0))?;
+    fn form_delete(cx, this, args) {
+        let name = js::to_string(cx, args.get(0))?;
         let removed: Vec<_> = {
-            let mut f = form(ctx, this)?;
+            let mut f = form(cx, this)?;
             let (gone, kept) = std::mem::take(&mut f.entries)
                 .into_iter()
                 .partition(|(n, _)| *n == name);
@@ -508,90 +508,90 @@ native!(
 );
 
 native!(
-    fn form_get(ctx, this, args) {
-        let name = js::to_string(ctx, args.get(0))?;
-        let found = form(ctx, this)?
+    fn form_get(cx, this, args) {
+        let name = js::to_string(cx, args.get(0))?;
+        let found = form(cx, this)?
             .entries
             .iter()
             .find(|(n, _)| *n == name)
             .map(|(_, v)| v.clone_ref());
         match found {
-            Some(v) => v.to_js(ctx),
+            Some(v) => v.to_js(cx),
             None => Ok(V::null()),
         }
     }
 );
 
 native!(
-    fn form_get_all(ctx, this, args) {
-        let name = js::to_string(ctx, args.get(0))?;
-        let all: Vec<FormValue> = form(ctx, this)?
+    fn form_get_all(cx, this, args) {
+        let name = js::to_string(cx, args.get(0))?;
+        let all: Vec<FormValue> = form(cx, this)?
             .entries
             .iter()
             .filter(|(n, _)| *n == name)
             .map(|(_, v)| v.clone_ref())
             .collect();
-        let items = all.iter().map(|v| v.to_js(ctx)).collect::<R<Vec<_>>>()?;
-        js::new_array(ctx, items)
+        let items = all.iter().map(|v| v.to_js(cx)).collect::<R<Vec<_>>>()?;
+        js::new_array(cx, items)
     }
 );
 
 native!(
-    fn form_has(ctx, this, args) {
-        let name = js::to_string(ctx, args.get(0))?;
-        Ok(V::bool(form(ctx, this)?.entries.iter().any(|(n, _)| *n == name)))
+    fn form_has(cx, this, args) {
+        let name = js::to_string(cx, args.get(0))?;
+        Ok(V::bool(form(cx, this)?.entries.iter().any(|(n, _)| *n == name)))
     }
 );
 
 native!(
-    fn form_for_each(ctx, this, args) {
+    fn form_for_each(cx, this, args) {
         let f = args.get(0);
-        if !js::is_function(ctx, f) {
-            return Err(js::type_error(ctx, "the callback is not a function"));
+        if !js::is_function(cx, f) {
+            return Err(js::type_error(cx, "the callback is not a function"));
         }
         let mut i = 0;
         loop {
-            let entry = form(ctx, this)?
+            let entry = form(cx, this)?
                 .entries
                 .get(i)
                 .map(|(n, v)| (n.clone(), v.clone_ref()));
             let Some((n, v)) = entry else { break };
-            let (n, v) = (js::string(ctx, &n)?, v.to_js(ctx)?);
-            js::call(ctx, f, args.get(1), &[v.raw(), n.raw(), this])?;
+            let (n, v) = (js::string(cx, &n)?, v.to_js(cx)?);
+            js::call(cx, f, args.get(1), &[v.raw(), n.raw(), this])?;
             i += 1;
         }
         Ok(V::undefined())
     }
 );
 
-fn form_iterator(ctx: Ctx, this: Raw, part: Part) -> R<V> {
-    let entries: Vec<(String, FormValue)> = form(ctx, this)?
+fn form_iterator(cx: Ctx, this: Raw, part: Part) -> R<V> {
+    let entries: Vec<(String, FormValue)> = form(cx, this)?
         .entries
         .iter()
         .map(|(n, v)| (n.clone(), v.clone_ref()))
         .collect();
     let items = entries
         .iter()
-        .map(|(n, v)| iterator::pair_value(ctx, n, v.to_js(ctx)?, part))
+        .map(|(n, v)| iterator::pair_value(cx, n, v.to_js(cx)?, part))
         .collect::<R<Vec<_>>>()?;
-    iterator::new(ctx, items)
+    iterator::new(cx, items)
 }
 
 native!(
-    fn form_entries(ctx, this, args) {
-        form_iterator(ctx, this, Part::Entries)
+    fn form_entries(cx, this, args) {
+        form_iterator(cx, this, Part::Entries)
     }
 );
 
 native!(
-    fn form_keys(ctx, this, args) {
-        form_iterator(ctx, this, Part::Keys)
+    fn form_keys(cx, this, args) {
+        form_iterator(cx, this, Part::Keys)
     }
 );
 
 native!(
-    fn form_values(ctx, this, args) {
-        form_iterator(ctx, this, Part::Values)
+    fn form_values(cx, this, args) {
+        form_iterator(cx, this, Part::Values)
     }
 );
 
@@ -605,8 +605,8 @@ fn escape_header(s: &str) -> String {
 }
 
 /// Encodes `form` as `multipart/form-data`: the body and its content type.
-pub(crate) fn encode_multipart(ctx: Ctx, form_obj: Raw) -> R<(Vec<u8>, String)> {
-    let entries: Vec<(String, FormValue)> = form(ctx, form_obj)?
+pub(crate) fn encode_multipart(cx: Ctx, form_obj: Raw) -> R<(Vec<u8>, String)> {
+    let entries: Vec<(String, FormValue)> = form(cx, form_obj)?
         .entries
         .iter()
         .map(|(n, v)| (n.clone(), v.clone_ref()))
@@ -626,7 +626,7 @@ pub(crate) fn encode_multipart(ctx: Ctx, form_obj: Raw) -> R<(Vec<u8>, String)> 
             }
             FormValue::File(f) => {
                 let (bytes, mime, filename) = {
-                    let file = file(ctx, f.raw())?;
+                    let file = file(cx, f.raw())?;
                     (
                         file.blob.bytes().to_vec(),
                         file.blob.mime.clone(),
@@ -681,7 +681,7 @@ pub(crate) fn header_param(value: &str, key: &str) -> Option<String> {
 /// Parses a `multipart/form-data` body with `boundary`: its entries
 /// (`None`: malformed).
 pub(crate) fn parse_multipart(
-    ctx: Ctx,
+    cx: Ctx,
     body: &[u8],
     boundary: &str,
 ) -> R<Option<Vec<(String, FormValue)>>> {
@@ -734,7 +734,7 @@ pub(crate) fn parse_multipart(
         let value = match filename {
             Some(filename) => {
                 let blob = Blob::new(value.to_vec(), normalize_type(&mime.unwrap_or_default()));
-                FormValue::File(new_file(ctx, blob, filename, now_ms())?)
+                FormValue::File(new_file(cx, blob, filename, now_ms())?)
             }
             None => FormValue::Str(String::from_utf8_lossy(value).into_owned()),
         };

@@ -115,44 +115,44 @@ export function Physics() {
         <Canvas
           pointerEvents="none"
           style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
-          draw={(ctx, { width, height }) => {
-            const cx = width / 2;
+          draw={(cx, { width, height }) => {
+            const centerX = width / 2;
             const cy = height / 2;
-            ctx.fillStyle = colors.line;
-            for (let gx = 10; gx < width; gx += 16) for (let gy = 10; gy < height; gy += 16) ctx.fillRect(gx, gy, 1.5, 1.5);
-            ctx.setLineDash([3, 5]);
-            ctx.strokeStyle = colors.border;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(cx, 0);
-            ctx.lineTo(cx, height);
-            ctx.moveTo(0, cy);
-            ctx.lineTo(width, cy);
-            ctx.stroke();
+            cx.fillStyle = colors.line;
+            for (let gx = 10; gx < width; gx += 16) for (let gy = 10; gy < height; gy += 16) cx.fillRect(gx, gy, 1.5, 1.5);
+            cx.setLineDash([3, 5]);
+            cx.strokeStyle = colors.border;
+            cx.lineWidth = 1;
+            cx.beginPath();
+            cx.moveTo(centerX, 0);
+            cx.lineTo(centerX, height);
+            cx.moveTo(0, cy);
+            cx.lineTo(width, cy);
+            cx.stroke();
             if (mode() === "snap") {
               const c = corners();
-              ctx.strokeStyle = colors.faint;
+              cx.strokeStyle = colors.faint;
               for (const sx of [-1, 1])
                 for (const sy of [-1, 1]) {
-                  ctx.beginPath();
-                  ctx.roundRect(cx + sx * c.x - CARD / 2, cy + sy * c.y - CARD / 2, CARD, CARD, 26);
-                  ctx.stroke();
+                  cx.beginPath();
+                  cx.roundRect(centerX + sx * c.x - CARD / 2, cy + sy * c.y - CARD / 2, CARD, CARD, 26);
+                  cx.stroke();
                 }
             }
-            ctx.setLineDash([]);
+            cx.setLineDash([]);
             // The tether, from animated values: it follows drags and springs without JS.
-            ctx.strokeStyle = colors.accent;
-            ctx.globalAlpha = 0.45;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.lineTo(x.add(cx), y.add(cy));
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = colors.accent;
-            ctx.beginPath();
-            ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-            ctx.fill();
+            cx.strokeStyle = colors.accent;
+            cx.globalAlpha = 0.45;
+            cx.lineWidth = 1.5;
+            cx.beginPath();
+            cx.moveTo(centerX, cy);
+            cx.lineTo(x.add(centerX), y.add(cy));
+            cx.stroke();
+            cx.globalAlpha = 1;
+            cx.fillStyle = colors.accent;
+            cx.beginPath();
+            cx.arc(centerX, cy, 4, 0, Math.PI * 2);
+            cx.fill();
           }}
         />
         <View

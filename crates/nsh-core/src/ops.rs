@@ -1199,7 +1199,8 @@ impl StatusBarSetting {
 }
 
 /// How a dialog button looks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DialogButtonStyle {
     /// A regular button.
     #[default]
@@ -1211,7 +1212,7 @@ pub enum DialogButtonStyle {
 }
 
 /// A dialog button.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DialogButton {
     /// Label.
     pub text: String,
@@ -1220,7 +1221,7 @@ pub struct DialogButton {
 }
 
 /// An alert, or with `sheet` an action sheet.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Dialog {
     /// Echoed in the answer.
     pub id: u32,

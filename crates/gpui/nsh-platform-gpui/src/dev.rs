@@ -260,6 +260,7 @@ pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
+            tests: false,
     };
     let events = tx;
     let started = DevClient::start(url, host, move |event| {
@@ -407,6 +408,8 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
     match event {
         DevEvent::Connected => dev.hide_status(),
         DevEvent::Disconnected => dev.show_status(Status::Reconnecting),
+        // No test agent here (`HostInfo::tests` is false): no steps come.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => dev.show_status(Status::Building),
         DevEvent::BuildFailed(message) => {
             dev.hide_status();

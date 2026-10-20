@@ -16,6 +16,7 @@ mod runtime;
 mod rust_app;
 mod sign;
 mod test;
+mod test_host;
 mod ui;
 mod web;
 mod windows;
@@ -63,7 +64,7 @@ pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
 }
 
 #[derive(Parser)]
-#[command(name = "nsh", version, about = "Build and run nsh apps")]
+#[command(name = "nsh", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("NSH_GIT_SHA"), ")"), about = "Build and run nsh apps")]
 struct Cli {
     /// Show everything: log lines with their targets, cargo's output and
     /// the hosts' own.
@@ -108,7 +109,7 @@ enum Command {
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Output directory.
-        #[arg(short, long, default_value = "out")]
+        #[arg(short, long, default_value = ".nsh/out")]
         out: PathBuf,
         /// Minify and strip debug info.
         #[arg(long)]
@@ -141,6 +142,11 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// Run the apps the tests open on this platform's development host
+        /// instead of headless: the steps act with the platform's own input
+        /// (macos for now).
+        #[arg(long, value_enum)]
+        target: Option<run::Target>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -238,7 +244,7 @@ enum Command {
         /// Script steps to run once the window shows (`wait`, `shot`,
         /// `tap`, `quit`, ...; the desktop hosts: `--target macos`,
         /// `linux`, `windows`, `gpui`; an app of Rust only: `macos`,
-        /// `linux`, `windows`). With `quit` the command exits when the
+        /// `linux`, `windows`, as GPUI has no runner of its own). With `quit` the command exits when the
         /// script does — snapshots without a window staying open.
         #[arg(long)]
         script: Option<String>,
@@ -282,7 +288,7 @@ enum Command {
         /// Its certificate (`nsh certify`).
         #[arg(long)]
         cert: PathBuf,
-        /// The package to write (default: `out/<id>-<build>.nshpkg`).
+        /// The package to write (default: `.nsh/out/<id>-<build>.nshpkg`).
         #[arg(short, long)]
         out: Option<PathBuf>,
         /// App id, e.g. `com.example.app`.
@@ -365,7 +371,7 @@ struct PackageArgs {
     #[arg(long, value_enum)]
     target: package::PackageTarget,
     /// Output directory.
-    #[arg(short, long, default_value = "out")]
+    #[arg(short, long, default_value = ".nsh/out")]
     out: PathBuf,
     /// Display name.
     #[arg(long)]
@@ -571,7 +577,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             filter,
             trace,
             junit,
-        } => test::test(&path, &entry, filter, trace, junit.as_deref()),
+            target,
+        } => test::test(&path, &entry, filter, trace, junit.as_deref(), target),
         Command::Dev {
             entry,
             port,
@@ -727,6 +734,40 @@ mod command_tests {
     use clap::Parser as _;
 
     use super::{Cli, Command, run::Target};
+
+    #[test]
+    fn version_includes_the_source_revision() {
+        for flag in ["-V", "--version"] {
+            let error = Cli::try_parse_from(["nsh", flag])
+                .err()
+                .expect("version exits");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "nsh {} ({})\n",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("NSH_GIT_SHA")
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn generated_outputs_default_to_the_project_cache() {
+        let cli = Cli::try_parse_from(["nsh", "build"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new(".nsh/out"))
+        );
+        let cli = Cli::try_parse_from(["nsh", "package", "--target", "web"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Package(args) if args.out == std::path::Path::new(".nsh/out"))
+        );
+        let cli = Cli::try_parse_from(["nsh", "build", "--out", "custom"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new("custom"))
+        );
+    }
 
     #[test]
     fn dev_and_run_default_to_this_systems_desktop_host() {

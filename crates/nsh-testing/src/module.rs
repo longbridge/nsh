@@ -16,9 +16,9 @@ use nsh_core::{
 use nsh_engine::{HttpBody, HttpRequest};
 
 use crate::{
+    driver::{Driver, headless_only},
     headless::{
-        self, Headless, MemoryStorage, RecordingNetwork, StubReply, StubResponse, StubRoute,
-        default_answer,
+        self, MemoryStorage, RecordingNetwork, StubReply, StubResponse, StubRoute, default_answer,
     },
     run::{OpenApp, Session},
 };
@@ -502,7 +502,7 @@ impl From<&nsh_core::Dialog> for Dialog {
 }
 
 /// Safe area insets in points.
-#[derive(Debug, Default, Clone, Copy, JsObject)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
 pub struct SafeArea {
     /// The top inset.
     #[prop(default)]
@@ -895,9 +895,10 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 #[class]
 pub struct App {
     steps: Steps,
-    storage: Arc<MemoryStorage>,
-    /// The requests the app made.
-    requests: Arc<RecordingNetwork>,
+    /// Its storage, on a headless engine.
+    storage: Option<Arc<MemoryStorage>>,
+    /// The requests the app made, on a headless engine.
+    requests: Option<Arc<RecordingNetwork>>,
 }
 
 /// What steps on an app take: `App`'s and its clock's.
@@ -1048,7 +1049,7 @@ impl App {
             }
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
-                let screen = on_app(&app, |a| Ok(format!("{:?}", a.screen().texts()))).await?;
+                let screen = on_app(&app, |a| Ok(format!("{:?}", a.texts()?))).await?;
                 return Err(format!(
                     "the condition never held in {} ms; on screen: {screen}",
                     timeout.as_millis()
@@ -1078,40 +1079,37 @@ impl App {
 
     /// How many views on screen match `selector` now.
     pub fn count(&self, selector: String) -> Result<u32, String> {
-        self.with(|app| Ok(app.screen().count(&selector)? as u32))
+        self.with(|app| Ok(app.count(&selector)? as u32))
     }
 
     /// Whether the view `selector` names takes input now: neither it nor a
     /// view around it is disabled, and an input is not `readonly`.
     pub fn enabled(&self, selector: String) -> Result<bool, String> {
-        self.with(|app| app.screen().enabled(&selector))
+        self.with(|app| app.enabled(&selector))
     }
 
     /// Whether a view on screen matches `selector` now.
     pub fn shows(&self, selector: String) -> Result<bool, String> {
-        self.with(|app| app.screen().matches(&selector))
+        self.with(|app| app.shows(&selector))
     }
 
     /// The texts on screen now, in order.
     pub fn texts(&self) -> Result<Vec<String>, String> {
-        self.with(|app| {
-            Ok(app
-                .screen()
-                .texts()
-                .into_iter()
-                .map(str::to_owned)
-                .collect())
-        })
+        self.with(|app| app.texts())
     }
 
     /// The text of the input `selector` names, `null` when none matches.
     pub fn value(&self, selector: String) -> Result<Option<String>, String> {
-        self.with(|app| Ok(app.screen().input_text(&selector)?.map(str::to_owned)))
+        self.with(|app| app.value(&selector))
     }
 
     /// What the app's storage holds now.
-    pub fn storage(&self) -> Entries {
-        Entries(self.storage.entries())
+    pub fn storage(&self) -> Result<Entries, String> {
+        let storage = self
+            .storage
+            .as_ref()
+            .ok_or_else(|| headless_only("`storage()`"))?;
+        Ok(Entries(storage.entries()))
     }
 
     /// Goes back as the user does (a header's back button, swiping a sheet
@@ -1120,7 +1118,7 @@ impl App {
     /// one, the newest modal asks to close. Rejects when there is nothing
     /// to go back from.
     pub async fn back(this: Instance<Self>) -> Result<(), String> {
-        step(&this, Headless::back).await
+        step(&this, |app| app.back()).await
     }
 
     /// Answers the dialogs the app shows from now on (`AlertDialog.show`, action
@@ -1134,7 +1132,7 @@ impl App {
 
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
-        self.with(|app| Ok(app.screen().dialogs().iter().map(Dialog::from).collect()))
+        self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
     }
 
     /// The app's manual clock (`open`'s `clock`), which the test moves.
@@ -1146,12 +1144,30 @@ impl App {
     }
 
     /// The requests the app made, in order.
-    pub fn requests(&self) -> Vec<StubRequest> {
-        self.requests
-            .requests()
-            .iter()
-            .map(StubRequest::from)
-            .collect()
+    pub fn requests(&self) -> Result<Vec<StubRequest>, String> {
+        let requests = self
+            .requests
+            .as_ref()
+            .ok_or_else(|| headless_only("`requests()`"))?;
+        Ok(requests.requests().iter().map(StubRequest::from).collect())
+    }
+
+    /// A picture of the app's window as a PNG, also saved at `path`
+    /// (relative to the current directory, on this machine) when given: a
+    /// real platform's (`nsh test --target`), which draws the app; a
+    /// headless run draws nothing.
+    pub async fn screenshot(this: Instance<Self>, path: Option<String>) -> Result<Vec<u8>, String> {
+        let app = this.with(|a| a.steps.app.clone());
+        let png = on_app(&app, |a| a.screenshot()).await?;
+        if let Some(path) = path {
+            let saved = png.clone();
+            blocking(move || {
+                std::fs::write(&path, saved).map_err(|e| format!("screenshot({path:?}): {e}"))
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+        }
+        Ok(png)
     }
 
     /// Makes the viewport `width` × `height` points (a rotation, a resized
@@ -1163,25 +1179,18 @@ impl App {
 
     /// Switches the system's appearance to `scheme`, as the user does.
     pub async fn set_color_scheme(this: Instance<Self>, scheme: ColorScheme) -> Result<(), String> {
-        step(&this, move |app| {
-            app.set_environment(&format!("setColorScheme({})", scheme.js_name()), |e| {
-                e.color_scheme = scheme.into();
-            })
-        })
-        .await
+        step(&this, move |app| app.set_color_scheme(scheme.into())).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.
     pub fn clipboard(&self) -> Result<Option<String>, String> {
-        self.with(|app| Ok(app.screen().clipboard().map(str::to_owned)))
+        self.with(|app| app.clipboard())
     }
 
     /// `f` with the app as it is now (the batches that came applied).
-    fn with<R>(&self, f: impl FnOnce(&mut Headless) -> Result<R, String>) -> Result<R, String> {
+    fn with<R>(&self, f: impl FnOnce(&mut dyn Driver) -> Result<R, String>) -> Result<R, String> {
         let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
-        let app = app.as_mut().ok_or(CLOSED)?;
-        app.catch_up();
-        f(app)
+        f(app.as_deref_mut().ok_or(CLOSED)?)
     }
 }
 
@@ -1190,7 +1199,7 @@ impl App {
 /// else as [`default_answer`] says.
 async fn step(
     this: &Instance<App>,
-    f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
+    f: impl FnOnce(&mut dyn Driver) -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
     this.with(|a| a.steps.clone()).run(f).await
 }
@@ -1200,7 +1209,7 @@ impl Steps {
     /// showed ([`step`]).
     async fn run(
         &self,
-        f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
+        f: impl FnOnce(&mut dyn Driver) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
         let Steps {
             app,
@@ -1209,7 +1218,7 @@ impl Steps {
         } = self;
         serve(server.as_deref(), on_app(app, f)).await??;
         loop {
-            let pending = on_app(app, |a| Ok(a.pending_dialog().cloned())).await?;
+            let pending = on_app(app, |a| Ok(a.pending_dialog())).await?;
             let Some(shown) = pending else {
                 return Ok(());
             };
@@ -1233,12 +1242,12 @@ impl Steps {
 /// `f` with the app `app`, on a blocking thread.
 async fn on_app<R: Send + 'static>(
     app: &OpenApp,
-    f: impl FnOnce(&mut Headless) -> Result<R, String> + Send + 'static,
+    f: impl FnOnce(&mut dyn Driver) -> Result<R, String> + Send + 'static,
 ) -> Result<R, String> {
     let app = app.clone();
     blocking(move || {
         let mut app = app.lock().unwrap_or_else(|e| e.into_inner());
-        f(app.as_mut().ok_or(CLOSED)?)
+        f(app.as_deref_mut().ok_or(CLOSED)?)
     })
     .await
     .map_err(|e| e.to_string())?

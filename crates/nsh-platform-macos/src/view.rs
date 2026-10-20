@@ -368,25 +368,25 @@ define_class!(
 
     unsafe impl CALayerDelegate for Drawer {
         #[unsafe(method(drawLayer:inContext:))]
-        fn draw_layer(&self, layer: &CALayer, ctx: &CGContext) {
+        fn draw_layer(&self, layer: &CALayer, cx: &CGContext) {
             let Some(view) = self.ivars().load() else {
                 return;
             };
             let Ok(state) = view.ivars().state.try_borrow() else {
                 return;
             };
-            let c = Some(ctx);
+            let c = Some(cx);
             CGContext::save_g_state(c);
             if !layer.contentsAreFlipped() {
                 // Drawing is top down, as in a flipped view.
                 CGContext::translate_ctm(c, 0.0, layer.bounds().size.height);
                 CGContext::scale_ctm(c, 1.0, -1.0);
             }
-            crate::text::draw(ctx, &state);
+            crate::text::draw(cx, &state);
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
             let dirty = CGContext::clip_bounding_box(c);
-            crate::canvas::draw(ctx, &state, dirty);
+            crate::canvas::draw(cx, &state, dirty);
             CGContext::restore_g_state(c);
         }
 

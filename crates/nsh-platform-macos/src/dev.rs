@@ -183,11 +183,18 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
+        tests: true,
     };
+    // The client answers test steps, once it exists.
+    let answers: Arc<std::sync::OnceLock<std::sync::Weak<DevClient>>> = Arc::default();
+    let tester = Tester::new(surface.key(), answers.clone());
     let started = DevClient::start(url, host, move |event| {
         match event {
             DevEvent::Connected => CONNECTED.store(true, Ordering::Relaxed),
             DevEvent::Disconnected => CONNECTED.store(false, Ordering::Relaxed),
+            // Taken off the main queue: a step waits for what it does there.
+            DevEvent::Testing => return tester.start(),
+            DevEvent::Step { id, step } => return tester.take(id, step),
             _ => {}
         }
         // The main queue is serial: events keep their order.
@@ -200,6 +207,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
     match started {
         Ok(client) => {
             let client = Arc::new(client);
+            let _ = answers.set(Arc::downgrade(&client));
             *CLIENT.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&client);
             *view.dev.borrow_mut() = Some(DevSession {
                 key,
@@ -211,6 +219,74 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             log::error!("cannot start the dev client: {err}");
             hide_status(&ui);
             show_error(&ui, "Cannot connect", &err.to_string(), true);
+        }
+    }
+}
+
+/// A test session's agent (`nsh test --target macos`): it takes the steps
+/// on a thread of its own, one after the other, on the surface `key`.
+struct Tester {
+    surface: u64,
+    client: Arc<std::sync::OnceLock<std::sync::Weak<DevClient>>>,
+    steps: Mutex<Option<std::sync::mpsc::Sender<(u64, nsh_dev::protocol::TestStep)>>>,
+}
+
+impl Tester {
+    fn new(surface: u64, client: Arc<std::sync::OnceLock<std::sync::Weak<DevClient>>>) -> Self {
+        Tester {
+            surface,
+            client,
+            steps: Mutex::new(None),
+        }
+    }
+
+    /// The server runs a test session: the surface keeps a model of the
+    /// app from its first bundle on, and an agent takes the steps.
+    fn start(&self) {
+        let mut steps = self.steps.lock().unwrap_or_else(|e| e.into_inner());
+        if steps.is_some() {
+            return;
+        }
+        let model = Arc::new(nsh_testing::agent::Model::default());
+        let key = self.surface;
+        let attached = model.clone();
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = crate::surface::Surface::with_key(key) {
+                surface.set_test_model(Some(attached));
+            }
+        });
+        let agent =
+            nsh_testing::agent::Agent::new(model, Box::new(crate::agent::MacNative::new(key)));
+        let (tx, rx) = std::sync::mpsc::channel::<(u64, nsh_dev::protocol::TestStep)>();
+        let client = self.client.clone();
+        let spawned = std::thread::Builder::new()
+            .name("nsh-test-agent".into())
+            .spawn(move || {
+                for (id, step) in rx {
+                    let outcome = agent.take(step);
+                    if let Some(client) = client.get().and_then(std::sync::Weak::upgrade) {
+                        client.step_done(id, outcome);
+                    }
+                }
+            });
+        match spawned {
+            Ok(_) => *steps = Some(tx),
+            Err(err) => log::error!("cannot start the test agent: {err}"),
+        }
+    }
+
+    /// Hands step `id` to the agent.
+    fn take(&self, id: u64, step: nsh_dev::protocol::TestStep) {
+        let steps = self.steps.lock().unwrap_or_else(|e| e.into_inner());
+        if steps.as_ref().is_none_or(|tx| tx.send((id, step)).is_err())
+            && let Some(client) = self.client.get().and_then(std::sync::Weak::upgrade)
+        {
+            client.step_done(
+                id,
+                nsh_dev::protocol::StepOutcome::Failed {
+                    message: "the host runs no test session".into(),
+                },
+            );
         }
     }
 }
@@ -291,6 +367,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
     match event {
         DevEvent::Connected => hide_status(ui),
         DevEvent::Disconnected => show_status(ui, "Dev server disconnected — reconnecting…"),
+        // The client's thread hands them to the test agent ([`Tester`]).
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => show_status(ui, "Building…"),
         DevEvent::BuildFailed(message) => {
             hide_status(ui);

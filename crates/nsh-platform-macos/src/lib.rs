@@ -21,6 +21,8 @@
 #![cfg(target_os = "macos")]
 
 mod access;
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod blur;
@@ -42,6 +44,7 @@ mod net;
 mod script;
 mod scroll;
 mod surface;
+mod synth;
 mod system;
 mod text;
 mod text_input;

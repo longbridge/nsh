@@ -283,12 +283,12 @@ function Sketch() {
         const all = strokes();
         strokes.set([...all.slice(0, -1), [...all[all.length - 1], point(e)]]);
       }}
-      draw={(ctx) => {
-        ctx.lineWidth = 3;
+      draw={(cx) => {
+        cx.lineWidth = 3;
         for (const s of strokes()) {
-          ctx.beginPath();
-          s.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-          ctx.stroke();
+          cx.beginPath();
+          s.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+          cx.stroke();
         }
       }}
     />

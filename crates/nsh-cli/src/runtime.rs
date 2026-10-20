@@ -15,7 +15,6 @@
 //! runtime/windows/nsh-windows-host.exe       development host (Windows)
 //! runtime/windows/nsh-windows-app.exe        release runner (Windows)
 //! runtime/gpui/nsh-gpui-host[.exe]           development host (GPUI, this OS)
-//! runtime/gpui/nsh-gpui-app[.exe]            release runner (GPUI, this OS)
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
 //! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
@@ -57,7 +56,8 @@ pub(crate) enum Platform {
     MacOs,
     /// Windows (Win32), on this machine.
     Windows,
-    /// GPUI, on this machine (macOS, Windows or Linux).
+    /// GPUI, on this machine (macOS, Windows or Linux): a development host
+    /// only, as GPUI is the backend for embedding in GPUI apps.
     Gpui,
 }
 
@@ -95,7 +95,7 @@ impl Platform {
             (Platform::Windows, false) => "nsh-windows-host",
             (Platform::Windows, true) => "nsh-windows-app",
             (Platform::Gpui, false) => "nsh-gpui-host",
-            (Platform::Gpui, true) => "nsh-gpui-app",
+            (Platform::Gpui, true) => unreachable!("GPUI apps are embedded, never packaged"),
             (_, false) => "nsh-ios-host",
             (_, true) => "nsh-ios-app",
         }
@@ -390,11 +390,11 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     existing(built, platform, name)
 }
 
-/// The cargo arguments a build of a GPUI host or runner adds: on a Mac
+/// The cargo arguments a build of a GPUI host adds: on a Mac
 /// where Xcode cannot run `metal`, which GPUI's build script precompiles
 /// its shaders with, `nsh-platform-gpui`'s `runtime-shaders` feature, so
-/// GPUI compiles them when the app starts. Every GPUI host and runner,
-/// the checkout's and those of apps with Rust crates, depends on
+/// GPUI compiles them when the app starts. Every GPUI host, the
+/// checkout's and those of apps with Rust crates, depends on
 /// `nsh-platform-gpui`.
 pub(crate) fn gpui_features() -> &'static [&'static str] {
     if !metal_toolchain_missing() {
@@ -529,10 +529,9 @@ mod tests {
         assert_eq!(Platform::Gpui.dir(), "gpui");
         assert_eq!(Platform::Gpui.triple(), None);
         assert_eq!(Platform::Gpui.binary(false), "nsh-gpui-host");
-        assert_eq!(Platform::Gpui.binary(true), "nsh-gpui-app");
         assert_eq!(
-            Platform::Gpui.file_name(true),
-            format!("nsh-gpui-app{}", std::env::consts::EXE_SUFFIX)
+            Platform::Gpui.file_name(false),
+            format!("nsh-gpui-host{}", std::env::consts::EXE_SUFFIX)
         );
         assert_eq!(Platform::Gpui.host(false), "the development host for GPUI");
     }

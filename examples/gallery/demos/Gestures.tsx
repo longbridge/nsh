@@ -12,9 +12,9 @@ function Dots() {
     <Canvas
       pointerEvents="none"
       style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
-      draw={(ctx, { width, height }) => {
-        ctx.fillStyle = colors.line;
-        for (let x = 8; x < width; x += 14) for (let y = 8; y < height; y += 14) ctx.fillRect(x, y, 1.5, 1.5);
+      draw={(cx, { width, height }) => {
+        cx.fillStyle = colors.line;
+        for (let x = 8; x < width; x += 14) for (let y = 8; y < height; y += 14) cx.fillRect(x, y, 1.5, 1.5);
       }}
     />
   );
@@ -389,26 +389,26 @@ function PointerEvents() {
         <Canvas
           pointerEvents="none"
           style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}
-          draw={(ctx, { width, height }) => {
+          draw={(cx, { width, height }) => {
             // A hatched band across the middle, framed with dashes.
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(width * 0.18, 0, width * 0.64, height);
-            ctx.clip();
-            ctx.strokeStyle = alpha(colors.warn, 0.28);
-            ctx.lineWidth = 1;
-            ctx.beginPath();
+            cx.save();
+            cx.beginPath();
+            cx.rect(width * 0.18, 0, width * 0.64, height);
+            cx.clip();
+            cx.strokeStyle = alpha(colors.warn, 0.28);
+            cx.lineWidth = 1;
+            cx.beginPath();
             for (let i = -height; i < width; i += 8) {
-              ctx.moveTo(i, height);
-              ctx.lineTo(i + height, 0);
+              cx.moveTo(i, height);
+              cx.lineTo(i + height, 0);
             }
-            ctx.stroke();
-            ctx.restore();
-            ctx.setLineDash([4, 4]);
-            ctx.strokeStyle = colors.warn;
-            ctx.beginPath();
-            ctx.roundRect(width * 0.18 + 0.5, 0.5, width * 0.64 - 1, height - 1, 10);
-            ctx.stroke();
+            cx.stroke();
+            cx.restore();
+            cx.setLineDash([4, 4]);
+            cx.strokeStyle = colors.warn;
+            cx.beginPath();
+            cx.roundRect(width * 0.18 + 0.5, 0.5, width * 0.64 - 1, height - 1, 10);
+            cx.stroke();
           }}
         />
       </View>

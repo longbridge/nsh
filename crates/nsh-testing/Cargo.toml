@@ -14,10 +14,16 @@ workspace = true
 [features]
 # The headless driver alone: no QuickJS, so a Rust app's tests run its root
 # with none.
-default = []
+default = ["live"]
+# The headless driver's network: `fetch` on ureq (`UreqNetwork`).
+live = ["dep:ureq"]
+# A real host's test agent (`agent`): `nsh test --target` steps on the app it
+# shows, through the platform's input. No QuickJS and no network: the dev
+# hosts link it.
+agent = ["dep:nsh-dev", "dep:serde_json", "dep:base64"]
 # `nsh test`'s side: the `nsh/test` module, test files on an engine of their
 # own (`run_file`) and apps' headless runners (`runner`): QuickJS.
-js = ["nsh-engine/js", "dep:dunce", "dep:serde", "dep:serde_json", "dep:tokio"]
+js = ["live", "nsh-engine/js", "dep:nsh-dev", "dep:base64", "dep:dunce", "dep:serde", "dep:serde_json", "dep:tokio"]
 # Building entries in this process (`compile_tsx`, `tsx`, `compiler`): nsh's
 # bundler. Off in apps' headless runners, which `nsh` builds the entries for.
 bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
@@ -27,6 +33,8 @@ nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
 nsh-core.workspace = true
 nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true }
+nsh-dev = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 crossbeam-channel.workspace = true
 dunce = { workspace = true, optional = true }
 log.workspace = true
@@ -35,7 +43,7 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 # The requests routes' JS functions answer, waiting for the test file's VM.
 tokio = { workspace = true, features = ["sync"], optional = true }
-ureq.workspace = true
+ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The fetch tests drive a VM's network by hand (`headless/net_fetch_tests.rs`).

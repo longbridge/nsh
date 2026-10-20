@@ -1133,7 +1133,7 @@ impl Painter {
 
     /// Whether `point` (in the canvas, as a touch's location) is inside the
     /// current path by `rule`, with the transform, as recorded so far (TS:
-    /// `ctx.isPointInPath(x, y, rule)`). Answered from the geometry here,
+    /// `cx.isPointInPath(x, y, rule)`). Answered from the geometry here,
     /// with no platform round trip; a number given as an animated value
     /// counts as 0, as in TS. To find what is under a tap, build the
     /// canvas's painter in a function the press handler calls too.
@@ -1142,14 +1142,14 @@ impl Painter {
     }
 
     /// Whether `point` is on the stroke of the current path with the line
-    /// width and cap recorded so far (TS: `ctx.isPointInStroke(x, y)`;
+    /// width and cap recorded so far (TS: `cx.isPointInStroke(x, y)`;
     /// round joins, no dashes). See [`Self::is_point_in_path`].
     pub fn is_point_in_stroke(&self, point: Point<Points>) -> bool {
         crate::canvas::point_in_stroke(&self.drawing.ops, None, point, |_| 0.0)
     }
 
     /// Whether `point` is inside `path` by `rule`, with the transform
-    /// recorded so far (TS: `ctx.isPointInPath(path2d, x, y, rule)`): the
+    /// recorded so far (TS: `cx.isPointInPath(path2d, x, y, rule)`): the
     /// shape [`Self::fill_path`] drew under a tap. See
     /// [`Self::is_point_in_path`].
     pub fn path_contains(&self, path: &Path, point: Point<Points>, rule: FillRule) -> bool {
@@ -1157,7 +1157,7 @@ impl Painter {
     }
 
     /// Whether `point` is on the stroke of `path` with the transform, line
-    /// width and cap recorded so far (TS: `ctx.isPointInStroke(path2d, x,
+    /// width and cap recorded so far (TS: `cx.isPointInStroke(path2d, x,
     /// y)`). See [`Self::is_point_in_path`].
     pub fn stroke_contains(&self, path: &Path, point: Point<Points>) -> bool {
         crate::canvas::point_in_stroke(&self.drawing.ops, Some(path), point, |_| 0.0)

@@ -26,8 +26,8 @@ trace!(TextStream { transform });
 
 impl Object for TextStream {}
 
-fn text_stream<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, TextStream>> {
-    data::<TextStream>(ctx, v, "text stream")
+fn text_stream<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, TextStream>> {
+    data::<TextStream>(cx, v, "text stream")
 }
 
 /// Splits a WTF-8 chunk: a lone high surrogate at the end waits for the
@@ -73,22 +73,22 @@ fn encode_chunk(pending: &mut Option<u16>, mut bytes: &[u8]) -> Vec<u8> {
 }
 
 native!(
-    fn encoder_stream_constructor(ctx, this, args) {
+    fn encoder_stream_constructor(cx, this, args) {
         let pending = Rc::new(RefCell::new(None::<u16>));
         let p = pending.clone();
-        let transform_fn = js::closure(ctx, Vec::new(), move |ctx, _, args| {
-            let bytes = js::to_wtf8(ctx, args.get(0))?;
+        let transform_fn = js::closure(cx, Vec::new(), move |cx, _, args| {
+            let bytes = js::to_wtf8(cx, args.get(0))?;
             let out = encode_chunk(&mut p.borrow_mut(), &bytes);
             if !out.is_empty() {
-                let chunk = js::uint8_array(ctx, &out)?;
-                transform::enqueue(ctx, args.get(1), chunk.raw())?;
+                let chunk = js::uint8_array(cx, &out)?;
+                transform::enqueue(cx, args.get(1), chunk.raw())?;
             }
             Ok(V::undefined())
         })?;
-        let flush = js::closure(ctx, Vec::new(), move |ctx, _, args| {
+        let flush = js::closure(cx, Vec::new(), move |cx, _, args| {
             if pending.borrow_mut().take().is_some() {
-                let chunk = js::uint8_array(ctx, "\u{FFFD}".as_bytes())?;
-                transform::enqueue(ctx, args.get(0), chunk.raw())?;
+                let chunk = js::uint8_array(cx, "\u{FFFD}".as_bytes())?;
+                transform::enqueue(cx, args.get(0), chunk.raw())?;
             }
             Ok(V::undefined())
         })?;
@@ -98,45 +98,45 @@ native!(
             cancel: Algo::default(),
         };
         let (t, _, start) = new_transform(
-            ctx,
+            cx,
             js::UNDEFINED,
             Class::TransformStream,
             transformer,
             Sides::default_sides(),
         )?;
-        start.resolve(ctx, js::UNDEFINED);
-        instance(ctx, this, Class::TextEncoderStream, TextStream { transform: t, decoder: None })
+        start.resolve(cx, js::UNDEFINED);
+        instance(cx, this, Class::TextEncoderStream, TextStream { transform: t, decoder: None })
     }
 );
 
-fn decode(ctx: Ctx, d: &Rc<RefCell<Decoder>>, bytes: &[u8], stream: bool) -> R<String> {
+fn decode(cx: Ctx, d: &Rc<RefCell<Decoder>>, bytes: &[u8], stream: bool) -> R<String> {
     match d.borrow_mut().decode(bytes, stream) {
         Ok(s) => Ok(s),
-        Err(Malformed) => Err(js::type_error(ctx, "The encoded data was not valid")),
+        Err(Malformed) => Err(js::type_error(cx, "The encoded data was not valid")),
     }
 }
 
 native!(
-    fn decoder_stream_constructor(ctx, this, args) {
-        let decoder = Rc::new(RefCell::new(decoder_options(ctx, args.get(0), args.get(1))?));
+    fn decoder_stream_constructor(cx, this, args) {
+        let decoder = Rc::new(RefCell::new(decoder_options(cx, args.get(0), args.get(1))?));
         let d = decoder.clone();
-        let transform_fn = js::closure(ctx, Vec::new(), move |ctx, _, args| {
-            let bytes = js::buffer_source(ctx, args.get(0)).ok_or_else(|| {
-                js::type_error(ctx, "The provided value is not an ArrayBuffer or ArrayBufferView")
+        let transform_fn = js::closure(cx, Vec::new(), move |cx, _, args| {
+            let bytes = js::buffer_source(cx, args.get(0)).ok_or_else(|| {
+                js::type_error(cx, "The provided value is not an ArrayBuffer or ArrayBufferView")
             })?;
-            let s = decode(ctx, &d, &bytes, true)?;
+            let s = decode(cx, &d, &bytes, true)?;
             if !s.is_empty() {
-                let chunk = js::string(ctx, &s)?;
-                transform::enqueue(ctx, args.get(1), chunk.raw())?;
+                let chunk = js::string(cx, &s)?;
+                transform::enqueue(cx, args.get(1), chunk.raw())?;
             }
             Ok(V::undefined())
         })?;
         let d = decoder.clone();
-        let flush = js::closure(ctx, Vec::new(), move |ctx, _, args| {
-            let s = decode(ctx, &d, &[], false)?;
+        let flush = js::closure(cx, Vec::new(), move |cx, _, args| {
+            let s = decode(cx, &d, &[], false)?;
             if !s.is_empty() {
-                let chunk = js::string(ctx, &s)?;
-                transform::enqueue(ctx, args.get(0), chunk.raw())?;
+                let chunk = js::string(cx, &s)?;
+                transform::enqueue(cx, args.get(0), chunk.raw())?;
             }
             Ok(V::undefined())
         })?;
@@ -146,51 +146,51 @@ native!(
             cancel: Algo::default(),
         };
         let (t, _, start) = new_transform(
-            ctx,
+            cx,
             js::UNDEFINED,
             Class::TransformStream,
             transformer,
             Sides::default_sides(),
         )?;
-        start.resolve(ctx, js::UNDEFINED);
-        instance(ctx, this, Class::TextDecoderStream, TextStream { transform: t, decoder: Some(decoder) })
+        start.resolve(cx, js::UNDEFINED);
+        instance(cx, this, Class::TextDecoderStream, TextStream { transform: t, decoder: Some(decoder) })
     }
 );
 
 native!(
-    fn text_readable(ctx, this, args) {
-        let t = text_stream(ctx, this)?.transform.clone_ref();
-        js::get(ctx, t.raw(), "readable")
+    fn text_readable(cx, this, args) {
+        let t = text_stream(cx, this)?.transform.clone_ref();
+        js::get(cx, t.raw(), "readable")
     }
 );
 
 native!(
-    fn text_writable(ctx, this, args) {
-        let t = text_stream(ctx, this)?.transform.clone_ref();
-        js::get(ctx, t.raw(), "writable")
+    fn text_writable(cx, this, args) {
+        let t = text_stream(cx, this)?.transform.clone_ref();
+        js::get(cx, t.raw(), "writable")
     }
 );
 
 native!(
-    fn text_encoding(ctx, this, args) {
-        let name = match &text_stream(ctx, this)?.decoder {
+    fn text_encoding(cx, this, args) {
+        let name = match &text_stream(cx, this)?.decoder {
             Some(d) => d.borrow().encoding.name(),
             None => "utf-8",
         };
-        js::string(ctx, name)
+        js::string(cx, name)
     }
 );
 
 native!(
-    fn text_fatal(ctx, this, args) {
-        let fatal = text_stream(ctx, this)?.decoder.as_ref().is_some_and(|d| d.borrow().fatal);
+    fn text_fatal(cx, this, args) {
+        let fatal = text_stream(cx, this)?.decoder.as_ref().is_some_and(|d| d.borrow().fatal);
         Ok(V::bool(fatal))
     }
 );
 
 native!(
-    fn text_ignore_bom(ctx, this, args) {
-        let i = text_stream(ctx, this)?.decoder.as_ref().is_some_and(|d| d.borrow().ignore_bom);
+    fn text_ignore_bom(cx, this, args) {
+        let i = text_stream(cx, this)?.decoder.as_ref().is_some_and(|d| d.borrow().ignore_bom);
         Ok(V::bool(i))
     }
 );

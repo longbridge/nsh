@@ -16,6 +16,7 @@ fn test_run(filter: Option<&str>) -> TestRun {
         work_dir: std::env::temp_dir().join(format!("nsh-testing-{}", std::process::id())),
         filter: filter.map(str::to_owned),
         trace: None,
+        host: None,
     }
 }
 

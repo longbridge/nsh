@@ -40,40 +40,40 @@ function App() {
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
         <Canvas
           style={{ width: 110, height: 110 }}
-          draw={(ctx, { width, height }) => {
-            const cx = width / 2;
+          draw={(cx, { width, height }) => {
+            const centerX = width / 2;
             const cy = height / 2;
             const r = width / 2 - 8;
-            ctx.lineWidth = 10;
-            ctx.lineCap = "round";
-            ctx.strokeStyle = ui().border;
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, TAU);
-            ctx.stroke();
-            const g = ctx.createConicGradient(-Math.PI / 2, cx, cy);
+            cx.lineWidth = 10;
+            cx.lineCap = "round";
+            cx.strokeStyle = ui().border;
+            cx.beginPath();
+            cx.arc(centerX, cy, r, 0, TAU);
+            cx.stroke();
+            const g = cx.createConicGradient(-Math.PI / 2, centerX, cy);
             g.addColorStop(0, ui().up);
             g.addColorStop(1, ui().accent);
-            ctx.strokeStyle = g;
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, -Math.PI / 2, progress.mul(TAU).sub(Math.PI / 2));
-            ctx.stroke();
-            ctx.fillStyle = ui().text;
-            ctx.font = "600 18px system-ui";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(`${Math.round(target() * 100)}%`, cx, cy);
+            cx.strokeStyle = g;
+            cx.beginPath();
+            cx.arc(centerX, cy, r, -Math.PI / 2, progress.mul(TAU).sub(Math.PI / 2));
+            cx.stroke();
+            cx.fillStyle = ui().text;
+            cx.font = "600 18px system-ui";
+            cx.textAlign = "center";
+            cx.textBaseline = "middle";
+            cx.fillText(`${Math.round(target() * 100)}%`, centerX, cy);
           }}
         />
         <View style={{ gap: 10 }}>
           <Button label="Animate the ring" onPress={go} />
           <Canvas
             style={{ width: 48, height: 48 }}
-            draw={(ctx) => {
-              ctx.scale(2, 2);
-              ctx.shadowColor = tint(ui().down, 0.45);
-              ctx.shadowBlur = 4;
-              ctx.fillStyle = ui().down;
-              ctx.fill(heart);
+            draw={(cx) => {
+              cx.scale(2, 2);
+              cx.shadowColor = tint(ui().down, 0.45);
+              cx.shadowBlur = 4;
+              cx.fillStyle = ui().down;
+              cx.fill(heart);
             }}
           />
         </View>
@@ -81,27 +81,27 @@ function App() {
 
       <Canvas
         style={{ ...ui().inset, height: 150, borderRadius: 12 }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const values = data();
           const pad = 16;
           const x = (i: number) => pad + (i / (values.length - 1)) * (width - 2 * pad);
           const y = (v: number) => height - pad - (v / 100) * (height - 2 * pad);
-          const area = ctx.createLinearGradient(0, pad, 0, height - pad);
+          const area = cx.createLinearGradient(0, pad, 0, height - pad);
           area.addColorStop(0, tint(ui().accent, 0.28));
           area.addColorStop(1, tint(ui().accent, 0));
-          ctx.beginPath();
-          values.forEach((v, i) => (i === 0 ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v))));
-          ctx.lineTo(x(values.length - 1), height - pad);
-          ctx.lineTo(x(0), height - pad);
-          ctx.closePath();
-          ctx.fillStyle = area;
-          ctx.fill();
-          ctx.beginPath();
-          values.forEach((v, i) => (i === 0 ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v))));
-          ctx.strokeStyle = ui().accent;
-          ctx.lineWidth = 2.5;
-          ctx.lineJoin = "round";
-          ctx.stroke();
+          cx.beginPath();
+          values.forEach((v, i) => (i === 0 ? cx.moveTo(x(i), y(v)) : cx.lineTo(x(i), y(v))));
+          cx.lineTo(x(values.length - 1), height - pad);
+          cx.lineTo(x(0), height - pad);
+          cx.closePath();
+          cx.fillStyle = area;
+          cx.fill();
+          cx.beginPath();
+          values.forEach((v, i) => (i === 0 ? cx.moveTo(x(i), y(v)) : cx.lineTo(x(i), y(v))));
+          cx.strokeStyle = ui().accent;
+          cx.lineWidth = 2.5;
+          cx.lineJoin = "round";
+          cx.stroke();
         }}
       />
       <Button label="New data" onPress={() => data.set(data().map(() => Math.round(10 + Math.random() * 85)))} />
@@ -117,19 +117,19 @@ function App() {
           const all = strokes();
           strokes.set([...all.slice(0, -1), [...all[all.length - 1], point(e)]]);
         }}
-        draw={(ctx, { width }) => {
-          ctx.fillStyle = ui().faint;
-          ctx.font = "13px system-ui";
-          ctx.textAlign = "center";
-          ctx.fillText("Draw here", width / 2, 20);
-          ctx.strokeStyle = ui().text;
-          ctx.lineWidth = 3;
-          ctx.lineCap = "round";
-          ctx.lineJoin = "round";
+        draw={(cx, { width }) => {
+          cx.fillStyle = ui().faint;
+          cx.font = "13px system-ui";
+          cx.textAlign = "center";
+          cx.fillText("Draw here", width / 2, 20);
+          cx.strokeStyle = ui().text;
+          cx.lineWidth = 3;
+          cx.lineCap = "round";
+          cx.lineJoin = "round";
           for (const s of strokes()) {
-            ctx.beginPath();
-            s.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
-            ctx.stroke();
+            cx.beginPath();
+            s.forEach(([px, py], i) => (i === 0 ? cx.moveTo(px, py) : cx.lineTo(px, py)));
+            cx.stroke();
           }
         }}
       />

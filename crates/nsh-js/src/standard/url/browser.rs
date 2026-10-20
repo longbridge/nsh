@@ -11,22 +11,22 @@ pub(super) fn file_href(path: &str) -> String {
     url.into()
 }
 
-pub(super) fn file_url_to_path(_ctx: Ctx<'_>, input: Coerced<String>) -> Result<String> {
+pub(super) fn file_url_to_path(_cx: Ctx<'_>, input: Coerced<String>) -> Result<String> {
     // Preserve the native module's string projection, including its treatment
     // of escaped characters. The existing API record owns these semantics.
     Ok(input.0.trim_start_matches("file://").to_owned())
 }
 
-fn parse(ctx: &Ctx<'_>, input: &str) -> Result<Url> {
-    Url::parse(input).map_err(|error| Exception::throw_type(ctx, &error.to_string()))
+fn parse(cx: &Ctx<'_>, input: &str) -> Result<Url> {
+    Url::parse(input).map_err(|error| Exception::throw_type(cx, &error.to_string()))
 }
 
 pub(super) fn format<'js>(
-    ctx: Ctx<'js>,
+    cx: Ctx<'js>,
     input: Coerced<String>,
     options: Opt<Value<'js>>,
 ) -> Result<String> {
-    let url = parse(&ctx, &input.0)?;
+    let url = parse(&cx, &input.0)?;
     let options = options.0.and_then(|value| value.into_object());
     let option = |name: &str, default: bool| {
         options
@@ -60,11 +60,11 @@ pub(super) fn format<'js>(
 }
 
 pub(super) fn url_to_http_options<'js>(
-    ctx: Ctx<'js>,
+    cx: Ctx<'js>,
     input: Coerced<String>,
 ) -> Result<Object<'js>> {
-    let url = parse(&ctx, &input.0)?;
-    let object = Object::new(ctx)?;
+    let url = parse(&cx, &input.0)?;
+    let object = Object::new(cx)?;
     object.set("protocol", format!("{}:", url.scheme()))?;
     object.set("hostname", url.host_str().unwrap_or(""))?;
     if let Some(fragment) = url.fragment().filter(|fragment| !fragment.is_empty()) {
@@ -102,11 +102,11 @@ mod tests {
         let host = crate::Host::new().unwrap();
         host.with_raw(|raw| {
             // SAFETY: the host holds the context lock; no JS handle escapes.
-            let ctx = unsafe { Ctx::from_raw(std::ptr::NonNull::new(raw).unwrap()) };
+            let cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new(raw).unwrap()) };
             let input = "https://user:pass@example.com:8443/a?q=1#fragment";
-            let portable = url_to_http_options(ctx.clone(), Coerced(input.to_owned())).unwrap();
+            let portable = url_to_http_options(cx.clone(), Coerced(input.to_owned())).unwrap();
             let native =
-                super::super::url_to_http_options(ctx.clone(), Coerced(input.to_owned())).unwrap();
+                super::super::url_to_http_options(cx.clone(), Coerced(input.to_owned())).unwrap();
             for key in [
                 "protocol", "hostname", "hash", "search", "pathname", "path", "href", "auth",
                 "port",
@@ -118,11 +118,11 @@ mod tests {
                 );
             }
             assert_eq!(
-                format(ctx.clone(), Coerced(input.to_owned()), Opt(None)).unwrap(),
-                super::super::format(ctx.clone(), Coerced(input.to_owned()), Opt(None)).unwrap()
+                format(cx.clone(), Coerced(input.to_owned()), Opt(None)).unwrap(),
+                super::super::format(cx.clone(), Coerced(input.to_owned()), Opt(None)).unwrap()
             );
             assert_eq!(
-                file_url_to_path(ctx, Coerced("file:///a%20b".to_owned())).unwrap(),
+                file_url_to_path(cx, Coerced("file:///a%20b".to_owned())).unwrap(),
                 "/a%20b"
             );
         });

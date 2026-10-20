@@ -66,7 +66,15 @@ downloaded from the npm registry's tarball URL the first time (ureq, no npm clie
 and the integrities (`npm view @typescript/typescript-<os>-<arch>@<version> dist.integrity`). The distribution
 (`cargo xtask dist`) does not ship the compiler: it is 24 MB per platform and most runs of `nsh` never check types.
 
+## Project files
+
+NSH-generated declarations, runner workspaces, tests and default build/package outputs live under `.nsh/`.
+Default bundles and packages are `.nsh/out/`; `--out` still overrides that location. Cargo keeps its normal
+`target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not add Cargo configuration to relocate it.
+Existing directories are never deleted automatically. Follow the CoC project constraint in `AGENTS.md`.
+
 ## Output
+
 
 The CLI's terminal output is `crates/nsh-cli/src/ui.rs` (`website/docs/cli.md`, "Output", shows it): one line per
 step, the details only when something fails. Every command prints through it:
@@ -115,8 +123,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   host, `crates/nsh-linux-host`, run in place: it needs no app bundle) on Linux, `--target windows` (the Win32 host,
   `crates/nsh-windows-host`, run in place too) on Windows. `--target macos` runs the AppKit host
   (`crates/nsh-macos-host`) in place too: it makes itself a regular app without a bundle. `--target gpui` runs the
-  GPUI host (`crates/gpui/nsh-gpui-host`) in place on any of the three; GPUI hosts report `HostPlatform::Gpui`, so the dev
-  server shows them `nsh run --target gpui`. The hosts are stopped with the run
+  GPUI host (`crates/gpui/nsh-gpui-host`) in place on any of the three: it shows a TSX app as GPUI apps that embed it
+  show it (GPUI is the backend for embedding; a Rust app of Rust only runs on the OS's own backend). GPUI hosts report
+  `HostPlatform::Gpui`, so the dev server shows them `nsh run --target gpui`. The hosts are stopped with the run
   (Ctrl-C, SIGTERM, the session ending); a host that exits with an error ends it with its kept output. On Windows the host starts in a
   process group of its own (`CREATE_NEW_PROCESS_GROUP`), out of the console's Ctrl-C, so a stop is not taken for the
   host failing, and in a job object that kills it when the job closes (`run::KillOnClose`): Windows ends a child with
@@ -318,6 +327,35 @@ directory): the runner then makes the app's root (`app_root()`), so `open(".")` 
 failures and log records come back as `RunnerMessage`s; batches of `--trace` go to the runner's stdout, which is
 `nsh`'s.
 
+### On a real platform (`--target`)
+
+`nsh test --target <platform>` runs the apps tests open on the platform's development host. `App` drives either kind
+of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
+`nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
+For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
+(`DevServer::test_session`: its hello says `test`), publishes the build and starts the host with `--dev-server`,
+`--window-size` and a fresh `--data-dir`, removed after it. A host whose hello says `tests` takes steps:
+`DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the
+`ClientMessage::StepDone` with that id; a host that leaves fails its waiting steps.
+
+The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
+`Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
+so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
+a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
+(`Native`: press, long press, scroll, typed keys, `back`, dialogs, screenshots, the window's size and appearance),
+then waits until no batch came for 100 ms and no native animation runs (2 s at most). `Native`'s calls do their work
+on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
+test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
+`runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (stubbed
+routes, storage, clipboard, locale, reduced motion, safe area).
+
+macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
+and key events (which `--script` steps use too), `NSView` frames converted to the content's top-left points, `NSAlert`
+buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
+attaches the model to the surface on the server's test session (before the first bundle) and starts the agent's
+thread.
+
 ## New apps (`nsh init --template`)
 
 `nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a
@@ -404,10 +442,9 @@ program that describes them, builds the hosts and runners with them, and does ev
     program, with no console), `android` (the app's `libnsh.so`: `nsh::ui_sets!`, which the Android runtime looks up
     when an engine starts) and `web` (the app's web runtime, a `cdylib` for `wasm32-unknown-unknown` built with the
     `web` profile: `nsh_platform_web::ui_sets!`, whose `nsh_app_init` export `nsh.js` calls; `docs/dev/web.md`, "Apps
-    with Rust components"). `gpui-host` / `gpui-app` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os =
-    "linux", target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are a workspace of their
-    own in `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is built
-    (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
+    with Rust components"). `gpui-host` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
+    target_os = "macos", windows))`) is a workspace of its own in `.nsh/rust/gpui` (excluded from the main one), written
+    only when the GPUI host is built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates.
 
   They take nsh's crates where the app's crates do (`rust_app::Nsh::of`, from each crate's dependencies through `cargo
   metadata`): from crates.io at the version of the running `nsh` (`=0.1.1` for nsh 0.1.1: the code it
@@ -440,7 +477,7 @@ program that describes them, builds the hosts and runners with them, and does ev
   `native-pipeline.md`), `.nsh/types` declares each set (`.nsh/types/<specifier>.d.ts` from its declarations, found
   through tsconfig's `"*"` path, which falls back to `node_modules`), the dev server serves their files and tells hosts
   which sets a bundle needs. The hosts `run` and `package` need are built for the app instead of taken from the runtime
-  (iOS `--target` triples; Linux's, macOS's, Windows' and GPUI's `*-host` / `*-app` for this machine; Android: the
+  (iOS `--target` triples; Linux's, macOS's, Windows' `*-host` / `*-app` and GPUI's `gpui-host` for this machine; Android: the
   prebuilt `classes.dex` with the app's `libnsh.so` for each ABI of the prebuilt runtime, cross-compiled with the NDK;
   the web: the app's `nsh.wasm` / `nsh-dev.wasm`, with nsh's `nsh.js`).
 - `nsh test` builds the app's headless runner (`RustApp::test_runner`) and runs the test files in it, building the
@@ -458,7 +495,7 @@ program that describes them, builds the hosts and runners with them, and does ev
   `rust-macos`, `rust-windows`, `rust-ios` (each the platform's release runner library without its feature `js`, whose
   `run_rust` mounts the generated `app_root()`), `rust-android` (`nsh::ui_sets!` and `nsh::main!`,
   `nsh-platform-android` without `js`; the APK's manifest gets the `com.longbridge.nsh.RUST` meta-data `AppActivity`
-  reads), `rust-web` (`docs/dev/web.md`) and `gpui/rust-gpui`, and the root to `test` (`app_root()`: `open(".")` of a test
+  reads) and `rust-web` (`docs/dev/web.md`), and the root to `test` (`app_root()`: `open(".")` of a test
   starts it). None of them, nor `describe`, links nsh-js, QuickJS, rolldown or the bundler: a Rust app compiles none of
   them to build, run or package it; `nsh test` runs TypeScript tests, so its runner links QuickJS (not the bundler). `RustApp::runtime`, `android` and `web` build those
   instead; `nsh package` ships no bundle (`build::rust_root`: the crates' assets only); `nsh run` runs the desktops'
@@ -501,14 +538,14 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
-Toolchain it builds GPUI's hosts and runners with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
+Toolchain it builds GPUI's hosts with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
 ## Releases
 
 `.github/workflows/release.yml` runs `cargo xtask dist` on macOS (Apple silicon: the iOS, Mac Catalyst and macOS
-runtimes and the iOS SDK), Linux and Windows (x86_64), each with the GPUI runtime of its OS and the Android runtime, checks that the packaged CLI
+runtimes and the iOS SDK), Linux and Windows (x86_64), each with the GPUI development host of its OS and the Android runtime, checks that the packaged CLI
 makes and bundles a new app, and archives `dist/nsh` as one directory `nsh/` in `nsh-<platform>.tar.gz` (`.zip` on
 Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android.zip`), each with a `.sha256`. Asset
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
@@ -526,6 +563,9 @@ both workspaces' `[workspace.dependencies]` (the run fails otherwise). Crates al
 skipped, so a run stopped by crates.io's rate limit on new crates can simply be run again; running it by hand with
 *dry run* packages and verifies without uploading.
 
+The CLI build script stamps `-V` / `--version` with seven characters of Git HEAD
+(or Cargo's packaged VCS metadata); crate dependency versions stay unchanged.
+
 How users get it (`website/docs/installation.md`):
 
 - `website/public/install.sh` and `install.ps1` (served at `nsh.dev/install.sh`, `/install.ps1`, and
@@ -533,6 +573,9 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
+- `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
+  Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
+  are preserved and rejected. The checkout stays available for on-demand native runtime builds.
 - Homebrew: publishing a stable release runs `.github/workflows/packages.yml`, which fills in
   `.github/packages/nsh.rb` with the archives' checksums and pushes it to `longbridge/homebrew-tap` as
   `Formula/nsh.rb`. It validates the tag and checksum sidecars, downloads and verifies both archives, then installs

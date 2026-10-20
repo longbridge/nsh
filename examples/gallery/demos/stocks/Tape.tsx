@@ -59,51 +59,51 @@ export function Tape(props: { market: Market; stock: Stock }) {
       <Canvas
         style={{ height: SHOWN * ROW }}
         accessibilityLabel="Recent trades"
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const trades = shown();
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, width, height);
-          ctx.clip();
-          ctx.translate(0, offset);
-          ctx.textBaseline = "middle";
+          cx.save();
+          cx.beginPath();
+          cx.rect(0, 0, width, height);
+          cx.clip();
+          cx.translate(0, offset);
+          cx.textBaseline = "middle";
           trades.forEach((t, i) => {
             const y = i * ROW + ROW / 2;
             const block = t.size >= BLOCK;
             const color = t.side > 0 ? colors.up : colors.down;
             if (block) {
-              ctx.fillStyle = tints.accent;
-              ctx.beginPath();
-              ctx.roundRect(0, i * ROW + 2, width, ROW - 4, 8);
-              ctx.fill();
+              cx.fillStyle = tints.accent;
+              cx.beginPath();
+              cx.roundRect(0, i * ROW + 2, width, ROW - 4, 8);
+              cx.fill();
             } else if (i) {
-              ctx.strokeStyle = grid();
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              ctx.moveTo(0, i * ROW);
-              ctx.lineTo(width, i * ROW);
-              ctx.stroke();
+              cx.strokeStyle = grid();
+              cx.lineWidth = 1;
+              cx.beginPath();
+              cx.moveTo(0, i * ROW);
+              cx.lineTo(width, i * ROW);
+              cx.stroke();
             }
-            ctx.font = "12px system-ui";
-            ctx.textAlign = "left";
-            ctx.fillStyle = colors.faint;
-            ctx.fillText(time(t.t), 8, y);
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(84, y, 3, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.font = "14px system-ui";
-            ctx.fillText(price(t.price, props.stock), 96, y);
-            ctx.textAlign = "right";
-            ctx.font = block ? "600 14px system-ui" : "14px system-ui";
-            ctx.fillStyle = block ? colors.accent : colors.text;
-            ctx.fillText(compact(t.size), width - 8, y);
+            cx.font = "12px system-ui";
+            cx.textAlign = "left";
+            cx.fillStyle = colors.faint;
+            cx.fillText(time(t.t), 8, y);
+            cx.fillStyle = color;
+            cx.beginPath();
+            cx.arc(84, y, 3, 0, Math.PI * 2);
+            cx.fill();
+            cx.font = "14px system-ui";
+            cx.fillText(price(t.price, props.stock), 96, y);
+            cx.textAlign = "right";
+            cx.font = block ? "600 14px system-ui" : "14px system-ui";
+            cx.fillStyle = block ? colors.accent : colors.text;
+            cx.fillText(compact(t.size), width - 8, y);
             if (block) {
-              ctx.font = "600 10px system-ui";
-              ctx.fillText("BLOCK", width - 70, y);
+              cx.font = "600 10px system-ui";
+              cx.fillText("BLOCK", width - 70, y);
             }
           });
-          ctx.restore();
+          cx.restore();
         }}
       />
     </Block>

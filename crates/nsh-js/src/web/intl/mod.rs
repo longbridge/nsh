@@ -47,32 +47,32 @@ fn join(parts: &[Part]) -> String {
     parts.iter().map(|p| p.value.as_str()).collect()
 }
 
-fn parts_array(ctx: Ctx, parts: &[Part]) -> R<V> {
+fn parts_array(cx: Ctx, parts: &[Part]) -> R<V> {
     let mut items = Vec::with_capacity(parts.len());
     for part in parts {
-        let o = js::new_object(ctx)?;
-        js::define(ctx, o.raw(), "type", js::string(ctx, part.kind)?, true)?;
-        js::define(ctx, o.raw(), "value", js::string(ctx, &part.value)?, true)?;
+        let o = js::new_object(cx)?;
+        js::define(cx, o.raw(), "type", js::string(cx, part.kind)?, true)?;
+        js::define(cx, o.raw(), "value", js::string(cx, &part.value)?, true)?;
         items.push(o);
     }
-    js::new_array(ctx, items)
+    js::new_array(cx, items)
 }
 
 // --- Arguments ------------------------------------------------------------
 
 /// The requested locales: `undefined`, a tag or a list of them.
-fn requested(ctx: Ctx, locales: Raw) -> R<Vec<String>> {
+fn requested(cx: Ctx, locales: Raw) -> R<Vec<String>> {
     if js::is_undefined(locales) {
         return Ok(Vec::new());
     }
     let tags = if !js::is_object(locales) {
-        vec![js::to_string(ctx, locales)?]
+        vec![js::to_string(cx, locales)?]
     } else {
-        let length = js::to_number(ctx, js::get(ctx, locales, "length")?.raw())?;
+        let length = js::to_number(cx, js::get(cx, locales, "length")?.raw())?;
         let mut tags = Vec::new();
         for i in 0..(length.max(0.0) as usize).min(64) {
-            let item = js::get(ctx, locales, &i.to_string())?;
-            tags.push(js::to_string(ctx, item.raw())?);
+            let item = js::get(cx, locales, &i.to_string())?;
+            tags.push(js::to_string(cx, item.raw())?);
         }
         tags
     };
@@ -85,7 +85,7 @@ fn requested(ctx: Ctx, locales: Raw) -> R<Vec<String>> {
             Some(_) => {}
             None => {
                 return Err(js::range_error(
-                    ctx,
+                    cx,
                     &format!("Incorrect locale information provided: {tag}"),
                 ));
             }
@@ -94,127 +94,119 @@ fn requested(ctx: Ctx, locales: Raw) -> R<Vec<String>> {
     Ok(out)
 }
 
-fn resolve(ctx: Ctx, locales: Raw) -> R<Locale> {
-    let requested = requested(ctx, locales)?;
-    Ok(locale::resolve(
-        &requested,
-        crate::env::locale(ctx).as_str(),
-    ))
+fn resolve(cx: Ctx, locales: Raw) -> R<Locale> {
+    let requested = requested(cx, locales)?;
+    Ok(locale::resolve(&requested, crate::env::locale(cx).as_str()))
 }
 
 /// The options object (`undefined`: none).
-fn options(ctx: Ctx, options: Raw) -> R<Option<V>> {
+fn options(cx: Ctx, options: Raw) -> R<Option<V>> {
     if js::is_undefined(options) {
         return Ok(None);
     }
     if !js::is_object(options) {
         if js::is_nullish(options) {
-            return Err(js::type_error(ctx, "options must be an object"));
+            return Err(js::type_error(cx, "options must be an object"));
         }
         return Ok(None);
     }
-    Ok(Some(V::dup(ctx, options)))
+    Ok(Some(V::dup(cx, options)))
 }
 
-fn get(ctx: Ctx, options: &Option<V>, key: &str) -> R<V> {
+fn get(cx: Ctx, options: &Option<V>, key: &str) -> R<V> {
     match options {
-        Some(o) => js::get(ctx, o.raw(), key),
+        Some(o) => js::get(cx, o.raw(), key),
         None => Ok(V::undefined()),
     }
 }
 
 /// A string option, one of `allowed`.
 fn string_option(
-    ctx: Ctx,
+    cx: Ctx,
     o: &Option<V>,
     key: &str,
     allowed: &[&'static str],
 ) -> R<Option<&'static str>> {
-    let v = get(ctx, o, key)?;
+    let v = get(cx, o, key)?;
     if v.is_undefined() {
         return Ok(None);
     }
-    let s = js::to_string(ctx, v.raw())?;
+    let s = js::to_string(cx, v.raw())?;
     allowed
         .iter()
         .find(|a| **a == s)
         .copied()
         .map(Some)
-        .ok_or_else(|| js::range_error(ctx, &format!("Value {s} out of range for option {key}")))
+        .ok_or_else(|| js::range_error(cx, &format!("Value {s} out of range for option {key}")))
 }
 
-fn number_option(ctx: Ctx, o: &Option<V>, key: &str, min: u8, max: u8) -> R<Option<u8>> {
-    let v = get(ctx, o, key)?;
+fn number_option(cx: Ctx, o: &Option<V>, key: &str, min: u8, max: u8) -> R<Option<u8>> {
+    let v = get(cx, o, key)?;
     if v.is_undefined() {
         return Ok(None);
     }
-    let n = js::to_number(ctx, v.raw())?;
+    let n = js::to_number(cx, v.raw())?;
     if n.is_nan() || n < f64::from(min) || n > f64::from(max) {
         return Err(js::range_error(
-            ctx,
+            cx,
             &format!("{key} value is out of range."),
         ));
     }
     Ok(Some(n.floor() as u8))
 }
 
-fn bool_option(ctx: Ctx, o: &Option<V>, key: &str) -> R<Option<bool>> {
-    let v = get(ctx, o, key)?;
-    Ok((!v.is_undefined()).then(|| js::to_bool(ctx, v.raw())))
+fn bool_option(cx: Ctx, o: &Option<V>, key: &str) -> R<Option<bool>> {
+    let v = get(cx, o, key)?;
+    Ok((!v.is_undefined()).then(|| js::to_bool(cx, v.raw())))
 }
 
 // --- NumberFormat -----------------------------------------------------------
 
-fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
+fn number_format(cx: Ctx, options: Raw) -> R<number::Format> {
     use number::{
         CurrencyDisplay, Format, Grouping, Notation, Rounding, SignDisplay, Style, UnitDisplay,
     };
-    let o = self::options(ctx, options)?;
-    let style = string_option(
-        ctx,
-        &o,
-        "style",
-        &["decimal", "percent", "currency", "unit"],
-    )?;
-    let currency = get(ctx, &o, "currency")?;
+    let o = self::options(cx, options)?;
+    let style = string_option(cx, &o, "style", &["decimal", "percent", "currency", "unit"])?;
+    let currency = get(cx, &o, "currency")?;
     let currency = if currency.is_undefined() {
         None
     } else {
-        let code = js::to_string(ctx, currency.raw())?;
+        let code = js::to_string(cx, currency.raw())?;
         if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_alphabetic()) {
             return Err(js::range_error(
-                ctx,
+                cx,
                 &format!("Invalid currency code : {code}"),
             ));
         }
         Some(code.to_ascii_uppercase())
     };
     let currency_display = string_option(
-        ctx,
+        cx,
         &o,
         "currencyDisplay",
         &["code", "symbol", "narrowSymbol", "name"],
     )?;
-    string_option(ctx, &o, "currencySign", &["standard", "accounting"])?;
-    let unit = get(ctx, &o, "unit")?;
+    string_option(cx, &o, "currencySign", &["standard", "accounting"])?;
+    let unit = get(cx, &o, "unit")?;
     let unit = if unit.is_undefined() {
         None
     } else {
-        let unit = js::to_string(ctx, unit.raw())?;
+        let unit = js::to_string(cx, unit.raw())?;
         if !number::known_unit(&unit) {
             return Err(js::range_error(
-                ctx,
+                cx,
                 &format!("Invalid unit argument for Intl.NumberFormat() '{unit}'"),
             ));
         }
         Some(unit)
     };
-    let unit_display = string_option(ctx, &o, "unitDisplay", &["short", "narrow", "long"])?;
+    let unit_display = string_option(cx, &o, "unitDisplay", &["short", "narrow", "long"])?;
     let style = match style.unwrap_or("decimal") {
         "percent" => Style::Percent,
         "currency" => Style::Currency {
             code: currency.ok_or_else(|| {
-                js::type_error(ctx, "Currency code is required with currency style.")
+                js::type_error(cx, "Currency code is required with currency style.")
             })?,
             display: match currency_display {
                 Some("code") => CurrencyDisplay::Code,
@@ -224,7 +216,7 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
             },
         },
         "unit" => Style::Unit {
-            unit: unit.ok_or_else(|| js::type_error(ctx, "Unit is required with unit style."))?,
+            unit: unit.ok_or_else(|| js::type_error(cx, "Unit is required with unit style."))?,
             display: match unit_display {
                 Some("narrow") => UnitDisplay::Narrow,
                 Some("long") => UnitDisplay::Long,
@@ -234,26 +226,26 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
         _ => Style::Decimal,
     };
     let notation = string_option(
-        ctx,
+        cx,
         &o,
         "notation",
         &["standard", "scientific", "engineering", "compact"],
     )?;
     // Read in the order of the specification (getters observe it).
-    let min_integer = number_option(ctx, &o, "minimumIntegerDigits", 1, 21)?.unwrap_or(1);
-    let mnfd = number_option(ctx, &o, "minimumFractionDigits", 0, 100)?;
-    let mxfd = number_option(ctx, &o, "maximumFractionDigits", 0, 100)?;
-    let mnsd = number_option(ctx, &o, "minimumSignificantDigits", 1, 21)?;
-    let mxsd = number_option(ctx, &o, "maximumSignificantDigits", 1, 21)?;
+    let min_integer = number_option(cx, &o, "minimumIntegerDigits", 1, 21)?.unwrap_or(1);
+    let mnfd = number_option(cx, &o, "minimumFractionDigits", 0, 100)?;
+    let mxfd = number_option(cx, &o, "maximumFractionDigits", 0, 100)?;
+    let mnsd = number_option(cx, &o, "minimumSignificantDigits", 1, 21)?;
+    let mxsd = number_option(cx, &o, "maximumSignificantDigits", 1, 21)?;
     let priority = string_option(
-        ctx,
+        cx,
         &o,
         "roundingPriority",
         &["auto", "morePrecision", "lessPrecision"],
     )?
     .unwrap_or("auto");
-    let trailing = string_option(ctx, &o, "trailingZeroDisplay", &["auto", "stripIfInteger"])?;
-    let compact_display = string_option(ctx, &o, "compactDisplay", &["short", "long"])?;
+    let trailing = string_option(cx, &o, "trailingZeroDisplay", &["auto", "stripIfInteger"])?;
+    let compact_display = string_option(cx, &o, "compactDisplay", &["short", "long"])?;
     let notation = match notation.unwrap_or("standard") {
         "scientific" => Notation::Scientific,
         "engineering" => Notation::Engineering,
@@ -279,7 +271,7 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
     let (min_sig, max_sig) = (mnsd.unwrap_or(1), mxsd.unwrap_or(21));
     if need_sd && min_sig > max_sig {
         return Err(js::range_error(
-            ctx,
+            cx,
             "maximumSignificantDigits value is out of range.",
         ));
     }
@@ -287,7 +279,7 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
         _ if !has_fd => (fraction_min, fraction_max),
         (Some(min), Some(max)) if min > max => {
             return Err(js::range_error(
-                ctx,
+                cx,
                 "maximumFractionDigits value is out of range.",
             ));
         }
@@ -321,7 +313,7 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
             more: priority != "lessPrecision",
         },
     };
-    let grouping = get(ctx, &o, "useGrouping")?;
+    let grouping = get(cx, &o, "useGrouping")?;
     let grouping = if grouping.is_undefined() {
         if compact {
             Grouping::Min2
@@ -330,27 +322,27 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
         }
     // SAFETY: an inline tag read.
     } else if unsafe { qjs::JS_VALUE_GET_TAG(grouping.raw()) } == qjs::JS_TAG_BOOL {
-        if js::to_bool(ctx, grouping.raw()) {
+        if js::to_bool(cx, grouping.raw()) {
             Grouping::Always
         } else {
             Grouping::Off
         }
     } else {
-        match js::to_string(ctx, grouping.raw())?.as_str() {
+        match js::to_string(cx, grouping.raw())?.as_str() {
             "always" => Grouping::Always,
             "min2" => Grouping::Min2,
             "auto" | "true" | "false" => Grouping::Auto,
             "" => Grouping::Off,
             other => {
                 return Err(js::range_error(
-                    ctx,
+                    cx,
                     &format!("Value {other} out of range for option useGrouping"),
                 ));
             }
         }
     };
     let sign = match string_option(
-        ctx,
+        cx,
         &o,
         "signDisplay",
         &["auto", "never", "always", "exceptZero", "negative"],
@@ -374,14 +366,14 @@ fn number_format(ctx: Ctx, options: Raw) -> R<number::Format> {
 
 /// The number `v` stands for: a BigInt or a decimal string exactly, else
 /// `ToNumber`.
-fn number_value(ctx: Ctx, v: Raw) -> R<number::Value> {
+fn number_value(cx: Ctx, v: Raw) -> R<number::Value> {
     // SAFETY: an inline tag read.
     let tag = unsafe { qjs::JS_VALUE_GET_TAG(v) };
     if tag == qjs::JS_TAG_BIG_INT || tag == qjs::JS_TAG_SHORT_BIG_INT || tag == qjs::JS_TAG_STRING {
-        let text = js::to_string(ctx, v)?;
+        let text = js::to_string(cx, v)?;
         return Ok(number::Value::parse(&text).unwrap_or(number::Value::Nan));
     }
-    Ok(number::Value::from_f64(js::to_number(ctx, v)?))
+    Ok(number::Value::from_f64(js::to_number(cx, v)?))
 }
 
 struct NumberFormat {
@@ -395,12 +387,12 @@ trace!(NumberFormat { bound });
 
 impl Object for NumberFormat {}
 
-fn format_number(ctx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
+fn format_number(cx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
     let (locale, format) = {
-        let nf = data::<NumberFormat>(ctx, this, "NumberFormat")?;
+        let nf = data::<NumberFormat>(cx, this, "NumberFormat")?;
         (nf.locale, nf.format.clone())
     };
-    let value = number_value(ctx, value)?;
+    let value = number_value(cx, value)?;
     Ok(number::format(
         &value,
         &format,
@@ -410,44 +402,44 @@ fn format_number(ctx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
 }
 
 native!(
-    fn number_format_constructor(ctx, this, args) {
-        let locale = resolve(ctx, args.get(0))?;
-        let format = number_format(ctx, args.get(1))?;
-        instance(ctx, this, Class::NumberFormat, NumberFormat { locale, format, bound: None })
+    fn number_format_constructor(cx, this, args) {
+        let locale = resolve(cx, args.get(0))?;
+        let format = number_format(cx, args.get(1))?;
+        instance(cx, this, Class::NumberFormat, NumberFormat { locale, format, bound: None })
     }
 );
 
 native!(
-    fn number_format_format(ctx, this, args) {
-        if let Some(bound) = &data::<NumberFormat>(ctx, this, "NumberFormat")?.bound {
+    fn number_format_format(cx, this, args) {
+        if let Some(bound) = &data::<NumberFormat>(cx, this, "NumberFormat")?.bound {
             return Ok(bound.clone_ref());
         }
-        let f = js::closure(ctx, vec![V::dup(ctx, this)], |ctx, captures, args| {
-            let parts = format_number(ctx, captures[0].raw(), args.get(0))?;
-            js::string(ctx, &join(&parts))
+        let f = js::closure(cx, vec![V::dup(cx, this)], |cx, captures, args| {
+            let parts = format_number(cx, captures[0].raw(), args.get(0))?;
+            js::string(cx, &join(&parts))
         })?;
-        data::<NumberFormat>(ctx, this, "NumberFormat")?.bound = Some(f.clone_ref());
+        data::<NumberFormat>(cx, this, "NumberFormat")?.bound = Some(f.clone_ref());
         Ok(f)
     }
 );
 
 native!(
-    fn number_format_to_parts(ctx, this, args) {
-        let parts = format_number(ctx, this, args.get(0))?;
-        parts_array(ctx, &parts)
+    fn number_format_to_parts(cx, this, args) {
+        let parts = format_number(cx, this, args.get(0))?;
+        parts_array(cx, &parts)
     }
 );
 
 native!(
-    fn number_format_resolved_options(ctx, this, args) {
+    fn number_format_resolved_options(cx, this, args) {
         use number::{CurrencyDisplay, Grouping, Notation, Rounding, SignDisplay, Style, UnitDisplay};
         let (locale, f) = {
-            let nf = data::<NumberFormat>(ctx, this, "NumberFormat")?;
+            let nf = data::<NumberFormat>(cx, this, "NumberFormat")?;
             (nf.locale, nf.format.clone())
         };
-        let o = js::new_object(ctx)?;
-        let set = |key: &str, value: V| js::define(ctx, o.raw(), key, value, true);
-        let text = |s: &str| js::string(ctx, s);
+        let o = js::new_object(cx)?;
+        let set = |key: &str, value: V| js::define(cx, o.raw(), key, value, true);
+        let text = |s: &str| js::string(cx, s);
         set("locale", text(locale.tag.as_str())?)?;
         set("numberingSystem", text("latn")?)?;
         match &f.style {
@@ -525,23 +517,23 @@ native!(
 
 native!(
     /// `supportedLocalesOf` of both classes: the requested tags with data.
-    fn supported_locales_of(ctx, this, args) {
-        let tags = requested(ctx, args.get(0))?;
+    fn supported_locales_of(cx, this, args) {
+        let tags = requested(cx, args.get(0))?;
         let mut items = Vec::new();
         for tag in tags.iter().filter(|t| locale::supported(t)) {
-            items.push(js::string(ctx, tag)?);
+            items.push(js::string(cx, tag)?);
         }
-        js::new_array(ctx, items)
+        js::new_array(cx, items)
     }
 );
 
 native!(
-    fn get_canonical_locales(ctx, this, args) {
+    fn get_canonical_locales(cx, this, args) {
         let mut items = Vec::new();
-        for tag in requested(ctx, args.get(0))? {
-            items.push(js::string(ctx, &tag)?);
+        for tag in requested(cx, args.get(0))? {
+            items.push(js::string(cx, &tag)?);
         }
-        js::new_array(ctx, items)
+        js::new_array(cx, items)
     }
 );
 
@@ -590,12 +582,12 @@ fn parse_offset(zone: &str) -> Option<i32> {
     (hours < 24 && minutes < 60).then_some(sign * (hours * 60 + minutes))
 }
 
-fn zone_option(ctx: Ctx, o: &Option<V>) -> R<date::Zone> {
-    let v = get(ctx, o, "timeZone")?;
+fn zone_option(cx: Ctx, o: &Option<V>) -> R<date::Zone> {
+    let v = get(cx, o, "timeZone")?;
     if v.is_undefined() {
         return Ok(date::Zone::Local);
     }
-    let name = js::to_string(ctx, v.raw())?;
+    let name = js::to_string(cx, v.raw())?;
     let upper = name.to_ascii_uppercase();
     if matches!(
         upper.as_str(),
@@ -610,7 +602,7 @@ fn zone_option(ctx: Ctx, o: &Option<V>) -> R<date::Zone> {
         return Ok(date::Zone::Local);
     }
     Err(js::range_error(
-        ctx,
+        cx,
         &format!(
             "Invalid time zone specified: {name} (nsh knows the device's zone, UTC and offsets such as +08:00)"
         ),
@@ -623,12 +615,12 @@ type Styles = (&'static str, &'static str);
 /// The fields, the zone and the styles (made into fields for a locale by
 /// [`styled`]) of the options.
 fn date_format(
-    ctx: Ctx,
+    cx: Ctx,
     options: Raw,
     defaults: Defaults,
 ) -> R<(date::Format, date::Zone, Option<Styles>)> {
     use date::{Format, HourCycle, Month, Num, Text};
-    let o = self::options(ctx, options)?;
+    let o = self::options(cx, options)?;
     let text = |s: Option<&str>| match s {
         Some("long") => Some(Text::Long),
         Some("short") => Some(Text::Short),
@@ -641,19 +633,19 @@ fn date_format(
         _ => None,
     };
     const NUMS: &[&str] = &["2-digit", "numeric"];
-    let hour12 = bool_option(ctx, &o, "hour12")?;
-    let hour_cycle = string_option(ctx, &o, "hourCycle", &["h11", "h12", "h23", "h24"])?;
-    let zone = zone_option(ctx, &o)?;
+    let hour12 = bool_option(cx, &o, "hour12")?;
+    let hour_cycle = string_option(cx, &o, "hourCycle", &["h11", "h12", "h23", "h24"])?;
+    let zone = zone_option(cx, &o)?;
     let weekday = text(string_option(
-        ctx,
+        cx,
         &o,
         "weekday",
         &["narrow", "short", "long"],
     )?);
-    string_option(ctx, &o, "era", &["narrow", "short", "long"])?;
-    let year = num(string_option(ctx, &o, "year", NUMS)?);
+    string_option(cx, &o, "era", &["narrow", "short", "long"])?;
+    let year = num(string_option(cx, &o, "year", NUMS)?);
     let month = match string_option(
-        ctx,
+        cx,
         &o,
         "month",
         &["2-digit", "numeric", "narrow", "short", "long"],
@@ -662,14 +654,14 @@ fn date_format(
         Some("2-digit") => Some(Month::Num(Num::TwoDigit)),
         other => text(other).map(Month::Text),
     };
-    let day = num(string_option(ctx, &o, "day", NUMS)?);
-    string_option(ctx, &o, "dayPeriod", &["narrow", "short", "long"])?;
-    let hour = num(string_option(ctx, &o, "hour", NUMS)?);
-    let minute = num(string_option(ctx, &o, "minute", NUMS)?);
-    let second = num(string_option(ctx, &o, "second", NUMS)?);
-    let fraction = number_option(ctx, &o, "fractionalSecondDigits", 1, 3)?.unwrap_or(0);
+    let day = num(string_option(cx, &o, "day", NUMS)?);
+    string_option(cx, &o, "dayPeriod", &["narrow", "short", "long"])?;
+    let hour = num(string_option(cx, &o, "hour", NUMS)?);
+    let minute = num(string_option(cx, &o, "minute", NUMS)?);
+    let second = num(string_option(cx, &o, "second", NUMS)?);
+    let fraction = number_option(cx, &o, "fractionalSecondDigits", 1, 3)?.unwrap_or(0);
     let zone_name = string_option(
-        ctx,
+        cx,
         &o,
         "timeZoneName",
         &[
@@ -682,8 +674,8 @@ fn date_format(
         ],
     )?
     .is_some();
-    let date_style = string_option(ctx, &o, "dateStyle", &["full", "long", "medium", "short"])?;
-    let time_style = string_option(ctx, &o, "timeStyle", &["full", "long", "medium", "short"])?;
+    let date_style = string_option(cx, &o, "dateStyle", &["full", "long", "medium", "short"])?;
+    let time_style = string_option(cx, &o, "timeStyle", &["full", "long", "medium", "short"])?;
     let hour_cycle = match (hour12, hour_cycle) {
         (Some(true), _) => Some(HourCycle::H12),
         (Some(false), _) => Some(HourCycle::H23),
@@ -717,7 +709,7 @@ fn date_format(
     if date_style.is_some() || time_style.is_some() {
         if any_field {
             return Err(js::type_error(
-                ctx,
+                cx,
                 "Can't set option dateStyle or timeStyle with other date-time fields",
             ));
         }
@@ -794,96 +786,96 @@ trace!(DateTimeFormat { bound });
 impl Object for DateTimeFormat {}
 
 /// The offset in minutes east of UTC that the local zone has at `ms`.
-fn local_offset(ctx: Ctx, ms: f64) -> R<i32> {
+fn local_offset(cx: Ctx, ms: f64) -> R<i32> {
     // SAFETY: a new Date of this context.
-    let date = V::checked(ctx, unsafe { qjs::JS_NewDate(ctx, ms) })?;
+    let date = V::checked(cx, unsafe { qjs::JS_NewDate(cx, ms) })?;
     let west = js::to_number(
-        ctx,
-        js::invoke(ctx, date.raw(), "getTimezoneOffset", &[])?.raw(),
+        cx,
+        js::invoke(cx, date.raw(), "getTimezoneOffset", &[])?.raw(),
     )?;
     Ok(if west.is_finite() { -(west as i32) } else { 0 })
 }
 
 /// The time `v` stands for (`undefined`: now), or a `RangeError`.
-fn time_value(ctx: Ctx, v: Raw) -> R<f64> {
+fn time_value(cx: Ctx, v: Raw) -> R<f64> {
     let ms = if js::is_undefined(v) {
         // Not std's clock: WebAssembly has none.
         nsh_core::time::unix_ms()
     } else {
-        js::to_number(ctx, v)?
+        js::to_number(cx, v)?
     };
     if !ms.is_finite() || ms.abs() > 8.64e15 {
-        return Err(js::range_error(ctx, "Invalid time value"));
+        return Err(js::range_error(cx, "Invalid time value"));
     }
     Ok(ms)
 }
 
 fn format_date(
-    ctx: Ctx,
+    cx: Ctx,
     locale: &Locale,
     f: &date::Format,
     zone: date::Zone,
     ms: f64,
 ) -> R<Vec<Part>> {
     let offset = match zone {
-        date::Zone::Local => local_offset(ctx, ms)?,
+        date::Zone::Local => local_offset(cx, ms)?,
         date::Zone::Utc => 0,
         date::Zone::Offset(minutes) => minutes,
     };
     Ok(date::format(ms, offset, zone, f, &locale.dates))
 }
 
-fn format_with(ctx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
+fn format_with(cx: Ctx, this: Raw, value: Raw) -> R<Vec<Part>> {
     let (locale, format, zone) = {
-        let d = data::<DateTimeFormat>(ctx, this, "DateTimeFormat")?;
+        let d = data::<DateTimeFormat>(cx, this, "DateTimeFormat")?;
         (d.locale, d.format, d.zone)
     };
-    let ms = time_value(ctx, value)?;
-    format_date(ctx, &locale, &format, zone, ms)
+    let ms = time_value(cx, value)?;
+    format_date(cx, &locale, &format, zone, ms)
 }
 
 native!(
-    fn date_time_format_constructor(ctx, this, args) {
-        let locale = resolve(ctx, args.get(0))?;
-        let (mut format, zone, styles) = date_format(ctx, args.get(1), Defaults::Date)?;
+    fn date_time_format_constructor(cx, this, args) {
+        let locale = resolve(cx, args.get(0))?;
+        let (mut format, zone, styles) = date_format(cx, args.get(1), Defaults::Date)?;
         if let Some(styles) = styles {
             styled(&mut format, styles, &locale);
         }
-        instance(ctx, this, Class::DateTimeFormat, DateTimeFormat { locale, format, zone, styles, bound: None })
+        instance(cx, this, Class::DateTimeFormat, DateTimeFormat { locale, format, zone, styles, bound: None })
     }
 );
 
 native!(
-    fn date_time_format_format(ctx, this, args) {
-        if let Some(bound) = &data::<DateTimeFormat>(ctx, this, "DateTimeFormat")?.bound {
+    fn date_time_format_format(cx, this, args) {
+        if let Some(bound) = &data::<DateTimeFormat>(cx, this, "DateTimeFormat")?.bound {
             return Ok(bound.clone_ref());
         }
-        let f = js::closure(ctx, vec![V::dup(ctx, this)], |ctx, captures, args| {
-            let parts = format_with(ctx, captures[0].raw(), args.get(0))?;
-            js::string(ctx, &join(&parts))
+        let f = js::closure(cx, vec![V::dup(cx, this)], |cx, captures, args| {
+            let parts = format_with(cx, captures[0].raw(), args.get(0))?;
+            js::string(cx, &join(&parts))
         })?;
-        data::<DateTimeFormat>(ctx, this, "DateTimeFormat")?.bound = Some(f.clone_ref());
+        data::<DateTimeFormat>(cx, this, "DateTimeFormat")?.bound = Some(f.clone_ref());
         Ok(f)
     }
 );
 
 native!(
-    fn date_time_format_to_parts(ctx, this, args) {
-        let parts = format_with(ctx, this, args.get(0))?;
-        parts_array(ctx, &parts)
+    fn date_time_format_to_parts(cx, this, args) {
+        let parts = format_with(cx, this, args.get(0))?;
+        parts_array(cx, &parts)
     }
 );
 
 native!(
-    fn date_time_format_resolved_options(ctx, this, args) {
+    fn date_time_format_resolved_options(cx, this, args) {
         use date::{Month, Num, Text, Zone};
         let (locale, f, zone, styles) = {
-            let d = data::<DateTimeFormat>(ctx, this, "DateTimeFormat")?;
+            let d = data::<DateTimeFormat>(cx, this, "DateTimeFormat")?;
             (d.locale, d.format, d.zone, d.styles)
         };
-        let o = js::new_object(ctx)?;
-        let set = |key: &str, value: V| js::define(ctx, o.raw(), key, value, true);
-        let text = |s: &str| js::string(ctx, s);
+        let o = js::new_object(cx)?;
+        let set = |key: &str, value: V| js::define(cx, o.raw(), key, value, true);
+        let text = |s: &str| js::string(cx, s);
         set("locale", text(locale.tag.as_str())?)?;
         set("calendar", text("gregory")?)?;
         set("numberingSystem", text("latn")?)?;
@@ -893,7 +885,7 @@ native!(
             Zone::Local => match local_zone_name() {
                 Some(name) => name,
                 None => {
-                    let m = local_offset(ctx, time_value(ctx, js::UNDEFINED)?)?;
+                    let m = local_offset(cx, time_value(cx, js::UNDEFINED)?)?;
                     format!("{}{:02}:{:02}", if m < 0 { '-' } else { '+' }, m.abs() / 60, m.abs() % 60)
                 }
             },
@@ -961,62 +953,62 @@ native!(
 native!(
     /// `Number.prototype.toLocaleString` and `BigInt.prototype.
     /// toLocaleString`: `Intl.NumberFormat` without the object.
-    fn number_to_locale_string(ctx, this, args) {
+    fn number_to_locale_string(cx, this, args) {
         // SAFETY: an inline tag read.
         let tag = unsafe { qjs::JS_VALUE_GET_TAG(this) };
         let value = if tag == qjs::JS_TAG_BIG_INT || tag == qjs::JS_TAG_SHORT_BIG_INT {
-            number_value(ctx, this)?
+            number_value(cx, this)?
         } else {
             // A Number object or a number (`valueOf` unwraps the object).
-            number::Value::from_f64(js::to_number(ctx, this)?)
+            number::Value::from_f64(js::to_number(cx, this)?)
         };
-        let locale = resolve(ctx, args.get(0))?;
-        let format = number_format(ctx, args.get(1))?;
+        let locale = resolve(cx, args.get(0))?;
+        let format = number_format(cx, args.get(1))?;
         let parts = number::format(&value, &format, &locale.numbers, locale.tag.as_str());
-        js::string(ctx, &join(&parts))
+        js::string(cx, &join(&parts))
     }
 );
 
-fn date_to_locale(ctx: Ctx, this: Raw, args: js::Args<'_>, defaults: Defaults) -> R<V> {
+fn date_to_locale(cx: Ctx, this: Raw, args: js::Args<'_>, defaults: Defaults) -> R<V> {
     // SAFETY: an inline class check.
     if !unsafe { qjs::JS_IsDate(this) } {
-        return Err(js::type_error(ctx, "this is not a Date object."));
+        return Err(js::type_error(cx, "this is not a Date object."));
     }
-    let ms = js::to_number(ctx, this)?;
+    let ms = js::to_number(cx, this)?;
     if !ms.is_finite() {
-        return js::string(ctx, "Invalid Date");
+        return js::string(cx, "Invalid Date");
     }
-    let locale = resolve(ctx, args.get(0))?;
-    let (mut format, zone, styles) = date_format(ctx, args.get(1), defaults)?;
+    let locale = resolve(cx, args.get(0))?;
+    let (mut format, zone, styles) = date_format(cx, args.get(1), defaults)?;
     if let Some(styles) = styles {
         styled(&mut format, styles, &locale);
     }
-    let parts = format_date(ctx, &locale, &format, zone, ms)?;
-    js::string(ctx, &join(&parts))
+    let parts = format_date(cx, &locale, &format, zone, ms)?;
+    js::string(cx, &join(&parts))
 }
 
 native!(
-    fn date_to_locale_string(ctx, this, args) {
-        date_to_locale(ctx, this, args, Defaults::All)
+    fn date_to_locale_string(cx, this, args) {
+        date_to_locale(cx, this, args, Defaults::All)
     }
 );
 
 native!(
-    fn date_to_locale_date_string(ctx, this, args) {
-        date_to_locale(ctx, this, args, Defaults::Date)
+    fn date_to_locale_date_string(cx, this, args) {
+        date_to_locale(cx, this, args, Defaults::Date)
     }
 );
 
 native!(
-    fn date_to_locale_time_string(ctx, this, args) {
-        date_to_locale(ctx, this, args, Defaults::Time)
+    fn date_to_locale_time_string(cx, this, args) {
+        date_to_locale(cx, this, args, Defaults::Time)
     }
 );
 
 /// Replaces the engine's `toLocaleString`s (which ignore locales and
 /// options) with these.
-pub(crate) fn install(ctx: Ctx) -> R<()> {
-    let g = js::global(ctx);
+pub(crate) fn install(cx: Ctx) -> R<()> {
+    let g = js::global(cx);
     type Methods = &'static [(&'static std::ffi::CStr, js::Native, c_int)];
     let methods: [(&str, Methods); 3] = [
         ("Number", &[(c"toLocaleString", number_to_locale_string, 0)]),
@@ -1031,15 +1023,15 @@ pub(crate) fn install(ctx: Ctx) -> R<()> {
         ),
     ];
     for (class, methods) in methods {
-        let ctor = js::get(ctx, g.raw(), class)?;
-        let proto = js::get(ctx, ctor.raw(), "prototype")?;
+        let ctor = js::get(cx, g.raw(), class)?;
+        let proto = js::get(cx, ctor.raw(), "prototype")?;
         for (name, f, length) in methods {
-            let func = js::function(ctx, name, *f, *length)?;
+            let func = js::function(cx, name, *f, *length)?;
             // SAFETY: the property takes the function; non-enumerable, as
             // built-in methods are.
             unsafe {
                 qjs::JS_DefinePropertyValueStr(
-                    ctx,
+                    cx,
                     proto.raw(),
                     name.as_ptr(),
                     func.take(),
@@ -1052,22 +1044,22 @@ pub(crate) fn install(ctx: Ctx) -> R<()> {
 }
 
 /// The `Intl` object: the namespace of the two classes.
-pub(crate) fn namespace(ctx: Ctx) -> R<V> {
-    let intl = js::new_object(ctx)?;
+pub(crate) fn namespace(cx: Ctx) -> R<V> {
+    let intl = js::new_object(cx)?;
     for (name, class) in [
         ("NumberFormat", Class::NumberFormat),
         ("DateTimeFormat", Class::DateTimeFormat),
     ] {
-        let ctor = super::constructor(ctx, class)?;
-        js::define(ctx, intl.raw(), name, ctor, false)?;
+        let ctor = super::constructor(cx, class)?;
+        js::define(cx, intl.raw(), name, ctor, false)?;
     }
-    let f = js::function(ctx, c"getCanonicalLocales", get_canonical_locales, 1)?;
-    js::define(ctx, intl.raw(), "getCanonicalLocales", f, false)?;
-    let tag = js::string(ctx, "Intl")?;
+    let f = js::function(cx, c"getCanonicalLocales", get_canonical_locales, 1)?;
+    js::define(cx, intl.raw(), "getCanonicalLocales", f, false)?;
+    let tag = js::string(cx, "Intl")?;
     // SAFETY: the property takes the string.
     unsafe {
         qjs::JS_DefinePropertyValue(
-            ctx,
+            cx,
             intl.raw(),
             qjs::JS_ATOM_Symbol_toStringTag as _,
             tag.take(),

@@ -7,7 +7,7 @@ that `App.tsx` imports from `__SPECIFIER__`.
 ```sh
 nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
 nsh check                    # type checks App.tsx against the declarations generated from the Rust code
-nsh package --target web     # or ios, android, macos, linux, windows, gpui
+nsh package --target web     # or ios, android, macos, linux, windows
 ```
 
 `nsh` describes the crate's exports with a small program of the crate and builds the app's hosts with it linked in.
@@ -23,3 +23,6 @@ Register more in `native/src/lib.rs` with `registry.register::<…>()` (componen
 The `nsh` commands build the app's hosts from the NSH crates `native/Cargo.toml` depends on: crates.io's at the version
 of the `nsh` you run (keep the `nsh-*` dependencies at that version when you upgrade `nsh`), or an NSH checkout's by
 path.
+
+NSH-generated files stay in `.nsh/`: runner sources in `.nsh/rust/` and default packages in `.nsh/out/`.
+Cargo keeps its normal `target/` directory and respects your existing `CARGO_TARGET_DIR`.

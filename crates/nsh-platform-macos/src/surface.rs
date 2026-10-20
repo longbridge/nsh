@@ -175,6 +175,9 @@ pub(crate) struct Surface {
     /// Frame callbacks of the platform's own animations (scroll glides,
     /// transitions): called on every frame while they return true.
     frame_callbacks: RefCell<Vec<FrameCallback>>,
+    /// The model of a test session's app (`nsh test --target`).
+    #[cfg(feature = "dev")]
+    test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The display link, while it runs.
     link: RefCell<Option<Retained<CADisplayLink>>>,
     /// The performance monitor ([`Surface::set_perf_monitor`]), and whether
@@ -230,6 +233,8 @@ impl Surface {
             host_environment: Cell::default(),
             js_frame: Cell::new(false),
             frame_callbacks: RefCell::default(),
+            #[cfg(feature = "dev")]
+            test_model: RefCell::default(),
             link: RefCell::new(None),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
@@ -474,6 +479,10 @@ impl Surface {
             }
             Message::Error(message) => {
                 log::error!("{message}");
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.borrow() {
+                    model.error(message.to_string());
+                }
                 if let Some(f) = &*self.on_error.borrow() {
                     f(&message);
                 }
@@ -501,6 +510,10 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.borrow() {
+            model.apply(batch);
+        }
     }
 
     /// Writes the animated values to the views and reports finished
@@ -523,6 +536,21 @@ impl Surface {
     ) {
         self.frame_callbacks.borrow_mut().push(Box::new(f));
         self.ensure_ticking();
+    }
+
+    /// Whether a native animation runs: the graph's, or the platform's own
+    /// (scroll glides, zooms).
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.anim.borrow().animating() || !self.frame_callbacks.borrow().is_empty()
+    }
+
+    /// Keeps the model `nsh test --target` steps see of the app
+    /// ([`nsh_testing::agent::Model`]): every batch applied and every error
+    /// go to it from now on.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
+        *self.test_model.borrow_mut() = model;
     }
 
     fn wants_frames(&self) -> bool {

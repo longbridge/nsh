@@ -611,6 +611,38 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     alert.beginSheetModalForWindow_completionHandler(&window, Some(&handler));
 }
 
+/// Answers the oldest dialog shown on `surface` as a user would: presses
+/// its button titled `button`, or closes it without one (`None`).
+#[cfg(feature = "dev")]
+pub(crate) fn answer_dialog(surface: &Rc<Surface>, button: Option<&str>) -> Result<(), String> {
+    let alert = SYSTEM
+        .with(|s| {
+            s.borrow()
+                .dialogs
+                .iter()
+                .find(|d| d.surface.upgrade().is_some_and(|x| Rc::ptr_eq(&x, surface)))
+                .map(|d| d.alert.clone())
+        })
+        .ok_or("no dialog is shown")?;
+    match button {
+        Some(text) => {
+            let buttons = alert.buttons();
+            let found = buttons
+                .iter()
+                .find(|b| b.title().to_string() == text)
+                .ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+            // SAFETY: a button of a live alert, clicked on the main thread
+            // with no sender, as a user's click has none to hand over.
+            unsafe { found.performClick(None) };
+        }
+        None => {
+            let window = surface.root.ns().window().ok_or("the window is gone")?;
+            window.endSheet_returnCode(&alert.window(), objc2_app_kit::NSModalResponseCancel);
+        }
+    }
+    Ok(())
+}
+
 /// Shows `text` at the bottom of the surface for a while (one at a time:
 /// a new toast replaces the one showing).
 fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {

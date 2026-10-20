@@ -33,16 +33,15 @@ const ICON_SIZES: [u32; 7] = [16, 20, 24, 32, 40, 48, 64];
 /// app's icon embedded), the bundle and assets in `nsh\` (where the runner
 /// looks, next to itself), `nsh\app.json` (the window's title, the app's
 /// id and appearance, which the window opens in); then the same as
-/// `<name>.zip`. `runner` is the native backend's or GPUI's.
+/// `<name>.zip`.
 pub(crate) fn package(
     options: &PackageOptions<'_>,
     config: &AppConfig,
     name: &str,
     id: &str,
-    runner: Platform,
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
-    let runner = runtime::file(runner, true)?;
+    let runner = runtime::file(Platform::Windows, true)?;
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {

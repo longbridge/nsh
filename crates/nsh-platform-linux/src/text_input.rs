@@ -200,7 +200,7 @@ pub(crate) struct InputState {
     /// composition ends.
     held: RefCell<Option<(String, u32)>>,
     /// The handlers' context, for reports after programmatic changes.
-    ctx: std::cell::OnceCell<Ctx>,
+    cx: std::cell::OnceCell<Ctx>,
     /// The window whose focus widget is watched, and the handler.
     window: RefCell<Option<(glib::WeakRef<gtk::Window>, glib::SignalHandlerId)>>,
     /// The handler that focuses the editor once it is shown (`autoFocus`).
@@ -521,8 +521,8 @@ impl InputState {
         editor.select(caret, caret);
         self.applying.set(false);
         self.update_placeholder();
-        if let Some(ctx) = self.ctx.get() {
-            ctx.selection_changed();
+        if let Some(cx) = self.cx.get() {
+            cx.selection_changed();
         }
     }
 }
@@ -564,18 +564,18 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         selection: Cell::new((0, 0)),
         composition: RefCell::new(None),
         held: RefCell::new(None),
-        ctx: std::cell::OnceCell::new(),
+        cx: std::cell::OnceCell::new(),
         window: RefCell::new(None),
         auto_focus: RefCell::new(None),
     });
     add_provider(&input.placeholder, &input.provider);
-    let ctx = Ctx {
+    let cx = Ctx {
         surface: Rc::downgrade(surface),
         view: view.downgrade(),
         input: Rc::downgrade(&input),
     };
-    attach(&ctx, &input.editor.borrow(), &input);
-    let _ = input.ctx.set(ctx);
+    attach(&cx, &input.editor.borrow(), &input);
+    let _ = input.cx.set(cx);
     view.state_mut().input = Some(input);
 }
 
@@ -600,12 +600,12 @@ fn add_providers(widget: &impl IsA<gtk::Widget>, input: &InputState) {
 }
 
 /// Connects an editor's signals.
-fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
+fn attach(cx: &Ctx, editor: &Editor, input: &InputState) {
     let widget = editor.widget();
     match editor {
         Editor::Line(t) => {
             add_providers(t, input);
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_insert_text(move |t, text, pos| {
                 let Some(input) = c.user_edit() else { return };
                 let fit = c.allowed(|| t.text().into(), text);
@@ -621,7 +621,7 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
                     }
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_delete_text(move |_, start, end| {
                 if start != end
                     && let Some(input) = c.user_edit()
@@ -629,23 +629,23 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
                     c.deleted(&input);
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_paste_clipboard(move |_| {
                 if let Some(input) = c.input.upgrade() {
                     input.pasting.set(true);
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_changed(move |_| c.changed());
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_preedit_changed(move |_, text| c.preedit_changed(text));
-            let c = ctx.clone();
+            let c = cx.clone();
             t.connect_local("activate", false, move |_| {
                 c.submitted();
                 None
             });
             for property in ["cursor-position", "selection-bound"] {
-                let c = ctx.clone();
+                let c = cx.clone();
                 t.connect_notify_local(Some(property), move |_, _| c.selection_changed());
             }
         }
@@ -653,7 +653,7 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
             add_providers(scroller, input);
             add_providers(view, input);
             let buffer = view.buffer();
-            let c = ctx.clone();
+            let c = cx.clone();
             buffer.connect_insert_text(move |b, iter, text| {
                 let Some(input) = c.user_edit() else { return };
                 let fit = c.allowed(
@@ -673,7 +673,7 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
                     }
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             buffer.connect_delete_range(move |_, start, end| {
                 if start != end
                     && let Some(input) = c.user_edit()
@@ -681,30 +681,30 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
                     c.deleted(&input);
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             view.connect_paste_clipboard(move |_| {
                 if let Some(input) = c.input.upgrade() {
                     input.pasting.set(true);
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             buffer.connect_changed(move |_| c.changed());
-            let c = ctx.clone();
+            let c = cx.clone();
             view.connect_preedit_changed(move |_, text| c.preedit_changed(text));
-            let c = ctx.clone();
+            let c = cx.clone();
             buffer.connect_mark_set(move |b, _, mark| {
                 if *mark == b.get_insert() || *mark == b.selection_bound() {
                     c.selection_changed();
                 }
             });
-            let c = ctx.clone();
+            let c = cx.clone();
             buffer.connect_cursor_position_notify(move |_| c.selection_changed());
         }
     }
 
     // Focus is followed on the window: focus controllers only hear of it
     // while the window is active.
-    let c = ctx.clone();
+    let c = cx.clone();
     widget.connect_map(move |w| c.watch_window(w));
 
     // Backspace in an empty input deletes nothing, so no deletion reports
@@ -712,7 +712,7 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
     // text view inserts a line break.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let c = ctx.clone();
+    let c = cx.clone();
     let area = match editor {
         Editor::Area { view, .. } => Some(view.downgrade()),
         Editor::Line(_) => None,
@@ -788,8 +788,8 @@ pub(crate) fn config(_surface: &Rc<Surface>, view: &NshView, config: &InputConfi
         let focused = input.focused.get();
         view.remove_native(&old.host());
         let editor = new_editor(config.multiline);
-        if let Some(ctx) = input.ctx.get() {
-            attach(ctx, &editor, &input);
+        if let Some(cx) = input.cx.get() {
+            attach(cx, &editor, &input);
         }
         *input.editor.borrow_mut() = editor.clone();
         input.replace_text(&text);

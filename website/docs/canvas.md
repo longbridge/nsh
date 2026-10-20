@@ -19,14 +19,14 @@ function App() {
     <View style={{ flex: 1, padding: 24, paddingTop: 60 }}>
       <Canvas
         style={{ height: 200, borderRadius: 12, backgroundColor: "#ffffff" }}
-        draw={(ctx, { width, height }) => {
-          ctx.fillStyle = "#0969da";
-          ctx.beginPath();
-          ctx.arc(width / 2, height / 2, 60, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "#1f2328";
-          ctx.lineWidth = 4;
-          ctx.strokeRect(20, 20, width - 40, height - 40);
+        draw={(cx, { width, height }) => {
+          cx.fillStyle = "#0969da";
+          cx.beginPath();
+          cx.arc(width / 2, height / 2, 60, 0, Math.PI * 2);
+          cx.fill();
+          cx.strokeStyle = "#1f2328";
+          cx.lineWidth = 4;
+          cx.strokeRect(20, 20, width - 40, height - 40);
         }}
       />
     </View>
@@ -40,7 +40,7 @@ A `Canvas` takes every prop of a [`View`](../elements/view.md) (style, classes, 
 
 ## When draw runs
 
-`draw(ctx, { width, height })` runs:
+`draw(cx, { width, height })` runs:
 
 - once the canvas's size is known (after its first layout);
 - again when the canvas is resized;
@@ -53,16 +53,16 @@ const values = signal([12, 30, 22, 48, 36, 60]);
 
 <Canvas
   style={{ height: 160 }}
-  draw={(ctx, { width, height }) => {
+  draw={(cx, { width, height }) => {
     const v = values();
     const x = (i: number) => (i / (v.length - 1)) * width;
     const y = (n: number) => height - (n / 100) * height;
-    ctx.beginPath();
-    v.forEach((n, i) => (i === 0 ? ctx.moveTo(x(i), y(n)) : ctx.lineTo(x(i), y(n))));
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = "round";
-    ctx.stroke();
+    cx.beginPath();
+    v.forEach((n, i) => (i === 0 ? cx.moveTo(x(i), y(n)) : cx.lineTo(x(i), y(n))));
+    cx.strokeStyle = "#3b82f6";
+    cx.lineWidth = 2.5;
+    cx.lineJoin = "round";
+    cx.stroke();
   }}
 />
 ```
@@ -99,18 +99,18 @@ Context calls only record: nothing is drawn while `draw` runs, so you cannot rea
 **Hit testing**: `isPointInPath(path?, x, y, rule?)` and `isPointInStroke(path?, x, y)` answer synchronously, computed from the recorded geometry (the current transform, path, `lineWidth` and `lineCap`). Keep the context of the last `draw` and the `Path2D`s you drew to find the shape under a tap:
 
 ```tsx
-let ctx: CanvasRenderingContext2D | undefined;
+let cx: CanvasRenderingContext2D | undefined;
 const slices = [new Path2D("M50 50 L100 50 A50 50 0 0 1 50 100 Z"), /* ... */];
 
 <Canvas
   style={{ width: 100, height: 100 }}
   onStartShouldSetResponder={() => true}
   onResponderRelease={(e) => {
-    const hit = slices.findIndex((p) => ctx?.isPointInPath(p, e.locationX, e.locationY));
+    const hit = slices.findIndex((p) => cx?.isPointInPath(p, e.locationX, e.locationY));
     if (hit >= 0) select(hit);
   }}
   draw={(c) => {
-    ctx = c;
+    cx = c;
     slices.forEach((p) => c.fill(p));
   }}
 />
@@ -122,7 +122,7 @@ Strokes are tested with round joins and without dashes; coordinates given as ani
 
 **Images**: `drawImage(image, dx, dy)`, `drawImage(image, dx, dy, dw, dh)`, `drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)`.
 
-`ctx.canvas.width` and `ctx.canvas.height` give the canvas's size in points.
+`cx.canvas.width` and `cx.canvas.height` give the canvas's size in points.
 
 **Not supported**: `getImageData` / `putImageData` and other pixel access, `filter`, SVG images in `drawImage`. An invalid color or font drops that one operation, as in HTML Canvas.
 
@@ -139,10 +139,10 @@ function Heart(props: { size: number; color: string }) {
   return (
     <Canvas
       style={{ width: props.size, height: props.size }}
-      draw={(ctx) => {
-        ctx.scale(props.size / 24, props.size / 24); // the path is drawn on a 24-point grid
-        ctx.fillStyle = props.color;
-        ctx.fill(heart);
+      draw={(cx) => {
+        cx.scale(props.size / 24, props.size / 24); // the path is drawn on a 24-point grid
+        cx.fillStyle = props.color;
+        cx.fill(heart);
       }}
     />
   );
@@ -156,20 +156,20 @@ A `Path2D` has the same path methods as the context (`moveTo`, `arc`, `roundRect
 ```tsx
 <Canvas
   style={{ height: 120 }}
-  draw={(ctx, { width, height }) => {
-    const linear = ctx.createLinearGradient(0, 0, width, 0);
+  draw={(cx, { width, height }) => {
+    const linear = cx.createLinearGradient(0, 0, width, 0);
     linear.addColorStop(0, "#22d3ee");
     linear.addColorStop(1, "#6366f1");
-    ctx.fillStyle = linear;
-    ctx.fillRect(0, 0, width, height / 2);
+    cx.fillStyle = linear;
+    cx.fillRect(0, 0, width, height / 2);
 
-    const radial = ctx.createRadialGradient(width / 2, height * 0.75, 4, width / 2, height * 0.75, 40);
+    const radial = cx.createRadialGradient(width / 2, height * 0.75, 4, width / 2, height * 0.75, 40);
     radial.addColorStop(0, "#fde68a");
     radial.addColorStop(1, "#f97316");
-    ctx.fillStyle = radial;
-    ctx.beginPath();
-    ctx.arc(width / 2, height * 0.75, 28, 0, Math.PI * 2);
-    ctx.fill();
+    cx.fillStyle = radial;
+    cx.beginPath();
+    cx.arc(width / 2, height * 0.75, 28, 0, Math.PI * 2);
+    cx.fill();
   }}
 />
 ```
@@ -179,15 +179,15 @@ A `Path2D` has the same path methods as the context (`moveTo`, `arc`, `roundRect
 ## Text
 
 ```tsx
-ctx.font = "600 20px system-ui";
-ctx.fillStyle = "#1f2328";
-ctx.textAlign = "center";
-ctx.textBaseline = "middle";
-ctx.fillText("72%", width / 2, height / 2);
+cx.font = "600 20px system-ui";
+cx.fillStyle = "#1f2328";
+cx.textAlign = "center";
+cx.textBaseline = "middle";
+cx.fillText("72%", width / 2, height / 2);
 
-ctx.font = "11px system-ui";
+cx.font = "11px system-ui";
 const label = "100";
-ctx.fillText(label, 32 - 6 - ctx.measureText(label).width, 16);
+cx.fillText(label, 32 - 6 - cx.measureText(label).width, 16);
 ```
 
 Font families are the same as in styles: system families and the names of fonts your app imports (see [Fonts](./fonts.md)).
@@ -202,13 +202,13 @@ import logo from "./logo.png";
 
 <Canvas
   style={{ width: 120, height: 120 }}
-  draw={(ctx) => {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(60, 60, 56, 0, Math.PI * 2);
-    ctx.clip(); // a round avatar
-    ctx.drawImage(logo, 4, 4, 112, 112);
-    ctx.restore();
+  draw={(cx) => {
+    cx.save();
+    cx.beginPath();
+    cx.arc(60, 60, 56, 0, Math.PI * 2);
+    cx.clip(); // a round avatar
+    cx.drawImage(logo, 4, 4, 112, 112);
+    cx.restore();
   }}
 />
 ```
@@ -235,24 +235,24 @@ function Ring() {
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
       <Canvas
         style={{ width: 140, height: 140 }}
-        draw={(ctx, { width, height }) => {
-          const cx = width / 2, cy = height / 2, r = width / 2 - 10;
-          ctx.lineWidth = 12;
-          ctx.lineCap = "round";
-          ctx.strokeStyle = "#e5e7eb";
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.strokeStyle = "#6366f1";
-          ctx.beginPath();
+        draw={(cx, { width, height }) => {
+          const centerX = width / 2, cy = height / 2, r = width / 2 - 10;
+          cx.lineWidth = 12;
+          cx.lineCap = "round";
+          cx.strokeStyle = "#e5e7eb";
+          cx.beginPath();
+          cx.arc(centerX, cy, r, 0, Math.PI * 2);
+          cx.stroke();
+          cx.strokeStyle = "#6366f1";
+          cx.beginPath();
           // The end angle reads the animated value on every frame.
-          ctx.arc(cx, cy, r, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
-          ctx.stroke();
-          ctx.fillStyle = "#1f2328";
-          ctx.font = "600 22px system-ui";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(`${label()}%`, cx, cy);
+          cx.arc(centerX, cy, r, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
+          cx.stroke();
+          cx.fillStyle = "#1f2328";
+          cx.font = "600 22px system-ui";
+          cx.textAlign = "center";
+          cx.textBaseline = "middle";
+          cx.fillText(`${label()}%`, centerX, cy);
         }}
       />
       <View onPress={() => go(Math.random())}>
@@ -265,9 +265,9 @@ function Ring() {
 mount(Ring);
 ```
 
-The arc's end angle is `progress.mul(2π).sub(π/2)`: a node, so the ring sweeps natively for 900 ms while `draw` ran only once (and once more for the label, which reads a signal). A clock's second hand works the same way: `ctx.rotate(seconds.mul(Math.PI / 30))` with `seconds` animated linearly.
+The arc's end angle is `progress.mul(2π).sub(π/2)`: a node, so the ring sweeps natively for 900 ms while `draw` ran only once (and once more for the label, which reads a signal). A clock's second hand works the same way: `cx.rotate(seconds.mul(Math.PI / 30))` with `seconds` animated linearly.
 
-Colors animate the same way: `ctx.fillStyle = t.interpolate({ inputRange: [0, 1], outputRange: ["#54aeff", "#cf222e"] })`.
+Colors animate the same way: `cx.fillStyle = t.interpolate({ inputRange: [0, 1], outputRange: ["#54aeff", "#cf222e"] })`.
 
 ## Touch on a canvas
 
@@ -287,14 +287,14 @@ const strokes = signal<[number, number][][]>([]);
     const all = strokes();
     strokes.set([...all.slice(0, -1), [...all[all.length - 1], [e.locationX, e.locationY]]]);
   }}
-  draw={(ctx) => {
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+  draw={(cx) => {
+    cx.lineWidth = 3;
+    cx.lineCap = "round";
+    cx.lineJoin = "round";
     for (const s of strokes()) {
-      ctx.beginPath();
-      s.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.stroke();
+      cx.beginPath();
+      s.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+      cx.stroke();
     }
   }}
 />

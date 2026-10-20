@@ -18,18 +18,18 @@ function Ring(props: { progress: number }) {
   return (
     <Canvas
       style={{ width: 120, height: 120 }}
-      draw={(ctx, { width, height }) => {
-        const cx = width / 2, cy = height / 2, r = width / 2 - 10;
-        ctx.lineWidth = 12;
-        ctx.lineCap = "round";
-        ctx.strokeStyle = "#e5e7eb";
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.strokeStyle = "#6366f1";
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + props.progress * Math.PI * 2);
-        ctx.stroke();
+      draw={(cx, { width, height }) => {
+        const centerX = width / 2, cy = height / 2, r = width / 2 - 10;
+        cx.lineWidth = 12;
+        cx.lineCap = "round";
+        cx.strokeStyle = "#e5e7eb";
+        cx.beginPath();
+        cx.arc(centerX, cy, r, 0, Math.PI * 2);
+        cx.stroke();
+        cx.strokeStyle = "#6366f1";
+        cx.beginPath();
+        cx.arc(centerX, cy, r, -Math.PI / 2, -Math.PI / 2 + props.progress * Math.PI * 2);
+        cx.stroke();
       }}
     />
   );
@@ -48,7 +48,7 @@ your `draw` function with a context and the canvas's size.
 
 | Prop | Type | Description |
 |---|---|---|
-| `draw` | `(ctx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | Draws the canvas. Runs once the size is known, again when the canvas resizes, and again when signals it reads change. |
+| `draw` | `(cx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | Draws the canvas. Runs once the size is known, again when the canvas resizes, and again when signals it reads change. |
 
 Give the canvas a size through its style (`width` / `height`, `flex`, `aspectRatio`): it has no content size of its own.
 
@@ -61,11 +61,11 @@ const values = signal([12, 40, 28, 64]);
 
 <Canvas
   style={{ height: 160 }}
-  draw={(ctx, { width, height }) => {
+  draw={(cx, { width, height }) => {
     const data = values(); // a change of values() redraws
     const step = width / data.length;
-    ctx.fillStyle = "#0969da";
-    data.forEach((v, i) => ctx.fillRect(i * step + 4, height - v, step - 8, v));
+    cx.fillStyle = "#0969da";
+    data.forEach((v, i) => cx.fillRect(i * step + 4, height - v, step - 8, v));
   }}
 />;
 ```
@@ -82,11 +82,11 @@ Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 
 <Canvas
   style={{ width: 80, height: 80 }}
-  draw={(ctx) => {
-    ctx.translate(40, 40);
-    ctx.rotate(angle); // animates natively
-    ctx.fillStyle = "#cf222e";
-    ctx.fillRect(-20, -4, 40, 8);
+  draw={(cx) => {
+    cx.translate(40, 40);
+    cx.rotate(angle); // animates natively
+    cx.fillStyle = "#cf222e";
+    cx.fillRect(-20, -4, 40, 8);
   }}
 />;
 ```

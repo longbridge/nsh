@@ -19,21 +19,21 @@ function App() {
   let gradient: CanvasGradient | undefined;
   const report = signal("Not checked");
   const check = () => {
-    const ctx = kept!;
+    const cx = kept!;
     report.set(
       [
         `size ${size}`,
-        `canvas ${ctx.canvas.width}x${ctx.canvas.height}`,
+        `canvas ${cx.canvas.width}x${cx.canvas.height}`,
         `drawn ${draws > 0}`,
-        `context ${ctx instanceof CanvasRenderingContext2D}`,
+        `context ${cx instanceof CanvasRenderingContext2D}`,
         `gradient ${gradient instanceof CanvasGradient}`,
-        `in ${ctx.isPointInPath(triangle, 75, 25)}`,
-        `out ${ctx.isPointInPath(triangle, 25, 75)}`,
-        `added ${ctx.isPointInPath(both, 55, 55)}`,
-        `current ${ctx.isPointInPath(150, 30)}`,
-        `stroke ${ctx.isPointInStroke(triangle, 50, 1)}`,
-        `dash ${ctx.getLineDash().join(",")}`,
-        `measured ${ctx.measureText("Hello").width > 0}`,
+        `in ${cx.isPointInPath(triangle, 75, 25)}`,
+        `out ${cx.isPointInPath(triangle, 25, 75)}`,
+        `added ${cx.isPointInPath(both, 55, 55)}`,
+        `current ${cx.isPointInPath(150, 30)}`,
+        `stroke ${cx.isPointInStroke(triangle, 50, 1)}`,
+        `dash ${cx.getLineDash().join(",")}`,
+        `measured ${cx.measureText("Hello").width > 0}`,
       ].join(" "),
     );
   };
@@ -42,26 +42,26 @@ function App() {
       <Canvas
         testID="canvas"
         style={{ width: 200, height: 100 }}
-        draw={(ctx, s) => {
-          kept = ctx;
+        draw={(cx, s) => {
+          kept = cx;
           size = `${s.width}x${s.height}`;
           draws++;
-          gradient = ctx.createLinearGradient(0, 0, 200, 0);
+          gradient = cx.createLinearGradient(0, 0, 200, 0);
           gradient.addColorStop(0, "red");
           gradient.addColorStop(1, "blue");
-          ctx.fillStyle = gradient;
-          ctx.fill(triangle);
-          ctx.lineWidth = 4;
-          ctx.setLineDash([4, 2]);
-          ctx.strokeStyle = "black";
-          ctx.stroke(triangle);
-          ctx.setLineDash([]);
-          ctx.font = "16px sans-serif";
-          ctx.fillText("Hi", 120, 50);
-          ctx.beginPath();
-          ctx.rect(120, 10, 60, 40);
-          ctx.fill();
-          ctx.setLineDash([3, 1]);
+          cx.fillStyle = gradient;
+          cx.fill(triangle);
+          cx.lineWidth = 4;
+          cx.setLineDash([4, 2]);
+          cx.strokeStyle = "black";
+          cx.stroke(triangle);
+          cx.setLineDash([]);
+          cx.font = "16px sans-serif";
+          cx.fillText("Hi", 120, 50);
+          cx.beginPath();
+          cx.rect(120, 10, 60, 40);
+          cx.fill();
+          cx.setLineDash([3, 1]);
         }}
       />
       <View testID="check" onPress={check}>

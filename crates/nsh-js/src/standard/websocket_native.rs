@@ -41,14 +41,14 @@ impl std::future::Future for YieldNow {
 const QUEUE: usize = 8;
 /// A place among the VM's WebSockets (shared with the `websocket` module),
 /// or the `RangeError` saying there is none.
-fn acquire_slot(ctx: &Ctx<'_>) -> Result<nsh_core::ui::Held> {
+fn acquire_slot(cx: &Ctx<'_>) -> Result<nsh_core::ui::Held> {
     use nsh_core::runtime::{MAX_WEBSOCKETS, WEBSOCKETS};
-    crate::dom::shared(ctx.as_raw().as_ptr())
+    crate::dom::shared(cx.as_raw().as_ptr())
         .system_quotas
         .take(WEBSOCKETS, MAX_WEBSOCKETS)
         .ok_or_else(|| {
             Exception::throw_range(
-                ctx,
+                cx,
                 &format!("At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"),
             )
         })
@@ -56,8 +56,8 @@ fn acquire_slot(ctx: &Ctx<'_>) -> Result<nsh_core::ui::Held> {
 
 /// Whether the app may open a WebSocket to `url`, checked before any DNS
 /// lookup: the handshake is a GET of the same URL over HTTP.
-fn allowed(ctx: &Ctx<'_>, url: &url::Url) -> bool {
-    crate::dom::shared(ctx.as_raw().as_ptr())
+fn allowed(cx: &Ctx<'_>, url: &url::Url) -> bool {
+    crate::dom::shared(cx.as_raw().as_ptr())
         .system_access
         .borrow()
         .allows_websocket(url.as_str())
@@ -74,29 +74,29 @@ enum Command {
 /// URL is checked here, against the app's capabilities. Its `send`,
 /// `close` and `bufferedAmount` object, or the pending exception.
 pub(crate) fn connect(
-    ctx: crate::web::js::Ctx,
+    cx: crate::web::js::Ctx,
     url: String,
     protocols: Vec<String>,
     callback: crate::web::js::V,
 ) -> crate::web::js::R<crate::web::js::V> {
     // SAFETY: a live context, borrowed for this call.
-    let rq = unsafe { Ctx::from_raw(std::ptr::NonNull::new(ctx).expect("a live context")) };
+    let rq = unsafe { Ctx::from_raw(std::ptr::NonNull::new(cx).expect("a live context")) };
     // SAFETY: the value takes the callback's reference.
     let callback = unsafe { Value::from_raw(rq.clone(), callback.take()) };
     let callback = callback
         .into_function()
         .ok_or(crate::web::js::Throw)
         .inspect_err(|_| {
-            crate::web::js::type_error(ctx, "WebSocket callback is not a function");
+            crate::web::js::type_error(cx, "WebSocket callback is not a function");
         })?;
     // Its transports do I/O on the VM's tokio runtime.
-    if let Some(scheduler) = crate::dom::shared(ctx).scheduler.upgrade() {
+    if let Some(scheduler) = crate::dom::shared(cx).scheduler.upgrade() {
         scheduler.start_io().map_err(|e| {
-            crate::web::js::type_error(ctx, &format!("cannot start WebSocket I/O: {e}"))
+            crate::web::js::type_error(cx, &format!("cannot start WebSocket I/O: {e}"))
         })?;
     }
     match open(rq, url, protocols, callback) {
-        Ok(handle) => Ok(crate::web::js::V::dup(ctx, handle.as_raw())),
+        Ok(handle) => Ok(crate::web::js::V::dup(cx, handle.as_raw())),
         Err(_) => Err(crate::web::js::Throw),
     }
 }
@@ -106,71 +106,71 @@ fn emit<'js>(callback: &Function<'js>, kind: &str, data: Value<'js>) -> Result<(
 }
 
 fn open<'js>(
-    ctx: Ctx<'js>,
+    cx: Ctx<'js>,
     url: String,
     protocols: Vec<String>,
     callback: Function<'js>,
 ) -> Result<Object<'js>> {
-    let parsed = url::Url::parse(&url)
-        .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket URL"))?;
+    let parsed =
+        url::Url::parse(&url).map_err(|_| Exception::throw_syntax(&cx, "Invalid WebSocket URL"))?;
     if !matches!(parsed.scheme(), "ws" | "wss")
         || parsed.fragment().is_some()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
     {
         return Err(Exception::throw_syntax(
-            &ctx,
+            &cx,
             "WebSocket requires a ws/wss URL without credentials or fragment",
         ));
     }
     // The handshake API does not follow redirects. The URL checked is the
     // one connected to: the parsed, normalized form.
-    if !allowed(&ctx, &parsed) {
+    if !allowed(&cx, &parsed) {
         return Err(Exception::throw_type(
-            &ctx,
+            &cx,
             "WebSocket network capability denied",
         ));
     }
-    let slot = acquire_slot(&ctx)?;
+    let slot = acquire_slot(&cx)?;
     let mut request = parsed
         .as_str()
         .into_client_request()
-        .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket URL"))?;
+        .map_err(|_| Exception::throw_syntax(&cx, "Invalid WebSocket URL"))?;
     if !protocols.is_empty() {
         let value = protocols
             .join(", ")
             .parse()
-            .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket protocols"))?;
+            .map_err(|_| Exception::throw_syntax(&cx, "Invalid WebSocket protocols"))?;
         request
             .headers_mut()
             .insert("Sec-WebSocket-Protocol", value);
     }
     let (tx, mut rx) = mpsc::channel(QUEUE);
     let buffered = Rc::new(Cell::new(0usize));
-    let handle = Object::new(ctx.clone())?;
+    let handle = Object::new(cx.clone())?;
     let send_tx = tx.clone();
     let send_buffered = buffered.clone();
     let read_buffered = buffered.clone();
     handle.set("bufferedAmount", Func::from(move || read_buffered.get()))?;
     handle.set(
         "send",
-        Func::from(move |send_ctx: Ctx<'js>, data: Value<'js>| -> Result<()> {
+        Func::from(move |send_cx: Ctx<'js>, data: Value<'js>| -> Result<()> {
             let message = if let Some(s) = data.as_string() {
                 let text = s.to_string()?;
                 if text.len() > MAX_MESSAGE {
                     return Err(Exception::throw_range(
-                        &send_ctx,
+                        &send_cx,
                         "WebSocket message exceeds 8 MiB",
                     ));
                 }
                 Message::Text(text.into())
             } else if let Some(blob) =
-                crate::web::blob::blob_of(send_ctx.as_raw().as_ptr(), data.as_raw())
+                crate::web::blob::blob_of(send_cx.as_raw().as_ptr(), data.as_raw())
                     .map_err(|_| rquickjs::Error::Exception)?
             {
                 if blob.bytes().len() > MAX_MESSAGE {
                     return Err(Exception::throw_range(
-                        &send_ctx,
+                        &send_cx,
                         "WebSocket message exceeds 8 MiB",
                     ));
                 }
@@ -178,16 +178,16 @@ fn open<'js>(
             } else {
                 // SAFETY: the bytes are copied while the JS value is alive.
                 let bytes =
-                    unsafe { crate::web::js::bytes_of(send_ctx.as_raw().as_ptr(), data.as_raw()) }
+                    unsafe { crate::web::js::bytes_of(send_cx.as_raw().as_ptr(), data.as_raw()) }
                         .ok_or_else(|| {
-                            Exception::throw_type(
-                                &send_ctx,
-                                "send expects text, Blob, ArrayBuffer or a typed array",
-                            )
-                        })?;
+                        Exception::throw_type(
+                            &send_cx,
+                            "send expects text, Blob, ArrayBuffer or a typed array",
+                        )
+                    })?;
                 if bytes.len() > MAX_MESSAGE {
                     return Err(Exception::throw_range(
-                        &send_ctx,
+                        &send_cx,
                         "WebSocket message exceeds 8 MiB",
                     ));
                 }
@@ -196,12 +196,12 @@ fn open<'js>(
             let length = message.len();
             if send_buffered.get().saturating_add(length) > MAX_MESSAGE {
                 return Err(Exception::throw_range(
-                    &send_ctx,
+                    &send_cx,
                     "WebSocket buffered data exceeds 8 MiB",
                 ));
             }
             send_tx.try_send(Command::Send(message)).map_err(|_| {
-                Exception::throw_type(&send_ctx, "WebSocket outbound queue is full or closed")
+                Exception::throw_type(&send_cx, "WebSocket outbound queue is full or closed")
             })?;
             send_buffered.set(send_buffered.get() + length);
             Ok(())
@@ -210,13 +210,13 @@ fn open<'js>(
     handle.set(
         "close",
         Func::from(
-            move |close_ctx: Ctx<'js>, code: u16, reason: String| -> Result<()> {
+            move |close_cx: Ctx<'js>, code: u16, reason: String| -> Result<()> {
                 tx.try_send(Command::Close(Some(CloseFrame {
                     code: CloseCode::from(code),
                     reason: reason.into(),
                 })))
                 .map_err(|_| {
-                    Exception::throw_type(&close_ctx, "WebSocket outbound queue is full or closed")
+                    Exception::throw_type(&close_cx, "WebSocket outbound queue is full or closed")
                 })
             },
         ),
@@ -226,12 +226,12 @@ fn open<'js>(
     let (abort_tx, abort_rx) = tokio::sync::oneshot::channel::<()>();
     let abort = Rc::new(std::cell::RefCell::new(Some(abort_tx)));
     let cleanup_abort = abort.clone();
-    let cleanup = Function::new(ctx.clone(), move || {
+    let cleanup = Function::new(cx.clone(), move || {
         if let Some(sender) = cleanup_abort.borrow_mut().take() {
             let _ = sender.send(());
         }
     })?;
-    let raw = ctx.as_raw().as_ptr();
+    let raw = cx.as_raw().as_ptr();
     let owned_cleanup = crate::web::js::V::dup(raw, cleanup.as_value().as_raw());
     if crate::reactive::has_owner(raw) {
         let mut callback = owned_cleanup.raw();
@@ -243,8 +243,8 @@ fn open<'js>(
     } else {
         crate::hot::undo_on_rerun(raw, owned_cleanup);
     }
-    let task_ctx = ctx.clone();
-    ctx.spawn(async move {
+    let task_cx = cx.clone();
+    cx.spawn(async move {
         let _slot = slot;
         let _abort_lifetime = abort;
         let operation = async {
@@ -261,7 +261,7 @@ fn open<'js>(
             };
             let protocol = response.headers().get("Sec-WebSocket-Protocol").and_then(|h| h.to_str().ok()).unwrap_or("");
             if !protocol.is_empty() && !protocols.iter().any(|p| p == protocol) { return Err("Server selected an unrequested protocol".into()); }
-            let opened = Object::new(task_ctx.clone()).map_err(|e| e.to_string())?;
+            let opened = Object::new(task_cx.clone()).map_err(|e| e.to_string())?;
             opened.set("protocol", protocol).map_err(|e| e.to_string())?;
             emit(&callback, "open", opened.into_value()).map_err(|e| e.to_string())?;
             let mut delivered = 0;
@@ -288,15 +288,15 @@ fn open<'js>(
                                 }
                                 Err::<Option<CloseFrame>, String>("Peer disconnected before completing the WebSocket close handshake".into())
                             }).await.map_err(|_| "WebSocket close timed out".to_string())??;
-                            closed(&task_ctx, &callback, frame, true).map_err(|e| e.to_string())?;
+                            closed(&task_cx, &callback, frame, true).map_err(|e| e.to_string())?;
                             return Ok(());
                         },
                         None => return Ok(()),
                     },
                     incoming = socket.next() => match incoming {
-                        Some(Ok(Message::Text(text))) => { delivered += 1; emit(&callback, "message", rquickjs::String::from_str(task_ctx.clone(), text.as_str()).map_err(|e| e.to_string())?.into_value()).map_err(|e| e.to_string())?; },
-                        Some(Ok(Message::Binary(bytes))) => { delivered += 1; let buffer = rquickjs::ArrayBuffer::new_copy(task_ctx.clone(), &bytes).map_err(|e| e.to_string())?; emit(&callback, "message", buffer.into_value()).map_err(|e| e.to_string())?; },
-                        Some(Ok(Message::Close(frame))) => { let _ = socket.flush().await; closed(&task_ctx, &callback, frame, true).map_err(|e| e.to_string())?; return Ok(()); },
+                        Some(Ok(Message::Text(text))) => { delivered += 1; emit(&callback, "message", rquickjs::String::from_str(task_cx.clone(), text.as_str()).map_err(|e| e.to_string())?.into_value()).map_err(|e| e.to_string())?; },
+                        Some(Ok(Message::Binary(bytes))) => { delivered += 1; let buffer = rquickjs::ArrayBuffer::new_copy(task_cx.clone(), &bytes).map_err(|e| e.to_string())?; emit(&callback, "message", buffer.into_value()).map_err(|e| e.to_string())?; },
+                        Some(Ok(Message::Close(frame))) => { let _ = socket.flush().await; closed(&task_cx, &callback, frame, true).map_err(|e| e.to_string())?; return Ok(()); },
                         Some(Ok(Message::Ping(_))) => { socket.flush().await.map_err(|e| e.to_string())?; },
                         Some(Ok(_)) => {},
                         Some(Err(e)) => return Err(e.to_string()),
@@ -311,20 +311,20 @@ fn open<'js>(
             result = operation => result,
         };
         if let Err(error) = outcome {
-            if let Ok(message) = rquickjs::String::from_str(task_ctx.clone(), &error) { let _ = emit(&callback, "error", message.into_value()); }
-            let _ = closed(&task_ctx, &callback, None, false);
+            if let Ok(message) = rquickjs::String::from_str(task_cx.clone(), &error) { let _ = emit(&callback, "error", message.into_value()); }
+            let _ = closed(&task_cx, &callback, None, false);
         }
     });
     Ok(handle)
 }
 
 fn closed<'js>(
-    ctx: &Ctx<'js>,
+    cx: &Ctx<'js>,
     callback: &Function<'js>,
     frame: Option<CloseFrame>,
     clean: bool,
 ) -> Result<()> {
-    let data = Object::new(ctx.clone())?;
+    let data = Object::new(cx.clone())?;
     data.set(
         "code",
         frame

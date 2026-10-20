@@ -21,6 +21,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
+    geometry::{Points, Size},
     platform::{Locale, Os},
     ui::{Callback, Registry, Root, prelude::timer},
 };
@@ -29,11 +30,12 @@ use nsh_engine::{
 };
 
 use crate::{
+    driver::{Driver, Host, Remote},
     headless::{
-        DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubNetwork, UreqNetwork,
+        DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubNetwork, UreqNetwork, WAIT,
         print_batch,
     },
-    module::{Case, Hook, Item, Launch, MobilePlatform, Mode, NetworkSetup, Suite},
+    module::{Case, Hook, Item, Launch, MobilePlatform, Mode, NetworkSetup, SafeArea, Suite},
 };
 
 /// Builds an entry ([`Entry`]; an app's may be its directory).
@@ -79,6 +81,24 @@ pub struct TestRun {
     /// Prints each batch of the apps the tests open, under the step it came
     /// in, and logs their commits' timings.
     pub trace: Option<Output>,
+    /// Opens the apps on a real platform's host instead of a headless
+    /// engine (`nsh test --target`).
+    pub host: Option<StartHost>,
+}
+
+/// Starts the app whose entry is the path on a real platform's host, as
+/// [`HostOptions`] say, once it connected (`nsh test --target`): what takes
+/// the test's steps.
+pub type StartHost =
+    Arc<dyn Fn(&Path, &HostOptions) -> Result<Box<dyn Host>, String> + Send + Sync>;
+
+/// How [`StartHost`] starts an app.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct HostOptions {
+    /// The window's (viewport's) size in points: the headless phone's,
+    /// 390 × 844, unless `open` says.
+    pub size: Option<Size<Points>>,
 }
 
 /// How a test ended.
@@ -288,7 +308,15 @@ impl MountSink for VmSink {
 }
 
 /// An app a test opened: closed (`None`) when the test ends.
-pub(crate) type OpenApp = Arc<Mutex<Option<Headless>>>;
+pub(crate) type OpenApp = Arc<Mutex<Option<Box<dyn Driver>>>>;
+
+/// What `open` gives the test's `App`: the app, and on a headless engine
+/// its storage and the requests it made.
+pub(crate) type Opened = (
+    OpenApp,
+    Option<Arc<MemoryStorage>>,
+    Option<Arc<RecordingNetwork>>,
+);
 
 /// The test file being run, for its VM's calls.
 pub(crate) struct Session {
@@ -316,13 +344,12 @@ impl Session {
     }
 
     /// Starts the app at `entry` as `options` say, once it rendered.
-    pub(crate) fn open(
-        &self,
-        entry: &str,
-        launch: Launch,
-    ) -> Result<(OpenApp, Arc<MemoryStorage>, Arc<RecordingNetwork>), String> {
+    pub(crate) fn open(&self, entry: &str, launch: Launch) -> Result<Opened, String> {
         let path = self.dir.join(entry);
         let path = dunce::canonicalize(&path).map_err(|e| format!("open({entry:?}): {e}"))?;
+        if let Some(start) = &self.run.host {
+            return self.open_on_host(entry, &path, launch, start);
+        }
         let app = match self.build(&path)? {
             Built::Js(bundle, Some(map)) => nsh_engine::App::Js(bundle.with_source_map(map)),
             Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
@@ -399,12 +426,65 @@ impl Session {
         app.set_clipboard(launch.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
-        let app = Arc::new(Mutex::new(Some(app)));
+        let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(app))));
         self.apps
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(app.clone());
-        Ok((app, storage, requests))
+        Ok((app, Some(storage), Some(requests)))
+    }
+
+    /// Starts the app at `path` (`entry` as the test names it) on a real
+    /// platform's host ([`TestRun::host`]), once it rendered.
+    fn open_on_host(
+        &self,
+        entry: &str,
+        path: &Path,
+        launch: Launch,
+        start: &StartHost,
+    ) -> Result<Opened, String> {
+        // What a real platform cannot be given yet: refused rather than
+        // left out, so a test never passes on what it did not set up.
+        let refused = [
+            (!launch.storage.0.is_empty(), "`storage`"),
+            (
+                matches!(launch.network, NetworkSetup::Stub(_)),
+                "stubbed `network` routes",
+            ),
+            (launch.clipboard.is_some(), "`clipboard`"),
+            (launch.locale.is_some(), "`locale`"),
+            (launch.reduced_motion, "`reducedMotion`"),
+            (launch.safe_area != SafeArea::default(), "`safeArea`"),
+        ];
+        if let Some((_, what)) = refused.iter().find(|(set, _)| *set) {
+            return Err(format!(
+                "open({entry:?}): {what} runs headless only for now: run the test without `--target`"
+            ));
+        }
+        let size = match (launch.width, launch.height) {
+            (None, None) => None,
+            (w, h) => Some(Size::new(
+                w.unwrap_or(Points(390.0)),
+                h.unwrap_or(Points(844.0)),
+            )),
+        };
+        let options = HostOptions {
+            size: size.or(Some(Size::new(Points(390.0), Points(844.0)))),
+        };
+        let host = start(path, &options).map_err(|e| format!("open({entry:?}): {e}"))?;
+        let remote = Remote::new(host);
+        remote.take(nsh_dev::protocol::TestStep::Ready {
+            timeout_ms: WAIT.as_millis() as u64 * 2,
+        })?;
+        if launch.color_scheme == crate::module::ColorScheme::Dark {
+            remote.take(nsh_dev::protocol::TestStep::SetColorScheme { dark: true })?;
+        }
+        let app: OpenApp = Arc::new(Mutex::new(Some(Box::new(remote))));
+        self.apps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(app.clone());
+        Ok((app, None, None))
     }
 
     /// The app at `path`, built once.
@@ -447,15 +527,7 @@ impl Session {
         let mut apps = self.apps.lock().unwrap_or_else(|e| e.into_inner());
         let screen = apps.iter().rev().find_map(|app| {
             let mut app = app.lock().unwrap_or_else(|e| e.into_inner());
-            let app = app.as_mut()?;
-            app.catch_up();
-            Some(
-                app.screen()
-                    .texts()
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-            )
+            app.as_mut()?.texts().ok()
         });
         let mark = mark.min(apps.len());
         for app in apps.drain(mark..) {

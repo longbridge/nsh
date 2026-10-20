@@ -210,9 +210,9 @@ const CONTEXT: usize = 0;
 const PATH: usize = 1;
 const GRADIENT: usize = 2;
 
-fn canvases<'a>(ctx: *mut JsContext) -> &'a Canvases {
+fn canvases<'a>(cx: *mut JsContext) -> &'a Canvases {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).canvases }
+    unsafe { &(*crate::state::state(cx)).canvases }
 }
 
 /// What a context, a path or a gradient holds.
@@ -289,8 +289,8 @@ unsafe extern "C" fn recording_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark:
 
 /// The recording of a context, path or gradient `v` (null for anything
 /// else).
-fn recording_ptr(ctx: *mut JsContext, v: JsValue) -> *mut Recording {
-    let c = classes(ctx);
+fn recording_ptr(cx: *mut JsContext, v: JsValue) -> *mut Recording {
+    let c = classes(cx);
     // SAFETY: reading the class and opaque of a live value.
     unsafe {
         let class = qjs::JS_GetClassID(v);
@@ -303,24 +303,24 @@ fn recording_ptr(ctx: *mut JsContext, v: JsValue) -> *mut Recording {
 
 /// [`recording_ptr`] as a reference, for code that neither runs JS nor
 /// reads another recording while it holds it.
-fn recording<'a>(ctx: *mut JsContext, v: JsValue) -> Option<&'a mut Recording> {
+fn recording<'a>(cx: *mut JsContext, v: JsValue) -> Option<&'a mut Recording> {
     // SAFETY: the object owns its recording; callers hold it briefly.
-    unsafe { recording_ptr(ctx, v).as_mut() }
+    unsafe { recording_ptr(cx, v).as_mut() }
 }
 
 /// The context's hand-written properties (their magic follows the specs').
 const OWN_PROPERTIES: [&str; 4] = ["fillStyle", "strokeStyle", "shadowOffsetX", "shadowOffsetY"];
 
 /// Registers the classes and makes the prototypes (once per context).
-fn classes(ctx: *mut JsContext) -> Classes {
-    let cv = canvases(ctx);
+fn classes(cx: *mut JsContext) -> Classes {
+    let cv = canvases(cx);
     if let Some(c) = cv.classes.get() {
         return c;
     }
     let s = specs();
     // SAFETY: registering classes; the prototypes take their members.
     unsafe {
-        let rt = qjs::JS_GetRuntime(ctx);
+        let rt = qjs::JS_GetRuntime(cx);
         let class = |name: &'static CStr| {
             let mut id: qjs::JSClassID = 0;
             qjs::JS_NewClassID(rt, &mut id);
@@ -343,12 +343,12 @@ fn classes(ctx: *mut JsContext) -> Classes {
         cv.classes.set(Some(classes));
         let set = |obj: JsValue, name: &str, f: JsValue| {
             let k = CString::new(name).unwrap_or_default();
-            qjs::JS_SetPropertyStr(ctx, obj, k.as_ptr(), f);
+            qjs::JS_SetPropertyStr(cx, obj, k.as_ptr(), f);
         };
         let recorders = |obj: JsValue, list: &[OpMethod], magic_base: usize| {
             for (i, m) in list.iter().enumerate() {
                 let f = qjs::JS_NewCFunctionData(
-                    ctx,
+                    cx,
                     Some(record_method),
                     m.params.len() as c_int,
                     (magic_base + i) as c_int,
@@ -360,17 +360,17 @@ fn classes(ctx: *mut JsContext) -> Classes {
         };
         let natives = |obj: JsValue, list: &[(&CStr, Native, c_int)]| {
             for &(name, f, length) in list {
-                let func = reactive::new_function(ctx, name, f, length);
-                qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func);
+                let func = reactive::new_function(cx, name, f, length);
+                qjs::JS_SetPropertyStr(cx, obj, name.as_ptr(), func);
             }
         };
-        let path_proto = qjs::JS_NewObject(ctx);
+        let path_proto = qjs::JS_NewObject(cx);
         recorders(path_proto, &s.path, 0);
         natives(
             path_proto,
             &[(c"roundRect", round_rect, 5), (c"addPath", add_path, 1)],
         );
-        let context_proto = qjs::JS_NewObject(ctx);
+        let context_proto = qjs::JS_NewObject(cx);
         recorders(context_proto, &s.path, 0);
         recorders(context_proto, &s.context, s.path.len());
         natives(
@@ -398,13 +398,13 @@ fn classes(ctx: *mut JsContext) -> Classes {
         );
         let accessor = |name: &str, getter: JsValue, setter: JsValue| {
             let k = CString::new(name).unwrap_or_default();
-            let atom = qjs::JS_NewAtom(ctx, k.as_ptr());
+            let atom = qjs::JS_NewAtom(cx, k.as_ptr());
             let flags = qjs::JS_PROP_HAS_GET
                 | qjs::JS_PROP_HAS_SET
                 | qjs::JS_PROP_HAS_CONFIGURABLE
                 | qjs::JS_PROP_CONFIGURABLE;
             qjs::JS_DefineProperty(
-                ctx,
+                cx,
                 context_proto,
                 atom,
                 UNDEFINED,
@@ -412,25 +412,25 @@ fn classes(ctx: *mut JsContext) -> Classes {
                 setter,
                 flags as c_int,
             );
-            qjs::JS_FreeAtom(ctx, atom);
-            qjs::JS_FreeValue(ctx, getter);
-            qjs::JS_FreeValue(ctx, setter);
+            qjs::JS_FreeAtom(cx, atom);
+            qjs::JS_FreeValue(cx, getter);
+            qjs::JS_FreeValue(cx, setter);
         };
         let names = s.properties.iter().map(|p| p.name).chain(OWN_PROPERTIES);
         for (i, name) in names.enumerate() {
             let magic = |f, length| {
-                qjs::JS_NewCFunctionData(ctx, Some(f), length, i as c_int, 0, ptr::null_mut())
+                qjs::JS_NewCFunctionData(cx, Some(f), length, i as c_int, 0, ptr::null_mut())
             };
             accessor(name, magic(property_get, 0), magic(property_set, 1));
         }
-        let size = reactive::new_function(ctx, c"canvas", context_size, 0);
+        let size = reactive::new_function(cx, c"canvas", context_size, 0);
         accessor("canvas", size, UNDEFINED);
-        let gradient_proto = qjs::JS_NewObject(ctx);
+        let gradient_proto = qjs::JS_NewObject(cx);
         natives(gradient_proto, &[(c"addColorStop", add_color_stop, 2)]);
         let protos = [context_proto, path_proto, gradient_proto];
         let ids = [classes.context, classes.path, classes.gradient];
         for (id, proto) in ids.into_iter().zip(protos) {
-            qjs::JS_SetClassProto(ctx, id, qjs::JS_DupValue(ctx, proto));
+            qjs::JS_SetClassProto(cx, id, qjs::JS_DupValue(cx, proto));
         }
         cv.protos.set(protos);
         classes
@@ -438,10 +438,10 @@ fn classes(ctx: *mut JsContext) -> Classes {
 }
 
 /// A new object of `class` with an empty recording (owned).
-fn new_recording(ctx: *mut JsContext, class: qjs::JSClassID) -> JsValue {
+fn new_recording(cx: *mut JsContext, class: qjs::JSClassID) -> JsValue {
     // SAFETY: an object of a canvas class owning its recording.
     unsafe {
-        let obj = qjs::JS_NewObjectClass(ctx, class);
+        let obj = qjs::JS_NewObjectClass(cx, class);
         if !qjs::JS_IsException(obj) {
             let data = Box::into_raw(Box::new(Recording {
                 out: Vec::new(),
@@ -459,13 +459,13 @@ fn new_recording(ctx: *mut JsContext, class: qjs::JSClassID) -> JsValue {
 }
 
 /// A string value's text, shared.
-fn rc_str(ctx: *mut JsContext, v: JsValue) -> Rc<str> {
+fn rc_str(cx: *mut JsContext, v: JsValue) -> Rc<str> {
     // SAFETY: a live value; the C string is freed below.
     unsafe {
         let mut len = 0usize;
-        let p = qjs::JS_ToCStringLen(ctx, &mut len, v);
+        let p = qjs::JS_ToCStringLen(cx, &mut len, v);
         if p.is_null() {
-            qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
             return Rc::from("");
         }
         let bytes = std::slice::from_raw_parts(p.cast::<u8>(), len);
@@ -473,14 +473,14 @@ fn rc_str(ctx: *mut JsContext, v: JsValue) -> Rc<str> {
             Ok(s) => Rc::from(s),
             Err(_) => Rc::from(String::from_utf8_lossy(bytes).as_ref()),
         };
-        qjs::JS_FreeCString(ctx, p);
+        qjs::JS_FreeCString(cx, p);
         s
     }
 }
 
 /// A JS value as a record (borrowed); the animated values it holds are added
 /// to `used` (owned dups).
-fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) -> Rec {
+fn to_rec(cx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) -> Rec {
     // SAFETY: inline checks and reads of a live value; values got are freed.
     unsafe {
         let tag = qjs::JS_VALUE_GET_TAG(v);
@@ -491,7 +491,7 @@ fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) 
             return Rec::Num(qjs::JS_VALUE_GET_FLOAT64(v));
         }
         if tag == qjs::JS_TAG_STRING {
-            return Rec::Str(rc_str(ctx, v));
+            return Rec::Str(rc_str(cx, v));
         }
         if tag == qjs::JS_TAG_BOOL {
             return Rec::Bool(qjs::JS_VALUE_GET_BOOL(v));
@@ -500,26 +500,26 @@ fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) 
             return Rec::Null;
         }
         // A path's or a gradient's recording, as it is now.
-        if let Some(r) = recording_ptr(ctx, v).as_ref() {
-            used.extend(r.used.iter().map(|&u| qjs::JS_DupValue(ctx, u)));
+        if let Some(r) = recording_ptr(cx, v).as_ref() {
+            used.extend(r.used.iter().map(|&u| qjs::JS_DupValue(cx, u)));
             return Rec::List(Rc::new(r.out.clone()));
         }
-        let nv = qjs::JS_GetPropertyStr(ctx, v, c"__av".as_ptr());
+        let nv = qjs::JS_GetPropertyStr(cx, v, c"__av".as_ptr());
         if qjs::JS_IsNumber(nv) {
             let mut n = 0f64;
-            qjs::JS_ToFloat64(ctx, &mut n, nv);
-            used.push(qjs::JS_DupValue(ctx, v));
+            qjs::JS_ToFloat64(cx, &mut n, nv);
+            used.push(qjs::JS_DupValue(cx, v));
             return Rec::Node(n as nsh_core::animation::NodeId);
         }
-        qjs::JS_FreeValue(ctx, nv);
+        qjs::JS_FreeValue(cx, nv);
         if qjs::JS_IsArray(v) {
             let mut len: i64 = 0;
-            qjs::JS_GetLength(ctx, v, &mut len);
+            qjs::JS_GetLength(cx, v, &mut len);
             let mut items = Vec::with_capacity(len.clamp(0, 1 << 16) as usize);
             for i in 0..len.max(0) {
-                let item = qjs::JS_GetPropertyInt64(ctx, v, i);
-                items.push(to_rec(ctx, item, used, depth + 1));
-                qjs::JS_FreeValue(ctx, item);
+                let item = qjs::JS_GetPropertyInt64(cx, v, i);
+                items.push(to_rec(cx, item, used, depth + 1));
+                qjs::JS_FreeValue(cx, item);
             }
             return Rec::List(Rc::new(items));
         }
@@ -528,19 +528,19 @@ fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) 
     }
 }
 
-fn throw_not_recording(ctx: *mut JsContext) -> JsValue {
+fn throw_not_recording(cx: *mut JsContext) -> JsValue {
     // SAFETY: throws on a live context.
-    unsafe { qjs::JS_ThrowTypeError(ctx, c"not a canvas context or path".as_ptr()) }
+    unsafe { qjs::JS_ThrowTypeError(cx, c"not a canvas context or path".as_ptr()) }
 }
 
 /// Records `code` and `args` (borrowed) on `this`'s recording.
-fn record(ctx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> JsValue {
-    let p = recording_ptr(ctx, this);
+fn record(cx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> JsValue {
+    let p = recording_ptr(cx, this);
     // SAFETY: the recording `this` owns; each `&mut` is made only while no
     // other recording is read (`to_rec` reads one, possibly this one).
     unsafe {
         let Some(r) = p.as_mut() else {
-            return throw_not_recording(ctx);
+            return throw_not_recording(cx);
         };
         if r.closed {
             return UNDEFINED;
@@ -548,7 +548,7 @@ fn record(ctx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> Js
         r.out.push(Rec::Num(code as f64));
         let mut used = Vec::new();
         for &a in args {
-            let rec = to_rec(ctx, a, &mut used, 0);
+            let rec = to_rec(cx, a, &mut used, 0);
             (*p).out.push(rec);
         }
         (*p).used.append(&mut used);
@@ -556,10 +556,10 @@ fn record(ctx: *mut JsContext, this: JsValue, code: i32, args: &[JsValue]) -> Js
     UNDEFINED
 }
 
-fn free_values(ctx: *mut JsContext, values: impl IntoIterator<Item = JsValue>) {
+fn free_values(cx: *mut JsContext, values: impl IntoIterator<Item = JsValue>) {
     for v in values {
         // SAFETY: owned values.
-        unsafe { qjs::JS_FreeValue(ctx, v) };
+        unsafe { qjs::JS_FreeValue(cx, v) };
     }
 }
 
@@ -567,9 +567,9 @@ fn new_number(n: f64) -> JsValue {
     qjs::JS_NewFloat64(n)
 }
 
-fn new_string(ctx: *mut JsContext, s: &str) -> JsValue {
+fn new_string(cx: *mut JsContext, s: &str) -> JsValue {
     // SAFETY: a new string.
-    unsafe { qjs::JS_NewStringLen(ctx, s.as_ptr().cast(), s.len() as _) }
+    unsafe { qjs::JS_NewStringLen(cx, s.as_ptr().cast(), s.len() as _) }
 }
 
 fn is_undefined(v: JsValue) -> bool {
@@ -580,7 +580,7 @@ fn is_undefined(v: JsValue) -> bool {
 /// A recording method of the specs (magic: the path methods', then the
 /// context's).
 unsafe extern "C" fn record_method(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -593,11 +593,11 @@ unsafe extern "C" fn record_method(
         Some(m) => m,
         None => &s.context[magic - s.path.len()],
     };
-    let p = recording_ptr(ctx, this);
+    let p = recording_ptr(cx, this);
     // SAFETY: as in `record`.
     unsafe {
         let Some(r) = p.as_mut() else {
-            return throw_not_recording(ctx);
+            return throw_not_recording(cx);
         };
         if r.closed {
             return UNDEFINED;
@@ -609,7 +609,7 @@ unsafe extern "C" fn record_method(
             let a = arg(argc, argv, i);
             let rec = match param.default {
                 Some(default) if is_undefined(a) => literal(default),
-                _ => to_rec(ctx, a, &mut used, 0),
+                _ => to_rec(cx, a, &mut used, 0),
             };
             (*p).out.push(rec);
         }
@@ -634,18 +634,18 @@ fn property_of(magic: c_int) -> (&'static str, Option<i32>, Rec) {
     }
 }
 
-fn rec_to_js(ctx: *mut JsContext, r: &Rec) -> JsValue {
+fn rec_to_js(cx: *mut JsContext, r: &Rec) -> JsValue {
     match r {
         Rec::Bool(true) => qjs::JS_TRUE,
         Rec::Bool(false) => qjs::JS_FALSE,
         Rec::Num(n) => new_number(*n),
-        Rec::Str(s) => new_string(ctx, s),
+        Rec::Str(s) => new_string(cx, s),
         _ => qjs::JS_NULL,
     }
 }
 
 unsafe extern "C" fn property_get(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -653,29 +653,29 @@ unsafe extern "C" fn property_get(
     _data: *mut JsValue,
 ) -> JsValue {
     let (name, _, initial) = property_of(magic);
-    match recording(ctx, this).and_then(|r| r.state.get(name)) {
+    match recording(cx, this).and_then(|r| r.state.get(name)) {
         // SAFETY: a dup of the kept value.
-        Some(v) => unsafe { qjs::JS_DupValue(ctx, v) },
-        None => rec_to_js(ctx, &initial),
+        Some(v) => unsafe { qjs::JS_DupValue(cx, v) },
+        None => rec_to_js(cx, &initial),
     }
 }
 
 /// Keeps `value` (borrowed) as `name` in `r`'s drawing state.
-fn keep(ctx: *mut JsContext, r: &mut Recording, name: &'static str, value: JsValue) {
+fn keep(cx: *mut JsContext, r: &mut Recording, name: &'static str, value: JsValue) {
     // SAFETY: a dup the state owns; the old value is freed (a finalizer it
     // runs touches only its own object).
-    let v = unsafe { qjs::JS_DupValue(ctx, value) };
+    let v = unsafe { qjs::JS_DupValue(cx, value) };
     match r.state.0.iter_mut().find(|(k, _)| *k == name) {
         Some(slot) => {
             let old = std::mem::replace(&mut slot.1, v);
-            unsafe { qjs::JS_FreeValue(ctx, old) };
+            unsafe { qjs::JS_FreeValue(cx, old) };
         }
         None => r.state.0.push((name, v)),
     }
 }
 
 unsafe extern "C" fn property_set(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -684,43 +684,43 @@ unsafe extern "C" fn property_set(
 ) -> JsValue {
     let (name, code, _) = property_of(magic);
     let value = arg(argc, argv, 0);
-    let Some(r) = recording(ctx, this) else {
-        return throw_not_recording(ctx);
+    let Some(r) = recording(cx, this) else {
+        return throw_not_recording(cx);
     };
-    keep(ctx, r, name, value);
+    keep(cx, r, name, value);
     match (name, code) {
-        (_, Some(code)) => record(ctx, this, code, &[value]),
-        ("fillStyle", _) => record(ctx, this, CV_FILL_STYLE, &[value]),
-        ("strokeStyle", _) => record(ctx, this, CV_STROKE_STYLE, &[value]),
+        (_, Some(code)) => record(cx, this, code, &[value]),
+        ("fillStyle", _) => record(cx, this, CV_FILL_STYLE, &[value]),
+        ("strokeStyle", _) => record(cx, this, CV_STROKE_STYLE, &[value]),
         _ => {
             let zero = new_number(0.0);
             let x = r.state.get("shadowOffsetX").unwrap_or(zero);
             let y = r.state.get("shadowOffsetY").unwrap_or(zero);
-            record(ctx, this, CV_SHADOW_OFFSET, &[x, y])
+            record(cx, this, CV_SHADOW_OFFSET, &[x, y])
         }
     }
 }
 
-/// `ctx.canvas`: the size `draw` got.
+/// `cx.canvas`: the size `draw` got.
 unsafe extern "C" fn context_size(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    match recording(ctx, this) {
+    match recording(cx, this) {
         // SAFETY: a dup of the size.
-        Some(r) => unsafe { qjs::JS_DupValue(ctx, r.size) },
+        Some(r) => unsafe { qjs::JS_DupValue(cx, r.size) },
         None => UNDEFINED,
     }
 }
 
-/// A native (`fn(ctx, this, args) -> JsValue`) over borrowed arguments.
+/// A native (`fn(cx, this, args) -> JsValue`) over borrowed arguments.
 macro_rules! native {
-    ($(#[$doc:meta])* $name:ident, |$ctx:ident, $this:ident, $args:ident| $body:expr) => {
+    ($(#[$doc:meta])* $name:ident, |$cx:ident, $this:ident, $args:ident| $body:expr) => {
         $(#[$doc])*
         unsafe extern "C" fn $name(
-            $ctx: *mut JsContext,
+            $cx: *mut JsContext,
             $this: JsValue,
             argc: c_int,
             argv: *mut JsValue,
@@ -740,11 +740,11 @@ fn at(args: &[JsValue], i: usize) -> JsValue {
     args.get(i).copied().unwrap_or(UNDEFINED)
 }
 
-fn number(ctx: *mut JsContext, v: JsValue) -> f64 {
+fn number(cx: *mut JsContext, v: JsValue) -> f64 {
     let mut n = 0f64;
     // SAFETY: converting a live value (a throwing `valueOf` gives NaN).
-    if unsafe { qjs::JS_ToFloat64(ctx, &mut n, v) } < 0 {
-        unsafe { qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx)) };
+    if unsafe { qjs::JS_ToFloat64(cx, &mut n, v) } < 0 {
+        unsafe { qjs::JS_FreeValue(cx, qjs::JS_GetException(cx)) };
         return f64::NAN;
     }
     n
@@ -754,19 +754,19 @@ native!(
     /// `roundRect(x, y, w, h, radii = 0)`: one radius, or 2–4 as in CSS
     /// `border-radius` (top-left first).
     round_rect,
-    |ctx, this, a| {
+    |cx, this, a| {
         let radii = at(a, 4);
         let mut r: Vec<JsValue> = Vec::new();
         // SAFETY: reads of a live array; the items got are freed below.
         unsafe {
             if qjs::JS_IsArray(radii) {
                 let mut len: i64 = 0;
-                qjs::JS_GetLength(ctx, radii, &mut len);
+                qjs::JS_GetLength(cx, radii, &mut len);
                 for i in 0..len.clamp(0, 4) {
-                    r.push(qjs::JS_GetPropertyInt64(ctx, radii, i));
+                    r.push(qjs::JS_GetPropertyInt64(cx, radii, i));
                 }
             } else if !is_undefined(radii) {
-                r.push(qjs::JS_DupValue(ctx, radii));
+                r.push(qjs::JS_DupValue(cx, radii));
             }
         }
         let zero = new_number(0.0);
@@ -781,15 +781,15 @@ native!(
             _ => [get(0); 4],
         };
         let args = [at(a, 0), at(a, 1), at(a, 2), at(a, 3), tl, tr, br, bl];
-        let out = record(ctx, this, CV_ROUND_RECT, &args);
-        free_values(ctx, r);
+        let out = record(cx, this, CV_ROUND_RECT, &args);
+        free_values(cx, r);
         out
     }
 );
 
 /// Appends path `from`'s recording to path `to`'s.
-fn append_path(ctx: *mut JsContext, to: JsValue, from: JsValue) {
-    let src = recording_ptr(ctx, from);
+fn append_path(cx: *mut JsContext, to: JsValue, from: JsValue) {
+    let src = recording_ptr(cx, from);
     // SAFETY: the source is read and its values dup'd before the target is
     // borrowed (they may be the same path).
     let (ops, used) = match unsafe { src.as_ref() } {
@@ -797,60 +797,60 @@ fn append_path(ctx: *mut JsContext, to: JsValue, from: JsValue) {
             let used: Vec<JsValue> = r
                 .used
                 .iter()
-                .map(|&u| unsafe { qjs::JS_DupValue(ctx, u) })
+                .map(|&u| unsafe { qjs::JS_DupValue(cx, u) })
                 .collect();
             (r.out.clone(), used)
         }
         None => return,
     };
-    match recording(ctx, to) {
+    match recording(cx, to) {
         Some(r) => {
             r.out.extend(ops);
             r.used.extend(used);
         }
-        None => free_values(ctx, used),
+        None => free_values(cx, used),
     }
 }
 
 native!(
     /// `addPath(path)`: appends `path`'s subpaths.
     add_path,
-    |ctx, this, a| {
-        append_path(ctx, this, at(a, 0));
+    |cx, this, a| {
+        append_path(cx, this, at(a, 0));
         UNDEFINED
     }
 );
 
-native!(save, |ctx, this, _a| {
-    if let Some(r) = recording(ctx, this) {
+native!(save, |cx, this, _a| {
+    if let Some(r) = recording(cx, this) {
         // SAFETY: dups for the saved state.
         let copy = r
             .state
             .0
             .iter()
-            .map(|&(k, v)| (k, unsafe { qjs::JS_DupValue(ctx, v) }));
+            .map(|&(k, v)| (k, unsafe { qjs::JS_DupValue(cx, v) }));
         let copy = DrawState(copy.collect());
         r.stack.push(copy);
     }
-    record(ctx, this, CV_SAVE, &[])
+    record(cx, this, CV_SAVE, &[])
 });
 
-native!(restore, |ctx, this, _a| {
-    let Some(r) = recording(ctx, this) else {
+native!(restore, |cx, this, _a| {
+    let Some(r) = recording(cx, this) else {
         return UNDEFINED;
     };
     let Some(saved) = r.stack.pop() else {
         return UNDEFINED;
     };
     let old = std::mem::replace(&mut r.state, saved);
-    free_values(ctx, old.0.into_iter().map(|(_, v)| v));
-    record(ctx, this, CV_RESTORE, &[])
+    free_values(cx, old.0.into_iter().map(|(_, v)| v));
+    record(cx, this, CV_RESTORE, &[])
 });
 
-native!(reset_transform, |ctx, this, _a| {
+native!(reset_transform, |cx, this, _a| {
     let n = new_number;
     record(
-        ctx,
+        cx,
         this,
         CV_SET_TRANSFORM,
         &[n(1.0), n(0.0), n(0.0), n(1.0), n(0.0), n(0.0)],
@@ -858,39 +858,39 @@ native!(reset_transform, |ctx, this, _a| {
 });
 
 /// The numbers of array `v` (anything else: none).
-fn numbers(ctx: *mut JsContext, v: JsValue) -> Vec<f64> {
+fn numbers(cx: *mut JsContext, v: JsValue) -> Vec<f64> {
     let mut out = Vec::new();
     // SAFETY: reads of a live array; items are freed.
     unsafe {
         if qjs::JS_IsArray(v) {
             let mut len: i64 = 0;
-            qjs::JS_GetLength(ctx, v, &mut len);
+            qjs::JS_GetLength(cx, v, &mut len);
             for i in 0..len.clamp(0, 1 << 16) {
-                let item = qjs::JS_GetPropertyInt64(ctx, v, i);
-                out.push(number(ctx, item));
-                qjs::JS_FreeValue(ctx, item);
+                let item = qjs::JS_GetPropertyInt64(cx, v, i);
+                out.push(number(cx, item));
+                qjs::JS_FreeValue(cx, item);
             }
         }
     }
     out
 }
 
-fn number_array(ctx: *mut JsContext, values: &[f64]) -> JsValue {
+fn number_array(cx: *mut JsContext, values: &[f64]) -> JsValue {
     let mut items: Vec<JsValue> = values.iter().map(|&n| new_number(n)).collect();
     // SAFETY: the array takes the items.
-    unsafe { qjs::JS_NewArrayFrom(ctx, items.len() as c_int, items.as_mut_ptr()) }
+    unsafe { qjs::JS_NewArrayFrom(cx, items.len() as c_int, items.as_mut_ptr()) }
 }
 
 native!(
     /// `setLineDash(segments)`: a copy is kept for `getLineDash`.
     set_line_dash,
-    |ctx, this, a| {
-        let copy = number_array(ctx, &numbers(ctx, at(a, 0)));
-        if let Some(r) = recording(ctx, this) {
-            keep(ctx, r, "lineDash", copy);
+    |cx, this, a| {
+        let copy = number_array(cx, &numbers(cx, at(a, 0)));
+        if let Some(r) = recording(cx, this) {
+            keep(cx, r, "lineDash", copy);
         }
-        let out = record(ctx, this, CV_LINE_DASH, &[copy]);
-        free_values(ctx, [copy]);
+        let out = record(cx, this, CV_LINE_DASH, &[copy]);
+        free_values(cx, [copy]);
         out
     }
 );
@@ -898,55 +898,55 @@ native!(
 native!(
     /// `getLineDash()`: an odd count is repeated, as in canvas.
     get_line_dash,
-    |ctx, this, _a| {
-        let kept = recording(ctx, this).and_then(|r| r.state.get("lineDash"));
-        let mut d = kept.map(|v| numbers(ctx, v)).unwrap_or_default();
+    |cx, this, _a| {
+        let kept = recording(cx, this).and_then(|r| r.state.get("lineDash"));
+        let mut d = kept.map(|v| numbers(cx, v)).unwrap_or_default();
         if d.len() % 2 == 1 {
             d.extend_from_within(..);
         }
-        number_array(ctx, &d)
+        number_array(cx, &d)
     }
 );
 
-fn is_path(ctx: *mut JsContext, v: JsValue) -> bool {
-    let c = classes(ctx);
+fn is_path(cx: *mut JsContext, v: JsValue) -> bool {
+    let c = classes(cx);
     // SAFETY: reading a live value's class.
     unsafe { qjs::JS_GetClassID(v) == c.path }
 }
 
 /// `fill` / `clip(path?, rule?)` (`fill(rule)` too).
-fn fill_like(ctx: *mut JsContext, this: JsValue, code: i32, a: &[JsValue]) -> JsValue {
-    let (path, rule) = if is_path(ctx, at(a, 0)) {
+fn fill_like(cx: *mut JsContext, this: JsValue, code: i32, a: &[JsValue]) -> JsValue {
+    let (path, rule) = if is_path(cx, at(a, 0)) {
         (at(a, 0), at(a, 1))
     } else {
         (qjs::JS_NULL, at(a, 0))
     };
     if is_undefined(rule) {
-        let nonzero = new_string(ctx, "nonzero");
-        let out = record(ctx, this, code, &[path, nonzero]);
-        free_values(ctx, [nonzero]);
+        let nonzero = new_string(cx, "nonzero");
+        let out = record(cx, this, code, &[path, nonzero]);
+        free_values(cx, [nonzero]);
         out
     } else {
-        record(ctx, this, code, &[path, rule])
+        record(cx, this, code, &[path, rule])
     }
 }
 
-native!(fill, |ctx, this, a| fill_like(ctx, this, CV_FILL, a));
-native!(clip, |ctx, this, a| fill_like(ctx, this, CV_CLIP, a));
-native!(stroke, |ctx, this, a| {
-    let path = if is_path(ctx, at(a, 0)) {
+native!(fill, |cx, this, a| fill_like(cx, this, CV_FILL, a));
+native!(clip, |cx, this, a| fill_like(cx, this, CV_CLIP, a));
+native!(stroke, |cx, this, a| {
+    let path = if is_path(cx, at(a, 0)) {
         at(a, 0)
     } else {
         qjs::JS_NULL
     };
-    record(ctx, this, CV_STROKE, &[path])
+    record(cx, this, CV_STROKE, &[path])
 });
 
 /// `fillText` / `strokeText(text, x, y, maxWidth?)`.
-fn text_like(ctx: *mut JsContext, this: JsValue, code: i32, a: &[JsValue]) -> JsValue {
+fn text_like(cx: *mut JsContext, this: JsValue, code: i32, a: &[JsValue]) -> JsValue {
     // `String(text)`.
     // SAFETY: a new string (or the exception), freed after recording.
-    let text = unsafe { qjs::JS_ToString(ctx, at(a, 0)) };
+    let text = unsafe { qjs::JS_ToString(cx, at(a, 0)) };
     if unsafe { qjs::JS_IsException(text) } {
         return text;
     }
@@ -955,19 +955,19 @@ fn text_like(ctx: *mut JsContext, this: JsValue, code: i32, a: &[JsValue]) -> Js
     } else {
         at(a, 3)
     };
-    let out = record(ctx, this, code, &[text, at(a, 1), at(a, 2), max]);
-    free_values(ctx, [text]);
+    let out = record(cx, this, code, &[text, at(a, 1), at(a, 2), max]);
+    free_values(cx, [text]);
     out
 }
 
-native!(fill_text, |ctx, this, a| text_like(
-    ctx,
+native!(fill_text, |cx, this, a| text_like(
+    cx,
     this,
     CV_FILL_TEXT,
     a
 ));
-native!(stroke_text, |ctx, this, a| text_like(
-    ctx,
+native!(stroke_text, |cx, this, a| text_like(
+    cx,
     this,
     CV_STROKE_TEXT,
     a
@@ -977,12 +977,12 @@ native!(
     /// `measureText(text)`: measured by the platform's text engine with
     /// the current `font`.
     measure_text,
-    |ctx, this, a| {
-        let text = dom::string_arg(ctx, at(a, 0)).unwrap_or_default();
+    |cx, this, a| {
+        let text = dom::string_arg(cx, at(a, 0)).unwrap_or_default();
         let state = |name| {
-            recording(ctx, this)
+            recording(cx, this)
                 .and_then(|r| r.state.get(name))
-                .and_then(|f| dom::string_arg(ctx, f))
+                .and_then(|f| dom::string_arg(cx, f))
         };
         let numeric = state("fontVariantNumeric")
             .as_deref()
@@ -993,7 +993,7 @@ native!(
             .and_then(CanvasFont::parse)
             .unwrap_or_default()
             .with_numeric(numeric);
-        let shared = dom::shared(ctx);
+        let shared = dom::shared(cx);
         let width = shared
             .measurer
             .borrow()
@@ -1001,8 +1001,8 @@ native!(
             .map_or(0.0, |m| m(&font, &text).0 as f64);
         // SAFETY: a new object.
         unsafe {
-            let o = qjs::JS_NewObject(ctx);
-            qjs::JS_SetPropertyStr(ctx, o, c"width".as_ptr(), new_number(width));
+            let o = qjs::JS_NewObject(cx);
+            qjs::JS_SetPropertyStr(cx, o, c"width".as_ptr(), new_number(width));
             o
         }
     }
@@ -1011,31 +1011,31 @@ native!(
 /// `isPointInPath([path,] x, y, rule?)` / `isPointInStroke([path,] x,
 /// y)`: answered in Rust from what the context recorded so far (after
 /// `draw` returned: all it drew), without the platform.
-fn point_in(ctx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> JsValue {
-    let Some(r) = recording(ctx, this) else {
-        return throw_not_recording(ctx);
+fn point_in(cx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> JsValue {
+    let Some(r) = recording(cx, this) else {
+        return throw_not_recording(cx);
     };
     let recorded = match &r.drawn {
         Some(d) if r.closed => d.clone(),
         _ => Rc::new(r.out.clone()),
     };
-    let (path, rest) = if is_path(ctx, at(a, 0)) {
+    let (path, rest) = if is_path(cx, at(a, 0)) {
         (Some(at(a, 0)), a.get(1..).unwrap_or_default())
     } else {
         (None, a)
     };
     let (x, y) = (
-        number(ctx, at(rest, 0)) as f32,
-        number(ctx, at(rest, 1)) as f32,
+        number(cx, at(rest, 0)) as f32,
+        number(cx, at(rest, 1)) as f32,
     );
-    let rule = match dom::string_arg(ctx, at(rest, 2)).as_deref() {
+    let rule = match dom::string_arg(cx, at(rest, 2)).as_deref() {
         Some("evenodd") => FillRule::EvenOdd,
         _ => FillRule::NonZero,
     };
     let path = path.and_then(|p| {
         let mut used = Vec::new();
-        let rec = to_rec(ctx, p, &mut used, 0);
-        free_values(ctx, used);
+        let rec = to_rec(cx, p, &mut used, 0);
+        free_values(cx, used);
         let list = RecList(Rc::new(vec![Rec::Num(CV_STROKE as f64), rec]));
         match decode(&list, 0, 2).ok()?.ops.pop()? {
             CanvasOp::Stroke(path) => path,
@@ -1057,23 +1057,19 @@ fn point_in(ctx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> 
     if hit { qjs::JS_TRUE } else { qjs::JS_FALSE }
 }
 
-native!(is_point_in_path, |ctx, this, a| point_in(
-    ctx, this, a, false
-));
-native!(is_point_in_stroke, |ctx, this, a| point_in(
-    ctx, this, a, true
+native!(is_point_in_path, |cx, this, a| point_in(cx, this, a, false));
+native!(is_point_in_stroke, |cx, this, a| point_in(
+    cx, this, a, true
 ));
 
 /// A gradient of `kind` (0 linear, 1 radial, 2 conic) over `count`
 /// numbers of `a`: its recording is `[kind, ...geometry, stops]`, the
 /// stops list filled by `addColorStop`.
-fn gradient(ctx: *mut JsContext, kind: f64, a: &[JsValue], count: usize) -> JsValue {
-    let c = classes(ctx);
-    let g = new_recording(ctx, c.gradient);
-    let geometry: Vec<Rec> = (0..count)
-        .map(|i| Rec::Num(number(ctx, at(a, i))))
-        .collect();
-    if let Some(r) = recording(ctx, g) {
+fn gradient(cx: *mut JsContext, kind: f64, a: &[JsValue], count: usize) -> JsValue {
+    let c = classes(cx);
+    let g = new_recording(cx, c.gradient);
+    let geometry: Vec<Rec> = (0..count).map(|i| Rec::Num(number(cx, at(a, i)))).collect();
+    if let Some(r) = recording(cx, g) {
         r.out.push(Rec::Num(kind));
         r.out.extend(geometry);
         r.out.push(Rec::List(Rc::new(Vec::new())));
@@ -1081,22 +1077,22 @@ fn gradient(ctx: *mut JsContext, kind: f64, a: &[JsValue], count: usize) -> JsVa
     g
 }
 
-native!(linear_gradient, |ctx, _this, a| gradient(ctx, 0.0, a, 4));
-native!(radial_gradient, |ctx, _this, a| gradient(ctx, 1.0, a, 6));
+native!(linear_gradient, |cx, _this, a| gradient(cx, 0.0, a, 4));
+native!(radial_gradient, |cx, _this, a| gradient(cx, 1.0, a, 6));
 native!(
     /// `createConicGradient(startAngle, x, y)`: the angle in radians,
     /// clockwise from the x axis.
     conic_gradient,
-    |ctx, _this, a| gradient(ctx, 2.0, a, 3)
+    |cx, _this, a| gradient(cx, 2.0, a, 3)
 );
 
 native!(
     /// `addColorStop(offset, color)`: offset 0..1, any CSS color.
     add_color_stop,
-    |ctx, this, a| {
-        let offset = number(ctx, at(a, 0));
-        let color = rc_str(ctx, at(a, 1));
-        if let Some(r) = recording(ctx, this)
+    |cx, this, a| {
+        let offset = number(cx, at(a, 0));
+        let color = rc_str(cx, at(a, 1));
+        if let Some(r) = recording(cx, this)
             && let Some(Rec::List(stops)) = r.out.last_mut()
         {
             let stops = Rc::make_mut(stops);
@@ -1112,19 +1108,19 @@ native!(
     /// dw, dh)`, or `(image, sx, sy, sw, sh, dx, dy, dw, dh)` (source in
     /// image pixels); `image` is a URL, an imported asset or `{ uri }`.
     draw_image,
-    |ctx, this, a| {
+    |cx, this, a| {
         let image = at(a, 0);
         let nan = || new_number(f64::NAN);
         // SAFETY: reads of a live value; the values got are freed below.
         let (uri, width, height) = unsafe {
             if qjs::JS_IsString(image) {
-                (qjs::JS_DupValue(ctx, image), nan(), nan())
+                (qjs::JS_DupValue(cx, image), nan(), nan())
             } else if qjs::JS_IsObject(image) {
                 let or_nan = |v: JsValue| if is_undefined(v) { nan() } else { v };
                 (
-                    qjs::JS_GetPropertyStr(ctx, image, c"uri".as_ptr()),
-                    or_nan(qjs::JS_GetPropertyStr(ctx, image, c"width".as_ptr())),
-                    or_nan(qjs::JS_GetPropertyStr(ctx, image, c"height".as_ptr())),
+                    qjs::JS_GetPropertyStr(cx, image, c"uri".as_ptr()),
+                    or_nan(qjs::JS_GetPropertyStr(cx, image, c"width".as_ptr())),
+                    or_nan(qjs::JS_GetPropertyStr(cx, image, c"height".as_ptr())),
                 )
             } else {
                 (UNDEFINED, nan(), nan())
@@ -1135,24 +1131,24 @@ native!(
             // SAFETY: dups the array takes.
             let mut src: Vec<JsValue> = rest[..4]
                 .iter()
-                .map(|&v| unsafe { qjs::JS_DupValue(ctx, v) })
+                .map(|&v| unsafe { qjs::JS_DupValue(cx, v) })
                 .collect();
-            let src = unsafe { qjs::JS_NewArrayFrom(ctx, 4, src.as_mut_ptr()) };
+            let src = unsafe { qjs::JS_NewArrayFrom(cx, 4, src.as_mut_ptr()) };
             let args = [uri, src, rest[4], rest[5], rest[6], rest[7]];
-            let out = record(ctx, this, CV_DRAW_IMAGE, &args);
-            free_values(ctx, [src]);
+            let out = record(cx, this, CV_DRAW_IMAGE, &args);
+            free_values(cx, [src]);
             out
         } else if rest.len() >= 4 {
             let args = [uri, qjs::JS_NULL, rest[0], rest[1], rest[2], rest[3]];
-            record(ctx, this, CV_DRAW_IMAGE, &args)
+            record(cx, this, CV_DRAW_IMAGE, &args)
         } else {
             let zero = new_number(0.0);
             let or_zero = |v: JsValue| if is_undefined(v) { zero } else { v };
             let (dx, dy) = (or_zero(at(rest, 0)), or_zero(at(rest, 1)));
             let args = [uri, qjs::JS_NULL, dx, dy, width, height];
-            record(ctx, this, CV_DRAW_IMAGE, &args)
+            record(cx, this, CV_DRAW_IMAGE, &args)
         };
-        free_values(ctx, [uri, width, height]);
+        free_values(cx, [uri, width, height]);
         out
     }
 );
@@ -1160,23 +1156,23 @@ native!(
 /// `new Path2D(path?)`: a path to fill, stroke or clip; a copy of another
 /// path, or SVG path data (parsed natively).
 unsafe extern "C" fn path_2d(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let c = classes(ctx);
-    let path = new_recording(ctx, c.path);
+    let c = classes(cx);
+    let path = new_recording(cx, c.path);
     let from = arg(argc, argv, 0);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsString(from) } {
-        let svg = rc_str(ctx, from);
-        if let Some(r) = recording(ctx, path) {
+        let svg = rc_str(cx, from);
+        if let Some(r) = recording(cx, path) {
             r.out.push(Rec::Num(CV_SVG_PATH as f64));
             r.out.push(Rec::Str(svg));
         }
-    } else if is_path(ctx, from) {
-        append_path(ctx, path, from);
+    } else if is_path(cx, from) {
+        append_path(cx, path, from);
     }
     path
 }
@@ -1184,79 +1180,79 @@ unsafe extern "C" fn path_2d(
 /// The objects of contexts and gradients are made by contexts, as in
 /// browsers.
 unsafe extern "C" fn illegal_constructor(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
     // SAFETY: throws on a live context.
-    unsafe { qjs::JS_ThrowTypeError(ctx, c"Illegal constructor".as_ptr()) }
+    unsafe { qjs::JS_ThrowTypeError(cx, c"Illegal constructor".as_ptr()) }
 }
 
 /// Class `index`'s constructor `name` (for `new` and `instanceof`).
 fn class_function(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     name: &CStr,
     f: Native,
     index: usize,
     length: c_int,
 ) -> JsValue {
-    classes(ctx);
-    let proto = canvases(ctx).protos.get()[index];
+    classes(cx);
+    let proto = canvases(cx).protos.get()[index];
     // SAFETY: a constructor-or-function whose `prototype` is the class's.
     unsafe {
         let func = qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(f),
             name.as_ptr(),
             length,
             qjs::JSCFunctionEnum_JS_CFUNC_constructor_or_func,
             0,
         );
-        qjs::JS_SetConstructor(ctx, func, proto);
+        qjs::JS_SetConstructor(cx, func, proto);
         func
     }
 }
 
 // --- Canvas ------------------------------------------------------------------------
 
-/// `<Canvas draw={(ctx, size) => …}>`: a view drawn with a 2D context.
+/// `<Canvas draw={(cx, size) => …}>`: a view drawn with a 2D context.
 /// `draw` runs once the size is known, and again when the size or the
 /// signals it reads change; animated values passed as numbers or colors
 /// animate without running it.
 unsafe extern "C" fn canvas(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let props = arg(argc, argv, 0);
-    let node = match dom::create_element(ctx, Tag::Canvas) {
+    let node = match dom::create_element(cx, Tag::Canvas) {
         Ok(node) => node,
         Err(e) => return e,
     };
     let made = (|| -> Result<(), JsValue> {
-        dom::spread_except(ctx, node, props, &["draw", "onLayout"])?;
-        let size = reactive::new_signal(ctx, qjs::JS_NULL);
+        dom::spread_except(cx, node, props, &["draw", "onLayout"])?;
+        let size = reactive::new_signal(cx, qjs::JS_NULL);
         let mut data = [size, props];
         // SAFETY: the functions keep dups of `data`; ours are freed.
         let on_layout = unsafe {
-            qjs::JS_NewCFunctionData(ctx, Some(canvas_layout), 1, 0, 2, data.as_mut_ptr())
+            qjs::JS_NewCFunctionData(cx, Some(canvas_layout), 1, 0, 2, data.as_mut_ptr())
         };
-        let id = dom::node_id(ctx, node).unwrap_or(0);
-        let set = dom::set_handler(ctx, id, EventKind::Layout, on_layout);
-        unsafe { qjs::JS_FreeValue(ctx, on_layout) };
+        let id = dom::node_id(cx, node).unwrap_or(0);
+        let set = dom::set_handler(cx, id, EventKind::Layout, on_layout);
+        unsafe { qjs::JS_FreeValue(cx, on_layout) };
         let mut data = [node, props, size];
         let draw =
-            unsafe { qjs::JS_NewCFunctionData(ctx, Some(canvas_draw), 0, 0, 3, data.as_mut_ptr()) };
-        unsafe { qjs::JS_FreeValue(ctx, size) };
+            unsafe { qjs::JS_NewCFunctionData(cx, Some(canvas_draw), 0, 0, 3, data.as_mut_ptr()) };
+        unsafe { qjs::JS_FreeValue(cx, size) };
         if let Err(e) = set {
-            unsafe { qjs::JS_FreeValue(ctx, draw) };
+            unsafe { qjs::JS_FreeValue(cx, draw) };
             return Err(e);
         }
-        let r = reactive::render_effect(ctx, draw);
-        unsafe { qjs::JS_FreeValue(ctx, r) };
-        let r = reactive::finish_value(ctx, UNDEFINED);
+        let r = reactive::render_effect(cx, draw);
+        unsafe { qjs::JS_FreeValue(cx, r) };
+        let r = reactive::finish_value(cx, UNDEFINED);
         if unsafe { qjs::JS_IsException(r) } {
             Err(r)
         } else {
@@ -1267,7 +1263,7 @@ unsafe extern "C" fn canvas(
         Ok(()) => node,
         Err(e) => {
             // SAFETY: ours.
-            unsafe { qjs::JS_FreeValue(ctx, node) };
+            unsafe { qjs::JS_FreeValue(cx, node) };
             e
         }
     }
@@ -1275,7 +1271,7 @@ unsafe extern "C" fn canvas(
 
 /// The canvas's `onLayout`: the size (when it changed), then the app's.
 unsafe extern "C" fn canvas_layout(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -1287,43 +1283,43 @@ unsafe extern "C" fn canvas_layout(
         let (size, props) = (*data, *data.add(1));
         let e = arg(argc, argv, 0);
         let field = |o: JsValue, k: &CStr| {
-            let v = qjs::JS_GetPropertyStr(ctx, o, k.as_ptr());
-            let n = number(ctx, v);
-            qjs::JS_FreeValue(ctx, v);
+            let v = qjs::JS_GetPropertyStr(cx, o, k.as_ptr());
+            let n = number(cx, v);
+            qjs::JS_FreeValue(cx, v);
             n
         };
         let (w, h) = (field(e, c"width"), field(e, c"height"));
-        let current = reactive::peek(ctx, size);
+        let current = reactive::peek(cx, size);
         let same = qjs::JS_IsObject(current)
             && field(current, c"width") == w
             && field(current, c"height") == h;
         if !same {
-            let s = qjs::JS_NewObject(ctx);
-            qjs::JS_SetPropertyStr(ctx, s, c"width".as_ptr(), new_number(w));
-            qjs::JS_SetPropertyStr(ctx, s, c"height".as_ptr(), new_number(h));
-            reactive::set_signal(ctx, size, s);
+            let s = qjs::JS_NewObject(cx);
+            qjs::JS_SetPropertyStr(cx, s, c"width".as_ptr(), new_number(w));
+            qjs::JS_SetPropertyStr(cx, s, c"height".as_ptr(), new_number(h));
+            reactive::set_signal(cx, size, s);
         }
-        let own = qjs::JS_GetPropertyStr(ctx, props, c"onLayout".as_ptr());
-        let r = if qjs::JS_IsFunction(ctx, own) {
+        let own = qjs::JS_GetPropertyStr(cx, props, c"onLayout".as_ptr());
+        let r = if qjs::JS_IsFunction(cx, own) {
             let mut args = [e];
-            qjs::JS_Call(ctx, own, UNDEFINED, 1, args.as_mut_ptr())
+            qjs::JS_Call(cx, own, UNDEFINED, 1, args.as_mut_ptr())
         } else {
             UNDEFINED
         };
-        qjs::JS_FreeValue(ctx, own);
-        let done = reactive::finish_value(ctx, UNDEFINED);
+        qjs::JS_FreeValue(cx, own);
+        let done = reactive::finish_value(cx, UNDEFINED);
         if qjs::JS_IsException(done) {
-            qjs::JS_FreeValue(ctx, r);
+            qjs::JS_FreeValue(cx, r);
             return done;
         }
         r
     }
 }
 
-/// The drawing effect: once the size is known, records `draw(ctx, size)`
+/// The drawing effect: once the size is known, records `draw(cx, size)`
 /// and sends it.
 unsafe extern "C" fn canvas_draw(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -1334,28 +1330,28 @@ unsafe extern "C" fn canvas_draw(
     // made here are freed or handed on.
     unsafe {
         let (node, props, size_signal) = (*data, *data.add(1), *data.add(2));
-        let size = qjs::JS_Call(ctx, size_signal, UNDEFINED, 0, ptr::null_mut());
+        let size = qjs::JS_Call(cx, size_signal, UNDEFINED, 0, ptr::null_mut());
         if qjs::JS_IsException(size) {
             return size;
         }
         if !qjs::JS_IsObject(size) {
-            qjs::JS_FreeValue(ctx, size);
+            qjs::JS_FreeValue(cx, size);
             return UNDEFINED;
         }
-        let c = classes(ctx);
-        let context = new_recording(ctx, c.context);
+        let c = classes(cx);
+        let context = new_recording(cx, c.context);
         if qjs::JS_IsException(context) {
-            qjs::JS_FreeValue(ctx, size);
+            qjs::JS_FreeValue(cx, size);
             return context;
         }
-        if let Some(r) = recording(ctx, context) {
-            r.size = qjs::JS_DupValue(ctx, size);
+        if let Some(r) = recording(cx, context) {
+            r.size = qjs::JS_DupValue(cx, size);
         }
-        let draw = qjs::JS_GetPropertyStr(ctx, props, c"draw".as_ptr());
+        let draw = qjs::JS_GetPropertyStr(cx, props, c"draw".as_ptr());
         let mut args = [context, size];
-        let called = qjs::JS_Call(ctx, draw, UNDEFINED, 2, args.as_mut_ptr());
-        free_values(ctx, [draw, size]);
-        let (out, used) = match recording(ctx, context) {
+        let called = qjs::JS_Call(cx, draw, UNDEFINED, 2, args.as_mut_ptr());
+        free_values(cx, [draw, size]);
+        let (out, used) = match recording(cx, context) {
             Some(r) => {
                 r.closed = true;
                 let out = Rc::new(std::mem::take(&mut r.out));
@@ -1364,27 +1360,27 @@ unsafe extern "C" fn canvas_draw(
             }
             None => (Rc::default(), Vec::new()),
         };
-        qjs::JS_FreeValue(ctx, context);
+        qjs::JS_FreeValue(cx, context);
         // What was recorded is drawn even when `draw` threw (then rethrown).
-        let sent = send(ctx, node, out, used);
+        let sent = send(cx, node, out, used);
         if qjs::JS_IsException(called) {
             if qjs::JS_IsException(sent) {
-                qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+                qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
             }
             return called;
         }
-        qjs::JS_FreeValue(ctx, called);
+        qjs::JS_FreeValue(cx, called);
         sent
     }
 }
 
 /// Sends drawing `out` of `node`, which keeps the animated values it reads
 /// (`used`, owned) alive.
-fn send(ctx: *mut JsContext, node: JsValue, out: Rc<Vec<Rec>>, mut used: Vec<JsValue>) -> JsValue {
-    let shared = dom::shared(ctx);
+fn send(cx: *mut JsContext, node: JsValue, out: Rc<Vec<Rec>>, mut used: Vec<JsValue>) -> JsValue {
+    let shared = dom::shared(cx);
     let max = shared.limits.max_canvas_ops;
     if out.len() > max {
-        free_values(ctx, used);
+        free_values(cx, used);
         let reason = format!(
             "a canvas drawing recorded {} values (limit {max}) and the app was stopped",
             out.len()
@@ -1392,28 +1388,28 @@ fn send(ctx: *mut JsContext, node: JsValue, out: Rc<Vec<Rec>>, mut used: Vec<JsV
         shared.stop(reason.clone());
         let message = CString::new(reason).unwrap_or_default();
         // SAFETY: throws on a live context; `%s` keeps the message literal.
-        return unsafe { qjs::JS_ThrowRangeError(ctx, c"%s".as_ptr(), message.as_ptr()) };
+        return unsafe { qjs::JS_ThrowRangeError(cx, c"%s".as_ptr(), message.as_ptr()) };
     }
     let len = out.len();
     let drawing = decode(&RecList(out), 0, len);
     // SAFETY: the array takes the values.
-    let array = unsafe { qjs::JS_NewArrayFrom(ctx, used.len() as c_int, used.as_mut_ptr()) };
-    dom::retain(ctx, node, "draw", array);
-    free_values(ctx, [array]);
+    let array = unsafe { qjs::JS_NewArrayFrom(cx, used.len() as c_int, used.as_mut_ptr()) };
+    dom::retain(cx, node, "draw", array);
+    free_values(cx, [array]);
     let drawing = match drawing {
         Ok(d) => d,
         Err(e) => {
             let message = CString::new(format!("nsh canvas: {e}")).unwrap_or_default();
             // SAFETY: as above.
-            return unsafe { qjs::JS_ThrowTypeError(ctx, c"%s".as_ptr(), message.as_ptr()) };
+            return unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) };
         }
     };
-    let id = dom::node_id(ctx, node).unwrap_or(0);
+    let id = dom::node_id(cx, node).unwrap_or(0);
     let op = Op::Draw {
         id,
         drawing: Box::new(drawing),
     };
-    match dom::push_op(ctx, op) {
+    match dom::push_op(cx, op) {
         Ok(()) => UNDEFINED,
         Err(e) => e,
     }
@@ -1431,7 +1427,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     ),
     (
         "Path2D",
-        Export::Value(|ctx| class_function(ctx, c"Path2D", path_2d, PATH, 1)),
+        Export::Value(|cx| class_function(cx, c"Path2D", path_2d, PATH, 1)),
         Ts::class(
             "A path to fill, stroke or clip; `new Path2D(\"M0 0 L10 10\")` takes SVG\npath data (parsed natively).",
             r#" {
@@ -1445,9 +1441,9 @@ export interface Path2D extends CanvasPath {}"#,
     ),
     (
         "CanvasRenderingContext2D",
-        Export::Value(|ctx| {
+        Export::Value(|cx| {
             let name = c"CanvasRenderingContext2D";
-            class_function(ctx, name, illegal_constructor, CONTEXT, 0)
+            class_function(cx, name, illegal_constructor, CONTEXT, 0)
         }),
         Ts::class(
             "The 2D context `<Canvas draw>` gets (an HTML Canvas 2D subset). Calls only\nrecord operations; the platform draws them after `draw` returns (and again\nwhenever an animated value they read changes). Coordinates are in points,\nthe origin at the canvas's top left.",
@@ -1502,9 +1498,7 @@ export interface CanvasRenderingContext2D extends CanvasPath, CanvasContextMetho
     ),
     (
         "CanvasGradient",
-        Export::Value(|ctx| {
-            class_function(ctx, c"CanvasGradient", illegal_constructor, GRADIENT, 0)
-        }),
+        Export::Value(|cx| class_function(cx, c"CanvasGradient", illegal_constructor, GRADIENT, 0)),
         Ts::class(
             "A gradient from `createLinearGradient` / `createRadialGradient` /\n`createConicGradient`.",
             r#" {
@@ -1543,6 +1537,6 @@ export interface CanvasProps extends ViewProps {
    * canvas resizes (it first runs once the size is known); animated values
    * passed as numbers or colors animate without running it.
    */
-  draw: (ctx: CanvasRenderingContext2D, size: CanvasSize) => void;
+  draw: (cx: CanvasRenderingContext2D, size: CanvasSize) => void;
 }
 "#;

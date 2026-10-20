@@ -86,8 +86,8 @@ pub(crate) fn register(raw: *mut JsContext) -> qjs::JSClassID {
 
 /// The data of resource `obj`, if it is one. Read briefly: no JS runs
 /// while it is held.
-fn data<'a>(ctx: *mut JsContext, obj: JsValue) -> Option<&'a mut Data> {
-    let class = reactive::resource_class(ctx);
+fn data<'a>(cx: *mut JsContext, obj: JsValue) -> Option<&'a mut Data> {
+    let class = reactive::resource_class(cx);
     // SAFETY: an object of the class holds its boxed data.
     let p = unsafe { qjs::JS_GetOpaque(obj, class) } as *mut Data;
     (!p.is_null()).then(|| unsafe { &mut *p })
@@ -117,48 +117,48 @@ unsafe extern "C" fn mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs::JS_M
 }
 
 /// Reads signal `signal` (borrowed), tracked.
-fn read(ctx: *mut JsContext, signal: JsValue) -> JsValue {
+fn read(cx: *mut JsContext, signal: JsValue) -> JsValue {
     // SAFETY: calling a live signal object.
-    unsafe { qjs::JS_Call(ctx, signal, UNDEFINED, 0, ptr::null_mut()) }
+    unsafe { qjs::JS_Call(cx, signal, UNDEFINED, 0, ptr::null_mut()) }
 }
 
 /// A dup of the signal `pick` chooses of resource `obj`.
-fn signal_of(ctx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue) -> Option<JsValue> {
-    let d = data(ctx, obj)?;
+fn signal_of(cx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue) -> Option<JsValue> {
+    let d = data(cx, obj)?;
     // SAFETY: a dup of an owned value.
-    Some(unsafe { qjs::JS_DupValue(ctx, pick(d)) })
+    Some(unsafe { qjs::JS_DupValue(cx, pick(d)) })
 }
 
 /// Reads the signal `pick` chooses of resource `obj`, tracked.
-fn read_of(ctx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue) -> JsValue {
-    let Some(signal) = signal_of(ctx, obj, pick) else {
-        return not_a_resource(ctx);
+fn read_of(cx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue) -> JsValue {
+    let Some(signal) = signal_of(cx, obj, pick) else {
+        return not_a_resource(cx);
     };
-    let v = read(ctx, signal);
-    unsafe { qjs::JS_FreeValue(ctx, signal) };
+    let v = read(cx, signal);
+    unsafe { qjs::JS_FreeValue(cx, signal) };
     v
 }
 
-fn not_a_resource(ctx: *mut JsContext) -> JsValue {
+fn not_a_resource(cx: *mut JsContext) -> JsValue {
     // SAFETY: throwing on a live context.
-    unsafe { qjs::JS_ThrowTypeError(ctx, c"not a resource".as_ptr()) }
+    unsafe { qjs::JS_ThrowTypeError(cx, c"not a resource".as_ptr()) }
 }
 
 /// `user()`: the latest value.
 unsafe extern "C" fn call(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     func: JsValue,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
     _flags: c_int,
 ) -> JsValue {
-    read_of(ctx, func, |d| d.value)
+    read_of(cx, func, |d| d.value)
 }
 
 /// `user.error()`.
 unsafe extern "C" fn error(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -167,12 +167,12 @@ unsafe extern "C" fn error(
 ) -> JsValue {
     // SAFETY: one data value (`resource`).
     let this = unsafe { *bound };
-    read_of(ctx, this, |d| d.error)
+    read_of(cx, this, |d| d.error)
 }
 
 /// `user.state()`.
 unsafe extern "C" fn state(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -181,12 +181,12 @@ unsafe extern "C" fn state(
 ) -> JsValue {
     // SAFETY: one data value (`resource`).
     let this = unsafe { *bound };
-    read_of(ctx, this, |d| d.state)
+    read_of(cx, this, |d| d.state)
 }
 
 /// `user.loading()`: whether a load runs (the state, read).
 unsafe extern "C" fn loading(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -195,7 +195,7 @@ unsafe extern "C" fn loading(
 ) -> JsValue {
     // SAFETY: one data value (`resource`).
     let this = unsafe { *bound };
-    let name = read_of(ctx, this, |d| d.state);
+    let name = read_of(cx, this, |d| d.state);
     // SAFETY: a live value, freed after the comparison.
     unsafe {
         if qjs::JS_IsException(name) {
@@ -203,40 +203,40 @@ unsafe extern "C" fn loading(
         }
         let loading = [ResourceState::Pending, ResourceState::Refreshing]
             .iter()
-            .any(|s| is_string(ctx, name, s.name()));
-        qjs::JS_FreeValue(ctx, name);
+            .any(|s| is_string(cx, name, s.name()));
+        qjs::JS_FreeValue(cx, name);
         if loading { qjs::JS_TRUE } else { qjs::JS_FALSE }
     }
 }
 
 /// Whether `v` (borrowed) is the string `s`.
-fn is_string(ctx: *mut JsContext, v: JsValue, s: &str) -> bool {
+fn is_string(cx: *mut JsContext, v: JsValue, s: &str) -> bool {
     // SAFETY: an inline check, then a C string of a live value, freed.
     unsafe {
         if !qjs::JS_IsString(v) {
             return false;
         }
         let mut len = 0;
-        let p = qjs::JS_ToCStringLen(ctx, &mut len, v);
+        let p = qjs::JS_ToCStringLen(cx, &mut len, v);
         if p.is_null() {
             return false;
         }
         let same = std::slice::from_raw_parts(p.cast::<u8>(), len) == s.as_bytes();
-        qjs::JS_FreeCString(ctx, p);
+        qjs::JS_FreeCString(cx, p);
         same
     }
 }
 
 /// A new string of `state`'s name.
-fn state_name(ctx: *mut JsContext, state: ResourceState) -> JsValue {
+fn state_name(cx: *mut JsContext, state: ResourceState) -> JsValue {
     let name = state.name();
     // SAFETY: a new string.
-    unsafe { qjs::JS_NewStringLen(ctx, name.as_ptr().cast(), name.len() as _) }
+    unsafe { qjs::JS_NewStringLen(cx, name.as_ptr().cast(), name.len() as _) }
 }
 
 /// `resource(fetcher, options?)` / `resource(source, fetcher, options?)`.
 pub(crate) unsafe extern "C" fn resource(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -248,25 +248,22 @@ pub(crate) unsafe extern "C" fn resource(
     );
     // SAFETY: inline checks of live arguments; what is kept is dup'd.
     unsafe {
-        let (source, fetcher, options) = if qjs::JS_IsFunction(ctx, a1) {
-            (Some(qjs::JS_DupValue(ctx, a0)), a1, a2)
+        let (source, fetcher, options) = if qjs::JS_IsFunction(cx, a1) {
+            (Some(qjs::JS_DupValue(cx, a0)), a1, a2)
         } else {
             (None, a0, a1)
         };
-        if !qjs::JS_IsFunction(ctx, fetcher) {
+        if !qjs::JS_IsFunction(cx, fetcher) {
             if let Some(s) = source {
-                qjs::JS_FreeValue(ctx, s);
+                qjs::JS_FreeValue(cx, s);
             }
-            return qjs::JS_ThrowTypeError(
-                ctx,
-                c"resource: the fetcher is not a function".as_ptr(),
-            );
+            return qjs::JS_ThrowTypeError(cx, c"resource: the fetcher is not a function".as_ptr());
         }
         let initial = qjs::JS_IsObject(options).then(|| {
-            let atom = qjs::JS_NewAtom(ctx, c"initialValue".as_ptr());
-            let has = qjs::JS_HasProperty(ctx, options, atom) > 0;
-            let value = has.then(|| qjs::JS_GetProperty(ctx, options, atom));
-            qjs::JS_FreeAtom(ctx, atom);
+            let atom = qjs::JS_NewAtom(cx, c"initialValue".as_ptr());
+            let has = qjs::JS_HasProperty(cx, options, atom) > 0;
+            let value = has.then(|| qjs::JS_GetProperty(cx, options, atom));
+            qjs::JS_FreeAtom(cx, atom);
             value
         });
         let initial = initial.flatten();
@@ -275,24 +272,24 @@ pub(crate) unsafe extern "C" fn resource(
         } else {
             Runs::default()
         };
-        let name = state_name(ctx, runs.state());
+        let name = state_name(cx, runs.state());
         let zero = qjs::JS_NewFloat64(0.0);
         let data = Box::new(Data {
-            value: reactive::new_signal(ctx, initial.unwrap_or(UNDEFINED)),
-            error: reactive::new_signal(ctx, UNDEFINED),
-            state: reactive::new_signal(ctx, name),
-            trigger: reactive::new_signal(ctx, zero),
+            value: reactive::new_signal(cx, initial.unwrap_or(UNDEFINED)),
+            error: reactive::new_signal(cx, UNDEFINED),
+            state: reactive::new_signal(cx, name),
+            trigger: reactive::new_signal(cx, zero),
             runs,
             source,
-            fetcher: qjs::JS_DupValue(ctx, fetcher),
+            fetcher: qjs::JS_DupValue(cx, fetcher),
             abort: UNDEFINED,
             refetching: false,
         });
-        qjs::JS_FreeValue(ctx, name);
+        qjs::JS_FreeValue(cx, name);
         if let Some(v) = initial {
-            qjs::JS_FreeValue(ctx, v);
+            qjs::JS_FreeValue(cx, v);
         }
-        let obj = qjs::JS_NewObjectClass(ctx, reactive::resource_class(ctx) as _);
+        let obj = qjs::JS_NewObjectClass(cx, reactive::resource_class(cx) as _);
         qjs::JS_SetOpaque(obj, Box::into_raw(data) as *mut c_void);
         // Own and bound: `onRefresh={user.refetch}` keeps its resource.
         for (name, f, length) in [
@@ -302,16 +299,16 @@ pub(crate) unsafe extern "C" fn resource(
             (c"refetch", refetch as Bound, 0),
             (c"mutate", mutate as Bound, 1),
         ] {
-            let func = bound(ctx, f, length, &mut [obj]);
-            qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func);
+            let func = bound(cx, f, length, &mut [obj]);
+            qjs::JS_SetPropertyStr(cx, obj, name.as_ptr(), func);
         }
-        let run = bound(ctx, load, 0, &mut [obj]);
-        let r = reactive::render_effect(ctx, run);
-        qjs::JS_FreeValue(ctx, r);
+        let run = bound(cx, load, 0, &mut [obj]);
+        let r = reactive::render_effect(cx, run);
+        qjs::JS_FreeValue(cx, r);
         // A throw of the source is the round's error.
-        let r = reactive::finish_value(ctx, UNDEFINED);
+        let r = reactive::finish_value(cx, UNDEFINED);
         if qjs::JS_IsException(r) {
-            qjs::JS_FreeValue(ctx, obj);
+            qjs::JS_FreeValue(cx, obj);
             return r;
         }
         obj
@@ -328,11 +325,11 @@ type Bound = unsafe extern "C" fn(
 ) -> JsValue;
 
 /// A function calling `f` with `data` (borrowed, kept).
-fn bound(ctx: *mut JsContext, f: Bound, length: c_int, data: &mut [JsValue]) -> JsValue {
+fn bound(cx: *mut JsContext, f: Bound, length: c_int, data: &mut [JsValue]) -> JsValue {
     // SAFETY: the function keeps dups of `data`.
     unsafe {
         qjs::JS_NewCFunctionData(
-            ctx,
+            cx,
             Some(f),
             length,
             0,
@@ -344,7 +341,7 @@ fn bound(ctx: *mut JsContext, f: Bound, length: c_int, data: &mut [JsValue]) -> 
 
 /// A run of a resource's effect: reads the source and starts a load.
 unsafe extern "C" fn load(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -353,81 +350,81 @@ unsafe extern "C" fn load(
 ) -> JsValue {
     // SAFETY: one data value (`resource`).
     let obj = unsafe { *bound };
-    let Some(trigger) = signal_of(ctx, obj, |d| d.trigger) else {
+    let Some(trigger) = signal_of(cx, obj, |d| d.trigger) else {
         return UNDEFINED;
     };
     // Tracked: `refetch()` writes it.
-    let r = read(ctx, trigger);
+    let r = read(cx, trigger);
     unsafe {
-        qjs::JS_FreeValue(ctx, trigger);
-        qjs::JS_FreeValue(ctx, r);
+        qjs::JS_FreeValue(cx, trigger);
+        qjs::JS_FreeValue(cx, r);
     }
-    let source = data(ctx, obj).and_then(|d| d.source);
+    let source = data(cx, obj).and_then(|d| d.source);
     let source = match source {
         // SAFETY: calls and dups of live values.
-        Some(s) if unsafe { qjs::JS_IsFunction(ctx, s) } => {
-            let s = unsafe { qjs::JS_DupValue(ctx, s) };
-            let v = unsafe { qjs::JS_Call(ctx, s, UNDEFINED, 0, ptr::null_mut()) };
-            unsafe { qjs::JS_FreeValue(ctx, s) };
+        Some(s) if unsafe { qjs::JS_IsFunction(cx, s) } => {
+            let s = unsafe { qjs::JS_DupValue(cx, s) };
+            let v = unsafe { qjs::JS_Call(cx, s, UNDEFINED, 0, ptr::null_mut()) };
+            unsafe { qjs::JS_FreeValue(cx, s) };
             if unsafe { qjs::JS_IsException(v) } {
                 return v;
             }
             Some(v)
         }
-        Some(s) => Some(unsafe { qjs::JS_DupValue(ctx, s) }),
+        Some(s) => Some(unsafe { qjs::JS_DupValue(cx, s) }),
         None => None,
     };
     // The load no longer counts once this runs again or goes.
-    let stop = bound_value(ctx, stop, obj);
-    reactive::add_cleanup(ctx, stop);
-    reactive::untracked_with(ctx, || start(ctx, obj, source))
+    let stop = bound_value(cx, stop, obj);
+    reactive::add_cleanup(cx, stop);
+    reactive::untracked_with(cx, || start(cx, obj, source))
 }
 
-fn bound_value(ctx: *mut JsContext, f: Bound, obj: JsValue) -> JsValue {
-    bound(ctx, f, 0, &mut [obj])
+fn bound_value(cx: *mut JsContext, f: Bound, obj: JsValue) -> JsValue {
+    bound(cx, f, 0, &mut [obj])
 }
 
 /// Starts a load of `obj` for `source` (owned; `None`: a resource with
 /// no source), or none when the source is not set.
-fn start(ctx: *mut JsContext, obj: JsValue, source: Option<JsValue>) -> JsValue {
+fn start(cx: *mut JsContext, obj: JsValue, source: Option<JsValue>) -> JsValue {
     // SAFETY: inline checks of a live value.
     let unset = source.is_some_and(|s| unsafe {
         qjs::JS_IsUndefined(s)
             || qjs::JS_IsNull(s)
-            || (qjs::JS_IsBool(s) && qjs::JS_ToBool(ctx, s) == 0)
+            || (qjs::JS_IsBool(s) && qjs::JS_ToBool(cx, s) == 0)
     });
-    let Some(d) = data(ctx, obj) else {
-        free_opt(ctx, source);
+    let Some(d) = data(cx, obj) else {
+        free_opt(cx, source);
         return UNDEFINED;
     };
     let refetching = std::mem::take(&mut d.refetching);
     if unset {
         let state = d.runs.skip();
-        free_opt(ctx, source);
-        write(ctx, obj, |d| d.state, state_name(ctx, state));
+        free_opt(cx, source);
+        write(cx, obj, |d| d.state, state_name(cx, state));
         return UNDEFINED;
     }
     let (run, state) = d.runs.start();
-    let signal = match crate::web::new_abort_signal(ctx) {
+    let signal = match crate::web::new_abort_signal(cx) {
         Ok(s) => s,
         Err(_) => {
-            free_opt(ctx, source);
+            free_opt(cx, source);
             return qjs::JS_EXCEPTION;
         }
     };
     // SAFETY: the signal is owned by the data now; a dup goes to the load.
     let fetcher = unsafe {
-        let d = data(ctx, obj).expect("checked above");
-        qjs::JS_FreeValue(ctx, std::mem::replace(&mut d.abort, signal));
-        qjs::JS_DupValue(ctx, d.fetcher)
+        let d = data(cx, obj).expect("checked above");
+        qjs::JS_FreeValue(cx, std::mem::replace(&mut d.abort, signal));
+        qjs::JS_DupValue(cx, d.fetcher)
     };
-    write(ctx, obj, |d| d.state, state_name(ctx, state));
+    write(cx, obj, |d| d.state, state_name(cx, state));
     // SAFETY: a new object holding dups.
     let info = unsafe {
-        let info = qjs::JS_NewObject(ctx);
-        qjs::JS_SetPropertyStr(ctx, info, c"signal".as_ptr(), qjs::JS_DupValue(ctx, signal));
+        let info = qjs::JS_NewObject(cx);
+        qjs::JS_SetPropertyStr(cx, info, c"signal".as_ptr(), qjs::JS_DupValue(cx, signal));
         qjs::JS_SetPropertyStr(
-            ctx,
+            cx,
             info,
             c"refetching".as_ptr(),
             if refetching {
@@ -442,57 +439,57 @@ fn start(ctx: *mut JsContext, obj: JsValue, source: Option<JsValue>) -> JsValue 
     // SAFETY: a call with owned arguments, freed after it.
     let result = unsafe {
         let r = qjs::JS_Call(
-            ctx,
+            cx,
             fetcher,
             UNDEFINED,
             args.len() as c_int,
             args.as_mut_ptr(),
         );
-        qjs::JS_FreeValue(ctx, fetcher);
+        qjs::JS_FreeValue(cx, fetcher);
         for a in args {
-            qjs::JS_FreeValue(ctx, a);
+            qjs::JS_FreeValue(cx, a);
         }
         r
     };
-    follow(ctx, obj, run, result);
+    follow(cx, obj, run, result);
     UNDEFINED
 }
 
 /// Follows what the fetcher gave for `run` (owned): a promise or another
 /// thenable settles the load when it settles, a throw fails it, any other
 /// value ends it.
-fn follow(ctx: *mut JsContext, obj: JsValue, run: Run, result: JsValue) {
+fn follow(cx: *mut JsContext, obj: JsValue, run: Run, result: JsValue) {
     // SAFETY: inline checks and calls of live values; what is made is
     // freed or handed on.
     unsafe {
         if qjs::JS_IsException(result) {
-            let e = qjs::JS_GetException(ctx);
-            settle(ctx, obj, run, Err(e));
+            let e = qjs::JS_GetException(cx);
+            settle(cx, obj, run, Err(e));
             return;
         }
         let then = if qjs::JS_IsObject(result) {
-            qjs::JS_GetPropertyStr(ctx, result, c"then".as_ptr())
+            qjs::JS_GetPropertyStr(cx, result, c"then".as_ptr())
         } else {
             UNDEFINED
         };
-        if !qjs::JS_IsFunction(ctx, then) {
-            qjs::JS_FreeValue(ctx, then);
-            settle(ctx, obj, run, Ok(result));
+        if !qjs::JS_IsFunction(cx, then) {
+            qjs::JS_FreeValue(cx, then);
+            settle(cx, obj, run, Ok(result));
             return;
         }
         let bits = qjs::JS_NewFloat64(run.to_bits() as f64);
         let mut data = [obj, bits];
         let mut handlers = [
-            qjs::JS_NewCFunctionData(ctx, Some(settled), 1, 0, 2, data.as_mut_ptr()),
-            qjs::JS_NewCFunctionData(ctx, Some(settled), 1, 1, 2, data.as_mut_ptr()),
+            qjs::JS_NewCFunctionData(cx, Some(settled), 1, 0, 2, data.as_mut_ptr()),
+            qjs::JS_NewCFunctionData(cx, Some(settled), 1, 1, 2, data.as_mut_ptr()),
         ];
-        let r = qjs::JS_Call(ctx, then, result, 2, handlers.as_mut_ptr());
+        let r = qjs::JS_Call(cx, then, result, 2, handlers.as_mut_ptr());
         for v in [then, result, r, handlers[0], handlers[1]] {
-            qjs::JS_FreeValue(ctx, v);
+            qjs::JS_FreeValue(cx, v);
         }
         if qjs::JS_IsException(r) {
-            let e = qjs::JS_GetException(ctx);
-            settle(ctx, obj, run, Err(e));
+            let e = qjs::JS_GetException(cx);
+            settle(cx, obj, run, Err(e));
         }
     }
 }
@@ -500,7 +497,7 @@ fn follow(ctx: *mut JsContext, obj: JsValue, run: Run, result: JsValue) {
 /// The handlers of a load's promise: magic 0 fulfilled, 1 rejected; data:
 /// the resource and the run.
 unsafe extern "C" fn settled(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -512,15 +509,15 @@ unsafe extern "C" fn settled(
         (
             *bound,
             *bound.add(1),
-            qjs::JS_DupValue(ctx, reactive::arg(argc, argv, 0)),
+            qjs::JS_DupValue(cx, reactive::arg(argc, argv, 0)),
         )
     };
     let mut n = 0.0;
     // SAFETY: a number made by `follow`.
-    unsafe { qjs::JS_ToFloat64(ctx, &mut n, bits) };
+    unsafe { qjs::JS_ToFloat64(cx, &mut n, bits) };
     let run = Run::from_bits(n as u64);
     settle(
-        ctx,
+        cx,
         obj,
         run,
         if magic == 0 { Ok(value) } else { Err(value) },
@@ -530,8 +527,8 @@ unsafe extern "C" fn settled(
 
 /// Ends `run` with `outcome` (owned): its value or its error, when it still
 /// counts.
-fn settle(ctx: *mut JsContext, obj: JsValue, run: Run, outcome: Result<JsValue, JsValue>) {
-    let ended = data(ctx, obj).and_then(|d| {
+fn settle(cx: *mut JsContext, obj: JsValue, run: Run, outcome: Result<JsValue, JsValue>) {
+    let ended = data(cx, obj).and_then(|d| {
         let state = match outcome {
             Ok(_) => d.runs.resolve(run),
             Err(_) => d.runs.reject(run),
@@ -541,46 +538,46 @@ fn settle(ctx: *mut JsContext, obj: JsValue, run: Run, outcome: Result<JsValue, 
     });
     let Some((state, signal)) = ended else {
         // SAFETY: owned.
-        unsafe { qjs::JS_FreeValue(ctx, outcome.unwrap_or_else(|e| e)) };
+        unsafe { qjs::JS_FreeValue(cx, outcome.unwrap_or_else(|e| e)) };
         return;
     };
     // SAFETY: the data's signal, now ours.
-    unsafe { qjs::JS_FreeValue(ctx, signal) };
-    reactive::batch_with(ctx, || {
+    unsafe { qjs::JS_FreeValue(cx, signal) };
+    reactive::batch_with(cx, || {
         match outcome {
             Ok(value) => {
-                write(ctx, obj, |d| d.value, value);
-                write(ctx, obj, |d| d.error, UNDEFINED);
+                write(cx, obj, |d| d.value, value);
+                write(cx, obj, |d| d.error, UNDEFINED);
             }
-            Err(error) => write(ctx, obj, |d| d.error, error),
+            Err(error) => write(cx, obj, |d| d.error, error),
         }
-        write(ctx, obj, |d| d.state, state_name(ctx, state));
+        write(cx, obj, |d| d.state, state_name(cx, state));
     });
 }
 
 /// Writes `value` (owned) to the signal `pick` chooses of `obj`.
-fn write(ctx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue, value: JsValue) {
-    match signal_of(ctx, obj, pick) {
+fn write(cx: *mut JsContext, obj: JsValue, pick: fn(&Data) -> JsValue, value: JsValue) {
+    match signal_of(cx, obj, pick) {
         Some(signal) => {
-            reactive::set_signal(ctx, signal, value);
+            reactive::set_signal(cx, signal, value);
             // SAFETY: the dup `signal_of` made.
-            unsafe { qjs::JS_FreeValue(ctx, signal) };
+            unsafe { qjs::JS_FreeValue(cx, signal) };
         }
         // SAFETY: owned.
-        None => unsafe { qjs::JS_FreeValue(ctx, value) },
+        None => unsafe { qjs::JS_FreeValue(cx, value) },
     }
 }
 
-fn free_opt(ctx: *mut JsContext, v: Option<JsValue>) {
+fn free_opt(cx: *mut JsContext, v: Option<JsValue>) {
     if let Some(v) = v {
         // SAFETY: owned.
-        unsafe { qjs::JS_FreeValue(ctx, v) };
+        unsafe { qjs::JS_FreeValue(cx, v) };
     }
 }
 
 /// The cleanup of a load: it no longer counts, and its signal aborts.
 unsafe extern "C" fn stop(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -589,7 +586,7 @@ unsafe extern "C" fn stop(
 ) -> JsValue {
     // SAFETY: one data value (`load`).
     let obj = unsafe { *bound };
-    let Some(d) = data(ctx, obj) else {
+    let Some(d) = data(cx, obj) else {
         return UNDEFINED;
     };
     d.runs.cancel();
@@ -597,10 +594,10 @@ unsafe extern "C" fn stop(
     // SAFETY: the signal was the data's; aborting runs its listeners.
     unsafe {
         if !qjs::JS_IsUndefined(signal) {
-            if crate::web::abort_signal(ctx, signal).is_err() {
-                qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
+            if crate::web::abort_signal(cx, signal).is_err() {
+                qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
             }
-            qjs::JS_FreeValue(ctx, signal);
+            qjs::JS_FreeValue(cx, signal);
         }
     }
     UNDEFINED
@@ -608,7 +605,7 @@ unsafe extern "C" fn stop(
 
 /// `user.refetch()`: loads again from the same source.
 unsafe extern "C" fn refetch(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -617,23 +614,23 @@ unsafe extern "C" fn refetch(
 ) -> JsValue {
     // SAFETY: one data value (`resource`).
     let obj = unsafe { *bound };
-    let Some(d) = data(ctx, obj) else {
+    let Some(d) = data(cx, obj) else {
         return UNDEFINED;
     };
     d.refetching = true;
-    let Some(trigger) = signal_of(ctx, obj, |d| d.trigger) else {
+    let Some(trigger) = signal_of(cx, obj, |d| d.trigger) else {
         return UNDEFINED;
     };
-    let n = reactive::peek_number(ctx, trigger).unwrap_or(0.0);
-    reactive::set_signal(ctx, trigger, qjs::JS_NewFloat64(n + 1.0));
+    let n = reactive::peek_number(cx, trigger).unwrap_or(0.0);
+    reactive::set_signal(cx, trigger, qjs::JS_NewFloat64(n + 1.0));
     // SAFETY: the dup `signal_of` made.
-    unsafe { qjs::JS_FreeValue(ctx, trigger) };
-    reactive::finish_value(ctx, UNDEFINED)
+    unsafe { qjs::JS_FreeValue(cx, trigger) };
+    reactive::finish_value(cx, UNDEFINED)
 }
 
 /// `user.mutate(value)`: sets the value here, clearing the error.
 unsafe extern "C" fn mutate(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -642,16 +639,14 @@ unsafe extern "C" fn mutate(
 ) -> JsValue {
     // SAFETY: one data value (`resource`); the argument is dup'd.
     let (obj, value) = unsafe { (*bound, reactive::arg(argc, argv, 0)) };
-    let Some(d) = data(ctx, obj) else {
+    let Some(d) = data(cx, obj) else {
         return UNDEFINED;
     };
     let state = d.runs.mutate();
-    reactive::batch_with(ctx, || {
-        write(ctx, obj, |d| d.value, unsafe {
-            qjs::JS_DupValue(ctx, value)
-        });
-        write(ctx, obj, |d| d.error, UNDEFINED);
-        write(ctx, obj, |d| d.state, state_name(ctx, state));
+    reactive::batch_with(cx, || {
+        write(cx, obj, |d| d.value, unsafe { qjs::JS_DupValue(cx, value) });
+        write(cx, obj, |d| d.error, UNDEFINED);
+        write(cx, obj, |d| d.state, state_name(cx, state));
     });
-    reactive::finish_value(ctx, unsafe { qjs::JS_DupValue(ctx, value) })
+    reactive::finish_value(cx, unsafe { qjs::JS_DupValue(cx, value) })
 }

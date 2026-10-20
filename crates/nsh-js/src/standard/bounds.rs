@@ -17,11 +17,8 @@ use rquickjs::{
 const MAX_ALLOCATION: usize = 1 << 30;
 
 /// The VM's largest allocation: its heap limit, or [`MAX_ALLOCATION`].
-fn ceiling(ctx: &Ctx<'_>) -> usize {
-    match crate::dom::shared(ctx.as_raw().as_ptr())
-        .limits
-        .memory_bytes
-    {
+fn ceiling(cx: &Ctx<'_>) -> usize {
+    match crate::dom::shared(cx.as_raw().as_ptr()).limits.memory_bytes {
         0 => MAX_ALLOCATION,
         heap => heap.min(MAX_ALLOCATION),
     }
@@ -50,19 +47,19 @@ impl<'js> JsClass<'js> for Guarded<'js> {
     const NAME: &'static str = "NshSizedAllocation";
     const KIND: ClassKind = ClassKind::Callable;
     type Mutable = Readable;
-    fn prototype(ctx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
-        Ok(Some(Function::prototype(ctx.clone())))
+    fn prototype(cx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
+        Ok(Some(Function::prototype(cx.clone())))
     }
     fn constructor(_: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
         Ok(None)
     }
     fn call<'a>(this: &JsCell<'js, Self>, params: Params<'a, 'js>) -> Result<Value<'js>> {
-        let ctx = params.ctx().clone();
+        let cx = params.ctx().clone();
         let this = this.borrow();
         let size = params
             .arg(0)
-            .unwrap_or_else(|| Value::new_undefined(ctx.clone()));
-        let limit = ceiling(&ctx);
+            .unwrap_or_else(|| Value::new_undefined(cx.clone()));
+        let limit = ceiling(&cx);
         // Other values are LLRT's to refuse.
         if let Some(n) = size.as_number()
             && n > limit as f64
@@ -72,12 +69,12 @@ impl<'js> JsClass<'js> for Guarded<'js> {
                 this.name
             );
             // A RangeError with Node's code.
-            let _ = Exception::throw_range(&ctx, &message);
-            let error = ctx.catch();
+            let _ = Exception::throw_range(&cx, &message);
+            let error = cx.catch();
             if let Some(error) = error.as_object() {
                 error.set("code", "ERR_OUT_OF_RANGE")?;
             }
-            return Err(ctx.throw(error));
+            return Err(cx.throw(error));
         }
         if this.size_only {
             return this.inner.call((size,));
@@ -93,13 +90,13 @@ impl<'js> JsClass<'js> for Guarded<'js> {
 
 /// `inner` behind the ceiling, as a function value.
 fn guarded<'js>(
-    ctx: &Ctx<'js>,
+    cx: &Ctx<'js>,
     inner: Function<'js>,
     name: &'static str,
     size_only: bool,
 ) -> Result<Value<'js>> {
     Ok(Class::instance(
-        ctx.clone(),
+        cx.clone(),
         Guarded {
             inner,
             name,
@@ -111,32 +108,32 @@ fn guarded<'js>(
 
 /// Puts the global `Buffer`'s allocations behind the ceiling (the `buffer`
 /// module exports the same constructor).
-pub(crate) fn guard_buffer(ctx: &Ctx<'_>) -> Result<()> {
-    let buffer: Object = ctx.globals().get("Buffer")?;
+pub(crate) fn guard_buffer(cx: &Ctx<'_>) -> Result<()> {
+    let buffer: Object = cx.globals().get("Buffer")?;
     let alloc: Function = buffer.get("alloc")?;
-    buffer.set("alloc", guarded(ctx, alloc.clone(), "Buffer.alloc", false)?)?;
+    buffer.set("alloc", guarded(cx, alloc.clone(), "Buffer.alloc", false)?)?;
     for name in ["allocUnsafe", "allocUnsafeSlow"] {
         let what = if name == "allocUnsafe" {
             "Buffer.allocUnsafe"
         } else {
             "Buffer.allocUnsafeSlow"
         };
-        buffer.set(name, guarded(ctx, alloc.clone(), what, true)?)?;
+        buffer.set(name, guarded(cx, alloc.clone(), what, true)?)?;
     }
     Ok(())
 }
 
 /// Puts `randomBytes` of the global `crypto` object behind the ceiling.
-pub(crate) fn guard_crypto(ctx: &Ctx<'_>) -> Result<()> {
-    let crypto: Object = ctx.globals().get("crypto")?;
-    guard_random_bytes(ctx, &crypto)
+pub(crate) fn guard_crypto(cx: &Ctx<'_>) -> Result<()> {
+    let crypto: Object = cx.globals().get("crypto")?;
+    guard_random_bytes(cx, &crypto)
 }
 
-fn guard_random_bytes<'js>(ctx: &Ctx<'js>, object: &Object<'js>) -> Result<()> {
+fn guard_random_bytes<'js>(cx: &Ctx<'js>, object: &Object<'js>) -> Result<()> {
     let random: Function = object.get("randomBytes")?;
     object.set(
         "randomBytes",
-        guarded(ctx, random, "crypto.randomBytes", false)?,
+        guarded(cx, random, "crypto.randomBytes", false)?,
     )
 }
 
@@ -149,15 +146,15 @@ impl ModuleDef for CryptoModule {
         quickjs_jit_stdlib::crypto::CryptoModule::declare(declare)
     }
 
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
+    fn evaluate<'js>(cx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
         let (inner, done) = Module::declare_def::<quickjs_jit_stdlib::crypto::CryptoModule, _>(
-            ctx.clone(),
+            cx.clone(),
             "nsh:crypto-llrt",
         )?
         .eval()?;
         done.finish::<()>()?;
         let default: Object = inner.namespace()?.get("default")?;
-        guard_random_bytes(ctx, &default)?;
+        guard_random_bytes(cx, &default)?;
         for key in default.keys::<String>() {
             let key = key?;
             exports.export(key.as_str(), default.get::<_, Value>(key.as_str())?)?;

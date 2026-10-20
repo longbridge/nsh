@@ -42,12 +42,16 @@ use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSEvent, NSEventModifierFlags, NSEventType, NSWindow,
+    NSEventModifierFlags, NSEventType, NSWindow,
 };
-use objc2_core_foundation::CGFloat;
-use objc2_foundation::{NSPoint, NSSize, NSString};
+use objc2_foundation::NSSize;
 
-use crate::surface::Surface;
+use crate::{
+    surface::Surface,
+    synth::{
+        key, mark, modifiers, mouse, mouse_with, shot, timestamp, type_text, wheel, wheel_with,
+    },
+};
 
 /// One step of a script.
 #[derive(Debug, Clone, PartialEq)]
@@ -216,7 +220,12 @@ fn run_step(runner: &Runner, step: Step) -> Option<u64> {
     }
     match step {
         Step::Wait(ms) => return Some(ms),
-        Step::Shot(path) => shot(window, &path),
+        Step::Shot(path) => match shot(window).and_then(|png| {
+            std::fs::write(&path, png).map_err(|e| format!("cannot save {path}: {e}"))
+        }) {
+            Ok(()) => log::info!("script: saved {path}"),
+            Err(e) => log::error!("script: {e}"),
+        },
         Step::Tap(x, y, count, mods) => {
             for clicks in 1..=count as isize {
                 mouse_with(window, NSEventType::LeftMouseDown, x, y, clicks, mods);
@@ -347,50 +356,6 @@ fn run_step(runner: &Runner, step: Step) -> Option<u64> {
     Some(16)
 }
 
-/// A point of the content view (points from its top left) in window
-/// coordinates (from its bottom left).
-fn to_window(window: &NSWindow, x: f64, y: f64) -> NSPoint {
-    let height = window.contentView().map_or(0.0, |v| v.frame().size.height);
-    NSPoint::new(x as CGFloat, height - y as CGFloat)
-}
-
-fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks: isize) {
-    mouse_with(window, kind, x, y, clicks, NSEventModifierFlags::empty());
-}
-
-fn mouse_with(
-    window: &NSWindow,
-    kind: NSEventType,
-    x: f64,
-    y: f64,
-    clicks: isize,
-    mods: NSEventModifierFlags,
-) {
-    let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
-        kind,
-        to_window(window, x, y),
-        mods,
-        timestamp(),
-        window.windowNumber(),
-        None,
-        0,
-        clicks,
-        if clicks > 0 { 1.0 } else { 0.0 },
-    );
-    if let Some(event) = event {
-        // Through the event queue, as real clicks come: the event becomes
-        // `NSApp.currentEvent` while it is handled (responders look at it).
-        // The run loop handles it before the next step's timer.
-        objc2_app_kit::NSApplication::sharedApplication(MainThreadMarker::from(window))
-            .postEvent_atStart(&event, false);
-    }
-}
-
-/// Seconds since the system started, as event timestamps are.
-fn timestamp() -> f64 {
-    objc2_foundation::NSProcessInfo::processInfo().systemUptime()
-}
-
 /// Queues the changed events of a gesture by `(dx, dy)` over `frames`
 /// events `delay` ms apart: whole points (as the event carries them) that
 /// add up to the distance.
@@ -417,272 +382,6 @@ fn gesture_events(
             delay,
         ));
         (sent_x, sent_y) = (to_x, to_y);
-    }
-}
-
-/// A scroll of `(dx, dy)`: points of a trackpad gesture in `phase` (a
-/// `CGScrollPhase`), or lines of a mouse wheel (`None`).
-fn wheel(window: &NSWindow, x: f64, y: f64, dx: i32, dy: i32, phase: Option<i64>) {
-    wheel_with(window, x, y, dx, dy, phase, 0, timestamp());
-}
-
-/// [`wheel`], in a `CGMomentumScrollPhase` (`0`: none), stamped `at`
-/// (seconds since the system started).
-#[allow(clippy::too_many_arguments)]
-fn wheel_with(
-    window: &NSWindow,
-    x: f64,
-    y: f64,
-    dx: i32,
-    dy: i32,
-    phase: Option<i64>,
-    momentum: i64,
-    at: f64,
-) {
-    use objc2_core_graphics::{CGEvent, CGEventField, CGScrollEventUnit};
-    // Content follows the fingers (or the wheel), so a positive `dy`
-    // (content up) is a negative delta.
-    let unit = match phase {
-        Some(_) => CGScrollEventUnit::Pixel,
-        None => CGScrollEventUnit::Line,
-    };
-    let Some(event) = CGEvent::new_scroll_wheel_event2(None, unit, 2, -dy, -dx, 0) else {
-        return;
-    };
-    // A window-less event's `locationInWindow` is its screen point, which
-    // `sendEvent:` takes as a window point: place it so that they match.
-    let p = to_window(window, x, y);
-    let main_height = objc2_app_kit::NSScreen::screens(MainThreadMarker::from(window))
-        .firstObject()
-        .map_or(0.0, |s| s.frame().size.height);
-    CGEvent::set_location(
-        Some(&event),
-        objc2_core_foundation::CGPoint::new(p.x, main_height - p.y),
-    );
-    if let Some(phase) = phase {
-        CGEvent::set_integer_value_field(
-            Some(&event),
-            CGEventField::ScrollWheelEventScrollPhase,
-            phase,
-        );
-    }
-    if momentum != 0 {
-        CGEvent::set_integer_value_field(
-            Some(&event),
-            CGEventField::ScrollWheelEventMomentumPhase,
-            momentum,
-        );
-    }
-    // Nanoseconds, as `NSEvent.timestamp` reads it.
-    CGEvent::set_timestamp(Some(&event), (at * 1e9) as u64);
-    let Some(ns) = NSEvent::eventWithCGEvent(&event) else {
-        return;
-    };
-    if momentum == 0 {
-        crate::view::scripted(&ns, || window.sendEvent(&ns));
-        return;
-    }
-    // The window drops synthesized momentum events (the system's go to
-    // the view that took the gesture): hand them to the view under the
-    // pointer, as AppKit would.
-    let view = window.contentView().and_then(|content| {
-        let local = content.convertPoint_fromView(ns.locationInWindow(), None);
-        // SAFETY: a superview's point, as hitTest: takes.
-        let outer = unsafe { content.superview() };
-        let p = outer.map_or(local, |o| {
-            o.convertPoint_fromView(ns.locationInWindow(), None)
-        });
-        content.hitTest(p)
-    });
-    if let Some(view) = view {
-        crate::view::scripted(&ns, || view.scrollWheel(&ns));
-    }
-}
-
-fn type_text(window: &NSWindow, text: &str) {
-    for c in text.chars() {
-        let s = c.to_string();
-        key_event(window, &s, 0, NSEventModifierFlags::empty());
-    }
-}
-
-/// Sets `text` as the focused text view's marked text, as an input method
-/// composing it would (empty: unmarks it).
-fn mark(window: &NSWindow, text: &str) {
-    use objc2_app_kit::{NSTextInputClient, NSTextView};
-    use objc2_foundation::NSRange;
-    let Some(responder) = window.firstResponder() else {
-        return;
-    };
-    let Some(view) = responder.downcast_ref::<NSTextView>() else {
-        return log::error!("script: mark needs a focused text field");
-    };
-    let s = NSString::from_str(text);
-    let len = s.length();
-    // SAFETY: an NSString, as the protocol takes; the ranges are within it
-    // and NSNotFound replaces the current marked text or selection.
-    unsafe {
-        view.setMarkedText_selectedRange_replacementRange(
-            &s,
-            NSRange::new(len, 0),
-            NSRange::new(objc2_foundation::NSNotFound as usize, 0),
-        )
-    };
-}
-
-/// One modifier's flag.
-fn modifier(name: &str) -> Option<NSEventModifierFlags> {
-    Some(match name {
-        "cmd" => NSEventModifierFlags::Command,
-        "shift" => NSEventModifierFlags::Shift,
-        "alt" => NSEventModifierFlags::Option,
-        "ctrl" => NSEventModifierFlags::Control,
-        _ => return None,
-    })
-}
-
-/// Modifiers alone, `+`-separated (`cmd+shift`).
-fn modifiers(names: &str) -> Option<NSEventModifierFlags> {
-    names
-        .split('+')
-        .try_fold(NSEventModifierFlags::empty(), |flags, m| {
-            Some(flags | modifier(m)?)
-        })
-}
-
-fn key(window: &NSWindow, name: &str) {
-    let mut flags = NSEventModifierFlags::empty();
-    let mut name = name;
-    // `cmd++` is Command and `+`.
-    while let Some((m, rest)) = name.split_once('+').filter(|(_, r)| !r.is_empty()) {
-        let Some(flag) = modifier(m) else { break };
-        flags |= flag;
-        name = rest;
-    }
-    // (characters, virtual key code)
-    let (chars, code): (String, u16) = match name {
-        "Return" => ("\r".into(), 36),
-        "Escape" => ("\u{1b}".into(), 53),
-        // Shift+Tab types a backtab, which is what field editors read.
-        "Tab" if flags.contains(NSEventModifierFlags::Shift) => ("\u{19}".into(), 48),
-        "Tab" => ("\t".into(), 48),
-        "BackSpace" => ("\u{7f}".into(), 51),
-        "space" => (" ".into(), 49),
-        "Up" => ("\u{f700}".into(), 126),
-        "Down" => ("\u{f701}".into(), 125),
-        "Left" => ("\u{f702}".into(), 123),
-        "Right" => ("\u{f703}".into(), 124),
-        "Page_Up" => ("\u{f72c}".into(), 116),
-        "Page_Down" => ("\u{f72d}".into(), 121),
-        "Home" => ("\u{f729}".into(), 115),
-        "End" => ("\u{f72b}".into(), 119),
-        "Delete" => ("\u{f728}".into(), 117),
-        // F1 to F12 (`F5`).
-        f if f.len() > 1
-            && f.starts_with('F')
-            && let Some(n) = f[1..].parse::<u16>().ok().filter(|n| (1..=12).contains(n)) =>
-        {
-            const CODES: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];
-            let c = char::from_u32(0xf703 + u32::from(n)).unwrap_or('\0');
-            (c.to_string(), CODES[usize::from(n - 1)])
-        }
-        // Shift types the shifted character, which menus' key
-        // equivalents match (`cmd+shift+z` is Redo's `Z`). A character's
-        // key is the US layout's, as a real event's would be.
-        other => {
-            let mut chars = other.chars();
-            let code = match (chars.next(), chars.next()) {
-                (Some(c), None) => crate::input::us_key_code(c).unwrap_or(0),
-                _ => 0,
-            };
-            if flags.contains(NSEventModifierFlags::Shift) {
-                (other.to_uppercase(), code)
-            } else {
-                (other.into(), code)
-            }
-        }
-    };
-    key_event(window, &chars, code, flags);
-}
-
-fn key_event(window: &NSWindow, chars: &str, code: u16, flags: NSEventModifierFlags) {
-    let s = NSString::from_str(chars);
-    for kind in [NSEventType::KeyDown, NSEventType::KeyUp] {
-        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
-            kind,
-            NSPoint::new(0.0, 0.0),
-            flags,
-            timestamp(),
-            window.windowNumber(),
-            None,
-            &s,
-            &s,
-            false,
-            code,
-        );
-        let Some(event) = event else { continue };
-        // Key equivalents (menus) and key monitors (`nsh/keymap`) are the
-        // application's, which hands the key to its key window.
-        if window.isKeyWindow() || flags.contains(NSEventModifierFlags::Command) {
-            objc2_app_kit::NSApplication::sharedApplication(MainThreadMarker::from(window))
-                .sendEvent(&event);
-        } else {
-            window.sendEvent(&event);
-        }
-    }
-}
-
-/// Renders the window's content into a PNG (in process: no Screen
-/// Recording permission, and it works while the screen is locked).
-fn shot(window: &NSWindow, path: &str) {
-    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRepPropertyKey};
-    use objc2_foundation::NSDictionary;
-    let Some(view) = window.contentView() else {
-        return;
-    };
-    if let Some(layer) = view.layer() {
-        crate::surface::quiet(|| order_by_z(&layer));
-    }
-    let bounds = view.bounds();
-    let Some(rep) = view.bitmapImageRepForCachingDisplayInRect(bounds) else {
-        return log::error!("script: cannot make a bitmap for {path}");
-    };
-    view.cacheDisplayInRect_toBitmapImageRep(bounds, &rep);
-    let properties = NSDictionary::<NSBitmapImageRepPropertyKey, objc2::runtime::AnyObject>::new();
-    // SAFETY: an empty property dictionary is valid for PNG.
-    let data =
-        unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties) };
-    match data.map(|d| std::fs::write(path, d.to_vec())) {
-        Some(Ok(())) => log::info!("script: saved {path}"),
-        other => log::error!("script: cannot save {path}: {other:?}"),
-    }
-}
-
-/// Orders the sublayers of `layer` and its sublayers by their `zPosition`
-/// (keeping their order where it is equal), as Core Animation composites
-/// them: `cacheDisplayInRect:` draws sublayers in their order and ignores
-/// `zPosition`, so a decoration added before a layer it is above (a
-/// border's stroke before a gradient) would look covered in the shot. The
-/// window looks the same either way.
-fn order_by_z(layer: &objc2_quartz_core::CALayer) {
-    // SAFETY: the main thread reads the layer tree, which nothing else
-    // changes meanwhile.
-    let Some(sublayers) = (unsafe { layer.sublayers() }) else {
-        return;
-    };
-    let layers: Vec<Retained<objc2_quartz_core::CALayer>> = sublayers.to_vec();
-    let sorted = layers
-        .windows(2)
-        .all(|w| w[0].zPosition() <= w[1].zPosition());
-    if !sorted {
-        let mut by_z = layers.clone();
-        by_z.sort_by(|a, b| a.zPosition().total_cmp(&b.zPosition()));
-        for (i, l) in by_z.iter().enumerate() {
-            layer.insertSublayer_atIndex(l, i as u32);
-        }
-    }
-    for l in &layers {
-        order_by_z(l);
     }
 }
 

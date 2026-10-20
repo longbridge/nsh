@@ -152,6 +152,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
+        tests: false,
     };
     let started = DevClient::start(url, host, move |event| {
         match event {
@@ -213,6 +214,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
     match event {
         DevEvent::Connected => hide_status(ui),
         DevEvent::Disconnected => show_status(ui, "Dev server disconnected — reconnecting…"),
+        // No test agent here (`HostInfo::tests` is false): no steps come.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => show_status(ui, "Building…"),
         DevEvent::BuildFailed(message) => {
             hide_status(ui);

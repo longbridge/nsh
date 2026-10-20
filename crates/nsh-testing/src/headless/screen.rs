@@ -549,6 +549,17 @@ impl Screen {
         }
     }
 
+    /// The input `selector` names, as [`Screen::input_text`] finds it.
+    #[cfg(feature = "agent")]
+    pub(crate) fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.input_view(&parsed) {
+            Pick::One(id) => Ok(Some(id)),
+            Pick::Many(n) => Err(format!("`{selector}` matches {n} inputs")),
+            Pick::None | Pick::Disabled => Ok(None),
+        }
+    }
+
     /// Whether the view `selector` names takes input: neither it nor a view
     /// around it is disabled, and an input is editable; an error when none
     /// or several match.
@@ -734,6 +745,24 @@ impl Screen {
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
+    /// The scroll views around `id` (not it), innermost first, with whether
+    /// each scrolls horizontally.
+    #[cfg(feature = "agent")]
+    pub(crate) fn scroll_ancestors(&self, id: NodeId) -> Vec<(NodeId, bool)> {
+        let mut out = Vec::new();
+        let mut at = self.nodes.get(&id).and_then(|v| v.parent);
+        while let Some(id) = at {
+            let Some(view) = self.nodes.get(&id) else {
+                break;
+            };
+            if let Some(scroll) = &view.scroll {
+                out.push((id, scroll.horizontal));
+            }
+            at = view.parent;
+        }
+        out
+    }
+
     fn up_to(&self, mut id: NodeId, test: impl Fn(&View) -> bool) -> Option<NodeId> {
         loop {
             let view = self.nodes.get(&id)?;

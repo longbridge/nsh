@@ -840,9 +840,9 @@ impl<M: TextEngine> Core<M> {
                 // The node's own style is the view's that makes it, then
                 // what is given it.
                 let base = self.base_of(id);
-                let ctx = self.root_context_of(base).expect("a host");
-                let app = if ctx.combined {
-                    ctx.app
+                let cx = self.root_context_of(base).expect("a host");
+                let app = if cx.combined {
+                    cx.app
                 } else {
                     self.components.instances[&base].app_style.clone()
                 };
@@ -1477,11 +1477,11 @@ impl<M: TextEngine> Core<M> {
             self.components.mark(rooted);
             return;
         }
-        let ctx = self.root_context(inst);
+        let cx = self.root_context(inst);
         let given_changed = std::mem::take(&mut inst.given_changed);
         let attrs = if let Some(node) = inst.bound.get_mut(&host) {
             let (style, classes) = (node.style.clone(), node.classes.clone());
-            let classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
+            let classes = self.apply_styles(host, &style, &style, classes, cx.user.clone());
             if let Some(node) = inst.bound.get_mut(&host) {
                 node.classes = classes;
                 given_changed.then(|| node.attrs.clone())
@@ -1490,7 +1490,7 @@ impl<M: TextEngine> Core<M> {
             }
         } else if let Some(root) = inst.root.as_mut() {
             let (style, classes) = (root.style.clone(), root.classes.clone());
-            root.classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
+            root.classes = self.apply_styles(host, &style, &style, classes, cx.user.clone());
             given_changed.then(|| root.attrs.clone())
         } else {
             None
@@ -1498,8 +1498,8 @@ impl<M: TextEngine> Core<M> {
         // What the views above give it changed: applied again over its
         // root's own.
         if let Some(attrs) = attrs {
-            let app = if ctx.combined {
-                ctx.app.as_ref()
+            let app = if cx.combined {
+                cx.app.as_ref()
             } else {
                 inst.app_style.as_ref()
             };
@@ -1511,8 +1511,8 @@ impl<M: TextEngine> Core<M> {
             ));
             let applied = inst.root_insets_applied;
             let insets = (
-                ctx.inset_padding.or(attrs.inset_padding),
-                ctx.inset_margin.or(attrs.inset_margin),
+                cx.inset_padding.or(attrs.inset_padding),
+                cx.inset_margin.or(attrs.inset_margin),
             );
             if insets.0 != applied.0 {
                 let _ = self.apply_op(Op::SetProp {
@@ -1898,13 +1898,13 @@ impl<M: TextEngine> Core<M> {
             };
         // What the views above give it and the components on its host, the
         // outer last.
-        let ctx = self.root_context(inst);
-        let app = if ctx.combined {
-            ctx.app.as_ref()
+        let cx = self.root_context(inst);
+        let app = if cx.combined {
+            cx.app.as_ref()
         } else {
             inst.app_style.as_ref()
         };
-        let attrs = ctx.over(el.attrs.clone());
+        let attrs = cx.over(el.attrs.clone());
         // As it was applied: with the insets its node got.
         let mut old_over = old_attrs.clone();
         (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
@@ -1913,7 +1913,7 @@ impl<M: TextEngine> Core<M> {
         // Given an inline style or animated values while its own did not
         // change: they go now.
         let given_changed = std::mem::take(&mut inst.given_changed) || first;
-        if ctx.given
+        if cx.given
             && given_changed
             && attrs.inline == old_over.inline
             && attrs.animated == old_over.animated
@@ -1925,8 +1925,8 @@ impl<M: TextEngine> Core<M> {
                 app,
             ));
         }
-        let user = ctx.user.clone();
-        let top_js = ctx.js;
+        let user = cx.user.clone();
+        let top_js = cx.js;
         let classes = self.apply_styles(host, &el.style, &old_style, old_classes, user);
         let text = self.reconcile_text(host, host, el.text.take(), old_text);
         if bound.is_some() {
@@ -2032,7 +2032,7 @@ impl<M: TextEngine> Core<M> {
     /// components whose views' roots it is (the outer last), the app's
     /// style and JS's events on the top host.
     pub(super) fn root_context(&mut self, inst: &Instance) -> RootContext {
-        let mut ctx = RootContext {
+        let mut cx = RootContext {
             user: inst.user.clone(),
             combined: false,
             app: None,
@@ -2042,21 +2042,21 @@ impl<M: TextEngine> Core<M> {
             given: false,
         };
         if inst.above.is_none() && inst.given.is_none() {
-            return ctx;
+            return cx;
         }
-        ctx.combined = true;
+        cx.combined = true;
         let mut decls: Vec<crate::StyleDecl> = Vec::new();
-        let mut take = |ctx: &mut RootContext, given: &Attrs| {
-            ctx.given = true;
+        let mut take = |cx: &mut RootContext, given: &Attrs| {
+            cx.given = true;
             if let Some(inline) = &given.inline {
                 decls.extend(inline.decls().iter().cloned());
             }
             decls.extend(given.animated.iter().map(|(d, _)| d.clone()));
-            ctx.inset_padding = given.inset_padding.or(ctx.inset_padding);
-            ctx.inset_margin = given.inset_margin.or(ctx.inset_margin);
+            cx.inset_padding = given.inset_padding.or(cx.inset_padding);
+            cx.inset_margin = given.inset_margin.or(cx.inset_margin);
         };
         if let Some(given) = &inst.given {
-            take(&mut ctx, given);
+            take(&mut cx, given);
         }
         let mut app = inst.app_style.clone();
         let mut at = inst.above;
@@ -2066,12 +2066,12 @@ impl<M: TextEngine> Core<M> {
             };
             let (outer, given) = (above.user.clone(), above.given.clone());
             app = above.app_style.clone();
-            ctx.js = Some(above.js_events);
+            cx.js = Some(above.js_events);
             at = above.above;
             if let Some(given) = &given {
-                take(&mut ctx, given);
+                take(&mut cx, given);
             }
-            ctx.user = self.merge_user(ctx.user.take(), outer);
+            cx.user = self.merge_user(cx.user.take(), outer);
         }
         if let Some(app) = &app {
             decls.extend(app.decls().iter().cloned());
@@ -2082,17 +2082,17 @@ impl<M: TextEngine> Core<M> {
             for decl in decls {
                 let _ = patch.push(&mut style, decl);
             }
-            ctx.app = Some(patch);
+            cx.app = Some(patch);
         }
-        ctx
+        cx
     }
 
     /// [`Self::root_context`] of the component hosted by `host`.
     pub(super) fn root_context_of(&mut self, host: NodeId) -> Option<RootContext> {
         let inst = self.components.instances.remove(&host)?;
-        let ctx = self.root_context(&inst);
+        let cx = self.root_context(&inst);
         self.components.instances.insert(host, inst);
-        Some(ctx)
+        Some(cx)
     }
 
     /// What the view `host` is in gives its element besides styles is `attrs`:

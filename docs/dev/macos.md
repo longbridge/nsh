@@ -210,6 +210,17 @@ from gesture to gesture). For where the time goes, `sample <pid> 5` the host (In
 record --template 'Time Profiler' --attach <pid>`).
 
 
+## Tests on macOS: `nsh test --target macos`
+
+The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
+implements `nsh_testing::agent::Native` on the main queue (`exec_sync`). A view's bounds are its `NSView`'s frame in
+window coordinates, turned into points from the content's top left; a press is a mouse move, down and up posted to the
+app (`synth.rs`, the app made active first); a scroll is a trackpad gesture (began, changed events 16 ms apart of at
+most 20 points, ended); typing posts key events; back is Escape, twice when a text field is focused (the first only
+leaves it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet; a screenshot is the
+content view cached into a PNG. `dev.rs`'s `Tester` attaches the agent's model to the surface when the server says it
+runs a test session, before the first bundle.
+
 ## Checking a change: `--script`
 
 `nsh-macos-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or new

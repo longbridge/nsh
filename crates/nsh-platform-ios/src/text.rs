@@ -940,12 +940,12 @@ pub(crate) fn prewarm() {
 /// splits them where a background starts or ends) joined by
 /// [`nsh_core::BackgroundBox::join`], as tall as their fonts.
 pub(crate) fn draw_backgrounds(
-    ctx: &objc2_core_graphics::CGContext,
+    cx: &objc2_core_graphics::CGContext,
     text: &AttributedText,
     layout: &CoreTextLayout,
     content: nsh_core::Bounds<nsh_core::Points>,
 ) {
-    let c = Some(ctx);
+    let c = Some(cx);
     let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
     let mut pieces = Vec::new();
     for line in &layout.lines {

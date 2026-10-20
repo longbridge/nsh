@@ -38,8 +38,8 @@ runs on QuickJS, which the app then carries.
 ```sh
 nsh init my-app --template rust
 cd my-app
-nsh run                        # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
-nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows, gpui
+nsh run                        # this machine's backend; --target ios, android, web, macos, linux or windows
+nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows
 ```
 
 `src/lib.rs` holds the app: components, state, handlers, tasks.
@@ -109,7 +109,7 @@ and no QuickJS linked in:
 
 | Target | What runs |
 |---|---|
-| macOS, Windows, Linux, GPUI | The release runner with your crate, in a window; `nsh run` runs a debug build and shows the app's logs in the terminal |
+| macOS, Windows, Linux | The release runner with your crate, in a window; `nsh run` runs a debug build and shows the app's logs in the terminal |
 | iOS, the iOS simulator, Mac Catalyst | The iOS runner with your crate, in an app |
 | Android | The app's `libnsh.so` with your crate, started by the runtime's activity |
 | Web | `nsh.wasm` with the engine and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli); the page mounts the root |
