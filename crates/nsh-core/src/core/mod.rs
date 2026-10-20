@@ -430,15 +430,12 @@ struct Node {
 impl Node {
     /// The listeners as platforms take them: a `disabled` view takes no
     /// presses (React Native's `Pressable` / touchables), so it shows no
-    /// press feedback either.
+    /// press feedback either, and opens no context menu: a secondary click
+    /// on it goes on to the nearest enabled listener around it.
     fn mounted_events(&self) -> EventMask {
         let mut events = self.events;
         if self.states & crate::tailwind::state::DISABLED != 0 {
-            for e in PRESSES.into_iter().chain([
-                EventKind::FileDragEnter,
-                EventKind::FileDragLeave,
-                EventKind::FileDrop,
-            ]) {
+            for e in DISABLED_OFF {
                 events.set(e, false);
             }
         }
@@ -4914,6 +4911,23 @@ const PRESSES: [EventKind; 4] = [
     EventKind::PressDown,
     EventKind::PressUp,
 ];
+
+/// The events a `disabled` view does not mount ([`Node::mounted_events`]).
+const DISABLED_OFF: [EventKind; 8] = [
+    EventKind::Press,
+    EventKind::LongPress,
+    EventKind::PressDown,
+    EventKind::PressUp,
+    EventKind::ContextMenu,
+    EventKind::FileDragEnter,
+    EventKind::FileDragLeave,
+    EventKind::FileDrop,
+];
+
+/// Whether `disabled` changes what a view with `events` mounts.
+fn disabling_changes(events: EventMask) -> bool {
+    DISABLED_OFF.iter().any(|&e| events.contains(e))
+}
 
 /// The background a nested text's view style gives its characters.
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {

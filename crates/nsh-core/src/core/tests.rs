@@ -3288,6 +3288,45 @@ fn disabled_views_take_no_presses() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
 }
 
+/// A view that takes no presses unmounts its other listeners when it is
+/// disabled too: a secondary click goes on to the listener around it.
+#[test]
+fn disabled_views_hear_no_context_menus_or_file_drops() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "disabled:opacity-40");
+    let disabled = |d| Op::SetProp {
+        id: 2,
+        prop: Prop::Native(NativeProp::Disabled(d)),
+    };
+    let events_of = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Events { id: 2, events } => Some(*events),
+            _ => None,
+        })
+    };
+    apply(
+        &mut c,
+        [EventKind::ContextMenu, EventKind::FileDrop]
+            .into_iter()
+            .map(|event| Op::Listen {
+                id: 2,
+                event,
+                enabled: true,
+            })
+            .collect(),
+    );
+    let batch = c.commit().unwrap();
+    let events = events_of(&batch).unwrap();
+    assert!(events.contains(EventKind::ContextMenu) && events.contains(EventKind::FileDrop));
+    apply(&mut c, vec![disabled(true)]);
+    let batch = c.commit().unwrap();
+    assert!(events_of(&batch).unwrap().is_empty());
+    apply(&mut c, vec![disabled(false)]);
+    let batch = c.commit().unwrap();
+    let events = events_of(&batch).unwrap();
+    assert!(events.contains(EventKind::ContextMenu) && events.contains(EventKind::FileDrop));
+}
+
 /// A style patch of `decls` (`activeStyle={{ … }}`).
 fn patch(decls: &[(&str, crate::StyleValue<'_>)]) -> Option<Arc<crate::StylePatch>> {
     let mut style = crate::Style::default();

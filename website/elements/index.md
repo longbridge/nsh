@@ -263,7 +263,8 @@ places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`
 `modifiers`. The nearest view that listens, from the one under the pointer outwards, hears it. A text input, or
 selectable text with an edit menu (Windows, the GPUI backend, browsers), nearer than that view shows its own menu
 instead. The platform decides this as the button goes down, from what is mounted, so the handler is told after the fact
-and nothing has to be cancelled. On touchscreens, a long press opens menus: handle `onLongPress` with the same function.
+and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
+touchscreens, a long press opens menus: handle `onLongPress` with the same function.
 
 ### Keyboard focus
 

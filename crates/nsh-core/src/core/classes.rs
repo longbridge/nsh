@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::{Core, Key, Kind, NO_KEY, dirty, pressable};
+use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
     mount::MountItem,
     ops::NodeId,
@@ -191,7 +191,7 @@ impl<M: TextEngine> Core<M> {
             node.states &= !state::DISABLED;
         }
         if node.states != before {
-            if pressable(node.events) {
+            if disabling_changes(node.events) {
                 self.mark(key, dirty::EVENTS);
             }
             // Its accessibility state says it.

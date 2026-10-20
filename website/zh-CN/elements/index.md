@@ -227,7 +227,7 @@ import { Menu } from "nsh/desktop";
 |---|---|---|---|
 | `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 辅助按钮在视图或其内部的视图上按下。 |
 
-`ContextMenuEvent` 包含视图中的 `locationX` / `locationY`、根视图中的 `pageX` / `pageY`（`Menu.popup` 放置菜单的位置）以及修饰键（`altKey`、`ctrlKey`、`metaKey`、`shiftKey`）；Rust 中为 `location`、`page` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
+`ContextMenuEvent` 包含视图中的 `locationX` / `locationY`、根视图中的 `pageX` / `pageY`（`Menu.popup` 放置菜单的位置）以及修饰键（`altKey`、`ctrlKey`、`metaKey`、`shiftKey`）；Rust 中为 `location`、`page` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
 ### 键盘焦点
 
