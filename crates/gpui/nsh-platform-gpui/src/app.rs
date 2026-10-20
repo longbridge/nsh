@@ -13,12 +13,10 @@ use gpui::{
     App as GpuiApp, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, Styled, Window,
 };
-use nsh_core::{
-    platform::{Appearance, Locale},
-    ui::ThemeError,
-};
+use nsh_base::{Theme, ThemeError};
+use nsh_core::platform::{Appearance, Locale};
 use nsh_engine::{
-    App, AppError, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root, Theme,
+    App, AppError, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root,
 };
 
 use crate::{
@@ -358,7 +356,8 @@ impl AppView {
     /// frame on.
     pub fn set_theme(&self, theme: Option<Theme>, cx: &mut GpuiApp) {
         *self.surface.host_theme.borrow_mut() = theme.clone();
-        self.surface.control(|c| c.set_theme(theme));
+        self.surface
+            .control(|c| c.set_tokens(theme.map(Theme::into_tokens)));
         self.surface.invalidate();
         crate::rt::flush(cx);
     }
@@ -366,7 +365,7 @@ impl AppView {
     /// [`AppView::set_theme`] with a theme in gpui-kit's JSON format
     /// (`{ "themes": [{ "mode": "light", "colors": { … } }, …] }`: a
     /// gpui-kit theme file, or `ThemeConfig`s serialized; null colors are
-    /// left as they are), over nsh's default theme.
+    /// left as they are), over `nsh/base`'s default theme.
     pub fn set_theme_json(&self, json: &str, cx: &mut GpuiApp) -> Result<(), ThemeError> {
         let theme = Theme::from_json(json)?;
         self.set_theme(Some(theme), cx);

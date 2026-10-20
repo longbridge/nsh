@@ -1,7 +1,8 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`), navigation (stacks and pages), dialogs, safe areas,
-//! the system's dialogs and the software keyboard.
+//! the system's dialogs and the software keyboard, and the theme's semantic
+//! tokens (`Theme`, as `gpui-base`'s).
 //!
 //! What it renders lays out or tells the platform, never styles: the look
 //! of an app is the app's, drawn with nsh's primitives or the components of
@@ -13,6 +14,7 @@ mod alert_dialog;
 mod button;
 mod keyboard;
 mod safe_area;
+mod theme;
 
 use std::sync::Arc;
 
@@ -26,6 +28,7 @@ pub use crate::{
     button::{Button, ButtonEvent, ButtonProps},
     keyboard::{AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewProps},
     safe_area::{Edge, SafeAreaView, SafeAreaViewProps},
+    theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
 };
 
 /// The JS module apps import the foundation as.
@@ -46,7 +49,9 @@ pub fn registry() -> Registry {
             &["Insets"],
         )
         // Navigation: made by `nsh-js` (`navigation.rs`), declared by hand.
-        .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack"]);
+        .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack"])
+        // The theme: the app's over the default, as design tokens.
+        .tokens_from(tokens_of);
     registry
 }
 

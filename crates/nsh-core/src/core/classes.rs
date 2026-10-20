@@ -504,11 +504,11 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The components' theme changed: classes naming its tokens
+    /// The design tokens changed: classes naming them
     /// (`bg-primary`) are resolved again, on nodes and on Rust components.
-    pub(super) fn theme_tokens_changed(&mut self) {
-        let theme = self.components.theme.clone();
-        let Some(changed) = self.tailwind.set_tokens(&theme) else {
+    pub(super) fn class_tokens_changed(&mut self) {
+        let tokens = self.components.tokens.clone();
+        let Some(changed) = self.tailwind.set_tokens(&tokens) else {
             return;
         };
         let reads =

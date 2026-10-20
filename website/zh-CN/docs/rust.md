@@ -42,6 +42,7 @@ nsh package --target web       # 或 ios、ios-simulator、android、macos、lin
 `src/lib.rs` 包含整个应用：组件、状态、事件处理和任务。
 
 ```rust
+use nsh_base::theme;
 use nsh_core::ui::prelude::*;
 
 /// TSX 通过 `app/native` 可以使用的组件。
@@ -72,12 +73,12 @@ pub fn App() -> impl IntoElement {
             view()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || px(theme().radius))
-                .bg(move || theme().primary)
-                .active(|s| s.bg(move || theme().primary_active))
+                .rounded(move || theme().radius())
+                .bg(move || theme().primary())
+                .active(|s| s.bg(move || theme().primary_active()))
                 .role(AccessibilityRole::Button)
                 .on_press(move |_: &()| count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground)),
+                .child(text("Tap").text_color(move || theme().primary_foreground())),
         )
 }
 ```
@@ -342,8 +343,8 @@ fn the_module_formats_money() {
 ## 主题
 
 应用的外观由应用自己决定：NSH 提供基础元素和 `nsh_base` 中无样式的基础组件，你的 crate 是其上带样式的一层，即应用自己的组件库（[三层结构](./architecture.md#three-layers)）。Rust 组件的颜色、圆角和基础字号取自主题，即
-`nsh_core::ui::prelude` 中的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
-`.bg(move || theme().primary)` 这样的绑定会原生地改变颜色，不需要重新渲染。
+`nsh_base` 的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
+`.bg(move || theme().primary())` 这样的绑定会原生地改变颜色，不需要重新渲染。
 
 默认主题是 gpui-kit 的默认主题：中性的黑白配色，采用移动端的圆角。要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径
 （相对于 `nsh.json`），或者直接写入主题内容：
@@ -386,8 +387,8 @@ fn the_module_formats_money() {
 - 你的主题叠加在默认主题之上，只需列出要修改的部分。
 - 颜色可以是 CSS 颜色（`#7c3aed`、`rgb(…)`、`white`），也可以是 Tailwind 默认调色板中的名称（`neutral-900`、`red-500`）。
   `nsh.json` 中 `tailwind` 键的颜色用于 `class` 字符串。
-- `radius`（`theme().radius`）是控件的圆角，`radius.lg`（`theme().radius_lg`）是卡片、底部面板等大面积表面的圆角，
-  `font.size`（`theme().font_size`）是基础字号，单位都是点。
+- `radius`（`theme().radius()`）是控件的圆角，`radius.lg`（`theme().radius_lg()`）是卡片、底部面板等大面积表面的圆角，
+  `font.size`（`theme().font_size()`）是基础字号，单位都是点。
 - 省略的按下颜色（`primary.active.background`、`secondary.active.background`、`danger.active.background` 等）由基础颜色推导：
   浅色模式下暗 12%，深色模式下亮 12%。
 - gpui-kit 桌面组件的键（侧边栏、标题栏等）会被接受并搁置，所以 gpui-kit 的主题文件可以原样使用。

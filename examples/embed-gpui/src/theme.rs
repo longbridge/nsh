@@ -1,6 +1,6 @@
 //! GPUI Kit's theme as nsh's: the host's theme for its embedded apps.
 //!
-//! nsh's theme has gpui-kit's color names and JSON format, so the
+//! nsh's theme (`nsh/base`'s) has gpui-kit's color names and JSON format, so the
 //! conversion is short: both modes come from the host's theme configs
 //! (serialized as gpui-kit theme JSON, where the colors a theme leaves out
 //! are null and nsh keeps its own), then the current mode's colors are
@@ -44,77 +44,80 @@ pub fn nsh_theme(theme: &Theme) -> nsh_platform_gpui::Theme {
         }
     };
     let dark = theme.mode.is_dark();
-    let set = |field: &mut AdaptiveColor, c: Hsla| {
+    let mut set = |key: &str, c: Hsla| {
+        let mut slot = nsh.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
         if dark {
-            field.dark = color(c);
+            slot.dark = color(c);
         } else {
-            field.light = color(c);
+            slot.light = color(c);
         }
+        nsh.set_color(key, slot);
     };
-    // Every color of nsh's theme has a field of the same name in GPUI Kit's.
+    // GPUI Kit's colors by the keys of its theme files, which nsh's theme
+    // reads.
     macro_rules! resolved {
-        ($($field:ident),* $(,)?) => {
-            $( set(&mut nsh.colors.$field, theme.colors.$field); )*
+        ($($field:ident = $key:literal),* $(,)?) => {
+            $( set($key, theme.colors.$field); )*
         };
     }
     resolved!(
-        accent,
-        accent_foreground,
-        background,
-        foreground,
-        border,
-        caret,
-        danger,
-        danger_active,
-        danger_foreground,
-        group_box,
-        group_box_foreground,
-        info,
-        info_active,
-        info_foreground,
-        input,
-        link,
-        link_active,
-        list,
-        list_active,
-        list_active_border,
-        list_even,
-        list_head,
-        muted,
-        muted_foreground,
-        overlay,
-        popover,
-        popover_foreground,
-        primary,
-        primary_active,
-        primary_foreground,
-        progress_bar,
-        ring,
-        secondary,
-        secondary_active,
-        secondary_foreground,
-        selection,
-        skeleton,
-        slider_bar,
-        slider_thumb,
-        success,
-        success_active,
-        success_foreground,
-        switch,
-        switch_thumb,
-        tab,
-        tab_active,
-        tab_active_foreground,
-        tab_bar,
-        tab_bar_segmented,
-        tab_foreground,
-        warning,
-        warning_active,
-        warning_foreground,
+        accent = "accent.background",
+        accent_foreground = "accent.foreground",
+        background = "background",
+        foreground = "foreground",
+        border = "border",
+        caret = "caret",
+        danger = "danger.background",
+        danger_active = "danger.active.background",
+        danger_foreground = "danger.foreground",
+        group_box = "group_box.background",
+        group_box_foreground = "group_box.foreground",
+        info = "info.background",
+        info_active = "info.active.background",
+        info_foreground = "info.foreground",
+        input = "input.border",
+        link = "link",
+        link_active = "link.active",
+        list = "list.background",
+        list_active = "list.active.background",
+        list_active_border = "list.active.border",
+        list_even = "list.even.background",
+        list_head = "list.head.background",
+        muted = "muted.background",
+        muted_foreground = "muted.foreground",
+        overlay = "overlay",
+        popover = "popover.background",
+        popover_foreground = "popover.foreground",
+        primary = "primary.background",
+        primary_active = "primary.active.background",
+        primary_foreground = "primary.foreground",
+        progress_bar = "progress.bar.background",
+        ring = "ring",
+        secondary = "secondary.background",
+        secondary_active = "secondary.active.background",
+        secondary_foreground = "secondary.foreground",
+        selection = "selection.background",
+        skeleton = "skeleton.background",
+        slider_bar = "slider.background",
+        slider_thumb = "slider.thumb.background",
+        success = "success.background",
+        success_active = "success.active.background",
+        success_foreground = "success.foreground",
+        switch = "switch.background",
+        switch_thumb = "switch.thumb.background",
+        tab = "tab.background",
+        tab_active = "tab.active.background",
+        tab_active_foreground = "tab.active.foreground",
+        tab_bar = "tab_bar.background",
+        tab_bar_segmented = "tab_bar.segmented.background",
+        tab_foreground = "tab.foreground",
+        warning = "warning.background",
+        warning_active = "warning.active.background",
+        warning_foreground = "warning.foreground",
     );
-    nsh.radius = nsh_core::Points(f32::from(theme.radius));
-    nsh.radius_lg = nsh_core::Points(f32::from(theme.radius_lg));
-    nsh.font_size = nsh_core::Points(f32::from(theme.font_size));
+    nsh.set_number("radius", f32::from(theme.radius));
+    nsh.set_number("radius.lg", f32::from(theme.radius_lg));
+    nsh.set_number("font.size", f32::from(theme.font_size));
     nsh
 }
 
@@ -145,12 +148,12 @@ mod tests {
         };
         theme.colors.primary = gpui_kit::rgb(0x7c3aed).into();
         let nsh = nsh_theme(&theme);
-        assert_eq!(Color::from(nsh.primary.dark), Color(0x7c3aedff));
+        assert_eq!(Color::from(nsh.primary().dark), Color(0x7c3aedff));
         // The other mode keeps nsh's (the configs set nothing here).
         assert_eq!(
-            nsh.primary.light,
-            nsh_platform_gpui::Theme::default().primary.light
+            nsh.primary().light,
+            nsh_platform_gpui::Theme::default().primary().light
         );
-        assert_eq!(nsh.radius, nsh_core::Points(6.0));
+        assert_eq!(nsh.radius(), nsh_core::Points(6.0));
     }
 }

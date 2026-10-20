@@ -270,6 +270,7 @@ fn manifest(package: &str, source: Option<&Path>, desktop: bool) -> String {
         None => format!("{{ version = {version:?}{extra} }}"),
     };
     let core = dep("nsh-core", "");
+    let base = dep("nsh-base", "");
     let mut manifest = format!(
         r#"[package]
 name = {package:?}
@@ -281,13 +282,11 @@ publish = false
 
 [dependencies]
 nsh-core = {core}
+nsh-base = {base}
 "#
     );
     if desktop {
-        manifest.push_str(&format!(
-            "nsh-base = {}\nenv_logger = \"0.11\"\n",
-            dep("nsh-base", "")
-        ));
+        manifest.push_str("env_logger = \"0.11\"\n");
         for platform in ["linux", "macos", "windows"] {
             manifest.push_str(&format!(
                 r#"

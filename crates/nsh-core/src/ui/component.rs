@@ -35,7 +35,7 @@ use super::{
 ///     view()
 ///         .px_4()
 ///         .py_3()
-///         .bg(move || theme().primary)
+///         .bg(move || theme().primary()) // nsh-base's theme
 ///         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
 ///         .child(text(props.title))
 /// }
@@ -473,7 +473,7 @@ pub(crate) trait AnyInstance {
 #[derive(Clone)]
 pub struct Root {
     make: Arc<dyn Fn() -> super::AnyElement + Send + Sync>,
-    theme: Option<Arc<super::Theme>>,
+    tokens: Option<Arc<super::Tokens>>,
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
     app_id: Option<String>,
@@ -485,7 +485,7 @@ impl Root {
     pub fn new<C: Component>(props: impl Fn() -> C::Props + Send + Sync + 'static) -> Self {
         Self {
             make: Arc::new(move || super::IntoElement::into_element(C::element(props()))),
-            theme: None,
+            tokens: None,
             fonts: Vec::new(),
             appearance: None,
             app_id: None,
@@ -505,9 +505,10 @@ impl Root {
         self.app_id.as_deref()
     }
 
-    /// Renders with `theme` (by default the default one).
-    pub fn theme(mut self, theme: super::Theme) -> Self {
-        self.theme = Some(Arc::new(theme));
+    /// Renders with design tokens `tokens` (`nsh-base`'s theme's; by
+    /// default the UI sets' defaults).
+    pub fn tokens(mut self, tokens: super::Tokens) -> Self {
+        self.tokens = Some(Arc::new(tokens));
         self
     }
 
@@ -544,9 +545,9 @@ impl Root {
         self.appearance
     }
 
-    /// The theme it renders with.
-    pub fn theme_ref(&self) -> Option<&super::Theme> {
-        self.theme.as_deref()
+    /// The design tokens it renders with.
+    pub fn tokens_ref(&self) -> Option<&super::Tokens> {
+        self.tokens.as_deref()
     }
 
     /// The font files to register.
@@ -622,6 +623,8 @@ pub struct Registry {
     ui_set: Option<&'static str>,
     /// The files its crates ship ([`Registry::assets`]).
     assets: Arc<Vec<&'static [super::AssetFile]>>,
+    /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
+    tokens: Option<super::TokenSource>,
 }
 
 impl fmt::Debug for Registry {
@@ -809,6 +812,7 @@ impl Registry {
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
         for set in sets {
+            out.tokens = out.tokens.or(set.tokens);
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
                 if let Some(old) = types.insert(name, ty.clone()) {
@@ -855,6 +859,20 @@ impl Registry {
     pub fn assets(&mut self, files: &'static [super::AssetFile]) -> &mut Self {
         Arc::make_mut(&mut self.assets).push(files);
         self
+    }
+
+    /// Makes the design tokens of the app's theme file, and the defaults
+    /// (`nsh-base`'s theme): the core reads `nsh.json`'s `"theme"` with it.
+    pub fn tokens_from(&mut self, source: super::TokenSource) -> &mut Self {
+        self.tokens = Some(source);
+        self
+    }
+
+    /// The tokens of theme file `json` (`None`: the defaults), by the
+    /// source a set brings ([`Registry::tokens_from`]; `None`: no set
+    /// does).
+    pub fn tokens(&self, json: Option<&str>) -> Option<Result<super::Tokens, String>> {
+        self.tokens.map(|source| source(json))
     }
 
     /// The files [`Registry::assets`] ships.

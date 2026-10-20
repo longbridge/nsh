@@ -6,6 +6,17 @@ use crate::{
     transform::TransformKind,
 };
 
+/// The Tailwind theme with the design tokens apps have.
+fn themed() -> Theme {
+    let mut theme = Theme::default();
+    theme.set_tokens(&ui_theme());
+    theme
+}
+
+fn ui_theme() -> crate::ui::Tokens {
+    crate::ui::tokens::sample()
+}
+
 fn cx(states: u8) -> (ClassEnvironment, u8) {
     (ClassEnvironment::default(), states)
 }
@@ -17,7 +28,7 @@ fn styled_with(
     window: (f32, f32),
     states: u8,
 ) -> (Style, ClassProps) {
-    let theme = Theme::default();
+    let theme = themed();
     let list = parse(&theme, classes);
     assert!(
         list.unknown().is_empty(),
@@ -108,31 +119,49 @@ fn colors_and_opacity() {
 
 #[test]
 fn theme_tokens() {
-    let ui = crate::ui::Theme::default();
+    let ui = ui_theme();
     let dark = ClassEnvironment {
         dark: true,
         ..Default::default()
     };
     let s = styled("bg-primary text-muted-foreground border border-border rounded-(--radius)");
-    assert_eq!(s.view.background_color, Color::from(ui.primary.light));
-    assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.light)));
-    assert_eq!(s.view.borders.colors[0], Color::from(ui.border.light));
-    assert_eq!(s.view.border_radius, ui.radius);
+    assert_eq!(
+        s.view.background_color,
+        Color::from(ui.color("primary.background").unwrap().light)
+    );
+    assert_eq!(
+        s.text.color,
+        Some(Color::from(ui.color("muted.foreground").unwrap().light))
+    );
+    assert_eq!(
+        s.view.borders.colors[0],
+        Color::from(ui.color("border").unwrap().light)
+    );
+    assert_eq!(s.view.border_radius, px(ui.number("radius").unwrap()));
     let (s, _) = styled_with(
         "bg-primary text-(--muted-foreground)",
         dark,
         (390.0, 844.0),
         0,
     );
-    assert_eq!(s.view.background_color, Color::from(ui.primary.dark));
-    assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.dark)));
+    assert_eq!(
+        s.view.background_color,
+        Color::from(ui.color("primary.background").unwrap().dark)
+    );
+    assert_eq!(
+        s.text.color,
+        Some(Color::from(ui.color("muted.foreground").unwrap().dark))
+    );
     // Opacity modifiers, longer prefixes, variants, the long form.
     let s = styled("bg-primary-background/50 border-t-2 border-t-ring");
     assert_eq!(
         s.view.background_color,
-        Color::from(ui.primary.light).with_alpha(0.5)
+        Color::from(ui.color("primary.background").unwrap().light).with_alpha(0.5)
     );
-    assert_eq!(s.view.borders.colors[0], Color::from(ui.ring.light));
+    assert_eq!(
+        s.view.borders.colors[0],
+        Color::from(ui.color("ring").unwrap().light)
+    );
     // Parts and props: shadows, rings, gradients, the caret, placeholders.
     let (s, props) = styled_with(
         "shadow-md shadow-primary ring-2 ring-ring bg-linear-to-r from-primary to-accent caret-primary placeholder:text-muted-foreground",
@@ -140,57 +169,61 @@ fn theme_tokens() {
         (390.0, 844.0),
         0,
     );
-    assert_eq!(props.caret_color, Some(Color::from(ui.primary.light)));
+    assert_eq!(
+        props.caret_color,
+        Some(Color::from(ui.color("primary.background").unwrap().light))
+    );
     assert_eq!(
         props.placeholder_color,
-        Some(Color::from(ui.muted_foreground.light))
+        Some(Color::from(ui.color("muted.foreground").unwrap().light))
     );
     let e = s.view.effects.as_ref().unwrap();
     assert!(
         e.box_shadows
             .iter()
-            .any(|l| l.color == Color::from(ui.ring.light))
+            .any(|l| l.color == Color::from(ui.color("ring").unwrap().light))
     );
     // The shadow's color keeps each layer's alpha.
-    assert!(
-        e.box_shadows
-            .iter()
-            .any(|l| l.color.0 >> 8 == Color::from(ui.primary.light).0 >> 8)
-    );
+    assert!(e.box_shadows.iter().any(
+        |l| l.color.0 >> 8 == Color::from(ui.color("primary.background").unwrap().light).0 >> 8
+    ));
     let g = &e.background_images[0];
-    assert_eq!(g.stops[0].color, Color::from(ui.primary.light));
+    assert_eq!(
+        g.stops[0].color,
+        Color::from(ui.color("primary.background").unwrap().light)
+    );
     let accent = ui.color("accent.background").unwrap();
     assert_eq!(g.stops.last().unwrap().color, Color::from(accent.light));
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color::from(accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
-    assert_eq!(s.text.font_size, Some(ui.font_size));
-    assert_eq!(s.view.border_radius, ui.radius_lg);
+    assert_eq!(s.text.font_size, Some(px(ui.number("font.size").unwrap())));
+    assert_eq!(s.view.border_radius, px(ui.number("radius.lg").unwrap()));
     // Later utilities still win, in both appearances.
     let (s, _) = styled_with("bg-primary bg-red-500", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color(0xfb2c_36ff));
-    let list = parse(&Theme::default(), "bg-primary p-4");
+    let list = parse(&themed(), "bg-primary p-4");
     assert_ne!(list.deps() & deps::THEME, 0);
     assert_ne!(list.deps() & deps::DARK, 0);
-    assert_eq!(
-        parse(&Theme::default(), "bg-red-500").deps() & deps::THEME,
-        0
-    );
+    assert_eq!(parse(&themed(), "bg-red-500").deps() & deps::THEME, 0);
     // Names that are no token, and variables there are not.
-    let list = parse(&Theme::default(), "bg-nope text-(--nope) w-primary");
+    let list = parse(&themed(), "bg-nope text-(--nope) w-primary");
     assert_eq!(list.unknown().len(), 3);
 }
 
 #[test]
 fn tailwind_colors_win_over_tokens_and_tokens_come_from_the_theme() {
     let mut theme = Theme::from_json(r##"{ "colors": { "primary": "#ff0000" } }"##).unwrap();
-    let ui = crate::ui::Theme::from_json(
-        r##"{ "themes": [
-            { "mode": "light", "radius.card": 10, "colors": { "chart.up": "#00ff00", "chart.grid": "#0000ff" } },
-            { "mode": "dark", "colors": { "chart.up": "#008800" } }
-        ] }"##,
-    )
-    .unwrap();
+    let mut ui = crate::ui::Tokens::default();
+    ui.set_number("radius.card", 10.0);
+    ui.set_color(
+        "chart.up",
+        crate::ui::AdaptiveColor::rgb(0x00ff00, 0x008800),
+    );
+    ui.set_color(
+        "chart.grid",
+        crate::ui::AdaptiveColor::rgb(0x0000ff, 0x0000ff),
+    );
     theme.set_tokens(&ui);
     let group = |_: &str| 0;
     let apply = |classes: &str, dark: bool| {
@@ -485,7 +518,7 @@ fn grid() {
     assert_eq!(s.layout.grid_row.start, named("main"));
     // Invalid arbitrary placements and tracks stay known classes that set
     // nothing (the style logs them); a negative named line is unknown.
-    let theme = Theme::default();
+    let theme = themed();
     let list = parse(
         &theme,
         "col-[1_2] row-start-[1a] auto-rows-[3zz] -col-start-[a]",
@@ -616,7 +649,7 @@ fn grid_utilities_follow_tailwind_css() {
         s.layout.grid_auto_rows,
         Style::default().layout.grid_auto_rows
     );
-    let theme = Theme::default();
+    let theme = themed();
     let negatives = "-grid-cols-2 -grid-rows-[13px] -col-span-2 -row-span-1 -auto-cols-[13px] -auto-rows-fr -col-auto";
     let list = parse(&theme, negatives);
     assert_eq!(list.unknown().len(), 7, "{:?}", list.unknown());
@@ -624,7 +657,7 @@ fn grid_utilities_follow_tailwind_css() {
 
 #[test]
 fn variants() {
-    let theme = Theme::default();
+    let theme = themed();
     let list = parse(
         &theme,
         "bg-white dark:bg-black md:p-8 hover:opacity-80 group-active:scale-95 ios:pt-1 android:pt-2 rtl:ml-2",
@@ -678,7 +711,7 @@ fn variants() {
 
 #[test]
 fn checked_variants() {
-    let theme = Theme::default();
+    let theme = themed();
     let list = parse(&theme, "checked:bg-black group-checked:translate-x-4");
     assert!(list.unknown().is_empty(), "{:?}", list.unknown());
     assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
@@ -713,7 +746,7 @@ fn checked_variants() {
 
 #[test]
 fn groups() {
-    let theme = Theme::default();
+    let theme = themed();
     let root = parse(&theme, "group/card p-2");
     assert_eq!(root.groups(), ["card".into()] as [Box<str>; 1]);
     let child = parse(&theme, "opacity-100 group-hover/card:opacity-50");
@@ -734,7 +767,7 @@ fn groups() {
 
 #[test]
 fn unknown_classes_are_reported() {
-    let theme = Theme::default();
+    let theme = themed();
     let list = parse(&theme, "p-4 bg-nope-500 flexx hover:wat antialiased");
     let unknown: Vec<&str> = list.unknown().iter().map(|s| &**s).collect();
     assert_eq!(unknown, ["bg-nope-500", "flexx", "hover:wat"]);

@@ -5,6 +5,7 @@
 
 use std::{rc::Rc, time::Duration};
 
+use nsh_base::theme;
 use nsh_core::ui::{Registry, prelude::*};
 
 /// The module the tests' apps import these components from.
@@ -70,9 +71,9 @@ fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColo
     let theme = theme();
     match variant {
         ButtonVariant::Primary => (
-            theme.primary,
-            theme.primary_active,
-            theme.primary_foreground,
+            theme.primary(),
+            theme.primary_active(),
+            theme.primary_foreground(),
         ),
         ButtonVariant::Secondary => {
             let color = |key| theme.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
@@ -82,13 +83,17 @@ fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColo
                 color("secondary.foreground"),
             )
         }
-        ButtonVariant::Danger => (theme.danger, theme.danger_active, theme.danger_foreground),
+        ButtonVariant::Danger => (
+            theme.danger(),
+            theme.danger_active(),
+            theme.danger_foreground(),
+        ),
         ButtonVariant::Plain => (
             AdaptiveColor::TRANSPARENT,
             theme
                 .color("accent.background")
                 .unwrap_or(AdaptiveColor::TRANSPARENT),
-            theme.foreground,
+            theme.foreground(),
         ),
     }
 }
@@ -103,7 +108,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .justify_center()
         .px_4()
         .py_3()
-        .rounded(move || theme().radius)
+        .rounded(move || theme().radius())
         .bg(move || colors.get().0)
         .active(|s| s.bg(move || colors.get().1))
         .style_when(props.disabled, |v| v.opacity(0.5))
@@ -118,7 +123,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .child(
             text(props.title)
-                .text_size(move || theme().font_size)
+                .text_size(move || theme().font_size())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(move || colors.get().2),
         )
@@ -171,7 +176,7 @@ pub(crate) fn Group(props: GroupProps) -> impl IntoElement {
             .py_3()
             .style_when(
                 move || !at.is_first(),
-                |s| s.border_t_1().border_color(move || theme().border),
+                |s| s.border_t_1().border_color(move || theme().border()),
             )
             .child(row)
     })
@@ -220,7 +225,7 @@ pub(crate) fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoEl
                 .min_h(px(48.0))
                 .style_when(
                     move || !at.is_first(),
-                    |v| v.border_t_1().border_color(move || theme().border),
+                    |v| v.border_t_1().border_color(move || theme().border()),
                 )
                 .style_when(
                     move || inset.get() && at.is_first(),

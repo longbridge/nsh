@@ -523,8 +523,7 @@ fn root_config(
     };
     if let Some(theme) = &theme {
         let json = fs::read_to_string(theme)?;
-        nsh_core::ui::Theme::from_json(&json)
-            .map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
+        nsh_base::Theme::from_json(&json).map_err(|e| anyhow::anyhow!("nsh.json: theme: {e}"))?;
     }
     let appearance = match config.get("appearance").and_then(|a| a.as_str()) {
         None | Some("system") => None,
@@ -1734,8 +1733,8 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!("nsh_core::ui::Root::of::<{krate}::{}>()", root.component);
     if let Some(theme) = &root.theme {
         make.push_str(&format!(
-            "\n        .theme(\n            nsh_core::ui::Theme::from_json(include_str!({:?}))\n                \
-             .expect(\"nsh.json: theme\"),\n        )",
+            "\n        .tokens(\n            nsh_base::Theme::from_json(include_str!({:?}))\n                \
+             .expect(\"nsh.json: theme\")\n                .into_tokens(),\n        )",
             theme.to_string_lossy()
         ));
     }

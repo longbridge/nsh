@@ -33,7 +33,7 @@ use rustc_hash::FxHashMap;
 pub use self::theme::{Theme, ThemeError};
 pub(crate) use self::utilities::{Decl, Len, Part};
 use self::{
-    theme::Tokens,
+    theme::ClassTokens,
     utilities::{Parts, touched},
 };
 use crate::{
@@ -541,12 +541,12 @@ impl Tailwind {
         self.cache.clear();
     }
 
-    /// Takes the tokens of component theme `theme`. Returns which classes
+    /// Takes design tokens `theme`. Returns which classes
     /// to resolve again: none ([`None`]) when the tokens did not change,
     /// those that name tokens ([`deps::THEME`]) when only their values
     /// did, else all (`u16::MAX`: unknown classes may name new ones).
-    pub(crate) fn set_tokens(&mut self, theme: &crate::ui::Theme) -> Option<u16> {
-        let tokens = Tokens::new(theme);
+    pub(crate) fn set_tokens(&mut self, theme: &crate::ui::Tokens) -> Option<u16> {
+        let tokens = ClassTokens::new(theme);
         let current = self.theme.tokens();
         if *current == tokens {
             return None;

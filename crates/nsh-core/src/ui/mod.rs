@@ -5,7 +5,7 @@
 //! A [`Component`] is a function that runs once ([`Component::view`]) and
 //! makes a tree of elements ([`view`], [`text`], [`image`], other
 //! components) styled with typed methods ([`Styled`]: `.px_4()`,
-//! `.rounded_xl()`, `.bg(theme().primary)`) that lower into the same rules
+//! `.rounded_xl()`, `.bg(rgb(0x2563eb))`) that lower into the same rules
 //! as Tailwind classes. The core expands the tree into nodes of its own and
 //! lays it out in the same pass as everything else, so a component sizes
 //! like any view, with no round trip. What changes is bound: a text, prop
@@ -15,16 +15,16 @@
 //! is signals the view makes (under the component's owner: they go with
 //! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
 //! component's listeners hear its elements' events first and decide what
-//! reaches JS ([`Scope::emit`]). The environment and the theme are signals
-//! too ([`ambient::window`], [`ambient::theme`]): reading one in a binding
+//! reaches JS ([`Scope::emit`]). The environment and the design tokens are
+//! signals too ([`ambient::window`], [`ambient::tokens`]): reading one in a binding
 //! subscribes it.
 //!
 //! Props are a struct (`#[derive(Props)]`), events an enum
 //! (`#[derive(Event)]`); their JS face (`nsh-js`) and TypeScript
 //! declarations ([`declarations`]) are made from them. In JS a component is one host node:
 //! the root of its expansion. The app's `class` is appended to the root's
-//! styles and its `style` stays the root's inline style. Colors come from
-//! the [`Theme`], with a light and a dark value each.
+//! styles and its `style` stays the root's inline style. Colors have a
+//! light and a dark value each ([`AdaptiveColor`]; the design [`Tokens`]).
 //!
 //! Node ids: JS allocates even ids, the core odd ones for the nodes it
 //! expands, so both stay dense. How the core runs components:
@@ -63,7 +63,7 @@ pub(crate) mod status_bar;
 mod style;
 mod system;
 pub(crate) mod task;
-mod theme;
+pub(crate) mod tokens;
 mod value;
 pub(crate) mod virtual_list;
 
@@ -161,7 +161,7 @@ pub use self::{
         Quotas, System, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
-    theme::{Theme, ThemeColors, ThemeError},
+    tokens::{TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
@@ -325,9 +325,9 @@ pub mod prelude {
         System,
         Task,
         Text,
-        Theme,
         Timing,
         ToastDuration,
+        Tokens,
         TouchClaim,
         Video,
         VideoInfo,
@@ -392,7 +392,7 @@ pub mod prelude {
             next_frame, on_back_press, on_key, on_key_with, os, os_version, pixel_ratio,
             prefetch_image, reduce_motion, request_animation_frame, round_to_nearest_pixel, rtl,
             safe_area, screen_reader, set_clipboard, set_clipboard_image, set_color_scheme,
-            set_interval, set_timeout, spawn, theme, timer, timer_until, toast, window,
+            set_interval, set_timeout, spawn, timer, timer_until, toast, tokens, window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context,
         resource, resource_with_value, signal, signal_with, stored, untracked, use_context,

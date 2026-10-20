@@ -127,9 +127,9 @@ NSH draws (`src/layers.rs`).
 - **Overlays.** The surface draws only inside its bounds and takes the mouse only on its hitbox: GPUI Kit's dialogs,
   sheets, popovers and notifications (drawn by `Root` above the content) cover it and take the input, while its app
   keeps running.
-- **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
-  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the Rust
-  components (the app's UI sets) render with it instead of the app's own theme (`Core::set_host_theme`, which wins until cleared with
+- **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_base::Theme`
+  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the app
+  renders with its tokens instead of its own theme's (`Core::set_host_tokens`, which win until cleared with
   `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
   `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
   keys it lacks keep the app's values. It applies at once and to every app loaded later, in their

@@ -4953,6 +4953,7 @@ name = "nsh-base"
 version = "0.1.1"
 dependencies = [
  "nsh-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -4961,6 +4962,7 @@ version = "0.1.1"
 dependencies = [
  "dunce",
  "log",
+ "nsh-base",
  "nsh-core",
  "oxc",
  "oxc_sourcemap",

@@ -162,17 +162,23 @@ export function A(p: { on: boolean }) {
     #[test]
     fn theme_tokens_are_classes() {
         let source = r#"<View class="bg-primary text-muted-foreground bg-chart-up rounded-(--radius-card)" />"#;
-        let found = check(source, SourceType::tsx(), &Theme::default());
+        let themed = |theme: nsh_base::Theme| {
+            let mut tailwind = Theme::default();
+            tailwind.set_tokens(theme.tokens());
+            tailwind
+        };
+        let found = check(
+            source,
+            SourceType::tsx(),
+            &themed(nsh_base::Theme::default()),
+        );
         let names: Vec<&str> = found.iter().map(|u| u.class.as_str()).collect();
         assert_eq!(names, ["bg-chart-up", "rounded-(--radius-card)"]);
         // The app's own theme (`nsh.json` `"theme"`) adds its keys.
-        let mut theme = Theme::default();
-        theme.set_tokens(
-            &nsh_core::ui::Theme::from_json(
-                r##"{ "themes": [{ "radius.card": 10, "colors": { "chart.up": "#00ff00" } }] }"##,
-            )
-            .unwrap(),
-        );
-        assert!(check(source, SourceType::tsx(), &theme).is_empty());
+        let theme = nsh_base::Theme::from_json(
+            r##"{ "themes": [{ "radius.card": 10, "colors": { "chart.up": "#00ff00" } }] }"##,
+        )
+        .unwrap();
+        assert!(check(source, SourceType::tsx(), &themed(theme)).is_empty());
     }
 }

@@ -1,7 +1,7 @@
 //! What components that run once read of the surface and ask of the
 //! platform, as free functions (TS: `nsh`'s accessors and modules).
 //!
-//! The environment, the theme, globals and screens' insets are signals the
+//! The environment, the design tokens, globals and screens' insets are signals the
 //! core writes: reading one in a binding subscribes it, so a change reaches
 //! only what read it. Services (dialogs, the clipboard, toasts) are actions
 //! for the core; tasks and timers belong to the current owner and end with
@@ -18,7 +18,7 @@ use std::{
 use rustc_hash::FxHashMap;
 
 use super::{
-    AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Theme, cleanup, computed,
+    AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
     task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
@@ -39,7 +39,7 @@ pub(crate) type MeasureFn = Rc<dyn Fn(&CanvasFont, &str) -> f32>;
 pub(crate) struct Ambient {
     executor: Option<Rc<Executor>>,
     env: Option<EnvSignals>,
-    theme: Option<Signal<Arc<Theme>>>,
+    tokens: Option<Signal<Arc<Tokens>>>,
     globals: FxHashMap<TypeId, Box<dyn Any>>,
     /// The insets of the screens or modals components are on, by host.
     insets: FxHashMap<NodeId, Signal<EdgeInsets>>,
@@ -135,15 +135,15 @@ impl super::Runtime {
         }
     }
 
-    /// The theme now: what read it runs again.
-    pub(crate) fn set_theme(&self, theme: Arc<Theme>) {
+    /// The design tokens now: what read them runs again.
+    pub(crate) fn set_tokens(&self, tokens: Arc<Tokens>) {
         let _entered = self.enter();
-        let signal = with_data(|d| d.ambient.theme);
+        let signal = with_data(|d| d.ambient.tokens);
         match signal {
-            Some(signal) => signal.set(theme),
+            Some(signal) => signal.set(tokens),
             None => {
-                let signal = Owner::detached().run(|| signal_with(theme, SignalEquals::Never));
-                with_data(|d| d.ambient.theme = Some(signal));
+                let signal = Owner::detached().run(|| signal_with(tokens, SignalEquals::Never));
+                with_data(|d| d.ambient.tokens = Some(signal));
             }
         }
     }
@@ -286,11 +286,11 @@ pub fn is_desktop() -> bool {
         .with_untracked(|e| e.idiom.desktop_on(e.os))
 }
 
-/// The app's theme (reading it subscribes: a new theme reaches what read
-/// it).
-pub fn theme() -> Arc<Theme> {
-    with_data(|d| d.ambient.theme)
-        .expect("the core sets the theme")
+/// The design tokens the app is drawn with (reading them subscribes: new
+/// tokens reach what read them).
+pub fn tokens() -> Arc<Tokens> {
+    with_data(|d| d.ambient.tokens)
+        .expect("the core sets the tokens")
         .get()
 }
 

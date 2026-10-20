@@ -266,6 +266,7 @@ ui::style::Styled::scale_y(scale)                                # a scale facto
 ui::style::Styled::sepia(amount)                                 # a filter amount (1 leaves the image as it is)
 ui::style::Styled::shadow_opacity(opacity)                       # an opacity, 0..1
 ui::style::Styled::transform_step(amount)                        # a transform operand (any of its kinds' units)
-ui::theme::Theme::number ->                                      # a generic number (a JS value, a recorded slot)
-ui::theme::Theme::set_number(value)                              # a generic number (a JS value, a recorded slot)
+ui::tokens::Tokens::number ->                                    # a design token: a generic number (a radius, a size, a ratio)
+ui::tokens::Tokens::numbers ->                                   # a design token: a generic number (a radius, a size, a ratio)
+ui::tokens::Tokens::set_number(value)                            # a design token: a generic number (a radius, a size, a ratio)
 ui::virtual_list::VirtualList::end_reached_threshold(viewports)  # in viewport lengths (a ratio)

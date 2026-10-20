@@ -2,7 +2,7 @@
 //! and `cargo run` mount.
 
 use nsh_core::ui::prelude::*;
-use nsh_base::{SafeAreaView, SafeAreaViewProps};
+use nsh_base::{SafeAreaView, SafeAreaViewProps, theme};
 
 /// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
 /// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").
@@ -17,8 +17,8 @@ pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
     view()
         .flex_1()
-        .bg(move || theme().background)
-        .text_color(move || theme().foreground)
+        .bg(move || theme().background())
+        .text_color(move || theme().foreground())
         .child(
             SafeAreaView::element(SafeAreaViewProps::default())
                 .flex_1()
@@ -34,13 +34,13 @@ pub fn App() -> impl IntoElement {
                                 .px_5()
                                 .py_3()
                                 .rounded(px(10.0))
-                                .bg(move || theme().primary)
+                                .bg(move || theme().primary())
                                 .active(|s| s.opacity(0.6))
                                 .on_press(move |_: &()| count.update(|value| *value += 1))
                                 .child(
                                     text("Tap")
                                         .text_size(px(17.0))
-                                        .text_color(move || theme().primary_foreground),
+                                        .text_color(move || theme().primary_foreground()),
                                 ),
                         ),
                 ),

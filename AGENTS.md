@@ -29,7 +29,7 @@ crates/
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); the native animation graph (`animation/`: value / interpolate /
                        math nodes, timing / spring / decay drivers; the platforms evaluate it every frame);
-                       Rust components that run once (`ui/`: signals, elements, bindings, typed styles, the theme;
+                       Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
                        toolchain (`ui/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
@@ -38,7 +38,9 @@ crates/
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
                        app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, safe areas, the keyboard, the status
-                       bar, written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs
+                       bar, written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
+                       the theme (`theme.rs`, as `gpui-base`'s: gpui-kit's theme files, semantic tokens and their defaults, which
+                       the core keeps as design tokens and no component of `nsh-base` draws with)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
@@ -286,11 +288,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
   (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
   (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt` (beside two pre-release changes: an alignment with Tailwind CSS and the fixtures merged by domain). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
+  `api/closed.txt` (beside three pre-release changes: an alignment with Tailwind CSS, the fixtures merged by domain and the theme moved to `nsh-base`). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
   --keep`); fixtures and their steps never change, and while they pass, old apps keep working
   (`docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
-  in `nsh-base`; a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
+  in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
   slot), no dialog card, scrim or shadow, no native press fade (press feedback is the app's `activeStyle` /

@@ -229,8 +229,11 @@ struct Resolver {
 
 impl Resolver {
     fn new() -> Self {
+        // Apps' classes name the tokens of `nsh/base`'s default theme.
+        let mut theme = Theme::default();
+        theme.set_tokens(nsh_base::Theme::default().tokens());
         Self {
-            theme: Theme::default(),
+            theme,
             default: Style::default(),
             places: places(),
         }

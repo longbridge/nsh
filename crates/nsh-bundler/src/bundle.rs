@@ -258,13 +258,17 @@ impl ResolveSetup {
 /// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
 /// to `nsh.json`) or its content.
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
+    let mut setup = plugin::ThemeSetup::default();
+    // The theme's tokens are classes (`bg-primary`): the default's unless
+    // the app sets its own.
+    let mut tokens = nsh_base::Theme::default().into_tokens();
     let path = dir.join("nsh.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return Ok(Arc::default());
+        setup.theme.set_tokens(&tokens);
+        return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
-    let mut setup = plugin::ThemeSetup::default();
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
         setup.theme = nsh_core::tailwind::Theme::from_json(&json)
@@ -277,12 +281,12 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
             v => v.to_string(),
         };
-        let ui = nsh_core::ui::Theme::from_json(&json)
-            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
-        // Its tokens are classes too (`bg-primary`).
-        setup.theme.set_tokens(&ui);
+        tokens = nsh_base::Theme::from_json(&json)
+            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
+            .into_tokens();
         setup.ui = Some(json);
     }
+    setup.theme.set_tokens(&tokens);
     if let Some(appearance) = config.get("appearance") {
         setup.appearance = match appearance.as_str() {
             Some("light") => Some("light"),

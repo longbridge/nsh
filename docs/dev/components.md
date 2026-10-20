@@ -53,11 +53,11 @@ come from two places:
 - **A component runs once** and makes its view with `view()`, `text()`, `image()` and other components
   (`SafeAreaView::element(props)`), styled with GPUI-style methods (`.px_4()`, `.rounded(px(16.0))`, `.active(|s|
   s.bg(..))`). What changes is a **binding**: a closure or a signal where the value goes (`text(props.label)`,
-  `.bg(move || theme().primary)`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
+  `.bg(move || theme().primary())`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
   is updated. A prop is read with `props.x.get()` in a binding and `get_untracked()` in a listener. The root can be
   any element; the app's `class` (merged last, it wins) and `style` apply to it.
-- **Colors come from the theme** (`theme()`: gpui-kit's semantic fields, a light and a dark value each), not
-  literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
+- **Colors come from the theme** (`nsh_base::theme()`: gpui-kit's semantic tokens, a light and a dark value each),
+  not literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
   variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `If::new(cond, ||
@@ -108,11 +108,11 @@ pub fn Chip(props: ChipProps, cx: Scope<ChipEvent>) -> impl IntoElement {
     view()
         .px_3()
         .py_1()
-        .rounded(move || theme().radius)
-        .bg(move || theme().muted)
-        .active(|s| s.bg(move || theme().border))
+        .rounded(move || theme().radius())
+        .bg(move || theme().muted())
+        .active(|s| s.bg(move || theme().border()))
         .on_press(move || cx.emit(ChipEvent::Press))
-        .child(text(props.label).text_color(move || theme().foreground))
+        .child(text(props.label).text_color(move || theme().foreground()))
 }
 ```
 
@@ -228,7 +228,7 @@ reasons: `reactive-components.md`.
   animated values take `f32`, `Points` or `Radians` too.
   `canvas(move || draw(..))` draws in a binding: again when what it read changes (a size kept from `on_layout`, the
   appearance through `color(..)`); a new drawing replaces the old one. Props that take a plain color (an input's
-  placeholder color) take `move || color(theme().muted_foreground)`: the theme color for the appearance now.
+  placeholder color) take `move || color(theme().muted_foreground())`: the theme color for the appearance now.
 - **What TS does, in Rust**:
 
   | TS | Rust component |
@@ -521,19 +521,25 @@ is no string to parse and no `.class()`.
 
 ## The theme
 
-`Theme` (`ui/theme.rs`) has a few semantic colors as fields (`background`, `foreground`, `border`, `primary`,
-`primary_active`, `primary_foreground`, `danger`, `danger_active`, `danger_foreground`, `muted`,
-`muted_foreground`, `overlay`, `ring`: the ones components read; every other key is kept by key) plus `radius`, `radius_lg` and `font_size` (`Points`), and derefs to its colors (`theme.primary`). The default
-(`default-theme.json`) is gpui-kit's default theme with mobile radii. An app sets its own in `nsh.json`: `"theme":
-"brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys no field has (desktop
-components', the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` /
-`set_number`): tokens of the app's classes (`styles.md`), a host's theme inheriting the app's it lacks; a pressed color the theme leaves out is derived from its base; null colors (gpui-kit serializes unset
-ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the theme; the entry
-hands it to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any view is made.
-`theme()` reads it from a signal of the surface: a new theme runs again the bindings that read it. An embedding app
-can give a surface its own theme (`Core::set_host_theme`, `EngineControl::set_theme`; sent from
-`Engine::start_with`'s `setup` it is in the first frame): it wins over the app's until cleared, so an embedded app
-looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").
+The core has no theme, as GPUI has none: it keeps **design tokens** (`ui::Tokens`: colors with a light and a dark
+value, and numbers, by key), gives no key a meaning and has none of its own. The theme is `nsh/base`'s, as
+`gpui-base`'s is: `nsh_base::Theme` (`crates/nsh-base/src/theme.rs`) reads gpui-kit's theme files, names the semantic
+tokens (`background`, `foreground`, `border`, `primary` / `primary_active` / `primary_foreground`, `danger` /
+`danger_active` / `danger_foreground`, `muted` / `muted_foreground`, `overlay`, `ring`, `radius`, `radius_lg`,
+`font_size`) and brings the defaults (`default-theme.json`, gpui-kit's default theme with mobile radii); no component
+of `nsh/base` draws with them. An app sets its own in `nsh.json`: `"theme": "brand.json"` (a gpui-kit theme file,
+relative to `nsh.json`) or the same JSON inline, over the default. Keys the theme does not name (desktop components',
+the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` / `set_number`):
+tokens of the app's classes (`styles.md`); a pressed color (`X.active.background`) the file leaves out is derived from
+its base; null colors (gpui-kit serializes unset ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the
+theme; the entry hands the file to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any
+view is made; the core makes tokens of it with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s
+`tokens_of`, which also gives the defaults when the engine starts). A Rust app's root carries them
+(`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of the surface (`ui::ambient::tokens`): new
+tokens run again the bindings that read them. An embedding app can give a surface its own (`Core::set_host_tokens`,
+`EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they are in the first frame): they win over the
+app's until cleared, and the app's keys they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
+and GPUI Kit apps").
 
 ## The host node and ids
 

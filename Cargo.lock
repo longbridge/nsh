@@ -2720,6 +2720,7 @@ name = "nsh-base"
 version = "0.1.1"
 dependencies = [
  "nsh-core",
+ "serde_json",
 ]
 
 [[package]]

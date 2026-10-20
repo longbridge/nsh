@@ -185,7 +185,7 @@ pub(crate) struct Surface {
     pub(crate) batches: Cell<u64>,
     /// The embedding app's theme ([`crate::AppView::set_theme`]): sent to
     /// every engine the surface starts, before its first frame.
-    pub(crate) host_theme: RefCell<Option<nsh_engine::Theme>>,
+    pub(crate) host_theme: RefCell<Option<nsh_base::Theme>>,
     /// The embedding app's appearance (dark or not), standing in for the
     /// window's ([`crate::AppView::set_appearance`]).
     pub(crate) host_dark: Cell<Option<bool>>,
@@ -304,8 +304,8 @@ impl Surface {
             move || GpuiTextEngine::new(text_system, family),
             sink,
             |control| {
-                if theme.is_some() {
-                    control.set_theme(theme);
+                if let Some(theme) = theme {
+                    control.set_tokens(Some(theme.into_tokens()));
                 }
             },
         ) {

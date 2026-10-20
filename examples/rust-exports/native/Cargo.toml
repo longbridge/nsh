@@ -11,10 +11,10 @@ workspace = true
 
 [dependencies]
 nsh-core.workspace = true
+nsh-base.workspace = true
 
 # The headless test runs `App.tsx` against this crate's set: `nsh-testing`
 # builds it (with the bundler and QuickJS) and runs it.
 [dev-dependencies]
 nsh-engine.workspace = true
 nsh-testing = { workspace = true, features = ["bundle"] }
-nsh-base.workspace = true

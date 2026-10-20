@@ -789,8 +789,8 @@ impl Element for SurfaceElement {
         // Embedded with a theme, the surface is drawn on the host's
         // background.
         let background = match &*surface.host_theme.borrow() {
-            Some(theme) if dark => theme.background.dark.into(),
-            Some(theme) => theme.background.light.into(),
+            Some(theme) if dark => theme.background().dark.into(),
+            Some(theme) => theme.background().light.into(),
             None => crate::system::window_background(&surface),
         };
         if background.0 & 0xff != 0 {

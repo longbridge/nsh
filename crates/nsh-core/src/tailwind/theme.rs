@@ -1,7 +1,7 @@
 //! The design tokens classes resolve against: Tailwind CSS v4.1's default
 //! theme (`theme.css`) in points (1rem = 16pt), extended by the app's
-//! `nsh.json` (`"tailwind": { ... }`), and the component theme's tokens
-//! ([`Tokens`]).
+//! `nsh.json` (`"tailwind": { ... }`), and the app's design tokens
+//! ([`ClassTokens`]).
 
 use std::{
     fmt::Write,
@@ -60,12 +60,11 @@ pub struct Theme {
     pub(crate) ease: FxHashMap<Box<str>, [f32; 4]>,
     /// Default transition duration (ms) and curve.
     pub(crate) transition: (f32, [f32; 4]),
-    /// The component theme's tokens (`None`: the default theme's).
-    tokens: Option<Arc<Tokens>>,
+    /// The design tokens classes name (`None`: none).
+    tokens: Option<Arc<ClassTokens>>,
 }
 
-/// The colors and numbers of the component theme (`crate::ui::Theme`) by
-/// the names classes give them: a key's dots are dashes (`muted.foreground`
+/// The design tokens (`crate::ui::Tokens`) by the names classes give them: a key's dots are dashes (`muted.foreground`
 /// is `muted-foreground`) and `.background` may be left out (`primary` is
 /// `primary.background`). Colors are names of the color utilities
 /// (`bg-primary`, `text-muted-foreground/70`) when the Tailwind theme has no
@@ -74,36 +73,36 @@ pub struct Theme {
 ///
 /// Classes naming them are parsed with each appearance's values (one rule
 /// per appearance when they differ), so applying them costs what a palette
-/// color does; when the theme changes, only they are parsed again
+/// color does; when the tokens change, only they are parsed again
 /// ([`super::deps::THEME`]).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct Tokens {
+pub(crate) struct ClassTokens {
     colors: FxHashMap<Box<str>, AdaptiveColor>,
     numbers: FxHashMap<Box<str>, f32>,
 }
 
-static DEFAULT_TOKENS: LazyLock<Arc<Tokens>> =
-    LazyLock::new(|| Arc::new(Tokens::new(&crate::ui::Theme::default())));
+static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
+    LazyLock::new(|| Arc::new(ClassTokens::new(&crate::ui::Tokens::default())));
 
-impl Tokens {
-    /// The tokens of `theme`.
-    pub(crate) fn new(theme: &crate::ui::Theme) -> Self {
-        let mut tokens = Tokens::default();
+impl ClassTokens {
+    /// The names classes give `theme`'s tokens.
+    pub(crate) fn new(theme: &crate::ui::Tokens) -> Self {
+        let mut tokens = ClassTokens::default();
         // Exact names win over the short ones: set after them.
         let mut exact = Vec::new();
-        theme.each_color(|key, c| {
+        for (key, c) in theme.colors() {
             let name = key.replace('.', "-");
             if let Some(short) = name.strip_suffix("-background") {
                 tokens.colors.insert(short.into(), c);
             }
             exact.push((name, c));
-        });
+        }
         for (name, c) in exact {
             tokens.colors.insert(name.into(), c);
         }
-        theme.each_number(|key, n| {
+        for (key, n) in theme.numbers() {
             tokens.numbers.insert(key.replace('.', "-").into(), n);
-        });
+        }
         tokens
     }
 
@@ -114,7 +113,7 @@ impl Tokens {
 
     /// Whether `self` and `other` have the same names (only their values
     /// may differ).
-    pub(crate) fn same_names(&self, other: &Tokens) -> bool {
+    pub(crate) fn same_names(&self, other: &ClassTokens) -> bool {
         self.colors.len() == other.colors.len()
             && self.numbers.len() == other.numbers.len()
             && self.colors.keys().all(|k| other.colors.contains_key(k))
@@ -611,7 +610,7 @@ impl Theme {
     }
 
     /// A color by name (`red-500`, `brand`).
-    pub(crate) fn color(&self, name: &str) -> Option<Color> {
+    pub fn color(&self, name: &str) -> Option<Color> {
         self.colors.get(name).copied()
     }
 
@@ -656,15 +655,15 @@ impl Theme {
         names
     }
 
-    /// The component theme's tokens classes name.
-    pub(crate) fn tokens(&self) -> &Tokens {
+    /// The design tokens classes name.
+    pub(crate) fn tokens(&self) -> &ClassTokens {
         self.tokens.as_deref().unwrap_or(&DEFAULT_TOKENS)
     }
 
-    /// Takes the tokens of `theme` (a component theme), which classes such
-    /// as `bg-primary` name. Without it they are the default theme's.
-    pub fn set_tokens(&mut self, theme: &crate::ui::Theme) {
-        self.tokens = Some(Arc::new(Tokens::new(theme)));
+    /// Takes design tokens `theme`, which classes such as `bg-primary`
+    /// name. Without them classes name none.
+    pub fn set_tokens(&mut self, theme: &crate::ui::Tokens) {
+        self.tokens = Some(Arc::new(ClassTokens::new(theme)));
     }
 
     /// The tokens of another theme.
@@ -673,7 +672,7 @@ impl Theme {
     }
 
     /// Replaces the tokens.
-    pub(crate) fn replace_tokens(&mut self, tokens: Arc<Tokens>) {
+    pub(crate) fn replace_tokens(&mut self, tokens: Arc<ClassTokens>) {
         self.tokens = Some(tokens);
     }
 }

@@ -5,9 +5,10 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
+use nsh_base::{Theme, theme};
 use nsh_core::{
     ApproxTextEngine, Color, MountBatch, MountItem, Size,
-    ui::{Root, Theme, prelude::*},
+    ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
 
@@ -16,7 +17,12 @@ use crate::ChannelSink;
 /// A square of the theme's primary color.
 #[component]
 fn Swatch() -> impl IntoElement {
-    view().size_10().bg(move || theme().primary)
+    view().size_10().bg(move || theme().primary())
+}
+
+/// The primary color of a theme that sets none: `nsh-base`'s default.
+fn default_primary() -> Color {
+    Color::from(Theme::default().primary().light)
 }
 
 fn themed(hex: &str) -> Theme {
@@ -30,7 +36,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut root = Root::new::<Swatch>(|| ());
     if let Some(theme) = app_theme {
-        root = root.theme(theme);
+        root = root.tokens(theme.into_tokens());
     }
     let config = EngineConfig {
         app: App::Rust(root),
@@ -54,8 +60,8 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         || ApproxTextEngine,
         ChannelSink(tx),
         |control| {
-            if host_theme.is_some() {
-                control.set_theme(host_theme);
+            if let Some(theme) = host_theme {
+                control.set_tokens(Some(theme.into_tokens()));
             }
         },
     )
@@ -97,9 +103,11 @@ fn a_host_theme_sent_before_the_start_is_in_the_first_frame() {
 fn the_host_theme_updates_the_views_and_gives_way_to_the_apps_when_cleared() {
     let (engine, rx) = start(Some(themed("#0000ff")), None);
     assert_eq!(backgrounds(&rx), vec![Color(0x0000ffff)]);
-    engine.control().set_theme(Some(themed("#00ff00")));
+    engine
+        .control()
+        .set_tokens(Some(themed("#00ff00").into_tokens()));
     assert_eq!(backgrounds(&rx), vec![Color(0x00ff00ff)]);
-    engine.control().set_theme(None);
+    engine.control().set_tokens(None);
     assert_eq!(backgrounds(&rx), vec![Color(0x0000ffff)]);
 }
 
@@ -135,23 +143,19 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         environment: Environment::default(),
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
-        ui_sets: Vec::new(),
+        ui_sets: vec![nsh_base::registry()],
         runtime: None,
         data_dir: None,
         storage: None,
         clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    assert_eq!(
-        backgrounds(&rx),
-        vec![Color::from(Theme::default().primary.light)]
-    );
-    engine.control().set_theme(Some(themed("#00ff00")));
+    assert_eq!(backgrounds(&rx), vec![default_primary()]);
+    engine
+        .control()
+        .set_tokens(Some(themed("#00ff00").into_tokens()));
     assert_eq!(backgrounds(&rx), vec![Color(0x00ff00ff)]);
-    engine.control().set_theme(None);
-    assert_eq!(
-        backgrounds(&rx),
-        vec![Color::from(Theme::default().primary.light)]
-    );
+    engine.control().set_tokens(None);
+    assert_eq!(backgrounds(&rx), vec![default_primary()]);
     let _ = std::fs::remove_dir_all(&dir);
 }

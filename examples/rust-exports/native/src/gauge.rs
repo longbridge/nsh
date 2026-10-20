@@ -1,5 +1,6 @@
 //! A component: `<Gauge value={…} max={…} label="…" onChange={…}>…</Gauge>`.
 
+use nsh_base::theme;
 use nsh_core::ui::prelude::*;
 
 /// The props of [`Gauge`].
@@ -42,10 +43,10 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
     view()
         .gap_2()
         .p_4()
-        .rounded(move || theme().radius_lg)
-        .bg(move || theme().muted)
+        .rounded(move || theme().radius_lg())
+        .bg(move || theme().muted())
         .border_1()
-        .border_color(move || theme().border)
+        .border_color(move || theme().border())
         .active(|s| s.opacity(0.7))
         .on_press(move || {
             let (value, max, step) = (
@@ -67,19 +68,19 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
                 .child(
                     text(move || props.label.get().unwrap_or_else(|| "Budget".into()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(move || theme().foreground),
+                        .text_color(move || theme().foreground()),
                 )
                 .child(
                     text(move || format!("{:.0}%", fraction() * 100.0))
                         .tabular_nums()
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().muted_foreground()),
                 ),
         )
         .child(
             view()
                 .h(px(10.0))
                 .rounded(px(5.0))
-                .bg(move || theme().border)
+                .bg(move || theme().border())
                 .child(
                     view()
                         .h(px(10.0))
@@ -87,9 +88,9 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
                         .w(move || relative(fraction()))
                         .bg(move || {
                             if fraction() >= 1.0 {
-                                theme().danger
+                                theme().danger()
                             } else {
-                                theme().primary
+                                theme().primary()
                             }
                         }),
                 ),

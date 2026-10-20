@@ -45,6 +45,7 @@ nsh package --target web       # or ios, ios-simulator, android, macos, linux, w
 `src/lib.rs` holds the app: components, state, handlers, tasks.
 
 ```rust
+use nsh_base::theme;
 use nsh_core::ui::prelude::*;
 
 /// The components available to TSX through `app/native`.
@@ -75,12 +76,12 @@ pub fn App() -> impl IntoElement {
             view()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || px(theme().radius))
-                .bg(move || theme().primary)
-                .active(|s| s.bg(move || theme().primary_active))
+                .rounded(move || theme().radius())
+                .bg(move || theme().primary())
+                .active(|s| s.bg(move || theme().primary_active()))
                 .role(AccessibilityRole::Button)
                 .on_press(move |_: &()| count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground)),
+                .child(text("Tap").text_color(move || theme().primary_foreground())),
         )
 }
 ```
@@ -370,9 +371,9 @@ batches to a test that keeps its own model of the screen. `examples/rust-exports
 ## Theme
 
 The look of an app is the app's own: NSH provides the primitives and the unstyled base components of `nsh_base`, and
-your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radii and base font size from a theme, `theme()` in
-`nsh_core::ui::prelude`, so one file restyles every component of the app. Each color has a light and a dark value;
-when the system switches appearance, a binding such as `.bg(move || theme().primary)` changes color natively, with no
+your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radii and base font size from a theme, `theme()` from
+`nsh_base`, so one file restyles every component of the app. Each color has a light and a dark value;
+when the system switches appearance, a binding such as `.bg(move || theme().primary())` changes color natively, with no
 render.
 
 The default theme is gpui-kit's default theme, a neutral black-and-white palette, with mobile corner radii. To use
@@ -418,8 +419,8 @@ The format is gpui-kit's theme file format. Each entry in `themes` sets the valu
 - Your theme is applied over the default theme, so you list only what you change.
 - Colors are CSS colors (`#7c3aed`, `rgb(…)`, `white`) or names from Tailwind's default palette (`neutral-900`,
   `red-500`). The colors of `nsh.json`'s `tailwind` key belong to `class` strings.
-- `radius` (`theme().radius`) is the corner radius of controls, `radius.lg` (`theme().radius_lg`) that of large
-  surfaces such as cards and sheets, and `font.size` (`theme().font_size`) the base font size. All are in points.
+- `radius` (`theme().radius()`) is the corner radius of controls, `radius.lg` (`theme().radius_lg()`) that of large
+  surfaces such as cards and sheets, and `font.size` (`theme().font_size()`) the base font size. All are in points.
 - A pressed color you leave out (`primary.active.background`, `secondary.active.background`,
   `danger.active.background`, ...) is derived from its base color: 12% darker in light mode, 12% lighter in dark
   mode.

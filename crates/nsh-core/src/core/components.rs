@@ -25,7 +25,7 @@ use crate::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
         ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
         JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
-        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Theme,
+        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
         view,
@@ -426,12 +426,14 @@ pub(super) struct Components {
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
     specs: FxHashMap<&'static str, Arc<ComponentSpec>>,
-    pub(super) theme: Arc<Theme>,
-    /// The app's theme (`nsh.json`, a Rust app's root): drawn with while
-    /// the embedding app sets none ([`Core::set_host_theme`]).
-    app_theme: Arc<Theme>,
-    /// The embedding app's theme: wins over [`Self::app_theme`].
-    host_theme: Option<Arc<Theme>>,
+    /// The design tokens drawn with.
+    pub(super) tokens: Arc<Tokens>,
+    /// The app's tokens (a UI set's defaults, `nsh.json`'s theme, a Rust
+    /// app's root): drawn with while the embedding app sets none
+    /// ([`Core::set_host_tokens`]).
+    app_tokens: Arc<Tokens>,
+    /// The embedding app's tokens: win over [`Self::app_tokens`].
+    host_tokens: Option<Arc<Tokens>>,
     /// Boxed: making a view (or applying its patches) takes its instance
     /// out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
@@ -523,9 +525,9 @@ impl Default for Components {
         Self {
             registry: Registry::default(),
             specs: FxHashMap::default(),
-            theme: Arc::new(Theme::default()),
-            app_theme: Arc::new(Theme::default()),
-            host_theme: None,
+            tokens: Arc::new(Tokens::default()),
+            app_tokens: Arc::new(Tokens::default()),
+            host_tokens: None,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
             slot_names: FxHashMap::default(),
@@ -578,7 +580,7 @@ impl Components {
         // What components that run once read of the core.
         components.runtime.set_services(components.executor.clone());
         components.runtime.set_environment(components.environment);
-        components.runtime.set_theme(components.theme.clone());
+        components.runtime.set_tokens(components.tokens.clone());
         components
     }
 
@@ -647,59 +649,59 @@ fn same(a: &Option<Arc<ClassList>>, b: &Option<Arc<ClassList>>) -> bool {
 
 impl<M: TextEngine> Core<M> {
     /// The components this core can render (from `nsh-base` and the
-    /// like); set before the first op.
+    /// like), and the design tokens their sets bring
+    /// ([`Registry::tokens_from`]); set before the first op.
     pub fn set_components(&mut self, registry: Registry) {
+        if let Some(Ok(tokens)) = registry.tokens(None) {
+            self.set_tokens(tokens);
+        }
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme (`nsh.json`).
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
+    /// UI set that reads themes makes tokens of.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
-        match Theme::from_json(json) {
-            Ok(theme) => self.set_theme(theme),
-            Err(e) => log::warn!("theme: {e}"),
+        match self.components.registry.tokens(Some(json)) {
+            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Err(e)) => log::warn!("theme: {e}"),
+            None => log::warn!("theme: no UI set reads themes"),
         }
     }
 
-    /// The app's theme; components are drawn with it unless the
-    /// embedding app set one ([`Core::set_host_theme`]).
-    pub fn set_theme(&mut self, theme: Theme) {
-        self.components.app_theme = Arc::new(theme);
-        self.theme_changed();
+    /// The app's design tokens; it is drawn with them unless the
+    /// embedding app set its own ([`Core::set_host_tokens`]).
+    pub fn set_tokens(&mut self, tokens: Tokens) {
+        self.components.app_tokens = Arc::new(tokens);
+        self.tokens_changed();
     }
 
-    /// The embedding app's theme (`None`: the app's again): an app
-    /// embedded in a native app looks like it, whatever theme the app
-    /// itself sets.
-    pub fn set_host_theme(&mut self, theme: Option<Theme>) {
-        self.components.host_theme = theme.map(Arc::new);
-        self.theme_changed();
+    /// The embedding app's design tokens (`None`: the app's again): an app
+    /// embedded in a native app looks like it, whatever the app sets.
+    pub fn set_host_tokens(&mut self, tokens: Option<Tokens>) {
+        self.components.host_tokens = tokens.map(Arc::new);
+        self.tokens_changed();
     }
 
-    /// The theme components are drawn with now: a signal of the surface,
-    /// so only the bindings that read it run again, and only when it
-    /// changed.
-    fn theme_changed(&mut self) {
-        let theme = match &self.components.host_theme {
-            // The app's own tokens the host's theme does not have stay.
-            Some(host) => {
-                let mut theme = (**host).clone();
-                theme.inherit(&self.components.app_theme);
-                Arc::new(theme)
-            }
-            None => self.components.app_theme.clone(),
+    /// The tokens drawn with now: a signal of the surface, so only the
+    /// bindings that read them run again, and only when they changed.
+    fn tokens_changed(&mut self) {
+        let tokens = match &self.components.host_tokens {
+            // The app's own tokens the host's do not have stay.
+            Some(host) => Arc::new(host.over(&self.components.app_tokens)),
+            None => self.components.app_tokens.clone(),
         };
-        if *theme == *self.components.theme {
-            self.components.theme = theme;
+        if *tokens == *self.components.tokens {
+            self.components.tokens = tokens;
             return;
         }
         {
             let _entered = self.components.runtime.enter();
-            self.components.theme = theme;
+            self.components.tokens = tokens;
             self.components
                 .runtime
-                .set_theme(self.components.theme.clone());
+                .set_tokens(self.components.tokens.clone());
         }
-        self.theme_tokens_changed();
+        self.class_tokens_changed();
     }
 
     /// Mounts a Rust app's root component as the content of the root view;
