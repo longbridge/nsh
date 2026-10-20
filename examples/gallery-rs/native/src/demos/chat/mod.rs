@@ -17,7 +17,9 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps, SelectionArea, SelectionAreaProps};
+use nsh_base::{
+    KeyboardAvoidingView, KeyboardAvoidingViewProps, SelectionArea, SelectionAreaProps,
+};
 use nsh_core::{
     LayoutAnimation, Points, Size,
     time::Instant,

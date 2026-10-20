@@ -5,7 +5,7 @@ import { expect, open, test } from "nsh/test";
 test("a chat reply streams in as Markdown, with a table and code to copy", async () => {
   const app = await open("../App.tsx", { clock: {} });
   await app.press("label:AI Chat");
-  await app.press("Explain list virtualization");
+  await app.press("Explain list virtualization >> nth=0");
   await app.clock.runFor(2000);
   expect(app.shows("Rendering a long list")).toBe(true);
   await app.clock.runFor(30_000);
@@ -21,7 +21,7 @@ test("the Text View demo shows Markdown, HTML and extensions, and streams", asyn
   await app.waitFor("Release notes");
   expect(app.shows("From HTML")).toBe(true);
   expect(app.shows("@maya")).toBe(true);
-  expect(app.shows("Heads up")).toBe(true);
+  expect(app.shows("HEADS UP")).toBe(true);
   await app.press("Stream it");
   await app.clock.runFor(10_000);
   expect(app.shows("That's it. Ping me if anything looks off.")).toBe(true);

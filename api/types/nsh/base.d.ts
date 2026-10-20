@@ -110,9 +110,9 @@ export interface TextViewClasses {
   heading5?: string | null;
   /** Level 6 headings. */
   heading6?: string | null;
-  /** Quotations and alerts (a column of their blocks). */
+  /** Quotations (a column of their blocks, a line at their side) and alerts. */
   blockquote?: string | null;
-  /** Every alert (`> [!NOTE]`), after `blockquote` (then its kind's part). */
+  /** Every alert (`> [!NOTE]`: a tinted box, a row of its icon and the column of its blocks), after `blockquote` (then its kind's part). */
   alert?: string | null;
   /** `[!NOTE]` alerts. */
   alertNote?: string | null;
@@ -124,6 +124,8 @@ export interface TextViewClasses {
   alertWarning?: string | null;
   /** `[!CAUTION]` alerts. */
   alertCaution?: string | null;
+  /** The icon of an alert (a ring with a glyph in the alert's color). */
+  alertIcon?: string | null;
   /** Every list (a column of its items). */
   list?: string | null;
   /** Numbered lists, after `list`. */
@@ -132,9 +134,9 @@ export interface TextViewClasses {
   unorderedList?: string | null;
   /** Every item (a row: its marker, then its blocks). */
   listItem?: string | null;
-  /** The marker of an item (`•`, `1.`). */
+  /** The marker of an item (`•`, `◦`, `▪` by depth, or `1.`): placed over the indent, right-aligned against the item's content. */
   listMarker?: string | null;
-  /** The marker of a task item (`☐`, `☑`), after `listMarker`. */
+  /** The marker of a task item (a box drawn as a view, filled with a `✓` when done), after `listMarker`. */
   taskMarker?: string | null;
   /** The marker of a done task item, after `taskMarker`. */
   taskMarkerChecked?: string | null;
@@ -142,7 +144,7 @@ export interface TextViewClasses {
   listItemContent?: string | null;
   /** Code blocks (a column: the header, then the code). */
   codeBlock?: string | null;
-  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row (only with one of them). */
+  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row over the block's top right corner (only with one of them). */
   codeBlockHeader?: string | null;
   /** The language a code block names. */
   codeBlockLanguage?: string | null;
@@ -154,7 +156,7 @@ export interface TextViewClasses {
   code?: string | null;
   /** Keys (`<kbd>`, monospace). */
   keyboard?: string | null;
-  /** Strong text (bold). */
+  /** Strong text (semibold). */
   strong?: string | null;
   /** Emphasized text (italic). */
   emphasis?: string | null;
@@ -162,19 +164,19 @@ export interface TextViewClasses {
   strikethrough?: string | null;
   /** Underlined text. */
   underline?: string | null;
-  /** Highlighted text (`<mark>`). */
+  /** Highlighted text (`<mark>`; on the document's color when it gives one). */
   highlight?: string | null;
   /** Superscript (smaller). */
   superscript?: string | null;
   /** Subscript (smaller). */
   subscript?: string | null;
-  /** Links (underlined). */
+  /** Links (in the theme's link color, underlined). */
   link?: string | null;
-  /** Images. */
+  /** Images: alone in a paragraph or a cell, as wide as they ask (their natural size when they ask for nothing), at most the text's width; in a line of text, the size they ask for, else three quarters of a line tall. */
   image?: string | null;
   /** Formulas in text, without a `renderMath` (their TeX, monospace). */
   math?: string | null;
-  /** Formula blocks, without a `renderMath` (their TeX, monospace). */
+  /** Formula blocks, without a `renderMath` (their TeX, monospace, in a box as a code block's). */
   mathBlock?: string | null;
   /** Tables (a column: the app's `renderTableActions`, then the scroll view of the cells). */
   table?: string | null;
@@ -260,12 +262,17 @@ export interface TextViewImage {
   alt?: string;
   /** Its title. */
   title?: string;
+  /** The width it is shown at: points, or a percentage of the text's width (`"50%"`); with no height, the height follows its aspect ratio. */
+  width?: number | `${number}%`;
+  /** The height it is shown at, as `width`; with no width, the width follows its aspect ratio. */
+  height?: number | `${number}%`;
 }
 
 /** Inline content of a `TextViewBlock`, by its `type`. */
 export type TextViewInline =
   | { type: "text"; text: string }
-  | { type: "strong" | "emphasis" | "strikethrough" | "underline" | "highlight" | "superscript" | "subscript"; content: TextViewInline[] }
+  | { type: "strong" | "emphasis" | "strikethrough" | "underline" | "superscript" | "subscript"; content: TextViewInline[] }
+  | { type: "highlight"; content: TextViewInline[]; color?: string }
   | { type: "code"; code: string }
   | { type: "keyboard"; text: string }
   | { type: "link"; url: string; title?: string; content: TextViewInline[] }
@@ -311,9 +318,9 @@ export interface TextViewStyles {
   heading5?: StyleProp<TextStyle> | null;
   /** Level 6 headings. */
   heading6?: StyleProp<TextStyle> | null;
-  /** Quotations and alerts (a column of their blocks). */
+  /** Quotations (a column of their blocks, a line at their side) and alerts. */
   blockquote?: StyleProp<TextStyle> | null;
-  /** Every alert (`> [!NOTE]`), after `blockquote` (then its kind's part). */
+  /** Every alert (`> [!NOTE]`: a tinted box, a row of its icon and the column of its blocks), after `blockquote` (then its kind's part). */
   alert?: StyleProp<TextStyle> | null;
   /** `[!NOTE]` alerts. */
   alertNote?: StyleProp<TextStyle> | null;
@@ -325,6 +332,8 @@ export interface TextViewStyles {
   alertWarning?: StyleProp<TextStyle> | null;
   /** `[!CAUTION]` alerts. */
   alertCaution?: StyleProp<TextStyle> | null;
+  /** The icon of an alert (a ring with a glyph in the alert's color). */
+  alertIcon?: StyleProp<TextStyle> | null;
   /** Every list (a column of its items). */
   list?: StyleProp<TextStyle> | null;
   /** Numbered lists, after `list`. */
@@ -333,9 +342,9 @@ export interface TextViewStyles {
   unorderedList?: StyleProp<TextStyle> | null;
   /** Every item (a row: its marker, then its blocks). */
   listItem?: StyleProp<TextStyle> | null;
-  /** The marker of an item (`•`, `1.`). */
+  /** The marker of an item (`•`, `◦`, `▪` by depth, or `1.`): placed over the indent, right-aligned against the item's content. */
   listMarker?: StyleProp<TextStyle> | null;
-  /** The marker of a task item (`☐`, `☑`), after `listMarker`. */
+  /** The marker of a task item (a box drawn as a view, filled with a `✓` when done), after `listMarker`. */
   taskMarker?: StyleProp<TextStyle> | null;
   /** The marker of a done task item, after `taskMarker`. */
   taskMarkerChecked?: StyleProp<TextStyle> | null;
@@ -343,7 +352,7 @@ export interface TextViewStyles {
   listItemContent?: StyleProp<TextStyle> | null;
   /** Code blocks (a column: the header, then the code). */
   codeBlock?: StyleProp<TextStyle> | null;
-  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row (only with one of them). */
+  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row over the block's top right corner (only with one of them). */
   codeBlockHeader?: StyleProp<TextStyle> | null;
   /** The language a code block names. */
   codeBlockLanguage?: StyleProp<TextStyle> | null;
@@ -355,7 +364,7 @@ export interface TextViewStyles {
   code?: StyleProp<TextStyle> | null;
   /** Keys (`<kbd>`, monospace). */
   keyboard?: StyleProp<TextStyle> | null;
-  /** Strong text (bold). */
+  /** Strong text (semibold). */
   strong?: StyleProp<TextStyle> | null;
   /** Emphasized text (italic). */
   emphasis?: StyleProp<TextStyle> | null;
@@ -363,19 +372,19 @@ export interface TextViewStyles {
   strikethrough?: StyleProp<TextStyle> | null;
   /** Underlined text. */
   underline?: StyleProp<TextStyle> | null;
-  /** Highlighted text (`<mark>`). */
+  /** Highlighted text (`<mark>`; on the document's color when it gives one). */
   highlight?: StyleProp<TextStyle> | null;
   /** Superscript (smaller). */
   superscript?: StyleProp<TextStyle> | null;
   /** Subscript (smaller). */
   subscript?: StyleProp<TextStyle> | null;
-  /** Links (underlined). */
+  /** Links (in the theme's link color, underlined). */
   link?: StyleProp<TextStyle> | null;
-  /** Images. */
+  /** Images: alone in a paragraph or a cell, as wide as they ask (their natural size when they ask for nothing), at most the text's width; in a line of text, the size they ask for, else three quarters of a line tall. */
   image?: StyleProp<TextStyle> | null;
   /** Formulas in text, without a `renderMath` (their TeX, monospace). */
   math?: StyleProp<TextStyle> | null;
-  /** Formula blocks, without a `renderMath` (their TeX, monospace). */
+  /** Formula blocks, without a `renderMath` (their TeX, monospace, in a box as a code block's). */
   mathBlock?: StyleProp<TextStyle> | null;
   /** Tables (a column: the app's `renderTableActions`, then the scroll view of the cells). */
   table?: StyleProp<TextStyle> | null;
@@ -508,13 +517,13 @@ export interface TextViewProps extends ComponentHostProps {
   renderTableActions?: (value: TextViewTable) => JSX.Element;
   /** Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its TeX shows as code. */
   renderMath?: (value: TextViewMath) => JSX.Element;
-  /** Shows an image in place of the default (the image at its natural size, at most as wide as the text). */
+  /** Shows an image in place of the default: alone in a paragraph, the image at the size it asks for (`width` / `height`) or its natural size, at most as wide as the text; in a line of text, the size it asks for, else three quarters of a line tall. A press on an image in a link reports the link (`onLinkPress`). */
   renderImage?: (value: TextViewImage) => JSX.Element;
   /** A link was pressed: its URL (`#anchor` for a heading of the document, `#footnote-<label>` for a footnote). Nothing opens it: the app decides. */
   onLinkPress?: (url: string) => void;
 }
 
-/** A document of Markdown, HTML or the app's own blocks (`markdown`, `html` or `document`), shown with texts, views and images: headings, paragraphs, emphasis, links, lists and task lists, quotes and alerts, code, tables, images, formulas, footnotes and disclosures, and the custom nodes of the app's extensions. It has the look a browser gives the same markup with no stylesheet (bold headings, monospace code, indented lists) and no colors: the app styles each part with `classes` or `styles`, its root with `class` and `style` (text styles there pass to every part). Links report presses (`onLinkPress`). Content of the app's goes in with render functions: custom nodes (`renderCustom`), code blocks and their actions, tables' actions, formulas, images. Made for replies streamed by AI models: blocks are kept by position, so only those that changed are made again, and `caret` follows the end of the text. */
+/** A document of Markdown, HTML or the app's own blocks (`markdown`, `html` or `document`), shown with texts, views and images: headings, paragraphs, emphasis, links, lists and task lists, quotes and alerts, code, tables, images, formulas, footnotes and disclosures, and the custom nodes of the app's extensions. It has a reading typography of its own (15pt text in 25.5pt lines, semibold headings with room above them, tinted alerts, code in bordered boxes, ruled tables), colored with the theme's tokens, so a theme or the dark appearance reaches it natively. The app restyles each part with `classes` or `styles` (or a Rust view's `TextViewParts`), its root with `class` and `style` (text styles there pass to every part): they apply over these defaults. Links report presses (`onLinkPress`). Content of the app's goes in with render functions: custom nodes (`renderCustom`), code blocks and their actions, tables' actions, formulas, images. Made for replies streamed by AI models: blocks are kept by position, so only those that changed are made again, and `caret` follows the end of the text. */
 export declare const TextView: ((props: TextViewProps) => JSX.Element) & {
   /** Markdown `markdown` read into a document, as the `markdown` prop reads it (with `options` and `extensions`). */
   parse(markdown: string, options?: MarkdownOptions | null, extensions?: (MarkdownExtension)[] | null): TextViewDocument;

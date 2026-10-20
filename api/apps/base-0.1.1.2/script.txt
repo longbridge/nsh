@@ -447,7 +447,7 @@ tap id:case-base-text-view
 # Markdown: a heading, a link, a list, a table with the app's actions
 # above it, code with the app's actions in its header.
 expect Markdown title
-style text:"Markdown title" fontWeight 700
+style text:"Markdown title" fontWeight 600
 prop text:"Markdown title" role header
 expect Read the guide now.
 expect First item
@@ -474,11 +474,11 @@ expect Link: https://example.com/guide
 # HTML.
 expect From HTML
 expect An hypertext paragraph.
-style span:hypertext fontWeight 700
+style span:hypertext fontWeight 600
 # The app's own blocks.
 expect From a document
 # Streaming: the `**` left open shows closed, the caret after the text.
-style span:stream-bold fontWeight 700
+style span:stream-bold fontWeight 600
 expect CARET
 # An extension of each kind, shown by `renderCustom`.
 expect Mention maya
@@ -492,7 +492,7 @@ expect Math block: x^2
 expect Image Logo: https://example.com/logo.png
 # Parts styled by `classes` and `styles`; `selectable`.
 style text:"Classed heading" color #ff0000ff
-style text:"Classed heading" fontWeight 700
+style text:"Classed heading" fontWeight 600
 style text:"Styled paragraph." color #00ff00ff
 prop text:"Styled paragraph." selectable true
 # The static functions.

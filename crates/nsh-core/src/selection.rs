@@ -292,7 +292,10 @@ impl SelectionModel {
 
     /// Records the keys of the texts the selection is in.
     fn remember(&mut self, texts: &impl SelectionTexts) {
-        let key = |p: Option<TextPosition>| p.filter(|p| p.text < texts.len()).map(|p| texts.key(p.text));
+        let key = |p: Option<TextPosition>| {
+            p.filter(|p| p.text < texts.len())
+                .map(|p| texts.key(p.text))
+        };
         self.keys = [
             key(self.anchor),
             key(self.focus),
@@ -1030,5 +1033,4 @@ mod tests {
         assert!(model.texts_changed(&gone));
         assert!(model.bounds().is_none());
     }
-
 }
