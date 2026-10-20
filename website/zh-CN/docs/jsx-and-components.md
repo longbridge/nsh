@@ -113,6 +113,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+在参数里直接解构 props 的组件（`function Title({ text }: …)`）同样只读取一次，构建时会给出警告，并说明应该改读哪些 props：
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+组件确实只需要读取一次的 prop（比如初始化时用的 id），在函数体里读取（`const { id } = props;`），这种写法表明了意图。
+
 默认值也是一样：在 JSX 中写 `props.color ?? "#ddf4ff"`，而不是用带默认值的解构。要从 props 计算出某个值，使用一个函数或 [`computed`](./reactivity.md#computed)：
 
 ```tsx

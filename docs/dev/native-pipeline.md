@@ -86,6 +86,10 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   or an import, which cannot be assigned, passes its name, so a value that is neither is an error saying what to write.
   Other expressions are the `ref` prop, which `apply_ref` handles likewise; a component's `ref` is a method doing the
   same with what the component gives. Consecutive dynamic children share one `insert`, before the next static child.
+- **Components** that take their props apart in their first parameter (`function Title({ text })`, top-level
+  functions and arrows with JSX and a PascalCase name, as `hot.rs` finds them) get a build warning naming the props
+  to read instead (`props.rs`, logged by the plugin with the module's path, target `nsh::build`): each would be read
+  once. Taking them apart in the body (`const { id } = props;`) is left alone, as a choice the code states.
 - **Components** are called untracked with a props object: static props as values, the others as getters, children as
   the `children` getter; spreads go through `merge`, which keeps getters. Among several children, an expression that
   changes is a function of its own (`["one ", () => s()]`), so the getter, which makes every sibling, reads none of

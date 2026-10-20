@@ -57,6 +57,16 @@ impl NativeModules {
     }
 }
 
+/// A module compiled by [`compile_native`].
+pub(crate) struct Compiled {
+    pub(crate) code: String,
+    /// What bundling keeps (`compile_module` returns the code alone).
+    #[cfg_attr(not(feature = "bundle"), expect(dead_code))]
+    pub(crate) map: SourceMap<'static>,
+    /// Components taking their props apart ([`crate::props`]), to warn of.
+    pub(crate) destructured: Vec<crate::props::DestructuredProps>,
+}
+
 /// TSX -> JS with nsh's JSX compiler ([`crate::jsx`]), TypeScript removed
 /// in the same pass; `prologue` runs first; with `hot_key` the module's
 /// components are hot ([`crate::hot`]). Errors are rendered with a code
@@ -68,13 +78,14 @@ pub(crate) fn compile_native(
     prologue: Option<&str>,
     hot_key: Option<&str>,
     modules: &NativeModules,
-) -> Result<(String, SourceMap<'static>), String> {
+) -> Result<Compiled, String> {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, source_type).parse();
     if let Some(err) = parsed.diagnostics.into_iter().next() {
         return Err(err.render_with_source_code(source.to_owned()));
     }
     let mut program = parsed.program;
+    let destructured = crate::props::check(&program, source);
     let scoping = SemanticBuilder::new()
         .build(&program)
         .semantic
@@ -113,10 +124,19 @@ pub(crate) fn compile_native(
             ..CodegenOptions::default()
         })
         .build(&program);
-    Ok((
-        out.code,
-        out.map.expect("source map requested").into_owned(),
-    ))
+    Ok(Compiled {
+        code: out.code,
+        map: out.map.expect("source map requested").into_owned(),
+        destructured,
+    })
+}
+
+/// 1-based line and column (in characters) of byte `offset` of `source`.
+pub(crate) fn position(source: &str, offset: u32) -> (usize, usize) {
+    let before = &source[..(offset as usize).min(source.len())];
+    let line = before.matches('\n').count() + 1;
+    let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+    (line, column)
 }
 
 /// TypeScript's import elision, once the JSX is compiled (a primitive's

@@ -113,6 +113,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+A component that takes its props apart in its parameter, `function Title({ text }: …)`, reads them the same once, and the build warns of it with the props to read instead:
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+A prop the component wants only once, such as an id it starts with, is read in the body (`const { id } = props;`), which says so.
+
 The same applies to default values: write `props.color ?? "#ddf4ff"` in the JSX rather than destructuring with a default. To compute something from props, use a function or [`computed`](./reactivity.md#computed):
 
 ```tsx

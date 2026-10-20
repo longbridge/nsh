@@ -17,6 +17,7 @@ mod jsx;
 mod minify;
 #[cfg(feature = "bundle")]
 mod plugin;
+mod props;
 #[cfg(feature = "bundle")]
 mod split;
 #[cfg(feature = "bundle")]
@@ -43,9 +44,12 @@ pub fn compile_module(
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;
     let modules = compile::NativeModules::new(ui_sets);
-    compile::compile_native(path, source_type, source, None, None, &modules)
-        .map(|(code, _)| code)
-        .map_err(|e| compile::strip_ansi(&e))
+    let compiled = compile::compile_native(path, source_type, source, None, None, &modules)
+        .map_err(|e| compile::strip_ansi(&e))?;
+    for d in &compiled.destructured {
+        log::warn!(target: "nsh::build", "{name}:{}:{}: {}", d.line, d.column, d.message());
+    }
+    Ok(compiled.code)
 }
 
 #[cfg(test)]

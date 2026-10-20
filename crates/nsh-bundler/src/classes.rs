@@ -49,7 +49,7 @@ impl Checker<'_> {
         for unknown in list.unknown() {
             // The class's own position within the string, if found.
             let at = classes.find(&**unknown).unwrap_or(0) as u32;
-            let (line, column) = position(self.source, offset + at);
+            let (line, column) = crate::compile::position(self.source, offset + at);
             self.found.push(UnknownClass {
                 line,
                 column,
@@ -134,14 +134,6 @@ impl<'a> Visit<'a> for Checker<'_> {
         }
         walk::walk_jsx_attribute(self, attr);
     }
-}
-
-/// 1-based line and column (in characters) of byte `offset`.
-fn position(source: &str, offset: u32) -> (usize, usize) {
-    let before = &source[..(offset as usize).min(source.len())];
-    let line = before.matches('\n').count() + 1;
-    let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
-    (line, column)
 }
 
 #[cfg(test)]

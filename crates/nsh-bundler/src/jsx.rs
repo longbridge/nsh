@@ -1315,7 +1315,7 @@ mod tests {
             None,
             &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry().into()]),
         )
-        .map(|(code, _)| code)
+        .map(|c| c.code)
     }
 
     /// A compile error's message on one line (the report wraps it).

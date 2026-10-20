@@ -51,7 +51,7 @@ crates/
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
-                       unknown-class check (`classes.rs`);
+                       unknown-class check (`classes.rs`); the warning of components taking their props apart (`props.rs`);
                        development bundles with hot module replacement (`hot.rs`); the bundler's part of `.nsh/types`
                        (`types.rs`: asset imports); feature `bundle` (default off in the workspace; the CLI turns it on) is
                        all of that, without it only `compile_module` (`compile.rs`: one module, no rolldown) is left, which
