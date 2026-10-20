@@ -318,6 +318,34 @@ define_class!(
                 unsafe { msg_send![super(self), navigationBar: bar, shouldPopItem: item] }
             }
         }
+
+        /// UIKit sizes a pushed controller's view from the navigation view,
+        /// which is still empty when the stack mounts: autoresizing cannot
+        /// grow a zero size, so the view keeps an empty frame even once the
+        /// navigation view has one. The screen's content is not clipped, so
+        /// it draws correctly, but an empty ancestor drops the whole subtree
+        /// from the accessibility snapshot UI tests read: no element inside
+        /// any screen can be found. Give such a view its parent's bounds.
+        #[unsafe(method(viewDidLayoutSubviews))]
+        fn view_did_layout_subviews(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
+            for controller in self.viewControllers().iter() {
+                if !controller.isViewLoaded() {
+                    continue;
+                }
+                let Some(view) = controller.view() else { continue };
+                let Some(parent) = view.superview() else { continue };
+                let size = view.bounds().size;
+                let bounds = parent.bounds();
+                if (size.width <= 0.0 || size.height <= 0.0)
+                    && bounds.size.width > 0.0
+                    && bounds.size.height > 0.0
+                {
+                    view.setFrame(bounds);
+                }
+            }
+        }
     }
 );
 
