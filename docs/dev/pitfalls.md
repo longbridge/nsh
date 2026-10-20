@@ -225,6 +225,10 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
+  Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
+  (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
+
 - **Changing `FullSizeContentView` can leave the content at its old size after `setStyleMask:` returns**:
   a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
