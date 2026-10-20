@@ -286,9 +286,9 @@ fn main(s: &ScrollState) -> f32 {
 /// The leading content inset along the main axis.
 fn lead(s: &ScrollState) -> f32 {
     if s.horizontal {
-        s.behavior.content_inset.left
+        s.behavior.content_inset.left.0
     } else {
-        s.behavior.content_inset.top
+        s.behavior.content_inset.top.0
     }
 }
 
@@ -316,8 +316,8 @@ fn reported(state: &ViewState) -> (f32, f32) {
     let (mx, my) = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let inset = s.behavior.content_inset;
     (
-        s.x.clamp(0.0, mx) - inset.left,
-        s.y.clamp(0.0, my) - inset.top,
+        s.x.clamp(0.0, mx) - inset.left.0,
+        s.y.clamp(0.0, my) - inset.top.0,
     )
 }
 
@@ -383,7 +383,11 @@ fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
         let (x, y) = reported(&state);
         (state.id, x, y)
     };
-    surface.event(id, kind, EventPayload::Scroll { x, y });
+    surface.event(
+        id,
+        kind,
+        EventPayload::Scroll(nsh_core::geometry::point(Points(x), Points(y))),
+    );
 }
 
 /// Ends a glide or a snap a new input interrupts (`onMomentumScrollEnd`,
@@ -509,13 +513,13 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
         let target = s
             .behavior
             .snap_target(
-                pos - lead,
-                projected(pos, v, rate(&s.behavior)) - lead,
+                Points(pos - lead),
+                Points(projected(pos, v, rate(&s.behavior)) - lead),
                 snap_velocity,
-                dim,
-                max + dim - lead,
+                Points(dim),
+                Points(max + dim - lead),
             )
-            .map(|t| t + lead);
+            .map(|t| t.0 + lead);
         (pos, min, max, target)
     };
     if pos < min - 0.5 || pos > max + 0.5 {
@@ -717,7 +721,7 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
     }
     let offset = main(s) - lead(s);
     for c in &s.sticky {
-        let t = sticky_shift(offset, c.start, c.end);
+        let t = sticky_shift(offset, c.start.0, c.end.0);
         let shift = if s.horizontal { (t, 0.0) } else { (0.0, t) };
         with_cell(surface, view, c.cell, |cell| {
             let mut cs = cell.state_mut();
@@ -922,9 +926,9 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
         let (target, animated) = match *command {
             Command::ScrollTo { x, y, animated } => (
                 if s.horizontal {
-                    x + inset.left
+                    x.0 + inset.left.0
                 } else {
-                    y + inset.top
+                    y.0 + inset.top.0
                 },
                 animated,
             ),
@@ -1140,9 +1144,9 @@ fn thumb(state: &ViewState) -> Option<((f32, f32, f32, f32), f32)> {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let inset = s.behavior.content_inset;
     let (dim, total, offset) = if s.horizontal {
-        (w, s.content.0 + inset.left + inset.right, s.x)
+        (w, s.content.0 + inset.left.0 + inset.right.0, s.x)
     } else {
-        (h, s.content.1 + inset.top + inset.bottom, s.y)
+        (h, s.content.1 + inset.top.0 + inset.bottom.0, s.y)
     };
     let (start, len) = indicator_span(dim, total, offset)?;
     let rect = if s.horizontal {
@@ -1168,7 +1172,7 @@ pub(crate) fn draw_indicator(cx: &mut DrawCx<'_>, state: &ViewState) {
         } else {
             (-s.y / REFRESH_PULL).min(1.0)
         };
-        let cy = s.behavior.content_inset.top - s.y - REFRESH_SPACE / 2.0;
+        let cy = s.behavior.content_inset.top.0 - s.y - REFRESH_SPACE / 2.0;
         draw_spinner(cx, w / 2.0, cy, progress, s.live.spin);
     }
     if !s.indicator || s.live.alpha <= 0.0 {
@@ -1678,20 +1682,39 @@ mod tests {
             ..Default::default()
         };
         let r = rate(&b);
-        let t = b.snap_target(250.0, projected(250.0, 0.0, r), 0.0, 400.0, 1600.0);
-        assert_eq!(t, Some(400.0));
-        let t = b.snap_target(100.0, projected(100.0, 1.0, r), 1.0, 400.0, 1600.0);
-        assert_eq!(t, Some(400.0));
-        let t = b.snap_target(300.0, projected(300.0, -1.0, r), -1.0, 400.0, 1600.0);
-        assert_eq!(t, Some(0.0));
+        let pt = Points;
+        let t = b.snap_target(
+            pt(250.0),
+            pt(projected(250.0, 0.0, r)),
+            0.0,
+            pt(400.0),
+            pt(1600.0),
+        );
+        assert_eq!(t, Some(pt(400.0)));
+        let t = b.snap_target(
+            pt(100.0),
+            pt(projected(100.0, 1.0, r)),
+            1.0,
+            pt(400.0),
+            pt(1600.0),
+        );
+        assert_eq!(t, Some(pt(400.0)));
+        let t = b.snap_target(
+            pt(300.0),
+            pt(projected(300.0, -1.0, r)),
+            -1.0,
+            pt(400.0),
+            pt(1600.0),
+        );
+        assert_eq!(t, Some(pt(0.0)));
         let b = ScrollBehavior {
-            snap_interval: 100.0,
+            snap_interval: pt(100.0),
             ..Default::default()
         };
-        let t = b.snap_target(140.0, 140.0, 0.0, 400.0, 1600.0);
-        assert_eq!(t, Some(100.0));
+        let t = b.snap_target(pt(140.0), pt(140.0), 0.0, pt(400.0), pt(1600.0));
+        assert_eq!(t, Some(pt(100.0)));
         assert_eq!(
-            ScrollBehavior::default().snap_target(140.0, 140.0, 0.0, 400.0, 1600.0),
+            ScrollBehavior::default().snap_target(pt(140.0), pt(140.0), 0.0, pt(400.0), pt(1600.0)),
             None
         );
     }
@@ -1727,8 +1750,8 @@ mod tests {
             let mut state = view.state_mut();
             let s = state.scroll.as_mut().unwrap();
             s.behavior.content_inset = EdgeInsets {
-                top: 50.0,
-                bottom: 20.0,
+                top: Points(50.0),
+                bottom: Points(20.0),
                 ..Default::default()
             };
         }

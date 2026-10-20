@@ -147,10 +147,8 @@ fn hover_handlers_are_in_the_event_masks_and_hear_their_events() {
     until_log(&rx, "log in outer|in inner");
     let at = |x: f32, shift: bool| {
         EventPayload::Hover(HoverEvent {
-            location_x: x,
-            location_y: 2.0,
-            page_x: x + 10.0,
-            page_y: 12.0,
+            location: nsh_core::geometry::point(px(x), px(2.0)),
+            page: nsh_core::geometry::point(px(x + 10.0), px(12.0)),
             modifiers: Modifiers {
                 shift,
                 ..Default::default()

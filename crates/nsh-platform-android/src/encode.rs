@@ -240,7 +240,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ResizeMode::Center => 3,
                 });
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
-                e.float(options.blur_radius);
+                e.float(options.blur_radius.0);
                 e.float(options.fade_ms.unwrap_or(-1.0));
             }
             MountItem::ScrollConfig {
@@ -282,8 +282,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(cells.len() as i32);
                 for c in &cells {
                     e.int(c.cell as i32);
-                    e.float(c.start);
-                    e.float(c.end);
+                    e.float(c.start.0);
+                    e.float(c.end.0);
                 }
             }
             MountItem::LayoutDirection { rtl } => {
@@ -321,10 +321,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(SCROLL_BEHAVIOR);
                 e.int(id as i32);
                 e.bool(b.paging);
-                e.float(b.snap_interval);
+                e.float(b.snap_interval.0);
                 e.int(b.snap_offsets.len() as i32);
                 for &o in &b.snap_offsets {
-                    e.float(o);
+                    e.float(o.0);
                 }
                 e.int(match b.snap_alignment {
                     SnapAlignment::Start => 0,
@@ -335,10 +335,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.bool(b.enabled);
                 e.bool(b.bounces);
                 let i = b.content_inset;
-                e.float(i.top);
-                e.float(i.right);
-                e.float(i.bottom);
-                e.float(i.left);
+                e.float(i.top.0);
+                e.float(i.right.0);
+                e.float(i.bottom.0);
+                e.float(i.left.0);
                 e.int(match b.keyboard_taps {
                     KeyboardTaps::Never => 0,
                     KeyboardTaps::Always => 1,
@@ -355,8 +355,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::ScrollBy { id, dx, dy } => {
                 e.int(SCROLL_BY);
                 e.int(id as i32);
-                e.float(dx);
-                e.float(dy);
+                e.float(dx.0);
+                e.float(dy.0);
             }
             MountItem::Refreshing { id, refreshing } => {
                 e.int(REFRESHING);
@@ -475,8 +475,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::Blur => e.int(1),
                     Command::ScrollTo { x, y, animated } => {
                         e.int(2);
-                        e.float(x);
-                        e.float(y);
+                        e.float(x.0);
+                        e.float(y.0);
                         e.bool(animated);
                     }
                     Command::ExitApp => e.int(3),
@@ -558,9 +558,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(20);
                         e.float(scale);
                         e.bool(center.is_some());
-                        let (x, y) = center.unwrap_or_default();
-                        e.float(x);
-                        e.float(y);
+                        let c = center.unwrap_or_default();
+                        e.float(c.x.0);
+                        e.float(c.y.0);
                         e.bool(animated);
                     }
                     Command::Native { name, args } => {
@@ -927,7 +927,7 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
     for id in [c.left, c.right, c.title_view] {
         e.int(id.map_or(-1, |i| i as i32));
     }
-    e.float(c.header_height);
+    e.float(c.header_height.0);
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {
@@ -939,7 +939,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
     });
     let h = p.hit_slop;
     for v in [h.top, h.right, h.bottom, h.left] {
-        e.float(v);
+        e.float(v.0);
     }
     e.float(p.active_opacity.unwrap_or(f32::NAN));
     let a = &p.accessibility;
@@ -1001,7 +1001,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(r) => {
             e.int(1 | (r.borderless as i32) << 1 | (r.foreground as i32) << 2);
             opt_color(e, r.color);
-            e.float(r.radius.unwrap_or(-1.0));
+            e.float(r.radius.map_or(-1.0, |r| r.0));
         }
         None => e.int(0),
     }
@@ -1014,7 +1014,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
                 a.fail_offset_x,
                 a.fail_offset_y,
             ] {
-                e.float(v.unwrap_or(f32::NAN));
+                e.float(v.map_or(f32::NAN, |v| v.0));
             }
         }
         None => e.int(0),

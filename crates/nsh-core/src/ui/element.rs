@@ -218,7 +218,7 @@ impl Attrs {
         if self.src != old.src {
             out.push(Prop::Source(self.src.as_ref().map(|src| ImageSource {
                 uri: src.uri.to_arc(),
-                size: src.size,
+                size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
             })));
         }
         if self.inset_padding != old.inset_padding {
@@ -361,7 +361,9 @@ impl ListConfig {
     /// The props of the fields that differ from `old`.
     pub(crate) fn changes(&self, old: &ListConfig, out: &mut Vec<Prop>) {
         if self.estimated != old.estimated {
-            out.push(Prop::EstimatedItemSize(self.estimated.unwrap_or(50.0)));
+            out.push(Prop::EstimatedItemSize(Points(
+                self.estimated.unwrap_or(50.0),
+            )));
         }
         if self.columns != old.columns {
             out.push(Prop::Columns(self.columns.unwrap_or(1)));
@@ -379,7 +381,7 @@ impl ListConfig {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
         }
         if self.follow_end != old.follow_end {
-            out.push(Prop::FollowEnd(self.follow_end));
+            out.push(Prop::FollowEnd(self.follow_end.map(Points)));
         }
     }
 }
@@ -1285,7 +1287,7 @@ pub trait Interactive: Element {
 
     /// The elevation shadow (Android).
     fn elevation(mut self, elevation: impl Into<Points>) -> Self {
-        super::host::set(self.node(), Prop::Elevation(elevation.into().0));
+        super::host::set(self.node(), Prop::Elevation(elevation.into()));
         self
     }
 
@@ -1531,7 +1533,7 @@ impl Image {
             &mut self.0,
             Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
                 uri: src.uri.to_arc(),
-                size: src.size,
+                size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
             }))),
         );
         self
@@ -1548,7 +1550,7 @@ impl Image {
     pub fn blur_radius(mut self, radius: impl Into<Points>) -> Self {
         super::host::set(
             &mut self.0,
-            Prop::Image(crate::ImageProp::BlurRadius(radius.into().0)),
+            Prop::Image(crate::ImageProp::BlurRadius(radius.into())),
         );
         self
     }

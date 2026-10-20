@@ -10,7 +10,10 @@
 
 use std::time::{Duration, Instant};
 
-use nsh_core::{ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind, geometry::px};
+use nsh_core::{
+    ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind,
+    geometry::{point, px},
+};
 use nsh_js::Host;
 
 enum Gap {
@@ -95,7 +98,7 @@ fn bench_gallery_scroll() {
         let mut y = 0.0;
         for _ in 0..2000 {
             y += 8.0;
-            core.set_scroll_offset(list, 0.0, y, u32::MAX);
+            core.set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
             let Some((t, j)) = frame(&mut core, &mut binds) else {
                 continue;
             };
@@ -116,7 +119,7 @@ fn bench_gallery_scroll() {
             }
         }
         // Scroll back to the top for the next run.
-        core.set_scroll_offset(list, 0.0, 0.0, u32::MAX);
+        core.set_scroll_offset(list, point(px(0.0), px(0.0)), u32::MAX);
         frame(&mut core, &mut binds);
         println!(
             "{label}: {n} rebinding frames, {:?}/frame (js {:?})",

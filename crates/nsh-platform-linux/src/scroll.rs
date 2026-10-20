@@ -30,6 +30,7 @@ use std::{f32::consts::PI, rc::Rc};
 use gtk4::{self as gtk, gdk, glib, graphene, prelude::*};
 use nsh_core::{
     Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
+    geometry::point,
 };
 
 use crate::{
@@ -271,7 +272,7 @@ fn reported(state: &ViewState) -> (f32, f32) {
         return (0.0, 0.0);
     };
     let (mx, my) = s.max((state.frame.size.width.0, state.frame.size.height.0));
-    let inset = s.behavior.content_inset;
+    let inset = s.behavior.content_inset.map(|v| v.0);
     (
         s.x.clamp(0.0, mx) - inset.left,
         s.y.clamp(0.0, my) - inset.top,
@@ -339,7 +340,7 @@ fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
         let (x, y) = reported(&state);
         (state.id, x, y)
     };
-    surface.event(id, kind, EventPayload::Scroll { x, y });
+    surface.event(id, kind, EventPayload::Scroll(point(Points(x), Points(y))));
 }
 
 /// Ends a glide or a snap a new input interrupts (`onMomentumScrollEnd`,
@@ -457,9 +458,9 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
         let (min, max) = limits(&state);
         let pos = main(s);
         let lead = if s.horizontal {
-            s.behavior.content_inset.left
+            s.behavior.content_inset.left.0
         } else {
-            s.behavior.content_inset.top
+            s.behavior.content_inset.top.0
         };
         let dim = viewport(&state, s.horizontal);
         let snap_velocity = if snap_velocity == 0.0 {
@@ -471,13 +472,13 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
         let target = s
             .behavior
             .snap_target(
-                pos - lead,
-                projected(pos, v, rate(&s.behavior)) - lead,
+                Points(pos - lead),
+                Points(projected(pos, v, rate(&s.behavior)) - lead),
                 snap_velocity,
-                dim,
-                max + dim - lead,
+                Points(dim),
+                Points(max + dim - lead),
             )
-            .map(|t| t + lead);
+            .map(|t| t.0 + lead);
         (pos, min, max, target)
     };
     if pos < min - 0.5 || pos > max + 0.5 {
@@ -668,13 +669,13 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
         return;
     }
     let lead = if s.horizontal {
-        s.behavior.content_inset.left
+        s.behavior.content_inset.left.0
     } else {
-        s.behavior.content_inset.top
+        s.behavior.content_inset.top.0
     };
     let offset = main(s) - lead;
     for c in &s.sticky {
-        let t = sticky_shift(offset, c.start, c.end);
+        let t = sticky_shift(offset, c.start.0, c.end.0);
         let shift = if s.horizontal { (t, 0.0) } else { (0.0, t) };
         with_cell(surface, view, c.cell, |cell| {
             let mut cs = cell.state_mut();
@@ -907,13 +908,13 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
         let Some(s) = state.scroll.as_mut() else {
             return;
         };
-        let inset = s.behavior.content_inset;
+        let inset = s.behavior.content_inset.map(|v| v.0);
         let (target, animated) = match *command {
             Command::ScrollTo { x, y, animated } => (
                 if s.horizontal {
-                    x + inset.left
+                    x.0 + inset.left
                 } else {
-                    y + inset.top
+                    y.0 + inset.top
                 },
                 animated,
             ),
@@ -1019,7 +1020,7 @@ fn thumb(state: &ViewState) -> Option<(graphene::Rect, f32)> {
     const EDGE: f32 = 2.0;
     let s = state.scroll.as_ref()?;
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
-    let inset = s.behavior.content_inset;
+    let inset = s.behavior.content_inset.map(|v| v.0);
     let (dim, total, offset) = if s.horizontal {
         (w, s.content.0 + inset.left + inset.right, s.x)
     } else {
@@ -1155,7 +1156,7 @@ pub(crate) fn draw_indicator(snapshot: &gtk::Snapshot, state: &ViewState) {
         } else {
             (-s.y / REFRESH_PULL).min(1.0)
         };
-        let cy = s.behavior.content_inset.top - s.y - REFRESH_SPACE / 2.0;
+        let cy = s.behavior.content_inset.top.0 - s.y - REFRESH_SPACE / 2.0;
         draw_spinner(snapshot, w / 2.0, cy, progress, s.live.spin, s.live.dark);
     }
     if !s.indicator || s.live.alpha <= 0.0 {

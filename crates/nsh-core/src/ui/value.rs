@@ -294,6 +294,21 @@ macro_rules! number {
 }
 
 number!(any: f32, f64);
+
+/// A number of points.
+impl JsValue for crate::geometry::Points {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "number".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        f32::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
 number!(whole: i32, i64, u32, u64, usize);
 
 /// A whole number of pixels (an image's size).

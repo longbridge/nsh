@@ -344,7 +344,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                         text(move || format!("use last {}", p(props.last.get())))
                             .on_press(move |_: &()| limit.set(props.last.get_untracked()))
                             .role(AccessibilityRole::Button)
-                            .hit_slop(EdgeInsets::all(10.0))
+                            .hit_slop(EdgeInsets::all(px(10.0)))
                             .text_size(px(13.0))
                             .text_color(colors::ACCENT)
                             .tabular_nums(),

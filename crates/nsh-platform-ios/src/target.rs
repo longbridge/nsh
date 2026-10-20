@@ -601,10 +601,10 @@ impl EventTarget {
         self.dispatch(
             scroll.tag() as NodeId,
             event,
-            EventPayload::Scroll {
-                x: offset.x as f32,
-                y: offset.y as f32,
-            },
+            EventPayload::Scroll(nsh_core::geometry::point(
+                nsh_core::Points(offset.x as f32),
+                nsh_core::Points(offset.y as f32),
+            )),
         );
     }
 

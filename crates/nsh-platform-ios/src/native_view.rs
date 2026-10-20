@@ -192,8 +192,8 @@ impl NshView {
     }
 
     fn inside(&self, point: CGPoint, event: Option<&UIEvent>) -> bool {
-        let slop = self.ivars().props.borrow().hit_slop;
-        if slop.is_zero() {
+        let slop = self.ivars().props.borrow().hit_slop.map(|v| v.0);
+        if slop == Default::default() {
             // SAFETY: calling the superclass implementation.
             return unsafe { msg_send![super(self), pointInside: point, withEvent: event] };
         }

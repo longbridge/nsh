@@ -5,7 +5,7 @@
 use super::{Core, Key, Kind, NO_KEY};
 use crate::{
     JsonValue,
-    geometry::{Bounds, Points, rect},
+    geometry::{Bounds, Point, Points, point, rect},
     mount::MountItem,
     ops::NodeId,
     text::TextEngine,
@@ -20,9 +20,7 @@ pub struct Measurement {
     /// in (the surface, or the modal it is shown in): those of touches'
     /// `pageX` / `pageY`. Scroll offsets and zoom scales of the scroll
     /// views and lists around it are applied; transforms are not.
-    pub page_x: f32,
-    /// See [`Measurement::page_x`].
-    pub page_y: f32,
+    pub page: Point<Points>,
 }
 
 impl Measurement {
@@ -33,8 +31,8 @@ impl Measurement {
             "y": self.frame.origin.y.0,
             "width": self.frame.size.width.0,
             "height": self.frame.size.height.0,
-            "pageX": self.page_x,
-            "pageY": self.page_y,
+            "pageX": self.page.x.0,
+            "pageY": self.page.y.0,
         })
     }
 }
@@ -94,8 +92,7 @@ impl<M: TextEngine> Core<M> {
         }
         Some(Measurement {
             frame: node.frame,
-            page_x: x,
-            page_y: y,
+            page: point(Points(x), Points(y)),
         })
     }
 

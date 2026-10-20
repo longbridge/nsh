@@ -290,9 +290,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   a `Percentage` (a fraction, 0.5 is 50%) or a style length (`AbsoluteLength`, `DefiniteLength`, `Length`), an angle is
   `Radians`, shapes are `Point` / `Size` / `Bounds` / `Edges` / `Corners` of a unit. Public API never takes or returns a
   bare `f32` / `f64` for a length, an angle or a fraction; platform boundaries (taffy, the toolkits, JS decoding) convert.
-  Enforced: nsh-core's `unit_types` test fails on a bare float in public API that `crates/nsh-core/unitless.txt`
-  (unitless quantities, with reasons) or the shrinking `crates/nsh-core/untyped.txt` (legacy, to migrate) does not list
-  (`docs/dev/geometry.md`).
+  Enforced: nsh-core's `unit_types` test (and nsh-js's and nsh-engine's `public_api_is_typed`) fails on a bare float
+  in public API that the crate's `unitless.txt` (unitless quantities, with reasons) or its shrinking `untyped.txt`
+  (legacy, to migrate) does not list (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. The primitives have one home each: `View`, `Text`, `Scroll`, `Input` from
   `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from `nsh/webview`,

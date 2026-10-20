@@ -105,10 +105,8 @@ fn touch(
             } else {
                 Vec::new()
             },
-            page_x: x,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     }))
@@ -167,8 +165,8 @@ fn a_js_view_waits_for_its_pan_and_negotiations_get_the_gesture() {
     assert_eq!(
         activation,
         Some(PanActivation {
-            active_offset_x: Some(10.0),
-            fail_offset_y: Some(10.0),
+            active_offset_x: Some(px(10.0)),
+            fail_offset_y: Some(px(10.0)),
             ..PanActivation::default()
         }),
         "the platform gets the offsets"

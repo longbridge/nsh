@@ -62,7 +62,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
             }),
             ..AccessibilityState::default()
         })
-        .hit_slop(EdgeInsets::all(8.0))
+        .hit_slop(EdgeInsets::all(px(8.0)))
         .on_press(move |_: &()| {
             let next = !props.value.get_untracked();
             on.spring(knob(next), motion::SETTLE);

@@ -55,10 +55,14 @@ fn scrub(
             } else {
                 Vec::new()
             },
-            page_x: x,
-            page_y: 400.0,
-            location_x: x,
-            location_y: 60.0,
+            page: nsh_core::geometry::point(
+                nsh_core::geometry::px(x),
+                nsh_core::geometry::px(400.0),
+            ),
+            location: nsh_core::geometry::point(
+                nsh_core::geometry::px(x),
+                nsh_core::geometry::px(60.0),
+            ),
             changed: true,
         }],
     };

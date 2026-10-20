@@ -9,6 +9,7 @@ use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, ROOT_ID, Size,
     TouchEvent, TouchPhase, TouchPoint,
     canvas::{CanvasOp, Num, PathOp},
+    geometry::px,
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
@@ -71,10 +72,8 @@ fn touch(phase: TouchPhase, path: &[u32], x: f32, y: f32, t: f64) -> EventPayloa
             } else {
                 Vec::new()
             },
-            page_x: x,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     }))

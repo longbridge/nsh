@@ -37,10 +37,10 @@ use crate::{mount::SharedMounter, native_view::NshView};
 
 fn insets_payload(i: EdgeInsets) -> EventPayload {
     EventPayload::Map(vec![
-        ("top", PayloadValue::Number(i.top as f64)),
-        ("right", PayloadValue::Number(i.right as f64)),
-        ("bottom", PayloadValue::Number(i.bottom as f64)),
-        ("left", PayloadValue::Number(i.left as f64)),
+        ("top", PayloadValue::Number(i.top.0 as f64)),
+        ("right", PayloadValue::Number(i.right.0 as f64)),
+        ("bottom", PayloadValue::Number(i.bottom.0 as f64)),
+        ("left", PayloadValue::Number(i.left.0 as f64)),
     ])
 }
 
@@ -129,10 +129,10 @@ impl ScreenController {
         let s = view.safeAreaInsets();
         self.report_header(&view, s.top as f32);
         let insets = EdgeInsets {
-            top: (s.top as f32 - self.ivars().padded.get()).max(0.0),
-            right: s.right as f32,
-            bottom: s.bottom as f32,
-            left: s.left as f32,
+            top: Points((s.top as f32 - self.ivars().padded.get()).max(0.0)),
+            right: Points(s.right as f32),
+            bottom: Points(s.bottom as f32),
+            left: Points(s.left as f32),
         };
         if self.ivars().insets.replace(Some(insets)) != Some(insets) {
             let id = self.ivars().id;
@@ -261,10 +261,10 @@ impl ModalController {
         let size = view.bounds().size;
         let s = view.safeAreaInsets();
         let insets = EdgeInsets {
-            top: s.top as f32,
-            right: s.right as f32,
-            bottom: s.bottom as f32,
-            left: s.left as f32,
+            top: Points(s.top as f32),
+            right: Points(s.right as f32),
+            bottom: Points(s.bottom as f32),
+            left: Points(s.left as f32),
         };
         if size.width <= 0.0
             || self.ivars().reported.replace(Some((size, insets))) == Some((size, insets))
@@ -575,7 +575,7 @@ impl ScreenHost {
         let padded = if c.header_transparent || c.large_title {
             0.0
         } else {
-            c.header_height
+            c.header_height.0
         };
         let ivars = self.controller.ivars();
         ivars.padded.set(padded);

@@ -12,7 +12,10 @@ use std::{
     ptr,
 };
 
-use nsh_core::{Command, EventKind, NodeId, Op, Tag};
+use nsh_core::{
+    Command, EventKind, NodeId, Op, Tag,
+    geometry::{Percentage, Points},
+};
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 
@@ -287,8 +290,8 @@ pub(crate) fn render(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsV
                     command: Command::ScrollToIndex {
                         index: index.max(0.0) as u32,
                         animated: false,
-                        view_position: 0.0,
-                        view_offset: 0.0,
+                        view_position: Percentage(0.0),
+                        view_offset: Points::ZERO,
                     },
                 },
             )

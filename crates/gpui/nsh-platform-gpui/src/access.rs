@@ -92,7 +92,7 @@ use gpui::{
 };
 use nsh_core::{
     Accessibility, AccessibilityRole as AxRole, Checked, Command, EventKind, EventMask, LiveRegion,
-    MountBatch, NodeId, ViewKind,
+    MountBatch, NodeId, ViewKind, geometry::Points,
 };
 use rustc_hash::FxHashMap;
 
@@ -1129,8 +1129,8 @@ fn perform(
 /// Scrolls the scroll view `view` to the offset.
 fn scroll_to(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) {
     let command = Command::ScrollTo {
-        x,
-        y,
+        x: Points(x),
+        y: Points(y),
         animated: false,
     };
     crate::scroll::command(surface, view, &command);

@@ -99,7 +99,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     .right_0()
                     .bottom_0()
                     .pt_2()
-                    .pb(move || px(safe_area().bottom + 16.0))
+                    .pb(move || px(safe_area().bottom.0 + 16.0))
                     .px_4()
                     .gap_3()
                     .rounded_t(move || theme().radius_lg.max(px(16.0)))

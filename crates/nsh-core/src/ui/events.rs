@@ -181,12 +181,7 @@ pub(crate) fn unit(_: &EventPayload) -> Option<Cow<'_, ()>> {
 
 pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Bounds<Points>>> {
     match *p {
-        EventPayload::Layout {
-            x,
-            y,
-            width,
-            height,
-        } => Some(Cow::Owned(crate::geometry::rect(x, y, width, height))),
+        EventPayload::Layout(frame) => Some(Cow::Owned(frame)),
         _ => None,
     }
 }
@@ -226,9 +221,10 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
 
 pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size<Points>>> {
     match *p {
-        EventPayload::Image { width, height } => {
-            Some(Cow::Owned(crate::geometry::size_pt(width, height)))
-        }
+        EventPayload::Image(size) => Some(Cow::Owned(crate::geometry::size_pt(
+            size.width.0 as f32,
+            size.height.0 as f32,
+        ))),
         _ => Some(Cow::Owned(crate::geometry::size_pt(
             number(p, "width"),
             number(p, "height"),
@@ -238,8 +234,8 @@ pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size<Points>>> {
 
 pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
     Some(Cow::Owned(match *p {
-        EventPayload::Scroll { x, y } => ScrollEvent {
-            offset: point(px(x), px(y)),
+        EventPayload::Scroll(offset) => ScrollEvent {
+            offset,
             ..ScrollEvent::default()
         },
         _ => ScrollEvent {
@@ -259,7 +255,7 @@ pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
 
 pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
     Some(Cow::Owned(match *p {
-        EventPayload::Scroll { x, y } => point(px(x), px(y)),
+        EventPayload::Scroll(offset) => offset,
         _ => point(px(number(p, "x")), px(number(p, "y"))),
     }))
 }
@@ -267,18 +263,17 @@ pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
 pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
     match *p {
         EventPayload::Pan {
-            translation_x,
-            translation_y,
+            translation,
             velocity_x,
             velocity_y,
             value_x,
             value_y,
         } => Some(Cow::Owned(PanEvent {
-            translation: point(px(translation_x), px(translation_y)),
+            translation,
             velocity_x,
             velocity_y,
-            value_x,
-            value_y,
+            value_x: value_x.map(|v| v.0),
+            value_y: value_y.map(|v| v.0),
         })),
         _ => None,
     }

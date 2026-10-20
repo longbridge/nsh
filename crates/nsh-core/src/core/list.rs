@@ -483,18 +483,18 @@ impl ListState {
     /// The gap between rows along the main axis.
     fn main_gap(&self) -> f32 {
         if self.horizontal {
-            self.content.column_gap
+            self.content.column_gap.0
         } else {
-            self.content.row_gap
+            self.content.row_gap.0
         }
     }
 
     /// The gap between columns.
     pub(super) fn cross_gap(&self) -> f32 {
         if self.horizontal {
-            self.content.row_gap
+            self.content.row_gap.0
         } else {
-            self.content.column_gap
+            self.content.column_gap.0
         }
     }
 
@@ -502,18 +502,18 @@ impl ListState {
     fn main_padding(&self) -> (f32, f32) {
         let p = &self.content.padding;
         if self.horizontal {
-            (p.left, p.right)
+            (p.left.0, p.right.0)
         } else {
-            (p.top, p.bottom)
+            (p.top.0, p.bottom.0)
         }
     }
 
     pub(super) fn cross_padding(&self) -> (f32, f32) {
         let p = &self.content.padding;
         if self.horizontal {
-            (p.top, p.bottom)
+            (p.top.0, p.bottom.0)
         } else {
-            (p.left, p.right)
+            (p.left.0, p.right.0)
         }
     }
 
@@ -668,15 +668,15 @@ impl ListState {
             let cross_changed = self.cross_padding() != {
                 let p = &content.padding;
                 if self.horizontal {
-                    (p.top, p.bottom)
+                    (p.top.0, p.bottom.0)
                 } else {
-                    (p.left, p.right)
+                    (p.left.0, p.right.0)
                 }
             } || self.cross_gap()
                 != if self.horizontal {
-                    content.row_gap
+                    content.row_gap.0
                 } else {
-                    content.column_gap
+                    content.column_gap.0
                 };
             self.content = content;
             if cross_changed {
@@ -1079,7 +1079,7 @@ impl ListState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::props::EdgeInsets;
+    use crate::{geometry::px, props::EdgeInsets};
 
     fn list(count: u32, estimated: f32, viewport: f32) -> ListState {
         let mut l = ListState::new();
@@ -1168,13 +1168,13 @@ mod tests {
         let mut l = list(3, 50.0, 1000.0);
         l.set_content(ListContentStyle {
             padding: EdgeInsets {
-                top: 10.0,
-                right: 16.0,
-                bottom: 20.0,
-                left: 16.0,
+                top: px(10.0),
+                right: px(16.0),
+                bottom: px(20.0),
+                left: px(16.0),
             },
-            row_gap: 8.0,
-            column_gap: 0.0,
+            row_gap: px(8.0),
+            column_gap: px(0.0),
         });
         l.add_slot_cell(CellSlot::Header, 7);
         l.measured_extra(ExtraKind::Header, 30.0);

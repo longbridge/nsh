@@ -63,7 +63,7 @@ use std::{
 use gpui::{Corners, RenderImage};
 use nsh_core::{
     Color, Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue,
-    ResizeMode, access::Access,
+    ResizeMode, access::Access, geometry::DevicePixels,
 };
 use rustc_hash::FxHashMap;
 
@@ -1617,10 +1617,10 @@ fn loaded(
         Ok(picture) if events.contains(EventKind::Load) => surface.event(
             id,
             EventKind::Load,
-            EventPayload::Image {
-                width: picture.size.0 as f32,
-                height: picture.size.1 as f32,
-            },
+            EventPayload::Image(nsh_core::geometry::size(
+                DevicePixels(picture.size.0 as i32),
+                DevicePixels(picture.size.1 as i32),
+            )),
         ),
         Err(message) if events.contains(EventKind::Error) => surface.event(
             id,
@@ -1679,9 +1679,9 @@ fn density(uri: &str) -> f32 {
 fn natural(size: (u32, u32), source: Option<&ImageSource>) -> (f32, f32) {
     if let Some(size) = source
         .and_then(|s| s.size)
-        .filter(|(w, h)| *w > 0.0 && *h > 0.0)
+        .filter(|s| s.width.0 > 0.0 && s.height.0 > 0.0)
     {
-        return size;
+        return (size.width.0, size.height.0);
     }
     let d = source.map_or(1.0, |s| density(&s.uri));
     (size.0 as f32 / d, size.1 as f32 / d)
@@ -1762,7 +1762,7 @@ fn draw_one(
         .as_ref()
         .map(|e| &e.filters[..])
         .unwrap_or(&[]);
-    let blur = ((image.options.blur_radius.max(0.0) + nsh_core::blur_radius(filters).0)
+    let blur = ((image.options.blur_radius.0.max(0.0) + nsh_core::blur_radius(filters).0)
         * px_per_pt)
         .round()
         .clamp(0.0, u16::MAX as f32);

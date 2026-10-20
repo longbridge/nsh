@@ -3,7 +3,10 @@ use std::cell::Cell;
 use nsh_animation::{AnimationOp, AnimationProp};
 
 use super::*;
-use crate::{Color, EventKind, StyleValue};
+use crate::{
+    Color, EventKind, StyleValue,
+    geometry::{point, px},
+};
 
 /// 8pt per char, 16pt per line, wraps at `max_width`. Counts calls.
 #[derive(Default)]
@@ -927,7 +930,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                 id: 2,
                 prop: Prop::Source(Some(ImageSource {
                     uri: "asset:/logo.png".into(),
-                    size: Some((200.0, 100.0)),
+                    size: Some(size_pt(200.0, 100.0)),
                 })),
             },
             Op::Insert {
@@ -950,7 +953,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                 id: 3,
                 prop: Prop::Source(Some(ImageSource {
                     uri: "asset:/logo.png".into(),
-                    size: Some((200.0, 100.0)),
+                    size: Some(size_pt(200.0, 100.0)),
                 })),
             },
             Op::Insert {
@@ -1242,7 +1245,7 @@ fn list_renders_window_and_recycles_cells() {
             style_op(2, &[("height", StyleValue::Number(400.0))]),
             Op::SetProp {
                 id: 2,
-                prop: Prop::EstimatedItemSize(50.0),
+                prop: Prop::EstimatedItemSize(px(50.0)),
             },
             Op::SetProp {
                 id: 2,
@@ -1273,13 +1276,13 @@ fn list_renders_window_and_recycles_cells() {
 
     // Scroll far down into unmeasured (50 pt estimated) rows: the window
     // needs 25 rows; all 17 existing cells are reused and 8 are added.
-    c.set_scroll_offset(2, 0.0, 10_000.0, u32::MAX);
+    c.set_scroll_offset(2, point(px(0.0), px(10_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     assert_eq!(cells.len(), 25);
     c.commit();
     // Scrolling on reuses cells only.
-    c.set_scroll_offset(2, 0.0, 20_000.0, u32::MAX);
+    c.set_scroll_offset(2, point(px(0.0), px(20_000.0)), u32::MAX);
     c.commit();
     assert_eq!(render_binds(&mut c, &mut next_id, &mut cells, 50.0), 25);
     assert_eq!(cells.len(), 25);
@@ -1300,7 +1303,7 @@ fn list_keeps_visible_content_anchored() {
             style_op(2, &[("height", StyleValue::Number(400.0))]),
             Op::SetProp {
                 id: 2,
-                prop: Prop::EstimatedItemSize(50.0),
+                prop: Prop::EstimatedItemSize(px(50.0)),
             },
             Op::SetProp {
                 id: 2,
@@ -1315,13 +1318,13 @@ fn list_keeps_visible_content_anchored() {
     );
     c.commit();
     // Jump into the middle before anything above was measured.
-    c.set_scroll_offset(2, 0.0, 2000.0, u32::MAX);
+    c.set_scroll_offset(2, point(px(0.0), px(2000.0)), u32::MAX);
     c.commit();
     let (mut next_id, mut cells) = (100, Vec::new());
     render_binds(&mut c, &mut next_id, &mut cells, 50.0);
     c.commit();
     // Scroll back up so rows above the old position get rendered at 80 pt.
-    c.set_scroll_offset(2, 0.0, 1200.0, u32::MAX);
+    c.set_scroll_offset(2, point(px(0.0), px(1200.0)), u32::MAX);
     c.commit();
     render_binds(&mut c, &mut next_id, &mut cells, 80.0);
     let batch = c.commit().unwrap();
@@ -1329,7 +1332,7 @@ fn list_keeps_visible_content_anchored() {
         .items
         .iter()
         .filter_map(|i| match i {
-            MountItem::ScrollBy { id: 2, dy, .. } => Some(*dy),
+            MountItem::ScrollBy { id: 2, dy, .. } => Some(dy.0),
             _ => None,
         })
         .sum();
@@ -1351,7 +1354,7 @@ fn estimated_list(c: &mut Core<FakeEngine>) {
             style_op(2, &[("height", StyleValue::Number(400.0))]),
             Op::SetProp {
                 id: 2,
-                prop: Prop::EstimatedItemSize(50.0),
+                prop: Prop::EstimatedItemSize(px(50.0)),
             },
             Op::SetProp {
                 id: 2,
@@ -1373,8 +1376,8 @@ fn scrolled(batch: &MountBatch, start: f32) -> f32 {
         MountItem::Command {
             id: 2,
             command: Command::ScrollTo { y, .. },
-        } => *y,
-        MountItem::ScrollBy { id: 2, dy, .. } => at + dy,
+        } => y.0,
+        MountItem::ScrollBy { id: 2, dy, .. } => at + dy.0,
         _ => at,
     })
 }
@@ -1416,8 +1419,8 @@ fn scroll_commands_follow_their_target_as_rows_are_measured() {
         command: Command::ScrollToIndex {
             index: 50,
             animated: false,
-            view_position: 0.5,
-            view_offset: 0.0,
+            view_position: crate::geometry::Percentage(0.5),
+            view_offset: px(0.0),
         },
     })
     .unwrap();
@@ -1433,7 +1436,7 @@ fn scroll_commands_follow_their_target_as_rows_are_measured() {
     assert!(!list.pinned(), "settled");
 
     // Scrolled by the user, the list stays where it is put.
-    c.set_scroll_offset(2, 0.0, at - 600.0, u32::MAX);
+    c.set_scroll_offset(2, point(px(0.0), px(at - 600.0)), u32::MAX);
     c.commit();
     assert!(render_binds(&mut c, &mut next_id, &mut cells, 120.0) > 0);
     let batch = c.commit().unwrap();
@@ -1463,9 +1466,9 @@ fn animated_scroll_commands_retarget_while_rows_are_measured() {
     let mut target = first;
     // The platform starts the animation; the window follows it to the
     // end, whose rows are measured: the animation is retargeted.
-    c.set_scroll_offset(2, 0.0, 1000.0, 1);
+    c.set_scroll_offset(2, point(px(0.0), px(1000.0)), 1);
     c.commit();
-    c.set_scroll_offset(2, 0.0, first - 10.0, 1);
+    c.set_scroll_offset(2, point(px(0.0), px(first - 10.0)), 1);
     c.commit();
     let mut issued = 1;
     for _ in 0..4 {
@@ -1478,7 +1481,7 @@ fn animated_scroll_commands_retarget_while_rows_are_measured() {
                 } = item
                 {
                     assert!(animated);
-                    target = *y;
+                    target = y.0;
                     issued += 1;
                 }
             }
@@ -1787,7 +1790,7 @@ fn bench_cell_relayout() {
         },
         Op::SetProp {
             id: 2,
-            prop: Prop::EstimatedItemSize(64.0),
+            prop: Prop::EstimatedItemSize(px(64.0)),
         },
         Op::SetProp {
             id: 2,
@@ -2221,12 +2224,7 @@ fn layout_events_carry_frames_and_late_listeners_get_one() {
         vec![(
             2,
             EventKind::Layout,
-            EventPayload::Layout {
-                x: 0.0,
-                y: 0.0,
-                width: 320.0,
-                height: 40.0
-            }
+            EventPayload::Layout(rect(0.0, 0.0, 320.0, 40.0))
         )]
     );
     // Unchanged frames report nothing; a listener added later learns the
@@ -2357,7 +2355,7 @@ fn view_props_and_gestures_reach_the_platform() {
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::HitSlop(crate::EdgeInsets::all(10.0)),
+                prop: Prop::HitSlop(crate::EdgeInsets::all(px(10.0))),
             },
             Op::SetProp {
                 id: 2,
@@ -2371,11 +2369,9 @@ fn view_props_and_gestures_reach_the_platform() {
         ],
     );
     let batch = c.commit().unwrap();
-    assert!(
-        batch.items.iter().any(
-            |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.hit_slop.top == 10.0)
-        )
-    );
+    assert!(batch.items.iter().any(
+        |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.hit_slop.top == px(10.0))
+    ));
     assert!(
         batch
             .items
@@ -2439,7 +2435,7 @@ fn a_changing_label_is_sent_alone() {
 fn screens_fill_their_stack_below_the_header() {
     let mut c = core();
     c.set_safe_area(crate::EdgeInsets {
-        top: 20.0,
+        top: px(20.0),
         ..Default::default()
     });
     apply(
@@ -2482,15 +2478,15 @@ fn screens_fill_their_stack_below_the_header() {
     assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 480.0)));
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 64.0, 320.0, 416.0)));
     assert!(batch.items.iter().any(
-        |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == 64.0)
+        |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == px(64.0))
     ));
     // The header the platform measured replaces the estimate (Catalyst
     // can show its bar in the window's title bar).
-    c.set_screen_header(3, Some(52.0));
+    c.set_screen_header(3, Some(px(52.0)));
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 52.0, 320.0, 428.0)));
     assert!(batch.items.iter().any(
-        |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == 52.0)
+        |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == px(52.0))
     ));
     // Without a header, the content starts at the top.
     apply(
@@ -2722,7 +2718,7 @@ fn right_to_left_horizontal_scrolls() {
         MountItem::Command {
             id: 2,
             command: Command::ScrollTo { x, .. }
-        } if *x == 60.0
+        } if x.0 == 60.0
     )));
 }
 
@@ -5300,8 +5296,8 @@ mod components {
                         m.frame.origin.y.0,
                         m.frame.size.width.0,
                         m.frame.size.height.0,
-                        m.page_x,
-                        m.page_y,
+                        m.page.x.0,
+                        m.page.y.0,
                         none.is_none()
                     ));
                 });
@@ -5503,12 +5499,11 @@ mod components {
 
         // Let go: a spring starts; its end resolves the task.
         let payload = EventPayload::Pan {
-            translation_x: 0.0,
-            translation_y: 120.0,
+            translation: point(px(0.0), px(120.0)),
             velocity_x: 0.0,
             velocity_y: 300.0,
             value_x: None,
-            value_y: Some(120.0),
+            value_y: Some(px(120.0)),
         };
         assert!(c.component_event(2, EventKind::PanEnd, &payload));
         let batch = c.commit().unwrap();
@@ -6004,20 +5999,20 @@ mod components {
                 .items
                 .iter()
                 .filter_map(|i| match i {
-                    MountItem::ScrollBy { id, dy, .. } if *id == list => Some(*dy),
+                    MountItem::ScrollBy { id, dy, .. } if *id == list => Some(dy.0),
                     _ => None,
                 })
                 .sum()
         };
         // At its end (20 rows of 40 in 460 points), the last row grows by
         // 80: the list scrolls with it.
-        c.set_scroll_offset(list, 0.0, 800.0 - 460.0, 0);
+        c.set_scroll_offset(list, point(px(0.0), px(800.0 - 460.0)), 0);
         assert!(c.commit().is_none(), "every row is bound already");
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
         assert_eq!(scrolled(&c.commit().unwrap()), 80.0);
         // Scrolled up, what is visible stays as the last row shrinks and
         // grows again.
-        c.set_scroll_offset(list, 0.0, 100.0, 1);
+        c.set_scroll_offset(list, point(px(0.0), px(100.0)), 1);
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
         assert_eq!(scrolled(&c.commit().unwrap()), 0.0);
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
@@ -6492,10 +6487,8 @@ mod touch {
                 } else {
                     Vec::new()
                 },
-                page_x: x,
-                page_y: 100.0,
-                location_x: x - 10.0,
-                location_y: 5.0,
+                page: point(px(x), px(100.0)),
+                location: point(px(x - 10.0), px(5.0)),
                 changed: true,
             }],
         }))
@@ -6684,7 +6677,8 @@ mod touch {
                     .size(px(100.0))
                     .claim_touches(TouchClaim::on_start())
                     .claim_touches(TouchClaim::on_pan(crate::PanActivation::horizontal(
-                        10.0, 10.0,
+                        px(10.0),
+                        px(10.0),
                     )))
                     .on_responder_grant(move |_: &ResponderEvent| {
                         log.update(|l| l.push("grant".into()));
@@ -6706,7 +6700,10 @@ mod touch {
                 _ => None,
             })
             .expect("the activation is mounted");
-        assert_eq!(activation, crate::PanActivation::horizontal(10.0, 10.0));
+        assert_eq!(
+            activation,
+            crate::PanActivation::horizontal(px(10.0), px(10.0))
+        );
         c.component_event(
             ROOT_ID,
             EventKind::Touch,
@@ -6734,15 +6731,15 @@ mod touch {
 
     #[test]
     fn a_pan_activation_decides_by_axis() {
-        let pan = crate::PanActivation::horizontal(10.0, 8.0);
-        assert_eq!(pan.decide(4.0, 3.0), None);
-        assert_eq!(pan.decide(-11.0, 3.0), Some(true));
-        assert_eq!(pan.decide(4.0, -9.0), Some(false));
+        let pan = crate::PanActivation::horizontal(px(10.0), px(8.0));
+        assert_eq!(pan.decide(px(4.0), px(3.0)), None);
+        assert_eq!(pan.decide(px(-11.0), px(3.0)), Some(true));
+        assert_eq!(pan.decide(px(4.0), px(-9.0)), Some(false));
         // Both passed by one move: the fail offset wins.
-        assert_eq!(pan.decide(20.0, 9.0), Some(false));
+        assert_eq!(pan.decide(px(20.0), px(9.0)), Some(false));
         let any = crate::PanActivation::default();
-        assert_eq!(any.decide(6.0, 6.0), None);
-        assert_eq!(any.decide(8.0, 8.0), Some(true));
+        assert_eq!(any.decide(px(6.0), px(6.0)), None);
+        assert_eq!(any.decide(px(8.0), px(8.0)), Some(true));
     }
 
     /// A card scaled and turned by two-finger gestures.
@@ -7072,10 +7069,10 @@ fn measures_in_root_coordinates() {
     c.commit().unwrap();
     let m = c.measure(6).unwrap();
     assert_eq!(m.frame, rect(20.0, 520.0, 280.0, 30.0));
-    assert_eq!((m.page_x, m.page_y), (20.0, 570.0));
-    c.set_scroll_offset(2, 0.0, 400.0, u32::MAX);
+    assert_eq!(m.page, point(px(20.0), px(570.0)));
+    c.set_scroll_offset(2, point(px(0.0), px(400.0)), u32::MAX);
     let m = c.measure(6).unwrap();
-    assert_eq!((m.page_x, m.page_y), (20.0, 170.0));
+    assert_eq!(m.page, point(px(20.0), px(170.0)));
     // Detached or unknown: nothing to measure.
     c.apply(Op::Remove {
         parent: 4,
@@ -7945,11 +7942,11 @@ mod views {
                 _ => None,
             })
             .expect("a list");
-        c.set_scroll_offset(list, 0.0, 10_000.0, u32::MAX);
+        c.set_scroll_offset(list, point(px(0.0), px(10_000.0)), u32::MAX);
         c.commit().unwrap();
         // Scrolling on: the cells are reused and their content stays; only
         // the texts change.
-        c.set_scroll_offset(list, 0.0, 20_000.0, u32::MAX);
+        c.set_scroll_offset(list, point(px(0.0), px(20_000.0)), u32::MAX);
         let batch = c.commit().unwrap();
         assert_eq!(creates(&batch), 0, "{:?}", batch.items);
         let shown = texts(&batch);
@@ -8994,7 +8991,7 @@ mod views {
         let mut sizes = Vec::new();
         for step in 1..=12u32 {
             let y = (step as f32 * 900.0) % 7000.0;
-            c.set_scroll_offset(list, 0.0, y, u32::MAX);
+            c.set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
             for _ in 0..3 {
                 if let Some(b) = c.commit() {
                     record(&b, &mut shown);
@@ -9072,7 +9069,9 @@ mod views {
                     Lit::element(LitProps {})
                         .bind_opacity(&v)
                         .inline_style(red.clone())
-                        .inset_padding(move || EdgeInsets::all(if wide.get() { 8.0 } else { 4.0 })),
+                        .inset_padding(move || {
+                            EdgeInsets::all(px(if wide.get() { 8.0 } else { 4.0 }))
+                        }),
                 )
                 .child(Plaque::element(PlaqueProps {}).inline_style(red))
         }
@@ -9106,7 +9105,7 @@ mod views {
                 .copied()
                 .unwrap_or_default()[0]
         };
-        assert_eq!(insets(&c, lit), EdgeInsets::all(4.0));
+        assert_eq!(insets(&c, lit), EdgeInsets::all(px(4.0)));
         // On a rooted component's host too, over the counter's own style.
         let plaque = native_children(&c, root)[1];
         assert_eq!(
@@ -9116,7 +9115,7 @@ mod views {
         // A bound inset follows.
         assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
         c.commit();
-        assert_eq!(insets(&c, lit), EdgeInsets::all(8.0));
+        assert_eq!(insets(&c, lit), EdgeInsets::all(px(8.0)));
     }
 
     /// A count its API reads.
@@ -9737,7 +9736,7 @@ mod rust_desktop {
         });
         c.mount_root(&Root::of::<Chrome>());
         let batch = c.commit().unwrap();
-        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::SetTitleBar {style:TitleBarStyle::Hidden, height:Some(42.0)})));
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::SetTitleBar {style:TitleBarStyle::Hidden, height:Some(px(42.0))})));
         let header = batch
             .items
             .iter()
@@ -9889,7 +9888,7 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
             .on_hover_move(move |e: &HoverEvent| {
                 at.set(format!(
                     "{} {} {} {} {}",
-                    e.location_x, e.location_y, e.page_x, e.page_y, e.modifiers.shift
+                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0, e.modifiers.shift
                 ))
             })
             .child(text(move || at.get()))
@@ -9906,10 +9905,8 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
         })
         .expect("the listening view mounts HoverMove in its event mask");
     let event = crate::HoverEvent {
-        location_x: 4.0,
-        location_y: 5.0,
-        page_x: 14.0,
-        page_y: 25.0,
+        location: point(px(4.0), px(5.0)),
+        page: point(px(14.0), px(25.0)),
         modifiers: crate::keymap::Modifiers {
             shift: true,
             ..Default::default()
@@ -9937,7 +9934,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
             .on_context_menu(move |e: &ContextMenuEvent| {
                 at.set(format!(
                     "{} {} {} {}",
-                    e.location_x, e.location_y, e.page_x, e.page_y
+                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0
                 ))
             })
             .child(text(move || at.get()))
@@ -9956,10 +9953,8 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         })
         .expect("the listening view mounts ContextMenu in its event mask");
     let event = crate::ContextMenuEvent {
-        location_x: 4.0,
-        location_y: 5.0,
-        page_x: 14.0,
-        page_y: 25.0,
+        location: point(px(4.0), px(5.0)),
+        page: point(px(14.0), px(25.0)),
         ..Default::default()
     };
     assert!(c.component_event(

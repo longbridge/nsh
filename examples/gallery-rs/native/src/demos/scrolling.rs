@@ -517,8 +517,8 @@ fn Events() -> impl IntoElement {
                 .content_inset(move || {
                     if inset.get() {
                         EdgeInsets {
-                            top: 40.0,
-                            bottom: 40.0,
+                            top: px(40.0),
+                            bottom: px(40.0),
                             ..EdgeInsets::default()
                         }
                     } else {

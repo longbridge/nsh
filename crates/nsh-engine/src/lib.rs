@@ -20,6 +20,18 @@ mod storage;
 #[cfg(feature = "js")]
 mod symbolicate;
 
+// The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
+// nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
+#[cfg(test)]
+#[path = "../../nsh-core/src/geometry/unit_scan.rs"]
+mod unit_scan;
+
+#[cfg(test)]
+#[test]
+fn public_api_is_typed() {
+    unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
+}
+
 use std::{io, rc::Rc, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -1076,7 +1088,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_storage(app_storage(&config));
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
-        core.set_header_heights(config.header_heights.0, config.header_heights.1);
+        core.set_header_heights(
+            Points(config.header_heights.0),
+            Points(config.header_heights.1),
+        );
         core.set_safe_area(insets(&config.environment));
         core.set_environment(ui_environment(&config.environment, config.viewport));
         // WebAssembly has no threads for a runtime: tasks' timers are
@@ -1804,13 +1819,7 @@ impl<M: TextEngine> State<M> {
 }
 
 fn insets(env: &Environment) -> EdgeInsets {
-    let a = env.safe_area;
-    EdgeInsets {
-        top: a.top.0,
-        right: a.right.0,
-        bottom: a.bottom.0,
-        left: a.left.0,
-    }
+    env.safe_area
 }
 
 /// What Rust components read from the environment.
@@ -1904,7 +1913,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Scroll(id, x, y, applied) => {
-            state.core.set_scroll_offset(id, x, y, applied);
+            state
+                .core
+                .set_scroll_offset(id, geometry::point(Points(x), Points(y)), applied);
             if let Some((throttle_ms, content, viewport, zoom)) = state.core.scroll_listener(id) {
                 let event = state.scroll_events.entry(id).or_insert(ScrollEvent {
                     x,
@@ -1947,7 +1958,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
-        Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
+        Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height.map(Points)),
         Message::Frame => {
             state.frame_requested = false;
             state.core.run_frame(Instant::now());
@@ -2063,8 +2074,8 @@ mod tests {
             content(Points(313.0)),
             MountItem::ScrollBy {
                 id: 2,
-                dx: 0.0,
-                dy: 10.0,
+                dx: Points(0.0),
+                dy: Points(10.0),
             },
         ];
         super::extend_frame(&mut frame, vec![content(Points(544.0))]);

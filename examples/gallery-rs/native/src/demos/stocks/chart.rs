@@ -749,7 +749,10 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         // The platform gives the chart the finger only once
                         // it has moved sideways, so vertical drags still
                         // scroll the page.
-                        .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(6.0, 8.0)))
+                        .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(
+                            px(6.0),
+                            px(8.0),
+                        )))
                         .keep_touches(true)
                         .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location.x.0)))
                         .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location.x.0)))

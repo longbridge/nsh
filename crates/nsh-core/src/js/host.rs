@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub use nsh_macros::HostProps;
 
-use crate::{EdgeInsets, EventKind, style::Color, ui::TsTypes};
+use crate::{EdgeInsets, EventKind, geometry::Points, style::Color, ui::TsTypes};
 
 /// A JS value as host props read it.
 pub trait HostInput: Sized {
@@ -175,6 +175,12 @@ impl Clamped for f32 {
     }
 }
 
+impl Clamped for Points {
+    fn clamped(self, min: Option<f64>, max: Option<f64>) -> Self {
+        Points(self.0.clamped(min, max))
+    }
+}
+
 impl Clamped for u32 {
     fn clamped(self, min: Option<f64>, max: Option<f64>) -> Self {
         let v = min.map_or(self, |m| self.max(m as u32));
@@ -201,6 +207,17 @@ impl HostValue for bool {
 impl HostValue for f32 {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         input.as_number().map(|n| n as f32)
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "number".into()
+    }
+}
+
+/// A number of points.
+impl HostValue for Points {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        f32::decode(input, cx).map(Points)
     }
 
     fn ts_type(_: &mut TsTypes) -> String {
@@ -294,7 +311,7 @@ impl<T: HostValue> HostValue for Vec<T> {
 /// `{ top, right, bottom, left }` (each 0 when left out).
 impl HostValue for EdgeInsets {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
-        let side = |key| input.field(key).and_then(|v| v.as_number()).unwrap_or(0.0) as f32;
+        let side = |key| Points(input.field(key).and_then(|v| v.as_number()).unwrap_or(0.0) as f32);
         Some(EdgeInsets {
             top: side("top"),
             right: side("right"),

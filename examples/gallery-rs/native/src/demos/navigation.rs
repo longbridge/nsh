@@ -25,10 +25,10 @@ type Edge = fn(EdgeInsets) -> f32;
 #[component]
 fn Insets(cx: Scope<NoEvent>) -> impl IntoElement {
     let edges: [(&str, Edge); 4] = [
-        ("Top", |i| i.top),
-        ("Bottom", |i| i.bottom),
-        ("Left", |i| i.left),
-        ("Right", |i| i.right),
+        ("Top", |i| i.top.0),
+        ("Bottom", |i| i.bottom.0),
+        ("Left", |i| i.left.0),
+        ("Right", |i| i.right.0),
     ];
     view().flex_row().children(edges.map(|(edge, inset)| {
         Stat::new(edge, move || format!("{} pt", inset(cx.insets()).round())).width(0.25)
@@ -195,7 +195,7 @@ fn custom_header() -> Screen {
                 .text_color(colors::ON_ACCENT)
                 .text_size(px(17.0))
                 .font_weight(FontWeight::MEDIUM)
-                .hit_slop(EdgeInsets::all(10.0))
+                .hit_slop(EdgeInsets::all(px(10.0)))
                 .on_press(|_: &()| nav::pop()),
         )
         .header_title(
@@ -216,7 +216,7 @@ fn custom_header() -> Screen {
                 .flex_row()
                 .items_center()
                 .gap(px(5.0))
-                .hit_slop(EdgeInsets::all(10.0))
+                .hit_slop(EdgeInsets::all(px(10.0)))
                 .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
                 .child(icon(IconName::Star, 18.0, colors::ON_ACCENT))
                 .child(

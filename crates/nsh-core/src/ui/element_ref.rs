@@ -140,8 +140,8 @@ impl ElementRef {
     /// Scrolls a scroll view to a content offset.
     pub fn scroll_to(&self, offset: Point<Points>, animated: bool) {
         self.send(Command::ScrollTo {
-            x: offset.x.0,
-            y: offset.y.0,
+            x: offset.x,
+            y: offset.y,
             animated,
         });
     }
@@ -149,8 +149,8 @@ impl ElementRef {
     /// Scrolls a list to `offset` along its axis.
     pub fn scroll_to_offset(&self, offset: Points, animated: bool) {
         self.send(Command::ScrollTo {
-            x: offset.0,
-            y: offset.0,
+            x: offset,
+            y: offset,
             animated,
         });
     }
@@ -172,8 +172,8 @@ impl ElementRef {
         self.send(Command::ScrollToIndex {
             index,
             animated,
-            view_position: view_position.0,
-            view_offset: view_offset.0,
+            view_position,
+            view_offset,
         });
     }
 
@@ -182,7 +182,7 @@ impl ElementRef {
     pub fn zoom_to(&self, scale: f32, center: Option<Point<Points>>, animated: bool) {
         self.send(Command::ZoomTo {
             scale,
-            center: center.map(|c| (c.x.0, c.y.0)),
+            center,
             animated,
         });
     }

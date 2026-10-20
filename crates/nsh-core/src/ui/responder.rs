@@ -50,8 +50,8 @@ fn centroid(touch: &TouchEvent) -> (f32, f32, u32) {
     let lifted = matches!(touch.phase, TouchPhase::End | TouchPhase::Cancel);
     let (mut x, mut y, mut n) = (0.0, 0.0, 0u32);
     for p in touch.points.iter().filter(|p| !lifted || !p.changed) {
-        x += p.page_x;
-        y += p.page_y;
+        x += p.page.x.0;
+        y += p.page.y.0;
         n += 1;
     }
     let d = n.max(1) as f32;
@@ -111,8 +111,8 @@ pub struct ResponderEvent {
 impl ResponderEvent {
     pub(crate) fn new(about: &TouchPoint, timestamp: f64, gesture: PanGesture) -> Self {
         Self {
-            location: point(px(about.location_x), px(about.location_y)),
-            page: point(px(about.page_x), px(about.page_y)),
+            location: about.location,
+            page: about.page,
             timestamp,
             gesture,
         }

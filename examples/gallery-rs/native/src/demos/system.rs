@@ -103,7 +103,7 @@ fn safe_area_diagram() -> AnyElement {
             [inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.06))],
         )
         .overflow_hidden()
-        .child(view().h(move || band(safe_area().top)).bg(tints::INFO))
+        .child(view().h(move || band(safe_area().top.0)).bg(tints::INFO))
         .child(
             view()
                 .flex_1()
@@ -114,7 +114,7 @@ fn safe_area_diagram() -> AnyElement {
                 .border_dashed(),
         )
         .child(view().h(move || band(keyboard_height().0)).bg(tints::WARN))
-        .child(view().h(move || band(safe_area().bottom)).bg(tints::INFO))
+        .child(view().h(move || band(safe_area().bottom.0)).bg(tints::INFO))
         .into_element()
 }
 
@@ -122,10 +122,10 @@ fn safe_area_diagram() -> AnyElement {
 fn environment() -> AnyElement {
     type Edge = fn(EdgeInsets) -> f32;
     let insets: [(&str, Edge); 4] = [
-        ("Top", |i| i.top),
-        ("Right", |i| i.right),
-        ("Bottom", |i| i.bottom),
-        ("Left", |i| i.left),
+        ("Top", |i| i.top.0),
+        ("Right", |i| i.right.0),
+        ("Bottom", |i| i.bottom.0),
+        ("Left", |i| i.left.0),
     ];
     let insets = insets.map(|(label, value)| {
         Stat::new(label, move || value(safe_area()).round().to_string()).width(0.25)

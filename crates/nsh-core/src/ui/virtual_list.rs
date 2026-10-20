@@ -89,7 +89,7 @@ pub trait ListLayout: Sized {
     /// Padding around the rows.
     fn content_padding(self, padding: impl IntoReactive<Points>) -> Self {
         self.layout(padding, |c, padding: Points| {
-            content(c).padding = crate::EdgeInsets::all(padding.0);
+            content(c).padding = crate::EdgeInsets::all(padding);
         })
     }
 
@@ -97,7 +97,7 @@ pub trait ListLayout: Sized {
     fn content_padding_x(self, padding: impl IntoReactive<Points>) -> Self {
         self.layout(padding, |c, padding: Points| {
             let p = &mut content(c).padding;
-            (p.left, p.right) = (padding.0, padding.0);
+            (p.left, p.right) = (padding, padding);
         })
     }
 
@@ -105,32 +105,32 @@ pub trait ListLayout: Sized {
     fn content_padding_y(self, padding: impl IntoReactive<Points>) -> Self {
         self.layout(padding, |c, padding: Points| {
             let p = &mut content(c).padding;
-            (p.top, p.bottom) = (padding.0, padding.0);
+            (p.top, p.bottom) = (padding, padding);
         })
     }
 
     /// Padding above the rows.
     fn content_padding_top(self, padding: impl IntoReactive<Points>) -> Self {
         self.layout(padding, |c, padding: Points| {
-            content(c).padding.top = padding.0
+            content(c).padding.top = padding
         })
     }
 
     /// Padding below the rows.
     fn content_padding_bottom(self, padding: impl IntoReactive<Points>) -> Self {
         self.layout(padding, |c, padding: Points| {
-            content(c).padding.bottom = padding.0
+            content(c).padding.bottom = padding
         })
     }
 
     /// Space between rows (columns in horizontal lists).
     fn row_gap(self, gap: impl IntoReactive<Points>) -> Self {
-        self.layout(gap, |c, gap: Points| content(c).row_gap = gap.0)
+        self.layout(gap, |c, gap: Points| content(c).row_gap = gap)
     }
 
     /// Space between columns ([`Self::columns`]).
     fn column_gap(self, gap: impl IntoReactive<Points>) -> Self {
-        self.layout(gap, |c, gap: Points| content(c).column_gap = gap.0)
+        self.layout(gap, |c, gap: Points| content(c).column_gap = gap)
     }
 }
 

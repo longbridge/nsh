@@ -93,11 +93,11 @@ pub fn KeyboardAvoidingView(props: KeyboardAvoidingViewProps) -> impl IntoElemen
     // The room it makes, by `behavior`.
     let room = move |behavior: AvoidBehavior| {
         move || EdgeInsets {
-            bottom: if props.behavior.get() == behavior {
+            bottom: px(if props.behavior.get() == behavior {
                 lift.get()
             } else {
                 0.0
-            },
+            }),
             ..EdgeInsets::default()
         }
     };

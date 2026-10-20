@@ -58,7 +58,8 @@ use std::{
 
 use nsh_core::{
     Command, EventKind, EventMask, EventPayload, GestureValues, NodeId, PanActivation,
-    PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    PayloadValue, PointerEvents, Points, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    geometry::point,
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -456,7 +457,7 @@ impl Gate {
         dx: f32,
         dy: f32,
     ) -> (Option<NodeId>, bool) {
-        match self.activation.decide(dx, dy) {
+        match self.activation.decide(Points(dx), Points(dy)) {
             Some(true) => {
                 candidates.truncate(self.outer);
                 (Some(self.id), false)
@@ -843,10 +844,8 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         if listens {
             let (location_x, location_y) = local(&v, x, y);
             let event = nsh_core::ContextMenuEvent {
-                location_x,
-                location_y,
-                page_x: x,
-                page_y: y,
+                location: point(Points(location_x), Points(location_y)),
+                page: point(Points(x), Points(y)),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: modifiers.ctrl,
                     alt: modifiers.alt,
@@ -1174,7 +1173,8 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
     let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
     let inside = x >= 0.0 && y >= 0.0 && x < w && y < h;
     let slop = s.props.hit_slop;
-    let in_slop = x >= -slop.left && y >= -slop.top && x < w + slop.right && y < h + slop.bottom;
+    let in_slop =
+        x >= -slop.left.0 && y >= -slop.top.0 && x < w + slop.right.0 && y < h + slop.bottom.0;
     let children = if clip {
         inside
     } else if laid_out(s.kind, s.id) {
@@ -1727,10 +1727,8 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     } else {
                         Vec::new()
                     },
-                    page_x: p.x,
-                    page_y: p.y,
-                    location_x: lx,
-                    location_y: ly,
+                    page: point(Points(p.x), Points(p.y)),
+                    location: point(Points(lx), Points(ly)),
                     changed: is_changed,
                 }
             })
@@ -1885,10 +1883,10 @@ fn released_inside(view: &NshView, x: f32, y: f32) -> bool {
     let s = view.state();
     let slop = s.props.hit_slop;
     let r = PRESS_RETENTION;
-    lx >= -slop.left - r
-        && ly >= -slop.top - r
-        && lx <= s.frame.size.width.0 + slop.right + r
-        && ly <= s.frame.size.height.0 + slop.bottom + r
+    lx >= -slop.left.0 - r
+        && ly >= -slop.top.0 - r
+        && lx <= s.frame.size.width.0 + slop.right.0 + r
+        && ly <= s.frame.size.height.0 + slop.bottom.0 + r
 }
 
 /// Fades `view` to `opacity` times its fade before the press, or back
@@ -1943,12 +1941,11 @@ fn fade(surface: &Rc<Surface>, view: &NshView, opacity: Option<f32>) {
 fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
     EventPayload::Pan {
-        translation_x: t.0,
-        translation_y: t.1,
+        translation: point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
-        value_x,
-        value_y,
+        value_x: value_x.map(Points),
+        value_y: value_y.map(Points),
     }
 }
 
@@ -2263,10 +2260,8 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
         };
         let (location_x, location_y) = local(&v, x, y);
         let event = nsh_core::HoverEvent {
-            location_x,
-            location_y,
-            page_x: x,
-            page_y: y,
+            location: point(Points(location_x), Points(location_y)),
+            page: point(Points(x), Points(y)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: modifiers.ctrl,
                 alt: modifiers.alt,
@@ -2534,12 +2529,7 @@ mod tests {
     fn hit_slop_extends_the_view() {
         let root = root();
         let a = view(&root, 2, ViewKind::View, rect(100.0, 100.0, 20.0, 20.0));
-        a.state_mut().props.hit_slop = EdgeInsets {
-            top: 10.0,
-            right: 10.0,
-            bottom: 10.0,
-            left: 10.0,
-        };
+        a.state_mut().props.hit_slop = EdgeInsets::all(Points(10.0));
         assert_eq!(at(&root, 95.0, 125.0), Some(2));
         assert_eq!(at(&root, 85.0, 125.0), Some(ROOT_ID));
     }
@@ -2717,7 +2707,7 @@ mod tests {
     fn gates_decide_on_their_offsets() {
         let gate = Gate {
             id: 7,
-            activation: PanActivation::horizontal(6.0, 8.0),
+            activation: PanActivation::horizontal(Points(6.0), Points(8.0)),
             outer: 0,
         };
         let mut candidates = Vec::new();

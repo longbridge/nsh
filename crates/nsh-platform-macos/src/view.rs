@@ -102,7 +102,7 @@ pub(crate) struct ScrollState {
 impl ScrollState {
     /// The largest offsets.
     pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset;
+        let inset = self.behavior.content_inset.map(|v| v.0);
         (
             (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
             (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),

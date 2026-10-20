@@ -448,12 +448,12 @@ fn sheet_style(t: &Theme) -> ViewStyle {
 fn content_insets(c: &ScreenConfig) -> EdgeInsets {
     let under = c.header_transparent || c.large_title;
     let top = if c.header_shown && under {
-        c.header_height.max(0.0)
+        c.header_height.0.max(0.0)
     } else {
         0.0
     };
     EdgeInsets {
-        top,
+        top: Points(top),
         ..EdgeInsets::default()
     }
 }
@@ -469,10 +469,10 @@ fn measured_header(c: &ScreenConfig) -> Option<f32> {
 fn insets_payload(i: EdgeInsets) -> EventPayload {
     let n = |v: f32| PayloadValue::Number(v as f64);
     EventPayload::Map(vec![
-        ("top", n(i.top)),
-        ("right", n(i.right)),
-        ("bottom", n(i.bottom)),
-        ("left", n(i.left)),
+        ("top", n(i.top.0)),
+        ("right", n(i.right.0)),
+        ("bottom", n(i.bottom.0)),
+        ("left", n(i.left.0)),
     ])
 }
 
@@ -689,7 +689,7 @@ impl ScreenNav {
     }
 
     fn header_shown(&self) -> bool {
-        self.config.header_shown && self.config.header_height > 0.0
+        self.config.header_shown && self.config.header_height.0 > 0.0
     }
 
     fn report(&mut self, surface: &Surface, stack: &NshView) {
@@ -776,13 +776,13 @@ impl ScreenNav {
         let Some(header) = &mut self.header else {
             return;
         };
-        let key = (w, c.header_height, frames);
+        let key = (w, c.header_height.0, frames);
         if header.laid_out == Some(key) {
             return;
         }
         header.laid_out = Some(key);
         let view = &self.view;
-        let height = c.header_height;
+        let height = c.header_height.0;
         let rows = if c.large_title { 2.0 } else { 1.0 };
         // The status area (none on desktops) is above the bar.
         let top = (height - BAR * rows).max(0.0);
@@ -1485,13 +1485,7 @@ impl Nav {
             // A card inside the window: no system UI over it.
             EdgeInsets::default()
         } else {
-            let safe = surface.environment.get().safe_area;
-            EdgeInsets {
-                top: safe.top.0,
-                right: safe.right.0,
-                bottom: safe.bottom.0,
-                left: safe.left.0,
-            }
+            surface.environment.get().safe_area
         };
         let frame = sheet.unwrap_or(rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         if std::mem::replace(&mut view.state_mut().frame, frame) != frame {
@@ -1966,12 +1960,12 @@ mod tests {
             header_transparent: transparent,
             large_title,
             header_shown,
-            header_height: 47.0,
+            header_height: Points(47.0),
             ..ScreenConfig::default()
         };
-        assert_eq!(content_insets(&config(false, false, true)).top, 0.0);
-        assert_eq!(content_insets(&config(true, false, true)).top, 47.0);
-        assert_eq!(content_insets(&config(false, true, true)).top, 47.0);
-        assert_eq!(content_insets(&config(true, false, false)).top, 0.0);
+        assert_eq!(content_insets(&config(false, false, true)).top.0, 0.0);
+        assert_eq!(content_insets(&config(true, false, true)).top.0, 47.0);
+        assert_eq!(content_insets(&config(false, true, true)).top.0, 47.0);
+        assert_eq!(content_insets(&config(true, false, false)).top.0, 0.0);
     }
 }

@@ -39,10 +39,10 @@ pub fn SafeAreaView(props: SafeAreaViewProps, cx: Scope<NoEvent>) -> impl IntoEl
                 if on { v } else { 0.0 }
             };
             EdgeInsets {
-                top: pick(Edge::Top, insets.top),
-                right: pick(Edge::Right, insets.right),
-                bottom: pick(Edge::Bottom, insets.bottom),
-                left: pick(Edge::Left, insets.left),
+                top: px(pick(Edge::Top, insets.top.0)),
+                right: px(pick(Edge::Right, insets.right.0)),
+                bottom: px(pick(Edge::Bottom, insets.bottom.0)),
+                left: px(pick(Edge::Left, insets.left.0)),
             }
         })
         .child(props.children)
