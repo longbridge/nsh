@@ -18,7 +18,7 @@
 
 use std::{mem::ManuallyDrop, rc::Rc};
 
-use nsh_core::{Checked, Command, NodeId, ROOT_ID, ViewKind};
+use nsh_core::{Checked, Command, NodeId, Points, ROOT_ID, ViewKind};
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, VARIANT_FALSE, VARIANT_TRUE, WPARAM},
@@ -603,8 +603,8 @@ impl Element_Impl {
             max,
             viewport,
             extent: (
-                sc.content.0 + inset.left + inset.right,
-                sc.content.1 + inset.top + inset.bottom,
+                sc.content.0 + inset.left.0 + inset.right.0,
+                sc.content.1 + inset.top.0 + inset.bottom.0,
             ),
         })
     }
@@ -612,8 +612,8 @@ impl Element_Impl {
     fn scroll_to(&self, x: f32, y: f32) -> Result<()> {
         let t = self.target()?;
         let command = Command::ScrollTo {
-            x,
-            y,
+            x: Points(x),
+            y: Points(y),
             animated: false,
         };
         crate::scroll::command(&t.surface, &t.view, &command);

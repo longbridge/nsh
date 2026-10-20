@@ -123,7 +123,7 @@ pub fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> impl IntoE
                             .active(|s| s.bg(move || theme().secondary_active))
                             .role(AccessibilityRole::Button)
                             .label("Clear")
-                            .hit_slop(EdgeInsets::all(8.0))
+                            .hit_slop(EdgeInsets::all(px(8.0)))
                             .on_press(move |_: &()| {
                                 change(String::new());
                                 field.focus();

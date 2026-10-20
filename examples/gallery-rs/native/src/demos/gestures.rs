@@ -317,17 +317,19 @@ fn TouchPad() -> impl IntoElement {
         };
         let entry = format!(
             "{}, {} · page {}, {} · {} down",
-            p.location_x.round(),
-            p.location_y.round(),
-            p.page_x.round(),
-            p.page_y.round(),
+            p.location.x.0.round(),
+            p.location.y.0.round(),
+            p.page.x.0.round(),
+            p.page.y.0.round(),
             down.len()
         );
         batch(|| {
             fingers_down.set(if touch.phase == TouchPhase::Cancel {
                 Vec::new()
             } else {
-                down.iter().map(|f| (f.location_x, f.location_y)).collect()
+                down.iter()
+                    .map(|f| (f.location.x.0, f.location.y.0))
+                    .collect()
             });
             log.update(|log| {
                 log.insert(0, (name, entry));
@@ -569,7 +571,7 @@ fn PressEvents() -> impl IntoElement {
                     .on_press(fire("borderless"))
                     .ripple(Ripple {
                         borderless: true,
-                        radius: Some(40.0),
+                        radius: Some(px(40.0)),
                         ..Ripple::default()
                     })
                     .active_opacity(0.4)

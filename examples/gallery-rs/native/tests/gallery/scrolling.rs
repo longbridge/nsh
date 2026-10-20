@@ -81,7 +81,7 @@ fn scrolling_sections_react() {
     let snap = |screen: &crate::common::Screen| {
         let b = &screen.behaviors[&cards];
         (
-            b.snap_interval,
+            b.snap_interval.0,
             b.snap_alignment,
             b.deceleration,
             b.one_step,
@@ -101,7 +101,10 @@ fn scrolling_sections_react() {
     engine.control().dispatch_event(
         scroll,
         EventKind::ScrollBeginDrag,
-        EventPayload::Scroll { x: 0.0, y: 12.0 },
+        EventPayload::Scroll(nsh_core::geometry::point(
+            nsh_core::geometry::px(0.0),
+            nsh_core::geometry::px(12.0),
+        )),
     );
     crate::common::drain(&rx, &mut screen);
     assert!(shows(&screen, "begin drag"), "{:?}", screen.texts);

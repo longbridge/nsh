@@ -314,10 +314,8 @@ pub fn touch(
             } else {
                 Vec::new()
             },
-            page_x: x + 100.0,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x + 100.0), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     };

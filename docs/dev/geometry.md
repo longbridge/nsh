@@ -56,9 +56,13 @@ Inside NSH values stay typed; they become bare numbers only at a boundary, in on
   `Bounds<Points>`. The core's layout code computes in taffy's `f32` and wraps results (`geometry::rect`, `size_pt`,
   crate-private).
 - **Platforms**: a mount item's frame is a `Bounds<Points>`, a scroll content size a `Size<Points>`, the environment's
-  window, safe area, title bar and keyboard are `Size<Points>`, `Edges<Points>` and `Points`. A backend reads `.0` (or
-  `as_f32()`) where it hands a value to UIKit, AppKit, Android, GTK, Direct2D, GPUI or the DOM, and wraps what its
-  toolkit reports (`Points(width)`). The encodings to Android and the web are unchanged: they write the same `f32`s.
+  window, safe area, title bar and keyboard are `Size<Points>`, `Edges<Points>` and `Points`. The wire types are typed
+  the same way: insets are `EdgeInsets` (`Edges<Points>`), touch, hover and context menu positions `Point<Points>`
+  (`page`, `location`), `onLayout` a `Bounds<Points>`, scroll offsets and snap points `Points`, a scroll-to-index
+  position a `Percentage`, and a loaded image's size `Size<DevicePixels>` (the pixels of its source). A backend reads
+  `.0` (or `as_f32()`) where it hands a value to UIKit, AppKit, Android, GTK, Direct2D, GPUI or the DOM, and wraps what
+  its toolkit reports (`Points(width)`). The encodings to Android and the web are unchanged: they write the same
+  `f32`s. A value that reaches `format!` (the web's JSON) takes `.0`: `Points`' `Display` writes `10pt`.
 - **JS** (`nsh-js`): numbers decoded from JS become typed values where they enter the core's types, and typed values
   become JS numbers where they leave (the environment, events).
 

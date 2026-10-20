@@ -716,7 +716,8 @@ impl<M: TextEngine> Core<M> {
 
     /// Sets the height of the platform's screen header bar, normal and with
     /// a large title (status bar excluded).
-    pub fn set_header_heights(&mut self, normal: f32, large: f32) {
+    pub fn set_header_heights(&mut self, normal: Points, large: Points) {
+        let (normal, large) = (normal.0, large.0);
         if self.header_heights != (normal, large) {
             self.header_heights = (normal, large);
             self.needs_layout = true;
@@ -748,9 +749,9 @@ impl<M: TextEngine> Core<M> {
     /// the header it shows (`None`: estimate it from the bar's height and
     /// the safe area). Used for screens that lay their content out below
     /// the header (not large titles or transparent headers).
-    pub fn set_screen_header(&mut self, id: NodeId, height: Option<f32>) {
+    pub fn set_screen_header(&mut self, id: NodeId, height: Option<Points>) {
         let Ok(key) = self.key(id) else { return };
-        let height = height.filter(|h| h.is_finite() && *h >= 0.0);
+        let height = height.map(|h| h.0).filter(|h| h.is_finite() && *h >= 0.0);
         if let Some(root) = self.nodes[key as usize].root.as_mut()
             && root.header != height
         {
@@ -836,7 +837,8 @@ impl<M: TextEngine> Core<M> {
     /// The platform scrolled a scroll view or list to `(x, y)`, having
     /// applied `applied` of the scrolls the core issued to it
     /// (`MountItem::ScrollBy` and `Command::ScrollTo` of lists).
-    pub fn set_scroll_offset(&mut self, id: NodeId, x: f32, y: f32, applied: u32) {
+    pub fn set_scroll_offset(&mut self, id: NodeId, offset: Point<Points>, applied: u32) {
+        let (x, y) = (offset.x.0, offset.y.0);
         let Ok(key) = self.key(id) else { return };
         let node = &mut self.nodes[key as usize];
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
@@ -1017,12 +1019,7 @@ impl<M: TextEngine> Core<M> {
                         self.events.push(crate::ui::JsEvent::Event(
                             id,
                             event,
-                            EventPayload::Layout {
-                                x: f.origin.x.0,
-                                y: f.origin.y.0,
-                                width: f.size.width.0,
-                                height: f.size.height.0,
-                            },
+                            EventPayload::Layout(f),
                         ));
                     }
                 }
@@ -1256,11 +1253,14 @@ impl<M: TextEngine> Core<M> {
                     let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
                     let frame = node.frame;
                     let (x, y) = if horizontal {
-                        ((content.width - frame.size.width).max(Points::ZERO).0, 0.0)
+                        (
+                            (content.width - frame.size.width).max(Points::ZERO),
+                            Points::ZERO,
+                        )
                     } else {
                         (
-                            0.0,
-                            (content.height - frame.size.height).max(Points::ZERO).0,
+                            Points::ZERO,
+                            (content.height - frame.size.height).max(Points::ZERO),
                         )
                     };
                     command = Command::ScrollTo { x, y, animated };
@@ -1577,20 +1577,20 @@ impl<M: TextEngine> Core<M> {
                     *p = taffy::LengthPercentage::length(v + d);
                 }
             };
-            add(&mut layout.padding.top, padding.top);
-            add(&mut layout.padding.right, padding.right);
-            add(&mut layout.padding.bottom, padding.bottom);
-            add(&mut layout.padding.left, padding.left);
+            add(&mut layout.padding.top, padding.top.0);
+            add(&mut layout.padding.right, padding.right.0);
+            add(&mut layout.padding.bottom, padding.bottom.0);
+            add(&mut layout.padding.left, padding.left.0);
             // `auto` margins stay automatic.
             let add = |m: &mut taffy::LengthPercentageAuto, d: f32| {
                 if let taffy::style::ExpandedLengthPercentageAuto::Length(v) = m.expand() {
                     *m = taffy::LengthPercentageAuto::length(v + d);
                 }
             };
-            add(&mut layout.margin.top, margin.top);
-            add(&mut layout.margin.right, margin.right);
-            add(&mut layout.margin.bottom, margin.bottom);
-            add(&mut layout.margin.left, margin.left);
+            add(&mut layout.margin.top, margin.top.0);
+            add(&mut layout.margin.right, margin.right.0);
+            add(&mut layout.margin.bottom, margin.bottom.0);
+            add(&mut layout.margin.left, margin.left.0);
         }
         let flipped = node.rtl != rtl;
         node.rtl = rtl;
@@ -1717,8 +1717,8 @@ impl<M: TextEngine> Core<M> {
                 self.commands.push((
                     id,
                     Command::ScrollTo {
-                        x: 0.0,
-                        y: 0.0,
+                        x: Points::ZERO,
+                        y: Points::ZERO,
                         animated: false,
                     },
                 ));
@@ -1818,10 +1818,7 @@ impl<M: TextEngine> Core<M> {
         match prop {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
-                    let size = source
-                        .as_ref()
-                        .and_then(|s| s.size)
-                        .map(|(w, h)| size_pt(w, h));
+                    let size = source.as_ref().and_then(|s| s.size);
                     image.source = source;
                     flags |= dirty::IMAGE;
                     let layout = node.layout.expect("image layout");
@@ -1839,7 +1836,7 @@ impl<M: TextEngine> Core<M> {
                 if let Some(image) = node.image.as_mut() {
                     match option {
                         ImageProp::DefaultSource(source) => image.options.placeholder = source,
-                        ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(0.0),
+                        ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
                     }
                     flags |= dirty::IMAGE;
@@ -1881,7 +1878,7 @@ impl<M: TextEngine> Core<M> {
                     let b = &mut scroll.behavior;
                     match prop {
                         ScrollProp::Paging(on) => b.paging = on,
-                        ScrollProp::SnapInterval(v) => b.snap_interval = v.max(0.0),
+                        ScrollProp::SnapInterval(v) => b.snap_interval = v.max(Points::ZERO),
                         ScrollProp::SnapOffsets(v) => b.snap_offsets = v,
                         ScrollProp::SnapAlignment(a) => b.snap_alignment = a,
                         ScrollProp::Deceleration(r) => b.deceleration = r,
@@ -1908,14 +1905,14 @@ impl<M: TextEngine> Core<M> {
                             ));
                         }
                         ScrollProp::EventThrottle(ms) => scroll.event_throttle_ms = ms.max(0.0),
-                        ScrollProp::ContentOffset(x, y) => {
+                        ScrollProp::ContentOffset(offset) => {
                             // Where it starts: scrolled there after layout.
                             let id = node.id;
                             self.commands.push((
                                 id,
                                 Command::ScrollTo {
-                                    x,
-                                    y,
+                                    x: offset.x,
+                                    y: offset.y,
                                     animated: false,
                                 },
                             ));
@@ -1943,7 +1940,7 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::EstimatedItemSize(size) => {
                 if let Some(list) = node.list.as_mut() {
-                    list.set_estimated(size);
+                    list.set_estimated(size.0);
                 }
             }
             Prop::Slot(slot) => {
@@ -1974,7 +1971,7 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::FollowEnd(threshold) => {
                 if let Some(list) = node.list.as_mut() {
-                    list.set_follow_end(threshold);
+                    list.set_follow_end(threshold.map(|t| t.0));
                 }
             }
             Prop::StickyIndices(indices) => {
@@ -2163,7 +2160,7 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Elevation(value) => {
-                let value = value.max(0.0);
+                let value = value.0.max(0.0);
                 if node.elevation != value {
                     node.elevation = value;
                     flags |= dirty::VIEW;
@@ -3566,11 +3563,11 @@ impl<M: TextEngine> Core<M> {
         loop {
             let n = &self.nodes[k as usize];
             if k == self.root {
-                return (self.safe_area.top - y).max(0.0);
+                return (self.safe_area.top.0 - y).max(0.0);
             }
             if n.kind.is_root() {
                 let inset = match n.kind {
-                    Kind::Modal => n.root.as_ref().map_or(0.0, |r| r.insets.top),
+                    Kind::Modal => n.root.as_ref().map_or(0.0, |r| r.insets.top.0),
                     _ => 0.0,
                 };
                 return (inset - y).max(0.0);
@@ -3696,7 +3693,7 @@ impl<M: TextEngine> Core<M> {
         let node = &self.nodes[key as usize];
         let root = node.root.as_ref().filter(|_| node.kind == Kind::Screen)?;
         let mut config = root.screen.clone();
-        config.header_height = root.laid_out.map_or(0.0, |(_, h)| h);
+        config.header_height = Points(root.laid_out.map_or(0.0, |(_, h)| h));
         for &c in &node.children {
             let child = &self.nodes[c as usize];
             if child.kind != Kind::HeaderItem || !child.created {
@@ -4026,12 +4023,7 @@ impl<M: TextEngine> Core<M> {
                 self.events.push(crate::ui::JsEvent::Event(
                     id,
                     EventKind::Layout,
-                    EventPayload::Layout {
-                        x: frame.origin.x.0,
-                        y: frame.origin.y.0,
-                        width: frame.size.width.0,
-                        height: frame.size.height.0,
-                    },
+                    EventPayload::Layout(frame),
                 ));
             }
             self.mount.push(MountItem::Frame { id, frame });
@@ -4086,15 +4078,15 @@ impl<M: TextEngine> Core<M> {
                     None => self.commands.push((
                         id,
                         Command::ScrollTo {
-                            x: (size.width - Points(viewport)).max(Points::ZERO).0,
-                            y: 0.0,
+                            x: (size.width - Points(viewport)).max(Points::ZERO),
+                            y: Points::ZERO,
                             animated: false,
                         },
                     )),
                     Some(old) if old.width != size.width => self.mount.push(MountItem::ScrollBy {
                         id,
-                        dx: (size.width - old.width).0,
-                        dy: 0.0,
+                        dx: size.width - old.width,
+                        dy: Points::ZERO,
                     }),
                     Some(_) => {}
                 }
@@ -4193,8 +4185,8 @@ impl<M: TextEngine> Core<M> {
                     } => (
                         Some(PinTarget::Index {
                             index,
-                            view_position,
-                            view_offset,
+                            view_position: view_position.0,
+                            view_offset: view_offset.0,
                         }),
                         animated,
                     ),
@@ -4206,9 +4198,9 @@ impl<M: TextEngine> Core<M> {
                     (Some(pin), _) => list.target_offset(pin),
                     (None, &Command::ScrollTo { x, y, .. }) => {
                         if horizontal {
-                            x
+                            x.0
                         } else {
-                            y
+                            y.0
                         }
                     }
                     _ => continue,
@@ -4222,9 +4214,9 @@ impl<M: TextEngine> Core<M> {
                 }
                 list.issue_scroll_to(offset);
                 let (x, y) = if horizontal {
-                    (offset, 0.0)
+                    (Points(offset), Points::ZERO)
                 } else {
-                    (0.0, offset)
+                    (Points::ZERO, Points(offset))
                 };
                 *command = Command::ScrollTo { x, y, animated };
             }
@@ -4235,9 +4227,9 @@ impl<M: TextEngine> Core<M> {
                     .expect("list")
                     .issue_scroll_to(offset);
                 let (x, y) = if horizontal {
-                    (offset, 0.0)
+                    (Points(offset), Points::ZERO)
                 } else {
-                    (0.0, offset)
+                    (Points::ZERO, Points(offset))
                 };
                 let command = Command::ScrollTo {
                     x,
@@ -4386,8 +4378,8 @@ impl<M: TextEngine> Core<M> {
                     .iter()
                     .map(|r| StickyCell {
                         cell: r.cell,
-                        start: r.start,
-                        end: r.end,
+                        start: Points(r.start),
+                        end: Points(r.end),
                     })
                     .collect();
                 list.sent_sticky = sticky_cells;
@@ -4415,9 +4407,9 @@ impl<M: TextEngine> Core<M> {
             }
             let scroll_by = (anchor != 0.0).then(|| {
                 let (dx, dy) = if horizontal {
-                    (anchor, 0.0)
+                    (Points(anchor), Points::ZERO)
                 } else {
-                    (0.0, anchor)
+                    (Points::ZERO, Points(anchor))
                 };
                 MountItem::ScrollBy { id, dx, dy }
             });

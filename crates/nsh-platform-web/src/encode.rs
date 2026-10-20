@@ -719,7 +719,7 @@ fn props_json(p: &ViewProps) -> String {
     let _ = write!(
         s,
         ",\"hitSlop\":[{},{},{},{}]",
-        h.top, h.right, h.bottom, h.left
+        h.top.0, h.right.0, h.bottom.0, h.left.0
     );
     if let Some(o) = p.active_opacity {
         let _ = write!(s, ",\"activeOpacity\":{o}");
@@ -732,10 +732,10 @@ fn props_json(p: &ViewProps) -> String {
         let _ = write!(
             s,
             ",\"panActivation\":[{},{},{},{}]",
-            n(a.active_offset_x),
-            n(a.active_offset_y),
-            n(a.fail_offset_x),
-            n(a.fail_offset_y)
+            n(a.active_offset_x.map(|v| v.0)),
+            n(a.active_offset_y.map(|v| v.0)),
+            n(a.fail_offset_x.map(|v| v.0)),
+            n(a.fail_offset_y.map(|v| v.0))
         );
     }
     if let Some(l) = &a.label {
@@ -841,19 +841,19 @@ fn field_css(c: &InputConfig) -> String {
 }
 
 fn behavior_json(b: &ScrollBehavior) -> String {
-    let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.to_string()).collect();
+    let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.0.to_string()).collect();
     format!(
         "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{},\"bouncesZoom\":{},\"pinch\":{},\"centerContent\":{}}}",
         b.paging,
-        b.snap_interval,
+        b.snap_interval.0,
         offsets.join(","),
         json_str(enum_name(&b.snap_alignment)),
         b.enabled,
         b.bounces,
-        b.content_inset.top,
-        b.content_inset.right,
-        b.content_inset.bottom,
-        b.content_inset.left,
+        b.content_inset.top.0,
+        b.content_inset.right.0,
+        b.content_inset.bottom.0,
+        b.content_inset.left.0,
         b.min_zoom,
         b.max_zoom,
         b.bounces_zoom,
@@ -1088,7 +1088,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .opt_str(image_uri(source))
                 .str(resize_mode(*mode))
                 .opt_str(image_uri(&options.placeholder))
-                .num(options.blur_radius)
+                .num(options.blur_radius.0)
                 .num(options.fade_ms.unwrap_or(0.0))
                 .end();
         }
@@ -1114,7 +1114,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .end();
         }
         MountItem::ScrollBy { id, dx, dy } => {
-            out.item("sb").num(*id).num(*dx).num(*dy).end();
+            out.item("sb").num(*id).num(dx.0).num(dy.0).end();
         }
         MountItem::LayoutDirection { rtl } => out.item("dir").bool(*rtl).end(),
         MountItem::Appearance { appearance } => out.item("appearance").num(*appearance as u8).end(),
@@ -1125,8 +1125,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 if i > 0 {
                     out.s.push(',');
                 }
-                let end = if c.end.is_finite() { c.end } else { 1e9 };
-                let _ = write!(out.s, "[{},{},{}]", c.cell, c.start, end);
+                let end = if c.end.is_finite() { c.end.0 } else { 1e9 };
+                let _ = write!(out.s, "[{},{},{}]", c.cell, c.start.0, end);
             }
             out.s.push(']');
             out.end();
@@ -1189,7 +1189,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .num(*id)
                 .opt_str(config.title.as_deref())
                 .bool(config.header_shown)
-                .num(config.header_height)
+                .num(config.header_height.0)
                 .opt_str(config.background_color.map(css_color).as_deref())
                 .opt_str(config.title_color.map(css_color).as_deref())
                 .opt_str(config.tint_color.map(css_color).as_deref())
@@ -1272,8 +1272,8 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.item("cmd")
                 .num(id)
                 .str("scrollTo")
-                .num(*x)
-                .num(*y)
+                .num(x.0)
+                .num(y.0)
                 .bool(*animated)
                 .end();
         }
@@ -1339,7 +1339,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         } => {
             out.item("cmd").num(id).str("zoomTo").num(*scale);
             match center {
-                Some((x, y)) => out.num(*x).num(*y),
+                Some(c) => out.num(c.x.0).num(c.y.0),
                 None => out.raw("null").raw("null"),
             };
             out.bool(*animated).end();

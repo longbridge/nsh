@@ -19,7 +19,7 @@ use jni::{
 };
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, Points, Size,
-    geometry::px,
+    geometry::{DevicePixels, point, px, size},
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
@@ -738,11 +738,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
         | EventKind::ScrollBeginDrag
         | EventKind::ScrollEndDrag
         | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd => EventPayload::Scroll { x, y },
-        EventKind::Load => EventPayload::Image {
-            width: x,
-            height: y,
-        },
+        | EventKind::MomentumScrollEnd => EventPayload::Scroll(point(px(x), px(y))),
+        // The bitmap's width and height: whole pixels.
+        EventKind::Load => {
+            EventPayload::Image(size(DevicePixels(x as i32), DevicePixels(y as i32)))
+        }
         EventKind::Error => EventPayload::Error {
             message: read_text(),
         },
@@ -784,10 +784,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_hover(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let event = nsh_core::HoverEvent {
-        location_x: x,
-        location_y: y,
-        page_x,
-        page_y,
+        location: point(px(x), px(y)),
+        page: point(px(page_x), px(page_y)),
         modifiers: nsh_core::keymap::Modifiers {
             ctrl: modifiers & 1 != 0,
             alt: modifiers & 2 != 0,
@@ -862,10 +860,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
                 id: ids[i] as u32,
                 target: targets[i] as NodeId,
                 path,
-                page_x: c[i * 4],
-                page_y: c[i * 4 + 1],
-                location_x: c[i * 4 + 2],
-                location_y: c[i * 4 + 3],
+                page: point(px(c[i * 4]), px(c[i * 4 + 1])),
+                location: point(px(c[i * 4 + 2]), px(c[i * 4 + 3])),
                 changed: flags[i] != 0,
             }
         })
@@ -1105,12 +1101,11 @@ extern "system" fn Java_com_longbridge_nsh_Native_pan(
     }
     let (value_x, value_y) = ui.pan_values(id as u32);
     let payload = EventPayload::Pan {
-        translation_x: tx,
-        translation_y: ty,
+        translation: point(px(tx), px(ty)),
         velocity_x: vx,
         velocity_y: vy,
-        value_x,
-        value_y,
+        value_x: value_x.map(Points),
+        value_y: value_y.map(Points),
     };
     match (state, &control) {
         (0, Some(c)) => c.dispatch_event(id as NodeId, EventKind::PanStart, payload),
@@ -1190,10 +1185,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_rootSize(
             id as NodeId,
             Size::new(Points(width), Points(height)),
             nsh_core::EdgeInsets {
-                top,
-                right,
-                bottom,
-                left,
+                top: px(top),
+                right: px(right),
+                bottom: px(bottom),
+                left: px(left),
             },
         );
     }

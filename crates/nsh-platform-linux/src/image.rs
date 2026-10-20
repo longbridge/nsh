@@ -42,6 +42,7 @@ use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
     Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue, ResizeMode,
     access::Access,
+    geometry::{DevicePixels, size},
 };
 use rustc_hash::FxHashMap;
 
@@ -996,10 +997,10 @@ fn loaded(
         Ok(picture) if events.contains(EventKind::Load) => surface.event(
             id,
             EventKind::Load,
-            EventPayload::Image {
-                width: picture.texture.width() as f32,
-                height: picture.texture.height() as f32,
-            },
+            EventPayload::Image(size(
+                DevicePixels(picture.texture.width()),
+                DevicePixels(picture.texture.height()),
+            )),
         ),
         Err(message) if events.contains(EventKind::Error) => surface.event(
             id,
@@ -1057,6 +1058,7 @@ fn density(uri: &str) -> f32 {
 fn natural(texture: &gdk::Texture, source: Option<&ImageSource>) -> (f32, f32) {
     if let Some(size) = source
         .and_then(|s| s.size)
+        .map(|s| (s.width.0, s.height.0))
         .filter(|(w, h)| *w > 0.0 && *h > 0.0)
     {
         return size;
@@ -1108,7 +1110,7 @@ fn draw_one(
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(image.mode, natural(texture, source), (w, h));
     let mut rect = graphene::Rect::new(x, y, fw, fh);
-    let blur = image.options.blur_radius.max(0.0);
+    let blur = image.options.blur_radius.0.max(0.0);
     if blur > 0.0 {
         // Enlarged under a clip to its own rectangle: the blur's
         // transparent fringe falls outside.

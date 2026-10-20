@@ -3,6 +3,7 @@ use std::sync::Arc;
 use nsh_animation::AnimationOp;
 
 use crate::{
+    geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
     style::{Color, EllipsizeMode, Style, StylePatch},
@@ -307,13 +308,9 @@ pub struct TouchPoint {
     /// innermost first.
     pub path: Vec<NodeId>,
     /// Position in the surface.
-    pub page_x: f32,
-    /// Position in the surface.
-    pub page_y: f32,
+    pub page: Point<Points>,
     /// Position in `target`.
-    pub location_x: f32,
-    /// Position in `target`.
-    pub location_y: f32,
+    pub location: Point<Points>,
     /// This finger is one the event is about (it went down, moved or
     /// lifted).
     pub changed: bool,
@@ -324,14 +321,10 @@ pub struct TouchPoint {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HoverEvent {
     /// Position in the view, its transforms undone.
-    pub location_x: f32,
-    /// Position in the view.
-    pub location_y: f32,
+    pub location: Point<Points>,
     /// Position in the root view the view is in (the surface, or its
-    /// modal), as touches' `page_x`.
-    pub page_x: f32,
-    /// Position in the root view.
-    pub page_y: f32,
+    /// modal), as touches' `page`.
+    pub page: Point<Points>,
     /// The modifier keys held.
     pub modifiers: crate::keymap::Modifiers,
 }
@@ -341,14 +334,10 @@ pub struct HoverEvent {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ContextMenuEvent {
     /// Position in the view, its transforms undone.
-    pub location_x: f32,
-    /// Position in the view.
-    pub location_y: f32,
+    pub location: Point<Points>,
     /// Position in the root view the view is in (the surface, or its
     /// modal): where `Menu.popup` opens a menu.
-    pub page_x: f32,
-    /// Position in the root view.
-    pub page_y: f32,
+    pub page: Point<Points>,
     /// The modifier keys held.
     pub modifiers: crate::keymap::Modifiers,
 }
@@ -433,45 +422,24 @@ pub enum EventPayload {
     /// An object with named fields.
     Map(Vec<(&'static str, PayloadValue)>),
     /// A frame relative to the parent (`onLayout`).
-    Layout {
-        /// Left edge.
-        x: f32,
-        /// Top edge.
-        y: f32,
-        /// Width.
-        width: f32,
-        /// Height.
-        height: f32,
-    },
+    Layout(Bounds<Points>),
     /// A drag: translation since the start and velocity (points / second).
     Pan {
-        /// Horizontal translation.
-        translation_x: f32,
-        /// Vertical translation.
-        translation_y: f32,
+        /// The translation.
+        translation: Point<Points>,
         /// Horizontal velocity.
         velocity_x: f32,
         /// Vertical velocity.
         velocity_y: f32,
         /// The `pan.x` value now (`None` without one).
-        value_x: Option<f32>,
+        value_x: Option<Points>,
         /// The `pan.y` value now.
-        value_y: Option<f32>,
+        value_y: Option<Points>,
     },
-    /// A scroll position.
-    Scroll {
-        /// Horizontal content offset.
-        x: f32,
-        /// Vertical content offset.
-        y: f32,
-    },
+    /// A scroll position: the content offset.
+    Scroll(Point<Points>),
     /// A loaded image's source size in pixels (before downsampling).
-    Image {
-        /// Width.
-        width: f32,
-        /// Height.
-        height: f32,
-    },
+    Image(Size<DevicePixels>),
     /// An error message.
     Error {
         /// The message.
@@ -542,7 +510,7 @@ pub struct ImageSource {
     pub uri: Arc<str>,
     /// Natural size in points, when known up front (bundled assets): used
     /// as the intrinsic layout size.
-    pub size: Option<(f32, f32)>,
+    pub size: Option<Size<Points>>,
 }
 
 /// Keyboard layout of an input (`keyboardType`).
@@ -678,7 +646,7 @@ pub enum ImageProp {
     /// `blurRadius`: blurs the image by this radius in points (decoded once, off
     /// the main thread).
     #[prop(js = "blurRadius", on = IMAGE)]
-    BlurRadius(f32),
+    BlurRadius(Points),
     /// `fadeDuration`: how long a loaded image fades in, in milliseconds
     /// (default: the platform's, 0 on iOS and 300 on Android, like React
     /// Native).
@@ -694,10 +662,10 @@ pub enum ScrollProp {
     Paging(bool),
     /// `snapToInterval`: stops at multiples of this length (0: off).
     #[prop(js = "snapToInterval", on = SCROLLING)]
-    SnapInterval(f32),
+    SnapInterval(Points),
     /// `snapToOffsets`: stops at these offsets.
     #[prop(js = "snapToOffsets", on = SCROLLING)]
-    SnapOffsets(Vec<f32>),
+    SnapOffsets(Vec<Points>),
     /// `snapToAlignment`: which point of an item aligns with the viewport with
     /// `snapToInterval`.
     #[prop(js = "snapToAlignment", on = SCROLLING)]
@@ -715,7 +683,7 @@ pub enum ScrollProp {
     ContentInset(EdgeInsets),
     /// `contentOffset`: where it starts.
     #[prop(js = "contentOffset", with = crate::js::host_values::content_offset, once, ts = "{ x?: number; y?: number }", on = SCROLLING)]
-    ContentOffset(f32, f32),
+    ContentOffset(Point<Points>),
     /// `keyboardShouldPersistTaps`: whether a tap dismisses the keyboard: `"never"`
     /// (default: the tap only dismisses it), `"always"` (never dismisses),
     /// `"handled"` (unless something handles the tap).
@@ -771,9 +739,9 @@ pub struct ListContentStyle {
     /// Padding around the content.
     pub padding: EdgeInsets,
     /// Gap between rows (vertical lists) / columns (horizontal lists).
-    pub row_gap: f32,
+    pub row_gap: Points,
     /// Gap between columns (`numColumns`) of vertical lists.
-    pub column_gap: f32,
+    pub column_gap: Points,
 }
 
 /// When list items count as viewable (React Native's `viewabilityConfig`).
@@ -923,9 +891,9 @@ pub enum Command {
     /// Scroll a scroll view to an offset.
     ScrollTo {
         /// Horizontal offset.
-        x: f32,
+        x: Points,
         /// Vertical offset.
-        y: f32,
+        y: Points,
         /// Animate the change.
         animated: bool,
     },
@@ -959,9 +927,9 @@ pub enum Command {
         animated: bool,
         /// Where the item ends up: 0 at the start of the viewport, 1 at the
         /// end, 0.5 in the middle.
-        view_position: f32,
+        view_position: Percentage,
         /// Extra distance from that position.
-        view_offset: f32,
+        view_offset: Points,
     },
     /// Zoom a zoomable scroll view to `scale`, with the content point
     /// (`x`, `y`) (points, unzoomed) in the middle of the viewport, or
@@ -970,7 +938,7 @@ pub enum Command {
         /// The zoom scale (clamped to the view's limits).
         scale: f32,
         /// The content point to center.
-        center: Option<(f32, f32)>,
+        center: Option<Point<Points>>,
         /// Animate the change.
         animated: bool,
     },
@@ -1208,8 +1176,8 @@ pub enum Prop {
     Count(u32),
     /// `estimatedItemSize`: the size of items not measured yet, in points (default
     /// 50).
-    #[prop(js = "estimatedItemSize", default = 50.0, on = LIST)]
-    EstimatedItemSize(f32),
+    #[prop(js = "estimatedItemSize", default = Points(50.0), on = LIST)]
+    EstimatedItemSize(Points),
     /// The recycling slot (or the role) of a list cell, set once by the
     /// runtime.
     #[prop(js = "slot", with = crate::js::host_values::slot, internal)]
@@ -1231,7 +1199,7 @@ pub enum Prop {
     /// streaming into its last item); scrolled further up, it keeps the visible
     /// content where it is. Items inserted above the visible ones never move them.
     #[prop(js = "maintainVisibleContentPosition", with = crate::js::host_values::visible_content, reset = Prop::FollowEnd(None), ts = "{ autoscrollToBottomThreshold?: number }", on = LIST)]
-    FollowEnd(Option<f32>),
+    FollowEnd(Option<Points>),
     /// `stickyHeaderIndices`: items that stick to the start while scrolled past
     /// (one column, not inverted).
     #[prop(js = "stickyHeaderIndices", with = crate::js::host_values::sticky, reset = Prop::StickyIndices(Vec::new()), on = LIST)]
@@ -1417,7 +1385,7 @@ pub enum Prop {
     Ripple(Option<crate::props::Ripple>),
     /// `elevation` (Android): the material shadow (points), from the view's shape.
     #[prop(android = "elevation")]
-    Elevation(f32),
+    Elevation(Points),
     /// An accessibility property.
     #[prop(nested)]
     Accessibility(AccessibilityProp),

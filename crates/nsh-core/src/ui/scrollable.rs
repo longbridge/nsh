@@ -46,7 +46,7 @@ pub trait Scrollable: Element {
     /// Stops on multiples of `points` (TS: `snapToInterval`; 0: off).
     fn snap_interval(mut self, points: impl IntoReactive<f32>) -> Self {
         host::bind_prop(self.node(), points, |points| {
-            Prop::Scroll(ScrollProp::SnapInterval(points))
+            Prop::Scroll(ScrollProp::SnapInterval(crate::geometry::Points(points)))
         });
         self
     }
@@ -54,7 +54,9 @@ pub trait Scrollable: Element {
     /// Stops at these offsets (TS: `snapToOffsets`).
     fn snap_offsets(mut self, offsets: impl IntoReactive<Vec<f32>>) -> Self {
         host::bind_prop(self.node(), offsets, |offsets| {
-            Prop::Scroll(ScrollProp::SnapOffsets(offsets))
+            Prop::Scroll(ScrollProp::SnapOffsets(
+                offsets.into_iter().map(crate::geometry::Points).collect(),
+            ))
         });
         self
     }
@@ -110,7 +112,9 @@ pub trait Scrollable: Element {
 
     /// Where it starts (set once).
     fn content_offset(self, x: f32, y: f32) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::ContentOffset(x, y)))
+        self.set_scroll_prop(Prop::Scroll(ScrollProp::ContentOffset(
+            crate::geometry::point(crate::geometry::Points(x), crate::geometry::Points(y)),
+        )))
     }
 
     /// Taps while the keyboard shows: dismiss it, or reach the content (TS:

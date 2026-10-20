@@ -69,12 +69,14 @@ fn physics_springs_coasts_and_snaps() {
     assert_eq!(stat(&screen, "Speed"), "0 pt/s");
 
     let release = EventPayload::Pan {
-        translation_x: 80.0,
-        translation_y: 20.0,
+        translation: nsh_core::geometry::point(
+            nsh_core::geometry::px(80.0),
+            nsh_core::geometry::px(20.0),
+        ),
         velocity_x: 300.0,
         velocity_y: -400.0,
-        value_x: Some(80.0),
-        value_y: Some(20.0),
+        value_x: Some(nsh_core::geometry::px(80.0)),
+        value_y: Some(nsh_core::geometry::px(20.0)),
     };
     let springs = dispatch(
         &engine,

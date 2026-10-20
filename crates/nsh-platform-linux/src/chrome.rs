@@ -136,7 +136,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     let c = &surface.chrome;
     match command {
         DesktopCommand::SetTitleBar { style, height } => {
-            let resized = c.height.replace(*height) != *height;
+            let height = height.map(|h| h.0);
+            let resized = c.height.replace(height) != height;
             if resized && c.style.get() == *style {
                 update_area(surface);
             }
@@ -153,7 +154,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 install_menu(surface, &window);
             }
         }
-        DesktopCommand::PopupMenu { items, at } => popup(surface, items, *at),
+        DesktopCommand::PopupMenu { items, at } => {
+            popup(surface, items, at.map(|p| (p.x.0, p.y.0)))
+        }
         DesktopCommand::SetTitle(title) => {
             if let Some(window) = window(surface) {
                 window.set_title(Some(title));
@@ -174,8 +177,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             {
                 let (width, height) = window.default_size();
                 window.set_default_size(
-                    frame.width.map_or(width, |v| v.round() as i32),
-                    frame.height.map_or(height, |v| v.round() as i32),
+                    frame.width.map_or(width, |v| v.0.round() as i32),
+                    frame.height.map_or(height, |v| v.0.round() as i32),
                 );
             }
         }

@@ -36,6 +36,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, PayloadValue, Points, ROOT_ID, Size,
+    geometry::{DevicePixels, point, size},
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
@@ -907,16 +908,16 @@ pub unsafe extern "C" fn nsh_event(
         | EventKind::ScrollBeginDrag
         | EventKind::ScrollEndDrag
         | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd => EventPayload::Scroll {
-            x: num("x"),
-            y: num("y"),
-        },
+        | EventKind::MomentumScrollEnd => {
+            EventPayload::Scroll(point(Points(num("x")), Points(num("y"))))
+        }
         // A video's and a web view's loads carry more than an image's.
         EventKind::Load if value.get("duration").is_none() && value.get("url").is_none() => {
-            EventPayload::Image {
-                width: num("width"),
-                height: num("height"),
-            }
+            // `naturalWidth` / `naturalHeight`: whole pixels.
+            EventPayload::Image(size(
+                DevicePixels(num("width") as i32),
+                DevicePixels(num("height") as i32),
+            ))
         }
         EventKind::Error => EventPayload::Error {
             message: text("message"),
@@ -924,10 +925,8 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::HoverMove => {
             let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             EventPayload::Hover(nsh_core::HoverEvent {
-                location_x: num("locationX"),
-                location_y: num("locationY"),
-                page_x: num("pageX"),
-                page_y: num("pageY"),
+                location: point(Points(num("locationX")), Points(num("locationY"))),
+                page: point(Points(num("pageX")), Points(num("pageY"))),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: flag("ctrlKey"),
                     alt: flag("altKey"),
@@ -939,10 +938,8 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::ContextMenu => {
             let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-                location_x: num("locationX"),
-                location_y: num("locationY"),
-                page_x: num("pageX"),
-                page_y: num("pageY"),
+                location: point(Points(num("locationX")), Points(num("locationY"))),
+                page: point(Points(num("pageX")), Points(num("pageY"))),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: flag("ctrlKey"),
                     alt: flag("altKey"),
@@ -1050,10 +1047,8 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
                                 .collect()
                         })
                         .unwrap_or_default(),
-                    page_x: f(p, "pageX") as f32,
-                    page_y: f(p, "pageY") as f32,
-                    location_x: f(p, "x") as f32,
-                    location_y: f(p, "y") as f32,
+                    page: point(Points(f(p, "pageX") as f32), Points(f(p, "pageY") as f32)),
+                    location: point(Points(f(p, "x") as f32), Points(f(p, "y") as f32)),
                     changed: p.get("changed").and_then(|v| v.as_bool()).unwrap_or(true),
                 })
                 .collect()
@@ -1186,12 +1181,11 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
         }
         let (value_x, value_y) = app.animation.pan_values(id);
         let payload = EventPayload::Pan {
-            translation_x: tx,
-            translation_y: ty,
+            translation: point(Points(tx), Points(ty)),
             velocity_x: vx,
             velocity_y: vy,
-            value_x,
-            value_y,
+            value_x: value_x.map(Points),
+            value_y: value_y.map(Points),
         };
         match phase {
             0 => app.control.dispatch_event(id, EventKind::PanStart, payload),
@@ -1249,10 +1243,10 @@ pub extern "C" fn nsh_root_size(
 ) -> f64 {
     send(|app| {
         let insets = nsh_core::EdgeInsets {
-            top,
-            right,
-            bottom,
-            left,
+            top: Points(top),
+            right: Points(right),
+            bottom: Points(bottom),
+            left: Points(left),
         };
         app.control
             .set_root_size(id, Size::new(Points(width), Points(height)), insets);

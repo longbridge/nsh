@@ -110,7 +110,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
             ticket.set(true);
         }
     };
-    let bottom = move || cx.insets().bottom;
+    let bottom = move || cx.insets().bottom.0;
     let (second, market) = (live.second, live.market.clone());
     let footer = text(move || {
         second.get();

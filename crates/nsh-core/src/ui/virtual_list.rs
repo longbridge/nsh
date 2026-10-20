@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{
     CellSlot, EventKind, EventPayload, ListContentStyle, PayloadValue, Prop, Tag, Viewability,
+    geometry::Points,
 };
 
 /// How a list lays out its rows: [`super::ListElement`] (the app's rows)
@@ -88,7 +89,7 @@ pub trait ListLayout: Sized {
     /// Padding around the rows, in points.
     fn content_padding(self, points: impl IntoReactive<f32>) -> Self {
         self.layout(points, |c, points| {
-            content(c).padding = crate::EdgeInsets::all(points);
+            content(c).padding = crate::EdgeInsets::all(Points(points));
         })
     }
 
@@ -96,7 +97,7 @@ pub trait ListLayout: Sized {
     fn content_padding_x(self, points: impl IntoReactive<f32>) -> Self {
         self.layout(points, |c, points| {
             let p = &mut content(c).padding;
-            (p.left, p.right) = (points, points);
+            (p.left, p.right) = (Points(points), Points(points));
         })
     }
 
@@ -104,28 +105,30 @@ pub trait ListLayout: Sized {
     fn content_padding_y(self, points: impl IntoReactive<f32>) -> Self {
         self.layout(points, |c, points| {
             let p = &mut content(c).padding;
-            (p.top, p.bottom) = (points, points);
+            (p.top, p.bottom) = (Points(points), Points(points));
         })
     }
 
     /// Padding above the rows.
     fn content_padding_top(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).padding.top = points)
+        self.layout(points, |c, points| content(c).padding.top = Points(points))
     }
 
     /// Padding below the rows.
     fn content_padding_bottom(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).padding.bottom = points)
+        self.layout(points, |c, points| {
+            content(c).padding.bottom = Points(points)
+        })
     }
 
     /// Space between rows (columns in horizontal lists).
     fn row_gap(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).row_gap = points)
+        self.layout(points, |c, points| content(c).row_gap = Points(points))
     }
 
     /// Space between columns ([`Self::columns`]).
     fn column_gap(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).column_gap = points)
+        self.layout(points, |c, points| content(c).column_gap = Points(points))
     }
 }
 

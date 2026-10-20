@@ -234,7 +234,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             push(surface, Op::Title(title.clone()));
         }
         DesktopCommand::SetTitleBar { style, height } => {
-            let changed = c.height.replace(*height) != *height;
+            let height = height.map(|h| h.0);
+            let changed = c.height.replace(height) != height;
             if c.style.replace(*style) != *style || changed {
                 menus::close(surface);
                 push(surface, Op::TitleBar);
@@ -267,9 +268,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         DesktopCommand::PopupMenu { items, at } => {
             let anchor = match at {
-                Some((x, y)) => {
+                Some(at) => {
                     let (ox, oy) = surface.origin.get();
-                    menus::Anchor::Point(x + ox, y + oy)
+                    menus::Anchor::Point(at.x.0 + ox, at.y.0 + oy)
                 }
                 None => menus::Anchor::Pointer,
             };

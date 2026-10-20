@@ -14,6 +14,7 @@ use std::{
 use nsh_core::{
     Command, EventKind, Op, ROOT_ID,
     desktop::{DesktopCommand, MenuAction, MenuItem, MenuRole, Shortcut},
+    geometry::{Points, point},
     platform::Os,
 };
 use rquickjs::qjs;
@@ -379,7 +380,7 @@ unsafe extern "C" fn popup(
             free(ctx, v);
             n as f32
         };
-        Some((number(c"x"), number(c"y")))
+        Some(point(Points(number(c"x")), Points(number(c"y"))))
     } else {
         None
     };

@@ -268,7 +268,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::SetTitleBar { style, height } => {
-            surface.chrome.height.set(*height);
+            surface.chrome.height.set(height.map(|h| h.0));
             surface.chrome.style.set(*style);
             apply_title_bar(surface);
         }
@@ -333,7 +333,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             // batch is applied.
             let key = surface.key();
             let items = items.clone();
-            let at = *at;
+            let at = at.map(|p| (p.x.0, p.y.0));
             DispatchQueue::main().exec_async(move || {
                 if let Some(surface) = Surface::with_key(key) {
                     popup(&surface, &items, at);
@@ -347,9 +347,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
 /// (`setFrame`'s screen coordinates are the bottom left corner's).
 fn set_frame(window: &NSWindow, frame: &WindowFrame) {
     let current = window.frame();
+    let points = |v: nsh_core::Points| f64::from(v.0);
     let size = NSSize::new(
-        frame.width.map_or(current.size.width, f64::from),
-        frame.height.map_or(current.size.height, f64::from),
+        frame.width.map_or(current.size.width, points),
+        frame.height.map_or(current.size.height, points),
     );
     // `anchorTop` keeps the top edge where it is: the bottom left origin
     // would otherwise pin the bottom edge, and a content-height window
@@ -362,9 +363,9 @@ fn set_frame(window: &NSWindow, frame: &WindowFrame) {
                 current.origin.y
             }
         },
-        f64::from,
+        points,
     );
-    let point = NSPoint::new(frame.x.map_or(current.origin.x, f64::from), y);
+    let point = NSPoint::new(frame.x.map_or(current.origin.x, points), y);
     window.setFrame_display_animate(
         NSRect::new(point, size),
         true,

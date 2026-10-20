@@ -9,6 +9,7 @@ use nsh_animation::{
 use nsh_core::{
     Color, Command, EventKind, LayoutAnimation, NodeId, Op, Prop, Style, StyleDecl, StyleError,
     StylePatch, StyleValue, TransformKind,
+    geometry::{Percentage, Points, point},
     js::{
         host::{HostCx, HostInput, HostList, HostProps, HostValue},
         protocol::*,
@@ -190,8 +191,8 @@ pub(crate) fn decode_command<'js>(
                 animated: o
                     .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
                     .unwrap_or(true),
-                view_position: f("viewPosition")?.unwrap_or(0.0),
-                view_offset: f("viewOffset")?.unwrap_or(0.0),
+                view_position: Percentage(f("viewPosition")?.unwrap_or(0.0)),
+                view_offset: Points(f("viewOffset")?.unwrap_or(0.0)),
             }
         }
         "scrollToEnd" => Command::ScrollToEnd {
@@ -213,7 +214,7 @@ pub(crate) fn decode_command<'js>(
                 scale: field("scale").unwrap_or(1.0) as f32,
                 center: field("x")
                     .zip(field("y"))
-                    .map(|(x, y)| (x as f32, y as f32)),
+                    .map(|(x, y)| point(Points(x as f32), Points(y as f32))),
                 animated: arg
                     .as_object()
                     .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())
@@ -226,8 +227,8 @@ pub(crate) fn decode_command<'js>(
                     .and_then(|o| o.get::<_, Option<f64>>(key).ok().flatten())
             };
             Command::ScrollTo {
-                x: field("x").unwrap_or(0.0) as f32,
-                y: field("y").unwrap_or(0.0) as f32,
+                x: Points(field("x").unwrap_or(0.0) as f32),
+                y: Points(field("y").unwrap_or(0.0) as f32),
                 animated: arg
                     .as_object()
                     .and_then(|o| o.get::<_, Option<bool>>("animated").ok().flatten())

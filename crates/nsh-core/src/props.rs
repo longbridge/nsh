@@ -3,37 +3,14 @@
 
 use std::sync::Arc;
 
-use crate::{js::host::HostProps, ui::PropEnum};
+use crate::{
+    geometry::{Edges, Points, px},
+    js::host::HostProps,
+    ui::PropEnum,
+};
 
 /// Edge insets in points.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct EdgeInsets {
-    /// Top.
-    pub top: f32,
-    /// Right.
-    pub right: f32,
-    /// Bottom.
-    pub bottom: f32,
-    /// Left.
-    pub left: f32,
-}
-
-impl EdgeInsets {
-    /// The same inset on every edge.
-    pub const fn all(v: f32) -> Self {
-        Self {
-            top: v,
-            right: v,
-            bottom: v,
-            left: v,
-        }
-    }
-
-    /// True if every inset is zero.
-    pub fn is_zero(&self) -> bool {
-        *self == Self::default()
-    }
-}
+pub type EdgeInsets = Edges<Points>;
 
 /// Which touches a view and its children receive (`pointerEvents`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -259,7 +236,7 @@ pub struct Ripple {
     /// The ripple is not clipped to the view.
     pub borderless: bool,
     /// Radius in points; the platform's when `None`.
-    pub radius: Option<f32>,
+    pub radius: Option<Points>,
     /// Drawn over the view's content (else behind it).
     pub foreground: bool,
 }
@@ -306,24 +283,24 @@ pub struct ViewProps {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PanActivation {
     /// Activates once the finger moved further than this horizontally.
-    pub active_offset_x: Option<f32>,
+    pub active_offset_x: Option<Points>,
     /// Activates once the finger moved further than this vertically.
-    pub active_offset_y: Option<f32>,
+    pub active_offset_y: Option<Points>,
     /// Fails once the finger moved further than this horizontally first.
-    pub fail_offset_x: Option<f32>,
+    pub fail_offset_x: Option<Points>,
     /// Fails once the finger moved further than this vertically first.
-    pub fail_offset_y: Option<f32>,
+    pub fail_offset_y: Option<Points>,
 }
 
 impl PanActivation {
     /// How far the finger moves before a pan without active offsets
     /// activates, in points.
-    pub const MIN_DISTANCE: f32 = 10.0;
+    pub const MIN_DISTANCE: Points = px(10.0);
 
     /// A pan that activates horizontally past `active` and fails when it
     /// moves vertically past `fail` first (a scrubber in a vertical scroll
     /// view).
-    pub const fn horizontal(active: f32, fail: f32) -> Self {
+    pub const fn horizontal(active: Points, fail: Points) -> Self {
         Self {
             active_offset_x: Some(active),
             active_offset_y: None,
@@ -334,7 +311,7 @@ impl PanActivation {
 
     /// A pan that activates vertically past `active` and fails when it
     /// moves horizontally past `fail` first.
-    pub const fn vertical(active: f32, fail: f32) -> Self {
+    pub const fn vertical(active: Points, fail: Points) -> Self {
         Self {
             active_offset_x: None,
             active_offset_y: Some(active),
@@ -347,15 +324,16 @@ impl PanActivation {
     /// down: `Some(true)` activates, `Some(false)` fails (a fail offset
     /// passed wins over an active one passed by the same move), `None`
     /// waits. The platforms ask it on every move until it decides.
-    pub fn decide(&self, dx: f32, dy: f32) -> Option<bool> {
-        let past = |limit: Option<f32>, d: f32| limit.is_some_and(|l| d.abs() > l);
+    pub fn decide(&self, dx: Points, dy: Points) -> Option<bool> {
+        let (dx, dy) = (dx.0, dy.0);
+        let past = |limit: Option<Points>, d: f32| limit.is_some_and(|l| d.abs() > l.0);
         if past(self.fail_offset_x, dx) || past(self.fail_offset_y, dy) {
             return Some(false);
         }
         let activates = if self.active_offset_x.is_some() || self.active_offset_y.is_some() {
             past(self.active_offset_x, dx) || past(self.active_offset_y, dy)
         } else {
-            dx.hypot(dy) > Self::MIN_DISTANCE
+            dx.hypot(dy) > Self::MIN_DISTANCE.0
         };
         activates.then_some(true)
     }

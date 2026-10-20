@@ -3726,8 +3726,8 @@ mod tests {
         assert_eq!(
             commands,
             [
-                "Command { id: 2, command: ScrollTo { x: 0.0, y: 10.0, animated: false } }",
-                "Command { id: 2, command: ScrollToIndex { index: 3, animated: true, view_position: 0.0, view_offset: 0.0 } }",
+                "Command { id: 2, command: ScrollTo { x: 0pt, y: 10pt, animated: false } }",
+                "Command { id: 2, command: ScrollToIndex { index: 3, animated: true, view_position: 0%, view_offset: 0pt } }",
                 "Command { id: 4, command: Focus }",
                 "Command { id: 4, command: SetSelection { start: 2, end: 2 } }",
             ]

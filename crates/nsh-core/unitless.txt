@@ -9,6 +9,7 @@ canvas::damage::DamageScan::damage(value)                        # a generic num
 canvas::hit::point_in_path(slot)                                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
 canvas::measure_line ->                                          # a generic number (a JS value, a recorded slot)
+core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
 core::Core::set_font_scale(scale)                                # a font scale factor
 core::Core::set_zoom(scale)                                      # a zoom scale factor
 css::Color::with_alpha(factor)                                   # an opacity factor
@@ -64,6 +65,8 @@ ops::ScrollProp::MinZoom.0                                       # a zoom scale 
 ops::ScrollProp::Zoom.0                                          # a zoom scale factor
 ops::TouchEvent.timestamp                                        # time
 ops::UNDERLAY_OPACITY                                            # an opacity, 0..1
+ops::Viewability.item_visible_percent                            # a percent, 0..100, as React Native's viewabilityConfig takes it
+ops::Viewability.view_area_percent                               # a percent, 0..100, as React Native's viewabilityConfig takes it
 platform::Environment.font_scale                                 # a font scale factor
 platform::Environment.keyboard_duration                          # time
 platform::Environment.pixel_ratio                                # device pixels per point

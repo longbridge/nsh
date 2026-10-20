@@ -83,8 +83,8 @@ impl ScrollState {
     pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
         let inset = self.behavior.content_inset;
         (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
+            (self.content.0 + inset.left.0 + inset.right.0 - viewport.0).max(0.0),
+            (self.content.1 + inset.top.0 + inset.bottom.0 - viewport.1).max(0.0),
         )
     }
 
@@ -92,7 +92,7 @@ impl ScrollState {
     /// content inset.
     pub(crate) fn origin(&self) -> (f32, f32) {
         let inset = self.behavior.content_inset;
-        (self.x - inset.left, self.y - inset.top)
+        (self.x - inset.left.0, self.y - inset.top.0)
     }
 }
 

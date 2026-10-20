@@ -212,10 +212,10 @@ fn point(ctx: *mut JsContext, p: &TouchPoint, timestamp: f64) -> JsValue {
     let o = unsafe { qjs::JS_NewObject(ctx) };
     set(ctx, o, c"identifier", number(p.id as f64));
     set(ctx, o, c"target", number(p.target as f64));
-    set(ctx, o, c"pageX", number(p.page_x as f64));
-    set(ctx, o, c"pageY", number(p.page_y as f64));
-    set(ctx, o, c"locationX", number(p.location_x as f64));
-    set(ctx, o, c"locationY", number(p.location_y as f64));
+    set(ctx, o, c"pageX", number(p.page.x.0 as f64));
+    set(ctx, o, c"pageY", number(p.page.y.0 as f64));
+    set(ctx, o, c"locationX", number(p.location.x.0 as f64));
+    set(ctx, o, c"locationY", number(p.location.y.0 as f64));
     set(ctx, o, c"timestamp", number(timestamp));
     o
 }
@@ -248,10 +248,10 @@ fn event(
     // SAFETY: a new object taking its fields.
     let e = unsafe { qjs::JS_NewObject(ctx) };
     set(ctx, e, c"identifier", number(about.id as f64));
-    set(ctx, e, c"locationX", number(about.location_x as f64));
-    set(ctx, e, c"locationY", number(about.location_y as f64));
-    set(ctx, e, c"pageX", number(about.page_x as f64));
-    set(ctx, e, c"pageY", number(about.page_y as f64));
+    set(ctx, e, c"locationX", number(about.location.x.0 as f64));
+    set(ctx, e, c"locationY", number(about.location.y.0 as f64));
+    set(ctx, e, c"pageX", number(about.page.x.0 as f64));
+    set(ctx, e, c"pageY", number(about.page.y.0 as f64));
     set(ctx, e, c"target", number(about.target as f64));
     set(ctx, e, c"timestamp", number(timestamp));
     let list =
@@ -965,7 +965,10 @@ export interface PanResponderInstance {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{EventKind, EventPayload, Op, TouchEvent, TouchPhase, TouchPoint};
+    use nsh_core::{
+        EventKind, EventPayload, Op, TouchEvent, TouchPhase, TouchPoint,
+        geometry::{point, px},
+    };
 
     use crate::Host;
 
@@ -978,10 +981,8 @@ mod tests {
                 id: 1,
                 target: 4,
                 path: vec![4, 2],
-                page_x: x,
-                page_y: y,
-                location_x: x,
-                location_y: y,
+                page: point(px(x), px(y)),
+                location: point(px(x), px(y)),
                 changed: true,
             }],
         }))

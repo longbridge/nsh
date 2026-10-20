@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use crate::ui::{JsObject, PropEnum};
+use crate::{
+    geometry::{Point, Points},
+    ui::{JsObject, PropEnum},
+};
 
 /// How the window's title bar looks (`Window.setTitleBar`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -28,13 +31,13 @@ pub enum TitleBarStyle {
 pub struct WindowFrame {
     /// Its left edge (macOS's screen coordinates go up: `x` and `y` are the
     /// window's bottom left corner there).
-    pub x: Option<f32>,
+    pub x: Option<Points>,
     /// Its bottom edge on macOS, its top edge elsewhere.
-    pub y: Option<f32>,
+    pub y: Option<Points>,
     /// Its outer width on macOS / Windows, GTK default width on Linux.
-    pub width: Option<f32>,
+    pub width: Option<Points>,
     /// Its outer height on macOS / Windows, GTK default height on Linux.
-    pub height: Option<f32>,
+    pub height: Option<Points>,
     /// Animates the change on macOS (false by default).
     pub animated: Option<bool>,
     /// The top edge keeps its place when `height` changes without a `y`:
@@ -594,7 +597,7 @@ pub enum DesktopCommand {
         /// controls are centered in it (Windows' caption buttons fill it);
         /// `None` for the platform's height. On macOS this selects a native
         /// toolbar style; the environment reports its actual height.
-        height: Option<f32>,
+        height: Option<Points>,
     },
     /// Minimizes the window.
     Minimize,
@@ -622,19 +625,20 @@ pub enum DesktopCommand {
         /// Its items.
         items: Arc<[MenuItem]>,
         /// Where its top left corner goes.
-        at: Option<(f32, f32)>,
+        at: Option<Point<Points>>,
     },
 }
 
-pub(crate) fn title_bar_height(height: Option<f32>) -> Option<f32> {
+pub(crate) fn title_bar_height(height: Option<Points>) -> Option<Points> {
     height
-        .filter(|h| h.is_finite() && *h > 0.0)
-        .map(|h| h.min(200.0))
+        .filter(|h| h.is_finite() && h.0 > 0.0)
+        .map(|h| Points(h.0.min(200.0)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::px;
 
     #[test]
     fn custom_title_bar_height_is_finite_positive_and_bounded() {
@@ -645,10 +649,10 @@ mod tests {
             Some(f32::NAN),
             Some(f32::INFINITY),
         ] {
-            assert_eq!(title_bar_height(height), None);
+            assert_eq!(title_bar_height(height.map(Points)), None);
         }
-        assert_eq!(title_bar_height(Some(42.0)), Some(42.0));
-        assert_eq!(title_bar_height(Some(300.0)), Some(200.0));
+        assert_eq!(title_bar_height(Some(px(42.0))), Some(px(42.0)));
+        assert_eq!(title_bar_height(Some(px(300.0))), Some(px(200.0)));
     }
 
     #[test]

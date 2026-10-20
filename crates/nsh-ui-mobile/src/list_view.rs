@@ -54,7 +54,7 @@ pub fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                     .estimated_item_size(48.0)
                     .content_padding(margin)
                     // The last rows scroll clear of the home indicator.
-                    .content_padding_bottom(move || safe_area().bottom + margin())
+                    .content_padding_bottom(move || safe_area().bottom.0 + margin())
             },
             move |row, at| {
                 let radius = move || px(theme().radius_lg);

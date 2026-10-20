@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::{
     ApproxTextEngine, Core, EventKind, EventPayload, ListBind, MountItem, Size, ViewKind,
-    geometry::px,
+    geometry::{point, px},
 };
 use nsh_js::Host;
 
@@ -174,7 +174,8 @@ fn rows(entry: &str) {
     let mut y = 0.0;
     for _ in 0..4000 {
         y += 8.0;
-        app.core.set_scroll_offset(list, 0.0, y, u32::MAX);
+        app.core
+            .set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
         app.turn(|_| {});
         if app.ops_applied > 0 {
             js += app.js;

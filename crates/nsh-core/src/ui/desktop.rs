@@ -23,7 +23,7 @@ use crate::{
 pub fn set_title_bar(style: TitleBarStyle, height: Option<f32>) {
     super::ambient::desktop_command(DesktopCommand::SetTitleBar {
         style,
-        height: crate::desktop::title_bar_height(height),
+        height: crate::desktop::title_bar_height(height.map(Points)),
     });
 }
 

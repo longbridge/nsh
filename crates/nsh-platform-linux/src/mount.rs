@@ -233,7 +233,7 @@ impl Mounter {
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 if let Some(view) = self.get(*id) {
-                    crate::scroll::scroll_by(surface, view, *dx, *dy);
+                    crate::scroll::scroll_by(surface, view, dx.0, dy.0);
                 }
             }
             MountItem::LayoutDirection { rtl } => self.rtl = *rtl,

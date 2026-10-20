@@ -19,6 +19,7 @@ use super::{Core, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
+    geometry::Points,
     tailwind::ClassList,
     ui::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
@@ -3571,8 +3572,8 @@ impl<M: TextEngine> Core<M> {
                 command: Command::ScrollToIndex {
                     index,
                     animated: false,
-                    view_position: 0.0,
-                    view_offset: 0.0,
+                    view_position: crate::geometry::Percentage(0.0),
+                    view_offset: Points::ZERO,
                 },
             });
         }
@@ -4446,10 +4447,10 @@ impl<M: TextEngine> Core<M> {
             }
             EventKind::Insets => {
                 let insets = EdgeInsets {
-                    top: number("top").unwrap_or(0.0) as f32,
-                    right: number("right").unwrap_or(0.0) as f32,
-                    bottom: number("bottom").unwrap_or(0.0) as f32,
-                    left: number("left").unwrap_or(0.0) as f32,
+                    top: Points(number("top").unwrap_or(0.0) as f32),
+                    right: Points(number("right").unwrap_or(0.0) as f32),
+                    bottom: Points(number("bottom").unwrap_or(0.0) as f32),
+                    left: Points(number("left").unwrap_or(0.0) as f32),
                 };
                 // The views reading them follow (`drain_views`).
                 self.components.insets.insert(id, insets);
@@ -4539,7 +4540,12 @@ impl<M: TextEngine> Core<M> {
             }
             match node.kind {
                 // Not reported yet: a screen's header covers the top.
-                Kind::Screen => return EdgeInsets { top: 0.0, ..safe },
+                Kind::Screen => {
+                    return EdgeInsets {
+                        top: Points::ZERO,
+                        ..safe
+                    };
+                }
                 Kind::Modal => return safe,
                 _ => {}
             }

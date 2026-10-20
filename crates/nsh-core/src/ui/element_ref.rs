@@ -26,7 +26,10 @@ use super::{
     reactive::Kept,
     task::{Action, Executor},
 };
-use crate::{Command, JsonValue, Measurement, NodeId};
+use crate::{
+    Command, JsonValue, Measurement, NodeId,
+    geometry::{Percentage, Points, point},
+};
 
 /// An element of a view: made with [`super::ambient::element_ref`], put on
 /// the element ([`super::Element::element_ref`]). Its commands go to
@@ -136,14 +139,18 @@ impl ElementRef {
 
     /// Scrolls a scroll view to an offset.
     pub fn scroll_to(&self, x: f32, y: f32, animated: bool) {
-        self.send(Command::ScrollTo { x, y, animated });
+        self.send(Command::ScrollTo {
+            x: Points(x),
+            y: Points(y),
+            animated,
+        });
     }
 
     /// Scrolls a list to `offset` along its axis.
     pub fn scroll_to_offset(&self, offset: f32, animated: bool) {
         self.send(Command::ScrollTo {
-            x: offset,
-            y: offset,
+            x: Points(offset),
+            y: Points(offset),
             animated,
         });
     }
@@ -165,8 +172,8 @@ impl ElementRef {
         self.send(Command::ScrollToIndex {
             index,
             animated,
-            view_position,
-            view_offset,
+            view_position: Percentage(view_position),
+            view_offset: Points(view_offset),
         });
     }
 
@@ -175,7 +182,7 @@ impl ElementRef {
     pub fn zoom_to(&self, scale: f32, center: Option<(f32, f32)>, animated: bool) {
         self.send(Command::ZoomTo {
             scale,
-            center,
+            center: center.map(|(x, y)| point(Points(x), Points(y))),
             animated,
         });
     }

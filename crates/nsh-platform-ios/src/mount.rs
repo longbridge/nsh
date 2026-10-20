@@ -10,6 +10,7 @@ use nsh_core::{
     KeyboardDismissMode, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     MountBatch, MountItem, NodeId, PayloadValue, Points, ResizeMode, StickyCell, SubmitBehavior,
     ViewKind, ViewProps, ViewStyle,
+    geometry::{DevicePixels, point, size},
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -212,10 +213,10 @@ fn innermost(view: &UIView, point: CGPoint) -> Retained<UIView> {
 
 fn ui_insets(i: nsh_core::EdgeInsets) -> objc2_ui_kit::UIEdgeInsets {
     objc2_ui_kit::UIEdgeInsets {
-        top: i.top as CGFloat,
-        left: i.left as CGFloat,
-        bottom: i.bottom as CGFloat,
-        right: i.right as CGFloat,
+        top: i.top.0 as CGFloat,
+        left: i.left.0 as CGFloat,
+        bottom: i.bottom.0 as CGFloat,
+        right: i.right.0 as CGFloat,
     }
 }
 
@@ -838,7 +839,10 @@ impl Mounter {
                 {
                     self.target.scroll_applied(id);
                     let o = scroll.contentOffset();
-                    scroll.setContentOffset(CGPoint::new(o.x + dx as CGFloat, o.y + dy as CGFloat));
+                    scroll.setContentOffset(CGPoint::new(
+                        o.x + dx.0 as CGFloat,
+                        o.y + dy.0 as CGFloat,
+                    ));
                 }
             }
             MountItem::StickyCells { id, cells } => {
@@ -1073,8 +1077,8 @@ impl Mounter {
                 let max_x = (size.width + inset.right - bounds.width).max(-inset.left);
                 let max_y = (size.height + inset.bottom - bounds.height).max(-inset.top);
                 let offset = CGPoint::new(
-                    (x as CGFloat).clamp(-inset.left, max_x),
-                    (y as CGFloat).clamp(-inset.top, max_y),
+                    (x.0 as CGFloat).clamp(-inset.left, max_x),
+                    (y.0 as CGFloat).clamp(-inset.top, max_y),
                 );
                 self.target.scroll_applied(id);
                 scroll.setContentOffset_animated(offset, animated);
@@ -1088,6 +1092,7 @@ impl Mounter {
                 Native::Scroll(scroll),
             ) => {
                 if crate::zoom::zoom_view(scroll).is_some() {
+                    let center = center.map(|c| (c.x.0, c.y.0));
                     crate::zoom::zoom_to(scroll, scale, center, animated);
                 }
             }
@@ -1492,13 +1497,15 @@ impl Mounter {
                 content.height,
             )
         };
-        let snapped = b.snap_target(
-            at as f32,
-            projected as f32,
-            v as f32,
-            viewport as f32,
-            length as f32,
-        )? as CGFloat;
+        let snapped = b
+            .snap_target(
+                Points(at as f32),
+                Points(projected as f32),
+                v as f32,
+                Points(viewport as f32),
+                Points(length as f32),
+            )?
+            .0 as CGFloat;
         Some(if *horizontal {
             CGPoint::new(snapped, target.y)
         } else {
@@ -1701,10 +1708,8 @@ impl Mounter {
         // UIKeyModifierShift, Control, Alternate, Command.
         let has = |bit: u32| modifiers & (1 << bit) != 0;
         let event = nsh_core::HoverEvent {
-            location_x: local.x as f32,
-            location_y: local.y as f32,
-            page_x: page.x as f32,
-            page_y: page.y as f32,
+            location: point(Points(local.x as f32), Points(local.y as f32)),
+            page: point(Points(page.x as f32), Points(page.y as f32)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: has(18),
                 alt: has(19),
@@ -1729,10 +1734,8 @@ impl Mounter {
         // UIKeyModifierShift, Control, Alternate, Command.
         let has = |bit: u32| modifiers & (1 << bit) != 0;
         let event = nsh_core::ContextMenuEvent {
-            location_x: local.x as f32,
-            location_y: local.y as f32,
-            page_x: page.x as f32,
-            page_y: page.y as f32,
+            location: point(Points(local.x as f32), Points(local.y as f32)),
+            page: point(Points(page.x as f32), Points(page.y as f32)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: has(18),
                 alt: has(19),
@@ -1854,7 +1857,7 @@ impl Mounter {
                 .map(|e| &e.filters[..])
                 .unwrap_or(&[]);
             let look = crate::image::Look {
-                blur: s.image_options.blur_radius + nsh_core::blur_radius(filters),
+                blur: s.image_options.blur_radius.0 + nsh_core::blur_radius(filters),
                 matrix: nsh_core::compose_color_matrices(filters),
             };
             let (source, placeholder) = (
@@ -2024,10 +2027,10 @@ impl Mounter {
                 self.control.dispatch_event(
                     id,
                     EventKind::Load,
-                    EventPayload::Image {
-                        width: decoded.width as f32,
-                        height: decoded.height as f32,
-                    },
+                    EventPayload::Image(size(
+                        DevicePixels(decoded.width as i32),
+                        DevicePixels(decoded.height as i32),
+                    )),
                 );
             }
             Err(message) if s.events.contains(EventKind::Error) => {
@@ -2654,12 +2657,11 @@ impl Mounter {
         let Some(s) = self.slot(id) else { return };
         let (values, events) = (s.values, s.events);
         let payload = |m: &Self| EventPayload::Pan {
-            translation_x: t.x as f32,
-            translation_y: t.y as f32,
+            translation: point(Points(t.x as f32), Points(t.y as f32)),
             velocity_x: v.x as f32,
             velocity_y: v.y as f32,
-            value_x: values.pan_x.map(|n| m.animator.value(n)),
-            value_y: values.pan_y.map(|n| m.animator.value(n)),
+            value_x: values.pan_x.map(|n| Points(m.animator.value(n))),
+            value_y: values.pan_y.map(|n| Points(m.animator.value(n))),
         };
         if state == UIGestureRecognizerState::Began {
             // Grabbing an animating value stops it where it is.
@@ -2837,7 +2839,7 @@ impl Mounter {
                 let base = s
                     .behavior
                     .as_ref()
-                    .map_or(0.0, |b| b.content_inset.top as CGFloat);
+                    .map_or(0.0, |b| b.content_inset.top.0 as CGFloat);
                 inset.top = base + if on { REFRESH_INSET } else { 0.0 };
                 if on {
                     spinner.startAnimating();
@@ -2909,7 +2911,7 @@ impl Mounter {
         let offset = if l.horizontal { offset.x } else { offset.y } as f32;
         for c in cells {
             let Some(s) = self.slot(c.cell) else { continue };
-            let t = (offset - c.start).clamp(0.0, c.end - c.start) as CGFloat;
+            let t = (offset - c.start.0).clamp(0.0, c.end.0 - c.start.0) as CGFloat;
             let (x, y) = if l.horizontal { (t, 0.0) } else { (0.0, t) };
             s.native
                 .view()

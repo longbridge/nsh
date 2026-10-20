@@ -596,7 +596,7 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         if keyboard_height() > 0.0 {
             0.0
         } else {
-            cx.insets().bottom
+            cx.insets().bottom.0
         }
     };
     let bar = view()
