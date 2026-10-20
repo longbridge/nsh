@@ -424,7 +424,9 @@ program that describes them, builds the hosts and runners with them, and does ev
   is published by `release-crate.yml`, the hosts and runners included; the binaries are named after the app
   (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-test`), and so are
   the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`, installed as `libnsh.so`),
-  so apps sharing a target directory never take each other's.
+  so apps sharing a target directory never take each other's. Generated workspaces optimize `quickjs-jit-sys`
+  and `taffy` at level 3 in debug builds, matching NSH's own workspace, so hot reload hosts keep interpreter and
+  layout performance while application Rust code retains debug settings.
 - Before a command on the app (`build`, `test`, `dev`, `run`, `package`, `publish`, `check`) `nsh` builds `describe`
   ("building the Rust crate …": Cargo decides whether the app's Rust code changed) and runs it when the program is
   new, keeping its output in `.nsh/rust/description.json` with the program's size and time (`RustApp::describe`). The

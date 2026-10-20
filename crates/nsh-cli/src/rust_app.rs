@@ -1418,6 +1418,9 @@ opt-level = 3
     fn write_workspace_manifest(&self, ws: &Path, base: &str, gpui: bool) -> anyhow::Result<()> {
         let path = ws.join("Cargo.toml");
         let mut manifest = base.to_owned();
+        // Match nsh's own debug builds: the interpreter and layout run
+        // on every interaction, while app Rust code stays easy to debug.
+        manifest.push_str("\n[profile.dev.package.quickjs-jit-sys]\nopt-level = 3\n[profile.dev.package.taffy]\nopt-level = 3\n");
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
             let mut patches = String::new();
@@ -2498,6 +2501,25 @@ mod tests {
                 !manifest.contains("[patch.crates-io]"),
                 "{file}: {manifest}"
             );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generated_hosts_optimize_interpreter_and_layout_in_debug() {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-rust-debug-profile-{}", std::process::id()));
+        let app = app(&dir, &[("app-native", dir.join("native"))], None);
+        app.write_workspace().unwrap();
+        app.gpui_workspace().unwrap();
+        for file in ["Cargo.toml", "gpui/Cargo.toml"] {
+            let manifest = std::fs::read_to_string(app.workspace.join(file)).unwrap();
+            for package in ["quickjs-jit-sys", "taffy"] {
+                assert!(
+                    manifest.contains(&format!("[profile.dev.package.{package}]\nopt-level = 3")),
+                    "{file} must keep {package} fast in debug builds"
+                );
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
