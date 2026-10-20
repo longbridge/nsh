@@ -435,7 +435,7 @@ pub(super) struct Components {
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
-    slot_hosts: FxHashMap<NodeId, NodeId>,
+    pub(super) slot_hosts: FxHashMap<NodeId, NodeId>,
     styles: FxHashMap<StyleRefinement, Arc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).

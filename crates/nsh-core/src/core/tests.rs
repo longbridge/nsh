@@ -4504,6 +4504,40 @@ mod components {
         assert_eq!(child_ids(&c, 2), [10, 8, 12, 4]);
     }
 
+    /// A footer slot whose presses show and hide a note after it.
+    #[component]
+    fn Toggler(props: PanelProps) -> impl IntoElement {
+        let shown = signal(false);
+        view()
+            .child(
+                props
+                    .footer
+                    .place(move |f| f.on_press(move |_: &()| shown.update(|s| *s = !*s))),
+            )
+            .child(If::new(shown, || view().h(px(10.0))))
+    }
+
+    /// What a view gives a slot's node (its handlers) stays while the node
+    /// is its slot, also once a region of the view runs again.
+    #[test]
+    fn a_slots_handlers_outlive_the_views_regions() {
+        let mut c = mount_host::<Toggler>();
+        apply(&mut c, fill_footer());
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [4]);
+        let press = |c: &mut Core<FakeEngine>| {
+            c.component_event(4, EventKind::Press, &EventPayload::None);
+            let _ = c.commit();
+        };
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2).len(), 2, "the note shows");
+        // The region ran again: the slot still hears its presses.
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2), [4], "the note is gone");
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2).len(), 2, "and shows again");
+    }
+
     #[test]
     fn slots_are_the_glues_nodes_placed_by_the_render() {
         let mut c = core();
