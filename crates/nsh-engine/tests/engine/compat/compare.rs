@@ -396,6 +396,13 @@ fn head(statement: &str) -> Option<(&'static str, String)> {
         // A re-export: the statement is its own name.
         return Some(("re-export", statement.to_owned()));
     }
+    if (rest != statement && rest.chars().all(is_ident) && statement.contains("default "))
+        || rest.starts_with("= ")
+    {
+        // `export default value`, `export = value`: the module's default
+        // export.
+        return Some(("default", "default".to_owned()));
+    }
     for (word, kind) in [
         ("function ", "function"),
         ("const ", "const"),
@@ -409,6 +416,11 @@ fn head(statement: &str) -> Option<(&'static str, String)> {
         ("enum ", "enum"),
     ] {
         if let Some(after) = rest.strip_prefix(word) {
+            // An ambient module is named by its specifier (`module "url"`).
+            if let Some(quoted) = after.strip_prefix('"') {
+                let name: String = quoted.chars().take_while(|c| *c != '"').collect();
+                return Some((kind, format!("\"{name}\"")));
+            }
             let name: String = after.chars().take_while(|c| is_ident(*c)).collect();
             assert!(!name.is_empty(), "a name in `{statement}`");
             return Some((kind, name));
@@ -749,6 +761,14 @@ mod tests {
         );
         assert!(d.contains_key("export type { JSX } from \"./types\""));
         assert!(!d.contains_key("X"));
+        // The standard modules' ambient declarations.
+        let d = declarations(
+            "declare module \"url\" {\n  export { URL } from \"x\";\n  const defaultExport: {};\n  export default defaultExport;\n}\n",
+        );
+        assert_eq!(
+            d["\"url\""].members.keys().collect::<Vec<_>>(),
+            ["default", "defaultExport", "export { URL } from \"x\""]
+        );
     }
 
     #[test]

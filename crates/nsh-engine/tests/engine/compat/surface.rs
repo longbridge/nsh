@@ -64,13 +64,25 @@ function walk(path, v, depth) {
 /// every module the declarations describe.
 fn specifiers(types: &[(String, String)]) -> Vec<String> {
     let mut out = vec!["nsh:rt".to_owned()];
-    for (path, _) in types {
+    for (path, text) in types {
         let Some(module) = path.strip_suffix(".d.ts") else {
             continue;
         };
         let specifier = match module {
             "nsh/index" => "nsh",
             "nsh/types" | "nsh/jsx-runtime" | "nsh/globals" => continue,
+            // The standard modules LLRT implements are declared together,
+            // as ambient modules; their sources are types only.
+            "standard/index" => {
+                out.extend(
+                    text.lines()
+                        .filter_map(|l| l.strip_prefix("declare module \""))
+                        .filter_map(|l| l.split_once('"'))
+                        .map(|(name, _)| name.to_owned()),
+                );
+                continue;
+            }
+            "standard/llrt-sources" => continue,
             s => s,
         };
         out.push(specifier.to_owned());
