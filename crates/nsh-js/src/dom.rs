@@ -1143,17 +1143,7 @@ fn set_prop(
     match name {
         "children" => return Ok(()),
         "ref" => {
-            // SAFETY: a borrowed function, called untracked with the node.
-            if unsafe { qjs::JS_IsFunction(ctx, value) } {
-                let mut args = [node];
-                let r = reactive::untracked_with(ctx, || unsafe {
-                    qjs::JS_Call(ctx, value, UNDEFINED, 1, args.as_mut_ptr())
-                });
-                if unsafe { qjs::JS_IsException(r) } {
-                    return Err(r);
-                }
-                unsafe { qjs::JS_FreeValue(ctx, r) };
-            }
+            apply_ref(ctx, value, node)?;
             return Ok(());
         }
         "ios" | "android" | "desktop" | "web" => {
@@ -3080,6 +3070,72 @@ pub(crate) fn install_globals(ctx: *mut JsContext) {
     }
 }
 
+/// Gives `node` (borrowed) to ref `target` (borrowed): a signal is set to
+/// it, a function called with it (untracked). False for other values,
+/// which the compiled code assigns the node to (`ref={el}` with `let el`,
+/// `ref={refs.input}`).
+pub(crate) fn apply_ref(
+    ctx: *mut JsContext,
+    target: JsValue,
+    node: JsValue,
+) -> Result<bool, JsValue> {
+    match reactive::signal_kind(ctx, target) {
+        (true, _) => {
+            // SAFETY: a dup the signal takes.
+            reactive::set_signal(ctx, target, unsafe { qjs::JS_DupValue(ctx, node) });
+            return Ok(true);
+        }
+        (_, true) => {
+            return Err(throw_type(
+                ctx,
+                "a ref cannot be a memo, which is read-only: give a signal, a function or a variable",
+            ));
+        }
+        _ => {}
+    }
+    // SAFETY: a borrowed function, called untracked with the node.
+    if unsafe { !qjs::JS_IsFunction(ctx, target) } {
+        return Ok(false);
+    }
+    let mut args = [node];
+    let r = reactive::untracked_with(ctx, || unsafe {
+        qjs::JS_Call(ctx, target, UNDEFINED, 1, args.as_mut_ptr())
+    });
+    if unsafe { qjs::JS_IsException(r) } {
+        return Err(r);
+    }
+    unsafe { qjs::JS_FreeValue(ctx, r) };
+    Ok(true)
+}
+
+/// `ref(target, node, name)`: what compiled `ref={…}` calls with the
+/// element (or a component's ref): [`apply_ref`], whether it took the
+/// node. With `name`, the binding the ref names cannot be assigned (a
+/// `const`, an import), so a target that takes no node is an error.
+unsafe extern "C" fn ref_(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let (target, node, name) = (arg(argc, argv, 0), arg(argc, argv, 1), arg(argc, argv, 2));
+    match apply_ref(ctx, target, node) {
+        Ok(true) => qjs::JS_TRUE,
+        Ok(false) if unsafe { qjs::JS_IsString(name) } => {
+            let name = to_string(ctx, name).unwrap_or_default();
+            throw_type(
+                ctx,
+                &format!(
+                    "ref={{{name}}}: `{name}` cannot be assigned (a const or an import) and is neither \
+                     a signal nor a function: declare it with `let`, or give a signal or a function"
+                ),
+            )
+        }
+        Ok(false) => qjs::JS_FALSE,
+        Err(e) => e,
+    }
+}
+
 /// The exports of `nsh:rt`.
 pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("element", Export::Function(element, 1), Ts::Internal),
@@ -3096,6 +3152,7 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
     ("setup", Export::Function(setup, 3), Ts::Internal),
     ("font", Export::Function(font, 2), Ts::Internal),
+    ("ref", Export::Function(ref_, 3), Ts::Internal),
 ];
 
 /// `font(uri, family)`: what `import Inter from "./Inter.ttf"` evaluates

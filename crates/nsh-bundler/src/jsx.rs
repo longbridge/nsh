@@ -100,6 +100,7 @@ const HELPERS: &[&str] = &[
     "each",
     "merge",
     "setup",
+    "ref",
 ];
 
 /// Prefix of generated names; apps do not use it.
@@ -343,6 +344,19 @@ fn child_count(children: &[JSXChild<'_>]) -> usize {
         .count()
 }
 
+/// `e` without parentheses and TypeScript's assertions (`el!`, `el as
+/// T`), which leave what it names (a ref's target) as it is.
+fn without_wrappers(e: Expression<'_>) -> Expression<'_> {
+    match e {
+        Expression::ParenthesizedExpression(p) => without_wrappers(p.unbox().expression),
+        Expression::TSNonNullExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSAsExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSSatisfiesExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSTypeAssertion(t) => without_wrappers(t.unbox().expression),
+        e => e,
+    }
+}
+
 /// Whether an expression's value may change: it calls something or reads a
 /// member, outside nested functions.
 fn is_dynamic(e: &Expression<'_>) -> bool {
@@ -492,6 +506,22 @@ impl<'a> Compiler<'a, '_> {
         let n = self.vars.get();
         self.vars.set(n + 1);
         format!("{HOLE}v{n}")
+    }
+
+    /// Whether `name` names a binding here that code may assign: not a
+    /// `const`, an import or an undeclared global.
+    fn assignable(&self, name: &str) -> bool {
+        let scope = self
+            .scopes
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.scoping.root_scope_id());
+        self.scoping
+            .find_binding(scope, name.into())
+            .is_some_and(|symbol| {
+                let flags = self.scoping.symbol_flags(symbol);
+                !flags.is_const_variable() && !flags.is_import()
+            })
     }
 
     /// The binding `name` names here, if any: (whether it is the module's
@@ -753,6 +783,52 @@ impl<'a> Compiler<'a, '_> {
         format!("{prop}({v}, {}, {value});", quote(name))
     }
 
+    /// The statement giving `node` (a generated name) to `ref={e}`: a
+    /// signal is set to it and a function called with it (`nsh:rt`'s
+    /// `ref`), else a variable or a field is assigned it. A binding that
+    /// cannot be assigned (a `const`, an import) must hold a signal or a
+    /// function, which `ref` checks with its name. Other expressions come
+    /// back, to be a prop (a function or a signal there works as well).
+    fn ref_target(
+        &mut self,
+        e: Expression<'a>,
+        node: &str,
+        g: &mut Gen<'a>,
+    ) -> Result<String, Expression<'a>> {
+        match without_wrappers(e) {
+            Expression::Identifier(id) => {
+                let ref_ = self.use_helper("ref");
+                let name = id.name.to_string();
+                Ok(if self.assignable(&name) {
+                    format!("{ref_}({name}, {node}) || ({name} = {node});")
+                } else {
+                    format!("{ref_}({name}, {node}, {});", quote(&name))
+                })
+            }
+            Expression::StaticMemberExpression(m) => {
+                let m = m.unbox();
+                let key = quote(&m.property.name);
+                let object = g.hole(m.object);
+                Ok(self.ref_field(&object, &key, node))
+            }
+            Expression::ComputedMemberExpression(m) => {
+                let m = m.unbox();
+                let object = g.hole(m.object);
+                let key = g.hole(m.expression);
+                Ok(self.ref_field(&object, &key, node))
+            }
+            e => Err(e),
+        }
+    }
+
+    /// `ref={object[key]}`: each evaluated once.
+    fn ref_field(&mut self, object: &str, key: &str, node: &str) -> String {
+        let ref_ = self.use_helper("ref");
+        format!(
+            "(({HOLE}o, {HOLE}k) => {ref_}({HOLE}o[{HOLE}k], {node}) || ({HOLE}o[{HOLE}k] = {node}))({object}, {key});"
+        )
+    }
+
     fn host_attr(
         &mut self,
         v: &str,
@@ -762,16 +838,13 @@ impl<'a> Compiler<'a, '_> {
         body: &mut String,
     ) {
         if name == "ref" {
-            // `ref={el}` assigns the variable, `ref={fn}` calls it.
-            if let Expression::Identifier(id) = e.without_parentheses() {
-                let id = id.name.to_string();
-                body.push_str(&format!(
-                    "typeof {id} === \"function\" ? {id}({v}) : ({id} = {v});"
-                ));
-                return;
+            match self.ref_target(e, v, g) {
+                Ok(statement) => body.push_str(&statement),
+                Err(e) => {
+                    let hole = g.hole(e);
+                    body.push_str(&self.prop(v, name, &hole));
+                }
             }
-            let hole = g.hole(e);
-            body.push_str(&self.prop(v, name, &hole));
             return;
         }
         let dynamic = if is_event(name) {
@@ -938,17 +1011,16 @@ impl<'a> Compiler<'a, '_> {
                             props.push(format!("{k}: {}", quote(&s.value)));
                         }
                         Some(JSXAttributeValue::ExpressionContainer(c)) => {
-                            if let Some(e) = self.expression(c.unbox().expression) {
-                                // `ref={el}` assigns the variable, `ref={fn}`
-                                // calls it, with what the component gives.
-                                if name == "ref"
-                                    && let Expression::Identifier(id) = e.without_parentheses()
-                                {
-                                    let id = id.name.to_string();
-                                    props.push(format!(
-                                        "ref({HOLE}r) {{ typeof {id} === \"function\" ? {id}({HOLE}r) : ({id} = {HOLE}r); }}"
-                                    ));
-                                    continue;
+                            if let Some(mut e) = self.expression(c.unbox().expression) {
+                                // The ref takes what the component gives.
+                                if name == "ref" {
+                                    match self.ref_target(e, &format!("{HOLE}r"), g) {
+                                        Ok(statement) => {
+                                            props.push(format!("ref({HOLE}r) {{ {statement} }}"));
+                                            continue;
+                                        }
+                                        Err(other) => e = other,
+                                    }
                                 }
                                 let dynamic = is_dynamic(&e);
                                 let hole = g.hole(e);
@@ -1419,12 +1491,53 @@ mod tests {
             let el: unknown; export const a = <View ref={el} />; export const b = <View ref={(n) => (el = n)} />;"#,
         )
         .unwrap());
+        // A signal or a function takes the node (`ref`), else it is assigned.
         assert!(
-            code.contains(r#"typeof el === "function" ? el(__nsh_hv0) : el = __nsh_hv0;"#),
+            code.contains("_$ref(el, __nsh_hv0) || (el = __nsh_hv0);"),
             "{code}"
         );
         assert!(
             code.contains(r#"_$prop(__nsh_hv1, "ref", (n) => el = n);"#),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn refs_of_consts_fields_and_assertions() {
+        let code = flat(
+            &compile(
+                r#"import { View, signal } from "nsh";
+            import { shared } from "./refs";
+            const s = signal<unknown>(); const refs: { a?: unknown, [k: string]: unknown } = {};
+            declare const k: () => string; let el: unknown;
+            export const a = <View ref={s} />;
+            export const b = <View ref={shared} />;
+            export const c = <View ref={refs.a} />;
+            export const d = <View ref={refs[k()]} />;
+            export const e = <View ref={el!} />;"#,
+            )
+            .unwrap(),
+        );
+        // A const or an import cannot be assigned: `ref` checks it is a
+        // signal or a function, by name.
+        assert!(code.contains(r#"_$ref(s, __nsh_hv0, "s");"#), "{code}");
+        assert!(
+            code.contains(r#"_$ref(shared, __nsh_hv1, "shared");"#),
+            "{code}"
+        );
+        // A field is assigned, its object and key evaluated once.
+        assert!(
+            code.contains(
+                r#"((__nsh_ho, __nsh_hk) => _$ref(__nsh_ho[__nsh_hk], __nsh_hv2) || (__nsh_ho[__nsh_hk] = __nsh_hv2))(refs, "a");"#
+            ),
+            "{code}"
+        );
+        assert!(
+            code.contains("|| (__nsh_ho[__nsh_hk] = __nsh_hv3))(refs, k());"),
+            "{code}"
+        );
+        assert!(
+            code.contains("_$ref(el, __nsh_hv4) || (el = __nsh_hv4);"),
             "{code}"
         );
     }
@@ -1475,9 +1588,7 @@ mod tests {
             "{code}"
         );
         assert!(
-            code.contains(
-                "ref(__nsh_hr) { typeof r === \"function\" ? r(__nsh_hr) : r = __nsh_hr; }"
-            ),
+            code.contains("ref(__nsh_hr) { _$ref(r, __nsh_hr) || (r = __nsh_hr); }"),
             "{code}"
         );
     }

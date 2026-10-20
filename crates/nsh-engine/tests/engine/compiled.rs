@@ -520,3 +520,57 @@ fn a_new_value_replaces_the_effect_of_its_items() {
         }
     }
 }
+
+const REFS: &str = r#"
+import { Input, mount, signal, Text, View, type YNode } from "nsh";
+import { Stepper, type StepperRef } from "nsh/ui/mobile";
+
+function Field(props: { ref?: (node: YNode) => void }) {
+  return <Input ref={props.ref} />;
+}
+
+let assigned: YNode | undefined;
+const held = signal<YNode | undefined>(undefined);
+const fields: { input?: YNode; [key: string]: YNode | undefined } = {};
+const key = () => "computed";
+let called: YNode | undefined;
+let forwarded: YNode | undefined;
+const stepper = signal<StepperRef | undefined>(undefined);
+const report = signal("");
+
+mount(() => (
+  <View>
+    <View ref={assigned} />
+    <Input ref={held} />
+    <Input ref={fields.input} />
+    <Input ref={fields[key()]} />
+    <View ref={(n) => (called = n)} />
+    <Field ref={forwarded!} />
+    <Stepper ref={stepper} />
+    <Text onPress={() => report.set([assigned, held(), fields.input, fields.computed, called, forwarded, stepper()]
+      .map((r) => (r ? "set" : "unset")).join(" "))}>check</Text>
+    <Text>{report()}</Text>
+  </View>
+));
+"#;
+
+/// Every kind of ref target gets the element (or the component's ref): a
+/// `let` variable and fields are assigned, a signal set, a function
+/// called, also through a TS component and on a Rust component.
+#[test]
+fn refs_reach_variables_signals_fields_and_functions() {
+    let (engine, rx) = start_app(REFS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let check = text_id(&first, "check").expect("the check text");
+    engine
+        .control()
+        .dispatch_event(check, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.contains("set")));
+    assert!(
+        texts(&batch).contains(&"set set set set set set set".to_owned()),
+        "{:?}",
+        texts(&batch)
+    );
+}

@@ -77,8 +77,12 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - **Host elements** become one arrow function making the element and its host children: static props and children
   are set once (`prop`, `append`), changing ones are functions the renderer follows natively (`bindProp`, `insert`).
   An expression changes when it calls something or reads a member outside nested functions (Solid's rule). Event
-  handlers are set once when they are a function or a name, followed otherwise. `ref={el}` assigns the variable,
-  `ref={fn}` calls it. Consecutive dynamic children share one `insert`, before the next static child.
+  handlers are set once when they are a function or a name, followed otherwise. `ref={…}` goes through `nsh:rt`'s `ref`
+  (`dom::apply_ref`), which sets a signal or calls a function: a `let` variable or a field (`ref={refs.input}`,
+  `ref={refs[k]}`, object and key evaluated once) is assigned the node otherwise (`ref(el, n) || (el = n)`); a `const`
+  or an import, which cannot be assigned, passes its name, so a value that is neither is an error saying what to write.
+  Other expressions are the `ref` prop, which `apply_ref` handles likewise; a component's `ref` is a method doing the
+  same with what the component gives. Consecutive dynamic children share one `insert`, before the next static child.
 - **Components** are called untracked with a props object: static props as values, the others as getters, children as
   the `children` getter; spreads go through `merge`, which keeps getters. Among several children, an expression that
   changes is a function of its own (`["one ", () => s()]`), so the getter, which makes every sibling, reads none of

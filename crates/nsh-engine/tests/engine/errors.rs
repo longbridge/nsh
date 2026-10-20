@@ -243,3 +243,26 @@ fn a_stopped_vm_is_reported_as_fatal() {
     assert_eq!(stopped.len(), 1, "{errors:?}");
     assert!(stopped[0].is_fatal());
 }
+
+/// `ref={c}` with a const that is neither a signal nor a function says so,
+/// at the app's line, instead of assigning nothing.
+#[test]
+fn a_ref_naming_a_const_object_says_what_to_write() {
+    let bundle = bundle_app(
+        "const-ref",
+        false,
+        "import { mount, View } from \"nsh\";\n\
+         const target = { node: null };\n\
+         mount(() => <View ref={target} />);\n",
+    );
+    let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
+    // SAFETY: compiled just now by this runtime.
+    let bundle = unsafe { Bundle::bytecode(bytecode) }
+        .with_source_map(bundle.source_map.expect("source map"));
+    let error = first_error(bundle);
+    assert!(
+        error.contains("ref={target}: `target` cannot be assigned (a const or an import)"),
+        "{error}"
+    );
+    assert!(error.contains("App.tsx:3:"), "{error}");
+}

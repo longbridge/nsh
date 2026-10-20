@@ -633,10 +633,11 @@ fn render_component(
     let ref_ = get(ctx, props, "ref");
     // SAFETY: a live value; called untracked with the ref.
     if unsafe { qjs::JS_IsFunction(ctx, ref_) } {
-        let mut args = [api.as_ref().map_or(node, |a| a.1)];
-        let r = reactive::untracked_with(ctx, || unsafe {
-            qjs::JS_Call(ctx, ref_, UNDEFINED, 1, args.as_mut_ptr())
-        });
+        let target = api.as_ref().map_or(node, |a| a.1);
+        let r = match dom::apply_ref(ctx, ref_, target) {
+            Ok(_) => UNDEFINED,
+            Err(e) => e,
+        };
         unsafe {
             qjs::JS_FreeValue(ctx, ref_);
             if qjs::JS_IsException(r) {

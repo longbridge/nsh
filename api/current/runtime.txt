@@ -334,6 +334,7 @@ insert function
 list function
 merge function
 prop function
+ref function
 setup function
 spread function
 text function

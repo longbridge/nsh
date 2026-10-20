@@ -180,7 +180,12 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 
 ## ref
 
-`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。传入变量时会给它赋值，传入函数时会调用它：
+`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。`ref={…}` 指向的目标会收到这个节点：
+
+- 用 `let` 声明的变量：把节点赋给它；
+- 对象字段（`ref={refs.input}`、`ref={refs[name]}`）：把节点赋给它；
+- [signal](./reactivity.md)：把它设为这个节点，读取这个 signal 的地方会跟着更新；
+- 函数：以节点为参数调用它。
 
 ```tsx
 import type { YNode } from "nsh";
@@ -200,6 +205,8 @@ function Search() {
 
 <Scroll ref={(node) => (scroller = node)} />
 ```
+
+`const` 或 import 的绑定应当持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他值时，会在元素创建时报错，并说明该怎么写。
 
 ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`nsh/ui/mobile` 中的组件同样接受 `ref`。
 

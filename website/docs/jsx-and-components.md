@@ -180,7 +180,12 @@ For long or infinite lists, use [`List`](./lists.md): it creates views only for 
 
 ## Refs
 
-`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... A variable is assigned, a function is called:
+`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... What `ref={…}` names receives the node:
+
+- a variable declared with `let` is assigned it;
+- a field (`ref={refs.input}`, `ref={refs[name]}`) is assigned it;
+- a [signal](./reactivity.md) is set to it, so what reads the signal follows it;
+- a function is called with it.
 
 ```tsx
 import type { YNode } from "nsh";
@@ -200,6 +205,8 @@ function Search() {
 
 <Scroll ref={(node) => (scroller = node)} />
 ```
+
+A `const` or an import holds a signal or a function, as in `const input = signal<YNode>()` with `<Input ref={input} />` and `input()?.focus()`; one holding anything else is reported when the element is made, with what to write.
 
 The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. Components from `nsh/ui/mobile` accept `ref` too.
 
