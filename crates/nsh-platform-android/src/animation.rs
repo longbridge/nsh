@@ -2,8 +2,10 @@
 //! drags and scroll offsets update it; changed view properties go back to
 //! Java as `[animating, (view, prop, value)*]` float arrays.
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
-use nsh_core::{GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform};
+use nsh_core::{
+    GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform,
+    animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
+};
 use rustc_hash::FxHashMap;
 
 // Java-side property codes (`Mounter.java`).

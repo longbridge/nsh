@@ -661,43 +661,43 @@ pub trait Element: IntoElement + Sized {
 
     /// Binds `opacity` to an animated value (it moves natively).
     fn bind_opacity(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::Opacity, value)
+        self.bind(crate::animation::AnimationProp::Opacity, value)
     }
 
     /// Binds the background color to a node of colors
     /// ([`super::AnimatedNode::interpolate_colors`]).
     fn bind_background(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::BackgroundColor, value)
+        self.bind(crate::animation::AnimationProp::BackgroundColor, value)
     }
 
     /// Binds the color of every border side to a node of colors.
     fn bind_border_color(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::BorderColor, value)
+        self.bind(crate::animation::AnimationProp::BorderColor, value)
     }
 
     /// Binds a text's color (the whole text) to a node of colors.
     fn bind_color(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::Color, value)
+        self.bind(crate::animation::AnimationProp::Color, value)
     }
 
     /// Binds the shadow's color to a node of colors (TS: `shadowColor`).
     fn bind_shadow_color(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::ShadowColor, value)
+        self.bind(crate::animation::AnimationProp::ShadowColor, value)
     }
 
     /// Binds the shadow's opacity, 0..1 (TS: `shadowOpacity`).
     fn bind_shadow_opacity(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::ShadowOpacity, value)
+        self.bind(crate::animation::AnimationProp::ShadowOpacity, value)
     }
 
     /// Binds the shadow's blur radius, in points (TS: `shadowRadius`).
     fn bind_shadow_radius(self, value: &impl super::Animated) -> Self {
-        self.bind(nsh_animation::AnimationProp::ShadowRadius, value)
+        self.bind(crate::animation::AnimationProp::ShadowRadius, value)
     }
 
     /// Binds `prop` (anything but a transform step or a canvas argument)
     /// to an animated value (nothing once the value's owner is gone).
-    fn bind(mut self, prop: nsh_animation::AnimationProp, value: &impl super::Animated) -> Self {
+    fn bind(mut self, prop: crate::animation::AnimationProp, value: &impl super::Animated) -> Self {
         if let Some(node) = value.animated_node().live() {
             let decl = crate::StyleDecl::Animated(prop, node.id());
             self.node().attrs.animated.push((decl, node));

@@ -11,11 +11,11 @@ use std::{
 
 use nsh_core::{
     Bounds, Points,
+    animation::{Curve, EaseMode},
     canvas::{
         CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite, FillRule,
         LineCap, LineJoin, Num, PathOp, svg_path,
     },
-    nsh_animation::{Curve, EaseMode},
     ui::{Animation, prelude::*},
 };
 

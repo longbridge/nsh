@@ -10,8 +10,8 @@
 //! shadows for both appearances (`.dark(..)` variants: native too).
 
 use nsh_core::{
+    animation::{Curve, EaseMode},
     geometry::px,
-    nsh_animation::{Curve, EaseMode},
     ui::{
         AdaptiveColor, BoxShadow, Easing, Rgba, Spring, StyleRefinement, Styled, Timing,
         percentage, rgb, rgba,

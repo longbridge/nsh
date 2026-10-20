@@ -225,7 +225,7 @@ mod imp {
             self.host.bind_list(list, binds);
         }
 
-        pub(crate) fn animations_finished(&self, finished: &[nsh_animation::Finished]) {
+        pub(crate) fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
             self.host.animations_finished(finished);
         }
 
@@ -364,7 +364,7 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn animations_finished(&self, _: &[nsh_animation::Finished]) {
+        pub(crate) fn animations_finished(&self, _: &[nsh_core::animation::Finished]) {
             match *self {}
         }
 

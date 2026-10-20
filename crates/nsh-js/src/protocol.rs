@@ -3,12 +3,10 @@
 //! ([`decode_animation_op`], as `nsh/animated` encodes them) and JSON
 //! ([`to_json`]).
 
-use nsh_animation::{
-    AnimationOp, AnimationProp, Driver, Easing, Extrapolate, MathOp, Operand, Output,
-};
 use nsh_core::{
     Color, Command, EventKind, LayoutAnimation, NodeId, Op, Prop, Style, StyleDecl, StyleError,
     StylePatch, StyleValue, TransformKind,
+    animation::{AnimationOp, AnimationProp, Driver, Easing, Extrapolate, MathOp, Operand, Output},
     geometry::{Percentage, Points, point, px},
     js::{
         host::{HostCx, HostInput, HostList, HostProps, HostValue},
@@ -240,7 +238,7 @@ pub(crate) fn decode_command<'js>(
 }
 
 /// Reads the node id of an animated value object (`{ __av: id }`).
-fn animated_value(value: &Value<'_>) -> Option<nsh_animation::NodeId> {
+fn animated_value(value: &Value<'_>) -> Option<nsh_core::animation::NodeId> {
     value
         .as_object()?
         .get::<_, Option<u32>>("__av")
@@ -596,14 +594,14 @@ fn parse_angle(s: &str) -> Option<f32> {
 
 fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
     let sub = r.int()?;
-    let node = r.int()? as nsh_animation::NodeId;
+    let node = r.int()? as nsh_core::animation::NodeId;
     Ok(match sub {
         ANIMATION_VALUE => AnimationOp::CreateValue {
             node,
             value: r.number()?,
         },
         ANIMATION_INTERPOLATE => {
-            let input = r.int()? as nsh_animation::NodeId;
+            let input = r.int()? as nsh_core::animation::NodeId;
             let input_range = r.numbers()?;
             let outputs = r.value()?;
             let output = decode_output(r, &outputs)?;
@@ -627,7 +625,7 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
         }
         ANIMATION_DIFF_CLAMP => AnimationOp::CreateDiffClamp {
             node,
-            input: r.int()? as nsh_animation::NodeId,
+            input: r.int()? as nsh_core::animation::NodeId,
             min: r.number()?,
             max: r.number()?,
         },
@@ -661,7 +659,7 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
             value: r.number()?,
         },
         ANIMATION_START => {
-            let animation = r.int()? as nsh_animation::AnimationId;
+            let animation = r.int()? as nsh_core::animation::AnimationId;
             let config = r.value()?;
             let driver = decode_driver(r.ctx, &config)?;
             AnimationOp::Start {
@@ -680,7 +678,7 @@ fn decode_animation(r: &mut Reader<'_, '_>) -> rquickjs::Result<AnimationOp> {
         ANIMATION_EXTRACT_OFFSET => AnimationOp::ExtractOffset { node },
         ANIMATION_READ => AnimationOp::Read {
             node,
-            request: r.int()? as nsh_animation::AnimationId,
+            request: r.int()? as nsh_core::animation::AnimationId,
         },
         other => {
             return Err(Exception::throw_type(
@@ -804,8 +802,8 @@ fn decode_composite(
     r: &Reader<'_, '_>,
     spec: &Value<'_>,
     depth: u32,
-) -> rquickjs::Result<nsh_animation::Composite> {
-    use nsh_animation::Composite;
+) -> rquickjs::Result<nsh_core::animation::Composite> {
+    use nsh_core::animation::Composite;
     let Some(o) = spec.as_object().filter(|_| depth < 64) else {
         return Err(Exception::throw_type(r.ctx, "animation: invalid composite"));
     };
@@ -836,7 +834,7 @@ fn decode_composite(
             reset: o.get::<_, Option<bool>>("reset")?.unwrap_or(true),
         },
         _ => Composite::Run {
-            node: o.get::<_, f64>("node")? as nsh_animation::NodeId,
+            node: o.get::<_, f64>("node")? as nsh_core::animation::NodeId,
             driver: decode_driver(r.ctx, spec)?,
         },
     })
@@ -960,8 +958,10 @@ mod decode_bench {
 
 #[cfg(test)]
 mod tests {
-    use nsh_animation::{Curve, EaseMode};
-    use nsh_core::{LayoutCurve, LayoutProperty, LayoutTransition};
+    use nsh_core::{
+        LayoutCurve, LayoutProperty, LayoutTransition,
+        animation::{Curve, EaseMode},
+    };
     use rquickjs::{Context, Runtime};
 
     use super::*;

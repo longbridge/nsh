@@ -26,9 +26,9 @@
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
 
 use gtk4::{self as gtk, cairo, graphene, prelude::*};
-use nsh_animation::AnimationValue;
 use nsh_core::{
     Color,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint, PathOp, arc_sweep,

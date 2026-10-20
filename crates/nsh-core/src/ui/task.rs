@@ -80,16 +80,16 @@ pub(crate) enum Action {
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
     /// An operation on the native animation graph.
-    Animation(nsh_animation::AnimationOp),
+    Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.
     Animate {
-        op: nsh_animation::AnimationOp,
-        animation: nsh_animation::AnimationId,
+        op: crate::animation::AnimationOp,
+        animation: crate::animation::AnimationId,
         end: AnswerSlot<bool>,
     },
     /// Reads a node's value where it moves; the value resolves the slot.
     ReadValue {
-        node: nsh_animation::NodeId,
+        node: crate::animation::NodeId,
         value: AnswerSlot<f32>,
     },
     /// A component's own list reports the rows viewable now (they stayed

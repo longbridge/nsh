@@ -43,7 +43,7 @@ pub(crate) struct Shared {
     /// finalizers queue here: the op queue may be borrowed meanwhile).
     pub(crate) releases: RefCell<Vec<NodeId>>,
     /// Native animation nodes and composites collected meanwhile.
-    pub(crate) animation_releases: RefCell<Vec<nsh_animation::AnimationOp>>,
+    pub(crate) animation_releases: RefCell<Vec<nsh_core::animation::AnimationOp>>,
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
     pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
@@ -658,7 +658,7 @@ impl Host {
     }
 
     /// Resolves the promises of finished (or interrupted) native animations.
-    pub fn animations_finished(&self, finished: &[nsh_animation::Finished]) {
+    pub fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
         self.guarded(Phase::Call, || {
             if finished.is_empty() {
                 return;

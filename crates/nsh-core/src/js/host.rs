@@ -42,10 +42,10 @@ pub trait HostInput: Sized {
     /// Truthy, as JS sees it.
     fn truthy(&self) -> bool;
     /// The native animation node this value is (`AnimatedNode.__av`).
-    fn animated_node(&self) -> Option<nsh_animation::NodeId> {
+    fn animated_node(&self) -> Option<crate::animation::NodeId> {
         self.field("__av")
             .and_then(|v| v.as_number())
-            .map(|n| n as nsh_animation::NodeId)
+            .map(|n| n as crate::animation::NodeId)
     }
 }
 

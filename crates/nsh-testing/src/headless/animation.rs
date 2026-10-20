@@ -1,14 +1,14 @@
 //! The native animations of a headless app: the graph platforms run on
-//! their UI thread (`nsh-animation`, platform-free), run here frame by
+//! their UI thread (nsh-core's `animation`, platform-free), run here frame by
 //! frame while anything animates, finished animations reported to the
 //! engine as a platform reports them. Nothing is drawn: the values only
 //! move, so what waits for an animation's end goes on.
 
 use std::{collections::HashMap, time::Duration};
 
-use nsh_animation::{Finished, Graph, NodeId as ValueId};
 use nsh_core::{
     MountItem, NodeId, Point, Points,
+    animation::{Finished, Graph, NodeId as ValueId},
     time::{Clock, Instant},
 };
 

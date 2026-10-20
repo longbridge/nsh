@@ -9,6 +9,7 @@
 //! on the engine thread, between the JS host and the platform backend.
 
 pub mod access;
+pub mod animation;
 pub mod canvas;
 pub mod color;
 mod core;
@@ -42,7 +43,6 @@ pub mod websocket;
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;
 
-pub use nsh_animation;
 /// The values registered native components take and emit (props, events,
 /// command arguments): JSON.
 pub use serde_json::Value as JsonValue;

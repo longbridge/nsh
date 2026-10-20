@@ -475,7 +475,7 @@ pub(super) struct Components {
     next_fetch: u32,
     /// The ends of the animations components started and the values they
     /// read, by id.
-    animations: FxHashMap<nsh_animation::AnimationId, Awaited>,
+    animations: FxHashMap<crate::animation::AnimationId, Awaited>,
     /// Elements to measure once this commit is laid out
     /// ([`crate::ui::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
@@ -4201,7 +4201,7 @@ impl<M: TextEngine> Core<M> {
                 self.components
                     .animations
                     .insert(request, Awaited::Value(value));
-                let _ = self.apply_op(Op::Animation(nsh_animation::AnimationOp::Read {
+                let _ = self.apply_op(Op::Animation(crate::animation::AnimationOp::Read {
                     node,
                     request,
                 }));
@@ -4261,7 +4261,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Native animations that ended: the components' resolve their
     /// [`crate::ui::AnimationEnd`]s; JS's stay in `finished`.
-    pub fn animations_finished(&mut self, finished: &mut Vec<nsh_animation::Finished>) {
+    pub fn animations_finished(&mut self, finished: &mut Vec<crate::animation::Finished>) {
         finished.retain(|f| match self.components.animations.remove(&f.animation) {
             Some(Awaited::End(end)) => {
                 end.borrow_mut().deliver(f.finished);

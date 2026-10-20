@@ -794,7 +794,7 @@ pub struct Style {
     pub text: TextStyle,
     /// Visual properties driven by native animation nodes; they override
     /// the static values while bound.
-    pub animated: Vec<(nsh_animation::AnimationProp, nsh_animation::NodeId)>,
+    pub animated: Vec<(crate::animation::AnimationProp, crate::animation::NodeId)>,
     /// `zIndex`: stacking order among siblings (higher on top).
     pub z_index: i32,
     /// `direction`: right to left (`Some(true)`), left to right, or
@@ -1283,13 +1283,13 @@ pub enum StyleDecl {
     ClearTransform,
     /// Appends a `transform` entry, driven by an animated value when given
     /// (the amount is then the identity until it is bound).
-    Transform(TransformKind, f32, Option<nsh_animation::NodeId>),
+    Transform(TransformKind, f32, Option<crate::animation::NodeId>),
     /// `shadowOffset`; `None` restores the default.
     ShadowOffset(Option<Point<Points>>),
     /// `textShadowOffset`.
     TextShadowOffset(Option<Point<Points>>),
     /// A property driven by a native animation node.
-    Animated(nsh_animation::AnimationProp, nsh_animation::NodeId),
+    Animated(crate::animation::AnimationProp, crate::animation::NodeId),
 }
 
 impl StyleDecl {
@@ -1300,7 +1300,7 @@ impl StyleDecl {
             StyleDecl::ClearTransform => {
                 style.view.transform = Transform::IDENTITY;
                 style.animated.retain(|(prop, _)| {
-                    !matches!(prop, nsh_animation::AnimationProp::Transform(_))
+                    !matches!(prop, crate::animation::AnimationProp::Transform(_))
                 });
                 Ok(())
             }
@@ -1313,7 +1313,7 @@ impl StyleDecl {
                 if let Some(node) = node {
                     style
                         .animated
-                        .push((nsh_animation::AnimationProp::Transform(index), *node));
+                        .push((crate::animation::AnimationProp::Transform(index), *node));
                 }
                 Ok(())
             }

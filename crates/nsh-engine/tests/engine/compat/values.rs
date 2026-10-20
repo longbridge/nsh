@@ -1093,8 +1093,8 @@ struct Later {
     sticky: Option<Vec<(f32, f32)>>,
     /// `pan.x`, `pan.y`, `pinch.scale`, `rotation.angle`, by animated
     /// node.
-    gestures: Option<[Option<nsh_core::nsh_animation::NodeId>; 4]>,
-    scroll_value: Option<nsh_core::nsh_animation::NodeId>,
+    gestures: Option<[Option<nsh_core::animation::NodeId>; 4]>,
+    scroll_value: Option<nsh_core::animation::NodeId>,
     status_bar: Option<nsh_core::StatusBarConfig>,
 }
 
@@ -1126,7 +1126,7 @@ impl Later {
     }
 
     fn props(&self, kind: Option<ViewKind>, out: &mut Out) {
-        let animated = |node: Option<nsh_core::nsh_animation::NodeId>| {
+        let animated = |node: Option<nsh_core::animation::NodeId>| {
             let node = node?;
             ANIMATED.with(|a| a.borrow().get(&node).map(|v| num(*v)))
         };
@@ -1220,7 +1220,7 @@ impl Mounted {
 thread_local! {
     /// The value each animated node of the run on this thread was created
     /// with: the mount items create them before views bind them.
-    static ANIMATED: std::cell::RefCell<std::collections::HashMap<nsh_core::nsh_animation::NodeId, f32>> =
+    static ANIMATED: std::cell::RefCell<std::collections::HashMap<nsh_core::animation::NodeId, f32>> =
         Default::default();
 }
 
@@ -1228,7 +1228,7 @@ thread_local! {
 pub(crate) fn animated(item: Option<&MountItem>) {
     ANIMATED.with(|a| match item {
         None => a.borrow_mut().clear(),
-        Some(MountItem::Animation(nsh_core::nsh_animation::AnimationOp::CreateValue {
+        Some(MountItem::Animation(nsh_core::animation::AnimationOp::CreateValue {
             node,
             value,
         })) => {

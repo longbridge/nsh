@@ -7,7 +7,7 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem,
-    nsh_animation::{AnimationOp, Driver},
+    animation::{AnimationOp, Driver},
 };
 use nsh_engine::Engine;
 

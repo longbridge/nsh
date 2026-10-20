@@ -341,15 +341,15 @@ impl PanActivation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GestureValues {
     /// Horizontal drag translation (`pan={{ x }}`).
-    pub pan_x: Option<nsh_animation::NodeId>,
+    pub pan_x: Option<crate::animation::NodeId>,
     /// Vertical drag translation (`pan={{ y }}`).
-    pub pan_y: Option<nsh_animation::NodeId>,
+    pub pan_y: Option<crate::animation::NodeId>,
     /// Pinch scale (`pinch={{ scale }}`), multiplied from its value when the
     /// pinch starts.
-    pub pinch: Option<nsh_animation::NodeId>,
+    pub pinch: Option<crate::animation::NodeId>,
     /// Two-finger rotation in degrees (`rotation={{ angle }}`), added to its
     /// value when the rotation starts.
-    pub rotation: Option<nsh_animation::NodeId>,
+    pub rotation: Option<crate::animation::NodeId>,
 }
 
 impl GestureValues {

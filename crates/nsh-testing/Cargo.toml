@@ -24,7 +24,6 @@ bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
 
 [dependencies]
 nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
-nsh-animation.workspace = true
 nsh-core.workspace = true
 nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true }

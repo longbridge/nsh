@@ -208,7 +208,7 @@ enum Pumped {
 /// or asked what only a real platform answers (an image's size).
 ///
 /// It plays the platform's part the NSH protocol defines and nothing
-/// else: the native animation graph runs frame by frame (`nsh-animation`),
+/// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
 /// test, else [`default_answer`]), the clipboard holds text. Images are
 /// not loaded: no `onLoad` comes.

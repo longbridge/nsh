@@ -3,7 +3,7 @@
 //! written into the views' [`crate::view::AnimValues`] (the Android
 //! animator's design, `nsh-platform-android/src/anim.rs`).
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
+use nsh_core::animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
 use nsh_core::{Color, GestureValues, MountItem};
 use rustc_hash::FxHashMap;
 

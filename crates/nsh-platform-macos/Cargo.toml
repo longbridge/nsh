@@ -25,7 +25,6 @@ log.workspace = true
 # Empty off macOS (like the other platform crates off their targets).
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-core.workspace = true
-nsh-animation.workspace = true
 nsh-engine.workspace = true
 nsh-base.workspace = true
 block2.workspace = true

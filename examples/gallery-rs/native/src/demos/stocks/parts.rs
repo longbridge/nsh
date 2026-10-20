@@ -5,7 +5,7 @@
 
 use nsh_core::{
     Bounds, Points,
-    nsh_animation::{Curve, EaseMode},
+    animation::{Curve, EaseMode},
     ui::{AnyElement, prelude::*},
 };
 

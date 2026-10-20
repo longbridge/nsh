@@ -1,7 +1,7 @@
 //! Animation drivers. All are closed-form functions of elapsed time, so the
 //! result does not depend on frame rate or dropped frames.
 
-use crate::ops::{AnimationId, Curve, Driver, EaseMode, Easing};
+use crate::animation::ops::{AnimationId, Curve, Driver, EaseMode, Easing};
 
 /// Spring rest thresholds (value units and units per second).
 const REST_DISPLACEMENT: f32 = 0.001;

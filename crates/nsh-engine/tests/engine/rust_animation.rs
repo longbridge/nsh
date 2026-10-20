@@ -9,7 +9,7 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size,
-    nsh_animation::{AnimationOp, AnimationProp, Finished, Graph},
+    animation::{AnimationOp, AnimationProp, Finished, Graph},
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};

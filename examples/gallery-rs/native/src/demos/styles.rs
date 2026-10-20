@@ -4,7 +4,7 @@
 //! `demos/Styles.tsx`).
 
 use nsh_core::{
-    nsh_animation::{Curve, EaseMode},
+    animation::{Curve, EaseMode},
     ui::{Animation, TransformKind, prelude::*},
 };
 

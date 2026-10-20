@@ -15,9 +15,9 @@
 
 use std::{f64::consts::TAU, rc::Rc, sync::Arc};
 
-use nsh_animation::AnimationValue;
 use nsh_core::{
     Color, FontVariant,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Damage, DamageScan, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint,

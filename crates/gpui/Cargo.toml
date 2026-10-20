@@ -27,7 +27,6 @@ private_interfaces = "deny"
 
 [workspace.dependencies]
 # nsh's crates, from the main workspace.
-nsh-animation = { version = "0.1.1", path = "../nsh-animation" }
 nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }

@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use nsh_core::{
+    animation::{Curve, EaseMode},
     keymap::When,
-    nsh_animation::{Curve, EaseMode},
     time::Instant,
     ui::{AnyElement, Dialog, DialogButton, DialogButtonStyle, prelude::*},
 };

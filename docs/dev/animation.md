@@ -4,7 +4,7 @@
   `"deg"` / `"rad"` angles; `extrapolate` / `extrapolateLeft` / `extrapolateRight`: `clamp` (default) / `extend` / `identity`;
   `easing`), `add/sub/mul/div/mod`, `diffClamp(min, max)`. `Easing` (React Native's: `linear`, `ease`, `quad`, `cubic`, `poly`,
   `sin`, `circle`, `exp`, `elastic`, `back`, `bounce`, `bezier`, `in` / `out` / `inOut`) is data decoded in Rust
-  (`nsh_animation::Easing::Curve`), never a JS function: the curves, their parameters and defaults are one table
+  (`nsh_core::animation::Easing::Curve`), never a JS function: the curves, their parameters and defaults are one table
   (`nsh_core::js::animation`), which decodes them, declares their types (`animation::declarations`) and gives `nsh/animated` its curves (`animation::tables`). `Animated.timing` / `spring` / `decay` / `sequence` / `parallel` / `stagger` /
   `delay` / `loop` build a `Composite` tree that runs entirely natively (`AnimationOp::StartComposite`): each step starts at the exact end
   time of the previous one (no frame gaps), `stop()` / `reset()` (back to the values at start) / `start(cb)` report `finished` once
@@ -20,7 +20,7 @@
   offset; drivers, `set` and gestures move the value. JS reads a node back with `getValue()` (and `stop()`'s promise):
   `AnimationOp::Read` answers with a `Finished` carrying `value`, through the same path as animation ends (Rust
   components: `AnimatedValue::value()`, its request id odd, answered in `Core::animations_finished`).
-  `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_animation::sample_easing` /
+  `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_core::animation::sample_easing` /
   `sample_driver` (the drivers' own code, stepped like frames, at most `MAX_SAMPLES`), so drawn curves are what runs;
   Rust components call `ui::sample_easing` / `sample_spring` / `sample_decay` / `sample_decay_within`.
   Bindable: `opacity`, `backgroundColor`, `borderColor` (all sides), a text's `color` (the whole text: iOS and Android draw

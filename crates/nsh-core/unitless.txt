@@ -1,6 +1,44 @@
 # Public API of nsh-core with bare floats that have no unit (geometry::unit_types,
 # docs/dev/geometry.md): one item path per line, then the reason.
 
+animation::driver::sample_driver ->                              # generic animated values, sampled
+animation::driver::sample_driver(from)                           # a generic animated value (any prop: opacity, a color channel, a length)
+animation::driver::sample_driver(step)                           # time
+animation::driver::sample_easing ->                              # easing curve coordinates (unit square)
+animation::graph::AnimationValue::Number.0                       # a generic animated value (any prop: opacity, a color channel, a length)
+animation::graph::AnimationValue::number ->                      # a generic animated value (any prop: opacity, a color channel, a length)
+animation::graph::Finished.value                                 # a generic animated value (any prop: opacity, a color channel, a length)
+animation::graph::Graph::set(new)                                # a generic animated value (any prop: opacity, a color channel, a length)
+animation::graph::Graph::tick(now)                               # time
+animation::graph::Graph::value ->                                # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::AnimationOp::CreateDiffClamp.max                 # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::AnimationOp::CreateDiffClamp.min                 # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::AnimationOp::CreateInterpolate.input_range       # interpolation input stops (generic animated values)
+animation::ops::AnimationOp::CreateValue.value                   # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::AnimationOp::Set.value                           # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::AnimationOp::SetOffset.offset                    # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::Composite::Delay.0                               # time
+animation::ops::Curve::Back.0                                    # an easing curve parameter
+animation::ops::Curve::Elastic.0                                 # an easing curve parameter
+animation::ops::Curve::Poly.0                                    # an easing curve parameter
+animation::ops::Driver::Decay.bounce                             # decay physics parameters
+animation::ops::Driver::Decay.clamp                              # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::Driver::Decay.deceleration                       # decay physics parameters
+animation::ops::Driver::Decay.velocity                           # a generic animated value per millisecond
+animation::ops::Driver::Spring.damping                           # spring physics parameters
+animation::ops::Driver::Spring.mass                              # spring physics parameters
+animation::ops::Driver::Spring.stiffness                         # spring physics parameters
+animation::ops::Driver::Spring.to                                # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::Driver::Spring.velocity                          # a generic animated value per millisecond
+animation::ops::Driver::Timing.delay_ms                          # time
+animation::ops::Driver::Timing.duration_ms                       # time
+animation::ops::Driver::Timing.to                                # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::Easing::Bezier.0                                 # easing curve coordinates (unit square)
+animation::ops::Easing::Bezier.1                                 # easing curve coordinates (unit square)
+animation::ops::Easing::Bezier.2                                 # easing curve coordinates (unit square)
+animation::ops::Easing::Bezier.3                                 # easing curve coordinates (unit square)
+animation::ops::Operand::Const.0                                 # a generic animated value (any prop: opacity, a color channel, a length)
+animation::ops::Output::Numbers.0                                # generic animated values
 canvas::CanvasOp::MiterLimit.0                                   # a ratio of the stroke width
 canvas::Num::Const.0                                             # a generic number (a JS value, a recorded slot)
 canvas::Num::get ->                                              # a generic number (a JS value, a recorded slot)

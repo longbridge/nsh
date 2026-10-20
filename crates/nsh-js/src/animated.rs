@@ -15,8 +15,7 @@ use std::{
     ptr,
 };
 
-use nsh_animation::AnimationOp;
-use nsh_core::js::protocol::*;
+use nsh_core::{animation::AnimationOp, js::protocol::*};
 use rquickjs::{Ctx, Value, qjs};
 use rustc_hash::FxHashMap;
 
@@ -459,8 +458,10 @@ fn derived_hash(op: &AnimationOp) -> u64 {
                 f(x);
             }
             match output {
-                nsh_animation::Output::Numbers(v) => v.iter().for_each(|&x| f(x)),
-                nsh_animation::Output::Colors(v) => v.iter().for_each(|&c| f(f32::from_bits(c))),
+                nsh_core::animation::Output::Numbers(v) => v.iter().for_each(|&x| f(x)),
+                nsh_core::animation::Output::Colors(v) => {
+                    v.iter().for_each(|&c| f(f32::from_bits(c)))
+                }
             }
         }
         AnimationOp::CreateDiffClamp {
@@ -475,8 +476,8 @@ fn derived_hash(op: &AnimationOp) -> u64 {
             kind = 2;
             for (i, o) in [a, b].into_iter().enumerate() {
                 match *o {
-                    nsh_animation::Operand::Node(n) => ids[i] = n,
-                    nsh_animation::Operand::Const(c) => f(c),
+                    nsh_core::animation::Operand::Node(n) => ids[i] = n,
+                    nsh_core::animation::Operand::Const(c) => f(c),
                 }
             }
         }
@@ -819,7 +820,10 @@ unsafe extern "C" fn value_decay(
 
 /// Settles the promise of animation (or value read) `f.animation`
 /// (`Host::animations_finished`); false when it is not one of these.
-pub(crate) fn finished(ctx: *mut JsContext, f: &nsh_animation::Finished) -> Result<bool, JsValue> {
+pub(crate) fn finished(
+    ctx: *mut JsContext,
+    f: &nsh_core::animation::Finished,
+) -> Result<bool, JsValue> {
     let (id, done) = (f.animation, f.finished);
     let a = animations(ctx);
     let Some(End {
@@ -1046,11 +1050,11 @@ fn sample(ctx: *mut JsContext, kind: &str, config: JsValue, fps: JsValue) -> JsV
             let step = 1.0 / rate.clamp(1.0, 1000.0);
             number_array(
                 ctx,
-                &nsh_animation::sample_driver(
+                &nsh_core::animation::sample_driver(
                     driver,
                     from as f32,
                     step,
-                    nsh_animation::MAX_SAMPLES,
+                    nsh_core::animation::MAX_SAMPLES,
                 ),
             )
         }
@@ -1090,13 +1094,13 @@ unsafe extern "C" fn easing_sample(
     let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
     let e = unsafe { Value::from_raw(cx, qjs::JS_DupValue(ctx, arg(argc, argv, 0))) };
     let count = if count.is_finite() {
-        (count.max(0.0) as usize).min(nsh_animation::MAX_SAMPLES)
+        (count.max(0.0) as usize).min(nsh_core::animation::MAX_SAMPLES)
     } else {
         0
     };
     number_array(
         ctx,
-        &nsh_animation::sample_easing(crate::protocol::easing(e), count),
+        &nsh_core::animation::sample_easing(crate::protocol::easing(e), count),
     )
 }
 
@@ -1883,19 +1887,20 @@ mod tests {
         let starts: Vec<u32> = ops
             .iter()
             .filter_map(|o| match o {
-                Op::Animation(nsh_animation::AnimationOp::Start { animation, .. }) => {
+                Op::Animation(nsh_core::animation::AnimationOp::Start { animation, .. }) => {
                     Some(*animation)
                 }
-                Op::Animation(nsh_animation::AnimationOp::StartComposite { animation, .. }) => {
-                    Some(*animation)
-                }
+                Op::Animation(nsh_core::animation::AnimationOp::StartComposite {
+                    animation,
+                    ..
+                }) => Some(*animation),
                 _ => None,
             })
             .collect();
         assert_eq!(starts, [2, 4], "{ops:?}");
         host.animations_finished(&[
-            nsh_animation::Finished::new(2, true),
-            nsh_animation::Finished::new(4, false),
+            nsh_core::animation::Finished::new(2, true),
+            nsh_core::animation::Finished::new(4, false),
         ]);
         host.eval_script("report.js", "report()").unwrap();
         let mut ops = Vec::new();
@@ -1912,7 +1917,7 @@ mod tests {
         );
     }
 
-    fn animation_ops(host: &Host) -> Vec<nsh_animation::AnimationOp> {
+    fn animation_ops(host: &Host) -> Vec<nsh_core::animation::AnimationOp> {
         let mut ops = Vec::new();
         host.take_ops(&mut ops);
         ops.into_iter()
@@ -1935,7 +1940,7 @@ mod tests {
 
     #[test]
     fn values_are_read_back_and_offset() {
-        use nsh_animation::AnimationOp as A;
+        use nsh_core::animation::AnimationOp as A;
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
@@ -1979,12 +1984,12 @@ mod tests {
             ]
         );
         host.animations_finished(&[
-            nsh_animation::Finished {
+            nsh_core::animation::Finished {
                 animation: 2,
                 finished: true,
                 value: Some(6.0),
             },
-            nsh_animation::Finished {
+            nsh_core::animation::Finished {
                 animation: 4,
                 finished: true,
                 value: Some(6.5),
@@ -2026,8 +2031,8 @@ mod tests {
             .filter(|o| {
                 matches!(
                     o,
-                    nsh_animation::AnimationOp::CreateInterpolate { .. }
-                        | nsh_animation::AnimationOp::CreateMath { .. }
+                    nsh_core::animation::AnimationOp::CreateInterpolate { .. }
+                        | nsh_core::animation::AnimationOp::CreateMath { .. }
                 )
             })
             .count();
@@ -2042,13 +2047,13 @@ mod tests {
         host.collect_garbage();
         let released = animation_ops(&host);
         assert!(
-            released.contains(&nsh_animation::AnimationOp::Release { node: 8 }),
+            released.contains(&nsh_core::animation::AnimationOp::Release { node: 8 }),
             "{released:?}"
         );
         host.eval_script("again.js", "keep.push(again())").unwrap();
         let ops = animation_ops(&host);
         assert!(
-            matches!(ops[..], [nsh_animation::AnimationOp::CreateMath { node, .. }] if node > 8),
+            matches!(ops[..], [nsh_core::animation::AnimationOp::CreateMath { node, .. }] if node > 8),
             "{ops:?}"
         );
     }
@@ -2067,7 +2072,7 @@ mod tests {
         let ops = animation_ops(&host);
         assert!(
             ops.iter()
-                .any(|o| matches!(o, nsh_animation::AnimationOp::StartComposite { .. })),
+                .any(|o| matches!(o, nsh_core::animation::AnimationOp::StartComposite { .. })),
             "{ops:?}"
         );
         // Its component goes: nothing holds the value but the running loop.
@@ -2076,7 +2081,7 @@ mod tests {
         let ops = animation_ops(&host);
         // The graph stops a loop whose value is released.
         assert!(
-            ops.contains(&nsh_animation::AnimationOp::Release { node: 2 }),
+            ops.contains(&nsh_core::animation::AnimationOp::Release { node: 2 }),
             "{ops:?}"
         );
     }

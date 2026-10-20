@@ -70,7 +70,7 @@ use std::{
 };
 
 use gpui::{Font, FontStyle, Hsla, RenderImage, TextRun, WindowTextSystem, px};
-use nsh_animation::AnimationValue;
+use nsh_core::animation::AnimationValue;
 use nsh_core::{
     Color,
     canvas::{

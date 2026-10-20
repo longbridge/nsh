@@ -319,8 +319,8 @@ fn redrawing_derives_the_same_nodes() {
             match item {
                 MountItem::Canvas { drawing, .. } => drawings.push(drawing.slots.clone()),
                 MountItem::Animation(
-                    nsh_animation::AnimationOp::CreateInterpolate { .. }
-                    | nsh_animation::AnimationOp::CreateMath { .. },
+                    nsh_core::animation::AnimationOp::CreateInterpolate { .. }
+                    | nsh_core::animation::AnimationOp::CreateMath { .. },
                 ) => derived += 1,
                 _ => {}
             }

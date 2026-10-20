@@ -4,12 +4,12 @@
 use std::{cell::RefCell, sync::Arc};
 
 use dispatch2::{DispatchQueue, MainThreadBound};
-use nsh_animation::{AnimationProp, AnimationValue};
 use nsh_core::{
     Bounds, Color, Command, EventKind, EventMask, EventPayload, GestureValues, ImageSource,
     KeyboardDismissMode, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     MountBatch, MountItem, NodeId, PayloadValue, Points, ResizeMode, StickyCell, SubmitBehavior,
     ViewKind, ViewProps, ViewStyle,
+    animation::{AnimationProp, AnimationValue},
     geometry::{DevicePixels, point, size},
 };
 use nsh_engine::EngineControl;
@@ -248,7 +248,7 @@ struct Slot {
     decor: Decor,
     events: EventMask,
     gestures: Gestures,
-    bindings: Vec<(AnimationProp, nsh_animation::NodeId)>,
+    bindings: Vec<(AnimationProp, nsh_core::animation::NodeId)>,
     values: GestureValues,
     /// Values of the gesture nodes when the gesture began: pan x, pan y,
     /// pinch, rotation.
@@ -259,7 +259,7 @@ struct Slot {
     mirrored: bool,
     /// A cell of such a list: mirrored back.
     in_mirrored: bool,
-    scroll_value: Option<nsh_animation::NodeId>,
+    scroll_value: Option<nsh_core::animation::NodeId>,
     /// How a scroll view scrolls (scroll views only).
     behavior: Option<Box<nsh_core::ScrollBehavior>>,
     horizontal: bool,

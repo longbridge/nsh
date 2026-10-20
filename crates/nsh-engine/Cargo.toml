@@ -23,7 +23,6 @@ oxc_sourcemap = { workspace = true, optional = true }
 nsh-core.workspace = true
 nsh-package = { workspace = true, optional = true }
 serde_json.workspace = true
-nsh-animation.workspace = true
 nsh-js = { workspace = true, optional = true }
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }

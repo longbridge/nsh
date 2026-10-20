@@ -25,7 +25,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOWS = {
     "core.yml": {
         "packages": [
-            "nsh-core", "nsh-animation", "nsh-macros", "nsh-js", "nsh-engine",
+            "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
             "nsh-bundler", "nsh-package", "nsh-base", "nsh-testing",
         ],
         "files": ["api/**", "examples/counter/**", "examples/gallery/**", "examples/bench/**"],

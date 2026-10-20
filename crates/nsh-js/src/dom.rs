@@ -274,7 +274,7 @@ impl Dom {
 
     /// Queues the release of a collected animation node or composite (from
     /// a finalizer).
-    pub(crate) fn queue_animation_release(&self, op: nsh_animation::AnimationOp) {
+    pub(crate) fn queue_animation_release(&self, op: nsh_core::animation::AnimationOp) {
         self.shared.animation_releases.borrow_mut().push(op);
     }
 

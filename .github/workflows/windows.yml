@@ -8,7 +8,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/nsh-animation/**"
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
@@ -31,7 +30,6 @@ on:
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
-      - "crates/nsh-animation/**"
       - "crates/nsh-bundler/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"

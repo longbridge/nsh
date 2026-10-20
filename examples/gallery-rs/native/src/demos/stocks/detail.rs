@@ -7,8 +7,8 @@ use std::f32::consts::TAU;
 
 use nsh_core::{
     Bounds, ModalPresentation, Points,
+    animation::{Curve, EaseMode},
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineCap},
-    nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
 };
 

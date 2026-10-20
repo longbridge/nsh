@@ -27,8 +27,8 @@ use std::{cell::RefCell, f32::consts::TAU, rc::Rc, time::Duration};
 
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
+    animation::{Curve, EaseMode},
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
-    nsh_animation::{Curve, EaseMode},
     time::Instant,
     ui::{AccessibilityState, AnimatedNode, View, prelude::*},
 };

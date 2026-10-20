@@ -318,7 +318,7 @@ pub enum AnimationOp {
         /// Value node.
         node: NodeId,
     },
-    /// Reports the current value of any node as a [`crate::Finished`] of
+    /// Reports the current value of any node as a [`super::Finished`] of
     /// `request` (with its `value`), so JS can read it back.
     Read {
         /// The node.

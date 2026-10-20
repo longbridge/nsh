@@ -5,7 +5,7 @@
 
 use nsh_core::{
     Bounds, Points, Ripple, TouchPhase, TouchPoint,
-    nsh_animation::{Curve, EaseMode},
+    animation::{Curve, EaseMode},
     ui::{Animation, BoxShadow, TouchEvent, prelude::*},
 };
 

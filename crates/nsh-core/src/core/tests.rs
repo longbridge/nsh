@@ -1,10 +1,9 @@
 use std::cell::Cell;
 
-use nsh_animation::{AnimationOp, AnimationProp};
-
 use super::*;
 use crate::{
     Color, EventKind, StyleValue,
+    animation::{AnimationOp, AnimationProp},
     geometry::{point, px},
 };
 
@@ -5967,12 +5966,12 @@ mod components {
             .collect();
         // The value and its interpolation, in the core's id range.
         let value = match animations[0] {
-            nsh_animation::AnimationOp::CreateValue { node, value: 0.0 } => node,
+            crate::animation::AnimationOp::CreateValue { node, value: 0.0 } => node,
             ref op => panic!("{op:?}"),
         };
         assert_eq!(value % 2, 1, "the core's ids are odd");
         assert!(
-            matches!(animations[1], nsh_animation::AnimationOp::CreateInterpolate { input, .. } if input == value)
+            matches!(animations[1], crate::animation::AnimationOp::CreateInterpolate { input, .. } if input == value)
         );
         assert_eq!(texts(&batch), ["resting"]);
 
@@ -5990,17 +5989,19 @@ mod components {
             .items
             .iter()
             .find_map(|i| match i {
-                MountItem::Animation(nsh_animation::AnimationOp::Start {
-                    node, animation, ..
+                MountItem::Animation(crate::animation::AnimationOp::Start {
+                    node,
+                    animation,
+                    ..
                 }) if *node == value => Some(*animation),
                 _ => None,
             })
             .expect("a spring");
         assert_eq!(texts(&batch), ["springing"]);
         let mut finished = vec![
-            nsh_animation::Finished::new(animation, true),
+            crate::animation::Finished::new(animation, true),
             // JS's (even ids) stay for JS.
-            nsh_animation::Finished::new(8, true),
+            crate::animation::Finished::new(8, true),
         ];
         c.animations_finished(&mut finished);
         assert_eq!(finished.len(), 1);
@@ -6029,7 +6030,7 @@ mod components {
             .filter(|i| {
                 matches!(
                     i,
-                    MountItem::Animation(nsh_animation::AnimationOp::Release { .. })
+                    MountItem::Animation(crate::animation::AnimationOp::Release { .. })
                 )
             })
             .count();
@@ -6089,7 +6090,7 @@ mod components {
                 },
             ],
         );
-        let animations = |batch: &MountBatch| -> Vec<nsh_animation::AnimationOp> {
+        let animations = |batch: &MountBatch| -> Vec<crate::animation::AnimationOp> {
             batch
                 .items
                 .iter()
@@ -6113,8 +6114,8 @@ mod components {
         let ops = animations(&batch);
         let fade = match ops[..] {
             [
-                nsh_animation::AnimationOp::CreateValue { node, value: 1.0 },
-                nsh_animation::AnimationOp::Start { node: started, .. },
+                crate::animation::AnimationOp::CreateValue { node, value: 1.0 },
+                crate::animation::AnimationOp::Start { node: started, .. },
             ] if started == node => node,
             _ => panic!("{ops:?}"),
         };
@@ -6146,7 +6147,7 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             animations(&batch),
-            [nsh_animation::AnimationOp::Set {
+            [crate::animation::AnimationOp::Set {
                 node: fade,
                 value: 0.5
             }]
@@ -6184,7 +6185,7 @@ mod components {
             .collect();
         assert_eq!(
             released,
-            [nsh_animation::AnimationOp::Release { node: fade }]
+            [crate::animation::AnimationOp::Release { node: fade }]
         );
     }
 
@@ -8178,8 +8179,8 @@ mod views {
         let colors = |batch: &MountBatch| {
             batch.items.iter().find_map(|i| match i {
                 MountItem::Animation(
-                    nsh_animation::AnimationOp::CreateInterpolate { output, .. }
-                    | nsh_animation::AnimationOp::SetOutput { output, .. },
+                    crate::animation::AnimationOp::CreateInterpolate { output, .. }
+                    | crate::animation::AnimationOp::SetOutput { output, .. },
                 ) => Some(output.clone()),
                 _ => None,
             })
@@ -8188,7 +8189,9 @@ mod views {
         c.mount_root(&Root::new::<Track>(|| ()));
         assert_eq!(
             colors(&c.commit().unwrap()),
-            Some(nsh_animation::Output::Colors(vec![0xeeeeeeff, 0x00ff00ff]))
+            Some(crate::animation::Output::Colors(vec![
+                0xeeeeeeff, 0x00ff00ff
+            ]))
         );
         c.set_environment(crate::ui::Environment {
             dark: true,
@@ -8198,11 +8201,13 @@ mod views {
         let batch = c.commit().unwrap();
         assert_eq!(
             colors(&batch),
-            Some(nsh_animation::Output::Colors(vec![0x222222ff, 0x00ff00ff]))
+            Some(crate::animation::Output::Colors(vec![
+                0x222222ff, 0x00ff00ff
+            ]))
         );
         assert!(!batch.items.iter().any(|i| matches!(
             i,
-            MountItem::Animation(nsh_animation::AnimationOp::CreateInterpolate { .. })
+            MountItem::Animation(crate::animation::AnimationOp::CreateInterpolate { .. })
         )));
     }
 
@@ -8235,8 +8240,8 @@ mod views {
                 .iter()
                 .filter_map(|i| match i {
                     MountItem::Animation(
-                        nsh_animation::AnimationOp::CreateInterpolate { output, .. }
-                        | nsh_animation::AnimationOp::SetOutput { output, .. },
+                        crate::animation::AnimationOp::CreateInterpolate { output, .. }
+                        | crate::animation::AnimationOp::SetOutput { output, .. },
                     ) => Some(output.clone()),
                     _ => None,
                 })
@@ -8244,7 +8249,7 @@ mod views {
             outputs.sort_by_key(|o| format!("{o:?}"));
             outputs
         };
-        let colors = |off: u32| nsh_animation::Output::Colors(vec![off, 0x00ff00ff]);
+        let colors = |off: u32| crate::animation::Output::Colors(vec![off, 0x00ff00ff]);
         let mut c = core();
         c.mount_root(&Root::new::<SharedLight>(|| ()));
         assert_eq!(outputs(&c.commit().unwrap()), vec![colors(0x000000ff); 3]);

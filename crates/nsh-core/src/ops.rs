@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use nsh_animation::AnimationOp;
-
 use crate::{
+    animation::AnimationOp,
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
     props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
@@ -1325,10 +1324,13 @@ pub enum Prop {
     /// `scrollValue`: an animated value fed with the scroll offset (main axis), for
     /// scroll-linked effects.
     #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
-    ScrollValue(Option<nsh_animation::NodeId>),
+    ScrollValue(Option<crate::animation::NodeId>),
     /// `pan`: drags drive these animated values (points) on the UI thread.
     #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: AnimatedValue; y?: AnimatedValue }")]
-    PanValues(Option<nsh_animation::NodeId>, Option<nsh_animation::NodeId>),
+    PanValues(
+        Option<crate::animation::NodeId>,
+        Option<crate::animation::NodeId>,
+    ),
     /// `numberOfLines`: the most lines shown; 0 (default) is unlimited.
     #[prop(js = "numberOfLines", on = TEXT)]
     NumberOfLines(u32),
@@ -1537,10 +1539,10 @@ pub enum Prop {
     MinimumFontScale(f32),
     /// `pinch`: two-finger pinches drive `scale` natively.
     #[prop(js = "pinch", with = crate::js::host_values::pinch, reset = Prop::PinchValue(None), ts = "{ scale?: AnimatedValue }")]
-    PinchValue(Option<nsh_animation::NodeId>),
+    PinchValue(Option<crate::animation::NodeId>),
     /// `rotation`: two-finger rotations drive `angle` (degrees) natively.
     #[prop(js = "rotation", with = crate::js::host_values::rotation, reset = Prop::RotationValue(None), ts = "{ angle?: AnimatedValue }")]
-    RotationValue(Option<nsh_animation::NodeId>),
+    RotationValue(Option<crate::animation::NodeId>),
     /// A screen option.
     #[prop(nested)]
     Screen(ScreenProp),

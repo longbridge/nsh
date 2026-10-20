@@ -20,7 +20,6 @@ bytecode-only = []
 serde_json.workspace = true
 log.workspace = true
 nsh-core.workspace = true
-nsh-animation.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 percent-encoding.workspace = true

@@ -553,7 +553,6 @@ fn root_config(
 /// nsh's crates an app's crate may depend on ([`Nsh::of`]; built against a
 /// checkout, `[patch.crates-io]` sends them to it).
 const NSH_CRATES: &[&str] = &[
-    "nsh-animation",
     "nsh-macros",
     "nsh-core",
     "nsh-base",

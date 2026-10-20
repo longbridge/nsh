@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::{
+use super::{
     driver::{Running, ease},
     ops::{
         AnimationId, AnimationOp, Composite, Driver, Easing, Extrapolate, MathOp, NodeId, Operand,
@@ -844,7 +844,7 @@ fn lerp_color(a: u32, b: u32, t: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::{Driver, Easing};
+    use crate::animation::ops::{Driver, Easing};
 
     const CLAMP: (Extrapolate, Extrapolate) = (Extrapolate::Clamp, Extrapolate::Clamp);
 
@@ -1304,7 +1304,10 @@ mod tests {
             &r,
             &out,
             both(Extrapolate::Clamp, Extrapolate::Clamp),
-            Easing::Curve(crate::ops::Curve::Quad, crate::ops::EaseMode::In),
+            Easing::Curve(
+                crate::animation::ops::Curve::Quad,
+                crate::animation::ops::EaseMode::In,
+            ),
         );
         assert_eq!(eased, AnimationValue::Number(25.0));
     }

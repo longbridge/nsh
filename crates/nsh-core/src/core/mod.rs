@@ -10,13 +10,13 @@ mod views;
 
 use std::{rc::Rc, sync::Arc};
 
-use nsh_animation::AnimationProp;
 use slab::Slab;
 use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
 
 use self::list::{ExtraKind, Follow, ListState, PinTarget};
 pub use self::measure::Measurement;
 use crate::{
+    animation::AnimationProp,
     geometry::{Bounds, Percentage, Point, Points, Size, rect, size_pt},
     mount::{
         InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig, ScrollBehavior,
@@ -276,7 +276,7 @@ struct ScrollState {
     horizontal: bool,
     shows_indicator: bool,
     refreshing: bool,
-    scroll_value: Option<nsh_animation::NodeId>,
+    scroll_value: Option<crate::animation::NodeId>,
     keyboard_dismiss: KeyboardDismissMode,
     /// Last content size sent to the platform.
     content: Option<Size<Points>>,
@@ -356,7 +356,7 @@ struct Node {
     base_layout: Option<Box<taffy::Style>>,
     view_style: ViewStyle,
     text_style: TextStyle,
-    animated: Vec<(AnimationProp, nsh_animation::NodeId)>,
+    animated: Vec<(AnimationProp, crate::animation::NodeId)>,
     /// What a canvas draws.
     drawing: Option<Arc<crate::canvas::Drawing>>,
     /// The `style` prop as written, applied over the class styles.

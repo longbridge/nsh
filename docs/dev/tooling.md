@@ -243,7 +243,7 @@ responses back as the clock's alarms. Quiet detection and `waitFor` timeouts sta
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
 (`headless/mod.rs` `Headless::react`, `go_back`, `answer`; `headless/animation.rs`):
 
-- the native animation graph (`nsh-animation`, platform-free) runs frame by frame at 60 Hz while anything animates,
+- the native animation graph (nsh-core's `animation`, platform-free) runs frame by frame at 60 Hz while anything animates,
   fed the mount items' animation ops and scroll values, its finished animations reported (`animations_finished`); a
   step is quiet only when nothing animates;
 - a back (`Headless::back`, and the app's `Command::Back`) does what `nsh-platform-macos`'s `default_back` does: in the

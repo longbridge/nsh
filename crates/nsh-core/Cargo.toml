@@ -12,7 +12,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-nsh-animation.workspace = true
 rustc-hash.workspace = true
 slab.workspace = true
 taffy.workspace = true

@@ -3,8 +3,10 @@
 //! bound view properties go to the DOM as `["a", view, prop, value]`
 //! items (the Android animator's design, `nsh-platform-android/src/animation.rs`).
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
-use nsh_core::{Color, GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform};
+use nsh_core::{
+    Color, GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform,
+    animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
+};
 use rustc_hash::FxHashMap;
 
 use crate::encode::{Out, css_color, css_transform};

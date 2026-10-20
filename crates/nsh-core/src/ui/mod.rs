@@ -87,9 +87,6 @@ macro_rules! decl {
     };
 }
 
-pub use nsh_animation::{
-    Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing,
-};
 pub use nsh_macros::{
     Event, JsObject, PropEnum, Props, asset, assets, class, component, methods, module,
     native_module,
@@ -182,6 +179,7 @@ pub use crate::{
     LayoutTransition, Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents,
     ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
     StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    animation::{Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing},
     color::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
         transparent_black, transparent_white, white, yellow,
