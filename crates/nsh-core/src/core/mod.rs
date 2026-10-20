@@ -4674,7 +4674,6 @@ const PRESSES: [EventKind; 4] = [
     EventKind::PressOut,
 ];
 
-/// Whether a span with `events` takes presses (a link in its text block).
 /// The background a nested text's view style gives its characters.
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
     (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
@@ -4684,6 +4683,7 @@ fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextB
     })
 }
 
+/// Whether a span with `events` takes presses (a link in its text block).
 fn pressable(events: EventMask) -> bool {
     PRESSES.iter().any(|&e| events.contains(e))
 }
