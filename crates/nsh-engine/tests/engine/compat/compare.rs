@@ -428,12 +428,11 @@ fn keyword(statement: &str) -> &str {
 
 /// What a statement declares: (kind, name); `None` for imports.
 fn head(statement: &str) -> Option<(&'static str, String)> {
-    if let Some(name) = statement.strip_prefix("export default ") {
-        if !name.trim_end_matches(';').is_empty()
-            && name.trim_end_matches(';').chars().all(is_ident)
-        {
-            return Some(("re-export", "default".into()));
-        }
+    if let Some(name) = statement.strip_prefix("export default ")
+        && !name.trim_end_matches(';').is_empty()
+        && name.trim_end_matches(';').chars().all(is_ident)
+    {
+        return Some(("re-export", "default".into()));
     }
     let mut rest = statement;
     loop {
