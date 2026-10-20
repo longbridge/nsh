@@ -63,6 +63,8 @@ pub trait JsHost {
     fn number(&self, v: JsRaw) -> Option<f64>;
     /// `v` as a string (`None`: not one).
     fn string(&self, v: JsRaw) -> Option<String>;
+    /// The bytes of `Uint8Array` `v`, copied (`None`: not one).
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>>;
     /// The length of array `v` (`None`: not an array; an error when it is
     /// more than the host reads in one call).
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError>;
@@ -70,6 +72,12 @@ pub trait JsHost {
     fn index(&self, v: JsRaw, i: usize) -> Result<JsRaw, PropError>;
     /// Field `key` of object `v` (`undefined` when it has none), owned.
     fn field(&self, v: JsRaw, key: &str) -> Result<JsRaw, PropError>;
+    /// The own enumerable string keys of object `v` (none when it is not
+    /// one).
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError>;
+    /// The time `Date` `v` stands for, in milliseconds since the Unix
+    /// epoch (`None`: not a `Date`).
+    fn date(&self, v: JsRaw) -> Option<f64>;
     /// `v` as JSON (as `JSON.stringify` sees it).
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError>;
     /// A short text showing `v`, for errors (`"abc"`, `{}`).
@@ -98,6 +106,10 @@ pub trait JsHost {
     fn new_number(&self, n: f64) -> JsRaw;
     /// A string.
     fn new_string(&self, s: &str) -> Result<JsRaw, PropError>;
+    /// A `Uint8Array` of `bytes` (copied).
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError>;
+    /// A `Date` of `millis` since the Unix epoch.
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError>;
     /// An array of `items` (taken).
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError>;
     /// An empty object.
@@ -117,6 +129,26 @@ pub trait JsHost {
     /// The object a constructor makes for `instance` (with `new.target`'s
     /// prototype).
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError>;
+
+    /// The VM the call comes from ([`super::System`]); one granting nothing
+    /// where the host configured none.
+    fn system(&self) -> super::System {
+        super::System::default()
+    }
+
+    /// Starts `task` as a task of the core, in order with the ops JS sent
+    /// before the call (`CallCx::start`); a host without a core drops it.
+    fn start_task(&self, task: super::TaskStart) {
+        drop(task);
+    }
+
+    /// Runs `f` when what owns the call in JS goes (`CallCx::on_cleanup`);
+    /// a host without owners keeps it until it goes itself. Returns what
+    /// unregisters `f` without running it.
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
+        drop(f);
+        Box::new(|| {})
+    }
 }
 
 /// A JS value borrowed for a call: read it with its methods, convert it
@@ -157,6 +189,11 @@ impl<'a> JsIn<'a> {
         self.host.kind(self.raw)
     }
 
+    /// The bytes of a `Uint8Array`, copied.
+    pub fn as_bytes(&self) -> Option<Vec<u8>> {
+        self.host.bytes(self.raw)
+    }
+
     /// `undefined` or `null`.
     pub fn is_nullish(&self) -> bool {
         matches!(self.kind(), JsKind::Undefined | JsKind::Null)
@@ -193,6 +230,16 @@ impl<'a> JsIn<'a> {
     pub fn field(&self, key: &str) -> Result<JsOwned<'a>, PropError> {
         let raw = self.host.field(self.raw, key)?;
         Ok(JsOwned::new(self.host, raw))
+    }
+
+    /// Its own enumerable string keys (none when it is not an object).
+    pub fn keys(&self) -> Result<Vec<String>, PropError> {
+        self.host.keys(self.raw)
+    }
+
+    /// The milliseconds since the Unix epoch of the `Date` it is.
+    pub fn as_date(&self) -> Option<f64> {
+        self.host.date(self.raw)
     }
 
     /// The value as JSON.

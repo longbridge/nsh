@@ -32,7 +32,9 @@ crates/
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
                        toolchain (`ui/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
-                       modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs)
+                       modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs),
+                       the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
+                       `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
                        app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, safe areas, the keyboard, the status
                        bar, written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs
@@ -48,7 +50,9 @@ crates/
                        responder system (`touch.rs`), the environment (`env.rs`), hot module replacement (`hot.rs`),
                        Rust classes (`classes.rs`: on the web classes' machinery);
                        decoding JS values into core types (`protocol.rs`); the web APIs of TS apps (`web/`: fetch, streams,
-                       Blob / FormData, URL, encoding, events), native classes; the TypeScript declarations of all of it
+                       Blob / FormData, URL, encoding, events), native classes; the standard modules' VM side (`standard/`:
+                       the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
+                       the globals `WebSocket`, `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
   nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform; feature
                        `headless`: headless runs (`headless/`: the driver of `nsh test` and Rust tests, its model of the views and its steps,
@@ -267,6 +271,13 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   NSH; apps and the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home
   (two registries exporting one name panic, `Registry::merged`). Platform-only APIs go to `nsh/ios` / `nsh/android`,
   platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}`. `nsh` has no catch-all re-exports.
+- **The standard catalog.** Beside the layers sits a fixed catalog of eleven
+  standard modules with bare specifiers (`nsh_core::js::STANDARD_MODULES`: `buffer`, `console`, `crypto`,
+  `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib`): Node-shaped subsets compatible with
+  gpui-shell's, built on the same native machinery (typed registries, capability checks in Rust) with generated
+  declarations. Exactly these names import; `node:` prefixes and other Node modules (`fs`, `events`, `util`, ...)
+  are refused. Files and processes are these modules (`fs/promises`, `process`), never an `nsh/<module>`; the
+  catalog grows only by a design decision.
 - **Backward compatible, always.** Apps are delivered to host apps as plugins and may never be built again, so every
   release runs every app built for an earlier one (from v0.1.2 on, for good, whatever the version). Nothing that
   reached `main` is removed or renamed: modules, exports and their members, `nsh:rt` (what compiled JSX calls:
@@ -333,6 +344,12 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - A crate's integration tests are one test binary (`tests/<name>/main.rs` with a module per area, as
   `nsh-engine/tests/engine/`), never a new `tests/*.rs`: each binary links its own copy of the bundler, QuickJS and
   the core (about 1 GiB of debug objects apiece).
+
+## Public Rust structs
+
+- New `pub struct` types use `#[non_exhaustive]` and implement `Default`, deriving it when possible.
+- Set only the fields needed and leave the rest at their defaults. Within the defining crate, use `..Default::default()`; callers in other crates start with `Type::default()` and assign fields, because non-exhaustive structs cannot be constructed with external struct literals.
+- New fields have sensible defaults so extending a struct does not break downstream construction.
 
 ## Commits and pull requests
 

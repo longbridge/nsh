@@ -104,6 +104,8 @@ fn scrolls_with_recycled_cells(app: &str) {
         viewport: Size::new(320.0, 500.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
         header_heights: (44.0, 96.0),

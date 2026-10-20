@@ -700,7 +700,13 @@ impl<M: TextEngine> Core<M> {
     /// Forgets what `host`'s view knew of the nodes released since: their
     /// handlers, responders and bindings.
     fn forget_released(&self, host: NodeId, inst: &mut Instance) {
-        let live = |id: &NodeId| *id == host || self.components.owners.contains_key(id);
+        // The app's slot nodes are JS's, not the view's: they keep what the
+        // view gave them while they are its slots.
+        let live = |id: &NodeId| {
+            *id == host
+                || self.components.owners.contains_key(id)
+                || self.components.slot_hosts.get(id) == Some(&host)
+        };
         inst.handlers.retain(|(id, _, _)| live(id));
         inst.event_handlers.retain(|(id, _)| live(id));
         inst.responders.retain(|(id, _)| live(id));

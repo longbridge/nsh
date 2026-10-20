@@ -85,7 +85,7 @@ lto = "fat"
 codegen-units = 1
 
 # Keep the interpreter and layout fast even in debug builds; they dominate runtime cost.
-[profile.dev.package.rquickjs-sys]
+[profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3

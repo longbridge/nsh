@@ -243,8 +243,9 @@ fn component_event(
 }
 
 /// Settles call `call` with `result`: resolved with the value (converted
-/// now), or rejected with an `Error` of the message (also when the value
-/// does not convert, or its conversion panics).
+/// now), or rejected with its error (a [`nsh_core::ui::JsError`]'s class
+/// and properties; an `Error` of the message when the value does not
+/// convert, or its conversion panics).
 fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValue> {
     let pending = components(ctx).pending.borrow_mut().remove(&call);
     // Nobody waits (the promise's VM state was reset): the value drops,
@@ -267,21 +268,15 @@ fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValu
             value
                 .to_js_value(&host)
                 .map(|v| V::own(ctx, crate::classes::from_raw(v.into_raw())))
-                .map_err(|e| e.0)
+                .map_err(|e| nsh_core::ui::Thrown::Error(e.0))
         })
     }))
-    .unwrap_or_else(|payload| Err(crate::classes::panic_message(payload)));
+    .unwrap_or_else(|payload| Err(crate::classes::panic_message(payload).into()));
     let (f, value) = match converted {
         Ok(value) => (resolve, value),
-        Err(message) => {
+        Err(thrown) => {
             host.clear_pending();
-            // SAFETY: a new error taking its message.
-            let error = unsafe {
-                let error = qjs::JS_NewError(ctx);
-                qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), new_string(ctx, &message));
-                V::own(ctx, error)
-            };
-            (reject, error)
+            (reject, crate::classes::error_value(ctx, &thrown))
         }
     };
     match crate::web::js::call(ctx, f.raw(), UNDEFINED, &[value.raw()]) {
@@ -303,6 +298,7 @@ pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function
         FunctionCall::Sync(f) => return crate::classes::sync_function(ctx, function, f, length),
         FunctionCall::Op(make) => (Some(call_op), make as *const ()),
         FunctionCall::Async(start) => (Some(call_task), start as *const ()),
+        FunctionCall::Start(start) => (Some(call_start), start as *const ()),
     };
     let name = CString::new(function).unwrap_or_default();
     // SAFETY: the opaque is the function's conversion (a function pointer,
@@ -366,11 +362,33 @@ unsafe extern "C" fn call_task(
     })
 }
 
+/// A function starting its task in the JS call (`Later`): what the start
+/// throws throws.
+unsafe extern "C" fn call_start(
+    ctx: *mut JsContext,
+    this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+    _magic: c_int,
+    opaque: *mut std::ffi::c_void,
+) -> JsValue {
+    // SAFETY: `module_function` made the opaque from an `AsyncCall`, and
+    // QuickJS passes `argc` live arguments.
+    let (start, args) = unsafe {
+        (
+            std::mem::transmute::<*const (), nsh_core::ui::AsyncCall>(opaque as *const ()),
+            crate::web::js::Args::new(argc, argv),
+        )
+    };
+    crate::classes::start(ctx, this, args, |host| start(host).map(RustCall::Task))
+}
+
 /// A module's object: its functions.
 pub(crate) fn module(ctx: *mut JsContext, module: &ModuleSpec) -> JsValue {
     // SAFETY: a new object taking the functions.
     let obj = unsafe { qjs::JS_NewObject(ctx) };
     add_functions(ctx, obj, module);
+
     obj
 }
 
@@ -378,8 +396,45 @@ fn add_functions(ctx: *mut JsContext, obj: JsValue, module: &ModuleSpec) {
     for f in &module.functions {
         let func = module_function(ctx, module, f.name);
         let name = CString::new(f.name).unwrap_or_default();
+        if f.getter {
+            // SAFETY: an accessor of the object, which takes the getter.
+            unsafe {
+                let atom = qjs::JS_NewAtom(ctx, name.as_ptr());
+                qjs::JS_DefinePropertyGetSet(
+                    ctx,
+                    obj,
+                    atom,
+                    func,
+                    UNDEFINED,
+                    (qjs::JS_PROP_ENUMERABLE | qjs::JS_PROP_CONFIGURABLE) as c_int,
+                );
+                qjs::JS_FreeAtom(ctx, atom);
+            }
+            continue;
+        }
         // SAFETY: the object takes the function.
         unsafe { qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func) };
+    }
+    for constant in &module.constants {
+        use nsh_core::ui::ConstantValue;
+        let value = match constant.value {
+            ConstantValue::Undefined => UNDEFINED,
+            ConstantValue::String(value) => new_string(ctx, value),
+            ConstantValue::Number(value) => qjs::JS_NewFloat64(value),
+            ConstantValue::Bool(value) => {
+                if value {
+                    qjs::JS_TRUE
+                } else {
+                    qjs::JS_FALSE
+                }
+            }
+        };
+        let name = CString::new(constant.name).unwrap_or_default();
+        // SAFETY: this live module object takes ownership of the newly
+        // created primitive; its constant name is NUL-terminated.
+        unsafe {
+            qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), value);
+        }
     }
 }
 

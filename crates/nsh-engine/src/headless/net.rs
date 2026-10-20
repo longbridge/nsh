@@ -282,3 +282,7 @@ fn run(
     }
     Ok(())
 }
+
+#[cfg(all(test, feature = "js"))]
+#[path = "net_fetch_tests.rs"]
+mod fetch_tests;

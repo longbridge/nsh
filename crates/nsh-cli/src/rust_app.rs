@@ -840,7 +840,7 @@ lto = \"fat\"
 codegen-units = 1
 strip = true
 panic = \"abort\"
-[profile.web.package.rquickjs-sys]
+[profile.web.package.quickjs-jit-sys]
 opt-level = 3
 "),
             false,
@@ -1460,6 +1460,9 @@ opt-level = 3
             .env("CARGO_TARGET_DIR", self.target_dir()?);
         if let Some(triple) = triple {
             cmd.args(["--target", triple]);
+            if triple == "wasm32-unknown-unknown" {
+                crate::runtime::web_build_flags(&mut cmd);
+            }
         }
         if let Some(profile) = profile {
             cmd.args(["--profile", profile]);

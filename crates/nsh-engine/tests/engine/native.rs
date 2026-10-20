@@ -62,6 +62,8 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         viewport: Size::new(320.0, 480.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
         header_heights: (44.0, 96.0),

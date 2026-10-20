@@ -21,6 +21,11 @@ keeps, and for good, whatever the version number says; earlier versions made no 
 | The TypeScript declarations (`.nsh/types`) | generated (`crates/nsh-js/src/declarations.rs`) | an old app's source must still type-check and build when its team fixes a bug |
 | The package format (`.nshpkg`) and its signatures | `crates/nsh-package` | a package signed for an earlier release still verifies; it carries its JS source, which runs when its bytecode is not this runtime's (`BYTECODE_VERSION` may change freely) |
 
+The standard catalog also imports `buffer`, `crypto`, `path`, `url` and `zlib` from quickjs-stdlib. That project
+owns their API, declarations and exhaustive compatibility tests, including its `Buffer` and cryptography globals.
+NSH keeps the catalog, native integration, capability checks and resource limits under local tests; `api/` records
+NSH-owned declarations and behavior rather than copying the upstream API into its fixture coverage requirements.
+
 ## The rules
 
 1. **Nothing that reached `main` is removed or renamed**, released or not: no module, export, member, prop, event,

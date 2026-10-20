@@ -367,6 +367,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             tailwind,
             entry: entry.clone(),
             natives: natives.clone(),
+            preloads: None,
             modules: Arc::new(compile::NativeModules::new(&options.ui_sets)),
         })],
     )
@@ -434,9 +435,10 @@ pub struct HotBundle {
     modules: Vec<HotModule>,
     /// Module id of the entry.
     entry: String,
-    /// The native modules the app imports (the script imports their
-    /// namespaces for the factories' `require`).
+    /// All native modules the app imports, for host UI-set validation.
     natives: Vec<String>,
+    /// Native namespaces the factories require statically.
+    preloads: Vec<String>,
     /// Asset files the app imports (as in [`Bundle::assets`]).
     pub assets: Vec<PathBuf>,
     /// As in [`Bundle::capabilities`].
@@ -479,16 +481,17 @@ impl HotBundle {
     }
 
     /// The whole app as one script, an ES module: the native hot runtime
-    /// and the app's native modules imported, every module defined, and the
+    /// and the app's static native imports, every module defined, and the
     /// start of the entry.
     pub fn script(&self) -> (String, Option<String>) {
         let mut joiner = rolldown_sourcemap::SourceJoiner::default();
         joiner.enable_sourcemap = true;
         let mut imports = String::from("import \"nsh:hot\";");
         let mut map = String::new();
-        for (i, spec) in self.natives.iter().enumerate() {
+        for (i, spec) in self.preloads.iter().enumerate() {
             imports.push_str(&format!("import * as __nsh_n{i} from {spec:?};"));
-            map.push_str(&format!("{spec:?}: __nsh_n{i},"));
+            // CommonJS interop must select the real ESM default object, including its getters.
+            map.push_str(&format!("{spec:?}: {{...__nsh_n{i}, __esModule: true}},"));
         }
         joiner.append_source(imports);
         let start = format!("{HOT}.start({:?}, {{{map}}});", self.entry);
@@ -511,7 +514,9 @@ impl HotBundle {
             return HotPatch::Reload;
         }
         // A native module the running script did not import.
-        if !self.natives.iter().all(|s| previous.natives.contains(s)) {
+        if !self.natives.iter().all(|s| previous.natives.contains(s))
+            || !self.preloads.iter().all(|s| previous.preloads.contains(s))
+        {
             return HotPatch::Reload;
         }
         let old: std::collections::HashMap<&str, &HotModule> = previous
@@ -597,6 +602,7 @@ pub async fn bundle_hot_async(
         .ok_or_else(|| BundleError::other("entry has no parent directory"))?
         .to_path_buf();
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
+    let preloads = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let tailwind = tailwind_setup(&cwd)?;
@@ -632,6 +638,7 @@ pub async fn bundle_hot_async(
             tailwind,
             entry: entry.clone(),
             natives: natives.clone(),
+            preloads: Some(preloads.clone()),
             modules: Arc::new(compile::NativeModules::new(ui_sets)),
             split: false,
         })],
@@ -674,6 +681,9 @@ pub async fn bundle_hot_async(
     Ok(HotBundle {
         modules,
         natives: natives.into_iter().collect(),
+        preloads: std::mem::take(&mut *preloads.lock().expect("preloads lock"))
+            .into_iter()
+            .collect(),
         entry: entry_id.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?,
         assets,
         capabilities,
@@ -743,6 +753,31 @@ mod tests {
     }
 
     #[test]
+    fn hot_bundles_keep_optional_native_imports_deferred() {
+        let dir = app("hot-native-imports");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from 'nsh';\n\
+             function App() { return <Text onPress={() => import('buffer')}>Load</Text>; }\n\
+             mount(App);",
+        )
+        .unwrap();
+        let bundle = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        let (code, _) = bundle.script();
+        assert!(bundle.natives().iter().any(|name| name == "buffer"));
+        assert!(code.contains("import(\"buffer\")"), "{code}");
+        assert!(!code.contains("from \"buffer\""), "{code}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { Buffer } from 'buffer'; export const bytes = Buffer.from('NSH');",
+        )
+        .unwrap();
+        let eager = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(matches!(eager.patch(&bundle), HotPatch::Reload));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn split_bundles_load_dynamic_imports_as_chunks() {
         let dir = app("chunks");
         let bundle = bundle_app(&dir, true);
@@ -805,6 +840,39 @@ mod tests {
         assert!(!bundle.code.contains("import("), "{}", bundle.code);
         assert!(!bundle.code.contains("__nsh_import"), "{}", bundle.code);
         assert!(bundle.code.contains("second screen"), "{}", bundle.code);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_code_gets_its_import_meta_url_and_plain_js_keeps_its_imports() {
+        let dir = std::env::temp_dir().join(format!("nsh-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in [
+            (
+                "App.tsx",
+                "import { mount, Text } from \"nsh\";\nimport data from \"./data.json\";\nimport { here } from \"./lib.js\";\nmount(() => <Text>{data.note + here}</Text>);\n",
+            ),
+            ("data.json", "{ \"note\": \"uses import.meta.url\" }"),
+            (
+                "lib.js",
+                "import { unused } from \"./polyfill.js\";\nexport const here = import.meta.url;\n",
+            ),
+            (
+                "polyfill.js",
+                "globalThis.polyfilled = true;\nexport const unused = 1;\n",
+            ),
+        ] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let bundle = bundle_app(&dir, false);
+        let code = &bundle.code;
+        assert!(code.contains("uses import.meta.url"), "{code}");
+        assert!(
+            code.contains("metaUrl as ") && code.contains("(`lib.js`)"),
+            "{code}"
+        );
+        assert!(code.contains("polyfilled"), "{code}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

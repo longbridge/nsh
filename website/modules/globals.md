@@ -25,6 +25,8 @@ The TypeScript declarations of all of these are generated into `.nsh/types/nsh/g
 | [Number and date formatting](#number-and-date-formatting) | `Intl.NumberFormat`, `Intl.DateTimeFormat`, `toLocaleString` |
 | [Streams](#streams) | `ReadableStream`, `WritableStream`, `TransformStream`, readers, writers, controllers, `ByteLengthQueuingStrategy`, `CountQueuingStrategy`, `TextEncoderStream`, `TextDecoderStream` |
 
+Native hosts also provide `Buffer`, `crypto`, `process` and `WebSocket`; see [Standard modules](./standard-modules.md) for their modules, permissions and resource limits.
+
 ## Console and timing
 
 ```ts

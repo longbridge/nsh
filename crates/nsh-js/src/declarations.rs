@@ -430,7 +430,18 @@ pub(crate) fn exported_names(body: &str) -> Vec<String> {
 pub(crate) fn exported_values(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in code_only(body).lines() {
-        let Some(rest) = line.strip_prefix("export declare ") else {
+        let Some(rest) = line.strip_prefix("export ") else {
+            continue;
+        };
+        // The local binding is not the exported name: `export default x`
+        // creates the namespace value `default`, not a named export `x`.
+        if rest.split_whitespace().next() == Some("default") {
+            if !out.iter().any(|name| name == "default") {
+                out.push("default".to_owned());
+            }
+            continue;
+        }
+        let Some(rest) = rest.strip_prefix("declare ") else {
             continue;
         };
         let rest = rest.trim_start_matches("abstract ");
@@ -465,8 +476,9 @@ fn references(body: &str) -> (Vec<String>, Vec<String>) {
             local.push(word.to_owned());
         } else if prev.ends_with('.') {
             // A member (`JSX.Element`, `Symbol.iterator`).
-        } else if after.starts_with(':') || after.starts_with("?:") {
-            // A property's or a parameter's name (`safeArea?: SafeArea`).
+        } else if after.trim_start_matches('?').starts_with([':', '(']) {
+            // A field's, method's or parameter's name (`signal?: string`,
+            // `connect(url: string)`), not a type.
         } else {
             used.push(word.to_owned());
         }
@@ -561,7 +573,30 @@ pub fn type_definitions(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         format!("{BANNER}export type {{ JSX }} from \"./types\";\n"),
     ));
     out.push(("nsh/globals.d.ts".to_owned(), globals()));
+    out.extend(standard_types().iter().cloned());
     out
+}
+
+/// Standard export discovery evaluates trusted builtins once, without running
+/// application code, privileged operations, or asynchronous jobs.
+fn standard_types() -> &'static Vec<(String, String)> {
+    static FILES: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    FILES.get_or_init(|| {
+        let host = crate::Host::new().expect("create standard declaration discovery VM");
+        let exports = host
+            .standard_exports()
+            .expect("discover actual standard module exports");
+        let names: Vec<Vec<&str>> = exports
+            .iter()
+            .map(|(_, values)| values.iter().map(String::as_str).collect())
+            .collect();
+        let borrowed: Vec<(&str, &[&str])> = exports
+            .iter()
+            .zip(&names)
+            .map(|((name, _), values)| (name.as_str(), values.as_slice()))
+            .collect();
+        crate::standard::declarations::type_definitions(&borrowed)
+    })
 }
 
 /// A constant's value as TypeScript (`2`, not `2.0`).
@@ -578,7 +613,9 @@ fn number(v: f64) -> String {
 fn globals() -> String {
     let mut out = String::from(BANNER);
     out.push_str("// The globals of nsh's JS environment besides the ECMAScript library\n// (there is no DOM).\n\n");
+    out.push_str("/// <reference path=\"../standard/index.d.ts\" />\n");
     out.push_str(crate::host::GLOBALS);
+    out.push_str(&crate::standard::declarations::globals());
     for types in crate::web::TYPES {
         out.push('\n');
         out.push_str(types);
@@ -637,6 +674,42 @@ fn member_names(members: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_export_statements_name_the_default_namespace_value() {
+        assert_eq!(
+            exported_values(
+                r#"
+declare const moduleValue: { value: number };
+export default moduleValue;
+export declare const EOL: string;
+export interface Shape { default: string; }
+// export default ignored;
+declare const text: "export default ignored";
+"#
+            ),
+            ["default", "EOL"]
+        );
+        for source in [
+            "export default class Example {}",
+            "export default function example(): void;",
+            "export default\n  moduleValue;",
+        ] {
+            assert_eq!(exported_values(source), ["default"], "{source}");
+        }
+    }
+
+    #[test]
+    fn generated_os_declaration_really_exports_its_typed_default_object() {
+        let files = bodies(&[]);
+        let (_, os) = files.iter().find(|(path, _)| path == "os.d.ts").unwrap();
+        assert!(os.contains("declare const defaultExport: {"), "{os}");
+        assert!(os.contains("readonly EOL: string;"), "{os}");
+        assert!(os.contains("export default defaultExport;"), "{os}");
+        let mut values = exported_values(os);
+        values.sort();
+        assert_eq!(values, ["EOL", "arch", "default", "homedir", "platform"]);
+    }
 
     #[test]
     fn paths_are_relative() {

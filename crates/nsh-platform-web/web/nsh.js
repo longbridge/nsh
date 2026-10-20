@@ -469,6 +469,8 @@ class Player {
     this.images = new Map();
     this.pointers = new Map();
     this.requests = new Map();
+    this.websockets = new Map();
+    this.fileOperations = new Map();
     this.dark = options.dark ?? matchMedia("(prefers-color-scheme: dark)").matches;
     // The navigation stacks and modals are the browser's history: by
     // default only when the app is the page (in an iframe each push would
@@ -479,7 +481,18 @@ class Player {
 
   async load(url) {
     const imports = {
-      env: { __rquickjs_host_now_us: () => Date.now() * 1000 },
+      env: {
+        __rquickjs_host_now_us: () => Date.now() * 1000,
+        __nsh_random_fill: (ptr, len) => {
+          try {
+            const bytes = this.bytes(ptr, len);
+            for (let offset = 0; offset < len; offset += 65536) {
+              globalThis.crypto.getRandomValues(bytes.subarray(offset, Math.min(offset + 65536, len)));
+            }
+            return 0;
+          } catch { return -1; }
+        },
+      },
       nsh: {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
@@ -532,6 +545,20 @@ class Player {
         fetch_finish: (id) => this.requests.get(id)?.finish?.(),
         fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
         fetch_cancel: (id) => this.fetchCancel(id),
+        filesystem_start: (id, p, l, bp, bl) => this.filesystemStart(id, JSON.parse(this.str(p, l)), this.bytes(bp, bl).slice()),
+        filesystem_cancel: (id) => this.fileOperations.delete(id),
+        websocket_start: (id, p, l) => this.websocketOperation(() => this.websocketStart(id, JSON.parse(this.str(p, l)))),
+        websocket_send: (id, p, l, binary) => this.websocketOperation(() => {
+          const socket = this.websockets.get(id);
+          if (!socket) throw new Error("WebSocket is closed");
+          socket.send(binary ? this.bytes(p, l).slice() : this.str(p, l));
+        }),
+        websocket_close: (id, code, p, l) => this.websocketOperation(() => {
+          const socket = this.websockets.get(id);
+          if (socket) socket.close(code, this.str(p, l));
+        }),
+        websocket_buffered: (id) => this.websockets.get(id)?.bufferedAmount ?? 0,
+        websocket_cancel: (id) => this.websocketCancel(id),
         load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
         // The app's storage (`nsh/storage`): the entries of `localStorage`
         // under the app's prefix. 1 when done, 0 when the browser refused
@@ -828,7 +855,9 @@ class Player {
   }
 
   stop() {
+    this.fileOperations.clear();
     for (const id of [...this.requests.keys()]) this.fetchCancel(id);
+    for (const id of [...this.websockets.keys()]) this.websocketCancel(id);
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
@@ -3051,6 +3080,12 @@ class Player {
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
+      case "exitApp": {
+        const app = this.app;
+        // Finish the current engine call before releasing its surface.
+        queueMicrotask(() => { if (this.app === app) this.reset(); });
+        break;
+      }
       case "announce":
         // Cleared first: the same text again is announced again.
         this.live.textContent = "";
@@ -3162,6 +3197,196 @@ class Player {
   }
 
   // Network -------------------------------------------------------------
+
+  /** A browser operation returns its error without reentering the engine. */
+  /** Executes app-private fs/promises requests using persistent browser OPFS. */
+  filesystemStart(id, request, bytes) {
+    const token = {};
+    this.fileOperations.set(id, token);
+    const active = () => this.fileOperations.get(id) === token;
+    const error = (code, message = code) => Object.assign(new Error(message), { code });
+    const parts = (path) => {
+      const value = path.split("/").filter(Boolean);
+      if (value.some(p => p === "." || p === ".." || p.includes("\\"))) throw error("EACCES");
+      return value;
+    };
+    const execute = async () => {
+      if (!navigator.storage?.getDirectory) throw error("ENOTSUP", "This browser does not provide Origin Private File System storage");
+      const origin = await navigator.storage.getDirectory();
+      // Hashing makes arbitrary app IDs safe as a single OPFS directory name.
+      const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(request.namespace));
+      const namespace = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("");
+      const apps = await origin.getDirectoryHandle("nsh-files", {create:true});
+      const root = await apps.getDirectoryHandle(namespace, {create:true});
+      const directory = async (names, create = false) => {
+        let dir = root;
+        for (const name of names) dir = await dir.getDirectoryHandle(name, {create});
+        return dir;
+      };
+      const locate = async (path) => {
+        const names = parts(path);
+        if (!names.length) return {handle:root, parent:root, name:""};
+        const name = names.pop(), parent = await directory(names);
+        let handle;
+        try {handle = await parent.getFileHandle(name);} catch (e) {
+          if (e.name !== "TypeMismatchError") throw e;
+          handle = await parent.getDirectoryHandle(name);
+        }
+        return {handle,parent,name};
+      };
+      const names = parts(request.path), name = names.at(-1);
+      if (!active()) return {};
+      if (request.op === "mkdir") {
+        if (!names.length) {if (!request.recursive) throw error("EEXIST"); return {};}
+        if (request.recursive) {await directory(names,true); return {};}
+        const parent = await directory(names.slice(0,-1));
+        try {await locate(request.path); throw error("EEXIST");} catch(e) {if(e.name !== "NotFoundError") throw e;}
+        await parent.getDirectoryHandle(name,{create:true}); return {};
+      }
+      if (request.op === "write") {
+        if (!name) throw error("EISDIR");
+        const parent = await directory(names.slice(0,-1));
+        let handle;
+        try {handle=await parent.getFileHandle(name,{create:true});} catch(e) {if(e.name === "TypeMismatchError") throw error("EISDIR");throw e;}
+        if (!active()) return {};
+        const writer = await handle.createWritable();
+        try {
+          if (!active()) {await writer.abort(); return {};}
+          await writer.write(bytes);
+          if (!active()) {await writer.abort(); return {};}
+          await writer.close();
+        } catch(e) {await writer.abort().catch(()=>{});throw e;}
+        return {};
+      }
+      let item;
+      try {item = await locate(request.path);} catch(e) {if(request.op === "exists" && e.name === "NotFoundError") return {kind:"exists",value:false}; throw e;}
+      const {handle,parent} = item;
+      const isDir = handle.kind === "directory";
+      switch(request.op) {
+        case "exists": return {kind:"exists",value:true};
+        case "read": {
+          if(isDir) throw error("EISDIR");
+          const file=await handle.getFile();
+          if(file.size > request.maxBytes) throw error("EFBIG", "File exceeds the configured read limit");
+          return {kind:"bytes",bytes:new Uint8Array(await file.arrayBuffer())};
+        }
+        case "entries": {
+          if(!isDir) throw error("ENOTDIR");
+          const entries=[]; let nameBytes=0;
+          for await (const [name,entry] of handle.entries()) {
+            nameBytes += new TextEncoder().encode(name).length;
+            if(entries.length >= request.maxEntries || nameBytes > request.maxNameBytes) throw error("EFBIG", "Directory exceeds the configured listing limit");
+            entries.push({name,directory:entry.kind === "directory"});
+          }
+          return {kind:"entries",entries};
+        }
+        case "stat": {
+          const file=isDir?null:await handle.getFile();
+          return {kind:"metadata",file:!isDir,directory:isDir,size:file?.size??0,mtime:file?.lastModified??0};
+        }
+        case "readlink": throw error("EINVAL", "OPFS entries are regular files and directories");
+        case "unlink": if(isDir) throw error("EISDIR"); if (!active()) return {}; await parent.removeEntry(item.name); return {};
+        case "rmdir":
+          if(!isDir) throw error("ENOTDIR");
+          if(!item.name) throw error("EBUSY");
+          for await (const _ of handle.keys()) throw error("ENOTEMPTY");
+          if (!active()) return {};
+          await parent.removeEntry(item.name); return {};
+        case "rename": {
+          const to=parts(request.to), targetName=to.pop();
+          if(!item.name || !targetName) throw error("EBUSY");
+          const target=await directory(to);
+          if(await parent.isSameEntry(target) && item.name===targetName) return {};
+          try {
+            const existing = (await locate(request.to)).handle;
+            if(existing.kind === "directory" && !isDir) throw error("EISDIR");
+            if(existing.kind === "file" && isDir) throw error("ENOTDIR");
+            if(existing.kind === "directory") {
+              for await (const _ of existing.keys()) throw error("ENOTEMPTY");
+            }
+          } catch(e) {if(e.name !== "NotFoundError") throw e;}
+          if(typeof handle.move !== "function") throw error("ENOTSUP", "This browser does not support atomic OPFS rename for this entry");
+          // The browser's move preserves a file's identity; never emulate it with copy/delete.
+          if (!active()) return {};
+          await handle.move(target,targetName); return {};
+        }
+        default: throw error("ENOTSUP");
+      }
+    };
+    execute().then(result => {
+      if(!active()) return;
+      const bytes=result.bytes??new Uint8Array(); delete result.bytes;
+      this.call(w => this.withStrings([JSON.stringify(result),bytes], (p,l,bp,bl) => w.nsh_filesystem_reply(id,p,l,bp,bl)));
+      this.fileOperations.delete(id);
+    }, e => {
+      if(!active()) return;
+      const codes={NotFoundError:"ENOENT",TypeMismatchError:"ENOTDIR",NotAllowedError:"EACCES",SecurityError:"EACCES",QuotaExceededError:"ENOSPC",InvalidModificationError:"ENOTEMPTY",NotSupportedError:"ENOTSUP"};
+      const reply={error:String(e?.message??e),code:e?.code&&typeof e.code === "string"?e.code:(codes[e?.name]??"EIO"),syscall:request.op,path:request.path};
+      this.call(w => this.withStrings([JSON.stringify(reply),new Uint8Array()], (p,l,bp,bl) => w.nsh_filesystem_reply(id,p,l,bp,bl)));
+      this.fileOperations.delete(id);
+    });
+  }
+
+  websocketOperation(operation) {
+    try {
+      operation();
+      return 1;
+    } catch (error) {
+      this.withStrings([String(error?.message ?? error)], (p, l) => this.wasm.nsh_websocket_reply(p, l));
+      return 0;
+    }
+  }
+
+  websocketStart(id, request) {
+    const socket = new WebSocket(request.url, request.protocols);
+    socket.binaryType = "arraybuffer";
+    this.websockets.set(id, socket);
+    const report = (kind, value, code = 0, clean = false) => {
+      if (this.websockets.get(id) !== socket) return;
+      this.call((w) => {
+        // A queued callback from before stop or a hot replacement cannot enter the new engine.
+        if (this.websockets.get(id) !== socket) return w.nsh_pump();
+        // Count UTF-8 without allocating an encoded copy of an oversized peer message.
+        const limit = 8 * 1024 * 1024;
+        let length = typeof value === "string" ? 0 : value.byteLength;
+        if (typeof value === "string") {
+          for (let i = 0; i < value.length && length <= limit; i++) {
+            const ch = value.charCodeAt(i);
+            if (ch < 0x80) length++;
+            else if (ch < 0x800) length += 2;
+            else if (ch >= 0xd800 && ch <= 0xdbff && i + 1 < value.length &&
+              value.charCodeAt(i + 1) >= 0xdc00 && value.charCodeAt(i + 1) <= 0xdfff) {
+              length += 4;
+              i++;
+            } else length += 3;
+          }
+        }
+        if (length > limit) {
+          const message = "WebSocket message exceeds the 8 MiB limit";
+          return this.withStrings([message], (p, l) => {
+            try {
+              w.nsh_websocket_event(id, 3, p, l, 0, 0);
+              return w.nsh_websocket_event(id, 4, p, l, 1009, 0);
+            } finally { this.websocketCancel(id); }
+          });
+        }
+        return this.withStrings([value], (p, l) => w.nsh_websocket_event(id, kind, p, l, code, clean ? 1 : 0));
+      });
+    };
+    socket.onopen = () => report(0, socket.protocol);
+    socket.onmessage = (event) => report(typeof event.data === "string" ? 1 : 2,
+      typeof event.data === "string" ? event.data : new Uint8Array(event.data));
+    socket.onerror = () => report(3, "Browser WebSocket failed (network, TLS, origin or server handshake error)");
+    socket.onclose = (event) => report(4, event.reason, event.code, event.wasClean);
+  }
+
+  websocketCancel(id) {
+    const socket = this.websockets.get(id);
+    if (!socket) return;
+    this.websockets.delete(id);
+    socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
+    try { socket.close(); } catch { /* The browser already ended this socket. */ }
+  }
 
   /**
    * Request `id` from the engine's `fetch` (`net.rs`): made with the

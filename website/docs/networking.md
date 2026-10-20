@@ -206,7 +206,7 @@ An app may declare in `nsh.json` which hosts it talks to. Once `"capabilities"` 
 | Key | Description |
 |---|---|
 | `network.hosts` | Hosts reachable with any method: `"*"` (any host), `"*.example.com"` (its subdomains, not `example.com` itself) or a host name. |
-| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes` and a `pathPrefix`. |
+| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes`, a `port`, exact `paths` and `pathPrefixes`. |
 
 The checks are enforced in Rust, outside your JS, before a request reaches the network:
 
@@ -227,7 +227,7 @@ NSH's `fetch` follows the Fetch standard with the differences that make sense fo
 - **`data:` and `blob:` URLs** are answered locally. `URL.createObjectURL(blob)` makes a `blob:` URL that `fetch` can read until you revoke it.
 - Browser-only options (`mode`, `credentials`, `cache`, `referrer`, `integrity`, `keepalive`, `priority`) are accepted for compatibility with libraries.
 
-Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`, and no WebSocket API.
+Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`; native hosts provide the global `WebSocket` and the [`websocket` module](../modules/standard-modules.md), checked against the same grants as `fetch`.
 
 ## From Rust components
 

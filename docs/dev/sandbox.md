@@ -34,13 +34,16 @@ trusted: every limit and check is enforced in Rust, never in JS.
   without that, `Sub.prototype.constructor = Sub` or `obj.toString = …` throws (the "override mistake"), which breaks
   libraries such as axios. Hot updates are evaluated from Rust and need none of it.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
-  (`hosts`: `*`, `*.example.com` or a host, any method; `http`: a host with `methods` / `schemes` / `pathPrefix`),
-  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `clipboard` (`nsh/clipboard`: reading and
+  (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
+  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
+  visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
   are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
   newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
-  capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key may do everything (a standalone app is its developer's own). The embedding app
+  capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
+  retains unrestricted network, webview, status bar and clipboard access. Process execution and filesystem access
+  always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change
@@ -52,6 +55,31 @@ trusted: every limit and check is enforced in Rust, never in JS.
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
+- **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
+  declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
+  command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an
+  argument array, in the app data directory or a `cwd` within an `fs.write` root, with a cleared environment
+  refilled from the host's `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_*`
+  and the names `process.env` grants (`nsh_core::runtime::process`). A child leads its own process group; its exit is noticed
+  without reaping it (`waitid(WNOWAIT)` on Linux, a kqueue `NOTE_EXIT` on Apple platforms), so the group is only
+  signalled while the leader's pid is still taken. VM teardown sends every child SIGKILL before joining any
+  supervisor. On Windows a child starts suspended, runs once it is in a job object of its own
+  (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), and ending it terminates the job, so everything it started ends with it;
+  pipe threads still blocked at teardown have their I/O cancelled (`CancelSynchronousIo`). Filesystem checks
+  work on the path's text (`.` and `..` resolved as written) against each granted root in both its written and its
+  canonical form (the nearest existing ancestor canonicalized once per VM, `Roots` in `sys.locals`), so the call
+  does no disk work on the engine thread; a path reaching a root through an outside symlink is refused. The
+  operation then runs off the engine thread in the granted root, opened (on Unix component by component with
+  `O_NOFOLLOW` from `/`, ancestors for search only) as a cap-std `Dir`, so no symlink leads it outside; a write
+  creates a root that does not exist yet, a read finds nothing in it. Operations on links (`lstat`, `readlink`,
+  `exists`, `unlink`, `rename`, `rmdir`) act on the last component itself. Files are opened non-blocking and must be regular files. One VM has at most 1024 operations and
+  64 MiB of file data in flight (`nsh_core::runtime::fs`, counted in the VM's `Quotas`). `${dataDir}`, `${pluginDir}` and
+  `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
+  directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility
+  uses the default metadata-name list in `default-env` (language, time zone, terminal and desktop kind only: no
+  identity, paths or proxies, which can carry credentials), plus explicit `process.env` names (matched exactly, ignoring case only on Windows)
+  allowed by both policies. `process.exit` requests a host handler and never exits the embedding process itself.
+  The engine forwards a granted request as the platform app-close command, closing its surface or standalone window.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default; both through `HostLimits`, as `--limits` is), from the next load;
   on macOS, Windows, Linux and GPUI `AppOptions::limits` / `AppView::set_limits` (a whole `Limits`), likewise from
@@ -59,3 +87,28 @@ trusted: every limit and check is enforced in Rust, never in JS.
 
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).
+
+Standard networking: global `fetch` keeps engine checks and redirect handling. A `network.http` rule (`HttpGrant`,
+one form) names a `host` pattern; every other key narrows it and is optional: `methods` (any), `schemes` / `scheme`
+(any of `http`, `https`, `ws`, `wss`), `port` (any; a URL without one has its scheme's default), `paths` (exact,
+without the query) and `pathPrefixes` / `pathPrefix` / `path_prefixes` (whole segments: `/v1` covers `/v1/x`, not
+`/v10`; a prefix ending in `/` covers what follows). Without paths or prefixes a rule covers every path, so
+`{host, methods}` means what it always did. The spellings of a key are merged and may appear together (gpui-shell's
+`scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot
+match is a parse error rather than a silent grant of nothing: a scheme outside the four, port 0, a path without a
+leading `/` or with `*`, `?` or `#`, a method that is not a token. WebSockets (the global and the `websocket` module)
+go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
+`https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed URL the handshake then connects
+to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). Raw TCP
+`net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
+bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
+declaration) has none. Sockets are capped at 32 per VM (the call's `System` quotas) and 4 MiB of pending writes each;
+`close()` ends pending reads and writes. `zlib` decompression output is capped at 64 MiB or the heap limit if
+smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), and `Buffer.alloc`,
+`allocUnsafe`, `allocUnsafeSlow` and `crypto.randomBytes` refuse a size past the heap limit (1 GiB without one) with a
+`RangeError` (`standard/bounds.rs`; Rust's allocator would abort the process); `allocUnsafe` memory is zeroed. LLRT's
+buffers are native memory the heap limit does not count, so these bound one call, not a VM's total. `fs/promises`, `process` and `net` check the call's `System` (the VM's `Access`, data directory,
+`TrustedPaths`) in Rust before any work starts, and count their limits in its quotas. The standard catalog is
+eleven bare specifiers and nothing else: `node:` prefixes and other Node modules (`fs`, `child_process`,
+`events`, ...) do not import, so no module reaches files, processes or sockets around these checks. See
+`website/modules/standard-modules.md` for the public surface.

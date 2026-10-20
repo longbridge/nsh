@@ -151,8 +151,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - **Hot module replacement** (`nsh dev` / `nsh run` without `--release`): development bundles keep one CommonJS chunk per
   module (rolldown `preserveModules`, tree shaking off), each registered with the native hot runtime
   (`crates/nsh-js/src/hot.rs`, the `__nsh_hot` global that importing `nsh:hot` makes; only development bundles import
-  it). The script is an ES module importing `nsh:hot` and the namespaces of the native modules the app imports, for the
-  factories' `require`; an edit importing a native module the running script did not makes the host reload. After a
+  it). The script is an ES module importing `nsh:hot` and the namespaces of the native modules the app imports statically, for the
+  factories' `require`. Native `import()` expressions load on demand, so a platform branch can select its host's APIs;
+  the full import catalog still checks that the host serves every required UI set. An edit importing a native module the running script did not makes the host reload. After a
   rebuild the CLI compares the chunks with the last good build and publishes a patch (`ServerMessage::Patch`, protocol
   v2) before the full bundle; hosts running the patch's base apply it in place (`EngineControl::hot_update`,
   ~0.2–0.5ms) and otherwise load the bundle. The runtime runs the changed modules again, plus the importers of modules
@@ -446,7 +447,7 @@ Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GP
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
 Toolchain it builds GPUI's hosts and runners with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
-the `web` profile, into `target/wasm32-unknown-unknown/web/`.
+the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
 ## Releases
 

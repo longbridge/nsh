@@ -25,6 +25,8 @@ order: 15
 | [数字与日期格式化](#数字与日期格式化) | `Intl.NumberFormat`、`Intl.DateTimeFormat`、`toLocaleString` |
 | [流](#流) | `ReadableStream`、`WritableStream`、`TransformStream`、各类 reader、writer 和 controller、`ByteLengthQueuingStrategy`、`CountQueuingStrategy`、`TextEncoderStream`、`TextDecoderStream` |
 
+原生宿主还提供 `Buffer`、`crypto`、`process` 和 `WebSocket`；其模块、授权和资源限制见[标准模块](./standard-modules.md)。
+
 ## 控制台与计时
 
 ```ts
