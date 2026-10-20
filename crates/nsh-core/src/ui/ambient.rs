@@ -337,6 +337,7 @@ pub(crate) fn insets_of(host: NodeId) -> EdgeInsets {
 
 /// Shows `dialog` (an alert, or with `sheet` an action sheet); await the
 /// answer in a task.
+#[deprecated(note = "use nsh_base::alert_dialog, as TSX's `AlertDialog.show` of `nsh/base`")]
 pub fn dialog(dialog: Dialog) -> DialogAnswer {
     let (answer, slot) = DialogAnswer::new();
     act(Action::Dialog(dialog, slot));

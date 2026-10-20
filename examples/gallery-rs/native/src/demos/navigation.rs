@@ -3,9 +3,9 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
-use nsh_base::{dialog, nav_page, safe_area_view};
+use nsh_base::{alert_dialog, dialog, nav_page, safe_area_view};
 use nsh_core::{
-    Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
+    ModalPresentation,
     ui::{AnyElement, Os, Screen, prelude::*},
 };
 
@@ -355,25 +355,15 @@ fn unsaved() -> Screen {
     titled("Unsaved changes")
         .pop_on_back(move || draft.with(|d| d.0.is_empty()))
         .on_back_press(move |_: &()| {
-            let answer = nsh_core::ui::prelude::dialog(Dialog {
-                id: 0,
-                title: Some("Discard your changes?".into()),
-                message: None,
-                buttons: vec![
-                    DialogButton {
-                        text: "Keep editing".into(),
-                        style: DialogButtonStyle::Cancel,
-                    },
-                    DialogButton {
-                        text: "Discard".into(),
-                        style: DialogButtonStyle::Destructive,
-                    },
-                ],
-                cancelable: true,
-                sheet: false,
-            });
+            let answer = alert_dialog()
+                .title("Discard your changes?")
+                .cancel("Keep editing")
+                .destructive("Discard")
+                .close_on_escape(true)
+                .close_on_backdrop_press(true)
+                .show();
             spawn(async move {
-                if answer.await == 1 {
+                if answer.await == Ok(Some("Discard".into())) {
                     // TS's draft is the screen's own and goes with it.
                     draft.update(|draft| draft.0.clear());
                     nav::pop();

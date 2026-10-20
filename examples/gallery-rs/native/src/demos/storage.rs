@@ -4,9 +4,10 @@
 //! gallery's own last demo among them), all still there after a restart
 //! (as the TSX gallery's `demos/Storage.tsx`).
 
+use nsh_base::alert_dialog;
 use nsh_core::{
     storage::Storage,
-    ui::{AnyElement, Dialog, DialogButton, DialogButtonStyle, prelude::*},
+    ui::{AnyElement, prelude::*},
 };
 
 use crate::ui::{
@@ -230,29 +231,19 @@ pub(crate) fn StorageDemo() -> impl IntoElement {
     };
     let owner = Owner::current();
     let clear_all = move || {
-        let chosen = dialog(Dialog {
-            id: 0,
-            title: Some("Clear the storage?".into()),
-            message: Some(
-                "Removes every key the gallery keeps, the launch count and the note among them."
-                    .into(),
-            ),
-            buttons: vec![
-                DialogButton {
-                    text: "Cancel".into(),
-                    style: DialogButtonStyle::Cancel,
-                },
-                DialogButton {
-                    text: "Clear".into(),
-                    style: DialogButtonStyle::Destructive,
-                },
-            ],
-            cancelable: true,
-            sheet: false,
-        });
+        let chosen = alert_dialog()
+            .title("Clear the storage?")
+            .description(
+                "Removes every key the gallery keeps, the launch count and the note among them.",
+            )
+            .cancel("Cancel")
+            .destructive("Clear")
+            .close_on_escape(true)
+            .close_on_backdrop_press(true)
+            .show();
         owner.run(|| {
             spawn(async move {
-                if chosen.await != 1 {
+                if chosen.await != Ok(Some("Clear".into())) {
                     return;
                 }
                 Storage::clear();
