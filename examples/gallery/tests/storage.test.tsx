@@ -1,11 +1,16 @@
 // The Storage demo with storage set up by the test: `open`'s `storage` is
 // what `nsh/storage` holds when the app starts, `app.storage()` what it
 // holds now.
-import { expect, open, test } from "nsh/test";
+import { beforeEach, expect, open, test } from "nsh/test";
+import type { App } from "nsh/test";
+
+let app: App;
+beforeEach(async () => {
+  app = await open("../App.tsx", { storage: { launches: "4", note: "Milk" } });
+  await app.press("role:button[Storage]");
+});
 
 test("counts the demo's openings and saves the note as it is typed", async () => {
-  const app = await open("../App.tsx", { storage: { launches: "4", note: "Milk" } });
-  await app.press("role:button[Storage]");
   await app.waitFor("Launches");
   await app.waitFor('setItem("launches", "5")');
   expect(app.value("label:Note")).toBe("Milk");
@@ -16,8 +21,6 @@ test("counts the demo's openings and saves the note as it is typed", async () =>
 });
 
 test("clearing the storage asks first", async () => {
-  const app = await open("../App.tsx", { storage: { launches: "4", note: "Milk" } });
-  await app.press("role:button[Storage]");
   await app.waitFor("Milk");
   // Unanswered, the dialog's cancel button keeps everything.
   await app.press("Clear all");

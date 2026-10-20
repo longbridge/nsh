@@ -22,7 +22,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
     platform::{Locale, Os},
-    ui::{Registry, Root, prelude::timer},
+    ui::{Callback, Registry, Root, prelude::timer},
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
@@ -33,11 +33,8 @@ use crate::{
         DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubNetwork, UreqNetwork,
         print_batch,
     },
-    module::{Launch, MobilePlatform, NetworkSetup},
+    module::{Case, Hook, Item, Launch, MobilePlatform, Mode, NetworkSetup, Suite},
 };
-
-/// How long a test may take.
-const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds an entry ([`Entry`]; an app's may be its directory).
 pub type Compile = Arc<dyn Fn(&Path, Entry) -> Result<Built, String> + Send + Sync>;
@@ -86,13 +83,30 @@ pub struct TestRun {
 
 /// How a test ended.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct TestResult {
-    /// Its name.
+    /// Its name, after the `describe` blocks it is in (`Cart › adds`).
     pub name: String,
     /// How long it took.
     pub elapsed: Duration,
-    /// Why it failed (`None`: it passed).
+    /// Whether it ran and passed.
+    pub status: TestStatus,
+    /// Why it failed (`None` unless its status is
+    /// [`TestStatus::Failed`]).
     pub failure: Option<Failure>,
+}
+
+/// Whether a test ran and passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TestStatus {
+    /// It ran and passed.
+    Passed,
+    /// It ran and failed, or a hook it needed did.
+    Failed,
+    /// It did not run: `.skip`, or another test of the file is `.only`.
+    Skipped,
+    /// A test still to write (`test.todo`).
+    Todo,
 }
 
 /// Why a test failed.
@@ -137,7 +151,7 @@ pub fn run_file(
         report,
     );
     *current() = None;
-    session.close_apps();
+    session.close_apps(0);
     ended
 }
 
@@ -406,20 +420,40 @@ impl Session {
     }
 
     /// Closes the apps the test opened: the texts on screen of the last.
-    fn close_apps(&self) -> Option<Vec<String>> {
-        let apps = std::mem::take(&mut *self.apps.lock().unwrap_or_else(|e| e.into_inner()));
-        let mut screen = None;
-        for app in apps {
-            if let Some(mut app) = app.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                app.catch_up();
-                screen = Some(
-                    app.screen()
-                        .texts()
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect(),
-                );
-            }
+    /// How many apps are open: a mark for [`Self::close_apps_since`].
+    fn open_apps(&self) -> usize {
+        self.apps.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// Closes the apps opened since `mark`, and returns the texts on
+    /// screen of the newest app open before (a failure's screen, which
+    /// may be an app a `beforeAll` opened).
+    async fn close_apps_since(self: &Arc<Self>, mark: usize) -> Option<Vec<String>> {
+        let session = self.clone();
+        nsh_core::ui::prelude::blocking(move || session.close_apps(mark))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// [`Self::close_apps_since`], on this thread.
+    fn close_apps(&self, mark: usize) -> Option<Vec<String>> {
+        let mut apps = self.apps.lock().unwrap_or_else(|e| e.into_inner());
+        let screen = apps.iter().rev().find_map(|app| {
+            let mut app = app.lock().unwrap_or_else(|e| e.into_inner());
+            let app = app.as_mut()?;
+            app.catch_up();
+            Some(
+                app.screen()
+                    .texts()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            )
+        });
+        let mark = mark.min(apps.len());
+        for app in apps.drain(mark..) {
+            drop(app.lock().unwrap_or_else(|e| e.into_inner()).take());
         }
         screen
     }
@@ -435,39 +469,278 @@ pub(crate) async fn run_tests() {
     let Ok(session) = Session::current() else {
         return;
     };
-    for (name, body) in crate::module::take_tests() {
-        if !session.wants(&name) {
-            continue;
+    let suite = crate::module::take_suite();
+    let run = Run {
+        only: suite.has_only(),
+        session,
+    };
+    run.suite(&suite, &Context::default()).await;
+    let _ = run.session.events.send(Event::Done);
+}
+
+/// A run of a test file's suite.
+struct Run {
+    session: Arc<Session>,
+    /// A test or a block of the file is `.only`.
+    only: bool,
+}
+
+/// Where a suite is: the blocks around it.
+#[derive(Clone, Default)]
+struct Context<'a> {
+    /// Their names, outermost first.
+    names: Vec<&'a str>,
+    /// Their `beforeEach` and `afterEach` hooks, outermost first.
+    hooks: Vec<(&'a [Hook], &'a [Hook])>,
+    /// One of them is `.skip`.
+    skipped: bool,
+    /// One of them is `.only`.
+    focused: bool,
+}
+
+impl Context<'_> {
+    /// The full name of `name` in it (`Cart › adds`).
+    fn name(&self, name: &str) -> String {
+        let mut names = self.names.clone();
+        names.push(name);
+        names.retain(|n| !n.is_empty());
+        names.join(" › ")
+    }
+}
+
+impl Suite {
+    /// It or what it holds is `.only`.
+    fn has_only(&self) -> bool {
+        self.items.iter().any(|item| match item {
+            Item::Test(case) => case.mode == Mode::Only,
+            Item::Suite(suite) => suite.mode == Mode::Only || suite.has_only(),
+        })
+    }
+}
+
+impl Run {
+    /// Whether `case` runs where `cx` is.
+    fn runs(&self, case: &Case, cx: &Context<'_>) -> bool {
+        !cx.skipped
+            && matches!(case.mode, Mode::Run | Mode::Only)
+            && (!self.only || cx.focused || case.mode == Mode::Only)
+            && self.session.wants(&cx.name(&case.name))
+    }
+
+    /// Whether a test of `suite` runs where `cx` is.
+    fn any_runs(&self, suite: &Suite, cx: &Context<'_>) -> bool {
+        let cx = cx.inside(suite);
+        suite.items.iter().any(|item| match item {
+            Item::Test(case) => self.runs(case, &cx),
+            Item::Suite(inner) => self.any_runs(inner, &cx),
+        })
+    }
+
+    /// Runs `suite` where `cx` is: its `beforeAll` hooks, its tests and
+    /// blocks in order, then its `afterAll` hooks, when any of its tests
+    /// runs.
+    fn suite<'a>(
+        &'a self,
+        suite: &'a Suite,
+        cx: &'a Context<'a>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + 'a>> {
+        Box::pin(async move {
+            let inner = cx.inside(suite);
+            let runs = self.any_runs(suite, cx);
+            let mark = self.session.open_apps();
+            // A `beforeAll` that failed fails the tests that needed it.
+            let mut setup = None;
+            if runs {
+                for hook in &suite.before_all {
+                    if let Err(failure) = self.hook("beforeAll", hook).await {
+                        setup = Some(failure);
+                        break;
+                    }
+                }
+            }
+            for item in &suite.items {
+                match item {
+                    Item::Suite(child) => match &setup {
+                        // Its tests fail as this block's do.
+                        Some(failure) => self.fail_all(child, &inner, failure),
+                        None => self.suite(child, &inner).await,
+                    },
+                    Item::Test(case) => {
+                        let name = inner.name(&case.name);
+                        if self.runs(case, &inner) {
+                            match &setup {
+                                Some(failure) => {
+                                    self.report(name, Duration::ZERO, Err(failure.clone()))
+                                }
+                                None => self.case(case, name, &inner).await,
+                            }
+                        } else if case.mode == Mode::Todo && self.session.wants(&name) {
+                            self.skip(name, TestStatus::Todo);
+                        } else if self.session.wants(&name) {
+                            self.skip(name, TestStatus::Skipped);
+                        }
+                    }
+                }
+            }
+            if runs {
+                let start = Instant::now();
+                let mut failed = None;
+                for hook in &suite.after_all {
+                    if let Err(failure) = self.hook("afterAll", hook).await {
+                        failed.get_or_insert(failure);
+                    }
+                }
+                let screen = self.session.close_apps_since(mark).await;
+                if let Some(mut failure) = failed {
+                    failure.screen = failure.screen.or(screen);
+                    self.report(
+                        cx.name(&suite.name_or("afterAll")),
+                        start.elapsed(),
+                        Err(failure),
+                    );
+                }
+            } else {
+                self.session.close_apps_since(mark).await;
+            }
+        })
+    }
+
+    /// Reports every test of `suite` that would run as failed with
+    /// `failure` (a `beforeAll` around it failed).
+    fn fail_all(&self, suite: &Suite, cx: &Context<'_>, failure: &Failure) {
+        let cx = cx.inside(suite);
+        for item in &suite.items {
+            match item {
+                Item::Test(case) if self.runs(case, &cx) => {
+                    self.report(cx.name(&case.name), Duration::ZERO, Err(failure.clone()));
+                }
+                Item::Test(_) => {}
+                Item::Suite(inner) => self.fail_all(inner, &cx, failure),
+            }
         }
+    }
+
+    /// Runs `case` (named `name`) with the `beforeEach` and `afterEach`
+    /// hooks around it, then closes the apps they opened.
+    async fn case(&self, case: &Case, name: String, cx: &Context<'_>) {
         let start = Instant::now();
-        let outcome = within(TEST_TIMEOUT, body.call_async_traced(())).await;
+        let mark = self.session.open_apps();
+        let mut failed = None;
+        'before: for (before, _) in &cx.hooks {
+            for hook in *before {
+                if let Err(failure) = self.hook("beforeEach", hook).await {
+                    failed = Some(failure);
+                    break 'before;
+                }
+            }
+        }
+        if failed.is_none()
+            && let Some(body) = &case.body
+        {
+            failed = run(body, case.timeout, "the test").await.err();
+        }
+        for (_, after) in cx.hooks.iter().rev() {
+            for hook in *after {
+                if let Err(failure) = self.hook("afterEach", hook).await {
+                    failed.get_or_insert(failure);
+                }
+            }
+        }
         // The apps go before the next test starts, whatever this one left
         // running.
-        let session_ = session.clone();
-        let screen = nsh_core::ui::prelude::blocking(move || session_.close_apps())
-            .await
-            .ok()
-            .flatten();
-        let failure = match outcome {
-            Some(Ok(())) => None,
-            Some(Err(thrown)) => Some(Failure {
-                message: thrown.message,
-                stack: thrown.stack,
-                screen,
-            }),
-            None => Some(Failure {
-                message: format!("the test did not end in {} s", TEST_TIMEOUT.as_secs()),
-                stack: None,
-                screen,
-            }),
+        let screen = self.session.close_apps_since(mark).await;
+        let outcome = match failed {
+            None => Ok(()),
+            Some(mut failure) => {
+                failure.screen = failure.screen.or(screen);
+                Err(failure)
+            }
         };
-        let _ = session.events.send(Event::Result(TestResult {
+        self.report(name, start.elapsed(), outcome);
+    }
+
+    /// Runs `hook`, a `what` hook.
+    async fn hook(&self, what: &str, hook: &Hook) -> Result<(), Failure> {
+        run(&hook.body, hook.timeout, what)
+            .await
+            .map_err(|mut failure| {
+                failure.message = format!("{what}: {}", failure.message);
+                failure
+            })
+    }
+
+    fn report(&self, name: String, elapsed: Duration, outcome: Result<(), Failure>) {
+        let (status, failure) = match outcome {
+            Ok(()) => (TestStatus::Passed, None),
+            Err(failure) => (TestStatus::Failed, Some(failure)),
+        };
+        let _ = self.session.events.send(Event::Result(TestResult {
             name,
-            elapsed: start.elapsed(),
+            elapsed,
+            status,
             failure,
         }));
     }
-    let _ = session.events.send(Event::Done);
+
+    fn skip(&self, name: String, status: TestStatus) {
+        let _ = self.session.events.send(Event::Result(TestResult {
+            name,
+            elapsed: Duration::ZERO,
+            status,
+            failure: None,
+        }));
+    }
+}
+
+impl<'a> Context<'a> {
+    /// The context of what `suite` holds.
+    fn inside(&self, suite: &'a Suite) -> Context<'a> {
+        let mut cx = self.clone();
+        cx.names.push(&suite.name);
+        cx.hooks.push((&suite.before_each, &suite.after_each));
+        cx.skipped |= suite.mode == Mode::Skip;
+        cx.focused |= suite.mode == Mode::Only;
+        cx
+    }
+}
+
+impl Suite {
+    /// `"<name> › <what>"`, or `what` for the file's.
+    fn name_or(&self, what: &str) -> String {
+        if self.name.is_empty() {
+            what.to_owned()
+        } else {
+            format!("{} › {what}", self.name)
+        }
+    }
+}
+
+/// Calls `body`, `what` (the test, a hook), bounded by `timeout`; the
+/// screen of the failure is the caller's.
+async fn run(body: &Callback, timeout: Duration, what: &str) -> Result<(), Failure> {
+    match within(timeout, body.call_async_traced(())).await {
+        Some(Ok(())) => Ok(()),
+        Some(Err(thrown)) => Err(Failure {
+            message: thrown.message,
+            stack: thrown.stack,
+            screen: None,
+        }),
+        None => Err(Failure {
+            message: format!("{what} did not end in {}", shown_duration(timeout)),
+            stack: None,
+            screen: None,
+        }),
+    }
+}
+
+/// `time` as a timeout is given: `30 s`, `250 ms`.
+fn shown_duration(time: Duration) -> String {
+    let ms = time.as_millis();
+    if ms.is_multiple_of(1000) {
+        format!("{} s", ms / 1000)
+    } else {
+        format!("{ms} ms")
+    }
 }
 
 /// `future`'s output, or `None` once `time` passed.

@@ -36,6 +36,8 @@ pub fn registry() -> Registry {
     let mut registry = Registry::ui_set(SPECIFIER);
     registry
         .module::<Testing>()
+        .module::<TestVariants>()
+        .module::<DescribeVariants>()
         .class::<App>()
         .class::<Expectation>()
         .class::<Rejection>();
@@ -49,15 +51,141 @@ pub(crate) fn runner_registry() -> Registry {
     registry
 }
 
-thread_local! {
-    /// The tests the test file declared, in order (the engine's thread is
-    /// the test file's).
-    static TESTS: RefCell<Vec<(String, Callback)>> = const { RefCell::new(Vec::new()) };
+/// How long a test or a hook may take unless it says (Jest's `timeout`).
+const TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A `describe` block, or the file: its tests and blocks in order, and the
+/// hooks that run around them.
+#[derive(Default)]
+pub(crate) struct Suite {
+    /// Its name (empty for the file).
+    pub(crate) name: String,
+    pub(crate) mode: Mode,
+    pub(crate) before_all: Vec<Hook>,
+    pub(crate) after_all: Vec<Hook>,
+    pub(crate) before_each: Vec<Hook>,
+    pub(crate) after_each: Vec<Hook>,
+    pub(crate) items: Vec<Item>,
 }
 
-/// The tests declared so far, taken.
-pub(crate) fn take_tests() -> Vec<(String, Callback)> {
-    TESTS.with(|tests| std::mem::take(&mut *tests.borrow_mut()))
+/// What a suite holds.
+pub(crate) enum Item {
+    Test(Case),
+    Suite(Suite),
+}
+
+/// A test as the file declared it.
+pub(crate) struct Case {
+    pub(crate) name: String,
+    /// `None` for a `test.todo`.
+    pub(crate) body: Option<Callback>,
+    pub(crate) mode: Mode,
+    pub(crate) timeout: Duration,
+}
+
+/// A `beforeAll`, `afterAll`, `beforeEach` or `afterEach` function.
+pub(crate) struct Hook {
+    pub(crate) body: Callback,
+    pub(crate) timeout: Duration,
+}
+
+/// How a test or a block was declared.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    #[default]
+    Run,
+    /// `.skip`: neither it nor what it holds runs.
+    Skip,
+    /// `.only`: a file with one runs only those.
+    Only,
+    /// `test.todo`: a test still to write.
+    Todo,
+}
+
+thread_local! {
+    /// The file's suite and the `describe` blocks being declared in it,
+    /// innermost last (the engine's thread is the test file's).
+    static DECLARING: RefCell<Vec<Suite>> = RefCell::new(vec![Suite::default()]);
+}
+
+/// The suite the file declared, taken: from now on it declares nothing.
+pub(crate) fn take_suite() -> Suite {
+    DECLARING.with(|declaring| {
+        let mut declaring = declaring.borrow_mut();
+        let suite = std::mem::take(&mut declaring[0]);
+        declaring.clear();
+        suite
+    })
+}
+
+/// Runs `f` on the suite being declared: an error once the tests run.
+fn declare(what: &str, f: impl FnOnce(&mut Suite)) -> Result<(), String> {
+    DECLARING.with(|declaring| match declaring.borrow_mut().last_mut() {
+        Some(suite) => {
+            f(suite);
+            Ok(())
+        }
+        None => Err(format!(
+            "{what} declares as the file loads, at its top level or in a `describe`: not in a test or a hook"
+        )),
+    })
+}
+
+/// A test of the suite being declared.
+fn declare_test(
+    name: String,
+    body: Option<Callback>,
+    mode: Mode,
+    timeout: Option<f64>,
+) -> Result<(), String> {
+    let timeout = milliseconds(timeout)?;
+    declare("`test`", |suite| {
+        suite.items.push(Item::Test(Case {
+            name,
+            body,
+            mode,
+            timeout,
+        }));
+    })
+}
+
+/// A `describe` block: `body` declares what it holds, at once.
+fn declare_suite(name: String, body: Callback, mode: Mode) -> Result<(), String> {
+    declare("`describe`", |_| ())?;
+    DECLARING.with(|declaring| {
+        declaring.borrow_mut().push(Suite {
+            name,
+            mode,
+            ..Suite::default()
+        })
+    });
+    let declared = body.call(());
+    let suite = DECLARING.with(|declaring| declaring.borrow_mut().pop());
+    declared.map_err(|e| format!("`describe` threw: {e}"))?;
+    let suite = suite.ok_or("`describe` lost its block")?;
+    declare("`describe`", |parent| parent.items.push(Item::Suite(suite)))
+}
+
+/// A hook of the suite being declared, which `pick` chooses.
+fn declare_hook(
+    what: &str,
+    body: Callback,
+    timeout: Option<f64>,
+    pick: fn(&mut Suite) -> &mut Vec<Hook>,
+) -> Result<(), String> {
+    let timeout = milliseconds(timeout)?;
+    declare(what, |suite| pick(suite).push(Hook { body, timeout }))
+}
+
+/// A timeout in milliseconds as a test gives it, [`TIMEOUT`] without one.
+fn milliseconds(ms: Option<f64>) -> Result<Duration, String> {
+    match ms {
+        None => Ok(TIMEOUT),
+        Some(ms) if ms.is_finite() && ms > 0.0 => Ok(Duration::from_secs_f64(ms / 1000.0)),
+        Some(ms) => Err(format!(
+            "a timeout is a positive number of milliseconds, not {ms}"
+        )),
+    }
 }
 
 /// Tests of an app, run headless by `nsh test`: each test opens the app on
@@ -70,9 +198,41 @@ impl Testing {
     /// Declares the test `name`: `nsh test` runs `body` after the file is
     /// loaded, the tests of a file one after the other, in order. A test
     /// fails when `body` throws or the promise it returns rejects, and
-    /// after 30 seconds. The apps it opened are closed when it ends.
-    pub fn test(name: String, body: Callback) {
-        TESTS.with(|tests| tests.borrow_mut().push((name, body)));
+    /// after `timeout` milliseconds (30 000). The apps it opened are closed
+    /// when it ends.
+    pub fn test(name: String, body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_test(name, Some(body), Mode::Run, timeout)
+    }
+
+    /// Groups the tests and blocks `body` declares (at once) under `name`:
+    /// their names start with it, and the hooks it declares run around
+    /// them only.
+    pub fn describe(name: String, body: Callback) -> Result<(), String> {
+        declare_suite(name, body, Mode::Run)
+    }
+
+    /// Runs `body` once before the first test of the block it is declared
+    /// in (the file, a `describe`); when it fails, so do those tests. Apps
+    /// it opens stay open until the block's tests ended.
+    pub fn before_all(body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_hook("`beforeAll`", body, timeout, |s| &mut s.before_all)
+    }
+
+    /// Runs `body` once after the last test of the block it is declared in.
+    pub fn after_all(body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_hook("`afterAll`", body, timeout, |s| &mut s.after_all)
+    }
+
+    /// Runs `body` before each test of the block it is declared in, the
+    /// outer blocks' first; when it fails, so does the test.
+    pub fn before_each(body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_hook("`beforeEach`", body, timeout, |s| &mut s.before_each)
+    }
+
+    /// Runs `body` after each test of the block it is declared in, the
+    /// inner blocks' first, whether the test passed or not.
+    pub fn after_each(body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_hook("`afterEach`", body, timeout, |s| &mut s.after_each)
     }
 
     /// Starts the app whose entry is `entry` (relative to the test file)
@@ -126,6 +286,48 @@ impl Testing {
                 not: false,
             },
         }
+    }
+}
+
+/// Unused in TS: `test`'s properties document themselves.
+#[module]
+pub(crate) struct TestVariants;
+
+#[module(name = "test")]
+impl TestVariants {
+    /// Declares a test that does not run: it is reported as skipped.
+    pub(crate) fn skip(name: String, body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_test(name, Some(body), Mode::Skip, timeout)
+    }
+
+    /// Declares a test that runs while the file's other tests, but those
+    /// declared with `only`, are skipped: to focus on it for a while.
+    pub(crate) fn only(name: String, body: Callback, timeout: Option<f64>) -> Result<(), String> {
+        declare_test(name, Some(body), Mode::Only, timeout)
+    }
+
+    /// Declares a test still to write: it is reported as one.
+    pub(crate) fn todo(name: String) -> Result<(), String> {
+        declare_test(name, None, Mode::Todo, None)
+    }
+}
+
+/// Unused in TS: `describe`'s properties document themselves.
+#[module]
+pub(crate) struct DescribeVariants;
+
+#[module(name = "describe")]
+impl DescribeVariants {
+    /// Declares a block whose tests do not run: they are reported as
+    /// skipped.
+    pub(crate) fn skip(name: String, body: Callback) -> Result<(), String> {
+        declare_suite(name, body, Mode::Skip)
+    }
+
+    /// Declares a block whose tests run while the file's other tests, but
+    /// those declared with `only`, are skipped.
+    pub(crate) fn only(name: String, body: Callback) -> Result<(), String> {
+        declare_suite(name, body, Mode::Only)
     }
 }
 

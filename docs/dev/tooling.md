@@ -271,10 +271,18 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
   `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
   name `App.test.tsx:12:5`.
-- The test file runs on an engine of its own (the VM). `test(name, body)` keeps the body (`Callback`) in a
-  thread-local of the VM's thread; `run`, a task, takes them and calls each in order with
-  `Callback::call_async_traced` (what was thrown with its stack), bounded by 30 s, then closes the apps the test opened
-  and reports the result over a channel to the caller, who symbolicates the stack with the test file's map.
+- The test file runs on an engine of its own (the VM). As it loads, `test`, `describe`, the hooks and the variants
+  (`test.skip` / `only` / `todo`, `describe.skip` / `only`: modules named `test` and `describe`, whose functions are
+  the functions' properties, `docs/dev/components.md`) declare a tree of `Suite`s in a thread-local of the VM's
+  thread (`describe` calls its body at once, inside the declaration); `run`, a task, takes it (from then on a
+  declaration throws) and walks it as Jest does: a block's `beforeAll` hooks once before its first test that runs,
+  each test with the `beforeEach` hooks of its blocks outermost first and their `afterEach` hooks innermost first, then
+  the block's `afterAll` hooks. Each body and hook is `Callback::call_async_traced` (what was thrown with its stack)
+  bounded by its timeout (30 s unless given). A failing `beforeAll` fails its block's tests, an `afterAll` is reported
+  as `<block> › afterAll`; `.only` anywhere in the file skips the tests outside the `.only`s. The apps are closed by
+  marks (`Session::close_apps_since`): a test's after its `afterEach` hooks, a block's (opened in `beforeAll`) after
+  its `afterAll`. Each result (`TestStatus`: passed, failed, skipped, todo; named after its blocks, `a › b`) goes over a
+  channel to the caller, who symbolicates the stack with the test file's map.
 - The VM's calls reach the run through the process's current `Session` (one test file at a time in a process, under a
   lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
 - `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
@@ -288,8 +296,8 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   `TestRun::trace` every app observes its batches and prints them under their step (`print_batch`).
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
-`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen)
-and fails when any test failed. Given an app's entry, it writes a test file in `.nsh/test` that opens the entry on the
+`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen),
+writes a JUnit XML report with `--junit` (`Tally::junit`) and fails when any test failed. Given an app's entry, it writes a test file in `.nsh/test` that opens the entry on the
 network, waits 1.2 s (the engine's idle collection runs first, so retention bugs show up) and runs what standard input
 holds; with `--trace` that is the headless trace of the app: every batch under its step and each commit's timings
 (the engine's `trace`, `nsh::perf` lines).

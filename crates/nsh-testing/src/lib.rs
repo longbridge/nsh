@@ -56,7 +56,7 @@ pub use self::{
         App, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption, OpenOptions,
         RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
     },
-    run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, run_file},
+    run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, TestStatus, run_file},
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };
 
