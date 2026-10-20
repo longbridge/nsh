@@ -105,7 +105,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | 每个子进程待写入的 stdin | 1 MiB；超出时 `write` 抛出错误 |
 | 监听器 | 每个子进程每个事件 64 个 |
 
-`process.exit(code?)` 请求宿主关闭当前应用界面。在 `capabilities.process` 中设置 `"exit": true` 后，引擎通过平台的应用退出命令转发请求。在 macOS 上，该请求关闭当前界面所在的窗口。在浏览器中，它停止应用并清空其界面，宿主页面保持打开。嵌入宿主决定如何处理其界面的退出请求。Gallery 已为明确触发的 **Request host exit** 操作授予此能力。
+`process.exit(code?)` 请求宿主关闭当前应用界面。在 `capabilities.process` 中设置 `"exit": true` 后，引擎通过平台的应用退出命令转发请求。在 macOS 上，该请求关闭当前界面所在的窗口。在浏览器中，它停止应用并清空其界面，宿主页面保持打开。嵌入宿主决定如何处理其界面的退出请求。Gallery 禁用此权限，让 **Request host exit** 操作展示权限拦截结果，并保持演示界面打开。
 
 ## 网络授权与边界
 

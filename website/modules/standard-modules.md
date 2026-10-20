@@ -105,7 +105,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | Pending stdin per child | 1 MiB; `write` throws past it |
 | Listeners | 64 per event per child |
 
-`process.exit(code?)` requests that the host close this app surface. Grant it with `"exit": true` in `capabilities.process`; the engine forwards the request through the platform's app-exit command. On macOS, this closes the surface window. In a browser, it stops the app and clears its surface while keeping the host page open. An embedding host controls how its surface handles the request. Gallery grants this capability for its explicit **Request host exit** action.
+`process.exit(code?)` requests that the host close this app surface. Grant it with `"exit": true` in `capabilities.process`; the engine forwards the request through the platform's app-exit command. On macOS, this closes the surface window. In a browser, it stops the app and clears its surface while keeping the host page open. An embedding host controls how its surface handles the request. Gallery denies this capability so its **Request host exit** action demonstrates permission handling and keeps the demo open.
 
 ## Network permissions and boundaries
 

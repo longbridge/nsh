@@ -12,7 +12,7 @@ The helper uses Python's standard library and binds loopback ports 9876 and 9877
 
 The web gallery uses the same standard APIs: utilities run in WebAssembly, files persist in the app's private browser filesystem, and both WebSocket interfaces use browser connections. Process and TCP actions display the browser host's typed platform errors.
 
-The **Request host exit** action calls `process.exit(0)` explicitly. Gallery grants this capability in `nsh.json`; the native development host closes the application and the browser stops and clears the app surface. The page displays capability and host errors from actions so the same gallery can run under different host policies.
+The **Request host exit** action calls `process.exit(0)` explicitly. Gallery denies this capability in `nsh.json` and displays the expected permission result, keeping the demo open on native hosts and in browsers. The page displays capability and host errors from actions so the same gallery can run under different host policies.
 
 AI Chat uses the local Claude or Codex CLI on desktop. Install `claude` and/or `codex` on the host's `PATH`, then sign in through that CLI in a terminal. Choose the provider in the composer. Each reply includes the conversation as context; Stop and leaving the screen terminate the child process. Codex runs with its read-only sandbox; Claude runs with tools disabled. The CLI uses its own saved login and configuration. Replies have a two-minute deadline, and launch or authentication errors appear with a retry action.
 

@@ -111,8 +111,12 @@ export function StandardActions() {
     }} />;
   }
   function Exit() {
-    return <Action name="Request host exit" detail={Platform.OS === "web" ? "process.exit(0) · stop and clear this Gallery surface" : "process.exit(0) · close this Gallery window"} action={async () => {
-      process.exit(0);
+    return <Action name="Request host exit" detail="process.exit(0) · Gallery keeps this demo open by denying exit requests" action={async () => {
+      try { process.exit(0); }
+      catch (error) {
+        if (!(error instanceof TypeError) || !error.message.includes("process.exit() is not granted")) throw error;
+        return "Exit request blocked by Gallery policy. You can continue exploring.";
+      }
       return "Exit requested from the host";
     }} />;
   }
