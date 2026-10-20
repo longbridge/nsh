@@ -999,4 +999,33 @@ mod tests {
         bundling(&dir).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn development_bundles_refuse_what_a_ui_set_does_not_export() {
+        let dir = single(
+            "hot",
+            "import { mount } from \"nsh\";\n\
+             import { Buton } from \"nsh/ui/mobile\";\n\
+             mount(() => <Buton title=\"Go\" />);\n",
+        );
+        let ui_sets = [nsh_ui_mobile::registry().into()];
+        let Err(error) = bundle_hot(&dir.join("App.tsx"), &ui_sets) else {
+            panic!("bundled");
+        };
+        let error = error.plain;
+        assert!(
+            error.contains("`nsh/ui/mobile` has no export `Buton`"),
+            "{error}"
+        );
+        assert!(error.contains("did you mean `Button`?"), "{error}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount } from \"nsh\";\n\
+             import { Button } from \"nsh/ui/mobile\";\n\
+             mount(() => <Button title=\"Go\" />);\n",
+        )
+        .unwrap();
+        bundle_hot(&dir.join("App.tsx"), &ui_sets).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
