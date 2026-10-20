@@ -10,7 +10,7 @@ use nsh_core::{
 };
 
 use super::live;
-use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with};
+use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with, rect};
 
 /// Grid lines of charts: the hairline color, a step darker on the light
 /// page.
@@ -273,7 +273,7 @@ pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Hsla, gap
     let mut p = p
         .save()
         .begin_path()
-        .rect(x, y, w, h)
+        .rect(rect(x, y, w, h))
         .clip()
         .stroke_color(color)
         .line_width(1.0)
@@ -287,7 +287,14 @@ pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Hsla, gap
 }
 
 /// A dashed horizontal line.
-pub(crate) fn dashed(p: Painter, x0: f32, x1: f32, y: f32, color: Hsla, dash: &[f32]) -> Painter {
+pub(crate) fn dashed(
+    p: Painter,
+    x0: f32,
+    x1: f32,
+    y: f32,
+    color: Hsla,
+    dash: &[Points],
+) -> Painter {
     p.stroke_color(color)
         .line_width(1.0)
         .line_dash(dash)

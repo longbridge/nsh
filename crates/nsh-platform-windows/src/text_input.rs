@@ -225,18 +225,18 @@ impl InputState {
                         DWRITE_FONT_STYLE_NORMAL
                     },
                     DWRITE_FONT_STRETCH_NORMAL,
-                    s.font_size.max(1.0),
+                    s.font_size.0.max(1.0),
                     &HSTRING::new(),
                 )
                 .ok()?
         };
-        if config.multiline && s.line_height > 0.0 {
+        if config.multiline && s.line_height.0 > 0.0 {
             // SAFETY: a COM call on the new format.
             let _ = unsafe {
                 format.SetLineSpacing(
                     DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                    s.line_height,
-                    s.line_height * 0.8,
+                    s.line_height.0,
+                    s.line_height.0 * 0.8,
                 )
             };
         }
@@ -255,7 +255,7 @@ impl InputState {
     ) -> Option<IDWriteTextLayout> {
         let format = self.format()?;
         let width = self.size.get().0.max(1.0);
-        let spacing = self.config.borrow().style.letter_spacing;
+        let spacing = self.config.borrow().style.letter_spacing.0;
         // SAFETY: COM calls on the new layout with ranges inside the text.
         unsafe {
             let layout = crate::gfx::dwrite()

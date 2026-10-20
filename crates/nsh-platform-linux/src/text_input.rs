@@ -934,10 +934,10 @@ fn css(config: &InputConfig) -> String {
     let _ = write!(
         font,
         "font-size: {}px; font-weight: {}; font-style: {}; letter-spacing: {}px;",
-        s.font_size,
+        s.font_size.0,
         s.font_weight,
         if s.italic { "italic" } else { "normal" },
-        s.letter_spacing,
+        s.letter_spacing.0,
     );
     let caret = if config.caret_hidden {
         "transparent".to_owned()
@@ -968,11 +968,11 @@ fn css(config: &InputConfig) -> String {
          text > selection:backdrop, textview > text > selection:backdrop {{ \
          background-color: alpha({selection}, 0.3); color: {color}; }}"
     );
-    if s.line_height > 0.0 {
+    if s.line_height.0 > 0.0 {
         let _ = writeln!(
             css,
             "textview > text, label.nsh-placeholder {{ line-height: {}px; }}",
-            s.line_height
+            s.line_height.0
         );
     }
     css

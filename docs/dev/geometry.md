@@ -86,6 +86,13 @@ Inside NSH values stay typed; they become bare numbers only at a boundary, in on
   `.0` (or `as_f32()`) where it hands a value to UIKit, AppKit, Android, GTK, Direct2D, GPUI or the DOM, and wraps what
   its toolkit reports (`Points(width)`). The encodings to Android and the web are unchanged: they write the same
   `f32`s. A value that reaches `format!` (the web's JSON) takes `.0`: `Points`' `Display` writes `10pt`.
+- **Text and canvas**: a `TextEngine` is handed typed styles (`ResolvedTextStyle`'s font size, line height, letter
+  spacing: `Points`) and a `Option<Points>` width, and reports typed metrics (`TextLine`, `LinePiece`, attachments'
+  `Point<Points>`), as GPUI's `TextSystem` takes and returns `Pixels`; each platform engine unwraps them where it calls
+  CoreText, `StaticLayout`, DirectWrite, Pango, GPUI or the browser. A canvas's recorded numbers stay `Num`s (a
+  constant or an animated value's slot); what is typed is the rest of a drawing (gradients' points and radii, color
+  stops as `Percentage`s, shadow blur and offset, dashes, `maxWidth`, `drawImage`'s source in the image's
+  `ScaledPixels`) and `Painter`'s methods. The JS recording and the encodings to Android and the web are unchanged.
 - **JS** (`nsh-js`): numbers decoded from JS become typed values where they enter the core's types, and typed values
   become JS numbers where they leave (the environment, events).
 

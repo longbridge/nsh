@@ -160,9 +160,12 @@ reasons: `reactive-components.md`.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
-  in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(x, y, rule)` /
-  `.is_point_in_stroke(x, y)` and, with a `Path2D`, `.path_contains(&path, x, y, rule)` / `.stroke_contains(&path, x,
-  y)`, on a painter made by a function the drawing and the press handler both call, to find the shape under a tap).
+  in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(point, rule)` /
+  `.is_point_in_stroke(point)` and, with a `Path2D`, `.path_contains(&path, point, rule)` /
+  `.stroke_contains(&path, point)`, on a painter made by a function the drawing and the press handler both call, to
+  find the shape under a tap). Its geometry is typed as GPUI's painting is: points and rectangles are `Point<Points>`
+  and `Bounds<Points>`, lengths `Points`, angles `Radians`, color stops `Percentage`s; the methods that take
+  animated values take `f32`, `Points` or `Radians` too.
   `canvas(move || draw(..))` draws in a binding: again when what it read changes (a size kept from `on_layout`, the
   appearance through `color(..)`); a new drawing replaces the old one. Props that take a plain color (an input's
   placeholder color) take `move || color(theme().muted_foreground)`: the theme color for the appearance now.

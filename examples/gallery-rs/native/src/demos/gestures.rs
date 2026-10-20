@@ -11,8 +11,8 @@ use nsh_core::{
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, MONO,
-    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, press_with, radius,
-    rgb_a, tints,
+    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, lengths, press_with,
+    radius, rect, rgb_a, tints,
 };
 
 /// A dot matrix behind a stage, drawn for its size (again when it or the
@@ -684,7 +684,7 @@ fn hatch(width: f32) -> Painter {
     let mut p = Painter::new()
         .save()
         .begin_path()
-        .rect(width * 0.18, 0.0, width * 0.64, height)
+        .rect(rect(width * 0.18, 0.0, width * 0.64, height))
         .clip()
         .stroke_color(color(colors::WARN.opacity(0.28)))
         .line_width(1.0)
@@ -696,15 +696,12 @@ fn hatch(width: f32) -> Painter {
     }
     p.stroke()
         .restore()
-        .line_dash(&[4.0, 4.0])
+        .line_dash(&lengths([4.0, 4.0]))
         .stroke_color(color(colors::WARN))
         .begin_path()
         .round_rect(
-            width * 0.18 + 0.5,
-            0.5,
-            width * 0.64 - 1.0,
-            height - 1.0,
-            10.0,
+            rect(width * 0.18 + 0.5, 0.5, width * 0.64 - 1.0, height - 1.0),
+            px(10.0),
         )
         .stroke()
 }

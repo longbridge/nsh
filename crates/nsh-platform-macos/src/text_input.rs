@@ -1238,9 +1238,9 @@ fn paragraph(config: &InputConfig, align: NSTextAlignment) -> Retained<NSMutable
     let style = NSMutableParagraphStyle::new();
     style.setAlignment(align);
     let line_height = config.style.line_height;
-    if line_height > 0.0 {
-        style.setMinimumLineHeight(line_height as CGFloat);
-        style.setMaximumLineHeight(line_height as CGFloat);
+    if line_height > Points::ZERO {
+        style.setMinimumLineHeight(line_height.0 as CGFloat);
+        style.setMaximumLineHeight(line_height.0 as CGFloat);
     }
     style
 }

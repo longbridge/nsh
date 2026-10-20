@@ -208,18 +208,18 @@ impl InputState {
         let s = &config.style;
         let line_height = if !config.multiline {
             0.0
-        } else if s.line_height > 0.0 {
-            s.line_height
+        } else if s.line_height.0 > 0.0 {
+            s.line_height.0
         } else if s.line_height_multiple > 0.0 {
-            s.line_height_multiple * s.font_size
+            s.line_height_multiple * s.font_size.0
         } else {
             0.0
         };
         let style = Style {
             font: font(s),
-            size: s.font_size.max(1.0),
+            size: s.font_size.0.max(1.0),
             line_height,
-            spacing: s.letter_spacing,
+            spacing: s.letter_spacing.0,
         };
         *self.style.borrow_mut() = Some(style.clone());
         style

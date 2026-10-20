@@ -115,10 +115,22 @@ fn canvases_draw_gradients_paths_and_measured_labels() {
     };
     // The dial's sweep strokes a conic gradient, the compositing card's
     // ball fills a radial one, the area chart a linear one.
-    let conic_stroke = |op: &CanvasOp| matches!(op, CanvasOp::StrokeStyle(Paint::Gradient(g)) if matches!(g.shape, GradientShape::Conic(_)));
+    let conic_stroke = |op: &CanvasOp| matches!(op, CanvasOp::StrokeStyle(Paint::Gradient(g)) if matches!(g.shape, GradientShape::Conic { .. }));
     assert!(drawing_with(&screen, conic_stroke).is_some(), "the dial");
-    assert!(drawing_with(&screen, gradient(|s| matches!(s, GradientShape::Radial(_)))).is_some());
-    assert!(drawing_with(&screen, gradient(|s| matches!(s, GradientShape::Linear(_)))).is_some());
+    assert!(
+        drawing_with(
+            &screen,
+            gradient(|s| matches!(s, GradientShape::Radial { .. }))
+        )
+        .is_some()
+    );
+    assert!(
+        drawing_with(
+            &screen,
+            gradient(|s| matches!(s, GradientShape::Linear { .. }))
+        )
+        .is_some()
+    );
     let (_, chart) = drawing_with(
         &screen,
         |op| matches!(op, CanvasOp::FillText { text, .. } if &**text == "deploy"),

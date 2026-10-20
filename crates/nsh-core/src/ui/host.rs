@@ -21,6 +21,7 @@ use crate::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
     },
+    geometry::{Bounds, Corners, Point, Radians, ScaledPixels},
     js::host::HostProps,
 };
 
@@ -971,6 +972,20 @@ impl From<f32> for CanvasArg {
     }
 }
 
+/// A length (coordinates, sizes, line widths, radii).
+impl From<Points> for CanvasArg {
+    fn from(n: Points) -> Self {
+        Self(CanvasArgKind::Const(n.0))
+    }
+}
+
+/// An angle (arcs, rotations).
+impl From<Radians> for CanvasArg {
+    fn from(n: Radians) -> Self {
+        Self(CanvasArgKind::Const(n.0))
+    }
+}
+
 /// An animated value whose owner is gone counts as 0.
 impl<A: super::Animated> From<&A> for CanvasArg {
     fn from(a: &A) -> Self {
@@ -1036,7 +1051,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 }
 
 /// Records a [`Drawing`] with the HTML Canvas 2D operations (Rust names):
-/// `Painter::new().fill_color(red).fill_rect(0.0, 0.0, w, h).finish()`.
+/// `Painter::new().fill_color(red).fill_rect(px(0.0), px(0.0), w, h).finish()`.
 /// Coordinates are points from the canvas's top left. Numbers and paints
 /// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
@@ -1097,37 +1112,36 @@ impl Painter {
         self.op(CanvasOp::Path(op))
     }
 
-    /// Whether point (`x`, `y`) (canvas points, as a touch's `location_x` /
-    /// `location_y`) is inside the current path by `rule`, with the
-    /// transform, as recorded so far (TS: `ctx.isPointInPath(x, y, rule)`).
-    /// Answered from the geometry here, with no platform round trip; a
-    /// number given as an animated value counts as 0, as in TS. To find what
-    /// is under a tap, build the canvas's painter in a function the press
-    /// handler calls too.
-    pub fn is_point_in_path(&self, x: f32, y: f32, rule: FillRule) -> bool {
-        crate::canvas::point_in_path(&self.drawing.ops, None, rule, x, y, |_| 0.0)
+    /// Whether `point` (in the canvas, as a touch's location) is inside the
+    /// current path by `rule`, with the transform, as recorded so far (TS:
+    /// `ctx.isPointInPath(x, y, rule)`). Answered from the geometry here,
+    /// with no platform round trip; a number given as an animated value
+    /// counts as 0, as in TS. To find what is under a tap, build the
+    /// canvas's painter in a function the press handler calls too.
+    pub fn is_point_in_path(&self, point: Point<Points>, rule: FillRule) -> bool {
+        crate::canvas::point_in_path(&self.drawing.ops, None, rule, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is on the stroke of the current path with
-    /// the line width and cap recorded so far (TS: `ctx.isPointInStroke(x,
-    /// y)`; round joins, no dashes). See [`Self::is_point_in_path`].
-    pub fn is_point_in_stroke(&self, x: f32, y: f32) -> bool {
-        crate::canvas::point_in_stroke(&self.drawing.ops, None, x, y, |_| 0.0)
+    /// Whether `point` is on the stroke of the current path with the line
+    /// width and cap recorded so far (TS: `ctx.isPointInStroke(x, y)`;
+    /// round joins, no dashes). See [`Self::is_point_in_path`].
+    pub fn is_point_in_stroke(&self, point: Point<Points>) -> bool {
+        crate::canvas::point_in_stroke(&self.drawing.ops, None, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is inside `path` by `rule`, with the
-    /// transform recorded so far (TS: `ctx.isPointInPath(path2d, x, y,
-    /// rule)`): the shape [`Self::fill_path`] drew under a tap. See
+    /// Whether `point` is inside `path` by `rule`, with the transform
+    /// recorded so far (TS: `ctx.isPointInPath(path2d, x, y, rule)`): the
+    /// shape [`Self::fill_path`] drew under a tap. See
     /// [`Self::is_point_in_path`].
-    pub fn path_contains(&self, path: &Path, x: f32, y: f32, rule: FillRule) -> bool {
-        crate::canvas::point_in_path(&self.drawing.ops, Some(path), rule, x, y, |_| 0.0)
+    pub fn path_contains(&self, path: &Path, point: Point<Points>, rule: FillRule) -> bool {
+        crate::canvas::point_in_path(&self.drawing.ops, Some(path), rule, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is on the stroke of `path` with the
-    /// transform, line width and cap recorded so far (TS:
-    /// `ctx.isPointInStroke(path2d, x, y)`). See [`Self::is_point_in_path`].
-    pub fn stroke_contains(&self, path: &Path, x: f32, y: f32) -> bool {
-        crate::canvas::point_in_stroke(&self.drawing.ops, Some(path), x, y, |_| 0.0)
+    /// Whether `point` is on the stroke of `path` with the transform, line
+    /// width and cap recorded so far (TS: `ctx.isPointInStroke(path2d, x,
+    /// y)`). See [`Self::is_point_in_path`].
+    pub fn stroke_contains(&self, path: &Path, point: Point<Points>) -> bool {
+        crate::canvas::point_in_stroke(&self.drawing.ops, Some(path), point, |_| 0.0)
     }
 
     /// Saves the state (styles, transform, clip).
@@ -1152,7 +1166,8 @@ impl Painter {
         self.op(CanvasOp::Scale(x, y))
     }
 
-    /// Rotates the axes (radians, clockwise).
+    /// Rotates the axes, clockwise (a [`Radians`], or an animated value of
+    /// radians).
     pub fn rotate(mut self, angle: impl Into<CanvasArg>) -> Self {
         let a = self.num(angle);
         self.op(CanvasOp::Rotate(a))
@@ -1195,31 +1210,31 @@ impl Painter {
     }
 
     /// A quadratic Bézier curve to `to` (`quadraticCurveTo`).
-    pub fn quadratic_curve_to(self, control: (f32, f32), to: (f32, f32)) -> Self {
-        let c = Num::Const;
+    pub fn quadratic_curve_to(self, control: Point<Points>, to: Point<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
         self.path(PathOp::QuadTo([
-            c(control.0),
-            c(control.1),
-            c(to.0),
-            c(to.1),
+            c(control.x),
+            c(control.y),
+            c(to.x),
+            c(to.y),
         ]))
     }
 
-    /// A cubic Bézier curve to (`x`, `y`).
-    pub fn bezier_curve_to(self, c1: (f32, f32), c2: (f32, f32), to: (f32, f32)) -> Self {
-        let c = Num::Const;
+    /// A cubic Bézier curve to `to` (`bezierCurveTo`).
+    pub fn bezier_curve_to(self, c1: Point<Points>, c2: Point<Points>, to: Point<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
         self.path(PathOp::CubicTo([
-            c(c1.0),
-            c(c1.1),
-            c(c2.0),
-            c(c2.1),
-            c(to.0),
-            c(to.1),
+            c(c1.x),
+            c(c1.y),
+            c(c2.x),
+            c(c2.y),
+            c(to.x),
+            c(to.y),
         ]))
     }
 
-    /// A circular arc around (`x`, `y`); angles in radians, clockwise from
-    /// the x axis.
+    /// A circular arc around (`x`, `y`); angles clockwise from the x axis
+    /// ([`Radians`], or animated values of radians).
     pub fn arc(
         self,
         x: impl Into<CanvasArg>,
@@ -1269,52 +1284,68 @@ impl Painter {
         })
     }
 
-    /// An arc of `radius` tangent to the lines to (`x1`, `y1`) and on to
-    /// (`x2`, `y2`) (`arcTo`): a rounded corner.
-    pub fn arc_to(self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::ArcTo([c(x1), c(y1), c(x2), c(y2), c(radius)]))
+    /// An arc of `radius` tangent to the lines to `p1` and on to `p2`
+    /// (`arcTo`): a rounded corner.
+    pub fn arc_to(self, p1: Point<Points>, p2: Point<Points>, radius: Points) -> Self {
+        let c = |v: Points| Num::Const(v.0);
+        self.path(PathOp::ArcTo([
+            c(p1.x),
+            c(p1.y),
+            c(p2.x),
+            c(p2.y),
+            c(radius),
+        ]))
     }
 
-    /// An elliptical arc around (`x`, `y`) with radii `radius` turned by
-    /// `rotation`; angles in radians, clockwise (`counterclockwise` draws
-    /// the other way).
-    #[allow(clippy::too_many_arguments)]
+    /// An elliptical arc around `center` with radii `radii` turned by
+    /// `rotation`; angles clockwise (`counterclockwise` draws the other
+    /// way).
     pub fn ellipse(
         self,
-        x: f32,
-        y: f32,
-        radius: (f32, f32),
-        rotation: f32,
-        start: f32,
-        end: f32,
+        center: Point<Points>,
+        radii: Size<Points>,
+        rotation: Radians,
+        start: Radians,
+        end: Radians,
         counterclockwise: bool,
     ) -> Self {
         let c = Num::Const;
         self.path(PathOp::Ellipse {
-            geometry: [c(x), c(y), c(radius.0), c(radius.1), c(rotation)],
-            start: c(start),
-            end: c(end),
+            geometry: [
+                c(center.x.0),
+                c(center.y.0),
+                c(radii.width.0),
+                c(radii.height.0),
+                c(rotation.0),
+            ],
+            start: c(start.0),
+            end: c(end.0),
             ccw: counterclockwise,
         })
     }
 
     /// A rectangle subpath.
-    pub fn rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::Rect([c(x), c(y), c(w), c(h)]))
+    pub fn rect(self, rect: Bounds<Points>) -> Self {
+        self.path(PathOp::Rect(nums(rect)))
     }
 
     /// A rectangle subpath with round corners (one radius for all).
-    pub fn round_rect(self, x: f32, y: f32, w: f32, h: f32, radius: f32) -> Self {
-        self.round_rect_corners(x, y, w, h, [radius; 4])
+    pub fn round_rect(self, rect: Bounds<Points>, radius: Points) -> Self {
+        self.round_rect_corners(rect, Corners::all(radius))
     }
 
-    /// A rectangle subpath with round corners: top left, top right, bottom
-    /// right, bottom left.
-    pub fn round_rect_corners(self, x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::RoundRect([c(x), c(y), c(w), c(h)], radii.map(c)))
+    /// A rectangle subpath with round corners.
+    pub fn round_rect_corners(self, rect: Bounds<Points>, radii: Corners<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
+        self.path(PathOp::RoundRect(
+            nums(rect),
+            [
+                c(radii.top_left),
+                c(radii.top_right),
+                c(radii.bottom_right),
+                c(radii.bottom_left),
+            ],
+        ))
     }
 
     /// A straight line back to the subpath's start.
@@ -1374,28 +1405,26 @@ impl Painter {
         self.op(CanvasOp::Clip(Some(path.clone()), rule))
     }
 
-    /// Fills a rectangle.
+    /// Fills a rectangle (its numbers [`Points`], or animated values).
     pub fn fill_rect(
         mut self,
-        x: f32,
-        y: f32,
+        x: impl Into<CanvasArg>,
+        y: impl Into<CanvasArg>,
         w: impl Into<CanvasArg>,
         h: impl Into<CanvasArg>,
     ) -> Self {
-        let (w, h) = (self.num(w), self.num(h));
-        self.op(CanvasOp::FillRect([Num::Const(x), Num::Const(y), w, h]))
+        let (x, y, w, h) = (self.num(x), self.num(y), self.num(w), self.num(h));
+        self.op(CanvasOp::FillRect([x, y, w, h]))
     }
 
     /// Strokes a rectangle.
-    pub fn stroke_rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.op(CanvasOp::StrokeRect([c(x), c(y), c(w), c(h)]))
+    pub fn stroke_rect(self, rect: Bounds<Points>) -> Self {
+        self.op(CanvasOp::StrokeRect(nums(rect)))
     }
 
     /// Makes a rectangle transparent.
-    pub fn clear_rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.op(CanvasOp::ClearRect([c(x), c(y), c(w), c(h)]))
+    pub fn clear_rect(self, rect: Bounds<Points>) -> Self {
+        self.op(CanvasOp::ClearRect(nums(rect)))
     }
 
     /// Fills with `color`.
@@ -1444,7 +1473,7 @@ impl Painter {
     }
 
     /// Dashes: lengths of dashes and gaps.
-    pub fn line_dash(self, segments: &[f32]) -> Self {
+    pub fn line_dash(self, segments: &[Points]) -> Self {
         self.op(CanvasOp::LineDash(segments.into()))
     }
 
@@ -1467,10 +1496,10 @@ impl Painter {
     }
 
     /// Shadows of what is drawn next.
-    pub fn shadow(self, color: impl Into<Hsla>, blur: f32, offset: (f32, f32)) -> Self {
+    pub fn shadow(self, color: impl Into<Hsla>, blur: Points, offset: Point<Points>) -> Self {
         self.op(CanvasOp::ShadowColor(Color::from(color.into())))
-            .op(CanvasOp::ShadowBlur(blur.max(0.0)))
-            .op(CanvasOp::ShadowOffset(offset.0, offset.1))
+            .op(CanvasOp::ShadowBlur(blur.max(Points::ZERO)))
+            .op(CanvasOp::ShadowOffset(offset))
     }
 
     /// The font (CSS `font` shorthand: `"600 14px Inter"`); an invalid one
@@ -1512,7 +1541,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: f32,
+        max_width: Points,
     ) -> Self {
         self.text(text, x, y, Some(max_width), false)
     }
@@ -1529,7 +1558,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: f32,
+        max_width: Points,
     ) -> Self {
         self.text(text, x, y, Some(max_width), true)
     }
@@ -1539,7 +1568,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: Option<f32>,
+        max_width: Option<Points>,
         stroke: bool,
     ) -> Self {
         let (text, x, y) = (text.into(), self.num(x), self.num(y));
@@ -1560,20 +1589,36 @@ impl Painter {
         })
     }
 
-    /// Draws the image at `uri` (a URL or `asset:/path`) into the rectangle.
-    pub fn draw_image(self, uri: &str, x: f32, y: f32, w: f32, h: f32) -> Self {
-        self.draw_image_part(uri, None, [x, y, w, h])
+    /// Draws the image at `uri` (a URL or `asset:/path`) into `dest`.
+    pub fn draw_image(self, uri: &str, dest: Bounds<Points>) -> Self {
+        self.draw_image_part(uri, None, dest)
     }
 
-    /// Draws the part `source` of the image at `uri` (`[x, y, w, h]` in
-    /// image pixels; `None`: all of it) into `dest` (`[x, y, w, h]`).
-    pub fn draw_image_part(self, uri: &str, source: Option<[f32; 4]>, dest: [f32; 4]) -> Self {
+    /// Draws the part `source` of the image at `uri` (in the image's
+    /// pixels; `None`: all of it) into `dest`.
+    pub fn draw_image_part(
+        self,
+        uri: &str,
+        source: Option<Bounds<ScaledPixels>>,
+        dest: Bounds<Points>,
+    ) -> Self {
         self.op(CanvasOp::DrawImage {
             image: CanvasImage { uri: uri.into() },
             source,
-            dest: dest.map(Num::Const),
+            dest: nums(dest),
         })
     }
+}
+
+/// `[x, y, w, h]` of `rect`, as a recorded rectangle's numbers.
+fn nums(rect: Bounds<Points>) -> [Num; 4] {
+    [
+        rect.origin.x,
+        rect.origin.y,
+        rect.size.width,
+        rect.size.height,
+    ]
+    .map(|v| Num::Const(v.0))
 }
 
 impl From<Drawing> for Painter {

@@ -1081,7 +1081,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
 
 fn input(e: &mut Encoded, c: &InputConfig) {
     let s = &c.style;
-    e.float(s.font_size);
+    e.float(s.font_size.0);
     e.int(s.font_weight as i32);
     e.bool(s.italic);
     e.int(argb(s.color));
@@ -1089,7 +1089,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
         Some(f) => e.string(f.name().to_string()),
         None => e.int(-1),
     }
-    e.float(s.letter_spacing);
+    e.float(s.letter_spacing.0);
     e.int(match c.align {
         TextAlign::Auto | TextAlign::Left | TextAlign::Justify => 0,
         TextAlign::Center => 1,
@@ -1279,7 +1279,7 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 e.int(30);
                 e.int(d.len() as i32);
                 for &v in d.iter() {
-                    e.float(v);
+                    e.float(v.0);
                 }
             }
             Op::LineDashOffset(o) => {
@@ -1300,16 +1300,16 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
             }
             Op::ShadowBlur(b) => {
                 e.int(35);
-                e.float(*b);
+                e.float(b.0);
             }
-            Op::ShadowOffset(x, y) => {
+            Op::ShadowOffset(offset) => {
                 e.int(36);
-                e.float(*x);
-                e.float(*y);
+                e.float(offset.x.0);
+                e.float(offset.y.0);
             }
             Op::Font(f) => {
                 e.int(37);
-                e.float(f.size);
+                e.float(f.size.0);
                 e.int(f.weight as i32);
                 e.bool(f.italic);
                 e.opt_string(f.family.as_deref());
@@ -1346,7 +1346,7 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 });
                 e.string(text.to_string());
                 e.nums(&[*x, *y]);
-                e.float(max_width.unwrap_or(f32::NAN));
+                e.float(max_width.map_or(f32::NAN, |m| m.0));
             }
             Op::DrawImage {
                 image,
@@ -1356,7 +1356,10 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 e.int(42);
                 e.string(image.uri.to_string());
                 e.bool(source.is_some());
-                for v in source.unwrap_or([0.0; 4]) {
+                let source = source.map_or([0.0; 4], |s| {
+                    [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]
+                });
+                for v in source {
                     e.float(v);
                 }
                 e.nums(dest);
@@ -1455,9 +1458,29 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
         Paint::Gradient(g) => {
             e.int(2);
             let (kind, values): (i32, &[f32]) = match &g.shape {
-                GradientShape::Linear(v) => (0, v),
-                GradientShape::Radial(v) => (1, v),
-                GradientShape::Conic(v) => (2, v),
+                GradientShape::Linear { start, end } => {
+                    (0, &[start.x.0, start.y.0, end.x.0, end.y.0])
+                }
+                GradientShape::Radial {
+                    start,
+                    start_radius,
+                    end,
+                    end_radius,
+                } => (
+                    1,
+                    &[
+                        start.x.0,
+                        start.y.0,
+                        start_radius.0,
+                        end.x.0,
+                        end.y.0,
+                        end_radius.0,
+                    ],
+                ),
+                GradientShape::Conic {
+                    start_angle,
+                    center,
+                } => (2, &[start_angle.0, center.x.0, center.y.0]),
             };
             e.int(kind);
             for &v in values {
@@ -1465,7 +1488,7 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
             }
             e.int(g.stops.len() as i32);
             for (offset, color) in &g.stops {
-                e.float(*offset);
+                e.float(offset.0);
                 e.int(argb(*color));
             }
         }

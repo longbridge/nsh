@@ -660,7 +660,7 @@ impl<M: TextEngine + 'static> Core<M> {
         core.components
             .runtime
             .set_measure(Rc::new(move |font, text| {
-                crate::canvas::measure_line(&*engine, font, text)
+                crate::canvas::measure_line(&*engine, font, text).0
             }));
         core
     }
@@ -3349,7 +3349,10 @@ impl<M: TextEngine> Core<M> {
                 _ => {
                     if let Some(l) = child.layout {
                         let size = self.layout.layout(l).expect("taffy layout").size;
-                        out.push_attachment(size.width, size.height, style);
+                        out.push_attachment(
+                            crate::geometry::size_pt(size.width, size.height),
+                            style,
+                        );
                     }
                 }
             }
@@ -3938,7 +3941,7 @@ impl<M: TextEngine> Core<M> {
             };
             let size = self.layout.layout(l).expect("taffy layout").size;
             let (x, y) = match points.get(i).copied().flatten() {
-                Some((x, y)) => (content.origin.x.0 + x, content.origin.y.0 + y),
+                Some(p) => (content.origin.x.0 + p.x.0, content.origin.y.0 + p.y.0),
                 // Far away, like unbound list cells.
                 None => (-100_000.0, 0.0),
             };
@@ -4517,11 +4520,9 @@ fn fitted<M: TextEngine>(
             max_lines: 0,
             ..t.clone()
         };
-        let full = engine.measure(&engine.prepare(&all), Some(size.width.0));
+        let full = engine.measure(&engine.prepare(&all), Some(size.width));
         let limited = if t.max_lines > 0 {
-            engine
-                .measure(&engine.prepare(t), Some(size.width.0))
-                .height
+            engine.measure(&engine.prepare(t), Some(size.width)).height
         } else {
             Points(f32::INFINITY)
         };
@@ -4557,16 +4558,17 @@ fn measure_text<M: TextEngine>(
     {
         return size;
     }
-    let size = match cache.get(ctx.layout_hash, max_width) {
+    let typed = max_width.map(Points);
+    let size = match cache.get(ctx.layout_hash, typed) {
         Some(size) => size,
         None => {
             let prepared = ctx
                 .prepared
                 .get_or_insert_with(|| engine.prepare(&ctx.text));
-            let size = engine.measure(prepared, max_width);
+            let size = engine.measure(prepared, typed);
             // Round up so rendering never truncates the last glyph.
             let size = size.map(Points::ceil);
-            cache.insert(ctx.layout_hash, max_width, size);
+            cache.insert(ctx.layout_hash, typed, size);
             size
         }
     };
@@ -4659,7 +4661,7 @@ const PRESSES: [EventKind; 4] = [
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
     (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
         color: style.background_color,
-        radius: style.border_radius.max(0.0),
+        radius: Points(style.border_radius.max(0.0)),
         node,
     })
 }

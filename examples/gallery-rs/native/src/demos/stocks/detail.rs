@@ -22,7 +22,9 @@ use super::{
     tape::{Flow, tape},
     ticket::{Side, Ticket, TicketEvent, TicketProps},
 };
-use crate::ui::{Button, ButtonVariant, Finish, Finished, IconName, Stat, colors, icon, radius};
+use crate::ui::{
+    Button, ButtonVariant, Finish, Finished, IconName, Stat, colors, icon, lengths, radius,
+};
 
 /// The props of a part of a stock's screen.
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -634,7 +636,7 @@ fn draw_ranges(r: &[Range], last: f64, prev_close: f64, width: f32, decimals: u3
     let bottom = HORIZONS.len() as f32 * 34.0;
     p.stroke_color(color(colors::FAINT))
         .line_width(1.0)
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .begin_path()
         .move_to(x_of(prev_close), 0.0)
         .line_to(x_of(prev_close), bottom)

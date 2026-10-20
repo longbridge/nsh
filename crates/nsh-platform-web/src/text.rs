@@ -36,7 +36,7 @@ pub(crate) fn css_font(style: &ResolvedTextStyle) -> String {
         "{}{} {}px {family}",
         if style.italic { "italic " } else { "" },
         style.font_weight,
-        style.font_size
+        style.font_size.0
     )
 }
 
@@ -103,8 +103,8 @@ impl RunStyle {
     /// top sits in it (CSS half-leading).
     fn line(&self) -> (f32, f32) {
         let natural = self.ascent + self.descent;
-        if self.style.line_height > 0.0 {
-            let h = self.style.line_height;
+        if self.style.line_height.0 > 0.0 {
+            let h = self.style.line_height.0;
             (h, (h - natural) / 2.0)
         } else {
             (natural, 0.0)
@@ -218,7 +218,7 @@ impl WebTextEngine {
                         let len = c.len_utf16() as u32;
                         atoms.push(Atom {
                             width: self.width(font, &s)
-                                + p.styles[atom.style as usize].style.letter_spacing,
+                                + p.styles[atom.style as usize].style.letter_spacing.0,
                             text: s,
                             style: atom.style,
                             kind: AtomKind::Text,
@@ -326,13 +326,13 @@ impl TextEngine for WebTextEngine {
         let attachments: FxHashMap<u32, (f32, f32)> = text
             .attachments
             .iter()
-            .map(|a| (a.index, (a.width, a.height)))
+            .map(|a| (a.index, (a.width.0, a.height.0)))
             .collect();
         let units: Vec<u16> = text.text.encode_utf16().collect();
         for span in &text.spans {
             let style = span.style;
             let font: Arc<str> = css_font(&style).into();
-            let (ascent, descent) = self.metrics(&font, style.font_size);
+            let (ascent, descent) = self.metrics(&font, style.font_size.0);
             let index = styles.len() as u16;
             styles.push(RunStyle {
                 style,
@@ -346,7 +346,7 @@ impl TextEngine for WebTextEngine {
                 continue;
             }
             let s = String::from_utf16_lossy(&units[start..end]);
-            let spacing = style.letter_spacing;
+            let spacing = style.letter_spacing.0;
             let mut at = span.start;
             let mut word = String::new();
             let mut word_start = at;
@@ -438,7 +438,7 @@ impl TextEngine for WebTextEngine {
         if styles.is_empty() {
             let style = ResolvedTextStyle::default();
             let font: Arc<str> = css_font(&style).into();
-            let (ascent, descent) = self.metrics(&font, style.font_size);
+            let (ascent, descent) = self.metrics(&font, style.font_size.0);
             styles.push(RunStyle {
                 style,
                 font,
@@ -457,7 +457,8 @@ impl TextEngine for WebTextEngine {
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let max_width = max_width.map(|m| m.0);
         let (_, lines) = self.break_lines(prepared, max_width);
         let shown = match prepared.max_lines {
             0 => lines.len(),
@@ -551,11 +552,11 @@ impl TextEngine for WebTextEngine {
                 let s = &styles[style as usize];
                 let attachment = matches!(kind, AtomKind::Attachment(..));
                 line_pieces.push(nsh_core::LinePiece {
-                    x,
-                    width: w,
+                    x: Points(x),
+                    width: Points(w),
                     background: s.style.background,
-                    ascent: if attachment { 0.0 } else { s.ascent },
-                    descent: if attachment { 0.0 } else { s.descent },
+                    ascent: Points(if attachment { 0.0 } else { s.ascent }),
+                    descent: Points(if attachment { 0.0 } else { s.descent }),
                 });
                 if let AtomKind::Attachment(_, h) = kind {
                     if let Some(slot) = attachments.get_mut(attachment_index) {
@@ -580,13 +581,14 @@ impl TextEngine for WebTextEngine {
                 merge = true;
                 x += w;
             }
-            nsh_core::BackgroundBox::join(line_pieces.drain(..), (x0, x0 + width), |b| {
+            let range = (Points(x0), Points(x0 + width));
+            nsh_core::BackgroundBox::join(line_pieces.drain(..), range, |b| {
                 backgrounds.push(Background {
-                    x: b.x,
-                    y: baseline - b.ascent,
-                    width: b.width,
-                    height: b.ascent + b.descent,
-                    radius: b.radius(),
+                    x: b.x.0,
+                    y: baseline - b.ascent.0,
+                    width: b.width.0,
+                    height: (b.ascent + b.descent).0,
+                    radius: b.radius().0,
                     color: b.background.color,
                 });
             });
@@ -604,12 +606,12 @@ impl TextEngine for WebTextEngine {
                 text: String::new(),
                 start: atoms.get(line.start).map_or(0, |a| a.start),
                 end: atoms.get(line.end.saturating_sub(1)).map_or(0, |a| a.end),
-                x: x0,
-                y,
-                width,
-                height: line.height,
-                ascender: first.ascent,
-                descender: first.descent,
+                x: Points(x0),
+                y: Points(y),
+                width: Points(width),
+                height: Points(line.height),
+                ascender: Points(first.ascent),
+                descender: Points(first.descent),
                 cap_height: first.style.font_size * 0.7,
                 x_height: first.style.font_size * 0.5,
             });
@@ -630,10 +632,13 @@ impl TextEngine for WebTextEngine {
             .map_or_else(Vec::new, |l| l.lines.clone())
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
-        layout
-            .downcast::<WebLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<nsh_core::Point<Points>>> {
+        layout.downcast::<WebLayout>().map_or_else(Vec::new, |l| {
+            l.attachments
+                .iter()
+                .map(|a| a.map(|(x, y)| nsh_core::geometry::point(Points(x), Points(y))))
+                .collect()
+        })
     }
 
     fn register_font(&self, data: &[u8]) -> Result<(), String> {

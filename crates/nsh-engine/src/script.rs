@@ -101,7 +101,7 @@ mod imp {
             }));
             // Canvas `measureText` measures on this thread.
             host.set_text_measurer(Box::new(move |font, text| {
-                nsh_core::canvas::measure_line(&*text_engine, font, text)
+                nsh_core::canvas::measure_line(&*text_engine, font, text).0
             }));
             host.set_environment(environment);
             let script = Script {

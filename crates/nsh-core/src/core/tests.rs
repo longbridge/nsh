@@ -26,10 +26,10 @@ impl TextEngine for FakeEngine {
         )
     }
 
-    fn measure(&self, &(chars, _): &(usize, Vec<u32>), max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, &(chars, _): &(usize, Vec<u32>), max_width: Option<Points>) -> Size<Points> {
         self.measures.set(self.measures.get() + 1);
         let w = chars as f32 * 8.0;
-        match max_width {
+        match max_width.map(|m| m.0) {
             Some(max) if w > max && max > 0.0 => size_pt(max, (w / max).ceil() * 16.0),
             _ => size_pt(w, 16.0),
         }
@@ -38,17 +38,19 @@ impl TextEngine for FakeEngine {
     fn layout(&self, (_, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
         self.layouts.set(self.layouts.get() + 1);
         // One line; the third attachment on is cut off.
-        let points: Vec<Option<(f32, f32)>> = attachments
+        let points: Vec<Option<Point<Points>>> = attachments
             .iter()
             .enumerate()
-            .map(|(i, &at)| (i < 2).then_some((at as f32 * 8.0, 2.0)))
+            .map(|(i, &at)| {
+                (i < 2).then_some(crate::geometry::point(Points(at as f32 * 8.0), Points(2.0)))
+            })
             .collect();
         TextLayout(Arc::new(points))
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
-            .downcast::<Vec<Option<(f32, f32)>>>()
+            .downcast::<Vec<Option<Point<Points>>>>()
             .cloned()
             .unwrap_or_default()
     }
@@ -568,7 +570,7 @@ fn span_backgrounds_style_their_characters() {
     let backgrounds: Vec<_> = text.spans.iter().map(|s| s.style.background).collect();
     let red = Some(crate::text::TextBackground {
         color: Color(0xff00_00ff),
-        radius: 4.0,
+        radius: Points(4.0),
         node: 4,
     });
     // The block's own background is its view's; the bold span inside the
@@ -593,7 +595,7 @@ fn span_backgrounds_style_their_characters() {
     let text = text_item(&batch).unwrap();
     assert_eq!(
         text.spans[1].style.background.map(|b| (b.color, b.radius)),
-        Some((Color(0x0000_ffff), 0.0))
+        Some((Color(0x0000_ffff), Points(0.0)))
     );
     assert!(frame_of(&batch, 2).is_none());
 
@@ -615,7 +617,7 @@ fn background_boxes_join_pieces_of_one_span() {
     let plain = ResolvedTextStyle::default();
     let bg = |node| crate::text::TextBackground {
         color: Color(0xff00_00ff),
-        radius: 3.0,
+        radius: Points(3.0),
         node,
     };
     let code = ResolvedTextStyle {
@@ -640,39 +642,41 @@ fn background_boxes_join_pieces_of_one_span() {
     );
     t.push(" e ", plain);
     let piece = |i: u32, ascent: f32| crate::text::LinePiece {
-        x: i as f32 * 10.0,
-        width: 10.0,
+        x: Points(i as f32 * 10.0),
+        width: Points(10.0),
         background: t.background_at(i),
-        ascent,
-        descent: 2.0,
+        ascent: Points(ascent),
+        descent: Points(2.0),
     };
     let pieces = (0..7).map(|i| piece(i, if i == 3 { 12.0 } else { 10.0 }));
     let mut boxes = Vec::new();
-    crate::text::BackgroundBox::join(pieces, (0.0, 70.0), |b| boxes.push(b));
+    crate::text::BackgroundBox::join(pieces, (Points(0.0), Points(70.0)), |b| boxes.push(b));
     assert_eq!(boxes.len(), 2);
-    assert_eq!((boxes[0].x, boxes[0].width), (20.0, 20.0));
-    assert_eq!((boxes[0].ascent, boxes[0].descent), (12.0, 2.0));
+    assert_eq!((boxes[0].x.0, boxes[0].width.0), (20.0, 20.0));
+    assert_eq!((boxes[0].ascent.0, boxes[0].descent.0), (12.0, 2.0));
     assert_eq!(boxes[0].background.node, 4);
-    assert_eq!((boxes[1].x, boxes[1].width), (40.0, 10.0));
+    assert_eq!((boxes[1].x.0, boxes[1].width.0), (40.0, 10.0));
     assert_eq!(boxes[1].background.node, 6);
     // At most half its height.
-    assert_eq!(boxes[0].radius(), 3.0);
+    assert_eq!(boxes[0].radius(), Points(3.0));
     assert_eq!(
         crate::text::BackgroundBox {
-            ascent: 2.0,
-            descent: 1.0,
+            ascent: Points(2.0),
+            descent: Points(1.0),
             ..boxes[0]
         }
         .radius(),
-        1.5
+        Points(1.5)
     );
     // Cut to the line.
     let mut boxes = Vec::new();
-    crate::text::BackgroundBox::join((0..7).map(|i| piece(i, 10.0)), (0.0, 25.0), |b| {
-        boxes.push(b)
-    });
+    crate::text::BackgroundBox::join(
+        (0..7).map(|i| piece(i, 10.0)),
+        (Points(0.0), Points(25.0)),
+        |b| boxes.push(b),
+    );
     assert_eq!(boxes.len(), 1);
-    assert_eq!((boxes[0].x, boxes[0].width), (20.0, 5.0));
+    assert_eq!((boxes[0].x.0, boxes[0].width.0), (20.0, 5.0));
 }
 
 #[test]
@@ -2302,7 +2306,9 @@ fn font_scale_scales_text_that_allows_it() {
     let batch = c.commit().unwrap();
     let size = |id| {
         batch.items.iter().find_map(|i| match i {
-            MountItem::Text { id: i, text, .. } if *i == id => Some(text.spans[0].style.font_size),
+            MountItem::Text { id: i, text, .. } if *i == id => {
+                Some(text.spans[0].style.font_size.0)
+            }
             _ => None,
         })
     };
@@ -2988,7 +2994,7 @@ fn text_inherits_from_views_and_classes_set_props() {
         })
         .unwrap();
     assert_eq!(text.spans[0].style.color, Color(0xffff_ffff));
-    assert_eq!(text.spans[0].style.font_size, 18.0);
+    assert_eq!(text.spans[0].style.font_size, Points(18.0));
     assert_eq!(text.spans[0].style.font_weight, 700);
     assert_eq!(text.align, TextAlign::Center);
     assert_eq!(text.max_lines, 2);
@@ -3392,7 +3398,7 @@ fn text_shrinks_to_fit_its_lines() {
         .items
         .iter()
         .find_map(|i| match i {
-            MountItem::Text { id: 2, text, .. } => Some(text.spans[0].style.font_size),
+            MountItem::Text { id: 2, text, .. } => Some(text.spans[0].style.font_size.0),
             _ => None,
         })
         .unwrap();
@@ -3480,13 +3486,13 @@ fn views_inside_text_are_attachments() {
         vec![
             crate::TextAttachment {
                 index: 2,
-                width: 20.0,
-                height: 10.0
+                width: Points(20.0),
+                height: Points(10.0)
             },
             crate::TextAttachment {
                 index: 5,
-                width: 12.0,
-                height: 12.0
+                width: Points(12.0),
+                height: Points(12.0)
             },
         ]
     );
@@ -3530,7 +3536,7 @@ fn views_inside_text_are_attachments() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(text.attachments[0].width, 30.0);
+    assert_eq!(text.attachments[0].width, Points(30.0));
     assert_eq!(frame_of(&batch, 4).map(|f| f.size.width.0), Some(30.0));
 
     // Taken out of the text: its view leaves the text view.
@@ -6784,6 +6790,7 @@ mod painter {
     use super::*;
     use crate::{
         canvas::{CanvasGradient, CanvasOp, FillRule, GradientShape, Num, Paint, svg_path},
+        geometry::{bounds, percentage, point, px, radians, size},
         ui::prelude::*,
     };
 
@@ -6800,23 +6807,24 @@ mod painter {
             .line_width(4.0)
             .stroke_svg("M0 2 L100 2")
             .begin_path()
-            .rect(60.0, 60.0, 20.0, 20.0);
+            .rect(bounds(point(px(60.0), px(60.0)), size(px(20.0), px(20.0))));
+        let at = |x, y| point(px(x), px(y));
         // Paths given are tested with the transform at the end: drawn
         // translated, the slice is hit where it shows only with the same
         // transform recorded.
-        assert!(p.path_contains(&slice, 5.0, 5.0, FillRule::NonZero));
-        assert!(!p.path_contains(&slice, 45.0, 45.0, FillRule::NonZero));
+        assert!(p.path_contains(&slice, at(5.0, 5.0), FillRule::NonZero));
+        assert!(!p.path_contains(&slice, at(45.0, 45.0), FillRule::NonZero));
         let moved = Painter::new().translate(10.0, 10.0);
-        assert!(moved.path_contains(&slice, 15.0, 15.0, FillRule::NonZero));
-        assert!(!moved.path_contains(&slice, 5.0, 5.0, FillRule::NonZero));
+        assert!(moved.path_contains(&slice, at(15.0, 15.0), FillRule::NonZero));
+        assert!(!moved.path_contains(&slice, at(5.0, 5.0), FillRule::NonZero));
         // The current path, and strokes with the line width.
-        assert!(p.is_point_in_path(70.0, 70.0, FillRule::EvenOdd));
-        assert!(!p.is_point_in_path(50.0, 70.0, FillRule::NonZero));
-        assert!(p.is_point_in_stroke(60.0, 70.0));
-        assert!(!p.is_point_in_stroke(70.0, 70.0));
+        assert!(p.is_point_in_path(at(70.0, 70.0), FillRule::EvenOdd));
+        assert!(!p.is_point_in_path(at(50.0, 70.0), FillRule::NonZero));
+        assert!(p.is_point_in_stroke(at(60.0, 70.0)));
+        assert!(!p.is_point_in_stroke(at(70.0, 70.0)));
         let top = svg_path("M0 2 L100 2");
-        assert!(p.stroke_contains(&top, 50.0, 3.5));
-        assert!(!p.stroke_contains(&top, 50.0, 5.0));
+        assert!(p.stroke_contains(&top, at(50.0, 3.5)));
+        assert!(!p.stroke_contains(&top, at(50.0, 5.0)));
     }
 
     /// A label placed by its measured width, gradients, a stroked SVG path
@@ -6827,12 +6835,17 @@ mod painter {
         let width = crate::ui::prelude::measure_text("600 20px system-ui", "100%");
         let mut p = Painter::new()
             .stroke_style(
-                CanvasGradient::conic(0.0, 50.0, 50.0)
-                    .add_color_stop(1.0, rgb(0x6366f1))
-                    .add_color_stop(0.0, rgb(0x22d3ee)),
+                CanvasGradient::conic(radians(0.0), point(px(50.0), px(50.0)))
+                    .add_color_stop(percentage(1.0), rgb(0x6366f1))
+                    .add_color_stop(percentage(0.0), rgb(0x22d3ee)),
             )
             .stroke_path(&svg_path("M20 6L9 17l-5-5"))
-            .fill_style(CanvasGradient::radial(0.0, 0.0, 4.0, 0.0, 0.0, 40.0))
+            .fill_style(CanvasGradient::radial(
+                point(px(0.0), px(0.0)),
+                px(4.0),
+                point(px(0.0), px(0.0)),
+                px(40.0),
+            ))
             .fill_path(&svg_path("M0 0h10v10z"), FillRule::EvenOdd)
             .fill_text("100%", 50.0 - width.0, 20.0);
         let x = p.num(&offset);
@@ -6858,15 +6871,18 @@ mod painter {
         let CanvasOp::StrokeStyle(Paint::Gradient(ring)) = &ops[0] else {
             panic!("{:?}", ops[0])
         };
-        assert!(matches!(
+        assert_eq!(
             ring.shape,
-            GradientShape::Conic([0.0, 50.0, 50.0])
-        ));
-        assert_eq!(ring.stops[0], (0.0, Color::from(rgb(0x22d3ee))));
+            GradientShape::Conic {
+                start_angle: radians(0.0),
+                center: point(px(50.0), px(50.0)),
+            }
+        );
+        assert_eq!(ring.stops[0], (percentage(0.0), Color::from(rgb(0x22d3ee))));
         assert!(matches!(&ops[1], CanvasOp::Stroke(Some(path)) if path.len() == 3));
         assert!(matches!(
             &ops[2],
-            CanvasOp::FillStyle(Paint::Gradient(g)) if matches!(g.shape, GradientShape::Radial(_))
+            CanvasOp::FillStyle(Paint::Gradient(g)) if matches!(g.shape, GradientShape::Radial { .. })
         ));
         assert!(matches!(
             &ops[3],

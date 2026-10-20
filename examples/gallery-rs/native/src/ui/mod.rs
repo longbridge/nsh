@@ -24,6 +24,7 @@ mod icons;
 mod layout;
 mod page;
 mod parts;
+mod shapes;
 mod theme;
 
 pub(crate) use self::{
@@ -40,5 +41,6 @@ pub(crate) use self::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, RoundButton, Row,
         Section, Stat, caption, code, header, legend,
     },
+    shapes::{lengths, pt, rect},
     theme::{Finish, Finished, MONO, Tone, colors, inset_shadow, motion, radius, rgb_a, tints},
 };

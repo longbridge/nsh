@@ -254,7 +254,7 @@ impl PathBounds {
                     return;
                 }
                 let (s, e) = (n(*start), n(*end));
-                let sweep = super::arc_sweep(s, e, *ccw);
+                let sweep = super::sweep(s, e, *ccw);
                 self.ellipse(m, [x, y], r, s + sweep, |t| {
                     [x + r * t.cos(), y + r * t.sin()]
                 });
@@ -270,7 +270,7 @@ impl PathBounds {
                     return;
                 }
                 let (s, e) = (n(*start), n(*end));
-                let sweep = super::arc_sweep(s, e, *ccw);
+                let sweep = super::sweep(s, e, *ccw);
                 let (sr, cr) = rotation.sin_cos();
                 self.ellipse(m, [x, y], rx.max(ry), s + sweep, |t| {
                     let (ex, ey) = (rx * t.cos(), ry * t.sin());
@@ -514,15 +514,15 @@ impl DamageScan {
                     None
                 }
                 CanvasOp::ShadowBlur(b) => {
-                    state.shadow.0 = *b;
+                    state.shadow.0 = b.0;
                     None
                 }
-                CanvasOp::ShadowOffset(x, y) => {
-                    (state.shadow.1, state.shadow.2) = (*x, *y);
+                CanvasOp::ShadowOffset(offset) => {
+                    (state.shadow.1, state.shadow.2) = (offset.x.0, offset.y.0);
                     None
                 }
                 CanvasOp::Font(f) => {
-                    state.font_size = f.size;
+                    state.font_size = f.size.0;
                     None
                 }
                 CanvasOp::TextAlign(a) => {
@@ -552,7 +552,7 @@ impl DamageScan {
                             state.stroke_dep || state.line_width_dep || state.dash_dep
                         };
                     d.then(|| {
-                        let b = text_bounds(&state, text, n(*x), n(*y), *max_width);
+                        let b = text_bounds(&state, text, n(*x), n(*y), max_width.map(|m| m.0));
                         if fill {
                             b
                         } else {
@@ -804,8 +804,11 @@ mod tests {
             CanvasOp::LineWidth(c(4.0)),
             CanvasOp::LineJoin(LineJoin::Round),
             CanvasOp::ShadowColor(Color(0x000000ff)),
-            CanvasOp::ShadowBlur(3.0),
-            CanvasOp::ShadowOffset(10.0, 0.0),
+            CanvasOp::ShadowBlur(crate::geometry::px(3.0)),
+            CanvasOp::ShadowOffset(crate::geometry::point(
+                crate::geometry::px(10.0),
+                crate::geometry::px(0.0),
+            )),
             CanvasOp::StrokeRect([S0, c(0.0), c(10.0), c(10.0)]),
         ];
         // The stroke: 2 past the box; its shadow 10 right, 6 wider.
@@ -818,7 +821,7 @@ mod tests {
         assert_eq!(scan(&ops, 0.0, 0.0), r(-22.0, -22.0, 54.0, 54.0));
         // A transparent shadow casts nothing.
         let ops = vec![
-            CanvasOp::ShadowBlur(30.0),
+            CanvasOp::ShadowBlur(crate::geometry::px(30.0)),
             CanvasOp::FillRect([S0, c(0.0), c(10.0), c(10.0)]),
         ];
         assert_eq!(scan(&ops, 0.0, 0.0), r(-2.0, -2.0, 14.0, 14.0));

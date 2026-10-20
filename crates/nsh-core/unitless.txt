@@ -8,7 +8,6 @@ canvas::Num::get(slot)                                           # a generic num
 canvas::damage::DamageScan::damage(value)                        # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_path(slot)                                 # a generic number (a JS value, a recorded slot)
 canvas::hit::point_in_stroke(slot)                               # a generic number (a JS value, a recorded slot)
-canvas::measure_line ->                                          # a generic number (a JS value, a recorded slot)
 core::Core::scroll_listener ->                                   # time and a zoom scale factor (the sizes it gives are typed)
 core::Core::set_font_scale(scale)                                # a font scale factor
 core::Core::set_zoom(scale)                                      # a zoom scale factor
