@@ -200,6 +200,7 @@ fn process_exit_requests_the_platform_to_close_the_app() {
     );
 }
 
+#[cfg(feature = "headless")]
 #[test]
 fn headless_trace_preserves_environment_and_data_and_stops_on_process_exit() {
     use std::sync::Arc;
