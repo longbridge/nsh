@@ -1058,10 +1058,12 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
         && (start - THUMB_SLOP..=start + len + THUMB_SLOP).contains(&along)
 }
 
-/// The mouse moved over `view`: its indicator shows (and fades again
-/// once the mouse rests), as GTK's overlay scroll bars do, so that a
-/// mouse user sees it can scroll and where its scroll bar is.
-pub(crate) fn hovered(surface: &Rc<Surface>, view: &NshView) {
+/// Reveal the indicator when the pointer reaches its draggable thumb.
+/// Moving over content must not restart the indicator's fade timer.
+pub(crate) fn hovered(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) {
+    if !grabs_thumb(view, x, y) {
+        return;
+    }
     {
         let mut state = view.state_mut();
         if thumb(&state).is_none() {

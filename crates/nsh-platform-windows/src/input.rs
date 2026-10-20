@@ -2122,13 +2122,14 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let tracking = !input.hover_tracked.borrow().is_empty() || !input.hovered.borrow().is_empty();
     let pressed = input.pointers.borrow().iter().any(|p| p.key == Key::Mouse);
     let hit = pick(&surface.root, x, y, true);
-    // The scroll views under the mouse show their indicators.
+    // Reveal only the scroll thumb under the pointer, including in nested scroll views.
     if let Some(hit) = &hit {
         for v in chain(&hit.view)
             .iter()
             .filter(|v| v.kind() == ViewKind::Scroll)
         {
-            crate::scroll::hovered(surface, v);
+            let (lx, ly) = local(v, x, y);
+            crate::scroll::hovered(surface, v, lx, ly);
         }
     }
     if tracking {

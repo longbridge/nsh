@@ -1827,9 +1827,10 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
     let views = pick(&surface.root, x, y)
         .map(|hit| chain(&hit.view))
         .unwrap_or_default();
-    // The scroll views under the mouse show their indicators.
+    // Reveal only the scroll thumb under the pointer, including in nested scroll views.
     for v in views.iter().filter(|v| v.kind() == ViewKind::Scroll) {
-        crate::scroll::hovered(surface, v);
+        let (lx, ly) = local(surface, v, x, y);
+        crate::scroll::hovered(surface, v, lx, ly);
     }
     if input.hover_tracked.borrow().is_empty() && input.hovered.borrow().is_empty() {
         return;

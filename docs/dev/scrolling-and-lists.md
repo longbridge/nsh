@@ -8,8 +8,9 @@
   the velocity. Lists keep the visible rows in place when items are inserted above them (`splice`).
 - **Input**: fingers (and pens) drag scroll views; on the desktop backends and the web the mouse never does (dragging
   the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
-  indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). The indicator shows while
-  the mouse moves over the view (`scroll::hovered` on the desktop backends, as overlay scroll bars do), and horizontal
+  indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). On Linux and Windows, the indicator shows while scrolling or when the pointer reaches its draggable thumb;
+  moving over content leaves its visibility and fade timer unchanged. macOS follows the system's scroll-bar
+  visibility preference (`WhenScrolling` suppresses content-hover reveal). Horizontal
   views keep theirs with `showsIndicator={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
   desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
