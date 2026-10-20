@@ -1,0 +1,1 @@
+import{element as e,insert as t,metaUrl as n}from"nsh:rt";import{mount as r}from"nsh";const i=new URL(n(`module-url.tsx`));r(()=>(()=>{let n=e(`text`);return t(n,()=>`Module URL: ${[`asset:`,`file:`].includes(i.protocol)&&i.pathname.endsWith(`module-url.tsx`)}`),n})());

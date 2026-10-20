@@ -363,7 +363,7 @@ import { ListView } from "nsh/ui/mobile";
 
 - Each cell is laid out on its own, so scrolling only lays out the cells that changed. Keep rows shallow and avoid reading signals in rows that change on every frame.
 - The native side asks for cells in batches, up to several rounds per frame, merged into one update; a fast fling binds many cells in one frame without a JS call per cell.
-- Use [`nsh trace --scroll`](./testing-and-trace.md) to measure the per-frame cost of your rows.
+- Use [`nsh test --trace` with a `scroll` step](./testing-and-trace.md#scrolling) to measure the per-frame cost of your rows.
 
 ## Related
 

@@ -29,7 +29,7 @@ Describe any breaking changes introduced by this pull request. If none, remove t
 
 ## Performance
 
-For changes to a hot path: before / after `nsh trace` timings and mount item counts. If none, remove this section.
+For changes to a hot path: before / after `nsh test --trace` timings and mount item counts. If none, remove this section.
 
 ## How to Test
 
@@ -40,5 +40,5 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] I have read the [CONTRIBUTING](../CONTRIBUTING.md) document and followed the guidelines.
 - [ ] Reviewed the changes in this PR and confirmed AI generated code (if any) is accurate.
 - [ ] Passed `cargo test --workspace`, `cargo +nightly fmt --all` and clippy (including the Catalyst and Android runs for platform code).
-- [ ] Changes to what apps use are additive and recorded in `api/current` (`cargo xtask api`); `api/v*` is untouched.
+- [ ] Changes to what apps use are additive and recorded in `api/` (`cargo xtask api`); the fixture apps in `api/apps` are untouched.
 - [ ] Ran the related `examples/gallery` demos on iOS and Android (if the change is visible or platform-specific).

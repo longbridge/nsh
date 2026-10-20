@@ -1,0 +1,10 @@
+# What a user does and sees (compat/apps.rs). No system clipboard answers
+# the headless runtime: writes go through, reads are promises that stay
+# pending (and none fails).
+expect Calls: not called
+expect Failed: none
+tap id:copy
+expect Calls: 5 promises
+wait 300
+expect Failed: none
+covers [nsh/clipboard] Clipboard

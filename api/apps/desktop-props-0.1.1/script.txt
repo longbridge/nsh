@@ -1,0 +1,7 @@
+# What a user does and sees (compat/apps.rs).
+platform macos
+expect Title bar
+prop id:bar desktop.windowDrag true
+prop id:body windowDrag false
+covers [props] desktop
+covers [props] desktop.windowDrag

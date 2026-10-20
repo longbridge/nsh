@@ -49,6 +49,8 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         viewport: Size::new(320.0, 480.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os,

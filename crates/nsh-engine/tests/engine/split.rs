@@ -91,6 +91,8 @@ fn config(bundle: Bundle) -> EngineConfig {
         viewport: Size::new(390.0, 844.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
         header_heights: (44.0, 96.0),

@@ -38,6 +38,8 @@ pub(crate) struct NshPlugin {
     pub(crate) entry: PathBuf,
     /// The native modules the app imports.
     pub(crate) natives: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    /// Static native imports whose namespaces hot factories require immediately.
+    pub(crate) preloads: Option<Arc<Mutex<std::collections::BTreeSet<String>>>>,
     /// The native modules there are.
     pub(crate) modules: Arc<NativeModules>,
     /// A split bundle: dynamic imports of chunks call the runtime's chunk
@@ -189,10 +191,21 @@ impl Plugin for NshPlugin {
     ) -> HookResolveIdReturn {
         let spec = args.specifier;
         if self.modules.contains(spec) {
+            // Hot factories keep external import() expressions. Preloading
+            // their namespaces would turn an optional native API into an
+            // eager dependency, including on hosts where it is unavailable.
             self.natives
                 .lock()
                 .expect("natives lock")
                 .insert(spec.to_owned());
+            if !args.kind.is_dynamic()
+                && let Some(preloads) = &self.preloads
+            {
+                preloads
+                    .lock()
+                    .expect("preloads lock")
+                    .insert(spec.to_owned());
+            }
             return Ok(Some(HookResolveIdOutput {
                 external: Some(true.into()),
                 ..HookResolveIdOutput::from_id(spec)
@@ -207,7 +220,14 @@ impl Plugin for NshPlugin {
                 "{from}`{spec}` is not part of nsh apps: import signal, computed, effect, batch, untracked, cleanup, context and mount from \"nsh\""
             )));
         }
-        if spec.starts_with("nsh/") || spec.starts_with("nsh:") {
+        // Rolldown may otherwise replace unsupported Node builtins with browser
+        // shims. These are absent from the reference runtime catalog.
+        if ["events", "assert", "util", "string_decoder", "fs"].contains(&spec)
+            || spec.starts_with("node:")
+            || spec.starts_with("@nsh/llrt-types/")
+            || spec.starts_with("nsh/")
+            || spec.starts_with("nsh:")
+        {
             return Err(self.refuse(format!("{from}nsh has no module `{spec}`")));
         }
         Ok(None)
@@ -274,7 +294,10 @@ impl Plugin for NshPlugin {
         let path = Path::new(args.id);
         let entry = path == self.entry;
         let script = matches!(args.module_type, ModuleType::Ts | ModuleType::Js);
-        if !(jsx_module || entry || self.hot && script) {
+        // A module that reads `import.meta` gets its own URL (`metaUrl`).
+        // (JSON, text and CSS modules are not code, whatever they say.)
+        let meta = script && args.code.contains("import.meta");
+        if !(jsx_module || entry || self.hot && script || meta) {
             return Ok(None);
         }
         let hot_key = self.hot.then(|| self.rel(path));
@@ -298,6 +321,7 @@ impl Plugin for NshPlugin {
             args.code,
             prologue.as_deref(),
             hot_key.as_deref(),
+            Some(&self.rel(path)),
             &self.modules,
         )
         .map_err(|detail| self.fail(path, &detail))?;

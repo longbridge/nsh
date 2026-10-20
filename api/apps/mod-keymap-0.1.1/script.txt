@@ -1,0 +1,11 @@
+# What a user does and sees (compat/apps.rs). The headless runtime is iOS,
+# an Apple platform: Apple's symbols, and Command+Q kept by the platform.
+expect Label: ⇧⌘L
+expect Label F5: F5
+expect Label alt: ⌥↩
+expect Invalid: refused
+expect Kept: refused
+expect Bound: not bound
+tap id:bind
+expect Bound: function function
+covers [nsh/keymap] keymap

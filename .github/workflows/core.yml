@@ -4,7 +4,8 @@ name: Core
 # graph, the macros, the JS runtime, the engine, the bundler, signed packages
 # and `nsh/ui/mobile`. The platform workflows test their backends and the
 # tooling only, so these ran nowhere but on developers' machines. The
-# engine's tests also hold the API to the baselines in `api/`
+# engine's tests also hold the API to its record in `api/`, which only
+# grows: nothing in it at the merge base with main may be gone
 # (docs/dev/compatibility.md).
 
 on:
@@ -77,6 +78,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The API record at the merge base with main (`compat::
+          # nothing_merged_is_removed`) needs main and the history.
+          fetch-depth: 0
 
       # QuickJS is C (bindgen needs libclang); none of these crates needs a
       # platform backend.

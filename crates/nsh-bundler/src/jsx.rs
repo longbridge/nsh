@@ -100,6 +100,7 @@ const HELPERS: &[&str] = &[
     "each",
     "merge",
     "setup",
+    "metaUrl",
     "ref",
 ];
 
@@ -147,9 +148,11 @@ pub(crate) fn transform<'a>(
     scoping: &Scoping,
     source: &str,
     prologue: Option<&str>,
+    meta_path: Option<&str>,
     modules: &crate::compile::NativeModules,
 ) -> Result<(), String> {
     let mut compiler = Compiler {
+        meta_path,
         allocator,
         scoping,
         scopes: Vec::new(),
@@ -471,6 +474,16 @@ struct Compiler<'a, 's> {
     components: &'s [(String, String)],
     /// The primitives the module imports, by local name.
     primitives: HashMap<String, Compiled>,
+    /// The module's path in the app: `import.meta.url` becomes its URL.
+    meta_path: Option<&'s str>,
+}
+
+/// Whether `e` is `import.meta.url`.
+fn is_import_meta_url(e: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(m) = e else {
+        return false;
+    };
+    m.property.name == "url" && matches!(&m.object, Expression::ImportMeta(_))
 }
 
 impl<'a> VisitMut<'a> for Compiler<'a, '_> {
@@ -486,7 +499,18 @@ impl<'a> VisitMut<'a> for Compiler<'a, '_> {
     }
 
     fn visit_expression(&mut self, e: &mut Expression<'a>) {
-        if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
+        if let Some(path) = self.meta_path
+            && is_import_meta_url(e)
+        {
+            // The module's own URL, which the runtime knows: the bundle
+            // shares one `import.meta`.
+            let call = format!(
+                "{}({})",
+                self.use_helper("metaUrl"),
+                serde_json::to_string(path).expect("a path is JSON")
+            );
+            *e = self.parse(&call, Vec::new(), e.span());
+        } else if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
             let span = e.span();
             let jsx = e.take_in(&AstBuilder::new(self.allocator));
             let mut g = Gen { holes: Vec::new() };
@@ -1203,13 +1227,32 @@ impl<'a> Compiler<'a, '_> {
             self.error("<If> needs `when`", span);
             return "undefined".to_owned();
         };
+        let cond = self.use_helper("cond");
+        // `{(user) => …}`: the child is called with an accessor of `when`'s
+        // value, truthy while the branch shows (Solid's `<Show>`); `when`
+        // is read through it, once per read.
+        if lone_function_child(&el.children) {
+            let mut render = String::new();
+            for child in el.children {
+                if let JSXChild::ExpressionContainer(c) = child
+                    && let Some(e) = self.expression(c.unbox().expression)
+                {
+                    render = g.hole(e);
+                }
+            }
+            let then = format!("() => ({render})({HOLE}w)");
+            let branches = match get("else") {
+                Some(otherwise) => format!("{then}, () => {otherwise}"),
+                None => then,
+            };
+            return format!("(({HOLE}w) => {cond}({HOLE}w, {branches}))(() => {when})");
+        }
         let values = self.children(el.children, g, Mode::Value);
         let then = match values.as_slice() {
             [] => "undefined".to_owned(),
             [one] => one.clone(),
             many => format!("[{}]", many.join(", ")),
         };
-        let cond = self.use_helper("cond");
         match get("else") {
             Some(otherwise) => {
                 format!("{cond}(() => {when}, () => {then}, () => {otherwise})")
@@ -1266,6 +1309,21 @@ impl<'a> Compiler<'a, '_> {
     }
 }
 
+/// Whether `children` are one function written in place, whitespace aside
+/// (`<If>`'s `{(value) => …}`).
+fn lone_function_child(children: &[JSXChild<'_>]) -> bool {
+    let mut meaningful = children
+        .iter()
+        .filter(|c| !matches!(c, JSXChild::Text(t) if clean_text(&t.value).is_none()));
+    match (meaningful.next(), meaningful.next()) {
+        (Some(JSXChild::ExpressionContainer(c)), None) => matches!(
+            c.expression,
+            JSXExpression::ArrowFunctionExpression(_) | JSXExpression::FunctionExpression(_)
+        ),
+        _ => false,
+    }
+}
+
 fn member(m: &JSXMemberExpression<'_>) -> String {
     let object = match &m.object {
         JSXMemberExpressionObject::IdentifierReference(r) => r.name.to_string(),
@@ -1313,6 +1371,7 @@ mod tests {
             source,
             None,
             None,
+            Some("App.tsx"),
             &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry().into()]),
         )
         .map(|c| c.code)
@@ -1334,6 +1393,22 @@ mod tests {
     /// The code with whitespace collapsed, for comparisons.
     fn flat(code: &str) -> String {
         code.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn import_meta_url_is_the_module_s_own() {
+        let code =
+            compile("const here = new URL(\".\", import.meta.url); const meta = import.meta;")
+                .unwrap();
+        assert!(
+            code.starts_with(r#"import { metaUrl as _$metaUrl } from "nsh:rt";"#),
+            "{code}"
+        );
+        assert!(
+            code.contains(r#"new URL(".", _$metaUrl("App.tsx"))"#),
+            "{code}"
+        );
+        assert!(code.contains("const meta = import.meta;"), "{code}");
     }
 
     #[test]
@@ -1637,6 +1712,27 @@ mod tests {
             </View>;"#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn an_if_with_a_function_child_hands_it_an_accessor_of_when() {
+        let code = flat(
+            &compile(
+                r#"import { Text } from "nsh";
+            declare const user: () => { name: string } | null;
+            export const a = <If when={user()} else={<Text>out</Text>}>
+              {(u) => <Text>{u().name}</Text>}
+            </If>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            code.contains("((__nsh_hw) => _$cond(__nsh_hw, () => ((u) => (() => {"),
+            "{code}"
+        );
+        // Called with the accessor; `else` as it was; `when` read through it.
+        assert!(code.contains("})())(__nsh_hw), () => (() => {"), "{code}");
+        assert!(code.contains("))(() => user());"), "{code}");
     }
 
     #[test]

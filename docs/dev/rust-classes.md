@@ -196,6 +196,46 @@ For that, two choices of the first version change:
 - **Arguments and results** are the module functions' types (`JsValue`: numbers, `bool`, strings, `Option`, `Vec`,
   `JsonValue`, `#[derive(JsObject)]` structs, `#[derive(PropEnum)]` enums), so classes and modules share one set of
   conversions and TypeScript types (`Arg` and `Ret` over them); a trailing `Option` parameter is optional.
+  `Vec<u8>` is bytes: a `Uint8Array` (a `Buffer` too), copied in the call (`u8` is no `JsValue`, so it never
+  overlaps the arrays); `SystemTime` is a `Date`. `#[prop(exact)]` on a `JsObject` struct refuses other own keys
+  (options, where a typo must not pass), and `#[prop(skip_none)]` on an `Option` field leaves it out when `None`
+  rather than `null` (`process`' exit `error`).
+- **Interfaces**: `#[class(interface)]` on the struct makes a class whose objects come from members only: its
+  module exports no value of it and TypeScript declares an `interface` (`fs/promises`' `Stats`); it has no
+  constructor or statics. Its getters are read once when its object is made, as own enumerable data properties
+  (so `Object.keys`, spread and `JSON.stringify` see them, as Node's `Stats`' fields), its methods stay on the
+  prototype (`nsh-js` `classes.rs`). A result `Vec<Instance<T>>` is an array of objects.
+- **The VM's `System`**: a parameter `sys: System` of a function or member (any kind) is not one JS passes: the
+  call fills it in (an `async` one when it is made) with the app's `Access`, its data directory, the host's
+  `TrustedPaths`, the VM's `Quotas` (counts of limited resources, `quotas.take(kind, max)` or
+  `quotas.reserve(kind, amount, max)` giving a `Held` back when dropped) and the surface's `Os`. The host provides it (`JsHost::system`); one that configured nothing grants nothing.
+- **Work started in the call**: a function or method that is not `async` and returns `Later<T>` (or
+  `Result<Later<T>, E>`) runs in the JS call, where its checks throw as a synchronous call's do, and the work it
+  returns runs as a core task: TS `Promise<T>` (`FunctionCall::Start`, `MemberCall::Start`). The system modules
+  use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`, `fs/promises`).
+- **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
+  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A `Later`
+  task's (and an `async` function's) `Err(JsError)` rejects with the same, any other error with an `Error` of its
+  message (the reply carries a `Thrown`). `JsError::with(key, value)` / `with_code(code)` add properties
+  (`JsError::Fields`), so errors keep Node's shape: `code`, `syscall`, `path` (`error.code === "ENOENT"`);
+  `JsError::from(io::Error)` and `io_code` name an I/O error's code from its OS error or kind. The system modules
+  share it (`fs/promises`; `process` and `net` can).
+- **What a synchronous call can do beyond computing**: a parameter `cx: CallCx` (filled in by the call, never in an
+  `async` one) starts a task of the core in order with the ops (`cx.start(future)`, nothing waits for it) and ties
+  work to what owns the call in JS (`cx.on_cleanup(f)`: the reactive owner, else the module's run under hot
+  reload). `process.spawn` returns its child at once and delivers the child's events from such a task.
+- **The VM's own state**: `sys.locals.get::<T: Local>()` is one `T` per VM, made on first use and closed
+  (`Local::close`) when the VM goes, before its callbacks are released (`process`'s children).
+- **Getters of a module**: `#[getter]` on a function without JS parameters makes it a property of the module's
+  object (`process.env`), declared `readonly`, never a named export. A flat default module's object also carries
+  the registry's native values (`Registry::native_values`: `process.nextTick`), and stays one object per VM, so
+  a global made from it (`process`) is the default export.
+- **`this` in a synchronous method**: `fn on(this: Instance<Self>, ..) -> Instance<Self>` gets the handle instead
+  of a borrow, so it can return its own object (`child.on(..)` chains).
+- **Overloads**: `#[overload(fn(event: ExitEvent, handler: Callback<ExitResult>) -> Instance<ChildProcess>)]`
+  (repeatable) on a module function or a member declares those signatures, from their Rust types, instead of
+  the one its own types give (the result is a promise when the function's is): what an argument selects
+  (`on("exit", ..)`, `readFile(path, "utf8")`).
 - **Instances of classes**, by reference: a parameter `&Other` / `&mut Other` borrows another instance for the call
   (TS: `other: Other`), `Instance<Other>` keeps a handle (to store one instance in another), and a result `Other`
   or `Instance<Other>` is a JS object (`Self` from `new` and statics; `Option<Instance<Other>>` for none). An
@@ -209,10 +249,10 @@ For that, two choices of the first version change:
 
 A parameter `Callback<A, R = ()>` takes a JS function: `A` is its argument (a `JsValue` type, or a tuple for
 several), `R` what it returns. TS: `Callback<f64>` is `(value: number) => void`, `Callback<(String, f64), bool>`
-`(a: string, b: number) => boolean`; `#[args(..)]` on the parameter names the function's arguments, checked at
-compile time to name each (`#[args(name, amount)] check: Callback<(String, f64), bool>` is `check: (name: string,
-amount: number) => boolean`), in classes, modules and ref methods alike. The attribute is the macros': it is
-removed from the function they leave.
+`(a: string, b: number) => boolean`; `#[args(..)]` on the parameter (a function's, a member's or an `#[overload]`'s)
+names the function's arguments, checked at compile time to name each (`#[args(name, amount)] check: Callback<(String,
+f64), bool>` is `check: (name: string, amount: number) => boolean`), in classes, modules and ref methods alike. The
+attribute is the macros': it is removed from the function they leave.
 
 ```rust
 #[class]
@@ -253,7 +293,9 @@ impl Downloader {
   never holds back later posts), and what the ops JS sent before it post while the core applies them goes before
   it. So an op function posting and then a synchronous one posting arrive in that order, and a task posting while
   JS is still busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
-  dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
+  dropped and their replies say so. `call_async_traced` is `call_async` with what was thrown whole (`Exception`: its
+  message and, for an `Error`, its stack), for a caller that says where it was thrown (`nsh test`'s failures).
+  `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
   out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
 - **In a finalizer:** a value whose JS object goes drops inside QuickJS's finalizer, where no JS may run. That is
   every finalizer, not only a collection's sweep: an object freed because its last reference went (a refcount
@@ -278,6 +320,9 @@ impl Downloader {
   (it runs in the collector's mark phase), part of its safety contract.
 - **Functions take them too:** `fn watch(path: String, on_change: Callback<String>)` (`on_change` kept and posted
   later), and `async` functions and members can `call_async`.
+- **Listeners**: an instance keeps them in a field (`listeners: Vec<Callback<String>>`, added by
+  `on(&mut self, listener: Callback<String>)`) and its tasks post to them (`Later` work cloning the field); the
+  field is traced like any other, so no event machinery is needed for `child.on("stdout", ..)`.
 
 
 ## How calls cross
@@ -326,7 +371,8 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   error: it can only be TS's). `new`
   is the constructor (a class without one cannot be made from JS, only returned); `&self` / `&mut self` methods,
   `#[getter]` / `#[setter]` (one name: `count` and `set_count` are the property `count`), functions without `self`
-  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations':
+  are statics, `async fn` with `this: Instance<Self>` are async methods. A raw identifier is its name in TS
+  (`r#type` is `type`). Doc comments become the declarations':
   the struct's documents the class, as a module's struct (`#[module]` on it and on its `impl`, `ModuleDoc`) does
   the module and a component's `#[component] fn` the component; one on a `#[class]` or `#[module]` `impl` block is a
   compile error (TS would not show it). TS gets a doc comment up to its first heading (`nsh-macros` `docs`, outside

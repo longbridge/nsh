@@ -959,9 +959,43 @@ pub(crate) unsafe extern "C" fn effect(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let mut args = [arg(argc, argv, 0)];
-    // SAFETY: as above.
-    unsafe { create_user_effect(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+    let mut data = [arg(argc, argv, 0)];
+    // SAFETY: the function keeps a dup of `fn`; the effect a dup of it.
+    unsafe {
+        let run = qjs::JS_NewCFunctionData(ctx, Some(effect_run), 0, 0, 1, data.as_mut_ptr());
+        let mut args = [run];
+        let r = create_user_effect(ctx, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(ctx, run);
+        r
+    }
+}
+
+/// A run of an `effect(fn)`: a function `fn` returns is its cleanup, as
+/// `cleanup(f)` in it would be (React's habit): it runs before the effect
+/// runs again or goes away. Anything else returned (an async effect's
+/// promise) is dropped.
+unsafe extern "C" fn effect_run(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`effect`); the result is owned.
+    unsafe {
+        let r = qjs::JS_Call(ctx, *data, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(r) {
+            return r;
+        }
+        if qjs::JS_IsFunction(ctx, r) {
+            // The effect is the running owner.
+            add_cleanup(ctx, r);
+        } else {
+            qjs::JS_FreeValue(ctx, r);
+        }
+    }
+    UNDEFINED
 }
 
 // --- For the renderer -------------------------------------------------------

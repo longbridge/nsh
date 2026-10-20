@@ -105,6 +105,8 @@ impl Host {
             viewport,
             trace: self.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(ViewAssets(self.clone()))),
             environment: *self.environment.lock().expect("environment"),
             // Android's toolbar is 56dp; it has no large titles.

@@ -22,7 +22,7 @@ import { Button, SafeAreaView } from "nsh/ui/mobile";
 
 NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方。平台专有的 API 位于 `nsh/ios`、`nsh/android` 和 `nsh/desktop`（macOS、Windows、Linux）；这些模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行（在其他平台上调用它们什么也不做，`isAvailable` 告诉你当前是否在该平台上）。
 
-类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh trace` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
+类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh test` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
 
 ## 全部模块
 
@@ -46,6 +46,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | 导航（`createNavigator`、`Stack`、`Screen`、`Modal`）、`SafeAreaView`、`StatusBar`、`Alert`、`ActionSheet`、`Keyboard`、`Button`、`TextField` 等 | [组件](../components/index.md) |
+| Standard modules | `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib` | [标准模块](./standard-modules.md) |
 | 全局对象 | `fetch`、`URL`、`TextEncoder`、`Blob`、`FormData`、`AbortController`、`Intl`、定时器、`console`、`requestAnimationFrame` 等（无需导入） | [全局 API](./globals.md) |
 
 以下参考页面不对应模块：

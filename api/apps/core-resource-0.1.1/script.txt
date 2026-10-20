@@ -1,0 +1,26 @@
+# What a user does and sees (compat/apps.rs).
+expect Resource: empty state unresolved loading false error undefined
+expect Initialized: initial state refreshing
+tap id:start
+expect Resource: empty state pending loading true error undefined
+expect Load: 1 refetch false
+tap id:resolve
+expect Resource: loaded state ready loading false error undefined
+tap id:refresh
+expect Resource: loaded state refreshing loading true error undefined
+expect Load: 1 refetch true
+tap id:reject
+expect Resource: loaded state errored loading false error failed
+tap id:mutate
+expect Resource: optimistic state ready loading false error undefined
+tap id:refresh
+expect Resource: optimistic state refreshing loading true error undefined
+tap id:next
+expect Load: 2 refetch false
+expect Aborted: true
+tap id:stale
+expect Resource: optimistic state refreshing loading true error undefined
+absent Resource: stale state ready loading false error undefined
+tap id:resolve
+expect Resource: loaded state ready loading false error undefined
+covers [nsh] resource

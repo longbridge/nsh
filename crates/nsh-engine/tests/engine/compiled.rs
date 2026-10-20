@@ -63,6 +63,8 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         viewport: Size::new(390.0, 844.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
         header_heights: (44.0, 96.0),
@@ -200,6 +202,8 @@ fn start_app(app: &str) -> (Engine, Receiver<MountBatch>) {
         viewport: Size::new(390.0, 844.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
         header_heights: (44.0, 96.0),
@@ -521,6 +525,56 @@ fn a_new_value_replaces_the_effect_of_its_items() {
     }
 }
 
+const IF_VALUE: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+const user = signal<{ name: string } | null>(null);
+mount(() => (
+  <View>
+    <If when={user()} else={<Text>signed out</Text>}>
+      {(u) => <Text>{`hello ${u().name}`}</Text>}
+    </If>
+    <Text onPress={() => user.set({ name: user()?.name === "Ada" ? "Grace" : "Ada" })}>next</Text>
+    <Text onPress={() => user.set(null)}>out</Text>
+  </View>
+));
+"#;
+
+/// An `<If>`'s function child gets an accessor of `when`: the branch is
+/// made when it turns truthy, follows its value in place while it stays
+/// so, and goes when it turns falsy.
+#[test]
+fn an_if_hands_its_function_child_the_value() {
+    let (engine, rx) = start_app(IF_VALUE);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(texts(&first).contains(&"signed out".to_owned()));
+    let (next_id, out) = (
+        text_id(&first, "next").expect("next"),
+        text_id(&first, "out").expect("out"),
+    );
+    let press = |id| control.dispatch_event(id, EventKind::Press, EventPayload::None);
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Ada".to_owned()));
+    let hello = text_id(&batch, "hello Ada").expect("the branch's text");
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Grace".to_owned()));
+    // The same text, updated: the branch stayed.
+    assert_eq!(text_id(&batch, "hello Grace"), Some(hello));
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Create { .. })),
+        "{:#?}",
+        batch.items
+    );
+    press(out);
+    next(&rx, |b| texts(b).contains(&"signed out".to_owned()));
+}
+
 const REFS: &str = r#"
 import { Input, mount, signal, Text, View, type YNode } from "nsh";
 import { Stepper, type StepperRef } from "nsh/ui/mobile";
@@ -573,4 +627,75 @@ fn refs_reach_variables_signals_fields_and_functions() {
         "{:?}",
         texts(&batch)
     );
+}
+
+const CONTENT_SIZE: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+
+const size = signal("none");
+mount(() => (
+  <View>
+    <Input
+      placeholder="A much longer placeholder"
+      style={{ width: 300, height: 40 }}
+      onContentSizeChange={(e) => size.set(`${e.width}x${e.height}`)}
+    />
+    <Text>{`size ${size()}`}</Text>
+  </View>
+));
+"#;
+
+/// A fixed-size input reports the size of its text as the user types (its
+/// own frame never changes), and an empty one the size of an empty line,
+/// not its placeholder's.
+#[test]
+fn inputs_report_their_text_size_as_it_changes() {
+    let (engine, rx) = start_app(CONTENT_SIZE);
+    let mut input = None;
+    let mut size = String::new();
+    // The batches until the size shown is not `last`.
+    let mut wait = |last: &str| {
+        loop {
+            let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
+            for item in &batch.items {
+                match item {
+                    MountItem::Create {
+                        id,
+                        kind: nsh_core::ViewKind::Input,
+                    } => input = Some(*id),
+                    MountItem::Text { text, .. } if text.text.starts_with("size ") => {
+                        size = text.text.clone();
+                    }
+                    _ => {}
+                }
+            }
+            if size != last && size != "size none" && !size.is_empty() {
+                return (input.expect("an input"), size.clone());
+            }
+        }
+    };
+    let (input, empty) = wait("");
+    // An empty line (ApproxTextEngine gives its zero-width space a width).
+    assert_eq!(empty, "size 8x17");
+    let control = engine.control();
+    let mut last = empty;
+    for (count, (text, want)) in [
+        ("ab", "size 16x17"),
+        ("abc", "size 24x17"),
+        ("", "size 8x17"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        control.dispatch_event(
+            input,
+            EventKind::ChangeText,
+            EventPayload::Text {
+                text: text.into(),
+                count: count as u32 + 1,
+            },
+        );
+        last = wait(&last).1;
+        assert_eq!(last, want, "after {text:?}");
+    }
 }

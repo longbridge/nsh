@@ -1,0 +1,9 @@
+expect Menu: none
+expect Refs: unchecked
+listens id:menu onContextMenu
+event id:menu onContextMenu locationX=2.5 locationY=-3 pageX=42 pageY=61 altKey=true ctrlKey=false metaKey=true shiftKey=false
+expect Menu: 2.5,-3 page 42,61 modifiers true,false,true,false
+tap id:check-refs
+expect Refs: assigned
+covers [events] onContextMenu
+covers [nsh:rt] ref

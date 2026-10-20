@@ -15,12 +15,15 @@ Things that were found the hard way. Read the section of the area you change bef
   the heap ran out are dropped, the VM stops with that report.
 - **The JS object graph must stay reachable from a GC root.** The renderer holds the root node, which holds its children's
   objects and each node its handlers (`dom.rs`, reported by the classes' GC marks). Without that the whole rendered app (nodes,
-  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh trace` taps after 1.2s of idling by
-  default; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
+  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh test App.tsx` runs the steps of stdin after 1.2s of idling
+  for that; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`
-  is tested against the linked QuickJS version: update both when upgrading rquickjs.
+  names the QuickJS-NG release and revision, `BC_VERSION` and the byte order, never the binding. Native and
+  browser targets use `quickjs-jit` (the browser uses its interpreter and pregenerated bindings) and must build
+  the same QuickJS-NG, as the web runtime loads what the native CLI compiles. Tests hold it to the linked release, the bytecode's format byte and the `-sys` versions
+  in `Cargo.lock` (`ENGINES`): update them together when upgrading either.
 - **Encoded operations' codes** (`ANIMATION_*`, `CV_*`) come from `nsh_core::js` (`protocol.rs`, `canvas.rs`): never write a code's value
   by hand in `nsh-js`.
 - **rquickjs converts `Option::None` to `undefined`, not `null`**: compare native results with `== null` in JS.
@@ -222,6 +225,10 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
+  Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
+  (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
+
 - **Changing `FullSizeContentView` can leave the content at its old size after `setStyleMask:` returns**:
   a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
@@ -288,7 +295,9 @@ Things that were found the hard way. Read the section of the area you change bef
   (`native::take_keyboard`), and `--script`'s `type` / `key` post to that window while it has the focus. A
   `MoveFocus` right after the click needs a few hundred milliseconds before typed characters reach the page.
 - **`std::fs::canonicalize` returns verbatim paths** (`\\?\C:\…`), which rolldown and path prefix comparisons do not
-  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid.
+  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid;
+  capability checks, trusted anchors and grant roots all go through `nsh_core::access::canonicalize`, which does the
+  same, so both sides of a containment check have one form.
 - **Git Bash sets `LANG`** whatever the user's settings: the Windows backend's locale is the user's regional format
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and

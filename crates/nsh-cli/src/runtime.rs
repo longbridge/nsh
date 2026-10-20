@@ -297,6 +297,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
             .args(features)
             .args(["--target", WASM])
             .current_dir(&root);
+        web_build_flags(&mut command);
         // QuickJS' archive needs an `ar` that knows WebAssembly objects.
         let ar = format!("AR_{}", WASM.replace('-', "_"));
         if env::var_os(&ar).is_none() && env::var_os("AR").is_none() {
@@ -357,6 +358,7 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         let target_dir = target_dir.to_string_lossy();
         if matches!(platform, Platform::Gpui) {
             args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+            args.extend(gpui_features());
         }
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
@@ -388,6 +390,33 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     existing(built, platform, name)
 }
 
+/// The cargo arguments a build of a GPUI host or runner adds: on a Mac
+/// where Xcode cannot run `metal`, which GPUI's build script precompiles
+/// its shaders with, `nsh-platform-gpui`'s `runtime-shaders` feature, so
+/// GPUI compiles them when the app starts. Every GPUI host and runner,
+/// the checkout's and those of apps with Rust crates, depends on
+/// `nsh-platform-gpui`.
+pub(crate) fn gpui_features() -> &'static [&'static str] {
+    if !metal_toolchain_missing() {
+        return &[];
+    }
+    crate::ui::note(
+        "no Metal Toolchain: GPUI compiles its shaders when the app starts \
+         (`xcodebuild -downloadComponent MetalToolchain` installs one to precompile them)",
+    );
+    &["--features", "nsh-platform-gpui/runtime-shaders"]
+}
+
+/// Whether this is a Mac where Xcode cannot run `metal` (no Metal
+/// Toolchain).
+fn metal_toolchain_missing() -> bool {
+    cfg!(target_os = "macos")
+        && !Command::new("xcrun")
+            .args(["metal", "--version"])
+            .output()
+            .is_ok_and(|out| out.status.success())
+}
+
 /// The workspace of a cargo checkout of nsh this CLI was built in
 /// (`<root>/target/<profile>/nsh`), if it is one.
 fn checkout(bin: &Path) -> Option<PathBuf> {
@@ -395,6 +424,36 @@ fn checkout(bin: &Path) -> Option<PathBuf> {
     root.join("crates/nsh-ios-host/Cargo.toml")
         .exists()
         .then(|| root.to_owned())
+}
+
+/// Selects the browser entropy provider for all dependencies of a web build.
+/// Cargo config arrays merge, preserving the workspace's stack link argument.
+pub(crate) fn web_build_flags(command: &mut Command) {
+    append_web_flags(
+        command,
+        env::var_os("CARGO_ENCODED_RUSTFLAGS"),
+        env::var_os("RUSTFLAGS")
+            .or_else(|| env::var_os("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS")),
+    );
+}
+
+fn append_web_flags(command: &mut Command, encoded: Option<OsString>, plain: Option<OsString>) {
+    // Environment flags override Cargo config, so append there when present.
+    if let Some(mut flags) = encoded {
+        if !flags.is_empty() {
+            flags.push("\x1f");
+        }
+        flags.push("--cfg\x1fgetrandom_backend=\"custom\"");
+        command.env("CARGO_ENCODED_RUSTFLAGS", flags);
+    } else if let Some(mut flags) = plain {
+        flags.push(" --cfg getrandom_backend=\"custom\"");
+        command.env("RUSTFLAGS", flags);
+    } else {
+        command.args([
+            "--config",
+            r#"target.wasm32-unknown-unknown.rustflags=["--cfg", "getrandom_backend=\"custom\""]"#,
+        ]);
+    }
 }
 
 /// Runs cargo in the checkout `root` (the one that runs this CLI under
@@ -422,6 +481,48 @@ fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<Pat
 #[cfg(test)]
 mod tests {
     use super::Platform;
+
+    #[test]
+    fn web_entropy_flags_preserve_existing_rustflags() {
+        use std::{ffi::OsString, process::Command};
+
+        for (encoded, plain, key, expected) in [
+            (
+                Some("-C\x1flink-arg=-zstack-size=8388608"),
+                None,
+                "CARGO_ENCODED_RUSTFLAGS",
+                "-C\x1flink-arg=-zstack-size=8388608\x1f--cfg\x1fgetrandom_backend=\"custom\"",
+            ),
+            (
+                None,
+                Some("-C link-arg=-zstack-size=8388608"),
+                "RUSTFLAGS",
+                "-C link-arg=-zstack-size=8388608 --cfg getrandom_backend=\"custom\"",
+            ),
+        ] {
+            let mut command = Command::new("cargo");
+            super::append_web_flags(
+                &mut command,
+                encoded.map(OsString::from),
+                plain.map(OsString::from),
+            );
+            assert_eq!(
+                command
+                    .get_envs()
+                    .find(|(name, _)| *name == key)
+                    .unwrap()
+                    .1
+                    .unwrap(),
+                expected
+            );
+        }
+        let mut command = Command::new("cargo");
+        super::append_web_flags(&mut command, None, None);
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args[0], "--config");
+        assert!(args[1].to_str().unwrap().contains("getrandom_backend"));
+        assert!(command.get_envs().next().is_none());
+    }
 
     #[test]
     fn gpui_runtimes_are_built_for_this_machine() {

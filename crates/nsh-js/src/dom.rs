@@ -3195,8 +3195,47 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
     ("setup", Export::Function(setup, 3), Ts::Internal),
     ("font", Export::Function(font, 2), Ts::Internal),
+    ("metaUrl", Export::Function(meta_url, 1), Ts::Internal),
     ("ref", Export::Function(ref_, 3), Ts::Internal),
 ];
+
+/// `metaUrl(path)`: what `import.meta.url` of the app's module `path`
+/// (relative to the app's directory) compiles to. The app's directory
+/// is a `file:` URL where the host has one (`${pluginDir}`: a local or
+/// packaged desktop app), else the page's URL (the web), else `asset:/`,
+/// whose relative URLs the app's assets resolve (packaged mobile apps,
+/// devices on the dev server).
+unsafe extern "C" fn meta_url(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let Some(path) = string_arg(ctx, arg(argc, argv, 0)) else {
+        return qjs::JS_EXCEPTION;
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let located = dom(ctx)
+        .shared
+        .system_paths
+        .borrow()
+        .plugin_dir
+        .clone()
+        .and_then(|dir| url::Url::from_directory_path(dir).ok());
+    // A page has no directory of its own on disk.
+    #[cfg(target_arch = "wasm32")]
+    let located = None;
+    let base = located
+        .or_else(|| crate::web::web(ctx).base_url.clone())
+        .or_else(|| url::Url::parse("asset:/").ok());
+    let url = base
+        .and_then(|base| base.join(&path).ok())
+        .map_or_else(|| format!("asset:/{path}"), String::from);
+    match crate::web::js::string(ctx, &url) {
+        Ok(v) => v.take(),
+        Err(_) => qjs::JS_EXCEPTION,
+    }
+}
 
 /// `font(uri, family)`: what `import Inter from "./Inter.ttf"` evaluates
 /// to (its family); the host registers the font before the first frame.

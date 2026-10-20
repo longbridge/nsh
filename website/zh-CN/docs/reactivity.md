@@ -188,6 +188,15 @@ effect(() => {
 });
 ```
 
+effect 也可以像 React 那样直接返回清理函数：`fn` 返回的函数和传给 `cleanup` 的函数在同样的时机运行。
+
+```tsx
+effect(() => {
+  const id = setInterval(tick, 100);
+  return () => clearInterval(id);
+});
+```
+
 组件不再被渲染时就会被销毁：它所在的 `<If>` 分支被隐藏、所在的 `<Each>` 行被移除，或者它的页面被弹出。它创建的一切（effect、computed 值、cleanup、嵌套组件）都会随之释放。
 
 ## batch

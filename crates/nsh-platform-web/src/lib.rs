@@ -25,9 +25,11 @@ mod animation;
 mod canvas;
 mod encode;
 mod ffi;
+mod filesystem;
 mod net;
 mod storage;
 mod text;
+mod websocket;
 
 use std::{
     cell::{Cell, RefCell},
@@ -47,8 +49,10 @@ use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
 pub use crate::{
+    filesystem::nsh_filesystem_reply,
     net::{nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head},
     storage::nsh_storage_reply,
+    websocket::{nsh_websocket_event, nsh_websocket_reply},
 };
 
 thread_local! {
@@ -499,11 +503,15 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
 fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limits) -> f64 {
     let storage =
         BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
+    let namespace = BASE_URL.with(|b| {
+        nsh_engine::local_storage_prefix(app.app_id(), b.borrow().as_deref().unwrap_or(""))
+    });
     let config = EngineConfig {
         app,
         viewport: Size::new(width, height),
         trace: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
+        websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
         // A desktop browser's headers are as tall as the desktop backends'
@@ -516,7 +524,10 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         limits,
         ui_sets: ui_sets(),
         runtime: None,
-        data_dir: None,
+        data_dir: Some("/app-data".into()),
+        filesystem: Some(std::sync::Arc::new(filesystem::BrowserFileSystem {
+            namespace,
+        })),
         storage: Some(std::sync::Arc::new(storage)),
     };
     let text = Rc::new(WebTextEngine::default());

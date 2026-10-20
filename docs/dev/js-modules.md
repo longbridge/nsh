@@ -81,3 +81,46 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   `desktop={{…}}`.
 - Never a React Native compatibility wrapper. Something released that moves keeps its old name and module as a
   deprecated alias (`compatibility.md`); something unreleased simply moves.
+
+## Standard modules
+
+The standard catalog is eleven bare specifiers, `nsh_core::js::STANDARD_MODULES`, shared by the bundler (which
+keeps their imports) and the loader: `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`,
+`process`, `url`, `websocket` and `zlib`. Only these names import: `node:buffer` and the Node modules outside the
+catalog (`fs`, `events`, `assert`, `util`, `string_decoder`, `child_process`, ...) are refused (tests:
+`nsh-js` `tests/standard/imports.rs`, which also checks that each module's runtime exports are its declared ones).
+The loader asks the module table first (typed registries own their names), then `standard::load`.
+
+| Module | Where | Exports |
+|---|---|---|
+| `os` | `nsh_core::runtime::os` (`#[module(flat, default)]`) | `platform()`, `arch()`, `homedir()`, `EOL`, default |
+| `fs/promises` | `nsh_core::runtime::fs` | `readFile`, `writeFile`, `readdir`, `exists`, `unlink`, `rmdir`, `mkdir`, `stat`, `lstat`, `rename`, `readlink`, default; `Stats` and `Dirent` are `#[class(interface)]` (declared, no value) |
+| `process` | `nsh_core::runtime::process`, `nsh-js` `standard/process.rs` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default (also `env` / `dataDir` getters); the default object is the global `process` |
+| `net` | `nsh_core::runtime::net` | `connect`, `Socket`, default |
+| `console` | `nsh-js` `standard/console.rs` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
+| `websocket` | `nsh_core::runtime::websocket`, `nsh-js` `standard/websocket.rs` (the global) | `WebSocket` (`connect`), `WebSocketConnection`; the global `WebSocket` constructor |
+| `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, vendored by `quickjs-jit-stdlib` (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
+
+The typed modules' JS face and `.nsh/types` come from their specs (`#[module]`, `#[class]`; `docs/dev/rust-classes.md`):
+grants and limits throw in the call (`Later`, `JsError`: a `TypeError` or `RangeError`), I/O failures reject, and
+the work runs as core tasks on the engine's tokio runtime (`fs/promises` on its blocking threads). A call's
+`System` carries the VM's `Access`, data directory, `TrustedPaths`, `Quotas` and per-VM state (`Locals`:
+`process`'s children, killed at once and joined together when the VM goes). `process.spawn` returns its
+`ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
+adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
+`websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake
+uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere). On native hosts a task spawned per connection drives the socket (answering pings, keeping up to eight unread
+messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket`
+(`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
+and grant no file access. On WebAssembly, `os.homedir()` returns a typed error and `process.env` an empty object;
+both avoid `std::env`, whose accessors panic on `wasm32-unknown-unknown`.
+
+QuickJS and the LLRT modules come through `quickjs-jit` and `quickjs-jit-stdlib` on native and WebAssembly targets. The WebAssembly build uses the interpreter and pregenerated bindings; the portable standard-library implementation supplies `buffer`, `crypto`, `path`, `url`, `zlib` and `zlib-zstd`, including synchronous hashing and compression. Browser entropy reaches Rust through the player's `crypto.getRandomValues` import (`standard/random.rs`); wasm builds select getrandom's custom backend. All eleven catalog modules load on both targets, with `Buffer` and `crypto` globals. On WebAssembly, `path` uses POSIX separators and a virtual `/` working directory. The crates are
+published together at one version and pinned exactly (`=0.14.1`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
+`third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
+keep their identity. `console` declares the global `console`'s type next to its implementation. The
+declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
+they differ (a symlink `exists`, listeners get the payload only, `Stats`' methods are on its prototype, the child
+environment and `cwd` rules), `website/modules/standard-modules.md` says so.
+
+On web, `System` receives a `BrowserFileSystem` and `BrowserWebSocket` from the player. `fs/promises` checks capabilities and quotas in Rust, then sends app-relative operations to the browser's persistent OPFS namespace. Browser WebSocket I/O crosses the transport bridge while Rust retains grants, size/count bounds and deadlines; custom handshake headers are rejected explicitly. `process.run` / `spawn` and raw TCP remain callable exports that report typed platform errors in a browser. `process.env` stays empty there.

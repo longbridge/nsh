@@ -71,6 +71,7 @@ mount(App);
 | `initialScrollIndex` | `number` | | 在第一帧之前滚动到该条目。 |
 | `contentContainerStyle` | `ListContentStyle` | | 内容的内边距和间距：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`（数字）。 |
 | `style` | `StyleProp<ViewStyle>` | | 列表自身的样式（需要给它尺寸：`flex: 1` 或高度）。 |
+| `testID` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
 | `ref` | `YNode \| ((node: YNode) => void)` | | 见 [ref 方法](#ref-方法)。 |
 
 `ListSlot` 是一个组件（`Header`）或一个元素（`<Header />`）。

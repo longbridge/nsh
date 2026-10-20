@@ -92,7 +92,7 @@ impl Os {
 }
 
 impl Default for Os {
-    /// The mobile OS of this build (`nsh trace` behaves as iOS); desktop
+    /// The mobile OS of this build (headless runs, `nsh test`, behave as iOS); desktop
     /// backends set theirs.
     fn default() -> Self {
         if cfg!(target_os = "android") {

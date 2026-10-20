@@ -39,6 +39,8 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         viewport: Size::new(800.0, 600.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os: Os::MacOs,

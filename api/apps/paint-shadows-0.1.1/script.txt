@@ -1,0 +1,30 @@
+# What a user does and sees (compat/apps.rs).
+expect Shadows
+style id:shadow shadowColor #000000ff
+style id:shadow shadowOffset width=2 height=4
+style id:shadow shadowOpacity 0.3
+style id:shadow shadowRadius 6
+style id:shadow-red shadowColor #ff000080
+style id:shadow-red shadowOffset width=-1 height=0
+style id:shadow-red shadowOpacity 1
+style id:shadow-red shadowRadius 0
+style id:box boxShadow 2 4 6 1 #00000080
+style id:box-two boxShadow 0 1 2 0 #00000033, inset 0 0 0 1 #ff0000ff
+style id:box-offsets boxShadow 3 3 0 0 #0000ffff
+style id:box-first boxShadow -2 -3 5 0 #ff0000ff
+style id:box-inset boxShadow inset 1 2 3 4 #00ff0088
+nostyle id:box-none boxShadow
+style id:text-shadow textShadowColor #336699ff
+style id:text-shadow textShadowOffset width=1 height=2
+style id:text-shadow textShadowRadius 3
+style id:text-shadow-alpha textShadowColor #00000080
+style id:text-shadow-alpha textShadowOffset width=-2 height=0
+style id:text-shadow-alpha textShadowRadius 0
+covers [styles] shadowColor
+covers [styles] shadowOffset
+covers [styles] shadowOpacity
+covers [styles] shadowRadius
+covers [styles] boxShadow
+covers [styles] textShadowColor
+covers [styles] textShadowOffset
+covers [styles] textShadowRadius

@@ -270,13 +270,13 @@ This is a supported use on every platform, and the quickest way to put a module 
 
 ## Try it in the terminal
 
-`nsh trace` runs an app headless (no device) and prints the native view operations it produces and their timings, then taps the first pressable view twice:
+`nsh test` runs an app's tests headless (no device): `nsh init` wrote one, `App.test.tsx`, which opens the app, presses its button and checks what it shows:
 
 ```sh
-nsh trace my-app/App.tsx
+nsh test my-app
 ```
 
-It is a quick way to check that an app starts without errors, and to see how much work an interaction causes ([Testing and trace](./testing-and-trace.md)).
+With `--trace`, it also prints the native view operations the app produces and their timings: a quick way to see how much work an interaction causes ([Testing](./testing-and-trace.md)).
 
 ## Next steps
 

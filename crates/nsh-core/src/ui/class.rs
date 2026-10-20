@@ -51,6 +51,10 @@ pub struct ClassDef {
     pub type_name: fn() -> &'static str,
     /// Its members: the constructor, methods, accessors and statics.
     pub members: &'static [Member],
+    /// Its objects come from members only and its module exports no value
+    /// of it: declared as an `interface` (`#[class(interface)]`: `fs`'s
+    /// `Stats`).
+    pub interface: bool,
 }
 
 impl ClassDef {
@@ -101,6 +105,10 @@ pub struct Member {
     pub refs: ClassRefs,
     /// How it runs.
     pub call: MemberCall,
+    /// The signatures TypeScript sees instead of the one its types give
+    /// (`#[overload(fn(..) -> ..)]`), as a module function's: what an
+    /// argument selects (`on("exit", ..)`).
+    pub overloads: &'static [super::Overload],
 }
 
 /// Adds the classes a signature names (its parameters' and result's
@@ -122,12 +130,15 @@ pub enum MemberCall {
     /// As a task of the core, started in order with the UI's ops; JS gets
     /// a promise.
     Async(AsyncCall),
+    /// In the JS call, returning a task's start ([`super::Later`]): what
+    /// the call throws throws there; JS gets a promise of the task.
+    Start(AsyncCall),
 }
 
 impl MemberCall {
     /// Whether JS gets a promise.
     pub fn is_async(&self) -> bool {
-        matches!(self, MemberCall::Async(_))
+        matches!(self, MemberCall::Async(_) | MemberCall::Start(_))
     }
 }
 
@@ -136,8 +147,22 @@ impl MemberCall {
 pub enum Thrown {
     /// A `TypeError`: a wrong argument, a disposed or busy instance.
     Type(String),
+    /// A `RangeError`: a value past a limit ([`super::JsError::Range`]).
+    Range(String),
     /// An `Error`: the member's `Err`, or its panic.
     Error(String),
+    /// One of those with properties (`code`, ...: [`super::JsError::with`]).
+    Fields(Box<super::ErrorFields>),
+}
+
+impl Thrown {
+    /// Its message.
+    pub fn message(&self) -> &str {
+        match self {
+            Thrown::Type(m) | Thrown::Range(m) | Thrown::Error(m) => m,
+            Thrown::Fields(f) => &f.message,
+        }
+    }
 }
 
 impl From<PropError> for Thrown {
@@ -146,11 +171,21 @@ impl From<PropError> for Thrown {
     }
 }
 
+impl From<String> for Thrown {
+    fn from(message: String) -> Self {
+        Thrown::Error(message)
+    }
+}
+
+impl From<&str> for Thrown {
+    fn from(message: &str) -> Self {
+        Thrown::Error(message.to_owned())
+    }
+}
+
 impl fmt::Display for Thrown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Thrown::Type(m) | Thrown::Error(m) => f.write_str(m),
-        }
+        f.write_str(self.message())
     }
 }
 
@@ -458,6 +493,27 @@ impl<C: Class> Ret for Instance<C> {
     }
 }
 
+/// An array of instances' objects.
+impl<C: Class> Ret for Vec<Instance<C>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("{}[]", types.class(C::DEF))
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        // Owned until the array takes them, as `Vec<T>`'s items are.
+        let mut items = Vec::with_capacity(self.len());
+        for instance in self {
+            items.push(instance.into_js(host)?);
+        }
+        let raws = items.into_iter().map(JsOwned::into_raw).collect();
+        Ok(JsOwned::new(host, host.new_array(raws)?))
+    }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
+}
+
 impl<C: Class> Ret for Option<Instance<C>> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("{} | null", <Instance<C> as Ret>::ts_type(types))
@@ -492,6 +548,8 @@ pub struct MemberSpec {
     pub returns: Option<String>,
     /// JS gets a promise.
     pub is_async: bool,
+    /// The signatures TypeScript sees instead ([`Member::overloads`]).
+    pub overloads: Vec<super::OverloadSpec>,
 }
 
 /// What a class is to JS and its declarations.
@@ -526,6 +584,18 @@ impl ClassSpec {
                     .collect(),
                 returns: m.returns.map(|ts| ts(&mut types)),
                 is_async: m.call.is_async(),
+                overloads: m
+                    .overloads
+                    .iter()
+                    .map(|o| {
+                        let params = o
+                            .params
+                            .iter()
+                            .map(|(n, ts, optional)| (*n, ts(&mut types), *optional))
+                            .collect();
+                        (params, o.returns.map(|ts| ts(&mut types)))
+                    })
+                    .collect(),
             })
             .collect();
         Self {
@@ -653,7 +723,12 @@ pub(crate) mod __private {
     fn arg_error(e: Thrown, what: &str, name: &str) -> Thrown {
         match e {
             Thrown::Type(m) => Thrown::Type(format!("{what}: `{name}`: {m}")),
+            Thrown::Range(m) => Thrown::Range(format!("{what}: `{name}`: {m}")),
             Thrown::Error(m) => Thrown::Error(format!("{what}: `{name}`: {m}")),
+            Thrown::Fields(mut f) => {
+                f.message = format!("{what}: `{name}`: {}", f.message);
+                Thrown::Fields(f)
+            }
         }
     }
 
@@ -665,15 +740,38 @@ pub(crate) mod __private {
             .map_err(|e| Thrown::Error(e.0))
     }
 
-    /// [`ret`] of a `Result`: an `Err` throws an `Error` with its message.
-    pub fn ret_result<T: Ret, E: fmt::Display>(
+    /// [`ret`] of a `Result`: an `Err` throws an `Error` with its message
+    /// (a [`crate::ui::JsError`] its class).
+    pub fn ret_result<T: Ret, E: crate::ui::IntoThrown>(
         host: &dyn JsHost,
         value: Result<T, E>,
     ) -> Result<JsRaw, Thrown> {
         match value {
             Ok(v) => ret(host, v),
-            Err(e) => Err(Thrown::Error(e.to_string())),
+            Err(e) => Err(e.into_thrown()),
         }
+    }
+
+    /// The task a synchronous call returned ([`crate::ui::Later`]).
+    pub fn start<T: Ret + 'static>(value: crate::ui::Later<T>) -> Result<TaskStart, Thrown> {
+        Ok(Box::new(move || value.into_future()))
+    }
+
+    /// [`start`] of a `Result`: an `Err` throws in the call.
+    pub fn start_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
+        value: Result<crate::ui::Later<T>, E>,
+    ) -> Result<TaskStart, Thrown> {
+        value.map_err(E::into_thrown).and_then(start)
+    }
+
+    /// What the call can do beyond computing (a `cx: CallCx` parameter).
+    pub fn call_cx(host: &dyn JsHost) -> crate::ui::CallCx<'_> {
+        crate::ui::CallCx::new(host)
+    }
+
+    /// The VM the call comes from (a `sys: System` parameter).
+    pub fn system(host: &dyn JsHost) -> crate::ui::System {
+        host.system()
     }
 
     /// The object a constructor makes for `value`.
@@ -683,13 +781,13 @@ pub(crate) mod __private {
     }
 
     /// [`construct`] of a `Result`.
-    pub fn construct_result<C: Class, E: fmt::Display>(
+    pub fn construct_result<C: Class, E: crate::ui::IntoThrown>(
         host: &dyn JsHost,
         value: Result<C, E>,
     ) -> Result<JsRaw, Thrown> {
         match value {
             Ok(v) => construct(host, v),
-            Err(e) => Err(Thrown::Error(e.to_string())),
+            Err(e) => Err(e.into_thrown()),
         }
     }
 
@@ -698,11 +796,14 @@ pub(crate) mod __private {
         Ok(Box::new(value))
     }
 
-    /// [`boxed`] of a `Result`: an `Err` rejects with its message.
-    pub fn boxed_result<T: Ret + 'static, E: fmt::Display>(value: Result<T, E>) -> JsResult {
+    /// [`boxed`] of a `Result`: an `Err` rejects (a [`crate::ui::JsError`]
+    /// with its class and properties, any other error with its message).
+    pub fn boxed_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
+        value: Result<T, E>,
+    ) -> JsResult {
         match value {
             Ok(v) => Ok(Box::new(v)),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(e.into_thrown()),
         }
     }
 
@@ -714,6 +815,8 @@ pub(crate) mod __private {
     pub trait ClassDoc {
         /// The struct's doc comment.
         const DOC: &'static str;
+        /// `#[class(interface)]`: [`super::ClassDef::interface`].
+        const INTERFACE: bool;
     }
 
     /// The documentation of a module (`#[module]` on its struct, or the
@@ -773,6 +876,22 @@ mod tests {
     /// A function the generated code must not call for `core::mem::drop`.
     #[allow(dead_code)]
     fn drop() {}
+
+    /// A field configured out is not traced: its type need not exist.
+    #[class]
+    struct Configured {
+        #[cfg(any())]
+        gone: NoSuchType,
+        kept: Option<Callback>,
+    }
+
+    #[class]
+    impl Configured {}
+
+    #[allow(dead_code)]
+    fn configured() -> Configured {
+        Configured { kept: None }
+    }
 
     /// A tally kept in Rust.
     #[class]

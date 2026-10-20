@@ -1,0 +1,34 @@
+# What a user does and sees (compat/apps.rs). The steppers' buttons step
+# on press in and out, which `tap` does not send: their refs drive them.
+expect Press me
+expect Disabled
+expect Presses: 0
+tap text:Press me
+expect Presses: 1
+tap text:Plain
+expect Presses: 11
+expect Disabled presses: 0
+expect 5
+expect 2.0
+expect Quantity: 2
+tap text:Ask the stepper
+expect Asked: 5 then 8
+expect 8
+tap text:Set the quantity
+expect Quantity: 3.5
+expect 3.5
+expect Chosen: none
+absent ✓
+tap text:Beta
+expect Chosen: 1
+expect ✓
+expect Name
+expect ×
+expect Text: not changed
+tap label:Clear
+expect Text: emptied
+absent ×
+covers [nsh/ui/mobile] Button
+covers [nsh/ui/mobile] Stepper
+covers [nsh/ui/mobile] SelectList
+covers [nsh/ui/mobile] TextField

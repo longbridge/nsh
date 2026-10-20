@@ -1,0 +1,11 @@
+# What a user does and sees (compat/apps.rs).
+expect Fruits
+expect 1. Apple
+expect 2. Banana
+expect 3. Cherry
+absent 4. Item 4
+tap id:add
+expect 4. Item 4
+expect 3. Cherry
+covers [nsh/list] List
+covers [nsh:rt] list

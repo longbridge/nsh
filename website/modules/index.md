@@ -22,7 +22,7 @@ import { Button, SafeAreaView } from "nsh/ui/mobile";
 
 There is no catch-all module: each API lives in exactly one place. Platform-only APIs live in `nsh/ios`, `nsh/android` and `nsh/desktop` (macOS, Windows, Linux); all can be imported on every platform, so one bundle runs everywhere (their calls do nothing elsewhere, and `isAvailable` tells you which platform you are on).
 
-Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `nsh trace` write `.nsh/types` next to your app, so the TypeScript declarations always match the runtime you build with (see [Project structure](../docs/project-structure.md)).
+Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `nsh test` write `.nsh/types` next to your app, so the TypeScript declarations always match the runtime you build with (see [Project structure](../docs/project-structure.md)).
 
 ## All modules
 
@@ -46,6 +46,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | Navigation (`createNavigator`, `Stack`, `Screen`, `Modal`), `SafeAreaView`, `StatusBar`, `Alert`, `ActionSheet`, `Keyboard`, `Button`, `TextField`, ... | [Components](../components/index.md) |
+| Standard modules | `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib` | [Standard modules](./standard-modules.md) |
 | Globals | `fetch`, `URL`, `TextEncoder`, `Blob`, `FormData`, `AbortController`, `Intl`, timers, `console`, `requestAnimationFrame`, ... (no import) | [Global APIs](./globals.md) |
 
 Reference pages that are not modules:

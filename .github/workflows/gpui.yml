@@ -113,6 +113,14 @@ jobs:
         working-directory: crates/gpui
         run: cargo test -p nsh-platform-gpui --features shot
 
+      # What a Mac without Xcode's Metal Toolchain builds (the CLI turns
+      # the feature on there): GPUI's build script stitches its shaders
+      # for run time compilation instead of running `metal`.
+      - name: Check (runtime-shaders)
+        if: runner.os == 'macOS'
+        working-directory: crates/gpui
+        run: cargo check -p nsh-gpui-host --features nsh-platform-gpui/runtime-shaders
+
       # The GPUI Kit example: its `build.rs` bundles its app.
       - name: Clippy (examples/embed-gpui)
         if: runner.os == 'Linux'

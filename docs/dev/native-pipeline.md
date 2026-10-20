@@ -3,7 +3,9 @@
 An app is TSX importing NSH's modules. The bundler compiles each module with NSH's JSX compiler and rolldown bundles
 them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of NSH's modules stay imports, and `nsh-js` serves them
 natively. The reactive graph, the renderer and every API apps import are Rust; nothing of NSH is JS. Apps cannot
-import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...).
+import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...). It also refuses a named import a
+native module does not export, as the names `nsh-js` serves say (`native_module_exports`), when the code uses it as a
+value (types need no `type` keyword), with the place in the source and the closest export's name.
 
 ```tsx
 import { computed, mount, signal, Text, View } from "nsh";
@@ -33,7 +35,11 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   `context` (`Theme()`, `<Theme.Provider value>`), `split(props, keys)` (`[picked, rest]`, keeping getters), `mount`;
   the primitives `View`, `Text`, `Scroll`, `Input`.
 - `nsh:rt` (only compiled code imports it): `element`, `text`, `append`, `insert`, `prop`, `bindProp`, `spread`,
-  `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`.
+  `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`, `metaUrl`. The bundle shares one `import.meta`, so
+  the compiler turns each module's `import.meta.url` into `metaUrl("<its path in the app>")` (a module that mentions
+  `import.meta` goes through the compiler even without JSX), which `dom.rs` resolves against the app's directory
+  (`${pluginDir}` as a `file:` URL), else the page's URL (`HostOptions::base_url`), else `asset:/`. `import.meta`
+  itself is left as it is.
 - `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `locale`, `Platform`, `PixelRatio`, `I18nManager`) and
   `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `AccessibilityInfo`): the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
@@ -125,7 +131,9 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - `each` keys rows (`key(item, index)`, the index for `key="index"`, else the item; objects by identity, primitives by
   value) and updates the item and index signals of kept rows (rows get accessors: `item()`, `index()`); each row has
   its own owner. `cond` renders a
-  branch per change of truthiness.
+  branch per change of truthiness. An `<If>` whose child is a function written in place compiles to
+  `((w) => cond(w, () => (fn)(w), …))(() => when)`: the function gets an accessor of `when`'s value (Solid's `<Show>`),
+  read through the same thunk the condition is.
 - Platform-only props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`): only the current platform's object is sent, each
   key as a prop of its own (`platform_props`).
 - The reactive graph and the renderer share one per-context state (`state.rs`); natives reach each part by shared or

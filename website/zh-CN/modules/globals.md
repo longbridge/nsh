@@ -25,6 +25,8 @@ order: 15
 | [数字与日期格式化](#数字与日期格式化) | `Intl.NumberFormat`、`Intl.DateTimeFormat`、`toLocaleString` |
 | [流](#流) | `ReadableStream`、`WritableStream`、`TransformStream`、各类 reader、writer 和 controller、`ByteLengthQueuingStrategy`、`CountQueuingStrategy`、`TextEncoderStream`、`TextDecoderStream` |
 
+原生宿主还提供 `Buffer`、`crypto`、`process` 和 `WebSocket`；其模块、授权和资源限制见[标准模块](./standard-modules.md)。
+
 ## 控制台与计时
 
 ```ts
@@ -635,7 +637,7 @@ new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: 
 new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date); // "Oct 16, 2026, 3:04 PM"
 ```
 
-不传 `locales` 时使用设备的区域设置（iOS 的 `NSLocale.currentLocale`、Android 的 `Locale.getDefault()`）；`nsh trace` 和 Web 上为 `en-US`。
+不传 `locales` 时使用设备的区域设置（iOS 的 `NSLocale.currentLocale`、Android 的 `Locale.getDefault()`）；`nsh test` 和 Web 上为 `en-US`。
 
 - **数字**：`decimal`、`percent`、`currency`（`currencyDisplay` 为 `symbol`、`narrowSymbol`、`code`）和 `unit`（常用单位：长度、质量、时长、数据大小、温度、速度）样式；`minimumIntegerDigits`、`minimum` / `maximumFractionDigits`、`minimum` / `maximumSignificantDigits`、`roundingPriority`、`trailingZeroDisplay`、`useGrouping`、`signDisplay`；`standard`、`scientific`、`engineering` 和 `compact` 记数法（`compactDisplay` 为 `short` / `long`）。舍入方式是四舍五入（远离零），按数字的书写形式进行（`1.005` 舍入为 `1.01`，与浏览器一致）。`format` 也精确地接受 BigInt 和十进制字符串。`formatToParts` 和 `resolvedOptions` 与浏览器一致。
 - **日期**：`weekday`、`year`、`month`（`numeric`、`2-digit`、`short`、`long`、`narrow`）、`day`、`hour`、`minute`、`second`、`fractionalSecondDigits`、`hour12` / `hourCycle`、`timeZoneName` 以及 `dateStyle` / `timeStyle`，使用公历。`timeZone` 支持设备时区、`UTC` 和偏移量（`"+08:00"`）；其他时区名会抛出 `RangeError`（没有时区数据库）。

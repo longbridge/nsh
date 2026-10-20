@@ -4,7 +4,7 @@ An app written in Rust: its UI is `src/lib.rs`, and `nsh.json` names the root co
 
 ```sh
 nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
-nsh trace                    # headless: what the root mounts, and the time of each commit
+nsh test nsh.json --trace    # headless: what the root mounts, and the time of each commit
 nsh package --target web     # or ios, android, macos, linux, windows, gpui
 ```
 

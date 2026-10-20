@@ -409,6 +409,14 @@ pub(crate) const REEXPORTS: &[Item] = &[
             &["(): Accessor<Insets>"],
         ),
     ),
+    (
+        "nextTick",
+        Export::Function(crate::standard::process::next_tick, 1),
+        Ts::function(
+            "Calls `callback` with `args` as a JS job, after the current one and before timers.",
+            &["<A extends unknown[]>(callback: (...args: A) => void, ...args: A): void"],
+        ),
+    ),
 ];
 
 /// Value `name` a registry re-exports or names as native

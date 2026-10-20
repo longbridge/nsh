@@ -12,6 +12,7 @@ group: start
 ```text
 my-app/
 ├── App.tsx            the entry module: calls mount()
+├── App.test.tsx       its tests (nsh test)
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
 ├── .gitignore         .nsh/ and out/
@@ -20,7 +21,7 @@ my-app/
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
-├── .nsh/              generated: type declarations, development host builds
+├── .nsh/              generated: type declarations, development host builds, test entries
 └── out/               generated: nsh build / nsh package output
 ```
 
@@ -110,7 +111,7 @@ nsh.json: tailwind: unknown theme key `colours`
 
 ## tsconfig.json 与 .nsh/types
 
-NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令（`init`、`build`、`trace`、`dev`、`run`、`package`、`publish`、`check`）都会把 NSH 提供的所有内容的 TypeScript 声明写入 `.nsh/types`，并把 NSH 的 TypeScript 设置写入 `.nsh/tsconfig.json`。应用的 `tsconfig.json` 继承它：
+NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令（`init`、`build`、`test`、`dev`、`run`、`package`、`publish`、`check`）都会把 NSH 提供的所有内容的 TypeScript 声明写入 `.nsh/types`，并把 NSH 的 TypeScript 设置写入 `.nsh/tsconfig.json`。应用的 `tsconfig.json` 继承它：
 
 ```json
 {
@@ -131,7 +132,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 | `list.d.ts`、`animated.d.ts`、`device.d.ts` 等 | 每个模块一个文件（`nsh/list`、`nsh/animated`、`nsh/device` 等） |
 | `ui/mobile.d.ts` | `nsh/ui/mobile` |
 
-`lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。`.nsh` 中的文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh trace App.tsx`。
+`lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。`.nsh` 中的文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh check`。
 
 `.nsh/tsconfig.json` 加入了 `"ESNext.Disposable"`，它声明了运行时提供的 `using` 声明和 `Symbol.dispose`：`using account = new Account()` 在块结束时释放一个 [Rust 类](./rust.md)的值。其中的 `jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
 
@@ -181,7 +182,7 @@ const open = async () => {
 | `nsh/native` | 嵌入应用注册的组件和函数 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |
 
-[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。
+[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/ui/mobile"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
 
 ### npm 包
 

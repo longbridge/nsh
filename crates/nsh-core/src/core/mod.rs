@@ -323,6 +323,12 @@ struct InputState {
     content: Option<Rect>,
     /// Last size `onContentSizeChange` reported.
     content_size: Option<Size>,
+    /// The input is measured with its placeholder (its value is empty).
+    placeholder_measured: bool,
+    /// The size of an empty line in the style of the measured placeholder,
+    /// by the placeholder text's `layout_hash`: what `onContentSizeChange`
+    /// reports for an empty input.
+    empty_line: Option<(u64, Size)>,
 }
 
 #[derive(Debug, Default)]
@@ -1436,7 +1442,38 @@ impl<M: TextEngine> Core<M> {
         let (Some(input), Some(layout)) = (&node.input, node.layout) else {
             return;
         };
-        let multiline = input.config.multiline;
+        let placeholder = input.value.is_empty() && !input.config.placeholder.is_empty();
+        let text = self.input_text(
+            key,
+            if placeholder {
+                &input.config.placeholder
+            } else {
+                &input.value
+            },
+        );
+        let ctx = self.text_ctx(layout);
+        let same = ctx.text.layout_eq(&text);
+        let input = self.nodes[key as usize]
+            .input
+            .as_mut()
+            .expect("input state");
+        // A value that reads as the placeholder measures the same, but
+        // its content size is the value's: laid out again to report it.
+        if same && input.placeholder_measured == placeholder {
+            return;
+        }
+        input.placeholder_measured = placeholder;
+        if !same {
+            *self.text_ctx(layout) = TextContext::new(Arc::new(text));
+        }
+        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.needs_layout = true;
+    }
+
+    /// `content` in the text style of input `key`, as it is measured.
+    fn input_text(&self, key: Key, content: &str) -> AttributedText {
+        let node = &self.nodes[key as usize];
+        let multiline = node.input.as_ref().is_some_and(|i| i.config.multiline);
         let mut text = AttributedText {
             max_lines: if multiline { 0 } else { 1 },
             ..AttributedText::default()
@@ -1445,24 +1482,13 @@ impl<M: TextEngine> Core<M> {
             self.inherited_text_style(key).inherit(&node.text_style),
             node.paragraph.font_multiplier(self.font_scale),
         );
-        let content = if !input.value.is_empty() {
-            &input.value
-        } else {
-            &input.config.placeholder
-        };
         text.push(content, style);
         // An empty last line still takes space (a trailing line break, or no
         // text at all).
         if content.is_empty() || (multiline && content.ends_with('\n')) {
             text.push("\u{200b}", style);
         }
-        let ctx = self.text_ctx(layout);
-        if ctx.text.layout_eq(&text) {
-            return;
-        }
-        *ctx = TextContext::new(Arc::new(text));
-        self.layout.mark_dirty(layout).expect("taffy dirty");
-        self.needs_layout = true;
+        text
     }
 
     /// Pushes the effective taffy style of `key`: the JS style, adjusted
@@ -2524,6 +2550,7 @@ impl<M: TextEngine> Core<M> {
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.update_direction(child);
+        self.groups_changed(child, parent);
         if self.nodes[child as usize]
             .classes
             .as_ref()
@@ -2606,8 +2633,9 @@ impl<M: TextEngine> Core<M> {
         if self.nodes[parent as usize].positional_children {
             self.positions_changed(parent);
         }
-        let node = &mut self.nodes[key as usize];
-        node.parent = NO_KEY;
+        self.nodes[key as usize].parent = NO_KEY;
+        self.groups_changed(key, parent);
+        let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
             self.mark_text_block(parent);
@@ -3166,18 +3194,38 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `onContentSizeChange` of input `key` if the size of its text (at the
-    /// content box's width when multiline) changed.
+    /// `onContentSizeChange` of input `key` if the size of its value (at the
+    /// content box's width when multiline) changed. An empty input reports
+    /// an empty line, as React Native does, though it is measured (sized)
+    /// with its placeholder.
     fn report_content_size(&mut self, key: Key, width: f32) {
         let node = &self.nodes[key as usize];
         let (Some(input), Some(layout)) = (node.input.as_ref(), node.layout) else {
             return;
         };
         let max = input.config.multiline.then_some(width);
+        let (placeholder, empty_line) = (input.placeholder_measured, input.empty_line);
         let Some(LeafContext::Text(ctx)) = self.layout.get_node_context_mut(layout) else {
             return;
         };
-        let size = measure_text(&self.text_engine, &mut self.measure_cache, ctx, max);
+        let size = if !placeholder {
+            measure_text(&self.text_engine, &mut self.measure_cache, ctx, max)
+        } else if let Some((hash, size)) = empty_line
+            && hash == ctx.layout_hash
+        {
+            size
+        } else {
+            // Measured once per placeholder and style.
+            let hash = ctx.layout_hash;
+            let mut empty = TextContext::new(Arc::new(self.input_text(key, "")));
+            let size = measure_text(&self.text_engine, &mut self.measure_cache, &mut empty, max);
+            let input = self.nodes[key as usize]
+                .input
+                .as_mut()
+                .expect("input state");
+            input.empty_line = Some((hash, size));
+            size
+        };
         let node = &mut self.nodes[key as usize];
         let input = node.input.as_mut().expect("input state");
         if input.content_size == Some(size) {

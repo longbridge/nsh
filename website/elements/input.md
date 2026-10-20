@@ -100,7 +100,7 @@ view styles apply):
 | `onFocus` / `onBlur` | none | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
-| `onContentSizeChange` | `{ width, height }` | The size of the text changed (at the input's width when multiline). |
+| `onContentSizeChange` | `{ width, height }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 
 A multiline input that grows with its text:
 
