@@ -21,6 +21,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
+    platform::{Locale, Os},
     ui::{Registry, Root, prelude::timer},
 };
 use nsh_engine::{
@@ -28,8 +29,11 @@ use nsh_engine::{
 };
 
 use crate::{
-    headless::{DirectoryAssets, Headless, MemoryStorage, StubNetwork, UreqNetwork, print_batch},
-    module::{NetworkOption, OpenOptions},
+    headless::{
+        DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubNetwork, UreqNetwork,
+        print_batch,
+    },
+    module::{Launch, MobilePlatform, NetworkSetup},
 };
 
 /// How long a test may take.
@@ -301,8 +305,8 @@ impl Session {
     pub(crate) fn open(
         &self,
         entry: &str,
-        options: OpenOptions,
-    ) -> Result<(OpenApp, Arc<MemoryStorage>), String> {
+        launch: Launch,
+    ) -> Result<(OpenApp, Arc<MemoryStorage>, Arc<RecordingNetwork>), String> {
         let path = self.dir.join(entry);
         let path = dunce::canonicalize(&path).map_err(|e| format!("open({entry:?}): {e}"))?;
         let app = match self.build(&path)? {
@@ -310,23 +314,31 @@ impl Session {
             Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
             Built::Rust(root) => nsh_engine::App::Rust(root),
         };
-        let network: Arc<dyn nsh_engine::Network> = match options.network {
-            Some(NetworkOption::Live) => Arc::new(UreqNetwork::new()),
-            Some(NetworkOption::Stub(responses)) => Arc::new(StubNetwork::new(responses)),
-            None => Arc::new(StubNetwork::default()),
+        let inner: Arc<dyn nsh_engine::Network> = match launch.network {
+            NetworkSetup::Live => Arc::new(UreqNetwork::new()),
+            NetworkSetup::Stub(routes) => Arc::new(StubNetwork::new(routes)),
+            NetworkSetup::None => Arc::new(StubNetwork::default()),
         };
-        let storage = MemoryStorage::new(options.storage.unwrap_or_default().0);
+        let requests = RecordingNetwork::new(inner);
+        let locale = match &launch.locale {
+            Some(tag) => Some(
+                Locale::parse(tag)
+                    .ok_or_else(|| format!("open({entry:?}): {tag:?} is not a locale"))?,
+            ),
+            None => None,
+        };
+        let storage = MemoryStorage::new(launch.storage.0);
         let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let safe_area = options.safe_area.unwrap_or_default();
+        let safe_area = launch.safe_area;
         let default = EngineConfig::new(app);
         let config = EngineConfig {
             viewport: nsh_core::Size::new(
-                options.width.unwrap_or(default.viewport.width),
-                options.height.unwrap_or(default.viewport.height),
+                launch.width.unwrap_or(default.viewport.width),
+                launch.height.unwrap_or(default.viewport.height),
             ),
             trace: self.run.trace.is_some(),
-            network: Some(network),
+            network: Some(requests.clone()),
             assets: Some(Arc::new(DirectoryAssets::new(dir, files))),
             storage: Some(storage.clone()),
             environment: Environment {
@@ -335,6 +347,13 @@ impl Session {
                     right: safe_area.right,
                     bottom: safe_area.bottom,
                     left: safe_area.left,
+                },
+                color_scheme: launch.color_scheme.into(),
+                locale: locale.unwrap_or(Locale::EN_US),
+                reduce_motion: launch.reduced_motion,
+                os: match launch.platform {
+                    MobilePlatform::Ios => Os::Ios,
+                    MobilePlatform::Android => Os::Android,
                 },
                 ..Default::default()
             },
@@ -357,7 +376,7 @@ impl Session {
             .unwrap_or_else(|| path.clone());
         // `App` answers dialogs after each step, with the test's handler.
         app.answer_dialogs_myself();
-        app.set_clipboard(options.clipboard);
+        app.set_clipboard(launch.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app = Arc::new(Mutex::new(Some(app)));
@@ -365,7 +384,7 @@ impl Session {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(app.clone());
-        Ok((app, storage))
+        Ok((app, storage, requests))
     }
 
     /// The app at `path`, built once.

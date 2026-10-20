@@ -132,7 +132,7 @@ docs/                 Documentation; `docs/dev/`: for developers of nsh (archite
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
 examples/             Example apps (gallery: a demo index, one module per demo, `tests/` the reference for `nsh test` (storage,
-                      inputs, a long list, stubbed requests); gallery-rs: the same in Rust, the app's crate in `native/`, a
+                      inputs, a long list, stubbed requests, dark mode); gallery-rs: the same in Rust, the app's crate in `native/`, a
                       TypeScript test of its root; rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
                       with a test), embedding samples
@@ -407,6 +407,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
+It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
+reports `check` for (one touching only `crates/gpui`) can still merge.
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'

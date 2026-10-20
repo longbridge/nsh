@@ -3095,6 +3095,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tokio",
  "ureq",
 ]
 

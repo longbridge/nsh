@@ -228,8 +228,11 @@ A step first applies the batches that came since the last one (they belong to it
 for 100 ms and no native animation runs (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
 failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
-edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
-`headless::MemoryStorage` (entries given up front) stand in for the device's services.
+edits than were typed is dropped. `headless::StubNetwork` (routes by `"<METHOD> <URL>"`, `*` matching any text, others
+fail: a `StubResponse`, which may fail the request with `error` or come after `delay`, or a `StubHandler` that answers
+through a `StubReply` whenever it likes) and `headless::MemoryStorage` (entries given up front) stand in for the
+device's services; `RecordingNetwork` keeps the requests a network gets. `Headless::set_viewport` and
+`set_environment` change the window and the environment while the app runs, as a rotation or a system setting does.
 
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
 (`headless/mod.rs` `Headless::react`, `go_back`, `answer`; `headless/animation.rs`):
@@ -275,9 +278,13 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
 - The VM's calls reach the run through the process's current `Session` (one test file at a time in a process, under a
   lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
 - `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
-  own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`; `MemoryStorage` seeded with
-  `options.storage`; the viewport and safe area), on a blocking thread; `App`'s async methods are the driver's steps,
-  run there too, and its synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. With
+  own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`, behind a `RecordingNetwork` for
+  `app.requests()`; `MemoryStorage` seeded with `options.storage`; the viewport, safe area, color scheme, locale,
+  reduced motion and OS), on a blocking thread; `App`'s async methods are the driver's steps, run there too, and its
+  synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. A route's JS function stays on the
+  VM: its `StubHandler` sends the request and its `StubReply` over a channel (`RouteServer`), and `serve` answers them
+  while the step that is waiting on the blocking thread runs (`open`, each step, `waitUntil`), so a request made in a
+  step is answered within it; a function that throws fails the request and the step. With
   `TestRun::trace` every app observes its batches and prints them under their step (`print_batch`).
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and

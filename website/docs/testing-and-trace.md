@@ -66,10 +66,46 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | Option | Default | Description |
 |---|---|---|
 | `storage` | empty | What `nsh/storage` holds at the start: `{ todos: "[]" }`. |
-| `network` | none | The responses the app's requests get, by `"<METHOD> <URL>"` (a bare URL is a `GET`): `{ "GET https://api.example.com/todos": { status: 200, body: [] } }`. `body` is a string, or a value sent as JSON. A request not listed fails, so tests never reach the network unasked. `"live"`: the real network. |
+| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network. |
 | `width`, `height` | 390, 844 | The viewport in points. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
 | `clipboard` | empty | The text on the clipboard at the start. |
+| `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
+| `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
+| `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
+| `platform` | `"ios"` | The platform the app runs as: `"ios"` or `"android"` (`Platform.OS`, `ios={{…}}` / `android={{…}}` props). |
+
+### Stubbing the network
+
+`network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
+matches fails, so tests never reach the network unasked. A route is a response, or a function of the request that
+returns one (or a promise of one):
+
+```tsx
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
+| Response member | Default | Description |
+|---|---|---|
+| `status` | 200 | The status code. |
+| `headers` | none | Header names and values. |
+| `body` | empty | A string, or a value sent as JSON (with `content-type: application/json` unless `headers` name one). |
+| `error` | none | The request fails with this message instead, as when the device is offline. |
+| `delay` | 0 | How long the response takes, in milliseconds; a step does not wait for it, `waitFor` does. |
+
+A route's function gets the request (`method`, `url`, `headers`, `body` as text) and runs in the test file, so it can
+count requests or answer from what the test set up. A function that throws fails the request and the step that made
+it. `app.requests()` lists the requests the app made, in order, the same way.
 
 ### Steps
 
@@ -80,7 +116,7 @@ Steps name views with **selectors**, written as Playwright's:
 | `id:<testID>` | The view with that `testID`. |
 | `label:<label>` | The view with that `accessibilityLabel`. |
 | `text:<text>` | A text that reads it (spaces around it aside), or an input holding it or, while empty, with that placeholder. |
-| `role:<role>`, `role:<role>[<name>]` | A view with that `accessibilityRole` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
+| `role:<role>`, `role:<role>[<name>]` | A view with that `role` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
 | `view:<id>` | The view with that id in `--trace` output. |
 | anything else | A `testID`, else a label, else a text, as written. |
 
@@ -103,7 +139,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
 | `app.shows(selector)` | Whether a view matches now. |
 | `app.count(selector)` | How many views match now. |
-| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is editable. |
+| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.storage()` | What the app's storage holds now. |
@@ -111,6 +147,9 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
 | `app.dialogs()` | The dialogs the app showed, in order. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
+| `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
+| `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
+| `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
 render all the time), so what it changed is on screen when the next line runs; use `waitFor` for what comes later (a
@@ -163,7 +202,7 @@ The 1.2 s let the engine's idle garbage collection run before the first step, so
 uses shows it: its handlers stop working.
 
 The examples have tests to start from: `examples/counter` and `examples/gallery/tests` (storage, inputs, a long list,
-stubbed requests) for TSX apps, `examples/rust-exports` for an app with a Rust crate, `examples/gallery-rs` for a Rust
+stubbed requests, dark mode) for TSX apps, `examples/rust-exports` for an app with a Rust crate, `examples/gallery-rs` for a Rust
 app.
 
 ## Tracing with --trace

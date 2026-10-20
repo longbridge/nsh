@@ -74,7 +74,7 @@ use crate::{
     app::AppView,
     geom::rect,
     input::{Cursor, KeyEvent, PointerKind},
-    render::{DrawCx, corners},
+    render::{DrawCx, border_quad, corners},
     surface::Surface,
     view::{Hosted, ItemPointer},
 };
@@ -1346,13 +1346,13 @@ fn stroke_rounded(
         return;
     }
     let k = cx.transform_scale();
-    let quad = gpui::fill(
+    let quad = border_quad(
         cx.rect(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
-        gpui::transparent_black(),
-    )
-    .corner_radii(corners([radius; 4], k))
-    .border_widths(px(width * k))
-    .border_color(cx.color(color));
+        corners([radius; 4], k),
+        gpui::Edges::all(px(width * k)),
+        cx.color(color),
+        gpui::BorderStyle::Solid,
+    );
     cx.paint_quad(quad);
 }
 

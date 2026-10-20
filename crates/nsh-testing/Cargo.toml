@@ -17,7 +17,7 @@ workspace = true
 default = []
 # `nsh test`'s side: the `nsh/test` module, test files on an engine of their
 # own (`run_file`) and apps' headless runners (`runner`): QuickJS.
-js = ["nsh-engine/js", "dep:dunce", "dep:serde", "dep:serde_json"]
+js = ["nsh-engine/js", "dep:dunce", "dep:serde", "dep:serde_json", "dep:tokio"]
 # Building entries in this process (`compile_tsx`, `tsx`, `compiler`): nsh's
 # bundler. Off in apps' headless runners, which `nsh` builds the entries for.
 bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
@@ -34,6 +34,8 @@ log.workspace = true
 regex.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+# The requests routes' JS functions answer, waiting for the test file's VM.
+tokio = { workspace = true, features = ["sync"], optional = true }
 ureq.workspace = true
 
 [dev-dependencies]

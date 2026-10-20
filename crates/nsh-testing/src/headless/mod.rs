@@ -33,10 +33,12 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
-    MountItem, NodeId, PayloadValue, Point, Points, ROOT_ID, SubmitBehavior,
+    MountItem, NodeId, PayloadValue, Point, Points, ROOT_ID, Size, SubmitBehavior,
     geometry::{point, px},
 };
-use nsh_engine::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
+use nsh_engine::{
+    AppError, AppErrorKind, Engine, EngineConfig, EngineControl, Environment, MountSink,
+};
 
 use self::{
     animation::{Animator, FRAME},
@@ -46,7 +48,10 @@ use self::{
 pub use self::{
     net::{DirectoryAssets, UreqNetwork},
     screen::Screen,
-    stub::{MemoryStorage, StubNetwork, StubResponse},
+    stub::{
+        MemoryStorage, RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse,
+        StubRoute,
+    },
 };
 
 /// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait by
@@ -188,12 +193,17 @@ pub struct Headless {
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
     /// come, and waits end.
     exited: bool,
+    /// The surface's environment and size, as the platform last reported.
+    environment: Environment,
+    viewport: Size<Points>,
     observer: Option<Observer>,
 }
 
 impl Headless {
     /// Starts `config`'s app ([`start`]).
     pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
+        let environment = config.environment;
+        let viewport = config.viewport;
         let (engine, batches, errors) = launch(config)?;
         Ok(Headless {
             engine,
@@ -206,8 +216,34 @@ impl Headless {
             step: "open".to_owned(),
             applied: 0,
             exited: false,
+            environment,
+            viewport,
             observer: None,
         })
+    }
+
+    /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
+    /// rotation, a resized window), as a platform reports it.
+    pub fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String> {
+        self.step(format!("setViewport({}, {})", size.width, size.height));
+        self.viewport = size;
+        self.environment.window = size;
+        self.engine.control().resize(size);
+        self.engine.control().set_environment(self.environment);
+        self.done()
+    }
+
+    /// The step `setEnvironment`: the surface's environment changes as
+    /// `change` says (dark mode, the locale), as a platform reports it.
+    pub fn set_environment(
+        &mut self,
+        what: &str,
+        change: impl FnOnce(&mut Environment),
+    ) -> Result<(), String> {
+        self.step(what);
+        change(&mut self.environment);
+        self.engine.control().set_environment(self.environment);
+        self.done()
     }
 
     /// The engine: [`Engine::control`] sends it input.
