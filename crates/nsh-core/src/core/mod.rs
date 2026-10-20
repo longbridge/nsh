@@ -2550,6 +2550,7 @@ impl<M: TextEngine> Core<M> {
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
         self.update_direction(child);
+        self.groups_changed(child, parent);
         if self.nodes[child as usize]
             .classes
             .as_ref()
@@ -2632,8 +2633,9 @@ impl<M: TextEngine> Core<M> {
         if self.nodes[parent as usize].positional_children {
             self.positions_changed(parent);
         }
-        let node = &mut self.nodes[key as usize];
-        node.parent = NO_KEY;
+        self.nodes[key as usize].parent = NO_KEY;
+        self.groups_changed(key, parent);
+        let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
             self.mark_text_block(parent);

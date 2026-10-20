@@ -378,6 +378,37 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// `key` joined `parent`, or left it (`parent` is where it was): the
+    /// `group-*:` classes in it were resolved with the groups it had, which
+    /// only matters while one of them, or of the new ones, is in a state (a
+    /// disabled row, a pressed card). A leaf that reads no group skips the
+    /// walk.
+    pub(super) fn groups_changed(&mut self, key: Key, parent: Key) {
+        let node = &self.nodes[key as usize];
+        let reads = node
+            .classes
+            .as_ref()
+            .is_some_and(|c| c.deps() & deps::GROUP != 0);
+        if !reads && node.children.is_empty() {
+            return;
+        }
+        let mut k = parent;
+        loop {
+            if k == NO_KEY {
+                return;
+            }
+            let n = &self.nodes[k as usize];
+            if n.states != 0 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty()) {
+                break;
+            }
+            k = n.parent;
+        }
+        if reads {
+            self.restyle(key);
+        }
+        self.restyle_subtree(key, deps::GROUP);
+    }
+
     /// Restyles the children of `parent` that depend on their position.
     pub(super) fn positions_changed(&mut self, parent: Key) {
         let children = self.nodes[parent as usize].children.clone();
