@@ -574,3 +574,74 @@ fn refs_reach_variables_signals_fields_and_functions() {
         texts(&batch)
     );
 }
+
+const CONTENT_SIZE: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+
+const size = signal("none");
+mount(() => (
+  <View>
+    <Input
+      placeholder="A much longer placeholder"
+      style={{ width: 300, height: 40 }}
+      onContentSizeChange={(e) => size.set(`${e.width}x${e.height}`)}
+    />
+    <Text>{`size ${size()}`}</Text>
+  </View>
+));
+"#;
+
+/// A fixed-size input reports the size of its text as the user types (its
+/// own frame never changes), and an empty one the size of an empty line,
+/// not its placeholder's.
+#[test]
+fn inputs_report_their_text_size_as_it_changes() {
+    let (engine, rx) = start_app(CONTENT_SIZE);
+    let mut input = None;
+    let mut size = String::new();
+    // The batches until the size shown is not `last`.
+    let mut wait = |last: &str| {
+        loop {
+            let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
+            for item in &batch.items {
+                match item {
+                    MountItem::Create {
+                        id,
+                        kind: nsh_core::ViewKind::Input,
+                    } => input = Some(*id),
+                    MountItem::Text { text, .. } if text.text.starts_with("size ") => {
+                        size = text.text.clone();
+                    }
+                    _ => {}
+                }
+            }
+            if size != last && size != "size none" && !size.is_empty() {
+                return (input.expect("an input"), size.clone());
+            }
+        }
+    };
+    let (input, empty) = wait("");
+    // An empty line (ApproxTextEngine gives its zero-width space a width).
+    assert_eq!(empty, "size 8x17");
+    let control = engine.control();
+    let mut last = empty;
+    for (count, (text, want)) in [
+        ("ab", "size 16x17"),
+        ("abc", "size 24x17"),
+        ("", "size 8x17"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        control.dispatch_event(
+            input,
+            EventKind::ChangeText,
+            EventPayload::Text {
+                text: text.into(),
+                count: count as u32 + 1,
+            },
+        );
+        last = wait(&last).1;
+        assert_eq!(last, want, "after {text:?}");
+    }
+}

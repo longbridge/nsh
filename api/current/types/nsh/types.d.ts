@@ -766,7 +766,7 @@ export interface InputHostProps {
   onSelectionChange?: (e: { start: number; end: number }) => void;
   /** Before the text changes: `key` is the typed text, `Backspace` or `Enter`. */
   onKeyPress?: (e: { key: string }) => void;
-  /** The size of the text (at the input's width when multiline): grow a multiline input with it. */
+  /** The size of the text (at the input's width when multiline; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it. */
   onContentSizeChange?: (e: { width: number; height: number }) => void;
 }
 
