@@ -2727,6 +2727,7 @@ dependencies = [
  "imagesize",
  "log",
  "nsh-core",
+ "nsh-js",
  "nsh-ui-mobile",
  "oxc",
  "oxc_sourcemap",

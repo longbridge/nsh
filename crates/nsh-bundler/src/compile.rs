@@ -22,6 +22,9 @@ use oxc_sourcemap::SourceMap;
 #[derive(Debug, Default)]
 pub(crate) struct NativeModules {
     specifiers: std::collections::BTreeSet<String>,
+    /// The names each module exports, to check named imports against
+    /// (empty without feature `bundle`: nothing is checked).
+    exports: std::collections::BTreeMap<String, Vec<String>>,
     /// The UI sets' components (export, module), for hints about tags.
     pub(crate) components: Vec<(String, String)>,
 }
@@ -49,6 +52,12 @@ impl NativeModules {
                 set.exports_of(ExportKind::Component)
                     .map(|export| (export.to_owned(), set.specifier.clone())),
             );
+        }
+        #[cfg(feature = "bundle")]
+        for spec in &out.specifiers {
+            if let Some(names) = nsh_js::native_module_exports(spec, ui_sets) {
+                out.exports.insert(spec.clone(), names);
+            }
         }
         out
     }
@@ -123,10 +132,17 @@ pub(crate) fn compile_native(
         meta_path,
         modules,
     )?;
-    // Plain JS keeps its imports: an unused one may be there for its side
-    // effects, and no type or compiled tag left it unused.
+    // The scopes once TypeScript and JSX are compiled, for checking imports.
+    let scoping = SemanticBuilder::new()
+        .build(&program)
+        .semantic
+        .into_scoping();
+    if let Some(err) = check_named_imports(&program, &scoping, modules) {
+        return Err(err.render_with_source_code(source.to_owned()));
+    }
+    // Plain JS keeps imports that may be present for their side effects.
     if source_type.is_typescript() || source_type.is_jsx() {
-        elide_unused_imports(&mut program);
+        elide_unused_imports(&mut program, &scoping);
     }
     let out = Codegen::new()
         .with_options(CodegenOptions {
@@ -149,16 +165,101 @@ pub(crate) fn position(source: &str, offset: u32) -> (usize, usize) {
     (line, column)
 }
 
+/// The first named import of a native module that it does not export:
+/// `import { createNativeValue } from "nsh/animated"` bundles fine and only
+/// fails when the app runs, so it is reported with its place in the source.
+/// Only names the code uses as values count (`scoping` is that of the
+/// program once TypeScript and the JSX are compiled): the declarations also
+/// name types, which need no `type`.
+fn check_named_imports(
+    program: &oxc::ast::ast::Program<'_>,
+    scoping: &oxc::semantic::Scoping,
+    modules: &NativeModules,
+) -> Option<oxc::diagnostics::OxcDiagnostic> {
+    use oxc::{
+        ast::ast::{ImportDeclarationSpecifier, Statement},
+        diagnostics::OxcDiagnostic,
+    };
+    if modules.exports.is_empty() {
+        return None;
+    }
+    for statement in &program.body {
+        let Statement::ImportDeclaration(import) = statement else {
+            continue;
+        };
+        let module = import.source.value.as_str();
+        let (true, Some(exports), Some(specifiers)) = (
+            !import.import_kind.is_type(),
+            modules.exports.get(module),
+            &import.specifiers,
+        ) else {
+            continue;
+        };
+        for specifier in specifiers {
+            let ImportDeclarationSpecifier::ImportSpecifier(s) = specifier else {
+                continue;
+            };
+            let name = s.imported.name();
+            let used = s
+                .local
+                .symbol_id
+                .get()
+                .is_none_or(|id| !scoping.get_resolved_reference_ids(id).is_empty());
+            if s.import_kind.is_type() || !used || exports.iter().any(|e| e == name.as_str()) {
+                continue;
+            }
+            let mut error = OxcDiagnostic::error(format!("`{module}` has no export `{name}`"))
+                .with_label(oxc::span::GetSpan::span(&s.imported));
+            if let Some(near) = closest_name(name.as_str(), exports) {
+                error = error.with_help(format!("did you mean `{near}`?"));
+            }
+            return Some(error);
+        }
+    }
+    None
+}
+
+/// The name in `names` closest to `name` (a typo or a rename), if any is
+/// close enough to suggest.
+fn closest_name<'a>(name: &str, names: &'a [String]) -> Option<&'a str> {
+    let name = name.to_lowercase();
+    let limit = (name.chars().count() / 3).clamp(1, 3);
+    names
+        .iter()
+        .map(|n| (edit_distance(&name, &n.to_lowercase()), n))
+        .filter(|(d, _)| *d <= limit)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, n)| n.as_str())
+}
+
+/// Levenshtein distance.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(ca != *cb))
+                .min(above + 1)
+                .min(row[j] + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
 /// TypeScript's import elision, once the JSX is compiled (a primitive's
 /// tag made in place no longer references its import): import specifiers
 /// nothing references go (an import of types only, without `type`, or of a
 /// primitive only its tags use), and declarations left without any.
-fn elide_unused_imports(program: &mut oxc::ast::ast::Program<'_>) {
+/// `scoping` is the program's.
+fn elide_unused_imports(
+    program: &mut oxc::ast::ast::Program<'_>,
+    scoping: &oxc::semantic::Scoping,
+) {
     use oxc::ast::ast::{ImportDeclarationSpecifier as S, Statement};
-    let scoping = SemanticBuilder::new()
-        .build(program)
-        .semantic
-        .into_scoping();
     let used = |local: &oxc::ast::ast::BindingIdentifier<'_>| {
         local
             .symbol_id
@@ -201,4 +302,17 @@ pub(crate) fn strip_ansi(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn closest_names_are_only_suggested_when_near() {
+        let names = ["AnimatedValue".to_owned(), "interpolate".to_owned()];
+        assert_eq!(
+            super::closest_name("animatedvalu", &names),
+            Some("AnimatedValue")
+        );
+        assert_eq!(super::closest_name("createNative", &names), None);
+    }
 }

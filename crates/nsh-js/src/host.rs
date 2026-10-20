@@ -1267,7 +1267,7 @@ declare function clearInterval(id: number | undefined): void;
 declare function queueMicrotask(callback: () => void): void;
 /** Runs `callback` at the next display frame with its time in milliseconds. */
 declare function requestAnimationFrame(callback: (time: number) => void): number;
-declare function cancelAnimationFrame(id: number): void;
+declare function cancelAnimationFrame(id: number | undefined): void;
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
@@ -1338,8 +1338,8 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let s = shared.clone();
     globals.set(
         "cancelAnimationFrame",
-        Function::new(ctx.clone(), move |id: Opt<u32>| {
-            if let Some(id) = id.0 {
+        Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+            if let Some(id) = handle_id(id) {
                 s.frames.borrow_mut().retain(|(i, _)| *i != id);
             }
         })?,
@@ -1348,14 +1348,34 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
         let s = shared.clone();
         globals.set(
             name,
-            Function::new(ctx.clone(), move |id: Opt<u32>| {
-                if let Some(id) = id.0 {
+            Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+                if let Some(id) = handle_id(id) {
                     s.timers.borrow_mut().cancel(id);
                 }
             })?,
         )?;
     }
     Ok(())
+}
+
+/// The id `clearTimeout`, `clearInterval` and `cancelAnimationFrame` were
+/// given, read as the web reads it (a number, truncated; a numeric string);
+/// anything else (`undefined`, `null`, objects) names no timer and is ignored,
+/// never thrown at: libraries call these with ids they never got.
+fn handle_id(id: Opt<Value<'_>>) -> Option<u32> {
+    let id = id.0?;
+    let n = match id.as_number() {
+        Some(n) => n,
+        None => id
+            .as_string()?
+            .to_string()
+            .ok()?
+            .trim()
+            .parse::<f64>()
+            .ok()?,
+    };
+    let n = n.trunc();
+    (n.is_finite() && n >= 1.0 && n <= f64::from(u32::MAX)).then_some(n as u32)
 }
 
 #[cfg(test)]
@@ -2005,6 +2025,39 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
             .unwrap();
         assert_eq!(reported(&host), ["micro,a,b"]);
+    }
+
+    #[test]
+    fn clearing_ids_that_name_no_timer_is_ignored() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            globalThis.log = [];
+            const t = setTimeout(() => log.push("timeout"), 0);
+            const i = setInterval(() => { log.push("interval"); clearInterval(i); }, 0);
+            const f = requestAnimationFrame(() => log.push("frame"));
+            for (const clear of [clearTimeout, clearInterval, cancelAnimationFrame]) {
+                clear();
+                for (const id of [undefined, null, 0, -1, NaN, Infinity, 1e12, 0.5, 99999, "x", "", {}, [], true, Symbol()])
+                    clear(id);
+            }
+            const gone = setTimeout(() => log.push("cancelled by string"), 0);
+            clearTimeout(String(gone));
+            const gone2 = setTimeout(() => log.push("cancelled by fraction"), 0);
+            clearTimeout(gone2 + 0.7);
+            const gone3 = requestAnimationFrame(() => log.push("cancelled frame"));
+            cancelAnimationFrame(gone3);
+            "#,
+        )
+        .unwrap();
+        host.run_frame();
+        while let Some(next) = host.next_timer() {
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
+            host.run_timers(Instant::now());
+        }
+        host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
+            .unwrap();
+        assert_eq!(reported(&host), ["frame,timeout,interval"]);
     }
 
     fn sandboxed(limits: Limits) -> Host {
