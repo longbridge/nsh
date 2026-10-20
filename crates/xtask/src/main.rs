@@ -13,8 +13,9 @@
 //!   (`website/public/play` by default).
 //! - `api`: records the API apps use in `api/runtime.txt` and `api/types`
 //!   and shrinks `api/uncovered.txt`; `--keep <app>...` instead adds apps built by
-//!   this checkout (examples by name, other apps or `api/cases/<case>.tsx`
-//!   by path) to the fixtures in `api/apps` (docs/dev/compatibility.md).
+//!   this checkout (examples by name, other apps or `api/cases/<domain>`
+//!   by path) to the fixtures in `api/apps`, those whose build changed
+//!   (docs/dev/compatibility.md).
 
 mod android;
 mod api;
@@ -83,11 +84,11 @@ enum Task {
     /// Record the API apps use in `api/runtime.txt` and `api/types`.
     Api {
         /// Instead of recording, keep these apps, as this checkout builds
-        /// them, in `api/apps/<app>-<version>` (when the JSX compiler's
-        /// output changes, or for a new API); write their scripts, then
-        /// record. A kept fixture is never rewritten. An app is an
-        /// example's name or the path of an app's directory or entry module
-        /// (`api/cases/<case>.tsx`).
+        /// them, in `api/apps/<app>-<version>` when the build differs from
+        /// the app's newest fixture (the JSX compiler's output changed, or a
+        /// new API's case); write their scripts, then record. A kept fixture
+        /// is never rewritten. An app is an example's name or the path of an
+        /// app's directory or entry module (`api/cases/<domain>`).
         #[arg(long, value_name = "APP", num_args = 1..)]
         keep: Vec<String>,
     },

@@ -1,2 +1,0 @@
-expect Module URL: true
-covers [nsh:rt] metaUrl

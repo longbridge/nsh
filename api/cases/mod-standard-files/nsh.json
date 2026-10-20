@@ -1,7 +1,0 @@
-{
-  "name": "Standard files",
-  "id": "com.example.standard-files",
-  "capabilities": {
-    "fs": { "read": ["${dataDir}"], "write": ["${dataDir}"] }
-  }
-}

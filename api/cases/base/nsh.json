@@ -1,0 +1,8 @@
+{
+  "name": "API Base",
+  "id": "com.example.api-base",
+  "statusBar": {
+    "foreground": "dark",
+    "hidden": true
+  }
+}

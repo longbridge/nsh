@@ -1,6 +1,0 @@
-# What a user does and sees (compat/apps.rs).
-platform android
-expect Card
-prop id:card elevation 6
-prop id:flat elevation 0
-covers [props] android

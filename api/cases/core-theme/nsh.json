@@ -1,7 +1,0 @@
-{
-  "name": "Core theme",
-  "id": "com.example.core-theme",
-  "tailwind": {
-    "spacing": 8
-  }
-}

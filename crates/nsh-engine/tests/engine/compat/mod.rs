@@ -204,11 +204,19 @@ fn closed(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// `closed` and the entries of `more`.
+fn closed_with(closed: &[String], more: &str) -> Vec<String> {
+    let mut out = closed.to_vec();
+    out.extend(self::closed(more));
+    out
+}
+
 /// Whether `entry` closes the break `b`: the break is about the entry or a
-/// member of it (`a` closes `a.b` and `a#.m`, not `ab`).
+/// member of it (`a` closes `a.b` and `a#.m`, not `ab`; `apps/x` closes
+/// `apps/x/bundle.js`).
 fn is_closed(entry: &str, b: &str) -> bool {
     b.strip_prefix(entry)
-        .is_some_and(|rest| rest.starts_with([':', '.', '#']))
+        .is_some_and(|rest| rest.starts_with([':', '.', '#', '/']))
 }
 
 /// Whether `base`'s steps are all still in `now`, in order: scripts may
@@ -260,15 +268,19 @@ fn record_breaks(
         let Some(rel) = path.strip_prefix("apps/") else {
             continue;
         };
-        match apps.get(rel) {
-            None => breaks.push(format!("apps/{rel}: removed")),
+        let b = match apps.get(rel) {
+            None => format!("apps/{rel}: removed"),
             Some(now) if rel.ends_with("/script.txt") => {
-                if !script_kept(&text(bytes.clone()), &text(now.clone())) {
-                    breaks.push(format!("apps/{rel}: lost or reordered steps"));
+                if script_kept(&text(bytes.clone()), &text(now.clone())) {
+                    continue;
                 }
+                format!("apps/{rel}: lost or reordered steps")
             }
-            Some(now) if now != bytes => breaks.push(format!("apps/{rel}: changed")),
-            Some(_) => {}
+            Some(now) if now != bytes => format!("apps/{rel}: changed"),
+            Some(_) => continue,
+        };
+        if open(&b) {
+            breaks.push(b);
         }
     }
     breaks
@@ -378,6 +390,12 @@ fn record_breaks_are_reported() {
 
     let closed = closed("# closed\n[nsh] Text -- unsafe\nnsh/index.d.ts -- unsafe\n");
     assert_eq!(record_breaks(&base, fewer, &[], &apps, &closed).len(), 2);
+    let closed = closed_with(&closed, "apps/counter -- merged into apps/core\n");
+    assert!(record_breaks(&base, fewer, &[], &BTreeMap::new(), &closed).is_empty());
+    assert!(!is_closed(
+        "apps/counter",
+        "apps/counter-2/bundle.js: removed"
+    ));
     assert!(is_closed("[nsh] Text", "[nsh] Text#.m: removed"));
     assert!(!is_closed("[nsh] Text", "[nsh] TextInput: removed"));
 }
@@ -389,6 +407,13 @@ fn apps_still_run() {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.is_dir())
+        // `NSH_API_APP=<name>` runs the fixtures whose name starts so.
+        .filter(|p| {
+            std::env::var("NSH_API_APP").map_or(true, |only| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(&only))
+            })
+        })
         .collect();
     apps.sort();
     let mut failed = Vec::new();

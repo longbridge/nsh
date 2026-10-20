@@ -1,8 +1,0 @@
-# What a user does and sees (compat/apps.rs).
-expect Layout: 12,8 100x30
-frame id:box 12 8 100 30
-tap id:widen
-expect Layout: 12,8 200x30
-expect Lines: reported, an array
-covers [events] onLayout
-covers [events] onTextLayout

@@ -126,7 +126,7 @@ crates/
 api/                  What apps depend on, append-only, held by the engine's `compat` tests: `runtime.txt` (module exports, `nsh:rt`
                       and globals), `types/` (declarations), `tailwind.txt` (every class and what it resolves to), `apps/` (fixture apps
                       as a build wrote them, never changed, with scripts that check the API: the backward-compat test suite),
-                      `cases/` (small fixtures' sources), `uncovered.txt` (API no script checks yet; only shrinks), `closed.txt` (the
+                      `cases/` (the sources of the fixtures of single APIs: one app per domain, a module per case), `uncovered.txt` (API no script checks yet; only shrinks), `closed.txt` (the
                       only removals: closed for security, with reasons)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
@@ -232,7 +232,7 @@ cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64
 cargo xtask ios-embed                                                           # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask api                                                                 # record the API apps use in api/ (after an additive change)
-cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture (new compiler output)
+cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture, when it differs from the app's newest
 cargo test -p nsh-engine --test engine compat::                                 # the API against the record at the merge base with main, and the fixture apps
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
@@ -286,7 +286,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
   (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
   (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt` (beside one pre-release alignment with Tailwind CSS). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
+  `api/closed.txt` (beside two pre-release changes: an alignment with Tailwind CSS and the fixtures merged by domain). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
   --keep`); fixtures and their steps never change, and while they pass, old apps keep working
   (`docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants

@@ -1,8 +1,0 @@
-# What a user does and sees (compat/apps.rs).
-platform web
-expect Link
-# `web={{…}}` wins over the prop set for every platform; `android={{…}}`
-# does not apply.
-prop id:link accessibilityLabel In a browser
-prop id:link elevation 0
-covers [props] web

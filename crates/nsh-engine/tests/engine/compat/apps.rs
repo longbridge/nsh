@@ -98,7 +98,7 @@
 //! and `scroll:<selector>`, the nearest scroll view around the view the
 //! inner selector names: a list, by one of its rows);
 //! the steps after `frame` also take the part after `:` quoted, for one
-//! with spaces: `text:"Taps: 0"`. Any error the app reports fails it. `NSH_API_DUMP=1` prints the texts
+//! with spaces: `text:"Taps: 0"`. Any error the app reports fails it. `NSH_API_APP=<name>` runs the fixtures whose name starts so; `NSH_API_DUMP=1` prints the texts
 //! on screen after each step, for writing scripts.
 
 use std::{
