@@ -54,6 +54,7 @@ mod once;
 pub mod palette;
 mod prop;
 pub mod reactive;
+mod resource;
 pub(crate) mod responder;
 mod scrollable;
 pub(crate) mod services;
@@ -150,6 +151,7 @@ pub use self::{
         batch, cleanup, computed, create_root, effect, provide_context, signal, signal_with,
         stored, untracked, use_context,
     },
+    resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
@@ -343,8 +345,8 @@ pub mod prelude {
         web_view_html,
     };
     pub use super::{
-        Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Scope,
-        Signal, SignalEquals, Stored,
+        Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Resource,
+        ResourceInfo, ResourceState, Scope, Signal, SignalEquals, Stored,
         ambient::{
             Delay, KeyOptions, Spawned, add_status_bar, allow_rtl, animate_layout, animated_value,
             announce_for_accessibility, clipboard_files, clipboard_has_image, clipboard_has_string,
@@ -357,8 +359,8 @@ pub mod prelude {
             set_interval, set_timeout, spawn, theme, timer, timer_until, toast, update_status_bar,
             window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context, signal,
-        signal_with, stored, untracked, use_context,
+        batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context,
+        resource, resource_with_value, signal, signal_with, stored, untracked, use_context,
     };
 }
 

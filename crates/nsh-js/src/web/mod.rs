@@ -439,6 +439,17 @@ pub(crate) fn new_closure(ctx: Ctx, closure: Closure) -> R<V> {
     }
 }
 
+/// A new `AbortSignal` (owned): a resource's load gets one, aborted when the
+/// load no longer counts.
+pub(crate) fn new_abort_signal(ctx: Ctx) -> R<Raw> {
+    event::new_signal(ctx).map(V::take)
+}
+
+/// Aborts `signal` with an `AbortError` (nothing when it is aborted).
+pub(crate) fn abort_signal(ctx: Ctx, signal: Raw) -> R<()> {
+    event::abort(ctx, signal, UNDEFINED)
+}
+
 /// The intrinsic `Promise.prototype.then`.
 pub(crate) fn intrinsic_then(ctx: Ctx) -> R<V> {
     build(ctx)?;

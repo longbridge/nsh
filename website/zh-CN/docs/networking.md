@@ -12,30 +12,22 @@ NSH 应用用标准的 `fetch` 发起 HTTP 请求。它运行在平台的网络�
 ## 获取 JSON
 
 ```tsx
-import { mount, Scroll, signal, Text, View } from "nsh";
+import { mount, resource, Scroll, Text, View } from "nsh";
 
 type Post = { id: number; title: string };
 
 function App() {
-  const posts = signal<Post[]>([]);
-  const status = signal("loading…");
-
-  (async () => {
-    try {
-      const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=5");
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      posts.set(await response.json());
-      status.set("");
-    } catch (e) {
-      status.set(String(e));
-    }
-  })();
+  const posts = resource(async ({ signal }) => {
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=5", { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return (await response.json()) as Post[];
+  });
 
   return (
     <Scroll style={{ flex: 1 }}>
       <View style={{ padding: 16, paddingTop: 60, gap: 8 }}>
-        <Text style={{ color: "#57606a" }}>{status()}</Text>
-        <Each of={posts()}>{(post) => <Text numberOfLines={1}>{post().title}</Text>}</Each>
+        <Text style={{ color: "#57606a" }}>{posts.loading() ? "loading…" : String(posts.error() ?? "")}</Text>
+        <Each of={posts() ?? []}>{(post) => <Text numberOfLines={1}>{post().title}</Text>}</Each>
       </View>
     </Scroll>
   );
@@ -43,6 +35,8 @@ function App() {
 
 mount(App);
 ```
+
+[`resource`](./reactivity.md#resource) 会保存值、错误以及是否正在加载；source 变化时重新加载；对于不再需要的加载（组件被移除，或有更新的加载开始），通过它传入的 `signal` 取消请求。
 
 `Response` 的响应体只能读取一次，可以用 `json()`、`text()`、`arrayBuffer()`、`bytes()`、`blob()` 或 `formData()`，也可以读取 `body` 流。2xx 状态码时 `response.ok` 为 true；与浏览器一样，HTTP 错误状态码不会让 promise 被拒绝。
 
@@ -258,6 +252,21 @@ let response = fetch(request).await?;
 ```
 
 URL 需为绝对地址。任务结束时（组件被移除或任务被取消），它发出的请求也随之取消。
+
+要显示加载的数据，可以用 `resource`，和 TSX 中一样，它保存值、错误和状态：source 变化或调用 `refetch()` 时，正在进行的加载任务会被丢弃，其请求随之取消。
+
+```rust
+let items = resource(move || Some(page.get()), |page, _| async move {
+    let response = fetch(format!("https://api.example.com/items?page={page}")).await?;
+    parse(&response.text())   // Result<Vec<Item>, String>
+});
+
+text(move || match (items.get(), items.error()) {
+    (Some(items), _) => format!("{} items", items.len()),
+    (None, Some(error)) => error,
+    _ => "loading…".into(),
+})
+```
 
 ## 相关内容
 

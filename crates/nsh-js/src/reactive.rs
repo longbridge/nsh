@@ -190,6 +190,7 @@ struct Classes {
     signal: qjs::JSClassID,
     setter: qjs::JSClassID,
     memo: qjs::JSClassID,
+    resource: qjs::JSClassID,
 }
 
 /// The graph of `ctx`.
@@ -781,6 +782,7 @@ pub(crate) fn new_graph(raw: *mut JsContext) -> Graph {
                 true,
                 qjs::JS_DupValue(raw, function_proto),
             ),
+            resource: crate::resource::register(raw),
         };
         qjs::JS_FreeValue(raw, function_proto);
         Graph::new(JsData {
@@ -977,6 +979,19 @@ pub(crate) fn new_signal(ctx: *mut JsContext, value: JsValue) -> JsValue {
     let mut args = [value];
     // SAFETY: borrowed arguments, as `signal` takes them.
     unsafe { signal(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+}
+
+/// The class of resource objects (`crate::resource`).
+pub(crate) fn resource_class(ctx: *mut JsContext) -> qjs::JSClassID {
+    unsafe { graph(ctx) }.data.classes.resource
+}
+
+/// Registers `f` (owned) to run before the current owner runs again or is
+/// disposed (freed at once with no owner).
+pub(crate) fn add_cleanup(ctx: *mut JsContext, f: JsValue) {
+    if let Err(f) = unsafe { graph(ctx) }.on_cleanup(f) {
+        unsafe { qjs::JS_FreeValue(ctx, f) };
+    }
 }
 
 /// Writes `value` (owned) to signal object `obj` (does nothing for a dead
