@@ -133,8 +133,8 @@ the older runtime lacks fails when the module loads.
 ### What a package holds
 
 A package is one file: a JSON header (app id, name, version, build, the declared capabilities, the bytecode version,
-the minimum runtime, the signing time, the release key's certificate and a table of files with their SHA-256), then the files, then the
-release key's Ed25519 signature over everything before it. The files are:
+the minimum runtime, the signing time, the release key's certificate and a table of files with their SHA-256), then
+the files, then the release key's Ed25519 signature over everything before it. The files are:
 
 - the app's JS source (always),
 - its bytecode, used only when the device's runtime has the same bytecode version (otherwise the source runs, so a
