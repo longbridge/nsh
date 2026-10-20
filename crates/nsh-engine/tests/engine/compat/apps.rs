@@ -12,7 +12,7 @@
 //!   quiet);
 //! - `tap <selector>`: presses the first view on screen `id:<testID>`,
 //!   `label:<accessibility label>` or `text:<text>` names, or its nearest
-//!   pressable ancestor (as `nsh trace --tap`);
+//!   pressable ancestor (as `nsh test`'s `press`);
 //! - `wait <ms>`: lets timers and animations run.
 //!
 //! Any error the app reports fails it. `NSH_API_DUMP=1` prints the texts

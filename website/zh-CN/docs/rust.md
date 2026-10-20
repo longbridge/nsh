@@ -102,7 +102,7 @@ pub fn App() -> impl IntoElement {
 
 `nsh` 只构建你的 crate 需要的东西：一个由你的 crate 和 NSH 核心组成的小程序，它向 CLI 描述 crate 的组件和模块，其余工作由
 CLI 自己完成；再加上你运行或打包的每个目标的运行器。新 Rust 应用的第一次构建只编译你的 crate 和 NSH 的核心，大约 60 个
-crate。`nsh trace` 在同样构建的、包含你的 crate 的运行器中以无界面方式挂载根组件。
+crate。`nsh test` 在同样构建的、包含你的 crate 的运行器中以无界面方式运行应用的测试。
 
 `nsh run` 期间，修改 crate 的 Rust 代码会重新构建运行器并重启应用；在浏览器中，已打开的页面会自动加载新的运行时。
 `cargo run` 在桌面后端上直接启动同一个根组件（`src/main.rs`）；嵌入 NSH 的原生应用在 macOS、Windows、Linux、GPUI 和
@@ -258,23 +258,38 @@ Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型
 也叫 `value`，在事件的变体上写 `#[args(index)]` 可以给它命名。类型不对的参数在调用中抛出 `TypeError`，
 返回 Promise 的调用则以它 reject；`Err` 以其消息抛出（或 reject）。类的对象拥有它的
 Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
-Rust 的修改会重新构建并重启应用。CLI 根据 crate 的描述知道它导出了什么，自己打包和编译 TSX；开发宿主和 `nsh trace` 的
+Rust 的修改会重新构建并重启应用。CLI 根据 crate 的描述知道它导出了什么，自己打包和编译 TSX；开发宿主和 `nsh test` 的
 无界面运行器则与你的 crate 和 QuickJS 一起构建。
 
 仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出一个组件（必填、有默认值和可选的
 props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
-Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简短的文档注释；它的无界面测试在应用中逐一点按，并检查每个导出显示的内容。
+Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简短的文档注释；它的测试（Rust 的，以及 TypeScript 的 `App.test.tsx`）在应用中逐一点按，并检查每个导出显示的内容。
 
 仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
-（或 `ios`、`android` 等）运行它的根组件，`nsh trace examples/gallery-rs` 以无界面方式运行它，`cargo run -p gallery-native`
+（或 `ios`、`android` 等）运行它的根组件，`nsh test examples/gallery-rs` 以无界面方式运行它的测试，`cargo run -p gallery-native`
 在桌面后端上启动它。
 
 ## 测试
 
-测试在 `cargo test` 中无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、任务和动画都像在屏幕上一样运行。
-`nsh_engine::headless::Headless`（nsh-engine 的特性 `headless`）启动应用，维护一份它所显示视图的模型（`app.screen()`：它们的文本、
-应用发送的命令），并像点击一样按下视图，视图的写法与 `nsh trace --tap` 相同（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）。
-Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
+对于带 Rust crate 的应用，`nsh test` 同样运行它的 TypeScript 测试（[测试](./testing-and-trace.md)）：在用你的 crate 构建的
+无界面运行器中。在 Rust 应用中，`open(".")` 启动它的根组件：
+
+```tsx
+// App.test.tsx, next to nsh.json
+import { expect, open, test } from "nsh/test";
+
+test("a tap counts", async () => {
+  const app = await open(".");
+  await app.press("Tap");
+  expect(app.texts()).toContain("Count: 1");
+});
+```
+
+测试也可以在 `cargo test` 中用同一个驱动无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、
+任务和动画都像在屏幕上一样运行。`nsh_engine::headless::Headless`（nsh-engine 的特性 `headless`）启动应用，维护一份它所显示
+视图的模型（`app.screen()`：它们的文本、应用发送的命令），并执行 `nsh test` 的那些步骤（`press`、`type_text`、`submit`、
+`scroll`、`wait_for`），视图用同样的选择器指定（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）；步骤无法执行时
+返回带有屏幕文字的错误。Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
 
 ```toml
 [dev-dependencies]
@@ -287,9 +302,9 @@ use nsh_engine::{EngineConfig, headless::Headless};
 #[test]
 fn a_tap_counts() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
-    app.wait_for("Count: 0");
-    app.press("Tap");
-    app.wait_for("Count: 1");
+    app.wait_for("Count: 0").unwrap();
+    app.press("Tap").unwrap();
+    app.wait_for("Count: 1").unwrap();
 }
 ```
 
@@ -307,7 +322,7 @@ nsh-ui-mobile = "0.1"
 fn the_module_formats_money() {
     let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
     let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
-    app.wait_for("Formatted at once: $1,234.50");
+    app.wait_for("Formatted at once: $1,234.50").unwrap();
 }
 ```
 

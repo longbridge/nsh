@@ -403,20 +403,6 @@ impl Screen {
         })
     }
 
-    /// The first view on screen that hears presses.
-    pub(crate) fn first_pressable(&self) -> Option<NodeId> {
-        self.by_layer()
-            .into_iter()
-            .find(|id| self.hears(*id, EventKind::Press))
-    }
-
-    /// The first scroll view on screen.
-    pub(crate) fn first_scroll_view(&self) -> Option<NodeId> {
-        self.by_layer()
-            .into_iter()
-            .find(|id| self.scroll(*id).is_some())
-    }
-
     /// `id`, or its nearest ancestor, that `test` accepts.
     fn up_to(&self, mut id: NodeId, test: impl Fn(&View) -> bool) -> Option<NodeId> {
         loop {

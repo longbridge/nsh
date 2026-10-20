@@ -19,6 +19,8 @@ on:
       - "crates/nsh-platform-windows/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-ui-mobile/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "examples/gallery-rs/**"
       - "examples/rust-exports/**"
       - "Cargo.toml"
@@ -43,6 +45,8 @@ on:
       - "crates/nsh-platform-windows/**"
       - "crates/nsh-testing/**"
       - "crates/nsh-ui-mobile/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "examples/gallery-rs/**"
       - "examples/rust-exports/**"
       - "Cargo.toml"
@@ -150,16 +154,25 @@ jobs:
       - name: Check that the Rust app builds no JS engine or bundler
         run: |
           # `nsh` describes the app's crates with the generated `describe`
-          # program and traces its root with `rust-trace`: neither links
-          # QuickJS, nsh-js, the bundler or its rolldown and Oxc.
-          for member in describe rust-trace; do
+          # program: it links no QuickJS, nsh-js, bundler, rolldown or Oxc.
+          # The test runner runs TypeScript tests (QuickJS, source maps) on
+          # entries `nsh` builds: no bundler or parser.
+          check() {
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
-              -p "nsh-app-gallery-native-$member" -e normal --target all \
-              > "$RUNNER_TEMP/$member-dependencies.txt"
-            if grep -E '(rquickjs|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "$RUNNER_TEMP/$member-dependencies.txt"; then
-              echo "The Rust app's $member program unexpectedly links a JS engine or the bundler"
+              -p "nsh-app-gallery-native-$1" -e normal --target all \
+              > "$RUNNER_TEMP/$1-dependencies.txt"
+            if grep -E "$2" "$RUNNER_TEMP/$1-dependencies.txt"; then
+              echo "The Rust app's $1 program unexpectedly links $3"
               exit 1
             fi
+          }
+          ./target/debug/nsh test examples/gallery-rs
+          check describe '(rquickjs|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
+          check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
+      - name: Run the examples' tests
+        run: |
+          for app in counter gallery rust-exports; do
+            ./target/debug/nsh test "examples/$app"
           done
       - name: Publish a TSX app with a Rust crate for the web
         run: |

@@ -21,7 +21,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
-    ui::{Registry, prelude::timer},
+    ui::{Registry, Root, prelude::timer},
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Engine, EngineConfig, Environment, Insets, MountSink,
@@ -33,13 +33,22 @@ use crate::module::{NetworkOption, OpenOptions};
 /// How long a test may take.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Builds an entry ([`Entry`]) to bytecode: the bundle (without its
-/// source map) and the source map.
-pub type Compile =
-    Arc<dyn Fn(&Path, Entry) -> Result<(Bundle, Option<String>), String> + Send + Sync>;
+/// Builds an entry ([`Entry`]; an app's may be its directory).
+pub type Compile = Arc<dyn Fn(&Path, Entry) -> Result<Built, String> + Send + Sync>;
+
+/// What [`Compile`] built.
+#[derive(Clone)]
+pub enum Built {
+    /// A bundle: its bytecode (without its source map), and its source map.
+    Js(Box<Bundle>, Option<String>),
+    /// The root of an app of Rust only (`nsh.json` `"root"`): what `open`
+    /// of the app starts.
+    Rust(Root),
+}
 
 /// What an entry [`Compile`] builds is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Entry {
     /// An app's entry, which a test opens: built as `nsh run` builds it.
     App,
@@ -70,7 +79,7 @@ pub struct TestRun {
 }
 
 /// How a test ended.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TestResult {
     /// Its name.
     pub name: String,
@@ -81,7 +90,7 @@ pub struct TestResult {
 }
 
 /// Why a test failed.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Failure {
     /// What was thrown.
     pub message: String,
@@ -108,7 +117,7 @@ pub fn run_file(
     let session = Arc::new(Session {
         dir: file.parent().unwrap_or(Path::new(".")).to_path_buf(),
         run: run.clone(),
-        bundles: Mutex::new(HashMap::new()),
+        built: Mutex::new(HashMap::new()),
         apps: Mutex::new(Vec::new()),
         events: events.clone(),
     });
@@ -139,6 +148,11 @@ fn drive(
     let mut ui_sets = run.ui_sets.clone();
     ui_sets.extend(crate::test_sets());
     let config = EngineConfig {
+        // The sets' fonts load as the engine starts.
+        assets: Some(Arc::new(DirectoryAssets::new(
+            run.work_dir.clone(),
+            set_files(&ui_sets),
+        ))),
         ui_sets,
         ..EngineConfig::new(bundle)
     };
@@ -186,11 +200,13 @@ fn compile_test_file(run: &TestRun, file: &Path) -> Result<(Bundle, Option<Strin
         crate::module::RUNNER
     );
     std::fs::write(&entry, code).map_err(|e| format!("{}: {e}", entry.display()))?;
-    let (bundle, map) = (run.compile)(&entry, Entry::TestFile)?;
+    let Built::Js(bundle, map) = (run.compile)(&entry, Entry::TestFile)? else {
+        return Err(format!("{}: built as a Rust root", entry.display()));
+    };
     let map = map.map(|map| readable_sources(&map, &run.work_dir));
     let bundle = match &map {
         Some(map) => bundle.with_source_map(map.clone()),
-        None => bundle,
+        None => *bundle,
     };
     Ok((bundle, map))
 }
@@ -218,6 +234,14 @@ fn readable_sources(map: &str, dir: &Path) -> String {
         }
     }
     json.to_string()
+}
+
+/// The files `sets` ship, by their path among an app's assets.
+fn set_files(sets: &[Registry]) -> Vec<(String, PathBuf)> {
+    sets.iter()
+        .flat_map(Registry::asset_files)
+        .map(|file| (file.path().to_owned(), PathBuf::from(file.source)))
+        .collect()
 }
 
 /// What the test file's VM reports.
@@ -252,7 +276,7 @@ pub(crate) struct Session {
     dir: PathBuf,
     run: TestRun,
     /// The apps built so far, by entry.
-    bundles: Mutex<HashMap<PathBuf, Bundle>>,
+    built: Mutex<HashMap<PathBuf, Built>>,
     /// The apps the running test opened, in order.
     apps: Mutex<Vec<OpenApp>>,
     events: Sender<Event>,
@@ -279,23 +303,21 @@ impl Session {
     ) -> Result<(OpenApp, Arc<MemoryStorage>), String> {
         let path = self.dir.join(entry);
         let path = dunce::canonicalize(&path).map_err(|e| format!("open({entry:?}): {e}"))?;
-        let bundle = self.bundle(&path)?;
+        let app = match self.build(&path)? {
+            Built::Js(bundle, Some(map)) => nsh_engine::App::Js(bundle.with_source_map(map)),
+            Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
+            Built::Rust(root) => nsh_engine::App::Rust(root),
+        };
         let network: Arc<dyn nsh_engine::Network> = match options.network {
             Some(NetworkOption::Live) => Arc::new(UreqNetwork::new()),
             Some(NetworkOption::Stub(responses)) => Arc::new(StubNetwork::new(responses)),
             None => Arc::new(StubNetwork::default()),
         };
         let storage = MemoryStorage::new(options.storage.unwrap_or_default().0);
-        let files = self
-            .run
-            .ui_sets
-            .iter()
-            .flat_map(Registry::asset_files)
-            .map(|file| (file.path().to_owned(), PathBuf::from(file.source)))
-            .collect();
+        let files = set_files(&self.run.ui_sets);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let safe_area = options.safe_area.unwrap_or_default();
-        let default = EngineConfig::new(bundle);
+        let default = EngineConfig::new(app);
         let config = EngineConfig {
             viewport: nsh_core::Size::new(
                 options.width.map_or(default.viewport.width, |w| w as f32),
@@ -342,25 +364,21 @@ impl Session {
     }
 
     /// The app at `path`, built once.
-    fn bundle(&self, path: &Path) -> Result<Bundle, String> {
-        if let Some(bundle) = self
-            .bundles
+    fn build(&self, path: &Path) -> Result<Built, String> {
+        if let Some(built) = self
+            .built
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(path)
         {
-            return Ok(bundle.clone());
+            return Ok(built.clone());
         }
-        let (bundle, map) = (self.run.compile)(path, Entry::App)?;
-        let bundle = match map {
-            Some(map) => bundle.with_source_map(map),
-            None => bundle,
-        };
-        self.bundles
+        let built = (self.run.compile)(path, Entry::App)?;
+        self.built
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(path.to_path_buf(), bundle.clone());
-        Ok(bundle)
+            .insert(path.to_path_buf(), built.clone());
+        Ok(built)
     }
 
     /// Closes the apps the test opened: the texts on screen of the last.

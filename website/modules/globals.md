@@ -635,7 +635,7 @@ new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: 
 new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date); // "Oct 16, 2026, 3:04 PM"
 ```
 
-Without `locales`, the device's locale is used: its region format (iOS `NSLocale.currentLocale`, Android `Locale.getDefault()`), `en-US` in `nsh trace` and on the web.
+Without `locales`, the device's locale is used: its region format (iOS `NSLocale.currentLocale`, Android `Locale.getDefault()`), `en-US` in `nsh test` and on the web.
 
 - **Numbers**: the `decimal`, `percent`, `currency` (`currencyDisplay` `symbol`, `narrowSymbol`, `code`) and `unit` (common units: lengths, masses, durations, data sizes, temperatures, speeds) styles; `minimumIntegerDigits`, `minimum` / `maximumFractionDigits`, `minimum` / `maximumSignificantDigits`, `roundingPriority`, `trailingZeroDisplay`, `useGrouping`, `signDisplay`; `standard`, `scientific`, `engineering` and `compact` notation (`compactDisplay` `short` / `long`). Rounding is half away from zero, on the number as written (`1.005` rounds to `1.01`, as in browsers). `format` also takes BigInts and decimal strings, exactly. `formatToParts` and `resolvedOptions` work as in browsers.
 - **Dates**: `weekday`, `year`, `month` (`numeric`, `2-digit`, `short`, `long`, `narrow`), `day`, `hour`, `minute`, `second`, `fractionalSecondDigits`, `hour12` / `hourCycle`, `timeZoneName` and `dateStyle` / `timeStyle`, in the Gregorian calendar. `timeZone` takes the device's zone, `UTC` or an offset (`"+08:00"`); other zone names throw a `RangeError` (there is no time zone database).

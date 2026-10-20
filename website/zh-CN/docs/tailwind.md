@@ -168,7 +168,7 @@ token 就是主题文件里的键，把其中的点写成连字符：`muted.fore
 
 ## 类名检查
 
-`nsh build`、`nsh dev`、`nsh run` 和 `nsh trace` 会用运行时相同的解析器和主题检查 JSX 中的静态类名（`class` 中的字符串字面量以及 `classList` 的键），并对不存在的类发出警告：
+`nsh build`、`nsh dev`、`nsh run` 和 `nsh test` 会用运行时相同的解析器和主题检查 JSX 中的静态类名（`class` 中的字符串字面量以及 `classList` 的键），并对不存在的类发出警告：
 
 ```text
  warn nsh::build App.tsx:12:36: unknown class `bg-brand-550`

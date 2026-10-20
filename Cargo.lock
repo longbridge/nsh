@@ -2518,6 +2518,7 @@ dependencies = [
  "nsh-core",
  "nsh-engine",
  "nsh-js",
+ "serde",
  "serde_json",
 ]
 

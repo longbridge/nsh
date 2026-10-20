@@ -20,6 +20,7 @@
 
 mod module;
 mod run;
+mod runner;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};
@@ -36,7 +37,8 @@ pub use self::{
         App, Entries, Expectation, NetworkOption, OpenOptions, SPECIFIER, SafeArea, Testing,
         registry,
     },
-    run::{Compile, Entry, Failure, Output, TestResult, TestRun, run_file},
+    run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, run_file},
+    runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };
 
 /// The sets the entry `nsh test` makes for a test file is built against
@@ -80,13 +82,22 @@ fn build(entry: &Path, ui_sets: &[Registry]) -> Result<(Bundle, Option<String>),
 /// process, against `ui_sets` (and [`test_sets`] for test files).
 #[cfg(feature = "bundle")]
 pub fn compiler(ui_sets: Vec<Registry>) -> Compile {
-    Arc::new(move |entry: &Path, kind: Entry| match kind {
-        Entry::App => build(entry, &ui_sets),
-        Entry::TestFile => {
-            let mut sets = ui_sets.clone();
-            sets.extend(test_sets());
-            build(entry, &sets)
-        }
+    Arc::new(move |entry: &Path, kind: Entry| {
+        // An app's directory: its `App.tsx`.
+        let entry = &if entry.is_dir() {
+            entry.join("App.tsx")
+        } else {
+            entry.to_owned()
+        };
+        let (bundle, map) = match kind {
+            Entry::App => build(entry, &ui_sets)?,
+            Entry::TestFile => {
+                let mut sets = ui_sets.clone();
+                sets.extend(test_sets());
+                build(entry, &sets)?
+            }
+        };
+        Ok(Built::Js(Box::new(bundle), map))
     })
 }
 

@@ -1,19 +1,20 @@
 ---
 title: Testing
-description: Write tests in TypeScript and run them headless with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings nsh trace prints; testID for UI tests.
+description: Write tests in TypeScript and run them headless with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings --trace prints; testID for UI tests.
 order: 61
 group: tools
 ---
 
 # Testing
 
-NSH runs apps **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components, layout and
-list virtualization as on a device), but no simulator, no device and no window. Two commands use it, and both run
-anywhere the CLI runs, including Linux CI machines:
+`nsh test` runs apps **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components,
+layout and list virtualization as on a device), but no simulator, no device and no window. It runs anywhere the CLI
+runs, including Linux CI machines, and does two jobs:
 
-- `nsh test` runs tests written in TypeScript: each opens the app, takes the steps a user would (press, type,
-  scroll), and checks what is on screen.
-- `nsh trace` prints every operation the runtime would send to the native views, with timings.
+- it runs tests written in TypeScript: each opens the app, takes the steps a user would (press, type, scroll), and
+  checks what is on screen;
+- with `--trace`, it prints every operation the runtime sends to the native views, with timings: what the first
+  frame, a tap or a frame of scrolling costs.
 
 ## Tests with nsh test
 
@@ -53,8 +54,9 @@ checks test files with the rest (`.nsh/types` declares `nsh/test`).
 
 Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
 another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
-test fails when it throws, when the promise it returns rejects, and after 30 seconds. Apps with Rust crates of their own
-(`nsh.json` `"rust"`) are traced with `nsh trace`.
+test fails when it throws, when the promise it returns rejects, and after 30 seconds. An app with Rust crates of its own
+(`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
+(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
 
 ### Opening the app
 
@@ -71,7 +73,7 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 ### Steps
 
 Steps name views with **selectors**: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` (a view
-id from `nsh trace`), or a bare string, matched as a `testID`, then a label, then a text. A selector finds the view a
+id from `--trace` output), or a bare string, matched as a `testID`, then a label, then a text. A selector finds the view a
 user would look at first: in the top modal, then on screen, and of a navigation stack only the top screen.
 
 | Step | Description |
@@ -112,15 +114,22 @@ the steps standard input gives, with `app` the app:
 echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh test App.tsx
 ```
 
-`--trace` prints every mount batch of the apps the tests open, under the step it came in (`── press(text:+1): 7
-items`), and the timing of every commit, as `nsh trace` does below.
+The 1.2 s let the engine's idle garbage collection run before the first step, so an app that lets go of what it still
+uses shows it: its handlers stop working.
 
-## nsh trace
+The examples have tests to start from: `examples/counter` and `examples/gallery/tests` (storage, inputs, a long list,
+stubbed requests) for TSX apps, `examples/rust-exports` for an app with a Rust crate, `examples/gallery-rs` for a Rust
+app.
 
-`nsh trace` prints every operation the runtime would send to the native views, with timings.
+## Tracing with --trace
+
+`--trace` prints every mount batch of the apps the tests open, under the step it came in, and the time of every
+commit. Run it on a test file, or on the app's entry with the steps on standard input:
 
 ```sh
-nsh trace App.tsx
+nsh test App.test.tsx --trace
+nsh test App.tsx --trace                                   # the first frame, then 1.2 s idle
+echo 'await app.press("Add")' | nsh test App.tsx --trace    # and a press
 ```
 
 Use it to:
@@ -130,66 +139,43 @@ Use it to:
 - measure the cost of the first frame, of a tap and of each scrolling frame;
 - catch regressions in CI.
 
-### What it does
-
-1. Bundles the entry (development settings, not minified) and compiles it to bytecode.
-2. Starts an engine with a 390×844 viewport and renders the first frame.
-3. Optionally scrolls the first scroll view or list.
-4. Waits while the app is idle (by default 1.2 s, so the engine's idle garbage collection runs first and retention bugs
-   show up), printing whatever the app renders meanwhile (timers, fetches, animations). An app that never stops
-   rendering (a clock, a looping animation) is waited for at most 10 s; `--wait` sets the time instead.
-5. Taps the views `--tap` names, or the first pressable view (the first view with `onPress`) a number of times, and
-   prints what each tap changes, then what the app renders after it.
-
-| Flag | Default | Description |
-|---|---|---|
-| `--tap <selector>` | none | A view to tap (repeatable, in order): `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>`, or a bare string matched as each of the first three. |
-| `--taps <n>` | 2 | Without `--tap`: taps to send to the first pressable view. |
-| `--idle-ms <ms>` | 1200 | Idle time before tapping. |
-| `--wait <ms>` | none | Run exactly this long before the first tap and after each one, instead of waiting until the app is idle. |
-| `--duration <ms>` | 0 | Keep running this long after the last tap. |
-| `--safe-area <insets>` | 0 | Safe area insets: `top,right,bottom,left` in points, e.g. `47,0,34,0`. |
-| `--scroll <points>` | none | Scroll the first scroll view or list by this many points, in 10 pt frames, printing each frame's batch. |
-| `--width <points>` | 390 | Viewport width. |
-| `--height <points>` | 844 | Viewport height. |
-
 ### Reading the output
 
-Here is the counter example (`examples/counter/App.tsx`), shortened:
+Here is the counter example with one press (`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx
+--trace`), shortened:
 
 ```text
-✓ bundled App.tsx (3255 B in 14.3 ms)
-perf commit: 56 ops, 395µs (list js 6µs), 49 mount items, 21 nodes
-perf first frame: eval 271µs, total 1235µs
-── initial render: 49 items
+✓ bundled App.tsx (3255 B in 6.2 ms)
+perf commit: 56 ops, 271µs (list js 5µs), 49 mount items, 21 nodes
+perf first frame: eval 187µs, total 820µs
+── open(App.tsx): 49 items
    LayoutDirection { rtl: false }
    Create { id: 2, kind: View }
    Create { id: 4, kind: Text }
    Insert { parent: 2, child: 4, before: None }
    ...
-   Events { id: 20, events: EventMask(1) }
    Frame { id: 2, x: 0, y: 0, w: 390, h: 844 }
    Frame { id: 4, x: 24, y: 64, w: 342, h: 34 }
    ...
    Text { id: 4, text: "nsh counter", content: 342x34 @ 0,0 }
    Text { id: 14, text: "0", content: 36x77 @ 0,0 }
-perf event Press on view 20
-perf event js: 196µs
-perf commit: 10 ops, 248µs (list js 6µs), 8 mount items, 24 nodes
-── tap #1 on view 20: 8 items
+perf event Press on view 26
+perf event js: 413µs
+perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
+── press(+1): 7 items
    Create { id: 42, kind: Text }
    Insert { parent: 32, child: 42, before: None }
-   Frame { id: 14, x: 136, y: 49, w: 71, h: 77 }
    Frame { id: 32, x: 24, y: 366, w: 342, h: 43 }
    Frame { id: 42, x: 0, y: 23, w: 342, h: 20 }
-   Text { id: 14, text: "-1", content: 71x77 @ 0,0 }
-   Text { id: 42, text: "• -1", content: 342x20 @ 0,0 }
+   Text { id: 14, text: "1", content: 36x77 @ 0,0 }
+   Text { id: 42, text: "• 1", content: 342x20 @ 0,0 }
    Text { id: 34, text: "Recent values: 1", content: 342x17 @ 0,0 }
+✓ App.tsx › steps (1.4s)
 ```
 
 #### Batches and mount items
 
-Each `── title: N items` block is one **mount batch**: everything the platform applies to native views for one frame,
+Each `── step: N items` block is one **mount batch**, under the step it came in: everything the platform applies to native views for one frame,
 in one hop to the main thread. The lines in it are **mount items**:
 
 | Item | Meaning |
@@ -227,92 +213,51 @@ the same machine, look at the minimum of several runs, and trust the op and item
 ### Scrolling
 
 ```sh
-nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
+echo 'await app.scroll("id:photos", 3000)' | nsh test examples/gallery/Bench.tsx --trace
 ```
 
-Scrolls the first `<Scroll>` or `List` 10 points per frame and prints each frame's batch:
+`scroll` moves the list 10 points per frame, at 60 frames a second, and each frame's batch is printed:
 
 ```text
-perf commit: 26 ops, 297µs (list js 111µs), 22 mount items, 233 nodes
-── scroll to 20: 22 items
-   Create { id: 448, kind: View }
+perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
+── scroll(id:photos, 3000): 46 items
+   Create { id: 792, kind: View }
+   Insert { parent: 94, child: 792, before: None }
    ...
-   Text { id: 456, text: "Photo #25", content: 298x20 @ 0,0 }
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
 costs, and that frames revealing no new row produce nothing. Use it with a release build of the CLI
 (`./target/release/nsh` in a checkout) for meaningful timings.
 
-### Taps
-
-Name the views to tap with `--tap`, by `testID`, accessibility label or text, in the order to tap them. A match that is
-not pressable itself (a `Text` inside a button) taps its nearest pressable ancestor, and the views a tap brings in (a
-pushed screen, an opened menu) can be tapped next:
-
-```sh
-nsh trace --tap label:Plan --tap "text:Add stage" --tap id:save --wait 300
-```
-
-Without `--tap`, `nsh trace` taps the **first** view with `onPress` on screen. You can also write a small entry file
-that renders only the screen under test:
-
-```tsx
-// trace/AddItem.tsx: renders the screen and puts the button under test first
-import { mount } from "nsh";
-import { Cart } from "../src/Cart";
-
-mount(() => <Cart initialItems={[]} />);
-```
-
-```sh
-nsh trace trace/AddItem.tsx --taps 5
-```
-
-If a tap produces no update, `nsh trace` stops with `error tap #1 produced no update` and a non-zero exit code: that
-is how it catches handlers that stopped working, for example because the app's nodes were garbage-collected.
-
 ### In CI
 
-`nsh trace` needs nothing but the CLI, so it runs on Linux runners. Errors in the app (a failed bundle evaluation, an
-uncaught exception, an unhandled promise rejection) are printed as `error` lines; a build failure, an app that renders nothing, or a tap that changes
-nothing make it exit with a non-zero code. Check both:
-
-```sh
-#!/bin/sh
-set -e
-for entry in App.tsx trace/*.tsx; do
-  out=$(nsh trace "$entry" --idle-ms 300 2>&1) || { echo "$out"; exit 1; }
-  if echo "$out" | grep -E '^ *error' >/dev/null; then
-    echo "$out"
-    echo "errors in $entry"
-    exit 1
-  fi
-done
-```
+`nsh test` needs nothing but the CLI, so it runs on Linux runners, and any failing test makes it exit with a non-zero
+code: a test that fails, an app that does not build or renders nothing, an exception the app throws during a step.
 
 ```yaml
-# .github/workflows/trace.yml
+# .github/workflows/test.yml
 jobs:
-  trace:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/trace.sh
+      - run: nsh test
 ```
 
 (Install the `nsh` CLI on the runner the way you install it locally; see [Installation](./installation.md).)
 
 To guard performance, record the item counts of a few interactions (the `── … : N items` lines and the `ops` /
-`mount items` numbers) and fail when they grow. Counts are deterministic; timings on shared CI machines are not.
+`mount items` numbers of `--trace`) and fail when they grow. Counts are deterministic; timings on shared CI machines
+are not.
 
 > [!NOTE]
-> `nsh trace` runs with every capability: it does not apply the `capabilities` of `nsh.json`, and its `fetch` really
-> goes to the network. Test capability rules on a device or in a packaged build.
+> Tests run with every capability: `nsh.json`'s `capabilities` are not applied. Test capability rules on a device or in
+> a packaged build.
 
 ## `testID` for UI tests
 
-`nsh trace` checks what the runtime renders. To drive the real native UI with the platform's test tools (XCUITest,
+`nsh test` checks what the runtime renders, and its `id:` selectors find views by `testID`. To drive the real native UI with the platform's test tools (XCUITest,
 Espresso / UI Automator, Appium, Maestro), give views a `testID`:
 
 ```tsx
@@ -327,7 +272,7 @@ Espresso / UI Automator, Appium, Maestro), give views a `testID`:
 | Android | The accessibility node's view id resource name (`By.res("add-to-cart")` in UI Automator). |
 
 `testID` is a prop of every element and of the components in `nsh/ui/mobile`. It does not change what screen readers
-say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `nsh trace` output it appears in
+say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 
 ## See also

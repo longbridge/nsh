@@ -2,98 +2,268 @@
 //! import `nsh/test`) headless, each on an engine of its own, and says how
 //! each test ended (`nsh-testing` runs them). Given an app's entry instead,
 //! it opens the app as a test would and takes the steps standard input
-//! gives (`await app.press("Add")`): with `--trace`, what `nsh trace`
-//! printed.
+//! gives (`await app.press("Add")`); `--trace` prints the mount batches of
+//! the apps under their steps.
+//!
+//! An app this command line serves runs in its process. An app with Rust
+//! crates of its own runs in the headless runner built with them
+//! (`rust_app.rs`, `nsh_testing::runner`), which asks this process to build
+//! each entry ([`RunnerMessage::Build`]): the runner links no bundler.
 
 use std::{
     collections::HashMap,
-    io::{IsTerminal as _, Read as _},
+    io::{BufRead as _, BufReader, IsTerminal as _, Read as _, Write as _},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::{Arc, Mutex},
     time::Instant,
 };
 
 use anyhow::{Context as _, bail};
+use nsh_bundler::BundleOptions;
 use nsh_core::ui::description::SetDescription;
 use nsh_engine::Bundle;
-use nsh_testing::{Entry, TestResult, TestRun};
+use nsh_testing::{Built, Entry, Reply, RunnerMessage, TestRequest, TestResult, TestRun};
 
-use crate::ui;
+use crate::{build::BuildError, logger, rust_app::RustApp, ui};
 
 /// How long the app runs after it opened before the steps of standard
 /// input: long enough for the engine's idle collection (every second at
 /// most), so what the app keeps alive shows in a trace.
 const IDLE_MS: u32 = 1200;
 
-/// Runs the tests `path` names: a test file, the test files in a directory
-/// (an app's), or an app's entry with the steps standard input gives.
-pub(crate) fn test(path: &Path, filter: Option<String>, trace: bool) -> anyhow::Result<()> {
-    let path = dunce::canonicalize(path).with_context(|| format!("{}", path.display()))?;
-    let entry = app_entry(&path)?;
-    if crate::rust_app::of(&entry)?.is_some() || crate::rust_app::is_root(&entry) {
-        bail!(
-            "nsh test runs apps whose code is TypeScript; {} has Rust crates of its own \
-             (`nsh.json` \"rust\"): trace it with `nsh trace`",
-            ui::path(&entry)
-        );
-    }
-    crate::init::write_types_for(&entry);
+/// Runs the tests `path` names, of the app whose entry is `entry`: a test
+/// file, the test files in a directory (an app's), or an app's entry with
+/// the steps standard input gives.
+pub(crate) fn test(
+    path: &Path,
+    entry: &Path,
+    filter: Option<String>,
+    trace: bool,
+) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let run = TestRun {
-        ui_sets: crate::own_sets().to_vec(),
-        compile: compiler(),
-        work_dir: app_dir.join(".nsh/test"),
-        filter,
-        trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
-    };
-    let files = if is_test_file(&path) {
-        vec![path.clone()]
+    let work_dir = app_dir.join(".nsh/test");
+    let files = if is_test_file(path) {
+        vec![path.to_owned()]
     } else if path.is_dir() {
         let mut files = Vec::new();
-        find_tests(&path, &mut files);
+        find_tests(path, &mut files);
         files.sort();
         if files.is_empty() {
             bail!(
                 "no test files in {}: tests are `*.test.tsx` / `*.test.ts` files importing nsh/test",
-                ui::path(&path)
+                ui::path(path)
             );
         }
         files
     } else {
-        vec![steps_file(&run.work_dir, &path)?]
+        vec![steps_file(&work_dir, path)?]
     };
-    let start = Instant::now();
-    let (mut passed, mut failed) = (0, 0);
-    for file in &files {
-        let shown = if file.starts_with(&run.work_dir) {
-            ui::path(&path)
+    // How the files are shown: an entry's steps by the entry.
+    let shown = |file: &Path| {
+        if file.starts_with(&work_dir) {
+            ui::path(path)
         } else {
             ui::path(file)
-        };
-        let mut report = |result: &TestResult| {
-            show(&shown, result);
-            if result.failure.is_some() {
-                failed += 1;
-            } else {
-                passed += 1;
+        }
+    };
+    let start = Instant::now();
+    let mut tally = Tally::default();
+    match crate::rust_app::current() {
+        Some(app) => {
+            let request = TestRequest {
+                protocol: nsh_testing::PROTOCOL,
+                bytecode_version: nsh_js::BYTECODE_VERSION.to_owned(),
+                files,
+                work_dir: work_dir.clone(),
+                filter,
+                trace,
+                verbose: ui::verbose(),
+            };
+            in_runner(&app, &request, &shown, &mut tally)?;
+        }
+        None => {
+            let run = TestRun {
+                ui_sets: crate::own_sets().to_vec(),
+                compile: compiler(),
+                work_dir: work_dir.clone(),
+                filter,
+                trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
+            };
+            for file in &files {
+                let shown = shown(file);
+                let ran = nsh_testing::run_file(&run, file, &mut |result| {
+                    tally.show(&shown, result);
+                });
+                if let Err(e) = ran {
+                    tally.failed(&shown, &e);
+                }
             }
-        };
-        if let Err(e) = nsh_testing::run_file(&run, file, &mut report) {
-            failed += 1;
-            ui::error(format!("{shown}: {e}"));
         }
     }
-    let total = passed + failed;
+    let total = tally.passed + tally.failed;
     let summary = format!(
-        "{total} {}: {passed} passed, {failed} failed {}",
+        "{total} {}: {} passed, {} failed {}",
         if total == 1 { "test" } else { "tests" },
+        tally.passed,
+        tally.failed,
         ui::dim(format!("({})", ui::duration(start.elapsed())))
     );
-    if failed > 0 {
+    if tally.failed > 0 {
         bail!(summary);
     }
     ui::done(summary);
     Ok(())
+}
+
+/// The tests that passed and failed so far.
+#[derive(Default)]
+struct Tally {
+    passed: usize,
+    failed: usize,
+}
+
+impl Tally {
+    /// Shows how a test of the file shown as `file` ended, and counts it.
+    fn show(&mut self, file: &str, result: &TestResult) {
+        show(file, result);
+        if result.failure.is_some() {
+            self.failed += 1;
+        } else {
+            self.passed += 1;
+        }
+    }
+
+    /// The test file shown as `file` could not run: it counts as a failure.
+    fn failed(&mut self, file: &str, message: &str) {
+        self.failed += 1;
+        ui::error(format!("{file}: {message}"));
+    }
+}
+
+/// Runs `request` in the headless runner of the app with Rust crates
+/// `app`: builds the entries it asks for, shows its results and its log.
+fn in_runner(
+    app: &RustApp,
+    request: &TestRequest,
+    shown: &dyn Fn(&Path) -> String,
+    tally: &mut Tally,
+) -> anyhow::Result<()> {
+    let runner = app.test_runner()?;
+    let mut child = Command::new(&runner)
+        .arg(serde_json::to_string(request)?)
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("run {}", runner.display()))?;
+    let mut input = child.stdin.take().context("the runner's standard input")?;
+    let stderr = child.stderr.take().context("the runner's standard error")?;
+    let mut builds = 0;
+    for line in BufReader::new(stderr).lines() {
+        let line = line?;
+        match RunnerMessage::parse(&line) {
+            Some(RunnerMessage::Log {
+                level,
+                target,
+                message,
+            }) => {
+                let level = level.parse().unwrap_or(log::Level::Info);
+                logger::forward(level, &target, &message);
+            }
+            Some(RunnerMessage::Build { entry, kind }) => {
+                builds += 1;
+                let reply = build_for_runner(&entry, kind, &request.work_dir, builds);
+                writeln!(input, "{}", serde_json::to_string(&reply)?)
+                    .context("answer the runner")?;
+            }
+            Some(RunnerMessage::Result { file, result }) => tally.show(&shown(&file), &result),
+            Some(RunnerMessage::Failed { file, message }) => {
+                tally.failed(&shown(&file), &message);
+            }
+            None => ui::plain(line),
+        }
+    }
+    let status = child.wait()?;
+    if !status.success() {
+        bail!(
+            "the headless runner {} exited with {status}",
+            ui::path(&runner)
+        );
+    }
+    Ok(())
+}
+
+/// Builds `entry` for the app's runner, the `n`th build of the run: its
+/// files in `work_dir`, or the app's root.
+fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
+    let built = (|| -> anyhow::Result<Reply> {
+        let (bytecode, map) = match kind {
+            Entry::TestFile => test_file_bytecode(entry)?,
+            Entry::App => {
+                let entry = crate::entry::resolve(entry)?;
+                if crate::rust_app::is_root(&entry) {
+                    return Ok(Reply::Root);
+                }
+                bytecode_of(&entry, &crate::ui_sets(), true)?
+            }
+        };
+        let dir = work_dir.join("build");
+        std::fs::create_dir_all(&dir).with_context(|| format!("{}", dir.display()))?;
+        let file = dir.join(format!("{n}.nshc"));
+        std::fs::write(&file, bytecode).with_context(|| format!("write {}", file.display()))?;
+        let source_map = match map {
+            Some(map) => {
+                let path = dir.join(format!("{n}.js.map"));
+                std::fs::write(&path, map).with_context(|| format!("write {}", path.display()))?;
+                Some(path)
+            }
+            None => None,
+        };
+        Ok(Reply::Js {
+            bytecode: file,
+            source_map,
+        })
+    })();
+    built.unwrap_or_else(|e| Reply::Failed {
+        message: format!("{e:#}"),
+    })
+}
+
+/// The entry made for a test file, bundled against the app's sets and
+/// `nsh/test`, and compiled.
+fn test_file_bytecode(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    let mut sets = crate::ui_sets().to_vec();
+    sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
+    bytecode_of(entry, &sets, false)
+}
+
+/// `entry` bundled against `sets` and compiled to bytecode, with its
+/// source map; `announce`: saying so.
+fn bytecode_of(
+    entry: &Path,
+    sets: &[SetDescription],
+    announce: bool,
+) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    let bundle = nsh_bundler::bundle(&BundleOptions {
+        entry: entry.to_path_buf(),
+        minify: false,
+        split: false,
+        ui_sets: sets.to_vec(),
+    })
+    .map_err(|e| BuildError::from(e).into_error(entry))?;
+    if announce {
+        ui::done(format!(
+            "bundled {} {}",
+            ui::path(entry),
+            ui::dim(format!(
+                "({} B in {:.1} ms)",
+                bundle.code.len(),
+                bundle.elapsed_ms
+            ))
+        ));
+    }
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
+    Ok((bytecode, bundle.source_map))
 }
 
 /// Prints how a test of the file shown as `file` ended: a line, and for a
@@ -118,7 +288,12 @@ fn show(file: &str, result: &TestResult) {
             ui::detail(ui::dim(format!("  {}", frame.trim_start())));
         }
     }
-    if let Some(screen) = &failure.screen {
+    // A step's error says what is on screen already.
+    if let Some(screen) = failure
+        .screen
+        .as_ref()
+        .filter(|_| !failure.message.contains("on screen: "))
+    {
         let texts: Vec<String> = screen.iter().map(|t| format!("{t:?}")).collect();
         ui::detail(format!("  on screen: {}", texts.join(", ")));
     }
@@ -126,7 +301,7 @@ fn show(file: &str, result: &TestResult) {
 
 /// The entry of the app `path` is part of: a directory's, a test file's
 /// (the nearest directory up with an app), or `path` itself.
-fn app_entry(path: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn app_entry(path: &Path) -> anyhow::Result<PathBuf> {
     if path.is_dir() {
         return crate::entry::resolve(path);
     }
@@ -207,38 +382,39 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 
 /// Builds the apps tests open against the UI sets this command line
 /// serves (each entry once), and the entries made for test files against
-/// them and `nsh/test`.
+/// them and `nsh/test`, in this process.
 fn compiler() -> nsh_testing::Compile {
-    type Built = (Vec<u8>, Option<String>);
-    let built: Mutex<HashMap<PathBuf, Built>> = Mutex::new(HashMap::new());
+    type Bytecode = (Vec<u8>, Option<String>);
+    let built: Mutex<HashMap<PathBuf, Bytecode>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
         let (bytecode, map) = match kind {
             Entry::App => {
+                let entry = crate::entry::resolve(entry).map_err(|e| format!("{e:#}"))?;
                 let cached = built
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .get(entry)
+                    .get(&entry)
                     .cloned();
                 match cached {
                     Some(built) => built,
                     None => {
-                        let out = crate::trace::compile(entry).map_err(|e| format!("{e:#}"))?;
+                        let out = bytecode_of(&entry, &crate::ui_sets(), true)
+                            .map_err(|e| format!("{e:#}"))?;
                         built
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
-                            .insert(entry.to_owned(), out.clone());
+                            .insert(entry, out.clone());
                         out
                     }
                 }
             }
-            Entry::TestFile => {
-                let mut sets = crate::ui_sets().to_vec();
-                sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
-                crate::trace::compile_with(entry, &sets, false).map_err(|e| format!("{e:#}"))?
-            }
+            Entry::TestFile => test_file_bytecode(entry).map_err(|e| format!("{e:#}"))?,
         };
         // SAFETY: compiled just now by this runtime.
-        Ok((unsafe { Bundle::bytecode(bytecode) }, map))
+        Ok(Built::Js(
+            Box::new(unsafe { Bundle::bytecode(bytecode) }),
+            map,
+        ))
     })
 }
 

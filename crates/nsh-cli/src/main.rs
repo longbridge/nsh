@@ -16,7 +16,6 @@ mod runtime;
 mod rust_app;
 mod sign;
 mod test;
-mod trace;
 mod ui;
 mod web;
 mod windows;
@@ -27,6 +26,7 @@ use std::{
     sync::{Arc, OnceLock, RwLock},
 };
 
+use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
 use nsh_core::ui::{Registry, description::SetDescription};
 
@@ -118,51 +118,6 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
-    /// Run an app headless (a Rust app: its root) and print the mount
-    /// instructions and timings.
-    Trace {
-        /// The entry module, or the app's directory (default: the current one),
-        /// whose `App.tsx` is the entry.
-        #[arg(default_value = ".")]
-        entry: PathBuf,
-        /// Number of taps to send to the first pressable view (without
-        /// `--tap`).
-        #[arg(long, default_value_t = 2)]
-        taps: u32,
-        /// Tap a view (repeatable, in order): `id:<testID>`,
-        /// `label:<accessibilityLabel>`, `text:<text>`, `view:<id>`, or a
-        /// bare string matched as a testID, a label, then a text. A match
-        /// that is not pressable taps its nearest pressable ancestor.
-        #[arg(long, value_name = "SELECTOR")]
-        tap: Vec<String>,
-        /// Idle time before tapping, in milliseconds: the app must render
-        /// nothing for this long (at most 10 s). The default lets the
-        /// engine's idle GC run first, so retention bugs show up.
-        #[arg(long, default_value_t = 1200)]
-        idle_ms: u64,
-        /// Run timers and animations this long before the first tap and
-        /// after each one, in milliseconds, instead of waiting until the
-        /// app is idle.
-        #[arg(long, value_name = "MS")]
-        wait: Option<u64>,
-        /// Keep running this long after the last tap, in milliseconds.
-        #[arg(long, value_name = "MS", default_value_t = 0)]
-        duration: u64,
-        /// Simulated safe area insets in points: `top,right,bottom,left`
-        /// (or one value for all four), e.g. `47,0,34,0`.
-        #[arg(long, value_name = "INSETS", value_parser = nsh_engine::headless::parse_insets)]
-        safe_area: Option<nsh_engine::Insets>,
-        /// Scroll the first scroll view / list by this many points, in
-        /// 10 pt frames, and print each frame's batch.
-        #[arg(long)]
-        scroll: Option<f32>,
-        /// Viewport width in points.
-        #[arg(long, default_value_t = 390.0)]
-        width: f32,
-        /// Viewport height in points.
-        #[arg(long, default_value_t = 844.0)]
-        height: f32,
-    },
     /// Run an app's tests headless: its test files (`*.test.tsx`,
     /// `*.test.ts`, importing `nsh/test`), each test opening the app on an
     /// engine of its own; or, given the app's entry, open it and take the
@@ -172,6 +127,9 @@ enum Command {
         /// current one), or an app's entry.
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// The entry of the app `path` is part of (set from it).
+        #[arg(skip)]
+        entry: PathBuf,
         /// Run only the tests whose name contains this.
         #[arg(long)]
         filter: Option<String>,
@@ -440,7 +398,7 @@ impl Command {
     fn entry_mut(&mut self) -> Option<&mut PathBuf> {
         match self {
             Command::Build { entry, .. }
-            | Command::Trace { entry, .. }
+            | Command::Test { entry, .. }
             | Command::Check { entry, .. }
             | Command::Dev { entry, .. }
             | Command::Run { entry, .. }
@@ -451,7 +409,6 @@ impl Command {
             | Command::Certify { .. }
             | Command::Verify { .. }
             | Command::Symbolicate { .. }
-            | Command::Test { .. }
             | Command::Revoke { .. } => None,
         }
     }
@@ -496,24 +453,29 @@ fn no_limits_for_rust(
 }
 
 fn run(mut command: Command) -> anyhow::Result<()> {
-    let mut types = !matches!(command, Command::Trace { .. });
+    let mut types = true;
+    // The app a test's path is part of.
+    if let Command::Test { path, entry, .. } = &mut command {
+        *path = dunce::canonicalize(&*path).with_context(|| format!("{}", path.display()))?;
+        *entry = test::app_entry(path)?;
+    }
     if let Some(entry) = command.entry_mut() {
         *entry = entry::resolve(entry)?;
         // A Rust app has no TypeScript to declare things for.
         types &= !rust_app::is_root(entry);
     }
-    // A Rust app (`nsh.json` "root") has no bundle: it is built, traced,
+    // A Rust app (`nsh.json` "root") has no bundle: it is built, tested,
     // run and packaged.
     let rust_command = matches!(
         command,
-        Command::Build { .. } | Command::Trace { .. } | Command::Package(_) | Command::Run { .. }
+        Command::Build { .. } | Command::Test { .. } | Command::Package(_) | Command::Run { .. }
     );
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
         && !rust_command
     {
         anyhow::bail!(
-            "{} declares a Rust app (\"root\"): it is built with `nsh build`, traced with `nsh trace`, \
+            "{} declares a Rust app (\"root\"): it is built with `nsh build`, tested with `nsh test`, \
              run with `nsh run` and packaged with `nsh package`; the other commands take a TSX entry",
             ui::path(entry)
         );
@@ -584,37 +546,13 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             release,
             split,
         } => build::build(&entry, &out, release, split),
-        Command::Trace {
-            entry,
-            taps,
-            tap,
-            idle_ms,
-            wait,
-            duration,
-            safe_area,
-            scroll,
-            width,
-            height,
-        } => trace::trace(
-            &entry,
-            nsh_engine::headless::TraceOptions {
-                taps,
-                tap,
-                idle_ms,
-                wait,
-                duration,
-                scroll,
-                width,
-                height,
-                safe_area: safe_area.unwrap_or_default(),
-            },
-        ),
         Command::Check { entry, tsc, args } => check::check(&entry, tsc.as_deref(), &args),
         Command::Test {
             path,
+            entry,
             filter,
             trace,
-        } => test::test(&path, filter, trace),
+        } => test::test(&path, &entry, filter, trace),
         Command::Dev {
             entry,
             port,
