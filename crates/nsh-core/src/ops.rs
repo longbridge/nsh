@@ -1473,6 +1473,9 @@ pub enum Prop {
     /// `selectedStyle`: the style while `accessibilityState.selected` (a
     /// `Button`'s `selected`), and not disabled.
     SelectedStyle(Option<Arc<StylePatch>>),
+    /// `checkedStyle`: the style while `accessibilityState.checked` (true,
+    /// not mixed: a checkbox's, a switch's, a radio's), and not disabled.
+    CheckedStyle(Option<Arc<StylePatch>>),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
     HeaderStyle(Option<Arc<StylePatch>>),

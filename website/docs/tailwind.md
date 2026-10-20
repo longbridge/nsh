@@ -51,7 +51,8 @@ Rust components (`SafeAreaView`, `KeyboardAvoidingView` and those of an app's ow
 | `focus-within:` | The view or a descendant has focus |
 | `disabled:`, `enabled:` | The element's `disabled` prop is true / false |
 | `selected:` | The element is selected (a `Button`'s `selected`, `accessibilityState.selected`) |
-| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:`, `group-selected:` | The nearest ancestor with the `group` class is in that state |
+| `checked:` | The element is checked (`accessibilityState.checked` is `true`; `"mixed"` is not checked) |
+| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:`, `group-selected:`, `group-checked:` | The nearest ancestor with the `group` class is in that state |
 | `group-active/name:` ... | The same, for an ancestor marked `group/name` |
 | `first:`, `last:`, `odd:`, `even:`, `only:` | The element's own position among its siblings. To color a row's label by the row's position, put `last:text-*` on the row: the label inherits it |
 | `placeholder:` | Styles an input's placeholder (`placeholder:text-zinc-400`) |

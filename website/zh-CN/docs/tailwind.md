@@ -51,7 +51,8 @@ Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate �
 | `focus-within:` | 视图或其后代获得焦点 |
 | `disabled:`、`enabled:` | 元素的 `disabled` 属性为 true / false |
 | `selected:` | 元素处于选中状态（`Button` 的 `selected`、`accessibilityState.selected`） |
-| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:`、`group-selected:` | 最近的带 `group` 类的祖先处于该状态 |
+| `checked:` | 元素处于勾选状态（`accessibilityState.checked` 为 `true`；`"mixed"` 不算） |
+| `group-active:`、`group-hover:`、`group-focus:`、`group-focus-within:`、`group-disabled:`、`group-selected:`、`group-checked:` | 最近的带 `group` 类的祖先处于该状态 |
 | `group-active/name:` ... | 同上，针对标记为 `group/name` 的祖先 |
 | `first:`、`last:`、`odd:`、`even:`、`only:` | 元素自身在兄弟节点中的位置。要按行的位置给行内标签上色，把 `last:text-*` 写在行上，标签会继承它 |
 | `placeholder:` | 设置输入框占位文字的样式（`placeholder:text-zinc-400`） |

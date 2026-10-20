@@ -1356,6 +1356,14 @@ pub trait Interactive: Element {
         super::host::bind_prop(self.node(), style, |s: Style| Prop::SelectedStyle(s.0));
         self
     }
+
+    /// An app's style while checked (`accessibility_state` `checked`, not
+    /// mixed: a checkbox's, a switch's, a radio's), as `checked:` classes
+    /// apply.
+    fn checked_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        super::host::bind_prop(self.node(), style, |s: Style| Prop::CheckedStyle(s.0));
+        self
+    }
 }
 
 macro_rules! element {

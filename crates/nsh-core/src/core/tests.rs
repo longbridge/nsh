@@ -3430,6 +3430,71 @@ fn selected_style_follows_the_accessibility_state() {
 }
 
 #[test]
+fn checked_style_follows_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState, Checked, StyleValue as V};
+    // A switch: the track by its checked state, the thumb by its group's.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "group bg-zinc-200 checked:bg-emerald-500 selected:opacity-50",
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-checked:translate-x-4"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let state = |checked, selected| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            checked,
+            selected,
+            ..AccessibilityState::default()
+        })),
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::CheckedStyle(patch(&[("opacity", V::Number(0.7))])),
+            },
+            state(Some(Checked::True), false),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let track = view_style_of(&batch, 2).unwrap();
+    assert_eq!(track.background_color, Color(0x00bc_7dff));
+    assert_eq!(track.opacity, 0.7);
+    assert_eq!(
+        view_style_of(&batch, 3).unwrap().transform.ops()[0].value,
+        16.0
+    );
+    // The platform never tracks it.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id: 2, states } if states & crate::tailwind::state::CHECKED != 0
+    )));
+    // Mixed is not checked; selected changing with it is applied too.
+    apply(&mut c, vec![state(Some(Checked::Mixed), true)]);
+    let batch = c.commit().unwrap();
+    let track = view_style_of(&batch, 2).unwrap();
+    assert_eq!(track.background_color, Color(0xe4e4_e7ff));
+    assert_eq!(track.opacity, 0.5);
+    assert!(view_style_of(&batch, 3).unwrap().transform.ops().is_empty());
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {
