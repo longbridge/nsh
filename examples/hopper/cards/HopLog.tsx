@@ -31,26 +31,26 @@ function Apogees() {
         onAccessibilityAction={(e) =>
           picked.set(Math.min(last().length - 1, Math.max(0, index() + (e.actionName === "increment" ? 1 : -1))))
         }
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const all = last();
           const step = width / all.length;
           // The ceiling, dashed.
-          ctx.strokeStyle = color.lineStrong;
-          ctx.setLineDash([2, 4]);
-          ctx.beginPath();
-          ctx.moveTo(0, height - (150 / top) * height);
-          ctx.lineTo(width, height - (150 / top) * height);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.lineCap = "round";
-          ctx.lineWidth = Math.max(2, step * 0.45);
+          cx.strokeStyle = color.lineStrong;
+          cx.setLineDash([2, 4]);
+          cx.beginPath();
+          cx.moveTo(0, height - (150 / top) * height);
+          cx.lineTo(width, height - (150 / top) * height);
+          cx.stroke();
+          cx.setLineDash([]);
+          cx.lineCap = "round";
+          cx.lineWidth = Math.max(2, step * 0.45);
           all.forEach((h, i) => {
             const x = i * step + step / 2;
-            ctx.strokeStyle = i === index() ? color.light : h.outcome === "abort" ? color.alert : h.outcome === "hard" ? color.caution : color.bar;
-            ctx.beginPath();
-            ctx.moveTo(x, height - 2);
-            ctx.lineTo(x, height - 2 - Math.max(4, (h.apogee / top) * (height - 6)));
-            ctx.stroke();
+            cx.strokeStyle = i === index() ? color.light : h.outcome === "abort" ? color.alert : h.outcome === "hard" ? color.caution : color.bar;
+            cx.beginPath();
+            cx.moveTo(x, height - 2);
+            cx.lineTo(x, height - 2 - Math.max(4, (h.apogee / top) * (height - 6)));
+            cx.stroke();
           });
         }}
       />
@@ -99,48 +99,48 @@ function Dispersion() {
         onAccessibilityAction={(e) =>
           zone.set(Math.round(Math.min(3, Math.max(0.3, zone() + (e.actionName === "increment" ? 0.1 : -0.1))) * 10) / 10)
         }
-        draw={(ctx, { width, height }) => {
-          const cx = width / 2, cy = height / 2;
+        draw={(cx, { width, height }) => {
+          const centerX = width / 2, cy = height / 2;
           const scale = height / 2 / reach;
-          ctx.strokeStyle = color.grid;
-          ctx.lineWidth = 1;
+          cx.strokeStyle = color.grid;
+          cx.lineWidth = 1;
           for (let r = 1; r <= 3; r++) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
-            ctx.stroke();
+            cx.beginPath();
+            cx.arc(centerX, cy, r * scale, 0, Math.PI * 2);
+            cx.stroke();
           }
-          ctx.beginPath();
-          ctx.moveTo(0, cy);
-          ctx.lineTo(width, cy);
-          ctx.moveTo(cx, 0);
-          ctx.lineTo(cx, height);
-          ctx.stroke();
-          ctx.fillStyle = color.faint;
-          ctx.font = `11px ${mono}`;
-          ctx.textAlign = "left";
-          ctx.textBaseline = "bottom";
-          for (let r = 1; r <= 3; r++) ctx.fillText(`${r} m`, cx + r * scale + 3, cy - 3);
+          cx.beginPath();
+          cx.moveTo(0, cy);
+          cx.lineTo(width, cy);
+          cx.moveTo(centerX, 0);
+          cx.lineTo(centerX, height);
+          cx.stroke();
+          cx.fillStyle = color.faint;
+          cx.font = `11px ${mono}`;
+          cx.textAlign = "left";
+          cx.textBaseline = "bottom";
+          for (let r = 1; r <= 3; r++) cx.fillText(`${r} m`, centerX + r * scale + 3, cy - 3);
 
-          ctx.fillStyle = color.accentDim;
-          ctx.beginPath();
-          ctx.arc(cx, cy, zone() * scale, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = color.accent;
-          ctx.setLineDash([5, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
+          cx.fillStyle = color.accentDim;
+          cx.beginPath();
+          cx.arc(centerX, cy, zone() * scale, 0, Math.PI * 2);
+          cx.fill();
+          cx.strokeStyle = color.accent;
+          cx.setLineDash([5, 4]);
+          cx.stroke();
+          cx.setLineDash([]);
 
           for (const p of touchdowns()) {
             const d = Math.hypot(p.x, p.y);
-            ctx.fillStyle = d <= zone() ? color.accent : d > 2.5 ? color.alert : color.muted;
-            ctx.beginPath();
-            ctx.arc(cx + p.x * scale, cy - p.y * scale, 2.6, 0, Math.PI * 2);
-            ctx.fill();
+            cx.fillStyle = d <= zone() ? color.accent : d > 2.5 ? color.alert : color.muted;
+            cx.beginPath();
+            cx.arc(centerX + p.x * scale, cy - p.y * scale, 2.6, 0, Math.PI * 2);
+            cx.fill();
           }
           // The pad's center.
-          ctx.strokeStyle = color.light;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(cx - 4, cy - 4, 8, 8);
+          cx.strokeStyle = color.light;
+          cx.lineWidth = 1.5;
+          cx.strokeRect(centerX - 4, cy - 4, 8, 8);
         }}
       />
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>

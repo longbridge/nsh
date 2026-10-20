@@ -28,7 +28,7 @@ export interface CanvasProps extends ViewProps {
    * canvas resizes (it first runs once the size is known); animated values
    * passed as numbers or colors animate without running it.
    */
-  draw: (ctx: CanvasRenderingContext2D, size: CanvasSize) => void;
+  draw: (cx: CanvasRenderingContext2D, size: CanvasSize) => void;
 }
 
 /** A number in a drawing: a constant, or an animated value the canvas reads

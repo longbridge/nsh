@@ -229,7 +229,7 @@ pub(crate) struct InputState {
     key_mods: Cell<NSEventModifierFlags>,
     /// The animated text color applied.
     anim_color: Cell<Option<Color>>,
-    ctx: Ctx,
+    cx: Ctx,
 }
 
 /// What the editors' callbacks need, without keeping anything alive.
@@ -616,7 +616,7 @@ macro_rules! define_field {
                 fn become_first_responder(&self) -> bool {
                     // AppKit selects the whole text as the field takes the
                     // focus: a step, reported (if it stays) with the focus.
-                    let input = self.ivars().get().and_then(|ctx| ctx.input.upgrade());
+                    let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
                     if let Some(input) = &input {
                         input.focusing.set(true);
                     }
@@ -625,8 +625,8 @@ macro_rules! define_field {
                     if let Some(input) = &input {
                         input.focusing.set(false);
                     }
-                    if ok && let Some(ctx) = self.ivars().get() {
-                        ctx.focus_changed(true);
+                    if ok && let Some(cx) = self.ivars().get() {
+                        cx.focus_changed(true);
                     }
                     ok
                 }
@@ -636,8 +636,8 @@ macro_rules! define_field {
                     // SAFETY: NSTextField's own handling of its field
                     // editor's end (it implements NSTextDelegate).
                     let _: () = unsafe { msg_send![super(self), textDidEndEditing: notification] };
-                    if let Some(ctx) = self.ivars().get() {
-                        ctx.focus_changed(false);
+                    if let Some(cx) = self.ivars().get() {
+                        cx.focus_changed(false);
                     }
                 }
 
@@ -663,7 +663,7 @@ macro_rules! define_field {
                     ok && self
                         .ivars()
                         .get()
-                        .is_none_or(|ctx| ctx.should_change(text_view, range, replacement))
+                        .is_none_or(|cx| cx.should_change(text_view, range, replacement))
                 }
 
                 #[unsafe(method(textViewDidChangeSelection:))]
@@ -676,17 +676,17 @@ macro_rules! define_field {
                             msg_send![super(self), textViewDidChangeSelection: notification]
                         };
                     }
-                    if let Some(ctx) = self.ivars().get() {
-                        ctx.selection_changed();
+                    if let Some(cx) = self.ivars().get() {
+                        cx.selection_changed();
                     }
                 }
             }
         );
 
         impl $name {
-            fn create(mtm: MainThreadMarker, ctx: Ctx) -> Retained<NSTextField> {
+            fn create(mtm: MainThreadMarker, cx: Ctx) -> Retained<NSTextField> {
                 let cell = OnceCell::new();
-                let _ = cell.set(ctx);
+                let _ = cell.set(cx);
                 let this = Self::alloc(mtm).set_ivars(cell);
                 // SAFETY: NSTextField's designated initializer.
                 let this: Retained<Self> =
@@ -739,7 +739,7 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
-            let input = self.ivars().get().and_then(|ctx| ctx.input.upgrade());
+            let input = self.ivars().get().and_then(|cx| cx.input.upgrade());
             if let Some(input) = &input {
                 input.key_mods.set(event.modifierFlags());
             }
@@ -754,8 +754,8 @@ define_class!(
         fn become_first_responder(&self) -> bool {
             // SAFETY: NSTextView's own method.
             let ok: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
-            if ok && let Some(ctx) = self.ivars().get() {
-                ctx.focus_changed(true);
+            if ok && let Some(cx) = self.ivars().get() {
+                cx.focus_changed(true);
             }
             ok
         }
@@ -764,8 +764,8 @@ define_class!(
         fn resign_first_responder(&self) -> bool {
             // SAFETY: NSTextView's own method.
             let ok: bool = unsafe { msg_send![super(self), resignFirstResponder] };
-            if ok && let Some(ctx) = self.ivars().get() {
-                ctx.focus_changed(false);
+            if ok && let Some(cx) = self.ivars().get() {
+                cx.focus_changed(false);
             }
             ok
         }
@@ -975,7 +975,7 @@ impl InputState {
         }
         self.applying.set(false);
         self.update_placeholder();
-        self.ctx.selection_changed();
+        self.cx.selection_changed();
     }
 
     /// The text color: an animated one over the config's.
@@ -1024,12 +1024,12 @@ impl InputState {
 pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
     let mtm = surface.mtm;
     let input = Rc::new_cyclic(|weak| {
-        let ctx = Ctx {
+        let cx = Ctx {
             surface: Rc::downgrade(surface),
             view: objc2::rc::Weak::new(view.ns()),
             input: weak.clone(),
         };
-        let delegate = InputDelegate::alloc(mtm).set_ivars(ctx.clone());
+        let delegate = InputDelegate::alloc(mtm).set_ivars(cx.clone());
         // SAFETY: NSObject's initializer.
         let delegate: Retained<InputDelegate> = unsafe { msg_send![super(delegate), init] };
         let placeholder = NSTextField::labelWithString(&NSString::new(), mtm);
@@ -1040,7 +1040,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             cell.setLineBreakMode(NSLineBreakMode::ByWordWrapping);
         }
         InputState {
-            editor: RefCell::new(new_editor(mtm, &ctx, &delegate, false, false)),
+            editor: RefCell::new(new_editor(mtm, &cx, &delegate, false, false)),
             delegate,
             pad: InputPad::create(mtm),
             placeholder,
@@ -1056,7 +1056,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             focusing: Cell::new(false),
             key_mods: Cell::new(NSEventModifierFlags::empty()),
             anim_color: Cell::new(None),
-            ctx,
+            cx,
         }
     });
     view.state_mut().input = Some(input);
@@ -1065,7 +1065,7 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
 /// A new editor, hooked to `delegate`.
 fn new_editor(
     mtm: MainThreadMarker,
-    ctx: &Ctx,
+    cx: &Ctx,
     delegate: &InputDelegate,
     multiline: bool,
     secure: bool,
@@ -1080,7 +1080,7 @@ fn new_editor(
         scroller.setAutohidesScrollers(true);
         let size = scroller.contentSize();
         let cell = OnceCell::new();
-        let _ = cell.set(ctx.clone());
+        let _ = cell.set(cx.clone());
         let this = TextArea::alloc(mtm).set_ivars(cell);
         // SAFETY: NSTextView's initializer (it makes its own text system).
         let area: Retained<TextArea> = unsafe {
@@ -1109,9 +1109,9 @@ fn new_editor(
         Editor::Area { scroller, view }
     } else {
         let field = if secure {
-            SecureField::create(mtm, ctx.clone())
+            SecureField::create(mtm, cx.clone())
         } else {
-            TextField::create(mtm, ctx.clone())
+            TextField::create(mtm, cx.clone())
         };
         field.setBezeled(false);
         field.setBordered(false);
@@ -1146,7 +1146,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         let text = old.text();
         let focused = input.focused.get();
         if focused {
-            input.ctx.unfocus();
+            input.cx.unfocus();
         }
         old.host().removeFromSuperview();
         if let Editor::Area { .. } = old {
@@ -1154,7 +1154,7 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         }
         let editor = new_editor(
             surface.mtm,
-            &input.ctx,
+            &input.cx,
             &input.delegate,
             config.multiline,
             config.secure,
@@ -1442,7 +1442,7 @@ pub(crate) fn focus(view: &NshView) {
 pub(crate) fn blur(view: &NshView) {
     let input = view.state().input.clone();
     if let Some(input) = input {
-        input.ctx.unfocus();
+        input.cx.unfocus();
     }
 }
 

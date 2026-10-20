@@ -43,12 +43,12 @@ thread_local! {
     static STATES: RefCell<FxHashMap<usize, usize>> = RefCell::default();
 }
 
-/// The state of `ctx`, set by [`install`] (callers project the part they
+/// The state of `cx`, set by [`install`] (callers project the part they
 /// use, never a reference to the whole).
 #[inline]
-pub(crate) fn state(ctx: *mut qjs::JSContext) -> *mut State {
+pub(crate) fn state(cx: *mut qjs::JSContext) -> *mut State {
     // SAFETY: reading the opaque pointer of a live context.
-    unsafe { qjs::JS_GetContextOpaque(ctx) as *mut State }
+    unsafe { qjs::JS_GetContextOpaque(cx) as *mut State }
 }
 
 /// The state of runtime `rt`, if it has one (finalizers may run after
@@ -57,16 +57,16 @@ pub(crate) fn of_runtime(rt: *mut qjs::JSRuntime) -> Option<*mut State> {
     STATES.with(|m| m.borrow().get(&(rt as usize)).map(|&p| p as *mut State))
 }
 
-/// Makes the state of `ctx`: the graph, the renderer and their classes,
+/// Makes the state of `cx`: the graph, the renderer and their classes,
 /// the environment, and the module loader of the native modules (with the
 /// UI sets `ui_sets`); the JS calls Rust posts queue in `posts`.
 pub(crate) fn install(
-    ctx: &Ctx<'_>,
+    cx: &Ctx<'_>,
     shared: Rc<Shared>,
     ui_sets: &[Registry],
     posts: nsh_core::ui::Posts,
 ) {
-    let raw = ctx.as_raw().as_ptr();
+    let raw = cx.as_raw().as_ptr();
     // SAFETY: registering classes on the context's runtime; the state is
     // freed by `uninstall`.
     unsafe {
@@ -95,14 +95,14 @@ pub(crate) fn install(
         STATES.with(|m| m.borrow_mut().insert(rt as usize, state as usize));
         crate::dom::init(raw);
         crate::env::init(raw);
-        crate::modules::install(ctx, &(*state).modules);
+        crate::modules::install(cx, &(*state).modules);
     }
 }
 
-/// Frees the state of `ctx` and every JS value it holds: before the
+/// Frees the state of `cx` and every JS value it holds: before the
 /// context goes (QuickJS checks that nothing is left).
-pub(crate) fn uninstall(ctx: &Ctx<'_>) {
-    let raw = ctx.as_raw().as_ptr();
+pub(crate) fn uninstall(cx: &Ctx<'_>) {
+    let raw = cx.as_raw().as_ptr();
     // SAFETY: the state `install` made; no JS runs from here on.
     unsafe {
         let p = qjs::JS_GetContextOpaque(raw) as *mut State;

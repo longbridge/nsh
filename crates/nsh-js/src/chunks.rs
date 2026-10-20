@@ -57,24 +57,24 @@ impl Chunks {
     }
 }
 
-fn chunks<'a>(ctx: Ctx) -> &'a Chunks {
+fn chunks<'a>(cx: Ctx) -> &'a Chunks {
     // SAFETY: a projection of the state's field, reached by shared
     // reference only.
-    unsafe { &(*crate::state::state(ctx)).chunks }
+    unsafe { &(*crate::state::state(cx)).chunks }
 }
 
-fn table<'a>(ctx: Ctx) -> &'a crate::modules::ModuleTable {
+fn table<'a>(cx: Ctx) -> &'a crate::modules::ModuleTable {
     // SAFETY: as `chunks`.
-    unsafe { &(*crate::state::state(ctx)).modules }
+    unsafe { &(*crate::state::state(cx)).modules }
 }
 
 /// Installs the global [`nsh_core::js::IMPORT_CHUNK`].
-pub(crate) fn install(ctx: Ctx) -> R<()> {
+pub(crate) fn install(cx: Ctx) -> R<()> {
     let name = CString::new(nsh_core::js::IMPORT_CHUNK).unwrap_or_default();
-    let f = js::function(ctx, &name, import_chunk, 2)?;
+    let f = js::function(cx, &name, import_chunk, 2)?;
     js::define(
-        ctx,
-        js::global(ctx).raw(),
+        cx,
+        js::global(cx).raw(),
         nsh_core::js::IMPORT_CHUNK,
         f,
         false,
@@ -84,26 +84,26 @@ pub(crate) fn install(ctx: Ctx) -> R<()> {
 native! {
     /// `__nsh_import(id, needs)`: the namespace of chunk `id` once it and
     /// the chunks `needs` are there.
-    fn import_chunk(ctx, _this, args) {
-        let id = js::to_string(ctx, args.get(0))?;
+    fn import_chunk(cx, _this, args) {
+        let id = js::to_string(cx, args.get(0))?;
         let mut needs = vec![id.clone()];
         if !js::is_nullish(args.get(1)) {
-            js::for_each(ctx, args.get(1), |v| {
-                needs.push(js::to_string(ctx, v.raw())?);
+            js::for_each(cx, args.get(1), |v| {
+                needs.push(js::to_string(cx, v.raw())?);
                 Ok(())
             })?;
         }
         // Chunks are files next to the bundle: a name the app's code made
         // up must not reach another place (the web fetches by it).
         if let Some(bad) = needs.iter().find(|n| !is_chunk_name(n)) {
-            let error = js::type_error_value(ctx, &format!("'{bad}' is not a chunk of this app"));
-            return js::rejected(ctx, error.raw());
+            let error = js::type_error_value(cx, &format!("'{bad}' is not a chunk of this app"));
+            return js::rejected(cx, error.raw());
         }
-        let deferred = Deferred::new(ctx)?;
+        let deferred = Deferred::new(cx)?;
         let promise = deferred.promise.clone_ref();
         {
-            let available = table(ctx).chunks.borrow();
-            let mut inner = chunks(ctx).0.borrow_mut();
+            let available = table(cx).chunks.borrow();
+            let mut inner = chunks(cx).0.borrow_mut();
             for need in &needs {
                 if !available.has(need) && inner.requested.insert(need.clone()) {
                     inner.queue.push(need.clone());
@@ -111,7 +111,7 @@ native! {
             }
             inner.pending.push(Pending { id, needs, deferred });
         }
-        start_ready(ctx);
+        start_ready(cx);
         Ok(promise)
     }
 }
@@ -130,10 +130,10 @@ fn is_chunk_name(name: &str) -> bool {
 }
 
 /// Starts the imports whose chunks are all there.
-fn start_ready(ctx: Ctx) {
+fn start_ready(cx: Ctx) {
     let ready: Vec<Pending> = {
-        let available = table(ctx).chunks.borrow();
-        let mut inner = chunks(ctx).0.borrow_mut();
+        let available = table(cx).chunks.borrow();
+        let mut inner = chunks(cx).0.borrow_mut();
         let (ready, waiting) = std::mem::take(&mut inner.pending)
             .into_iter()
             .partition(|p| p.needs.iter().all(|n| available.has(n)));
@@ -141,61 +141,61 @@ fn start_ready(ctx: Ctx) {
         ready
     };
     for p in ready {
-        let Ok(id) = js::string(ctx, &p.id) else {
-            p.deferred.reject(ctx, js::take_exception(ctx).raw());
+        let Ok(id) = js::string(cx, &p.id) else {
+            p.deferred.reject(cx, js::take_exception(cx).raw());
             continue;
         };
         // A job: an import made while a module evaluates must not evaluate
         // another one inside it.
         let mut args = [p.deferred.resolve.raw(), p.deferred.reject.raw(), id.raw()];
         // SAFETY: the job keeps its own references to the arguments.
-        unsafe { qjs::JS_EnqueueJob(ctx, Some(load_job), 3, args.as_mut_ptr()) };
+        unsafe { qjs::JS_EnqueueJob(cx, Some(load_job), 3, args.as_mut_ptr()) };
     }
 }
 
 /// Imports chunk `argv[2]` and settles the import with `argv[0]` /
 /// `argv[1]`.
-unsafe extern "C" fn load_job(ctx: Ctx, argc: std::ffi::c_int, argv: *mut Raw) -> Raw {
+unsafe extern "C" fn load_job(cx: Ctx, argc: std::ffi::c_int, argv: *mut Raw) -> Raw {
     // SAFETY: the job's three arguments.
     let args = unsafe { Args::new(argc, argv) };
     let (resolve, reject) = (args.get(0), args.get(1));
-    let settled = js::to_string(ctx, args.get(2)).and_then(|id| {
-        let id = CString::new(id).map_err(|_| js::type_error(ctx, "bad chunk id"))?;
+    let settled = js::to_string(cx, args.get(2)).and_then(|id| {
+        let id = CString::new(id).map_err(|_| js::type_error(cx, "bad chunk id"))?;
         let base = CString::new(nsh_core::js::ENTRY_CHUNK).unwrap_or_default();
         // SAFETY: a live context; names are NUL-terminated.
-        V::checked(ctx, unsafe {
-            qjs::JS_LoadModule(ctx, base.as_ptr(), id.as_ptr())
+        V::checked(cx, unsafe {
+            qjs::JS_LoadModule(cx, base.as_ptr(), id.as_ptr())
         })
     });
     let _ = match settled {
         // Resolving with the loading promise follows it.
-        Ok(namespace) => js::call(ctx, resolve, UNDEFINED, &[namespace.raw()]),
+        Ok(namespace) => js::call(cx, resolve, UNDEFINED, &[namespace.raw()]),
         Err(_) => {
-            let error = js::take_exception(ctx);
-            js::call(ctx, reject, UNDEFINED, &[error.raw()])
+            let error = js::take_exception(cx);
+            js::call(cx, reject, UNDEFINED, &[error.raw()])
         }
     };
     UNDEFINED
 }
 
 /// Gives the context chunk `id`, and starts the imports it completes.
-pub(crate) fn add(ctx: Ctx, id: &str, code: ChunkCode) {
+pub(crate) fn add(cx: Ctx, id: &str, code: ChunkCode) {
     {
-        let mut available = table(ctx).chunks.borrow_mut();
+        let mut available = table(cx).chunks.borrow_mut();
         if available.loaded.contains(id) {
             return;
         }
         available.code.insert(id.to_owned(), code);
     }
-    chunks(ctx).0.borrow_mut().requested.remove(id);
-    start_ready(ctx);
+    chunks(cx).0.borrow_mut().requested.remove(id);
+    start_ready(cx);
 }
 
 /// Chunk `id` could not be loaded: the imports that need it fail with
 /// `message` (a later import asks for it again).
-pub(crate) fn failed(ctx: Ctx, id: &str, message: &str) {
+pub(crate) fn failed(cx: Ctx, id: &str, message: &str) {
     let failed: Vec<Pending> = {
-        let mut inner = chunks(ctx).0.borrow_mut();
+        let mut inner = chunks(cx).0.borrow_mut();
         inner.requested.remove(id);
         let (failed, waiting) = std::mem::take(&mut inner.pending)
             .into_iter()
@@ -208,8 +208,8 @@ pub(crate) fn failed(ctx: Ctx, id: &str, message: &str) {
             true => format!("could not load chunk '{id}': {message}"),
             false => format!("could not load chunk '{id}' (for '{}'): {message}", p.id),
         };
-        let error = js::type_error_value(ctx, &message);
-        p.deferred.reject(ctx, error.raw());
+        let error = js::type_error_value(cx, &message);
+        p.deferred.reject(cx, error.raw());
     }
 }
 

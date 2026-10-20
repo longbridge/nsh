@@ -98,9 +98,9 @@ impl Classes {
     }
 }
 
-fn classes<'a>(ctx: Ctx) -> &'a Classes {
+fn classes<'a>(cx: Ctx) -> &'a Classes {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).classes }
+    unsafe { &(*crate::state::state(cx)).classes }
 }
 
 /// The data of an object of a Rust class: its instance.
@@ -156,25 +156,25 @@ impl Trace for ClassObject {
 impl Object for ClassObject {}
 
 /// The instance object `v` holds (any class's), if it is one.
-fn instance_of(ctx: Ctx, v: Raw) -> Option<Rc<dyn ClassInstance>> {
-    web::peek::<ClassObject, _>(ctx, v, |o| o.instance.clone())
+fn instance_of(cx: Ctx, v: Raw) -> Option<Rc<dyn ClassInstance>> {
+    web::peek::<ClassObject, _>(cx, v, |o| o.instance.clone())
 }
 
 // --- Making the classes ----------------------------------------------------------------
 
 /// The constructor of class `def` (made on first use).
-pub(crate) fn constructor(ctx: Ctx, def: &'static ClassDef) -> R<V> {
-    Ok(built(ctx, def)?.1)
+pub(crate) fn constructor(cx: Ctx, def: &'static ClassDef) -> R<V> {
+    Ok(built(cx, def)?.1)
 }
 
 /// Prototype and constructor of class `def`.
-fn built(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
+fn built(cx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
     let id = (def.type_id)();
-    if let Some((proto, ctor)) = classes(ctx).built.borrow().get(&id) {
+    if let Some((proto, ctor)) = classes(cx).built.borrow().get(&id) {
         return Ok((proto.clone_ref(), ctor.clone_ref()));
     }
-    let (proto, ctor) = make(ctx, def)?;
-    classes(ctx)
+    let (proto, ctor) = make(cx, def)?;
+    classes(cx)
         .built
         .borrow_mut()
         .insert(id, (proto.clone_ref(), ctor.clone_ref()));
@@ -184,7 +184,7 @@ fn built(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
 /// A function calling `f` with `def` (static, so it needs no finalizer)
 /// and `magic` (a member's index).
 fn native(
-    ctx: Ctx,
+    cx: Ctx,
     name: &str,
     f: qjs::JSCClosure,
     length: usize,
@@ -195,14 +195,14 @@ fn native(
     // QuickJS keeps a closure's magic in 16 unsigned bits.
     let Ok(magic) = u16::try_from(magic) else {
         return Err(js::range_error(
-            ctx,
+            cx,
             &format!("{}: a class has at most {} members", def.name, u16::MAX),
         ));
     };
     // SAFETY: the opaque points to static data.
-    V::checked(ctx, unsafe {
+    V::checked(cx, unsafe {
         qjs::JS_NewCClosure(
-            ctx,
+            cx,
             f,
             name.as_ptr(),
             None,
@@ -216,15 +216,15 @@ fn native(
 /// The constructor of `def`: a function QuickJS calls only with `new`
 /// (`this` is then `new.target`), which finds the class by the index it
 /// carries.
-fn constructor_function(ctx: Ctx, def: &'static ClassDef, length: usize) -> R<V> {
+fn constructor_function(cx: Ctx, def: &'static ClassDef, length: usize) -> R<V> {
     // QuickJS keeps a C function's magic in 16 signed bits: an index past
     // them would name another class.
     let index = {
-        let mut defs = classes(ctx).defs.borrow_mut();
+        let mut defs = classes(cx).defs.borrow_mut();
         let Ok(index) = i16::try_from(defs.len()) else {
             drop(defs);
             return Err(js::range_error(
-                ctx,
+                cx,
                 &format!(
                     "{}: a context makes at most {} Rust classes",
                     def.name,
@@ -245,9 +245,9 @@ fn constructor_function(ctx: Ctx, def: &'static ClassDef, length: usize) -> R<V>
         )
     };
     // SAFETY: a new constructor-only C function.
-    V::checked(ctx, unsafe {
+    V::checked(cx, unsafe {
         qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(f),
             name.as_ptr(),
             length as c_int,
@@ -258,46 +258,32 @@ fn constructor_function(ctx: Ctx, def: &'static ClassDef, length: usize) -> R<V>
 }
 
 /// Defines method `func` as `name` on `obj` (writable, configurable).
-fn define_method(ctx: Ctx, obj: Raw, name: &str, func: V) -> R<()> {
-    js::define(ctx, obj, name, func, false)
+fn define_method(cx: Ctx, obj: Raw, name: &str, func: V) -> R<()> {
+    js::define(cx, obj, name, func, false)
 }
 
-fn make(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
-    let proto = js::new_object(ctx)?;
+fn make(cx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
+    let proto = js::new_object(cx)?;
     let length = def.constructor().map_or(0, |m| m.params.len());
-    let ctor = constructor_function(ctx, def, length)?;
+    let ctor = constructor_function(cx, def, length)?;
     // SAFETY: live objects: `prototype` / `constructor` link both ways.
-    unsafe { qjs::JS_SetConstructor(ctx, ctor.raw(), proto.raw()) };
+    unsafe { qjs::JS_SetConstructor(cx, ctor.raw(), proto.raw()) };
     // Accessors by name: getter and setter.
     let mut accessors: Vec<(&'static str, Option<V>, Option<V>)> = Vec::new();
     for (index, member) in def.members.iter().enumerate() {
         match member.kind {
             MemberKind::Constructor => {}
             MemberKind::Method => {
-                let f = native(
-                    ctx,
-                    member.name,
-                    Some(call),
-                    member.params.len(),
-                    def,
-                    index,
-                )?;
-                define_method(ctx, proto.raw(), member.name, f)?;
+                let f = native(cx, member.name, Some(call), member.params.len(), def, index)?;
+                define_method(cx, proto.raw(), member.name, f)?;
             }
             MemberKind::Static => {
-                let f = native(
-                    ctx,
-                    member.name,
-                    Some(call),
-                    member.params.len(),
-                    def,
-                    index,
-                )?;
-                define_method(ctx, ctor.raw(), member.name, f)?;
+                let f = native(cx, member.name, Some(call), member.params.len(), def, index)?;
+                define_method(cx, ctor.raw(), member.name, f)?;
             }
             MemberKind::Getter | MemberKind::Setter => {
                 let length = usize::from(member.kind == MemberKind::Setter);
-                let f = native(ctx, member.name, Some(call), length, def, index)?;
+                let f = native(cx, member.name, Some(call), length, def, index)?;
                 let at = match accessors.iter().position(|a| a.0 == member.name) {
                     Some(at) => at,
                     None => {
@@ -317,36 +303,36 @@ fn make(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
         let (get, set) = (get.unwrap_or_default(), set.unwrap_or_default());
         // SAFETY: the property takes the functions.
         unsafe {
-            let atom = qjs::JS_NewAtom(ctx, cname.as_ptr());
+            let atom = qjs::JS_NewAtom(cx, cname.as_ptr());
             qjs::JS_DefinePropertyGetSet(
-                ctx,
+                cx,
                 proto.raw(),
                 atom,
                 get.take(),
                 set.take(),
                 (qjs::JS_PROP_CONFIGURABLE | qjs::JS_PROP_ENUMERABLE) as c_int,
             );
-            qjs::JS_FreeAtom(ctx, atom);
+            qjs::JS_FreeAtom(cx, atom);
         }
     }
     // `dispose()` and `[Symbol.dispose]()`: one function.
-    let dispose = native(ctx, "dispose", Some(dispose), 0, def, 0)?;
+    let dispose = native(cx, "dispose", Some(dispose), 0, def, 0)?;
     // SAFETY: the property takes its own reference.
     unsafe {
         qjs::JS_DefinePropertyValue(
-            ctx,
+            cx,
             proto.raw(),
             qjs::JS_ATOM_Symbol_dispose as _,
-            qjs::JS_DupValue(ctx, dispose.raw()),
+            qjs::JS_DupValue(cx, dispose.raw()),
             (qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE) as c_int,
         );
     }
-    define_method(ctx, proto.raw(), "dispose", dispose)?;
-    let tag = js::string(ctx, def.name)?;
+    define_method(cx, proto.raw(), "dispose", dispose)?;
+    let tag = js::string(cx, def.name)?;
     // SAFETY: the property takes the string.
     unsafe {
         qjs::JS_DefinePropertyValue(
-            ctx,
+            cx,
             proto.raw(),
             qjs::JS_ATOM_Symbol_toStringTag as _,
             tag.take(),
@@ -365,27 +351,27 @@ fn args<'a>(argc: c_int, argv: *mut Raw) -> js::Args<'a> {
 }
 
 unsafe extern "C" fn construct(
-    ctx: Ctx,
+    cx: Ctx,
     new_target: Raw,
     argc: c_int,
     argv: *mut Raw,
     magic: c_int,
 ) -> Raw {
     // QuickJS calls it with `new` only (`JS_CFUNC_constructor_magic`).
-    let def = classes(ctx).defs.borrow()[magic as usize];
+    let def = classes(cx).defs.borrow()[magic as usize];
     let Some(member) = def.constructor() else {
         let _ = js::type_error(
-            ctx,
+            cx,
             &format!("Illegal constructor: {} is made by its members", def.name),
         );
         return qjs::JS_EXCEPTION;
     };
-    let host = CallHost::new(ctx, UNDEFINED, new_target, args(argc, argv));
+    let host = CallHost::new(cx, UNDEFINED, new_target, args(argc, argv));
     host.run(member)
 }
 
 unsafe extern "C" fn call(
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     argc: c_int,
     argv: *mut Raw,
@@ -396,19 +382,19 @@ unsafe extern "C" fn call(
     // definition, the magic the member's index.
     let def = unsafe { &*(opaque as *const ClassDef) };
     let member = &def.members[magic as usize];
-    let host = CallHost::new(ctx, this, UNDEFINED, args(argc, argv));
+    let host = CallHost::new(cx, this, UNDEFINED, args(argc, argv));
     host.run(member)
 }
 
 /// A function running module function `f` in the JS call (owned, or the
 /// exception).
-pub(crate) fn sync_function(ctx: Ctx, name: &str, f: SyncCall, length: usize) -> Raw {
+pub(crate) fn sync_function(cx: Ctx, name: &str, f: SyncCall, length: usize) -> Raw {
     let cname = CString::new(name).unwrap_or_default();
     // SAFETY: the opaque is the function's code (a function pointer, as
     // large as a data pointer on every target), which needs no finalizer.
     unsafe {
         qjs::JS_NewCClosure(
-            ctx,
+            cx,
             Some(call_sync),
             cname.as_ptr(),
             None,
@@ -420,7 +406,7 @@ pub(crate) fn sync_function(ctx: Ctx, name: &str, f: SyncCall, length: usize) ->
 }
 
 unsafe extern "C" fn call_sync(
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     argc: c_int,
     argv: *mut Raw,
@@ -429,7 +415,7 @@ unsafe extern "C" fn call_sync(
 ) -> Raw {
     // SAFETY: `sync_function` made the opaque from a `SyncCall`.
     let f = unsafe { std::mem::transmute::<*const (), SyncCall>(opaque as *const ()) };
-    CallHost::new(ctx, this, UNDEFINED, args(argc, argv)).run_sync(f)
+    CallHost::new(cx, this, UNDEFINED, args(argc, argv)).run_sync(f)
 }
 
 /// Sends a call into Rust that runs as an op, with the call's `this` and
@@ -439,43 +425,43 @@ unsafe extern "C" fn call_sync(
 /// call returning `()`) `undefined`, a conversion error throws, and the
 /// op asks for no reply.
 pub(crate) fn send(
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     args: js::Args<'_>,
     promise: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(promise, false, make)
+    CallHost::new(cx, this, UNDEFINED, args).send(promise, false, make)
 }
 
 /// [`send`] of a call that starts its task in the JS call (`Later`): JS
 /// gets a promise of the task, and what the start throws throws here.
 pub(crate) fn start(
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     args: js::Args<'_>,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(true, true, make)
+    CallHost::new(cx, this, UNDEFINED, args).send(true, true, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
 /// interrupt, stays thrown).
-fn rejected_with_exception(ctx: Ctx) -> Raw {
-    let e = js::take_exception(ctx);
+fn rejected_with_exception(cx: Ctx) -> Raw {
+    let e = js::take_exception(cx);
     // SAFETY: a check of a live value.
     if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
-        let _ = js::throw(ctx, e);
+        let _ = js::throw(cx, e);
         return qjs::JS_EXCEPTION;
     }
-    match js::rejected(ctx, e.raw()) {
+    match js::rejected(cx, e.raw()) {
         Ok(p) => p.take(),
         Err(Throw) => qjs::JS_EXCEPTION,
     }
 }
 
 unsafe extern "C" fn dispose(
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     _argc: c_int,
     _argv: *mut Raw,
@@ -485,10 +471,10 @@ unsafe extern "C" fn dispose(
     // SAFETY: the opaque of `dispose` is its class's static definition.
     let def = unsafe { &*(opaque as *const ClassDef) };
     // This class's objects only (a subclass's are).
-    let Some(instance) = instance_of(ctx, this).filter(|i| (i.def().type_id)() == (def.type_id)())
+    let Some(instance) = instance_of(cx, this).filter(|i| (i.def().type_id)() == (def.type_id)())
     else {
         let _ = js::type_error(
-            ctx,
+            cx,
             &format!(
                 "{}.dispose: Illegal invocation: not a {}",
                 def.name, def.name
@@ -500,11 +486,11 @@ unsafe extern "C" fn dispose(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| instance.dispose())) {
         Ok(Ok(())) => UNDEFINED,
         Ok(Err(message)) => {
-            let _ = js::type_error(ctx, &message);
+            let _ = js::type_error(cx, &message);
             qjs::JS_EXCEPTION
         }
         Err(payload) => {
-            let _ = throw_error(ctx, &panic_message(payload));
+            let _ = throw_error(cx, &panic_message(payload));
             qjs::JS_EXCEPTION
         }
     }
@@ -513,7 +499,7 @@ unsafe extern "C" fn dispose(
 /// Throws an `Error` with `message`.
 /// The JS error `thrown` is: its class, its message and its properties
 /// (Node's `code`, `syscall`, `path`, ...), as an own enumerable field each.
-pub(crate) fn error_value(ctx: Ctx, thrown: &Thrown) -> V {
+pub(crate) fn error_value(cx: Ctx, thrown: &Thrown) -> V {
     use nsh_core::ui::ErrorClass;
     let (class, message, fields) = match thrown {
         Thrown::Type(m) => (ErrorClass::Type, m, &[][..]),
@@ -522,32 +508,32 @@ pub(crate) fn error_value(ctx: Ctx, thrown: &Thrown) -> V {
         Thrown::Fields(f) => (f.class, &f.message, &f.fields[..]),
     };
     let _ = match class {
-        ErrorClass::Type => js::type_error(ctx, message),
-        ErrorClass::Range => js::range_error(ctx, message),
-        ErrorClass::Error => throw_error(ctx, message),
+        ErrorClass::Type => js::type_error(cx, message),
+        ErrorClass::Range => js::range_error(cx, message),
+        ErrorClass::Error => throw_error(cx, message),
     };
-    let error = js::take_exception(ctx);
+    let error = js::take_exception(cx);
     for (key, value) in fields {
-        let value = V::own(ctx, crate::host::json_to_js(ctx, value));
-        let _ = js::define(ctx, error.raw(), key, value, true);
+        let value = V::own(cx, crate::host::json_to_js(cx, value));
+        let _ = js::define(cx, error.raw(), key, value, true);
     }
     error
 }
 
-pub(crate) fn throw_error(ctx: Ctx, message: &str) -> Throw {
+pub(crate) fn throw_error(cx: Ctx, message: &str) -> Throw {
     // SAFETY: a new error the exception takes.
     unsafe {
-        let error = qjs::JS_NewError(ctx);
-        if let Ok(m) = js::string(ctx, message) {
+        let error = qjs::JS_NewError(cx);
+        if let Ok(m) = js::string(cx, message) {
             qjs::JS_DefinePropertyValueStr(
-                ctx,
+                cx,
                 error,
                 c"message".as_ptr(),
                 m.take(),
                 (qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE) as c_int,
             );
         }
-        qjs::JS_Throw(ctx, error);
+        qjs::JS_Throw(cx, error);
     }
     Throw
 }
@@ -585,7 +571,7 @@ pub(crate) fn from_raw(v: JsRaw) -> Raw {
 /// that throws leaves the exception pending and fails with a `PropError`;
 /// the call then rethrows it.
 pub(crate) struct CallHost<'a> {
-    ctx: Ctx,
+    cx: Ctx,
     this: Raw,
     new_target: Raw,
     args: js::Args<'a>,
@@ -597,9 +583,9 @@ pub(crate) struct CallHost<'a> {
 }
 
 impl<'a> CallHost<'a> {
-    pub(crate) fn new(ctx: Ctx, this: Raw, new_target: Raw, args: js::Args<'a>) -> Self {
+    pub(crate) fn new(cx: Ctx, this: Raw, new_target: Raw, args: js::Args<'a>) -> Self {
         Self {
-            ctx,
+            cx,
             this,
             new_target,
             args,
@@ -649,11 +635,11 @@ impl<'a> CallHost<'a> {
     /// Runs `f` in this call (catching a panic): its result, or the
     /// exception.
     fn run_sync(&self, f: SyncCall) -> Raw {
-        let depth = &classes(self.ctx).depth;
+        let depth = &classes(self.cx).depth;
         depth.set(depth.get() + 1);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)))
             .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
-        let depth = &classes(self.ctx).depth;
+        let depth = &classes(self.cx).depth;
         depth.set(depth.get() - 1);
         self.finish(result)
     }
@@ -667,7 +653,7 @@ impl<'a> CallHost<'a> {
         throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
-        let ctx = self.ctx;
+        let cx = self.cx;
         // The app's conversions: a panic in one fails the call.
         let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| make(self)))
             .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
@@ -675,7 +661,7 @@ impl<'a> CallHost<'a> {
             Ok(run) => {
                 if self.pending.get() {
                     // Thrown by an operation whose error the code handled.
-                    let _ = js::take_exception(ctx);
+                    let _ = js::take_exception(cx);
                 }
                 run
             }
@@ -684,7 +670,7 @@ impl<'a> CallHost<'a> {
                 // taken as the promise's unless the call throws.
                 let thrown = self.finish(Err(e));
                 return if promise && !throws {
-                    rejected_with_exception(ctx)
+                    rejected_with_exception(cx)
                 } else {
                     thrown
                 };
@@ -692,17 +678,17 @@ impl<'a> CallHost<'a> {
         };
         // 0: no promise waits, so the core sends no reply.
         let call = if promise {
-            crate::components::next_call(ctx)
+            crate::components::next_call(cx)
         } else {
             0
         };
         // Not queued (over the op limit): the call and what it holds go
         // here, before any promise is made.
-        if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
+        if let Err(e) = crate::dom::push_op(cx, nsh_core::Op::Rust(RustOp { call, run })) {
             return e;
         }
         if promise {
-            crate::components::promise(ctx, call)
+            crate::components::promise(cx, call)
         } else {
             UNDEFINED
         }
@@ -717,37 +703,37 @@ impl<'a> CallHost<'a> {
     /// error was handled).
     pub(crate) fn clear_pending(&self) {
         if self.pending.replace(false) {
-            let _ = js::take_exception(self.ctx);
+            let _ = js::take_exception(self.cx);
         }
     }
 
     /// The JS result of a call: its value or what it throws.    /// The JS result of a call: its value or what it throws.
     pub(crate) fn finish(&self, result: Result<JsRaw, Thrown>) -> Raw {
-        let ctx = self.ctx;
+        let cx = self.cx;
         // A callback was interrupted: JS must not go on, whatever Rust
         // made of its `Err`.
-        let interrupted = classes(ctx).uncatchable.borrow_mut().take();
+        let interrupted = classes(cx).uncatchable.borrow_mut().take();
         if let Some(e) = interrupted {
             if let Ok(v) = result {
                 self.free(v);
             }
             if self.pending.get() {
-                let _ = js::take_exception(ctx);
+                let _ = js::take_exception(cx);
             }
-            let _ = js::throw(ctx, e);
+            let _ = js::throw(cx, e);
             return qjs::JS_EXCEPTION;
         }
         match result {
             Ok(v) => {
                 if self.pending.get() {
                     // Thrown by an operation whose error the code handled.
-                    let _ = js::take_exception(ctx);
+                    let _ = js::take_exception(cx);
                 }
                 from_raw(v)
             }
             Err(_) if self.pending.get() => qjs::JS_EXCEPTION,
             Err(thrown) => {
-                let _ = js::throw(ctx, error_value(ctx, &thrown));
+                let _ = js::throw(cx, error_value(cx, &thrown));
                 qjs::JS_EXCEPTION
             }
         }
@@ -755,11 +741,11 @@ impl<'a> CallHost<'a> {
 
     /// The object of `instance` with prototype `proto`, remembered.
     fn new_object(&self, proto: Raw, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
-        let wrappers = classes(self.ctx).wrappers.clone();
+        let wrappers = classes(self.cx).wrappers.clone();
         let k = key(&instance);
         let def = instance.def();
         let obj = web::instance_of_proto(
-            self.ctx,
+            self.cx,
             proto,
             ClassObject {
                 instance,
@@ -784,13 +770,13 @@ impl<'a> CallHost<'a> {
             };
             // SAFETY: no arguments.
             let args = unsafe { js::Args::new(0, std::ptr::null_mut()) };
-            let host = CallHost::new(self.ctx, obj.raw(), UNDEFINED, args);
+            let host = CallHost::new(self.cx, obj.raw(), UNDEFINED, args);
             let value = get(&host).map_err(|thrown| PropError(thrown.to_string()))?;
             js::define(
-                self.ctx,
+                self.cx,
                 obj.raw(),
                 member.name,
-                V::own(self.ctx, from_raw(value)),
+                V::own(self.cx, from_raw(value)),
                 true,
             )
             .map_err(|Throw| self.threw())?;
@@ -816,7 +802,7 @@ impl JsHost for CallHost<'_> {
                 JsKind::String
             } else if qjs::JS_IsArray(v) {
                 JsKind::Array
-            } else if qjs::JS_IsFunction(self.ctx, v) {
+            } else if qjs::JS_IsFunction(self.cx, v) {
                 JsKind::Function
             } else if qjs::JS_IsObject(v) {
                 JsKind::Object
@@ -829,7 +815,7 @@ impl JsHost for CallHost<'_> {
     fn bool(&self, v: JsRaw) -> Option<bool> {
         let v = from_raw(v);
         // SAFETY: a tag check and a conversion that cannot throw.
-        unsafe { qjs::JS_IsBool(v).then(|| qjs::JS_ToBool(self.ctx, v) == 1) }
+        unsafe { qjs::JS_IsBool(v).then(|| qjs::JS_ToBool(self.cx, v) == 1) }
     }
 
     fn number(&self, v: JsRaw) -> Option<f64> {
@@ -838,7 +824,7 @@ impl JsHost for CallHost<'_> {
         if !unsafe { qjs::JS_IsNumber(v) } {
             return None;
         }
-        js::to_number(self.ctx, v).ok()
+        js::to_number(self.cx, v).ok()
     }
 
     fn string(&self, v: JsRaw) -> Option<String> {
@@ -847,17 +833,17 @@ impl JsHost for CallHost<'_> {
         if !unsafe { qjs::JS_IsString(v) } {
             return None;
         }
-        js::to_string(self.ctx, v).ok()
+        js::to_string(self.cx, v).ok()
     }
 
     fn bytes(&self, v: JsRaw) -> Option<Vec<u8>> {
         let v = from_raw(v);
-        let view = js::view(self.ctx, v)?;
+        let view = js::view(self.cx, v)?;
         if view.kind != Some(qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int) {
             return None;
         }
         // SAFETY: copied at once, before any JS can detach the buffer.
-        Some(unsafe { js::bytes_of(self.ctx, v) }?.to_vec())
+        Some(unsafe { js::bytes_of(self.cx, v) }?.to_vec())
     }
 
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError> {
@@ -868,7 +854,7 @@ impl JsHost for CallHost<'_> {
                 return Ok(None);
             }
             let mut len = 0i64;
-            if qjs::JS_GetLength(self.ctx, v, &mut len) < 0 {
+            if qjs::JS_GetLength(self.cx, v, &mut len) < 0 {
                 return Err(self.threw());
             }
             len.max(0) as usize
@@ -881,8 +867,8 @@ impl JsHost for CallHost<'_> {
 
     fn index(&self, v: JsRaw, i: usize) -> Result<JsRaw, PropError> {
         // SAFETY: a property read of a live value (getters may run JS).
-        let item = unsafe { qjs::JS_GetPropertyUint32(self.ctx, from_raw(v), i as u32) };
-        self.checked(V::checked(self.ctx, item))
+        let item = unsafe { qjs::JS_GetPropertyUint32(self.cx, from_raw(v), i as u32) };
+        self.checked(V::checked(self.cx, item))
     }
 
     fn field(&self, v: JsRaw, key: &str) -> Result<JsRaw, PropError> {
@@ -891,7 +877,7 @@ impl JsHost for CallHost<'_> {
         if js::is_nullish(v) {
             return Ok(to_raw(UNDEFINED));
         }
-        self.checked(js::get(self.ctx, v, key))
+        self.checked(js::get(self.cx, v, key))
     }
 
     fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError> {
@@ -905,7 +891,7 @@ impl JsHost for CallHost<'_> {
         // JS_FreePropertyEnum (a proxy's trap may run JS meanwhile).
         if unsafe {
             qjs::JS_GetOwnPropertyNames(
-                self.ctx,
+                self.cx,
                 &mut table,
                 &mut len,
                 v,
@@ -921,18 +907,18 @@ impl JsHost for CallHost<'_> {
             for i in 0..len as usize {
                 // SAFETY: the table has `len` entries; JS_AtomToString
                 // returns an owned string.
-                let key = V::checked(self.ctx, unsafe {
-                    qjs::JS_AtomToString(self.ctx, (*table.add(i)).atom)
+                let key = V::checked(self.cx, unsafe {
+                    qjs::JS_AtomToString(self.cx, (*table.add(i)).atom)
                 });
                 let key = self.checked(key)?;
-                let text = js::to_string(self.ctx, from_raw(key));
+                let text = js::to_string(self.cx, from_raw(key));
                 self.free(key);
                 keys.push(text.map_err(|Throw| self.threw())?);
             }
             Ok(keys)
         })();
         // SAFETY: the table and length QuickJS returned above.
-        unsafe { qjs::JS_FreePropertyEnum(self.ctx, table, len) };
+        unsafe { qjs::JS_FreePropertyEnum(self.cx, table, len) };
         keys
     }
 
@@ -942,14 +928,14 @@ impl JsHost for CallHost<'_> {
         if !unsafe { qjs::JS_IsDate(v) } {
             return None;
         }
-        js::to_number(self.ctx, v).ok()
+        js::to_number(self.cx, v).ok()
     }
 
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {
         // SAFETY: a context reference and a dup for the converter.
-        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.ctx)) };
+        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.cx)) };
         let value =
-            unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(self.ctx, from_raw(v))) };
+            unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(self.cx, from_raw(v))) };
         crate::protocol::to_json(&value).map_err(|_| self.threw())
     }
 
@@ -972,7 +958,7 @@ impl JsHost for CallHost<'_> {
             }
             JsKind::Array => "an array".to_owned(),
             JsKind::Function => "a function".to_owned(),
-            JsKind::Object => match instance_of(self.ctx, from_raw(v)) {
+            JsKind::Object => match instance_of(self.cx, from_raw(v)) {
                 Some(i) => format!("a {}", i.def().name),
                 None => "an object".to_owned(),
             },
@@ -982,36 +968,36 @@ impl JsHost for CallHost<'_> {
 
     fn style(&self, v: JsRaw) -> Result<nsh_core::StylePatch, PropError> {
         // SAFETY: a context reference and a dup for the decoder.
-        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.ctx)) };
+        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.cx)) };
         let value =
-            unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(self.ctx, from_raw(v))) };
+            unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(self.cx, from_raw(v))) };
         // Decoding may run JS (getters): no borrow is held meanwhile.
         let mut warnings = crate::protocol::Warnings::deferred();
         let decoded = crate::protocol::style_patch(&value, &mut warnings);
-        crate::dom::merge_warnings(self.ctx, warnings);
+        crate::dom::merge_warnings(self.cx, warnings);
         decoded.map_err(|_| self.threw())
     }
 
     fn node(&self, v: JsRaw) -> Option<nsh_core::NodeId> {
-        crate::dom::node_id(self.ctx, from_raw(v))
+        crate::dom::node_id(self.cx, from_raw(v))
     }
 
     fn node_value(&self, id: nsh_core::NodeId) -> JsRaw {
-        to_raw(crate::dom::node_value(self.ctx, id))
+        to_raw(crate::dom::node_value(self.cx, id))
     }
 
     fn instance(&self, v: JsRaw) -> Option<Rc<dyn ClassInstance>> {
-        instance_of(self.ctx, from_raw(v))
+        instance_of(self.cx, from_raw(v))
     }
 
     fn callback(&self, v: JsRaw) -> Option<Rc<dyn CallbackHandle>> {
         let v = from_raw(v);
-        js::is_function(self.ctx, v).then(|| new_callback(self.ctx, v))
+        js::is_function(self.cx, v).then(|| new_callback(self.cx, v))
     }
 
     fn free(&self, v: JsRaw) {
         // SAFETY: an owned value.
-        unsafe { qjs::JS_FreeValue(self.ctx, from_raw(v)) };
+        unsafe { qjs::JS_FreeValue(self.cx, from_raw(v)) };
     }
 
     fn undefined(&self) -> JsRaw {
@@ -1031,52 +1017,52 @@ impl JsHost for CallHost<'_> {
     }
 
     fn new_string(&self, s: &str) -> Result<JsRaw, PropError> {
-        self.checked(js::string(self.ctx, s))
+        self.checked(js::string(self.cx, s))
     }
 
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
-        self.checked(js::uint8_array(self.ctx, bytes))
+        self.checked(js::uint8_array(self.cx, bytes))
     }
 
     fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {
         // SAFETY: JS_NewDate returns an owned Date of this live context.
-        self.checked(V::checked(self.ctx, unsafe {
-            qjs::JS_NewDate(self.ctx, millis)
+        self.checked(V::checked(self.cx, unsafe {
+            qjs::JS_NewDate(self.cx, millis)
         }))
     }
 
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError> {
         let items = items
             .into_iter()
-            .map(|i| V::own(self.ctx, from_raw(i)))
+            .map(|i| V::own(self.cx, from_raw(i)))
             .collect();
-        self.checked(js::new_array(self.ctx, items))
+        self.checked(js::new_array(self.cx, items))
     }
 
     fn new_object(&self) -> Result<JsRaw, PropError> {
-        self.checked(js::new_object(self.ctx))
+        self.checked(js::new_object(self.cx))
     }
 
     fn set_field(&self, obj: JsRaw, key: &str, value: JsRaw) -> Result<(), PropError> {
-        let value = V::own(self.ctx, from_raw(value));
-        js::define(self.ctx, from_raw(obj), key, value, true).map_err(|Throw| self.threw())
+        let value = V::own(self.cx, from_raw(value));
+        js::define(self.cx, from_raw(obj), key, value, true).map_err(|Throw| self.threw())
     }
 
     fn json(&self, v: &JsonValue) -> Result<JsRaw, PropError> {
-        Ok(to_raw(crate::host::json_to_js(self.ctx, v)))
+        Ok(to_raw(crate::host::json_to_js(self.cx, v)))
     }
 
     fn wrap(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
-        let existing = classes(self.ctx)
+        let existing = classes(self.cx)
             .wrappers
             .borrow()
             .get(&key(&instance))
             .copied();
         if let Some(obj) = existing {
             // SAFETY: a live object (it leaves the table when finalized).
-            return Ok(to_raw(unsafe { qjs::JS_DupValue(self.ctx, obj) }));
+            return Ok(to_raw(unsafe { qjs::JS_DupValue(self.cx, obj) }));
         }
-        let (proto, _) = built(self.ctx, instance.def()).map_err(|Throw| self.threw())?;
+        let (proto, _) = built(self.cx, instance.def()).map_err(|Throw| self.threw())?;
         self.new_object(proto.raw(), instance)
     }
 
@@ -1089,7 +1075,7 @@ impl JsHost for CallHost<'_> {
     }
 
     fn system(&self) -> nsh_core::ui::System {
-        let shared = crate::dom::shared(self.ctx);
+        let shared = crate::dom::shared(self.cx);
         nsh_core::ui::System::new(
             std::sync::Arc::new(shared.system_access.borrow().clone()),
             shared.system_data_dir.borrow().clone(),
@@ -1101,7 +1087,7 @@ impl JsHost for CallHost<'_> {
         .with_websocket(shared.system_websocket.borrow().clone())
         .with_filesystem(shared.system_filesystem.borrow().clone())
         // SAFETY: a short read of the live renderer state.
-        .with_os(unsafe { (*crate::state::state(self.ctx)).dom.os() })
+        .with_os(unsafe { (*crate::state::state(self.cx)).dom.os() })
     }
 
     fn start_task(&self, task: nsh_core::ui::TaskStart) {
@@ -1110,13 +1096,13 @@ impl JsHost for CallHost<'_> {
             call: 0,
             run: RustCall::Task(task),
         });
-        if crate::dom::push_op(self.ctx, op).is_err() {
-            let _ = js::take_exception(self.ctx);
+        if crate::dom::push_op(self.cx, op).is_err() {
+            let _ = js::take_exception(self.cx);
         }
     }
 
     fn on_cleanup(&self, f: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
-        let ctx = self.ctx;
+        let cx = self.cx;
         // Cleared when the JS function goes (it ran and its owner let it
         // go, or the VM went): the release then has nothing to find, and
         // until then the function's address is its own.
@@ -1129,7 +1115,7 @@ impl JsHost for CallHost<'_> {
         let alive = Rc::new(Cell::new(true));
         let guard = Alive(alive.clone());
         let f = RefCell::new(Some(f));
-        let cleanup = js::closure(ctx, Vec::new(), move |_, _, _| {
+        let cleanup = js::closure(cx, Vec::new(), move |_, _, _| {
             let _alive = &guard;
             if let Some(f) = f.borrow_mut().take() {
                 f();
@@ -1137,20 +1123,20 @@ impl JsHost for CallHost<'_> {
             Ok(V::undefined())
         });
         let Ok(cleanup) = cleanup else {
-            let _ = js::take_exception(ctx);
+            let _ = js::take_exception(cx);
             return Box::new(|| {});
         };
         let raw = cleanup.raw();
         // The reactive owner the call runs under, or the module's run
         // (hot reload); otherwise the VM's end runs the module's teardown.
-        if crate::reactive::has_owner(ctx) {
+        if crate::reactive::has_owner(cx) {
             // SAFETY: no other reference to the graph is held here.
-            let owner = unsafe { crate::reactive::graph(ctx) }.owner();
+            let owner = unsafe { crate::reactive::graph(cx) }.owner();
             let mut callback = cleanup.raw();
             // SAFETY: one borrowed callback; the owner duplicates it.
-            let result = unsafe { crate::reactive::on_cleanup(ctx, UNDEFINED, 1, &mut callback) };
+            let result = unsafe { crate::reactive::on_cleanup(cx, UNDEFINED, 1, &mut callback) };
             // SAFETY: on_cleanup's owned result.
-            unsafe { qjs::JS_FreeValue(ctx, result) };
+            unsafe { qjs::JS_FreeValue(cx, result) };
             drop(cleanup);
             Box::new(move || {
                 if !alive.get() {
@@ -1158,28 +1144,28 @@ impl JsHost for CallHost<'_> {
                 }
                 // SAFETY: the function lives, and so does its VM; a release
                 // runs outside JS, holding no other reference to the graph.
-                let removed = unsafe { crate::reactive::graph(ctx) }
+                let removed = unsafe { crate::reactive::graph(cx) }
                     .remove_cleanup(owner, |c| js::same(*c, raw));
                 if let Some(removed) = removed {
                     // SAFETY: the owner's reference, taken back.
-                    unsafe { qjs::JS_FreeValue(ctx, removed) };
+                    unsafe { qjs::JS_FreeValue(cx, removed) };
                 }
             })
         } else {
-            crate::hot::undo_on_rerun(ctx, cleanup);
+            crate::hot::undo_on_rerun(cx, cleanup);
             Box::new(move || {
                 if alive.get() {
-                    drop(crate::hot::forget_undo(ctx, raw));
+                    drop(crate::hot::forget_undo(cx, raw));
                 }
             })
         }
     }
 
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
-        let (proto, _) = built(self.ctx, instance.def()).map_err(|Throw| self.threw())?;
+        let (proto, _) = built(self.cx, instance.def()).map_err(|Throw| self.threw())?;
         // `new.target`'s prototype: a subclass's objects are its own.
         let target = if js::is_object(self.new_target) {
-            js::get(self.ctx, self.new_target, "prototype").map_err(|Throw| self.threw())?
+            js::get(self.cx, self.new_target, "prototype").map_err(|Throw| self.threw())?
         } else {
             V::undefined()
         };
@@ -1200,7 +1186,7 @@ impl JsHost for CallHost<'_> {
 #[derive(Default)]
 pub(crate) struct Functions {
     /// Null once the context is gone.
-    ctx: Cell<Ctx>,
+    cx: Cell<Ctx>,
     values: RefCell<FxHashMap<u64, Raw>>,
     next: Cell<u64>,
 }
@@ -1209,12 +1195,12 @@ impl Functions {
     /// Frees the functions (the context goes): callbacks Rust still holds
     /// do nothing after.
     fn free_all(&self) {
-        let ctx = self.ctx.replace(std::ptr::null_mut());
+        let cx = self.cx.replace(std::ptr::null_mut());
         let values: Vec<Raw> = self.values.borrow_mut().drain().map(|(_, v)| v).collect();
-        if !ctx.is_null() {
+        if !cx.is_null() {
             for v in values {
                 // SAFETY: references the table owned.
-                unsafe { qjs::JS_FreeValue(ctx, v) };
+                unsafe { qjs::JS_FreeValue(cx, v) };
             }
         }
     }
@@ -1230,12 +1216,12 @@ pub(crate) struct JsCallback {
 impl JsCallback {
     /// The function and its context, while the context lives.
     fn value(&self) -> Option<(Ctx, Raw)> {
-        let ctx = self.functions.ctx.get();
-        if ctx.is_null() {
+        let cx = self.functions.cx.get();
+        if cx.is_null() {
             return None;
         }
         let v = *self.functions.values.borrow().get(&self.key)?;
-        Some((ctx, v))
+        Some((cx, v))
     }
 
     /// The function, for the collector (nothing while the table is busy).
@@ -1258,7 +1244,7 @@ impl Drop for JsCallback {
 impl JsCallback {
     /// Lets go of the function (calls after find it gone).
     fn release(&self) {
-        let ctx = self.functions.ctx.get();
+        let cx = self.functions.cx.get();
         // Taken out first: freeing it may finalize objects whose callbacks
         // leave the table too.
         let v = self
@@ -1268,17 +1254,17 @@ impl JsCallback {
             .ok()
             .and_then(|mut values| values.remove(&self.key));
         if let Some(v) = v
-            && !ctx.is_null()
+            && !cx.is_null()
         {
             // SAFETY: the reference the table owned.
-            unsafe { qjs::JS_FreeValue(ctx, v) };
+            unsafe { qjs::JS_FreeValue(cx, v) };
         }
     }
 }
 
 impl CallbackHandle for JsCallback {
     fn call_now(&self, call: JsCall) {
-        let Some((ctx, _)) = self.value() else {
+        let Some((cx, _)) = self.value() else {
             // The function or the VM is gone: the call is dropped (its
             // reply says so).
             return;
@@ -1295,16 +1281,16 @@ impl CallbackHandle for JsCallback {
             return;
         }
         // SAFETY: reading the context's opaque pointer.
-        if crate::state::state(ctx).is_null() {
+        if crate::state::state(cx).is_null() {
             // The VM is being torn down.
             return;
         }
         assert!(
-            classes(ctx).depth.get() > 0,
+            classes(cx).depth.get() > 0,
             "`Callback::call` runs the function inside a synchronous call from JS; \
              elsewhere (in a task) use `post` or `call_async`"
         );
-        run_call(ctx, call);
+        run_call(cx, call);
     }
 
     fn post(&self, call: JsCall) {
@@ -1313,20 +1299,20 @@ impl CallbackHandle for JsCallback {
         // what they post. Not from a finalizer: an op is a JS value's
         // work, and QuickJS is collecting garbage (it queues as it is).
         if !web::finalizing()
-            && let Some((ctx, _)) = self.value()
+            && let Some((cx, _)) = self.value()
             // SAFETY: reading the context's opaque pointer.
-            && !crate::state::state(ctx).is_null()
-            && classes(ctx).depth.get() > 0
+            && !crate::state::state(cx).is_null()
+            && classes(cx).depth.get() > 0
         {
             let place = self.posts.park(call);
             let op = nsh_core::Op::Rust(RustOp {
                 call: 0,
                 run: RustCall::Post(place),
             });
-            if crate::dom::push_op(ctx, op).is_err() {
+            if crate::dom::push_op(cx, op).is_err() {
                 // Over the op limit (the VM stops): the dropped op released
                 // the place.
-                let _ = js::take_exception(ctx);
+                let _ = js::take_exception(cx);
             }
             return;
         }
@@ -1335,14 +1321,14 @@ impl CallbackHandle for JsCallback {
 }
 
 /// A callback holding JS function `v`.
-fn new_callback(ctx: Ctx, v: Raw) -> Rc<dyn CallbackHandle> {
-    let c = classes(ctx);
+fn new_callback(cx: Ctx, v: Raw) -> Rc<dyn CallbackHandle> {
+    let c = classes(cx);
     let functions = c.functions.clone();
-    functions.ctx.set(ctx);
+    functions.cx.set(cx);
     let key = functions.next.get() + 1;
     functions.next.set(key);
     // SAFETY: the table owns the new reference.
-    let v = unsafe { qjs::JS_DupValue(ctx, v) };
+    let v = unsafe { qjs::JS_DupValue(cx, v) };
     functions.values.borrow_mut().insert(key, v);
     Rc::new(JsCallback {
         functions,
@@ -1352,67 +1338,67 @@ fn new_callback(ctx: Ctx, v: Raw) -> Rc<dyn CallbackHandle> {
 }
 
 /// The message of what JS threw.
-fn message_of(ctx: Ctx, e: Raw) -> String {
+fn message_of(cx: Ctx, e: Raw) -> String {
     if js::is_object(e)
-        && let Ok(m) = js::get(ctx, e, "message")
-        && let Ok(Some(m)) = js::opt_string(ctx, m.raw())
+        && let Ok(m) = js::get(cx, e, "message")
+        && let Ok(Some(m)) = js::opt_string(cx, m.raw())
     {
         return m;
     }
-    let message = js::to_string(ctx, e).unwrap_or_else(|_| "an exception".to_owned());
-    let _ = js::take_exception(ctx);
+    let message = js::to_string(cx, e).unwrap_or_else(|_| "an exception".to_owned());
+    let _ = js::take_exception(cx);
     message
 }
 
 /// What `e`, thrown, is: its message and, for an `Error`, its stack.
-fn thrown_of(ctx: Ctx, e: Raw) -> Exception {
+fn thrown_of(cx: Ctx, e: Raw) -> Exception {
     let stack = js::is_object(e)
-        .then(|| js::get(ctx, e, "stack").ok())
+        .then(|| js::get(cx, e, "stack").ok())
         .flatten()
-        .and_then(|s| js::opt_string(ctx, s.raw()).ok().flatten())
+        .and_then(|s| js::opt_string(cx, s.raw()).ok().flatten())
         .filter(|s| !s.is_empty());
-    let _ = js::take_exception(ctx);
+    let _ = js::take_exception(cx);
     Exception {
-        message: message_of(ctx, e),
+        message: message_of(cx, e),
         stack,
     }
 }
 
 /// A host for conversions outside a call.
-pub(crate) fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
-    CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
+pub(crate) fn host_outside_calls<'a>(cx: Ctx) -> CallHost<'a> {
+    CallHost::new(cx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
 }
 
 /// Runs `call` of a callback of this context: its reply gets the result
 /// (a promise's, when it settles) or the message of what it threw; without
 /// a reply, what it throws is reported as uncaught.
-pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
+pub(crate) fn run_call(cx: Ctx, mut call: JsCall) {
     let callback = call.callback().clone();
     let function = (callback.as_ref() as &dyn Any)
         .downcast_ref::<JsCallback>()
         .and_then(JsCallback::value)
-        .filter(|(c, _)| *c == ctx);
+        .filter(|(c, _)| *c == cx);
     let Some((_, function)) = function else {
         call.reply(Err("the function belongs to another VM".to_owned().into()));
         return;
     };
-    let function = V::dup(ctx, function);
-    let host = host_outside_calls(ctx);
+    let function = V::dup(cx, function);
+    let host = host_outside_calls(cx);
     let args = match call.args(&host) {
         Ok(args) => args
             .into_iter()
-            .map(|a| V::own(ctx, from_raw(a.into_raw())))
+            .map(|a| V::own(cx, from_raw(a.into_raw())))
             .collect::<Vec<V>>(),
         Err(e) => {
             if host.pending.get() {
-                let _ = js::take_exception(ctx);
+                let _ = js::take_exception(cx);
             }
             call.reply(Err(e.0.into()));
             return;
         }
     };
     let raws: Vec<Raw> = args.iter().map(V::raw).collect();
-    match js::call(ctx, function.raw(), UNDEFINED, &raws) {
+    match js::call(cx, function.raw(), UNDEFINED, &raws) {
         Ok(result) => {
             if !call.wants_reply() {
                 return;
@@ -1422,50 +1408,50 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
                 let waiting = Rc::new(RefCell::new(Some(call)));
                 let rejected = waiting.clone();
                 let reacted = js::upon(
-                    ctx,
+                    cx,
                     result.raw(),
                     Vec::new(),
-                    move |ctx, _, value| {
+                    move |cx, _, value| {
                         if let Some(call) = waiting.borrow_mut().take() {
-                            let host = host_outside_calls(ctx);
+                            let host = host_outside_calls(cx);
                             call.reply(Ok(JsIn::new(&host, to_raw(value))));
                             // What converting the value threw (the reply has
                             // the error).
                             if host.pending.get() {
-                                let _ = js::take_exception(ctx);
+                                let _ = js::take_exception(cx);
                             }
                         }
                         Ok(())
                     },
-                    move |ctx, _, reason| {
+                    move |cx, _, reason| {
                         if let Some(call) = rejected.borrow_mut().take() {
-                            call.reply(Err(thrown_of(ctx, reason)));
+                            call.reply(Err(thrown_of(cx, reason)));
                         }
                         Ok(())
                     },
                 );
                 if reacted.is_err() {
-                    js::report_exception(ctx);
+                    js::report_exception(cx);
                 }
                 return;
             }
             call.reply(Ok(JsIn::new(&host, to_raw(result.raw()))));
             if host.pending.get() {
-                let _ = js::take_exception(ctx);
+                let _ = js::take_exception(cx);
             }
         }
         Err(Throw) => {
-            let e = js::take_exception(ctx);
+            let e = js::take_exception(cx);
             // SAFETY: a check of a live value.
             if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
                 // Kept for the call around it to rethrow.
-                let message = message_of(ctx, e.raw());
-                classes(ctx).uncatchable.borrow_mut().get_or_insert(e);
+                let message = message_of(cx, e.raw());
+                classes(cx).uncatchable.borrow_mut().get_or_insert(e);
                 call.reply(Err(message.into()));
             } else if call.wants_reply() {
-                call.reply(Err(thrown_of(ctx, e.raw())));
+                call.reply(Err(thrown_of(cx, e.raw())));
             } else {
-                js::report(ctx, e);
+                js::report(cx, e);
             }
         }
     }
@@ -1475,35 +1461,35 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
 /// `call_async`), in order. Those queued meanwhile wait for the next turn.
 /// An uncatchable exception (an interrupt) stops them: it is pending when
 /// this fails, and the calls left are dropped.
-pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
-    let calls = classes(ctx).posts.take_calls();
+pub(crate) fn run_posted(cx: Ctx) -> R<()> {
+    let calls = classes(cx).posts.take_calls();
     for call in calls {
         // The app's conversions (the arguments, the result) run here, with
         // nothing around to catch a panic: it is logged, and the call
         // dropped (its reply says so).
         if let Err(payload) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_call(ctx, call)))
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_call(cx, call)))
         {
-            let _ = js::take_exception(ctx);
+            let _ = js::take_exception(cx);
             log::error!(target: "js", "a posted call panicked: {}", panic_message(payload));
         }
-        let interrupted = classes(ctx).uncatchable.borrow_mut().take();
+        let interrupted = classes(cx).uncatchable.borrow_mut().take();
         if let Some(e) = interrupted {
-            return Err(js::throw(ctx, e));
+            return Err(js::throw(cx, e));
         }
     }
     Ok(())
 }
 
 /// Whether JS calls Rust queued are waiting.
-pub(crate) fn has_posted(ctx: Ctx) -> bool {
-    classes(ctx).posts.has_calls()
+pub(crate) fn has_posted(cx: Ctx) -> bool {
+    classes(cx).posts.has_calls()
 }
 
 /// No JS runs any more: the queued calls are dropped, and so are those
 /// posted later (their replies say JS stopped).
-pub(crate) fn close(ctx: Ctx) {
-    classes(ctx).posts.close();
+pub(crate) fn close(cx: Ctx) {
+    classes(cx).posts.close();
 }
 
 #[cfg(test)]
@@ -2261,8 +2247,8 @@ pub(crate) mod tests {
         let host = host();
         host.with_raw(|raw| {
             // SAFETY: the host owns the live context for this closure.
-            let ctx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
-            crate::reactive::install_globals(&ctx);
+            let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+            crate::reactive::install_globals(&cx);
         });
         run(
             &host,
@@ -2513,8 +2499,8 @@ pub(crate) mod tests {
         let host = host();
         // As if 32768 classes were made: the next one's index does not fit
         // its constructor's magic.
-        host.with_raw(|ctx| {
-            super::classes(ctx)
+        host.with_raw(|cx| {
+            super::classes(cx)
                 .defs
                 .borrow_mut()
                 .extend(std::iter::repeat_n(Token::DEF, 32768));

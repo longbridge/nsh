@@ -942,10 +942,10 @@ impl<M: TextEngine> Core<M> {
             .collect();
         for key in blocks {
             let layout = self.nodes[key as usize].layout.expect("text layout");
-            let ctx = self.text_ctx(layout);
-            ctx.prepared = None;
-            ctx.cache = None;
-            ctx.laid_out = None;
+            let cx = self.text_cx(layout);
+            cx.prepared = None;
+            cx.cache = None;
+            cx.laid_out = None;
             self.layout.mark_dirty(layout).expect("taffy dirty");
             self.needs_layout = true;
             if self.nodes[key as usize].kind == Kind::Text {
@@ -1463,8 +1463,8 @@ impl<M: TextEngine> Core<M> {
                 &input.value
             },
         );
-        let ctx = self.text_ctx(layout);
-        let same = ctx.text.layout_eq(&text);
+        let cx = self.text_cx(layout);
+        let same = cx.text.layout_eq(&text);
         let input = self.nodes[key as usize]
             .input
             .as_mut()
@@ -1476,7 +1476,7 @@ impl<M: TextEngine> Core<M> {
         }
         input.placeholder_measured = placeholder;
         if !same {
-            *self.text_ctx(layout) = TextContext::new(Arc::new(text));
+            *self.text_cx(layout) = TextContext::new(Arc::new(text));
         }
         self.layout.mark_dirty(layout).expect("taffy dirty");
         self.needs_layout = true;
@@ -2104,10 +2104,10 @@ impl<M: TextEngine> Core<M> {
                 if (node.paragraph.fit, node.paragraph.min_font_scale) != before {
                     self.queue_text(key);
                     if let Some(layout) = self.nodes[key as usize].layout
-                        && let Some(LeafContext::Text(ctx)) =
+                        && let Some(LeafContext::Text(cx)) =
                             self.layout.get_node_context_mut(layout)
                     {
-                        ctx.laid_out = None;
+                        cx.laid_out = None;
                     }
                 }
             }
@@ -2951,10 +2951,10 @@ impl<M: TextEngine> Core<M> {
             }
         } else {
             let style = node.base_layout.as_deref().cloned().unwrap_or_default();
-            let ctx = LeafContext::Text(TextContext::new(Arc::default()));
+            let cx = LeafContext::Text(TextContext::new(Arc::default()));
             node.layout = Some(
                 self.layout
-                    .new_leaf_with_context(style, ctx)
+                    .new_leaf_with_context(style, cx)
                     .expect("taffy leaf"),
             );
             self.mark(key, dirty::TEXT_BUILD);
@@ -3334,18 +3334,18 @@ impl<M: TextEngine> Core<M> {
         };
         let max = input.config.multiline.then_some(width);
         let (placeholder, empty_line) = (input.placeholder_measured, input.empty_line);
-        let Some(LeafContext::Text(ctx)) = self.layout.get_node_context_mut(layout) else {
+        let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
             return;
         };
         let size = if !placeholder {
-            measure_text(&self.text_engine, &mut self.measure_cache, ctx, max)
+            measure_text(&self.text_engine, &mut self.measure_cache, cx, max)
         } else if let Some((hash, size)) = empty_line
-            && hash == ctx.layout_hash
+            && hash == cx.layout_hash
         {
             size
         } else {
             // Measured once per placeholder and style.
-            let hash = ctx.layout_hash;
+            let hash = cx.layout_hash;
             let mut empty = TextContext::new(Arc::new(self.input_text(key, "")));
             let size = measure_text(&self.text_engine, &mut self.measure_cache, &mut empty, max);
             let input = self.nodes[key as usize]
@@ -3372,9 +3372,9 @@ impl<M: TextEngine> Core<M> {
         ));
     }
 
-    fn text_ctx(&mut self, layout: LayoutId) -> &mut TextContext<M::Prepared> {
+    fn text_cx(&mut self, layout: LayoutId) -> &mut TextContext<M::Prepared> {
         match self.layout.get_node_context_mut(layout) {
-            Some(LeafContext::Text(ctx)) => ctx,
+            Some(LeafContext::Text(cx)) => cx,
             _ => unreachable!("text block without text context"),
         }
     }
@@ -3486,22 +3486,22 @@ impl<M: TextEngine> Core<M> {
         let layout = self.nodes[key as usize]
             .layout
             .expect("text block has layout");
-        let ctx = self.text_ctx(layout);
-        if *ctx.text == text {
+        let cx = self.text_cx(layout);
+        if *cx.text == text {
             if inserted {
                 // New attachment views: placed with the next final layout.
-                ctx.laid_out = None;
+                cx.laid_out = None;
             }
             return inserted;
         }
-        let same_layout = ctx.text.layout_eq(&text);
-        ctx.text = Arc::new(text);
+        let same_layout = cx.text.layout_eq(&text);
+        cx.text = Arc::new(text);
         // Platform typesetting state embeds colors too: always rebuild it.
-        ctx.prepared = None;
-        ctx.laid_out = None;
+        cx.prepared = None;
+        cx.laid_out = None;
         if !same_layout {
-            ctx.layout_hash = ctx.text.layout_hash();
-            ctx.cache = None;
+            cx.layout_hash = cx.text.layout_hash();
+            cx.cache = None;
             self.layout.mark_dirty(layout).expect("taffy dirty");
             self.needs_layout = true;
         }
@@ -4033,16 +4033,16 @@ impl<M: TextEngine> Core<M> {
         let engine = &self.text_engine;
         let cache = &mut self.measure_cache;
         self.layout
-            .compute_layout_with_measure(root, available, |input, _, ctx, style| {
+            .compute_layout_with_measure(root, available, |input, _, cx, style| {
                 // Taffy resolves style sizes, padding, border, min/max and
                 // aspect ratio; only content is measured here.
                 taffy::compute_leaf_layout(
                     input,
                     style,
                     |_, _| 0.0,
-                    |known, available| match ctx {
-                        Some(LeafContext::Text(ctx)) => {
-                            let max_width = if ctx.text.no_wrap {
+                    |known, available| match cx {
+                        Some(LeafContext::Text(cx)) => {
+                            let max_width = if cx.text.no_wrap {
                                 None
                             } else {
                                 known.width.or(match available.width {
@@ -4051,7 +4051,7 @@ impl<M: TextEngine> Core<M> {
                                     AvailableSpace::MinContent | AvailableSpace::MaxContent => None,
                                 })
                             };
-                            let measured = measure_text(engine, cache, ctx, max_width);
+                            let measured = measure_text(engine, cache, cx, max_width);
                             taffy::Size {
                                 width: known.width.unwrap_or(measured.width.0),
                                 height: known.height.unwrap_or(measured.height.0),
@@ -4107,19 +4107,19 @@ impl<M: TextEngine> Core<M> {
             let mut content = content_box(self.layout.layout(layout).expect("taffy layout"));
             let engine = &self.text_engine;
             let cache = &mut self.measure_cache;
-            let Some(LeafContext::Text(ctx)) = self.layout.get_node_context_mut(layout) else {
+            let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
                 continue;
             };
-            if ctx.text.no_wrap {
+            if cx.text.no_wrap {
                 // One line at its natural width, past the box if need be.
                 content.size.width = content
                     .size
                     .width
-                    .max(measure_text(engine, cache, ctx, None).width);
+                    .max(measure_text(engine, cache, cx, None).width);
             }
             if align_vertical > Percentage(0.0) {
                 // Text shorter than its box: moved down within it.
-                let height = measure_text(engine, cache, ctx, Some(content.size.width.0)).height;
+                let height = measure_text(engine, cache, cx, Some(content.size.width.0)).height;
                 if height < content.size.height {
                     content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
@@ -4128,13 +4128,13 @@ impl<M: TextEngine> Core<M> {
             let size = content.size;
             if let Some(min) = fit {
                 // Shrunk to fit: its own text, laid out on its own.
-                if matches!(&ctx.laid_out, Some((r, _)) if *r == content) {
+                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
                     continue;
                 }
-                let text = Arc::new(fitted(engine, &ctx.text, size, min));
+                let text = Arc::new(fitted(engine, &cx.text, size, min));
                 let prepared = engine.prepare(&text);
                 let text_layout = engine.layout(&prepared, size);
-                ctx.laid_out = Some((content, text_layout.clone()));
+                cx.laid_out = Some((content, text_layout.clone()));
                 if report_lines {
                     self.events.push(crate::ui::JsEvent::Event(
                         id,
@@ -4153,32 +4153,30 @@ impl<M: TextEngine> Core<M> {
                 });
                 continue;
             }
-            let text_layout = match &ctx.laid_out {
+            let text_layout = match &cx.laid_out {
                 Some((r, _)) if *r == content => continue,
                 // Only moved (padding, vertical alignment): the same layout.
                 Some((r, l)) if r.size == size => l.clone(),
                 _ => {
-                    let prepared = ctx
-                        .prepared
-                        .get_or_insert_with(|| engine.prepare(&ctx.text));
+                    let prepared = cx.prepared.get_or_insert_with(|| engine.prepare(&cx.text));
                     let layout = engine.layout(prepared, size);
                     if report_lines {
                         self.events.push(crate::ui::JsEvent::Event(
                             id,
                             EventKind::TextLayout,
-                            text_lines(engine, &ctx.text, &layout),
+                            text_lines(engine, &cx.text, &layout),
                         ));
                     }
                     layout
                 }
             };
-            ctx.laid_out = Some((content, text_layout.clone()));
-            if !ctx.text.attachments.is_empty() {
+            cx.laid_out = Some((content, text_layout.clone()));
+            if !cx.text.attachments.is_empty() {
                 placements.push((key, text_layout.clone(), content));
             }
             self.mount.push(MountItem::Text {
                 id,
-                text: ctx.text.clone(),
+                text: cx.text.clone(),
                 layout: text_layout,
                 content,
             });
@@ -4812,29 +4810,27 @@ fn fitted<M: TextEngine>(
 fn measure_text<M: TextEngine>(
     engine: &M,
     cache: &mut MeasureCache,
-    ctx: &mut TextContext<M::Prepared>,
+    cx: &mut TextContext<M::Prepared>,
     max_width: Option<f32>,
 ) -> Size<Points> {
-    if let Some((w, size)) = ctx.cache
+    if let Some((w, size)) = cx.cache
         && w == max_width
     {
         return size;
     }
     let typed = max_width.map(Points);
-    let size = match cache.get(ctx.layout_hash, typed) {
+    let size = match cache.get(cx.layout_hash, typed) {
         Some(size) => size,
         None => {
-            let prepared = ctx
-                .prepared
-                .get_or_insert_with(|| engine.prepare(&ctx.text));
+            let prepared = cx.prepared.get_or_insert_with(|| engine.prepare(&cx.text));
             let size = engine.measure(prepared, typed);
             // Round up so rendering never truncates the last glyph.
             let size = size.map(Points::ceil);
-            cache.insert(ctx.layout_hash, typed, size);
+            cache.insert(cx.layout_hash, typed, size);
             size
         }
     };
-    ctx.cache = Some((max_width, size));
+    cx.cache = Some((max_width, size));
     size
 }
 

@@ -195,30 +195,30 @@ trace!(Encoder {});
 impl Object for Encoder {}
 
 native!(
-    fn encoder_constructor(ctx, this, args) {
-        instance(ctx, this, Class::TextEncoder, Encoder)
+    fn encoder_constructor(cx, this, args) {
+        instance(cx, this, Class::TextEncoder, Encoder)
     }
 );
 
 native!(
-    fn encoder_encoding(ctx, this, args) {
-        data::<Encoder>(ctx, this, "TextEncoder")?;
-        js::string(ctx, "utf-8")
+    fn encoder_encoding(cx, this, args) {
+        data::<Encoder>(cx, this, "TextEncoder")?;
+        js::string(cx, "utf-8")
     }
 );
 
 native!(
-    fn encoder_encode(ctx, this, args) {
-        data::<Encoder>(ctx, this, "TextEncoder")?;
-        let s = js::opt_string(ctx, args.get(0))?.unwrap_or_default();
-        js::uint8_array(ctx, s.as_bytes())
+    fn encoder_encode(cx, this, args) {
+        data::<Encoder>(cx, this, "TextEncoder")?;
+        let s = js::opt_string(cx, args.get(0))?.unwrap_or_default();
+        js::uint8_array(cx, s.as_bytes())
     }
 );
 
 native!(
-    fn encoder_encode_into(ctx, this, args) {
-        data::<Encoder>(ctx, this, "TextEncoder")?;
-        let s = js::to_string(ctx, args.get(0))?;
+    fn encoder_encode_into(cx, this, args) {
+        data::<Encoder>(cx, this, "TextEncoder")?;
+        let s = js::to_string(cx, args.get(0))?;
         let dest = args.get(1);
         // Bindgen types C enums as `u32`, but as `i32` with MSVC, where the
         // cast does nothing.
@@ -227,10 +227,10 @@ native!(
         if unsafe { rquickjs::qjs::JS_GetTypedArrayType(dest) }
             != rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as i32
         {
-            return Err(js::type_error(ctx, "encodeInto needs a Uint8Array"));
+            return Err(js::type_error(cx, "encodeInto needs a Uint8Array"));
         }
         // SAFETY: written before any JS runs.
-        let out = unsafe { js::bytes_mut(ctx, dest) }.unwrap_or_default();
+        let out = unsafe { js::bytes_mut(cx, dest) }.unwrap_or_default();
         let (mut read, mut written) = (0usize, 0usize);
         for ch in s.chars() {
             let n = ch.len_utf8();
@@ -241,67 +241,67 @@ native!(
             written += n;
             read += ch.len_utf16();
         }
-        let r = js::new_object(ctx)?;
-        js::define(ctx, r.raw(), "read", V::num(read as f64), true)?;
-        js::define(ctx, r.raw(), "written", V::num(written as f64), true)?;
+        let r = js::new_object(cx)?;
+        js::define(cx, r.raw(), "read", V::num(read as f64), true)?;
+        js::define(cx, r.raw(), "written", V::num(written as f64), true)?;
         Ok(r)
     }
 );
 
 /// The encoding, `fatal` and `ignoreBOM` of a decoder's arguments.
-pub(crate) fn decoder_options(ctx: Ctx, label: Raw, options: Raw) -> R<Decoder> {
-    let label = js::opt_string(ctx, label)?.unwrap_or_else(|| "utf-8".to_owned());
+pub(crate) fn decoder_options(cx: Ctx, label: Raw, options: Raw) -> R<Decoder> {
+    let label = js::opt_string(cx, label)?.unwrap_or_else(|| "utf-8".to_owned());
     let encoding = Encoding::from_label(&label).ok_or_else(|| {
-        js::range_error(ctx, &format!("The encoding \"{label}\" is not supported"))
+        js::range_error(cx, &format!("The encoding \"{label}\" is not supported"))
     })?;
     let (fatal, ignore_bom) = if js::is_object(options) {
-        let f = js::get(ctx, options, "fatal")?;
-        let i = js::get(ctx, options, "ignoreBOM")?;
-        (js::to_bool(ctx, f.raw()), js::to_bool(ctx, i.raw()))
+        let f = js::get(cx, options, "fatal")?;
+        let i = js::get(cx, options, "ignoreBOM")?;
+        (js::to_bool(cx, f.raw()), js::to_bool(cx, i.raw()))
     } else if js::is_nullish(options) {
         (false, false)
     } else {
-        return Err(js::type_error(ctx, "TextDecoder options must be an object"));
+        return Err(js::type_error(cx, "TextDecoder options must be an object"));
     };
     Ok(Decoder::new(encoding, fatal, ignore_bom))
 }
 
 native!(
-    fn decoder_constructor(ctx, this, args) {
-        let d = decoder_options(ctx, args.get(0), args.get(1))?;
-        instance(ctx, this, Class::TextDecoder, d)
+    fn decoder_constructor(cx, this, args) {
+        let d = decoder_options(cx, args.get(0), args.get(1))?;
+        instance(cx, this, Class::TextDecoder, d)
     }
 );
 
-fn decoder<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Decoder>> {
-    data::<Decoder>(ctx, v, "TextDecoder")
+fn decoder<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Decoder>> {
+    data::<Decoder>(cx, v, "TextDecoder")
 }
 
 native!(
-    fn decoder_encoding(ctx, this, args) {
-        let name = decoder(ctx, this)?.encoding.name();
-        js::string(ctx, name)
+    fn decoder_encoding(cx, this, args) {
+        let name = decoder(cx, this)?.encoding.name();
+        js::string(cx, name)
     }
 );
 
 native!(
-    fn decoder_fatal(ctx, this, args) {
-        Ok(V::bool(decoder(ctx, this)?.fatal))
+    fn decoder_fatal(cx, this, args) {
+        Ok(V::bool(decoder(cx, this)?.fatal))
     }
 );
 
 native!(
-    fn decoder_ignore_bom(ctx, this, args) {
-        Ok(V::bool(decoder(ctx, this)?.ignore_bom))
+    fn decoder_ignore_bom(cx, this, args) {
+        Ok(V::bool(decoder(cx, this)?.ignore_bom))
     }
 );
 
 native!(
-    fn decoder_decode(ctx, this, args) {
+    fn decoder_decode(cx, this, args) {
         let options = args.get(1);
         let stream = if js::is_object(options) {
-            let s = js::get(ctx, options, "stream")?;
-            js::to_bool(ctx, s.raw())
+            let s = js::get(cx, options, "stream")?;
+            js::to_bool(cx, s.raw())
         } else {
             false
         };
@@ -310,14 +310,14 @@ native!(
         let bytes = if js::is_undefined(input) {
             Vec::new()
         } else {
-            js::buffer_source(ctx, input).ok_or_else(|| {
-                js::type_error(ctx, "The provided value is not an ArrayBuffer or ArrayBufferView")
+            js::buffer_source(cx, input).ok_or_else(|| {
+                js::type_error(cx, "The provided value is not an ArrayBuffer or ArrayBufferView")
             })?
         };
-        let decoded = decoder(ctx, this)?.decode(&bytes, stream);
+        let decoded = decoder(cx, this)?.decode(&bytes, stream);
         match decoded {
-            Ok(s) => js::string(ctx, &s),
-            Err(Malformed) => Err(js::type_error(ctx, "The encoded data was not valid")),
+            Ok(s) => js::string(cx, &s),
+            Err(Malformed) => Err(js::type_error(cx, "The encoded data was not valid")),
         }
     }
 );

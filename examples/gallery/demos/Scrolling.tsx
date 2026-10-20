@@ -38,10 +38,10 @@ function Backdrop(props: { tone: Tone; seed: number }) {
     <Canvas
       pointerEvents="none"
       style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-      draw={(ctx, { width, height }) => {
+      draw={(cx, { width, height }) => {
         const color = toneColor(props.tone);
-        ctx.fillStyle = colors.border;
-        for (let x = 10; x < width; x += 12) for (let y = 10; y < height; y += 12) ctx.fillRect(x, y, 1.5, 1.5);
+        cx.fillStyle = colors.border;
+        for (let x = 10; x < width; x += 12) for (let y = 10; y < height; y += 12) cx.fillRect(x, y, 1.5, 1.5);
         // A wave, filled faintly below.
         const points: [number, number][] = [];
         for (let i = 0; i <= 24; i++) {
@@ -49,25 +49,25 @@ function Backdrop(props: { tone: Tone; seed: number }) {
           const y = height * (0.62 - 0.18 * Math.sin(i * 0.5 + props.seed) - 0.06 * Math.sin(i * 1.3 + props.seed * 2));
           points.push([x, y]);
         }
-        ctx.beginPath();
-        ctx.moveTo(0, height);
-        for (const [x, y] of points) ctx.lineTo(x, y);
-        ctx.lineTo(width, height);
-        ctx.closePath();
-        ctx.fillStyle = toneTint(props.tone);
-        ctx.fill();
-        ctx.beginPath();
-        points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.setLineDash([3, 4]);
-        ctx.strokeStyle = colors.faint;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, height * 0.5);
-        ctx.lineTo(width, height * 0.5);
-        ctx.stroke();
+        cx.beginPath();
+        cx.moveTo(0, height);
+        for (const [x, y] of points) cx.lineTo(x, y);
+        cx.lineTo(width, height);
+        cx.closePath();
+        cx.fillStyle = toneTint(props.tone);
+        cx.fill();
+        cx.beginPath();
+        points.forEach(([x, y], i) => (i ? cx.lineTo(x, y) : cx.moveTo(x, y)));
+        cx.strokeStyle = color;
+        cx.lineWidth = 1.5;
+        cx.stroke();
+        cx.setLineDash([3, 4]);
+        cx.strokeStyle = colors.faint;
+        cx.lineWidth = 1;
+        cx.beginPath();
+        cx.moveTo(0, height * 0.5);
+        cx.lineTo(width, height * 0.5);
+        cx.stroke();
       }}
     />
   );

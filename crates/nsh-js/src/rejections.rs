@@ -26,8 +26,8 @@ pub(crate) struct Rejection {
 
 impl Rejection {
     /// What the promise was rejected with.
-    pub(crate) fn reason<'js>(self, ctx: &Ctx<'js>) -> rquickjs::Result<Value<'js>> {
-        self.reason.restore(ctx)
+    pub(crate) fn reason<'js>(self, cx: &Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        self.reason.restore(cx)
     }
 }
 
@@ -42,7 +42,7 @@ impl Rejections {
     /// `reason` and has no handler (`handled` false), or has one now.
     pub(crate) fn track<'js>(
         &mut self,
-        ctx: &Ctx<'js>,
+        cx: &Ctx<'js>,
         promise: Value<'js>,
         reason: Value<'js>,
         handled: bool,
@@ -63,8 +63,8 @@ impl Rejections {
         }
         self.pending.push(Rejection {
             key,
-            _promise: Persistent::save(ctx, promise),
-            reason: Persistent::save(ctx, reason),
+            _promise: Persistent::save(cx, promise),
+            reason: Persistent::save(cx, reason),
         });
     }
 

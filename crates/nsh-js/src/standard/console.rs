@@ -18,8 +18,8 @@ impl ModuleDef for ConsoleModule {
         Ok(())
     }
 
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
-        let console: Object = ctx.globals().get("console")?;
+    fn evaluate<'js>(cx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
+        let console: Object = cx.globals().get("console")?;
         exports.export("default", console)?;
         Ok(())
     }

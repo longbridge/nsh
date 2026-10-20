@@ -32,7 +32,7 @@ use crate::{
 
 /// Draws the decoration lines CoreText does not: strikethroughs, and
 /// underlines with a style, thickness or offset (y-up text space).
-fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
+fn draw_decorations(cx: &CGContext, line: &LaidLine) {
     // SAFETY: the line's own run array (of CTRuns) and their attribute
     // dictionaries, whose values have the types set by the text engine.
     unsafe {
@@ -89,7 +89,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
             );
             if let Some(color) = strike {
                 let y = line.origin.y + font.x_height() / 2.0;
-                stroke_decoration(ctx, &color, style, x, y, width, thickness);
+                stroke_decoration(cx, &color, style, x, y, width, thickness);
             }
             if let Some(color) = under {
                 // Below the baseline: the font's position, or the offset.
@@ -99,7 +99,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
                     offset + thickness / 2.0
                 };
                 stroke_decoration(
-                    ctx,
+                    cx,
                     &color,
                     style,
                     x,
@@ -115,7 +115,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
 /// One decoration line centered on `y` (y-up), `style` as encoded by the
 /// text engine: solid, double, dotted, dashed, wavy.
 fn stroke_decoration(
-    ctx: &CGContext,
+    cx: &CGContext,
     color: &CGColor,
     style: i32,
     x: CGFloat,
@@ -123,7 +123,7 @@ fn stroke_decoration(
     width: CGFloat,
     thickness: CGFloat,
 ) {
-    let c = Some(ctx);
+    let c = Some(cx);
     CGContext::save_g_state(c);
     CGContext::set_stroke_color_with_color(c, Some(color));
     CGContext::set_line_width(c, thickness);
@@ -278,11 +278,11 @@ define_class!(
             let layout = self.ivars().layout.borrow();
             let Some((layout, content)) = layout.as_ref() else { return };
             let Some(text) = layout.downcast::<CoreTextLayout>() else { return };
-            let Some(ctx) = UIGraphicsGetCurrentContext() else { return };
-            let c = Some(&*ctx);
+            let Some(cx) = UIGraphicsGetCurrentContext() else { return };
+            let c = Some(&*cx);
             CGContext::save_g_state(c);
             if let Some(t) = self.ivars().text.borrow().as_ref().filter(|t| t.has_backgrounds()) {
-                crate::text::draw_backgrounds(&ctx, t, text, *content);
+                crate::text::draw_backgrounds(&cx, t, text, *content);
             }
             // CoreText draws in a y-up space with the origin at the bottom of
             // the box.
@@ -312,9 +312,9 @@ define_class!(
             for line in &text.lines {
                 CGContext::set_text_position(c, line.origin.x, line.origin.y);
                 // SAFETY: a valid line and context.
-                unsafe { line.line.draw(&ctx) };
+                unsafe { line.line.draw(&cx) };
                 if text.strikethrough {
-                    draw_decorations(&ctx, line);
+                    draw_decorations(&cx, line);
                 }
             }
             if let Some(color) = color {

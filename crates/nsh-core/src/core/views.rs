@@ -526,7 +526,7 @@ impl<M: TextEngine> Core<M> {
             Patch::Attrs { host, id, attrs } => {
                 // The root: what the views and components above give it
                 // goes after its own.
-                let ctx = if id == host {
+                let cx = if id == host {
                     self.root_context_of(host)
                 } else {
                     None
@@ -534,8 +534,8 @@ impl<M: TextEngine> Core<M> {
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let app = match &ctx {
-                    Some(ctx) if ctx.combined => ctx.app.clone(),
+                let app = match &cx {
+                    Some(cx) if cx.combined => cx.app.clone(),
                     Some(_) => inst.app_style.clone(),
                     None => None,
                 };
@@ -544,11 +544,11 @@ impl<M: TextEngine> Core<M> {
                 };
                 let attrs = *attrs;
                 let old = std::mem::replace(&mut node.attrs, attrs.clone());
-                let (attrs, old) = match &ctx {
-                    Some(ctx) => {
+                let (attrs, old) = match &cx {
+                    Some(cx) => {
                         let mut old = old;
                         (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
-                        let attrs = ctx.over(attrs);
+                        let attrs = cx.over(attrs);
                         inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
                         (attrs, old)
                     }
@@ -558,7 +558,7 @@ impl<M: TextEngine> Core<M> {
             }
             Patch::Style { host, id, style } => {
                 let user = if id == host {
-                    self.root_context_of(host).and_then(|ctx| ctx.user)
+                    self.root_context_of(host).and_then(|cx| cx.user)
                 } else {
                     None
                 };

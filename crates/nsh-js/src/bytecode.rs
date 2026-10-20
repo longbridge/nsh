@@ -118,15 +118,15 @@ fn compile(
 ) -> Result<Vec<u8>, JsError> {
     let rt = Runtime::new()?;
     rt.set_loader(crate::modules::Resolver, crate::modules::Loader);
-    let ctx = Context::full(&rt)?;
-    ctx.with(|ctx| {
+    let cx = Context::full(&rt)?;
+    cx.with(|cx| {
         // Imports resolve while compiling: the native modules declare
         // their exports.
         // The table outlives this context and runtime; compilation only
         // declares imports, without initializing host or LLRT globals.
-        crate::modules::install(&ctx, &modules);
-        let module = Module::declare(ctx.clone(), name, source)
-            .catch(&ctx)
+        crate::modules::install(&cx, &modules);
+        let module = Module::declare(cx.clone(), name, source)
+            .catch(&cx)
             .map_err(JsError::caught)?;
         let options = WriteOptions {
             endianness: WriteOptionsEndianness::Little,
@@ -136,7 +136,7 @@ fn compile(
         };
         module
             .write(options)
-            .map_err(|e| JsError::from_engine(&ctx, e))
+            .map_err(|e| JsError::from_engine(&cx, e))
     })
 }
 

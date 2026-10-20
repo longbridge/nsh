@@ -64,13 +64,13 @@ fn reference_zlib(script: &str) -> String {
                 .await;
             let context = AsyncContext::full(&runtime).await.unwrap();
             context
-                .async_with(async |ctx| {
-                    quickjs_jit_stdlib::buffer::init(&ctx).unwrap();
+                .async_with(async |cx| {
+                    quickjs_jit_stdlib::buffer::init(&cx).unwrap();
                     let module =
-                        Module::declare(ctx.clone(), "reference-compression.mjs", script).unwrap();
+                        Module::declare(cx.clone(), "reference-compression.mjs", script).unwrap();
                     let (_, done) = module.eval().unwrap();
                     done.into_future::<()>().await.unwrap();
-                    ctx.globals().get::<_, String>("referenceOutput").unwrap()
+                    cx.globals().get::<_, String>("referenceOutput").unwrap()
                 })
                 .await
         })

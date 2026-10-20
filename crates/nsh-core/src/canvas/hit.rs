@@ -24,7 +24,7 @@ pub(super) type Matrix = [f32; 6];
 
 pub(super) const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
-/// `m` after `n` (`n` applies first): what `ctx.transform(n)` makes of `m`.
+/// `m` after `n` (`n` applies first): what `cx.transform(n)` makes of `m`.
 pub(super) fn mul(m: Matrix, n: Matrix) -> Matrix {
     [
         m[0] * n[0] + m[2] * n[1],
@@ -496,7 +496,7 @@ fn outline(
     }
 }
 
-/// `ctx.isPointInPath([path,] x, y, rule)`: whether `point` (view
+/// `cx.isPointInPath([path,] x, y, rule)`: whether `point` (view
 /// coordinates, untransformed) is inside `path` (transformed by the
 /// transform after `ops`) or, without one, the current path after `ops`.
 /// Animated values (`Num::Slot`) are read through `slot`.
@@ -512,7 +512,7 @@ pub fn point_in_path(
     outline(&state, current, path, &n).contains([point.x.0, point.y.0], rule)
 }
 
-/// `ctx.isPointInStroke([path,] x, y)`: whether `point` is on the
+/// `cx.isPointInStroke([path,] x, y)`: whether `point` is on the
 /// stroke of `path` or the current path with the `lineWidth` and `lineCap`
 /// after `ops` ([`point_in_path`]'s coordinates).
 pub fn point_in_stroke(

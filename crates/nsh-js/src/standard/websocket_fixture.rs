@@ -132,8 +132,8 @@ fn websocket_owner_disposal_aborts_transport() {
     let host = host(true);
     host.with_raw(|raw| {
         // SAFETY: Host owns the live context for this closure.
-        let ctx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
-        crate::reactive::install_globals(&ctx);
+        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+        crate::reactive::install_globals(&cx);
     });
     host.eval_source(&format!(
         r#"

@@ -28,9 +28,9 @@ impl ModuleDef for PathModule {
         quickjs_jit_stdlib::path::PathModule::declare(declarations)
     }
 
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
+    fn evaluate<'js>(cx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
         let (inner, ready) = Module::declare_def::<quickjs_jit_stdlib::path::PathModule, _>(
-            ctx.clone(),
+            cx.clone(),
             "nsh:path-portable",
         )?
         .eval()?;

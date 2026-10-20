@@ -170,7 +170,7 @@ impl Plugin for NshPlugin {
 
     async fn render_chunk(
         &self,
-        _ctx: &PluginContext,
+        _cx: &PluginContext,
         args: &HookRenderChunkArgs<'_>,
     ) -> HookRenderChunkReturn {
         // What each chunk imports statically, by file name.
@@ -195,7 +195,7 @@ impl Plugin for NshPlugin {
 
     async fn resolve_id(
         &self,
-        _ctx: &PluginContext,
+        _cx: &PluginContext,
         args: &HookResolveIdArgs<'_>,
     ) -> HookResolveIdReturn {
         let spec = args.specifier;
@@ -242,7 +242,7 @@ impl Plugin for NshPlugin {
         Ok(None)
     }
 
-    async fn load(&self, _ctx: SharedLoadPluginContext, args: &HookLoadArgs<'_>) -> HookLoadReturn {
+    async fn load(&self, _cx: SharedLoadPluginContext, args: &HookLoadArgs<'_>) -> HookLoadReturn {
         let path = Path::new(args.id);
         let rel = self.rel(path);
         if has_extension(path, FONT_EXTENSIONS) {
@@ -292,7 +292,7 @@ impl Plugin for NshPlugin {
 
     async fn transform(
         &self,
-        _ctx: SharedTransformPluginContext,
+        _cx: SharedTransformPluginContext,
         args: &HookTransformArgs<'_>,
     ) -> HookTransformReturn {
         let jsx_module = matches!(args.module_type, ModuleType::Tsx | ModuleType::Jsx);

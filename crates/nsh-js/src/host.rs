@@ -104,7 +104,7 @@ pub type TextMeasurer =
 /// One QuickJS runtime + context with the nsh host APIs installed.
 pub struct Host {
     // Field order matters: the context must drop before the runtime.
-    ctx: Context,
+    cx: Context,
     rt: RefCell<Option<AsyncRuntime>>,
     scheduler: Rc<Scheduler>,
     /// Set by the heap's allocator when it refuses an allocation.
@@ -145,7 +145,7 @@ fn sourceless_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::
     use rquickjs::context::intrinsic::{
         Date, Json, MapSet, Performance, Promise, Proxy, RegExp, TypedArrays, WeakRef,
     };
-    let ctx = Context::custom::<(
+    let cx = Context::custom::<(
         Date,
         RegExp,
         Json,
@@ -157,8 +157,8 @@ fn sourceless_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::
         Performance,
     )>(rt, scheduler)?;
     // SAFETY: a new, live context; rquickjs has no intrinsic for it.
-    ctx.with(|ctx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(ctx.as_raw().as_ptr()) });
-    Ok(ctx)
+    cx.with(|cx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(cx.as_raw().as_ptr()) });
+    Ok(cx)
 }
 
 /// How a VM is set up.
@@ -209,7 +209,7 @@ impl Host {
         scheduler.ready(rt.set_max_stack_size(limits.stack_bytes));
         let budget = Budget::new(limits);
         scheduler.ready(rt.set_interrupt_handler(Some(budget.interrupt_handler(None))));
-        let ctx = new_context(&rt, scheduler.clone())?;
+        let cx = new_context(&rt, scheduler.clone())?;
         let shared = Rc::new(Shared {
             limits,
             scheduler: Rc::downgrade(&scheduler),
@@ -217,40 +217,35 @@ impl Host {
         });
         let tracked = shared.clone();
         scheduler.ready(rt.set_host_promise_rejection_tracker(Some(Box::new(
-            move |ctx, promise, reason, handled| {
+            move |cx, promise, reason, handled| {
                 tracked
                     .rejections
                     .borrow_mut()
-                    .track(&ctx, promise, reason, handled);
+                    .track(&cx, promise, reason, handled);
             },
         ))));
-        ctx.with(|ctx| {
-            crate::state::install(
-                &ctx,
-                shared.clone(),
-                &options.ui_sets,
-                options.posts.clone(),
-            );
-            web::web(ctx.as_raw().as_ptr()).base_url = options
+        cx.with(|cx| {
+            crate::state::install(&cx, shared.clone(), &options.ui_sets, options.posts.clone());
+            web::web(cx.as_raw().as_ptr()).base_url = options
                 .base_url
                 .as_deref()
                 .and_then(|u| url::Url::parse(u).ok());
-            install(&ctx, &shared)?;
-            crate::standard::install(&ctx)?;
+            install(&cx, &shared)?;
+            crate::standard::install(&cx)?;
             // Before hardening freezes the globals.
-            crate::clock::install(&ctx)?;
+            crate::clock::install(&cx)?;
             if options.harden {
                 match &options.harden_bytecode {
                     // SAFETY: trusted, per the option's contract.
-                    Some(bytecode) => unsafe { sandbox::harden_from(&ctx, bytecode)? },
-                    None => sandbox::harden(&ctx)?,
+                    Some(bytecode) => unsafe { sandbox::harden_from(&cx, bytecode)? },
+                    None => sandbox::harden(&cx)?,
                 }
             }
             Ok(())
         })
-        .map_err(|e| ctx.with(|ctx| JsError::from_engine(&ctx, e)))?;
+        .map_err(|e| cx.with(|cx| JsError::from_engine(&cx, e)))?;
         Ok(Host {
-            ctx,
+            cx,
             rt: RefCell::new(Some(rt)),
             scheduler,
             exhausted,
@@ -325,9 +320,9 @@ impl Host {
         self.evaluations.borrow_mut().clear();
         self.shared.timers.borrow_mut().clear();
         self.shared.frames.borrow_mut().clear();
-        if self.ctx.is_live() {
-            self.ctx.with(|ctx| crate::state::uninstall(&ctx));
-            self.ctx.retire();
+        if self.cx.is_live() {
+            self.cx.with(|cx| crate::state::uninstall(&cx));
+            self.cx.retire();
         }
         // After the state, whose freeing may reject what waits on it;
         // the rejections' values go before the runtime.
@@ -378,25 +373,25 @@ impl Host {
     #[cfg(not(feature = "bytecode-only"))]
     pub(crate) fn standard_exports(&self) -> Result<Vec<(String, Vec<String>)>, JsError> {
         self.guarded(Phase::Load, || {
-            self.ctx
-                .with(|ctx| {
+            self.cx
+                .with(|cx| {
                     crate::standard::NAMES
                         .iter()
                         .map(|name| {
-                            let module = crate::modules::load_module(&ctx, name)
-                                .catch(&ctx)
+                            let module = crate::modules::load_module(&cx, name)
+                                .catch(&cx)
                                 .map_err(JsError::caught)?;
                             let (module, promise) =
-                                module.eval().catch(&ctx).map_err(JsError::caught)?;
+                                module.eval().catch(&cx).map_err(JsError::caught)?;
                             if let Some(result) = promise.result::<()>() {
-                                result.catch(&ctx).map_err(JsError::caught)?;
+                                result.catch(&cx).map_err(JsError::caught)?;
                             }
                             let namespace =
-                                module.namespace().catch(&ctx).map_err(JsError::caught)?;
+                                module.namespace().catch(&cx).map_err(JsError::caught)?;
                             let mut exports = namespace
                                 .keys::<String>()
                                 .collect::<rquickjs::Result<Vec<_>>>()
-                                .catch(&ctx)
+                                .catch(&cx)
                                 .map_err(JsError::caught)?;
                             exports.sort();
                             Ok(((*name).to_owned(), exports))
@@ -425,15 +420,15 @@ impl Host {
     pub fn eval_source(&self, source: &str) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
             let promise = self
-                .ctx
-                .with(|ctx| -> Result<_, JsError> {
-                    let module = Module::declare(ctx.clone(), crate::BUNDLE_NAME, source)
-                        .catch(&ctx)
+                .cx
+                .with(|cx| -> Result<_, JsError> {
+                    let module = Module::declare(cx.clone(), crate::BUNDLE_NAME, source)
+                        .catch(&cx)
                         .map_err(JsError::caught)?;
-                    let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    let (_, promise) = module.eval().catch(&cx).map_err(JsError::caught)?;
                     // Its failure is the bundle's, reported as such.
-                    mark_handled(&ctx, &promise);
-                    Ok(Persistent::save(&ctx, promise))
+                    mark_handled(&cx, &promise);
+                    Ok(Persistent::save(&cx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
             self.finish_evaluation(promise)
@@ -445,15 +440,15 @@ impl Host {
     /// owned by the VM and resumes on its engine wake, without blocking input.
     fn finish_evaluation(&self, promise: Persistent<Promise<'static>>) -> Result<(), JsError> {
         self.run_jobs();
-        let result = self.ctx.with(|ctx| {
+        let result = self.cx.with(|cx| {
             let restored = promise
                 .clone()
-                .restore(&ctx)
-                .map_err(|e| JsError::from_engine(&ctx, e))?;
+                .restore(&cx)
+                .map_err(|e| JsError::from_engine(&cx, e))?;
             Ok::<_, JsError>(
                 restored
                     .result::<()>()
-                    .map(|r| r.catch(&ctx).map_err(JsError::caught)),
+                    .map(|r| r.catch(&cx).map_err(JsError::caught)),
             )
         })?;
         match result {
@@ -468,11 +463,11 @@ impl Host {
     fn settle_evaluations(&self) {
         let pending = self.evaluations.take();
         for promise in pending {
-            let result = self.ctx.with(|ctx| match promise.clone().restore(&ctx) {
+            let result = self.cx.with(|cx| match promise.clone().restore(&cx) {
                 Ok(promise) => promise
                     .result::<()>()
-                    .map(|r| r.catch(&ctx).map_err(JsError::caught)),
-                Err(error) => Some(Err(JsError::from_engine(&ctx, error))),
+                    .map(|r| r.catch(&cx).map_err(JsError::caught)),
+                Err(error) => Some(Err(JsError::from_engine(&cx, error))),
             });
             match result {
                 Some(Err(error)) => self.uncaught(&error),
@@ -491,14 +486,14 @@ impl Host {
     }
 
     fn eval_script_unguarded(&self, name: &str, source: &str) -> Result<bool, JsError> {
-        let applied = self.ctx.with(|ctx| -> Result<bool, JsError> {
+        let applied = self.cx.with(|cx| -> Result<bool, JsError> {
             let mut options = rquickjs::context::EvalOptions::default();
             options.global = true;
             options.strict = false;
             options.filename = Some(name.to_owned());
-            let value: rquickjs::Value<'_> = ctx
+            let value: rquickjs::Value<'_> = cx
                 .eval_with_options(source, options)
-                .catch(&ctx)
+                .catch(&cx)
                 .map_err(JsError::caught)?;
             Ok(value.as_bool() == Some(true))
         });
@@ -511,17 +506,17 @@ impl Host {
     pub fn eval_bytecode(&self, bytecode: &[u8]) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
             let promise = self
-                .ctx
-                .with(|ctx| -> Result<_, JsError> {
+                .cx
+                .with(|cx| -> Result<_, JsError> {
                     // SAFETY: bytecode comes from `compile_bytecode` with the same
                     // QuickJS build; QuickJS does not validate arbitrary input.
-                    let module = unsafe { Module::load(ctx.clone(), bytecode) }
-                        .catch(&ctx)
+                    let module = unsafe { Module::load(cx.clone(), bytecode) }
+                        .catch(&cx)
                         .map_err(JsError::caught)?;
-                    let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    let (_, promise) = module.eval().catch(&cx).map_err(JsError::caught)?;
                     // Its failure is the bundle's, reported as such.
-                    mark_handled(&ctx, &promise);
-                    Ok(Persistent::save(&ctx, promise))
+                    mark_handled(&cx, &promise);
+                    Ok(Persistent::save(&cx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
             self.finish_evaluation(promise)
@@ -550,8 +545,8 @@ impl Host {
 
     fn add_chunk(&self, id: &str, code: crate::modules::ChunkCode) {
         self.guarded(Phase::Call, || {
-            self.ctx
-                .with(|ctx| crate::chunks::add(ctx.as_raw().as_ptr(), id, code));
+            self.cx
+                .with(|cx| crate::chunks::add(cx.as_raw().as_ptr(), id, code));
             self.run_jobs();
         });
     }
@@ -560,8 +555,8 @@ impl Host {
     /// with `message`. A later import asks for it again.
     pub fn chunk_failed(&self, id: &str, message: &str) {
         self.guarded(Phase::Call, || {
-            self.ctx
-                .with(|ctx| crate::chunks::failed(ctx.as_raw().as_ptr(), id, message));
+            self.cx
+                .with(|cx| crate::chunks::failed(cx.as_raw().as_ptr(), id, message));
             self.run_jobs();
         });
     }
@@ -570,12 +565,12 @@ impl Host {
     /// (since the last call) into `out`: the host loads each and hands it
     /// over with [`Host::add_chunk_source`] or [`Host::chunk_failed`].
     pub fn take_chunk_requests(&self, out: &mut Vec<String>) {
-        if !self.ctx.is_live() {
+        if !self.cx.is_live() {
             return;
         }
-        self.ctx.with(|ctx| {
+        self.cx.with(|cx| {
             // SAFETY: the context's state, for this call.
-            unsafe { &(*crate::state::state(ctx.as_raw().as_ptr())).chunks }.take_requests(out)
+            unsafe { &(*crate::state::state(cx.as_raw().as_ptr())).chunks }.take_requests(out)
         });
     }
 
@@ -592,10 +587,10 @@ impl Host {
         // unused (JS stopped), its `Drop` must not unwind into the engine.
         let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.guarded(Phase::Call, || {
-                self.ctx.with(|ctx| {
-                    let raw = ctx.as_raw().as_ptr();
+                self.cx.with(|cx| {
+                    let raw = cx.as_raw().as_ptr();
                     if crate::components::deliver(raw, event).is_err() {
-                        self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+                        self.report::<()>(&cx, Err(rquickjs::Error::Exception));
                     }
                 });
                 self.run_jobs();
@@ -609,36 +604,36 @@ impl Host {
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
         self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
+            self.cx.with(|cx| {
                 // Touches: the responder system is native.
                 if let (EventKind::Touch, EventPayload::Touch(touch)) = (event, payload) {
-                    if crate::touch::dispatch(ctx.as_raw().as_ptr(), touch).is_err() {
-                        self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+                    if crate::touch::dispatch(cx.as_raw().as_ptr(), touch).is_err() {
+                        self.report::<()>(&cx, Err(rquickjs::Error::Exception));
                     }
                     return;
                 }
                 let payload = match (event, payload) {
                     // `onChange` receives the text itself, as in React Native.
                     (EventKind::ChangeText, EventPayload::Text { text, .. }) => {
-                        rquickjs::String::from_str(ctx.clone(), text).map(|s| s.into_value())
+                        rquickjs::String::from_str(cx.clone(), text).map(|s| s.into_value())
                     }
-                    (_, EventPayload::Value(value)) => payload_value(&ctx, value),
-                    _ => payload_object(&ctx, payload),
+                    (_, EventPayload::Value(value)) => payload_value(&cx, value),
+                    _ => payload_object(&cx, payload),
                 };
-                let raw = ctx.as_raw().as_ptr();
+                let raw = cx.as_raw().as_ptr();
                 let result = payload.and_then(|payload| {
                     // Nodes hold their handlers natively.
                     let Some(handler) = crate::dom::handler(raw, id, event) else {
                         return Ok(());
                     };
                     // SAFETY: an owned function value of this context.
-                    let handler = unsafe { Value::from_raw(ctx.clone(), handler) };
+                    let handler = unsafe { Value::from_raw(cx.clone(), handler) };
                     match handler.into_function() {
                         Some(f) => f.call::<_, ()>((payload,)),
                         None => Ok(()),
                     }
                 });
-                self.report(&ctx, result);
+                self.report(&cx, result);
             });
             self.run_jobs();
         });
@@ -648,9 +643,9 @@ impl Host {
     /// pairs.
     pub fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
         self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
-                if let Some(Err(_)) = crate::list::bind(ctx.as_raw().as_ptr(), list, binds) {
-                    self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+            self.cx.with(|cx| {
+                if let Some(Err(_)) = crate::list::bind(cx.as_raw().as_ptr(), list, binds) {
+                    self.report::<()>(&cx, Err(rquickjs::Error::Exception));
                 }
             });
             self.run_jobs();
@@ -663,11 +658,11 @@ impl Host {
             if finished.is_empty() {
                 return;
             }
-            self.ctx.with(|ctx| {
-                let raw = ctx.as_raw().as_ptr();
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
                 for f in finished {
                     if crate::animated::finished(raw, f).is_err() {
-                        self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+                        self.report::<()>(&cx, Err(rquickjs::Error::Exception));
                     }
                 }
             });
@@ -780,9 +775,9 @@ impl Host {
             };
             // Each callback, with the microtasks it queues, has a budget of its own.
             let ran = self.guarded(Phase::Call, || {
-                self.ctx.with(|ctx| {
-                    let result = callback.restore(&ctx).and_then(|f| f.call::<_, ()>(()));
-                    self.report(&ctx, result);
+                self.cx.with(|cx| {
+                    let result = callback.restore(&cx).and_then(|f| f.call::<_, ()>(()));
+                    self.report(&cx, result);
                 });
                 self.run_jobs();
             });
@@ -807,8 +802,8 @@ impl Host {
                         std::task::Poll::Ready(Ok(true)) => {}
                         std::task::Poll::Ready(Ok(false)) | std::task::Poll::Pending => break,
                         std::task::Poll::Ready(Err(err)) => {
-                            let err = self.scheduler.ready(err.with(|ctx| {
-                                let caught = ctx.catch();
+                            let err = self.scheduler.ready(err.with(|cx| {
+                                let caught = cx.catch();
                                 let mut err = JsError::new(describe(caught.clone()));
                                 err.null = caught.is_null();
                                 err
@@ -844,10 +839,10 @@ impl Host {
         if self.exhausted.load(Ordering::Relaxed) || self.shared.fatal.borrow().is_some() {
             return false;
         }
-        self.ctx.with(|ctx| {
+        self.cx.with(|cx| {
             for rejection in rejections {
                 let mut text = String::new();
-                if let Ok(reason) = rejection.reason(&ctx) {
+                if let Ok(reason) = rejection.reason(&cx) {
                     console::format_value(&reason, &mut text);
                 }
                 // An error without a stack ends with its empty line.
@@ -877,18 +872,18 @@ impl Host {
     /// Runs `f` with the raw context (tests).
     #[cfg(test)]
     pub(crate) fn with_raw<R>(&self, f: impl FnOnce(*mut qjs::JSContext) -> R) -> R {
-        self.ctx.with(|ctx| f(ctx.as_raw().as_ptr()))
+        self.cx.with(|cx| f(cx.as_raw().as_ptr()))
     }
 
     /// Whether an exception is pending outside any call (none should be).
     #[cfg(test)]
     pub(crate) fn has_exception(&self) -> bool {
-        if !self.ctx.is_live() {
+        if !self.cx.is_live() {
             return false;
         }
         // SAFETY: a check on the live context.
-        self.ctx
-            .with(|ctx| unsafe { qjs::JS_HasException(ctx.as_raw().as_ptr()) })
+        self.cx
+            .with(|cx| unsafe { qjs::JS_HasException(cx.as_raw().as_ptr()) })
     }
 
     /// Runs the calls of JS functions Rust queued (`Callback::post`,
@@ -897,16 +892,16 @@ impl Host {
     pub fn run_posted(&self) {
         if self.fatal().is_some() {
             // Stopped for good: what waits for these calls is told so.
-            if self.ctx.is_live() {
-                self.ctx
-                    .with(|ctx| crate::classes::close(ctx.as_raw().as_ptr()));
+            if self.cx.is_live() {
+                self.cx
+                    .with(|cx| crate::classes::close(cx.as_raw().as_ptr()));
             }
             return;
         }
         self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
-                let ran = crate::classes::run_posted(ctx.as_raw().as_ptr());
-                self.report(&ctx, ran.map_err(|_| rquickjs::Error::Exception));
+            self.cx.with(|cx| {
+                let ran = crate::classes::run_posted(cx.as_raw().as_ptr());
+                self.report(&cx, ran.map_err(|_| rquickjs::Error::Exception));
             });
             self.run_jobs();
         });
@@ -939,19 +934,19 @@ impl Host {
 
     /// Whether calls Rust queued wait for [`Host::run_posted`].
     pub fn has_posted(&self) -> bool {
-        if !self.ctx.is_live() {
+        if !self.cx.is_live() {
             return false;
         }
-        self.ctx
-            .with(|ctx| crate::classes::has_posted(ctx.as_raw().as_ptr()))
+        self.cx
+            .with(|cx| crate::classes::has_posted(cx.as_raw().as_ptr()))
     }
 
     /// Moves the network requests and cancellations made since the last
     /// call into `out`.
     pub fn take_network(&self, out: &mut NetworkQueue) {
-        if self.ctx.is_live() && !self.shared.dropped_fetches.borrow().is_empty() {
-            self.ctx
-                .with(|ctx| crate::web::forget_dropped_fetches(ctx.as_raw().as_ptr()));
+        if self.cx.is_live() && !self.shared.dropped_fetches.borrow().is_empty() {
+            self.cx
+                .with(|cx| crate::web::forget_dropped_fetches(cx.as_raw().as_ptr()));
         }
         out.ops.append(&mut self.shared.net.borrow_mut().ops);
     }
@@ -961,9 +956,9 @@ impl Host {
     /// every change.
     pub fn set_environment(&self, env: &Environment) {
         self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
+            self.cx.with(|cx| {
                 let result = (|| {
-                    let raw = ctx.as_raw().as_ptr();
+                    let raw = cx.as_raw().as_ptr();
                     // SAFETY: the state of this host's context.
                     unsafe { &(*crate::state::state(raw)).dom }.set_platform(env.os, env.desktop());
                     if crate::env::set_environment(raw, env).is_err() {
@@ -971,7 +966,7 @@ impl Host {
                     }
                     Ok(())
                 })();
-                self.report(&ctx, result);
+                self.report(&cx, result);
             });
             self.run_jobs();
         });
@@ -991,15 +986,15 @@ impl Host {
             if callbacks.is_empty() {
                 return;
             }
-            self.ctx.with(|ctx| {
+            self.cx.with(|cx| {
                 let now = (|| -> rquickjs::Result<f64> {
-                    let performance: rquickjs::Object = ctx.globals().get("performance")?;
+                    let performance: rquickjs::Object = cx.globals().get("performance")?;
                     performance.get::<_, Function>("now")?.call(())
                 })()
                 .unwrap_or(0.0);
                 for (_, callback) in callbacks {
-                    let result = callback.restore(&ctx).and_then(|f| f.call::<_, ()>((now,)));
-                    self.report(&ctx, result);
+                    let result = callback.restore(&cx).and_then(|f| f.call::<_, ()>((now,)));
+                    self.report(&cx, result);
                 }
             });
             self.run_jobs();
@@ -1015,11 +1010,11 @@ impl Host {
     /// Delivers an event of request `id` (what the network stack reported).
     pub fn fetch_event(&self, id: RequestId, event: FetchEvent) {
         self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
-                let raw = ctx.as_raw().as_ptr();
+            self.cx.with(|cx| {
+                let raw = cx.as_raw().as_ptr();
                 let result =
                     crate::web::fetch_event(raw, id, event).map_err(|_| rquickjs::Error::Exception);
-                self.report(&ctx, result);
+                self.report(&cx, result);
             });
             self.run_jobs();
         });
@@ -1045,8 +1040,8 @@ impl Host {
 }
 
 impl Host {
-    fn report<T>(&self, ctx: &Ctx<'_>, result: rquickjs::Result<T>) {
-        if let Err(err) = result.catch(ctx) {
+    fn report<T>(&self, cx: &Ctx<'_>, result: rquickjs::Result<T>) {
+        if let Err(err) = result.catch(cx) {
             self.uncaught(&JsError::caught(err));
         }
     }
@@ -1067,20 +1062,20 @@ impl Drop for Host {
 }
 
 /// Marks `promise` handled: it is not reported as an unhandled rejection.
-fn mark_handled(ctx: &Ctx<'_>, promise: &rquickjs::Promise<'_>) {
+fn mark_handled(cx: &Ctx<'_>, promise: &rquickjs::Promise<'_>) {
     // SAFETY: a live promise of this context.
-    unsafe { qjs::JS_PromiseMarkAsHandled(ctx.as_raw().as_ptr(), promise.as_raw()) };
+    unsafe { qjs::JS_PromiseMarkAsHandled(cx.as_raw().as_ptr(), promise.as_raw()) };
 }
 
 /// The JS object handed to event handlers.
-fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Result<Value<'js>> {
-    let obj = rquickjs::Object::new(ctx.clone())?;
+fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Result<Value<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
     match payload {
-        EventPayload::None => return Ok(Value::new_undefined(ctx.clone())),
-        EventPayload::Value(value) => return payload_value(ctx, value),
+        EventPayload::None => return Ok(Value::new_undefined(cx.clone())),
+        EventPayload::Value(value) => return payload_value(cx, value),
         EventPayload::Map(fields) => {
             for (key, value) in fields {
-                obj.set(*key, payload_value(ctx, value)?)?;
+                obj.set(*key, payload_value(cx, value)?)?;
             }
         }
         EventPayload::Hover(e) => {
@@ -1104,7 +1099,7 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
             obj.set("shiftKey", e.modifiers.shift)?;
         }
         EventPayload::FileDrop(uris) => {
-            let list = rquickjs::Array::new(ctx.clone())?;
+            let list = rquickjs::Array::new(cx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
                 list.set(index, uri.as_str())?;
             }
@@ -1112,12 +1107,12 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
         }
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
-            obj.set("data", json_value(ctx, data)?)?;
+            obj.set("data", json_value(cx, data)?)?;
         }
         EventPayload::TextLayout(lines) => {
-            let list = rquickjs::Array::new(ctx.clone())?;
+            let list = rquickjs::Array::new(cx.clone())?;
             for (i, l) in lines.iter().enumerate() {
-                let line = rquickjs::Object::new(ctx.clone())?;
+                let line = rquickjs::Object::new(cx.clone())?;
                 line.set("text", l.text.as_str())?;
                 line.set("x", l.x.0)?;
                 line.set("y", l.y.0)?;
@@ -1177,12 +1172,12 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
                 },
             )?;
             obj.set("timestamp", touch.timestamp)?;
-            let points = rquickjs::Array::new(ctx.clone())?;
+            let points = rquickjs::Array::new(cx.clone())?;
             for (i, p) in touch.points.iter().enumerate() {
-                let o = rquickjs::Object::new(ctx.clone())?;
+                let o = rquickjs::Object::new(cx.clone())?;
                 o.set("identifier", p.id)?;
                 o.set("target", p.target)?;
-                let path = rquickjs::Array::new(ctx.clone())?;
+                let path = rquickjs::Array::new(cx.clone())?;
                 for (j, id) in p.path.iter().enumerate() {
                     path.set(j, *id)?;
                 }
@@ -1213,36 +1208,36 @@ pub(crate) fn json_to_js(raw: *mut qjs::JSContext, json: &nsh_core::JsonValue) -
 }
 
 /// JSON (a native component's event data) as a JS value.
-fn json_value<'js>(ctx: &Ctx<'js>, value: &nsh_core::JsonValue) -> rquickjs::Result<Value<'js>> {
+fn json_value<'js>(cx: &Ctx<'js>, value: &nsh_core::JsonValue) -> rquickjs::Result<Value<'js>> {
     use nsh_core::JsonValue as J;
     Ok(match value {
-        J::Null => Value::new_null(ctx.clone()),
-        J::Bool(b) => Value::new_bool(ctx.clone(), *b),
-        J::Number(n) => Value::new_float(ctx.clone(), n.as_f64().unwrap_or(0.0)),
-        J::String(s) => rquickjs::String::from_str(ctx.clone(), s)?.into_value(),
+        J::Null => Value::new_null(cx.clone()),
+        J::Bool(b) => Value::new_bool(cx.clone(), *b),
+        J::Number(n) => Value::new_float(cx.clone(), n.as_f64().unwrap_or(0.0)),
+        J::String(s) => rquickjs::String::from_str(cx.clone(), s)?.into_value(),
         J::Array(items) => {
-            let array = rquickjs::Array::new(ctx.clone())?;
+            let array = rquickjs::Array::new(cx.clone())?;
             for (i, item) in items.iter().enumerate() {
-                array.set(i, json_value(ctx, item)?)?;
+                array.set(i, json_value(cx, item)?)?;
             }
             array.into_value()
         }
         J::Object(fields) => {
-            let object = rquickjs::Object::new(ctx.clone())?;
+            let object = rquickjs::Object::new(cx.clone())?;
             for (key, item) in fields {
-                object.set(key.as_str(), json_value(ctx, item)?)?;
+                object.set(key.as_str(), json_value(cx, item)?)?;
             }
             object.into_value()
         }
     })
 }
 
-fn payload_value<'js>(ctx: &Ctx<'js>, value: &PayloadValue) -> rquickjs::Result<Value<'js>> {
+fn payload_value<'js>(cx: &Ctx<'js>, value: &PayloadValue) -> rquickjs::Result<Value<'js>> {
     Ok(match value {
-        PayloadValue::Number(n) => Value::new_float(ctx.clone(), *n),
-        PayloadValue::Bool(b) => Value::new_bool(ctx.clone(), *b),
-        PayloadValue::Str(s) => rquickjs::String::from_str(ctx.clone(), s)?.into_value(),
-        PayloadValue::Null => Value::new_null(ctx.clone()),
+        PayloadValue::Number(n) => Value::new_float(cx.clone(), *n),
+        PayloadValue::Bool(b) => Value::new_bool(cx.clone(), *b),
+        PayloadValue::Str(s) => rquickjs::String::from_str(cx.clone(), s)?.into_value(),
+        PayloadValue::Null => Value::new_null(cx.clone()),
     })
 }
 
@@ -1322,19 +1317,19 @@ declare class DOMException extends Error {
 }
 "#;
 
-fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
-    let globals = ctx.globals();
-    console::install(ctx)?;
-    web::install(ctx.as_raw().as_ptr())?;
-    crate::chunks::install(ctx.as_raw().as_ptr()).map_err(|_| rquickjs::Error::Exception)?;
-    crate::dom::install_globals(ctx.as_raw().as_ptr());
+fn install(cx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
+    let globals = cx.globals();
+    console::install(cx)?;
+    web::install(cx.as_raw().as_ptr())?;
+    crate::chunks::install(cx.as_raw().as_ptr()).map_err(|_| rquickjs::Error::Exception)?;
+    crate::dom::install_globals(cx.as_raw().as_ptr());
 
     for (name, repeat) in [("setTimeout", false), ("setInterval", true)] {
         let s = shared.clone();
         globals.set(
             name,
             Function::new(
-                ctx.clone(),
+                cx.clone(),
                 move |callback: Function<'_>, delay: Opt<f64>| -> u32 {
                     let ms = delay.0.unwrap_or(0.0);
                     let delay = Duration::from_secs_f64(if ms.is_finite() && ms > 0.0 {
@@ -1351,7 +1346,7 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let s = shared.clone();
     globals.set(
         "requestAnimationFrame",
-        Function::new(ctx.clone(), move |callback: Function<'_>| -> u32 {
+        Function::new(cx.clone(), move |callback: Function<'_>| -> u32 {
             let id = s.next_frame_id.get().wrapping_add(1).max(1);
             s.next_frame_id.set(id);
             let callback = Persistent::save(&callback.ctx().clone(), callback);
@@ -1362,7 +1357,7 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let s = shared.clone();
     globals.set(
         "cancelAnimationFrame",
-        Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+        Function::new(cx.clone(), move |id: Opt<Value<'_>>| {
             if let Some(id) = handle_id(id) {
                 s.frames.borrow_mut().retain(|(i, _)| *i != id);
             }
@@ -1372,7 +1367,7 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
         let s = shared.clone();
         globals.set(
             name,
-            Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+            Function::new(cx.clone(), move |id: Opt<Value<'_>>| {
                 if let Some(id) = handle_id(id) {
                     s.timers.borrow_mut().cancel(id);
                 }
@@ -1485,8 +1480,8 @@ mod tests {
         )
         .unwrap();
         let tags = host
-            .ctx
-            .with(|ctx| crate::dom::unshown_text_tags(ctx.as_raw().as_ptr()));
+            .cx
+            .with(|cx| crate::dom::unshown_text_tags(cx.as_raw().as_ptr()));
         let bit = |t: nsh_core::Tag| 1u64 << t as u32;
         assert_eq!(tags, bit(nsh_core::Tag::View) | bit(nsh_core::Tag::Scroll));
     }
@@ -1654,10 +1649,10 @@ const report = (v) => text(String(v));
         host.set_system_wake(Arc::new(move || {
             let _ = send.send(());
         }));
-        host.ctx.with(|ctx| {
-            ctx.globals().set("nativeFutureDone", false).unwrap();
-            let owned = ctx.clone();
-            ctx.spawn(async move {
+        host.cx.with(|cx| {
+            cx.globals().set("nativeFutureDone", false).unwrap();
+            let owned = cx.clone();
+            cx.spawn(async move {
                 tokio::time::sleep(Duration::from_millis(25)).await;
                 owned.globals().set("nativeFutureDone", true).unwrap();
             });
@@ -1666,16 +1661,16 @@ const report = (v) => text(String(v));
         assert!(host.has_system_tasks());
         assert!(
             !host
-                .ctx
-                .with(|ctx| ctx.globals().get::<_, bool>("nativeFutureDone").unwrap())
+                .cx
+                .with(|cx| cx.globals().get::<_, bool>("nativeFutureDone").unwrap())
         );
         receive
             .recv_timeout(Duration::from_secs(2))
             .expect("native timer wakes owning engine");
         host.run_system();
         assert!(
-            host.ctx
-                .with(|ctx| ctx.globals().get::<_, bool>("nativeFutureDone").unwrap())
+            host.cx
+                .with(|cx| cx.globals().get::<_, bool>("nativeFutureDone").unwrap())
         );
         assert!(!host.has_system_tasks());
     }
@@ -1698,9 +1693,9 @@ const report = (v) => text(String(v));
             let _ = &callback_guard;
         }));
         let guard = Dropped(dropped.clone());
-        host.ctx.with(|ctx| {
-            let owned = ctx.clone();
-            ctx.spawn(async move {
+        host.cx.with(|cx| {
+            let owned = cx.clone();
+            cx.spawn(async move {
                 let (_guard, _owned) = (guard, owned);
                 tokio::time::sleep(Duration::from_secs(60)).await;
             });
@@ -1736,9 +1731,9 @@ const report = (v) => text(String(v));
             let _ = &callback_guard;
         }));
         let guard = Dropped(dropped.clone());
-        host.ctx.with(|ctx| {
-            let owned = ctx.clone();
-            ctx.spawn(async move {
+        host.cx.with(|cx| {
+            let owned = cx.clone();
+            cx.spawn(async move {
                 let (_guard, _owned) = (guard, owned);
                 tokio::time::sleep(Duration::from_secs(60)).await;
             });
@@ -1748,7 +1743,7 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report('frozen UI');"))
             .unwrap();
         host.stop("test stop".into());
-        assert!(!host.ctx.is_live());
+        assert!(!host.cx.is_live());
         assert!(host.rt.borrow().is_none());
         assert_eq!(reported(&host), ["frozen UI"]);
         assert!(!host.has_system_tasks());
@@ -1789,13 +1784,13 @@ const report = (v) => text(String(v));
         host.set_system_wake(Arc::new(move || {
             let _ = send.send(());
         }));
-        host.ctx.with(|ctx| {
-            let promise = Promise::wrap_future(&ctx, async {
+        host.cx.with(|cx| {
+            let promise = Promise::wrap_future(&cx, async {
                 tokio::time::sleep(Duration::from_millis(25)).await;
                 7
             })
             .unwrap();
-            ctx.globals().set("nativePending", promise).unwrap();
+            cx.globals().set("nativePending", promise).unwrap();
         });
         host.eval_source("await nativePending; throw new Error('native TLA rejected');")
             .unwrap();
@@ -1827,8 +1822,8 @@ const report = (v) => text(String(v));
         });
         host.scheduler.start_io().unwrap();
         let guard = Dropped(dropped.clone());
-        host.ctx.with(|ctx| {
-            ctx.spawn(async move {
+        host.cx.with(|cx| {
+            cx.spawn(async move {
                 let _guard = guard;
                 tokio::time::sleep(Duration::from_secs(60)).await;
             })
@@ -1838,7 +1833,7 @@ const report = (v) => text(String(v));
             "try { const keep=[]; for (;;) keep.push(new Array(100000).fill(1)); } catch (_) {}",
         );
         assert!(host.fatal().is_some());
-        assert!(!host.ctx.is_live());
+        assert!(!host.cx.is_live());
         assert!(host.rt.borrow().is_none());
         assert!(dropped.load(Ordering::SeqCst));
         assert!(!host.has_system_tasks());
@@ -1877,8 +1872,8 @@ const report = (v) => text(String(v));
                 ..Default::default()
             },
         };
-        host.ctx.with(|ctx| {
-            let value = payload_object(&ctx, &EventPayload::Hover(event)).unwrap();
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Hover(event)).unwrap();
             let obj = value.as_object().unwrap();
             let num = |k: &str| obj.get::<_, f64>(k).unwrap();
             let flag = |k: &str| obj.get::<_, bool>(k).unwrap();
@@ -1907,8 +1902,8 @@ const report = (v) => text(String(v));
                 ..Default::default()
             },
         };
-        host.ctx.with(|ctx| {
-            let value = payload_object(&ctx, &EventPayload::ContextMenu(event)).unwrap();
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::ContextMenu(event)).unwrap();
             let obj = value.as_object().unwrap();
             let num = |k: &str| obj.get::<_, f64>(k).unwrap();
             assert_eq!(
@@ -1932,8 +1927,8 @@ const report = (v) => text(String(v));
             "file:///tmp/a%20b.txt".into(),
             "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
         ];
-        host.ctx.with(|ctx| {
-            let value = payload_object(&ctx, &EventPayload::FileDrop(uris.clone())).unwrap();
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::FileDrop(uris.clone())).unwrap();
             let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
             assert_eq!(actual, uris);
         });

@@ -12,8 +12,8 @@ type JsContext = qjs::JSContext;
 
 /// Makes the `process` module's default object the global `process`, before
 /// application code runs (the module and the global are one object).
-pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
-    let raw = ctx.as_raw().as_ptr();
+pub(crate) fn install(cx: &Ctx<'_>) -> Result<()> {
+    let raw = cx.as_raw().as_ptr();
     // SAFETY: the state is installed before the standard globals.
     let object = unsafe {
         (*crate::state::state(raw))
@@ -37,33 +37,33 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
 /// `process.nextTick(callback, ...args)`: `callback(...args)` as a JS job,
 /// after the current one and before timers.
 pub(crate) unsafe extern "C" fn next_tick(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let callback = crate::reactive::arg(argc, argv, 0);
     // SAFETY: a tag check of a live argument.
-    if argc < 1 || !unsafe { qjs::JS_IsFunction(ctx, callback) } {
+    if argc < 1 || !unsafe { qjs::JS_IsFunction(cx, callback) } {
         // SAFETY: a literal message on a live context.
         return unsafe {
             qjs::JS_ThrowTypeError(
-                ctx,
+                cx,
                 c"process.nextTick: callback must be a function".as_ptr(),
             )
         };
     }
     // SAFETY: QuickJS copies the `argc` live arguments into the job.
-    if unsafe { qjs::JS_EnqueueJob(ctx, Some(tick), argc, argv) } < 0 {
+    if unsafe { qjs::JS_EnqueueJob(cx, Some(tick), argc, argv) } < 0 {
         return qjs::JS_EXCEPTION;
     }
     qjs::JS_UNDEFINED
 }
 
 /// The job: the callback (argument 0) with the rest of the arguments.
-unsafe extern "C" fn tick(ctx: *mut JsContext, argc: c_int, argv: *mut JsValue) -> JsValue {
+unsafe extern "C" fn tick(cx: *mut JsContext, argc: c_int, argv: *mut JsValue) -> JsValue {
     // SAFETY: the job's `argc` (at least one) live arguments.
-    unsafe { qjs::JS_Call(ctx, *argv, qjs::JS_UNDEFINED, argc - 1, argv.add(1)) }
+    unsafe { qjs::JS_Call(cx, *argv, qjs::JS_UNDEFINED, argc - 1, argv.add(1)) }
 }
 
 #[cfg(test)]

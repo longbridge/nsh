@@ -29,7 +29,7 @@ workaround here in the same change.
 - `borderColor` could not be animated natively: `borderColor`, `color` and shadows bind to animated values; the
   switch's knob ring animates.
 - QuickJS had no `Intl`: `Intl.NumberFormat` / `DateTimeFormat` and `toLocaleString` are formatted in Rust.
-- No `isPointInPath`: `ctx.isPointInPath` / `isPointInStroke` are answered in Rust; the RCS quads and the tank in
+- No `isPointInPath`: `cx.isPointInPath` / `isPointInStroke` are answered in Rust; the RCS quads and the tank in
   the mass section are hit-tested with paths.
 - A hot update of the entry popped pushed screens and reset state: top-level signals and navigators keep their state,
   and an unchanged `mount(App)` is kept (editing `App` itself still resets the state inside it).

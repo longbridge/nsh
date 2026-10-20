@@ -34,61 +34,61 @@ impl Events {
 }
 
 pub(crate) fn connect(
-    ctx: crate::web::js::Ctx,
+    cx: crate::web::js::Ctx,
     url: String,
     protocols: Vec<String>,
     callback: crate::web::js::V,
 ) -> crate::web::js::R<crate::web::js::V> {
-    let transport = crate::dom::shared(ctx).system_websocket.borrow().clone();
+    let transport = crate::dom::shared(cx).system_websocket.borrow().clone();
     let Some(transport) = transport else {
         #[cfg(not(target_arch = "wasm32"))]
-        return native::connect(ctx, url, protocols, callback);
+        return native::connect(cx, url, protocols, callback);
         #[cfg(target_arch = "wasm32")]
         return Err(crate::web::js::type_error(
-            ctx,
+            cx,
             "The host has no WebSocket transport configured",
         ));
     };
     // SAFETY: the caller lends a live context for this operation.
-    let rq = unsafe { Ctx::from_raw(std::ptr::NonNull::new(ctx).expect("a live context")) };
+    let rq = unsafe { Ctx::from_raw(std::ptr::NonNull::new(cx).expect("a live context")) };
     // SAFETY: the owned value transfers exactly one reference.
     let callback = unsafe { Value::from_raw(rq.clone(), callback.take()) };
     let callback = callback
         .into_function()
-        .ok_or_else(|| crate::web::js::type_error(ctx, "WebSocket callback is not a function"))?;
+        .ok_or_else(|| crate::web::js::type_error(cx, "WebSocket callback is not a function"))?;
     let result = open(rq, transport, url, protocols, callback);
     result
-        .map(|handle| crate::web::js::V::dup(ctx, handle.as_raw()))
+        .map(|handle| crate::web::js::V::dup(cx, handle.as_raw()))
         .map_err(|_| crate::web::js::Throw)
 }
 
 fn open<'js>(
-    ctx: Ctx<'js>,
+    cx: Ctx<'js>,
     transport: std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>,
     url: String,
     protocols: Vec<String>,
     callback: Function<'js>,
 ) -> Result<Object<'js>> {
-    let parsed = url::Url::parse(&url)
-        .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket URL"))?;
+    let parsed =
+        url::Url::parse(&url).map_err(|_| Exception::throw_syntax(&cx, "Invalid WebSocket URL"))?;
     if !matches!(parsed.scheme(), "ws" | "wss")
         || parsed.fragment().is_some()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
     {
         return Err(Exception::throw_syntax(
-            &ctx,
+            &cx,
             "WebSocket requires a ws/wss URL without credentials or fragment",
         ));
     }
-    let shared = crate::dom::shared(ctx.as_raw().as_ptr());
+    let shared = crate::dom::shared(cx.as_raw().as_ptr());
     if !shared
         .system_access
         .borrow()
         .allows_websocket(parsed.as_str())
     {
         return Err(Exception::throw_type(
-            &ctx,
+            &cx,
             "WebSocket network capability denied",
         ));
     }
@@ -98,7 +98,7 @@ fn open<'js>(
         .take(WEBSOCKETS, MAX_WEBSOCKETS)
         .ok_or_else(|| {
             Exception::throw_range(
-                &ctx,
+                &cx,
                 &format!("At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"),
             )
         })?;
@@ -133,9 +133,9 @@ fn open<'js>(
                 queue.wake();
             }),
         )
-        .map_err(|error| Exception::throw_type(&ctx, &error))?;
+        .map_err(|error| Exception::throw_type(&cx, &error))?;
     let task: Rc<RefCell<Option<Box<dyn WebSocketTask>>>> = Rc::new(RefCell::new(Some(task)));
-    let handle = Object::new(ctx.clone())?;
+    let handle = Object::new(cx.clone())?;
     let read_task = Rc::downgrade(&task);
     handle.set(
         "bufferedAmount",
@@ -149,16 +149,16 @@ fn open<'js>(
     let send_task = Rc::downgrade(&task);
     handle.set(
         "send",
-        Func::from(move |ctx: Ctx<'js>, data: Value<'js>| -> Result<()> {
+        Func::from(move |cx: Ctx<'js>, data: Value<'js>| -> Result<()> {
             let data = if let Some(text) = data.as_string() {
                 WebSocketData::Text(text.to_string()?)
             } else if let Some(blob) =
-                crate::web::blob::blob_of(ctx.as_raw().as_ptr(), data.as_raw())
+                crate::web::blob::blob_of(cx.as_raw().as_ptr(), data.as_raw())
                     .map_err(|_| rquickjs::Error::Exception)?
             {
                 if blob.bytes().len() > MAX_MESSAGE {
                     return Err(Exception::throw_range(
-                        &ctx,
+                        &cx,
                         "WebSocket message exceeds 8 MiB",
                     ));
                 }
@@ -166,16 +166,16 @@ fn open<'js>(
             } else {
                 // SAFETY: the value remains alive until its bytes have been copied.
                 let bytes =
-                    unsafe { crate::web::js::bytes_of(ctx.as_raw().as_ptr(), data.as_raw()) }
+                    unsafe { crate::web::js::bytes_of(cx.as_raw().as_ptr(), data.as_raw()) }
                         .ok_or_else(|| {
                             Exception::throw_type(
-                                &ctx,
+                                &cx,
                                 "send expects text, Blob, ArrayBuffer or a typed array",
                             )
                         })?;
                 if bytes.len() > MAX_MESSAGE {
                     return Err(Exception::throw_range(
-                        &ctx,
+                        &cx,
                         "WebSocket message exceeds 8 MiB",
                     ));
                 }
@@ -187,37 +187,37 @@ fn open<'js>(
             };
             if size > MAX_MESSAGE {
                 return Err(Exception::throw_range(
-                    &ctx,
+                    &cx,
                     "WebSocket message exceeds 8 MiB",
                 ));
             }
             let task = send_task
                 .upgrade()
-                .ok_or_else(|| Exception::throw_type(&ctx, "WebSocket is closed"))?;
+                .ok_or_else(|| Exception::throw_type(&cx, "WebSocket is closed"))?;
             let mut task = task.borrow_mut();
             let task = task
                 .as_mut()
-                .ok_or_else(|| Exception::throw_type(&ctx, "WebSocket is closed"))?;
+                .ok_or_else(|| Exception::throw_type(&cx, "WebSocket is closed"))?;
             if task.buffered_amount().saturating_add(size) > MAX_MESSAGE {
                 return Err(Exception::throw_range(
-                    &ctx,
+                    &cx,
                     "WebSocket buffered data exceeds 8 MiB",
                 ));
             }
             task.send(data)
-                .map_err(|error| Exception::throw_type(&ctx, &error))
+                .map_err(|error| Exception::throw_type(&cx, &error))
         }),
     )?;
     let close_task = Rc::downgrade(&task);
     handle.set(
         "close",
         Func::from(
-            move |ctx: Ctx<'js>, code: u16, reason: String| -> Result<()> {
+            move |cx: Ctx<'js>, code: u16, reason: String| -> Result<()> {
                 if let Some(task) = close_task.upgrade()
                     && let Some(task) = task.borrow_mut().as_mut()
                 {
                     task.close(code, &reason)
-                        .map_err(|error| Exception::throw_type(&ctx, &error))?;
+                        .map_err(|error| Exception::throw_type(&cx, &error))?;
                 }
                 Ok(())
             },
@@ -225,7 +225,7 @@ fn open<'js>(
     )?;
     let cleanup_task = Rc::downgrade(&task);
     let cleanup_events = Rc::downgrade(&events);
-    let cleanup = Function::new(ctx.clone(), move || {
+    let cleanup = Function::new(cx.clone(), move || {
         if let Some(task) = cleanup_task.upgrade() {
             task.borrow_mut().take();
         }
@@ -235,7 +235,7 @@ fn open<'js>(
             events.wake();
         }
     })?;
-    let raw = ctx.as_raw().as_ptr();
+    let raw = cx.as_raw().as_ptr();
     let owned_cleanup = crate::web::js::V::dup(raw, cleanup.as_value().as_raw());
     if crate::reactive::has_owner(raw) {
         let mut callback = owned_cleanup.raw();
@@ -247,8 +247,8 @@ fn open<'js>(
     } else {
         crate::hot::undo_on_rerun(raw, owned_cleanup);
     }
-    let task_ctx = ctx.clone();
-    ctx.spawn(async move {
+    let task_cx = cx.clone();
+    cx.spawn(async move {
         let _slot = slot;
         let _task = task;
         let mut delivered = 0;
@@ -298,13 +298,13 @@ fn open<'js>(
                 && !protocols.contains(protocol)
             {
                 let _ = deliver(
-                    &task_ctx,
+                    &task_cx,
                     &callback,
                     WebSocketEvent::Error("Server selected an unrequested protocol".into()),
                     &protocols,
                 );
                 let _ = deliver(
-                    &task_ctx,
+                    &task_cx,
                     &callback,
                     WebSocketEvent::Close {
                         code: 1006,
@@ -317,12 +317,12 @@ fn open<'js>(
             }
             let terminal = matches!(&event, WebSocketEvent::Close { .. });
             let overflow = events.borrow().overflow;
-            if deliver(&task_ctx, &callback, event, &protocols).is_err() {
+            if deliver(&task_cx, &callback, event, &protocols).is_err() {
                 break;
             }
             if overflow {
                 let _ = deliver(
-                    &task_ctx,
+                    &task_cx,
                     &callback,
                     WebSocketEvent::Close {
                         code: 1006,
@@ -342,7 +342,7 @@ fn open<'js>(
 }
 
 fn deliver<'js>(
-    ctx: &Ctx<'js>,
+    cx: &Ctx<'js>,
     callback: &Function<'js>,
     event: WebSocketEvent,
     protocols: &[String],
@@ -351,18 +351,18 @@ fn deliver<'js>(
         WebSocketEvent::Open { protocol } => {
             if !protocol.is_empty() && !protocols.contains(&protocol) {
                 return Err(Exception::throw_type(
-                    ctx,
+                    cx,
                     "Server selected an unrequested protocol",
                 ));
             }
-            let data = Object::new(ctx.clone())?;
+            let data = Object::new(cx.clone())?;
             data.set("protocol", protocol)?;
             callback.call(("open", data))
         }
         WebSocketEvent::Message(WebSocketData::Text(text)) => callback.call(("message", text)),
         WebSocketEvent::Message(WebSocketData::Bytes(bytes)) => callback.call((
             "message",
-            rquickjs::ArrayBuffer::new_copy(ctx.clone(), &bytes)?,
+            rquickjs::ArrayBuffer::new_copy(cx.clone(), &bytes)?,
         )),
         WebSocketEvent::Error(error) => callback.call(("error", error)),
         WebSocketEvent::Close {
@@ -370,7 +370,7 @@ fn deliver<'js>(
             reason,
             was_clean,
         } => {
-            let data = Object::new(ctx.clone())?;
+            let data = Object::new(cx.clone())?;
             data.set("code", code)?;
             data.set("reason", reason)?;
             data.set("wasClean", was_clean)?;
@@ -494,8 +494,8 @@ mod tests {
         let host = host();
         host.with_raw(|raw| {
             // SAFETY: Host lends the live context to this closure.
-            let ctx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
-            crate::reactive::install_globals(&ctx);
+            let cx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+            crate::reactive::install_globals(&cx);
         });
         host.eval_source("__nsh_reactive.createRoot(dispose => {globalThis.disposeSocket = dispose; globalThis.socket = new WebSocket('ws://127.0.0.1/', ['chat']);});").unwrap();
         assert!(!DROPPED.get());

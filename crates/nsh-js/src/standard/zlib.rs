@@ -68,16 +68,16 @@ impl<'js> JsClass<'js> for Bounded<'js> {
     const NAME: &'static str = "NshBoundedDecompressor";
     const KIND: ClassKind = ClassKind::Callable;
     type Mutable = Readable;
-    fn prototype(ctx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
-        Ok(Some(Function::prototype(ctx.clone())))
+    fn prototype(cx: &Ctx<'js>) -> Result<Option<Object<'js>>> {
+        Ok(Some(Function::prototype(cx.clone())))
     }
     fn constructor(_: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
         Ok(None)
     }
     fn call<'a>(this: &JsCell<'js, Self>, params: Params<'a, 'js>) -> Result<Value<'js>> {
-        let ctx = params.ctx().clone();
+        let cx = params.ctx().clone();
         let this = this.borrow();
-        let undefined = || Value::new_undefined(ctx.clone());
+        let undefined = || Value::new_undefined(cx.clone());
         let data = params.arg(0).unwrap_or_else(undefined);
         // `(data, options?)`, or `(data, options?, callback)`.
         let count = params.len();
@@ -87,7 +87,7 @@ impl<'js> JsClass<'js> for Bounded<'js> {
         } else {
             (params.arg(1), None)
         };
-        let options = bounded_options(&ctx, options)?;
+        let options = bounded_options(&cx, options)?;
         match callback {
             Some(callback) => this.inner.call((data, options, callback)),
             None => this.inner.call((data, options)),
@@ -111,22 +111,22 @@ impl ModuleDef for ZlibModule {
         Ok(())
     }
 
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
+    fn evaluate<'js>(cx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
         let (inner, done) = Module::declare_def::<quickjs_jit_stdlib::zlib::ZlibModule, _>(
-            ctx.clone(),
+            cx.clone(),
             "nsh:zlib-llrt",
         )?
         .eval()?;
         done.finish::<()>()?;
         let inner: Object = inner.namespace()?.get("default")?;
-        let default = Object::new(ctx.clone())?;
+        let default = Object::new(cx.clone())?;
         for name in COMPRESSORS {
             default.set(*name, inner.get::<_, Value>(*name)?)?;
         }
         for &(name, callback) in DECOMPRESSORS {
             let function: Function = inner.get(name)?;
             let bounded = Class::instance(
-                ctx.clone(),
+                cx.clone(),
                 Bounded {
                     inner: function,
                     callback,
@@ -144,11 +144,8 @@ impl ModuleDef for ZlibModule {
 
 /// The VM's ceiling on one decompression's output: [`MAX_OUTPUT`], or the
 /// heap limit when that is smaller.
-fn ceiling(ctx: &Ctx<'_>) -> usize {
-    match crate::dom::shared(ctx.as_raw().as_ptr())
-        .limits
-        .memory_bytes
-    {
+fn ceiling(cx: &Ctx<'_>) -> usize {
+    match crate::dom::shared(cx.as_raw().as_ptr()).limits.memory_bytes {
         0 => MAX_OUTPUT,
         heap => heap.min(MAX_OUTPUT),
     }
@@ -156,9 +153,9 @@ fn ceiling(ctx: &Ctx<'_>) -> usize {
 
 /// A copy of the caller's options whose `maxOutputLength` is at most the
 /// ceiling.
-fn bounded_options<'js>(ctx: &Ctx<'js>, options: Option<Value<'js>>) -> Result<Object<'js>> {
-    let bounded = Object::new(ctx.clone())?;
-    let mut limit = ceiling(ctx);
+fn bounded_options<'js>(cx: &Ctx<'js>, options: Option<Value<'js>>) -> Result<Object<'js>> {
+    let bounded = Object::new(cx.clone())?;
+    let mut limit = ceiling(cx);
     if let Some(options) = options.and_then(Value::into_object) {
         for entry in options.props::<String, Value>() {
             let (key, value) = entry?;
@@ -167,11 +164,11 @@ fn bounded_options<'js>(ctx: &Ctx<'js>, options: Option<Value<'js>>) -> Result<O
         let requested: Value = options.get("maxOutputLength")?;
         if !requested.is_undefined() {
             let requested = requested.as_number().ok_or_else(|| {
-                Exception::throw_type(ctx, "options.maxOutputLength must be a number")
+                Exception::throw_type(cx, "options.maxOutputLength must be a number")
             })?;
             if requested.is_nan() || requested < 0.0 {
                 return Err(Exception::throw_range(
-                    ctx,
+                    cx,
                     "options.maxOutputLength must be a non-negative number",
                 ));
             }

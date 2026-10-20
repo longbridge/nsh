@@ -160,7 +160,7 @@ fn slot_number(args: &[Option<AnimationValue>], s: u16) -> f32 {
 /// Draws a canvas view's drawing (in its content layer's
 /// `drawLayer:inContext:`; the context is y down, in points) where it is
 /// `dirty`: Core Graphics skips the rest.
-pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
+pub(crate) fn draw(cx: &CGContext, state: &ViewState, dirty: CGRect) {
     let Some(canvas) = state.canvas.as_ref() else {
         return;
     };
@@ -171,7 +171,7 @@ pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
         return;
     }
     let mut replay = Replay {
-        c: ctx,
+        c: cx,
         args: &canvas.args,
         images: &canvas.images,
         state: State::default(),
@@ -185,21 +185,21 @@ pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
         matches!(op, CanvasOp::ClearRect(_))
             || matches!(op, CanvasOp::Composite(c) if *c != Composite::SourceOver)
     });
-    CGContext::save_g_state(Some(ctx));
+    CGContext::save_g_state(Some(cx));
     // Core Animation clips to what it redraws already; said again for the
     // transparency layer, which takes the clip's size.
-    CGContext::clip_to_rect(Some(ctx), dirty);
+    CGContext::clip_to_rect(Some(cx), dirty);
     if isolated {
         // SAFETY: no auxiliary info.
-        unsafe { CGContext::begin_transparency_layer(Some(ctx), None) };
+        unsafe { CGContext::begin_transparency_layer(Some(cx), None) };
     }
     for op in &drawing.ops {
         replay.op(op);
     }
     if isolated {
-        CGContext::end_transparency_layer(Some(ctx));
+        CGContext::end_transparency_layer(Some(cx));
     }
-    CGContext::restore_g_state(Some(ctx));
+    CGContext::restore_g_state(Some(cx));
 }
 
 /// An affine transform `[a, b, c, d, e, f]` (canvas order: `x' = a x + c y
@@ -308,7 +308,7 @@ enum Mode {
 }
 
 impl<'a> Replay<'a> {
-    fn ctx(&self) -> Option<&'a CGContext> {
+    fn cx(&self) -> Option<&'a CGContext> {
         Some(self.c)
     }
 
@@ -328,7 +328,7 @@ impl<'a> Replay<'a> {
     }
 
     fn op(&mut self, op: &CanvasOp) {
-        let c = self.ctx();
+        let c = self.cx();
         match op {
             CanvasOp::Save => {
                 self.stack.push(self.state.clone());
@@ -612,7 +612,7 @@ impl<'a> Replay<'a> {
 
     /// Alpha, blend mode and shadow of the current state, for one draw.
     fn compositing(&self) {
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         CGContext::set_alpha(c, s.alpha);
         CGContext::set_blend_mode(c, blend(s.composite));
@@ -627,7 +627,7 @@ impl<'a> Replay<'a> {
 
     /// Fills or strokes `path` (in the view's space) with the state's paint.
     fn paint(&self, path: &CGMutablePath, mode: Mode) {
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         CGContext::save_g_state(c);
         self.compositing();
@@ -730,7 +730,7 @@ impl<'a> Replay<'a> {
     /// Draws a gradient paint over the clip (in user space).
     fn gradient(&self, paint: &Paint) {
         let Paint::Gradient(g) = paint else { return };
-        let c = self.ctx();
+        let c = self.cx();
         if g.stops.is_empty() {
             return;
         }
@@ -788,7 +788,7 @@ impl<'a> Replay<'a> {
         if text.is_empty() {
             return;
         }
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         let font = crate::text::make_font(&s.font.with_numeric(s.numeric).text_style());
         let string =
@@ -921,7 +921,7 @@ impl<'a> Replay<'a> {
         if dh.is_nan() {
             dh = size.1;
         }
-        let c = self.ctx();
+        let c = self.cx();
         CGContext::save_g_state(c);
         self.compositing();
         CGContext::concat_ctm(c, self.state.ctm.cg());

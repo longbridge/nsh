@@ -61,15 +61,15 @@ function Curve(props: { phase: Phase; onBezier: (b: Bezier) => void; time: Anima
           const p = props.phase;
           if (p.easing === "spring") return;
           const { w, h } = box();
-          const cx = (x - pad.left) / w, cy = 1 - (y - pad.top) / h;
+          const centerX = (x - pad.left) / w, cy = 1 - (y - pad.top) / h;
           if (first) {
-            const d = (i: 0 | 1) => Math.hypot((cx - p.bezier[i * 2]) * w, (cy - p.bezier[i * 2 + 1]) * h);
+            const d = (i: 0 | 1) => Math.hypot((centerX - p.bezier[i * 2]) * w, (cy - p.bezier[i * 2 + 1]) * h);
             handle = d(0) <= d(1) ? 0 : 1;
             if (d(handle) > 44) handle = null;
           }
           if (handle === null) return;
           const next: Bezier = [...p.bezier];
-          next[handle * 2] = cx;
+          next[handle * 2] = centerX;
           next[handle * 2 + 1] = Math.min(1.5, Math.max(-0.5, cy));
           props.onBezier(next);
         },
@@ -77,75 +77,75 @@ function Curve(props: { phase: Phase; onBezier: (b: Bezier) => void; time: Anima
       )}
       accessibilityLabel={`${props.phase.name}: ${easingLabel(props.phase.easing)} ${props.phase.bezier.join(", ")}`}
       accessibilityHint="Drag the rings to reshape the curve"
-      draw={(ctx, { width, height }) => {
+      draw={(cx, { width, height }) => {
         const p = props.phase;
         const w = width - pad.left - pad.right, h = height - pad.top - pad.bottom;
         const X = (x: number) => pad.left + x * w;
         const Y = (y: number) => pad.top + (1 - y) * h;
 
-        ctx.strokeStyle = color.grid;
-        ctx.lineWidth = 1;
+        cx.strokeStyle = color.grid;
+        cx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
-          ctx.beginPath();
-          ctx.moveTo(pad.left, Y(i / 4));
-          ctx.lineTo(width - pad.right, Y(i / 4));
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(pad.left, Y(i / 4));
+          cx.lineTo(width - pad.right, Y(i / 4));
+          cx.stroke();
         }
 
-        const area = ctx.createLinearGradient(0, Y(1), 0, Y(0));
+        const area = cx.createLinearGradient(0, Y(1), 0, Y(0));
         area.addColorStop(0, "rgba(61,214,198,0.30)");
         area.addColorStop(1, "rgba(61,214,198,0.02)");
-        ctx.fillStyle = area;
-        ctx.beginPath();
-        ctx.moveTo(X(0), Y(0));
-        for (let i = 0; i <= 60; i++) ctx.lineTo(X(i / 60), Y(ease(p, i / 60)));
-        ctx.lineTo(X(1), Y(0));
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = color.accent;
-        ctx.lineWidth = 2.5;
-        ctx.lineJoin = "round";
-        ctx.beginPath();
+        cx.fillStyle = area;
+        cx.beginPath();
+        cx.moveTo(X(0), Y(0));
+        for (let i = 0; i <= 60; i++) cx.lineTo(X(i / 60), Y(ease(p, i / 60)));
+        cx.lineTo(X(1), Y(0));
+        cx.closePath();
+        cx.fill();
+        cx.strokeStyle = color.accent;
+        cx.lineWidth = 2.5;
+        cx.lineJoin = "round";
+        cx.beginPath();
         for (let i = 0; i <= 60; i++) {
-          if (i === 0) ctx.moveTo(X(0), Y(ease(p, 0)));
-          else ctx.lineTo(X(i / 60), Y(ease(p, i / 60)));
+          if (i === 0) cx.moveTo(X(0), Y(ease(p, 0)));
+          else cx.lineTo(X(i / 60), Y(ease(p, i / 60)));
         }
-        ctx.stroke();
+        cx.stroke();
 
         if (p.easing !== "spring") {
           const [x1, y1, x2, y2] = p.bezier;
-          ctx.strokeStyle = color.caution;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.moveTo(X(0), Y(0));
-          ctx.lineTo(X(x1), Y(y1));
-          ctx.moveTo(X(1), Y(1));
-          ctx.lineTo(X(x2), Y(y2));
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.lineWidth = 2;
-          ctx.fillStyle = color.inset;
+          cx.strokeStyle = color.caution;
+          cx.lineWidth = 1;
+          cx.setLineDash([3, 3]);
+          cx.beginPath();
+          cx.moveTo(X(0), Y(0));
+          cx.lineTo(X(x1), Y(y1));
+          cx.moveTo(X(1), Y(1));
+          cx.lineTo(X(x2), Y(y2));
+          cx.stroke();
+          cx.setLineDash([]);
+          cx.lineWidth = 2;
+          cx.fillStyle = color.inset;
           for (const [x, y] of [[x1, y1], [x2, y2]]) {
-            ctx.beginPath();
-            ctx.arc(X(x), Y(y), 7, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
+            cx.beginPath();
+            cx.arc(X(x), Y(y), 7, 0, Math.PI * 2);
+            cx.fill();
+            cx.stroke();
           }
         }
 
-        ctx.fillStyle = color.light;
-        ctx.beginPath();
-        ctx.arc(props.time.mul(w).add(pad.left), props.value.mul(-h).add(pad.top + h), 6, 0, Math.PI * 2);
-        ctx.fill();
+        cx.fillStyle = color.light;
+        cx.beginPath();
+        cx.arc(props.time.mul(w).add(pad.left), props.value.mul(-h).add(pad.top + h), 6, 0, Math.PI * 2);
+        cx.fill();
 
-        ctx.font = `11px ${mono}`;
-        ctx.fillStyle = color.faint;
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "left";
-        ctx.fillText("100%", pad.left, pad.top - 14);
-        ctx.textAlign = "right";
-        ctx.fillText(p.easing === "spring" ? "spring k 180" : `cubic-bezier(${p.bezier.join(", ")})`, width - pad.right, height - 12);
+        cx.font = `11px ${mono}`;
+        cx.fillStyle = color.faint;
+        cx.textBaseline = "middle";
+        cx.textAlign = "left";
+        cx.fillText("100%", pad.left, pad.top - 14);
+        cx.textAlign = "right";
+        cx.fillText(p.easing === "spring" ? "spring k 180" : `cubic-bezier(${p.bezier.join(", ")})`, width - pad.right, height - 12);
       }}
     />
   );

@@ -24,9 +24,9 @@ trace!(ListIterator { items });
 impl Object for ListIterator {}
 
 /// An iterator yielding `items`.
-pub(crate) fn new(ctx: Ctx, items: Vec<V>) -> R<V> {
+pub(crate) fn new(cx: Ctx, items: Vec<V>) -> R<V> {
     instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::Iterator,
         ListIterator {
@@ -36,25 +36,25 @@ pub(crate) fn new(ctx: Ctx, items: Vec<V>) -> R<V> {
 }
 
 /// One item of an iterator over string pairs.
-pub(crate) fn pair_item(ctx: Ctx, k: &str, v: &str, part: Part) -> R<V> {
-    pair_value(ctx, k, js::string(ctx, v)?, part)
+pub(crate) fn pair_item(cx: Ctx, k: &str, v: &str, part: Part) -> R<V> {
+    pair_value(cx, k, js::string(cx, v)?, part)
 }
 
 /// One item of an iterator over pairs with value `v`.
-pub(crate) fn pair_value(ctx: Ctx, k: &str, v: V, part: Part) -> R<V> {
+pub(crate) fn pair_value(cx: Ctx, k: &str, v: V, part: Part) -> R<V> {
     match part {
-        Part::Keys => js::string(ctx, k),
+        Part::Keys => js::string(cx, k),
         Part::Values => Ok(v),
-        Part::Entries => js::new_array(ctx, vec![js::string(ctx, k)?, v]),
+        Part::Entries => js::new_array(cx, vec![js::string(cx, k)?, v]),
     }
 }
 
 native!(
-    fn next(ctx, this, args) {
-        let item = data::<ListIterator>(ctx, this, "Iterator")?.items.pop_front();
+    fn next(cx, this, args) {
+        let item = data::<ListIterator>(cx, this, "Iterator")?.items.pop_front();
         match item {
-            Some(v) => js::iter_result(ctx, v, false),
-            None => js::iter_result(ctx, V::undefined(), true),
+            Some(v) => js::iter_result(cx, v, false),
+            None => js::iter_result(cx, V::undefined(), true),
         }
     }
 );

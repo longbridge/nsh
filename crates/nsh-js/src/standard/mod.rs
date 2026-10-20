@@ -26,16 +26,16 @@ pub(crate) fn normalize(name: &str) -> Option<&str> {
     NAMES.iter().copied().find(|candidate| *candidate == name)
 }
 
-pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
+pub(crate) fn load<'js>(cx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
     // LLRT's crypto module expects the classes its global defines.
     // Compiling to bytecode declares modules in a context without NSH's
     // state, and runs none.
-    if name == "crypto" && !crate::state::state(ctx.as_raw().as_ptr()).is_null() {
-        init_crypto(ctx)?;
+    if name == "crypto" && !crate::state::state(cx.as_raw().as_ptr()).is_null() {
+        init_crypto(cx)?;
     }
     macro_rules! declare {
         ($ty:ty) => {
-            Module::declare_def::<$ty, _>(ctx.clone(), name)
+            Module::declare_def::<$ty, _>(cx.clone(), name)
         };
     }
     match name {
@@ -73,21 +73,21 @@ const LAZY: &[(&[&str], Init)] = &[
 /// over `%TypedArray%.prototype` members assignments throw once hardening
 /// has frozen that prototype, so it must exist before
 /// [`crate::sandbox::harden`].
-pub(crate) fn install<'js>(ctx: &Ctx<'js>) -> Result<()> {
-    init_buffer(ctx)?;
-    let globals = ctx.globals();
+pub(crate) fn install<'js>(cx: &Ctx<'js>) -> Result<()> {
+    init_buffer(cx)?;
+    let globals = cx.globals();
     for &(names, init) in LAZY {
         for &name in names {
             globals.prop(
                 name,
                 Accessor::new(
-                    move |ctx: Ctx<'js>| -> Result<Value<'js>> {
-                        init(&ctx)?;
-                        ctx.globals().get(name)
+                    move |cx: Ctx<'js>| -> Result<Value<'js>> {
+                        init(&cx)?;
+                        cx.globals().get(name)
                     },
-                    move |ctx: Ctx<'js>, value: Value<'js>| -> Result<()> {
-                        init(&ctx)?;
-                        ctx.globals().set(name, value)
+                    move |cx: Ctx<'js>, value: Value<'js>| -> Result<()> {
+                        init(&cx)?;
+                        cx.globals().set(name, value)
                     },
                 )
                 .configurable()
@@ -101,18 +101,18 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>) -> Result<()> {
 /// Removes the accessors of the group of `name`, so the installation's own
 /// assignments define plain properties; false when the group was installed
 /// already.
-pub(crate) fn take_lazy(ctx: &Ctx<'_>, name: &str) -> Result<bool> {
+pub(crate) fn take_lazy(cx: &Ctx<'_>, name: &str) -> Result<bool> {
     let index = LAZY
         .iter()
         .position(|(names, _)| names.contains(&name))
         .expect("a lazy global");
-    let installed = &crate::dom::shared(ctx.as_raw().as_ptr()).lazy_globals;
+    let installed = &crate::dom::shared(cx.as_raw().as_ptr()).lazy_globals;
     let bit = 1 << index;
     if installed.get() & bit != 0 {
         return Ok(false);
     }
     installed.set(installed.get() | bit);
-    let globals = ctx.globals();
+    let globals = cx.globals();
     for name in LAZY[index].0 {
         globals.remove(*name)?;
     }
@@ -122,21 +122,21 @@ pub(crate) fn take_lazy(ctx: &Ctx<'_>, name: &str) -> Result<bool> {
 /// `Buffer` and the LLRT state every standard module returning buffers
 /// needs. LLRT's initialization also defines its own `Blob`, `File`, `URL`
 /// and `URLSearchParams`; NSH's WHATWG globals stay the objects they were.
-fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
+fn init_buffer(cx: &Ctx<'_>) -> Result<()> {
     // The globals LLRT's initialization defines over NSH's. Their own
     // properties are kept as they are, not read: NSH's web globals are
     // accessors that make every web class on first read (~60 µs).
     let saved: Vec<_> = ["Blob", "File", "URL", "URLSearchParams"]
         .into_iter()
-        .map(|name| own_property(ctx, name))
+        .map(|name| own_property(cx, name))
         .collect::<Result<_>>()?;
-    quickjs_jit_stdlib::buffer::init(ctx)?;
-    bounds::guard_buffer(ctx)?;
+    quickjs_jit_stdlib::buffer::init(cx)?;
+    bounds::guard_buffer(cx)?;
     // LLRT URL helper classes are registered once; public constructors remain NSH's.
     #[cfg(not(target_arch = "wasm32"))]
-    quickjs_jit_stdlib::url::init(ctx)?;
+    quickjs_jit_stdlib::url::init(cx)?;
     for property in saved {
-        property.restore(ctx)?;
+        property.restore(cx)?;
     }
     Ok(())
 }
@@ -148,8 +148,8 @@ struct OwnProperty {
 }
 
 /// Global `name`'s own property, without calling its getter.
-fn own_property(ctx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
-    let raw = ctx.as_raw().as_ptr();
+fn own_property(cx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
+    let raw = cx.as_raw().as_ptr();
     let name = std::ffi::CString::new(name).expect("no NUL in a global's name");
     // SAFETY: a live context; the global and the descriptor's values are
     // owned here (freed by `restore`).
@@ -172,8 +172,8 @@ fn own_property(ctx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
 
 impl OwnProperty {
     /// Puts the property back as it was (deleting it when there was none).
-    fn restore(self, ctx: &Ctx<'_>) -> Result<()> {
-        let raw = ctx.as_raw().as_ptr();
+    fn restore(self, cx: &Ctx<'_>) -> Result<()> {
+        let raw = cx.as_raw().as_ptr();
         // SAFETY: a live context; the descriptor's values and the atom are
         // owned by `self` and freed here, after the definition took its own
         // references.
@@ -219,18 +219,18 @@ impl OwnProperty {
 }
 
 /// The global `process` (`standard/process.rs`).
-fn init_process(ctx: &Ctx<'_>) -> Result<()> {
-    if take_lazy(ctx, "process")? {
-        process::install(ctx)?;
+fn init_process(cx: &Ctx<'_>) -> Result<()> {
+    if take_lazy(cx, "process")? {
+        process::install(cx)?;
     }
     Ok(())
 }
 
 /// `crypto` and its classes.
-fn init_crypto(ctx: &Ctx<'_>) -> Result<()> {
-    if take_lazy(ctx, "crypto")? {
-        quickjs_jit_stdlib::crypto::init(ctx)?;
-        bounds::guard_crypto(ctx)?;
+fn init_crypto(cx: &Ctx<'_>) -> Result<()> {
+    if take_lazy(cx, "crypto")? {
+        quickjs_jit_stdlib::crypto::init(cx)?;
+        bounds::guard_crypto(cx)?;
     }
     Ok(())
 }

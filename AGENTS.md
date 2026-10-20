@@ -337,6 +337,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 
 ## Code conventions
 
+- Name context bindings and parameters `cx`.
+
 - Formatting: `cargo +nightly fmt --all`, configured in `.rustfmt.toml`.
 - Units and geometry are typed, as GPUI's are (`nsh_core::geometry`): a length is `Points` (GPUI's `Pixels`), `Rems`,
   a `Percentage` (a fraction, 0.5 is 50%) or a style length (`AbsoluteLength`, `DefiniteLength`, `Length`), an angle is

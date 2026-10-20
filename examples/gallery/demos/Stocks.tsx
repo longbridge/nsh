@@ -174,7 +174,7 @@ function Sparkline(props: { stock: Stock }) {
     <Canvas
       pointerEvents="none"
       style={{ width: SPARK_W + RING * 2, height: SPARK_H + RING * 2, margin: -RING }}
-      draw={(ctx, { width, height }) => {
+      draw={(cx, { width, height }) => {
         const minutes = props.stock.minutes();
         const q = props.stock.quote();
         // Each point: the mean close of the minutes before it; the newest
@@ -201,72 +201,72 @@ function Sparkline(props: { stock: Stock }) {
         const tone = toneOf(q.last - q.prevClose);
         // A smooth curve: quadratic segments through the midpoints.
         const curve = () => {
-          ctx.moveTo(X(0), Y(ys[0]));
+          cx.moveTo(X(0), Y(ys[0]));
           for (let k = 1; k < n - 1; k++) {
-            ctx.quadraticCurveTo(X(k), Y(ys[k]), (X(k) + X(k + 1)) / 2, (Y(ys[k]) + Y(ys[k + 1])) / 2);
+            cx.quadraticCurveTo(X(k), Y(ys[k]), (X(k) + X(k + 1)) / 2, (Y(ys[k]) + Y(ys[k + 1])) / 2);
           }
-          ctx.lineTo(X(n - 1), Y(ys[n - 1]));
+          cx.lineTo(X(n - 1), Y(ys[n - 1]));
         };
 
         // The fill: down from the line's top, strictly under the curve...
         let top = bottom;
         for (const v of ys) top = Math.min(top, Y(v));
-        const fill = ctx.createLinearGradient(0, top, 0, bottom);
+        const fill = cx.createLinearGradient(0, top, 0, bottom);
         fill.addColorStop(0, alpha(tone, 0.22));
         fill.addColorStop(1, alpha(tone, 0));
-        ctx.beginPath();
+        cx.beginPath();
         curve();
-        ctx.lineTo(X(n - 1), bottom);
-        ctx.lineTo(X(0), bottom);
-        ctx.closePath();
-        ctx.fillStyle = fill;
-        ctx.fill();
+        cx.lineTo(X(n - 1), bottom);
+        cx.lineTo(X(0), bottom);
+        cx.closePath();
+        cx.fillStyle = fill;
+        cx.fill();
         // ...and faded in over the first fifth (erased, not overdrawn).
         const fadeTo = left + (right - left) * 0.2;
-        const fade = ctx.createLinearGradient(left, 0, fadeTo, 0);
+        const fade = cx.createLinearGradient(left, 0, fadeTo, 0);
         fade.addColorStop(0, "rgba(0,0,0,1)");
         fade.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.fillStyle = fade;
-        ctx.fillRect(0, 0, fadeTo, height);
-        ctx.globalCompositeOperation = "source-over";
+        cx.globalCompositeOperation = "destination-out";
+        cx.fillStyle = fade;
+        cx.fillRect(0, 0, fadeTo, height);
+        cx.globalCompositeOperation = "source-over";
 
         // The previous close, dotted.
-        ctx.strokeStyle = alpha(colors.muted, 0.4);
-        ctx.lineWidth = 1;
-        ctx.setLineDash([1, 3]);
-        ctx.beginPath();
-        ctx.moveTo(left, Y(q.prevClose));
-        ctx.lineTo(right, Y(q.prevClose));
-        ctx.stroke();
-        ctx.setLineDash([]);
+        cx.strokeStyle = alpha(colors.muted, 0.4);
+        cx.lineWidth = 1;
+        cx.setLineDash([1, 3]);
+        cx.beginPath();
+        cx.moveTo(left, Y(q.prevClose));
+        cx.lineTo(right, Y(q.prevClose));
+        cx.stroke();
+        cx.setLineDash([]);
 
-        ctx.beginPath();
+        cx.beginPath();
         curve();
-        ctx.strokeStyle = tone;
-        ctx.lineWidth = 1.75;
-        ctx.lineJoin = "round";
-        ctx.lineCap = "round";
-        ctx.stroke();
+        cx.strokeStyle = tone;
+        cx.lineWidth = 1.75;
+        cx.lineJoin = "round";
+        cx.lineCap = "round";
+        cx.stroke();
 
         // The newest point and its pulse: a soft halo and a ring that grow
         // and fade natively (the canvas has room for them on every side).
         const x = X(n - 1), y = Y(ys[n - 1]);
-        ctx.fillStyle = tone;
-        ctx.strokeStyle = tone;
-        ctx.globalAlpha = haloAlpha;
-        ctx.beginPath();
-        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = strokeAlpha;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fill();
+        cx.fillStyle = tone;
+        cx.strokeStyle = tone;
+        cx.globalAlpha = haloAlpha;
+        cx.beginPath();
+        cx.arc(x, y, ringRadius, 0, Math.PI * 2);
+        cx.fill();
+        cx.globalAlpha = strokeAlpha;
+        cx.lineWidth = 1.5;
+        cx.beginPath();
+        cx.arc(x, y, ringRadius, 0, Math.PI * 2);
+        cx.stroke();
+        cx.globalAlpha = 1;
+        cx.beginPath();
+        cx.arc(x, y, 3, 0, Math.PI * 2);
+        cx.fill();
       }}
     />
   );
