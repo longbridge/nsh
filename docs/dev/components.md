@@ -242,7 +242,7 @@ reasons: `reactive-components.md`.
   | TS | Rust component |
   |---|---|
   | the component's body (runs once) | the function's body |
-  | `signal(v)`, `memo(f)`, `effect(f)`, `untracked`, `batch` | `signal(v)` (`PartialEq`: equal writes are skipped; `signal_with(v, SignalEquals::Never)` without), `computed(f)`, `effect(f)`, `untracked(f)`, `batch(f)`; `stored(v)` for state nothing displays; all `Copy` handles owned by the current owner |
+  | `signal(v)`, `memo(f)`, `effect(f)`, `untracked`, `batch` | `signal(v)` (`PartialEq`: equal writes are skipped; `signal_with(v, SignalEquals::Never)` without), `computed(f)`, `effect(f)`, `untracked(f)`, `batch(f)`; `stored(v)` for state nothing displays (`.get()`, `.with(\|v\| ..)`, `.replace(v)`, none subscribing); all `Copy` handles owned by the current owner |
   | event handlers | closures (`move \|e: &E\| ..`) that write signals; `cx.emit(..)` |
   | `setTimeout` / `setInterval`, `clear*` | `set_timeout(d, f)` / `set_interval(d, f)` return a `Spawned`; `.cancel()` clears it; it ends with the component either way |
   | async work | `spawn(async move { timer(d).await; value.set(..) })` on the engine thread, tokio inside; `background(fut)` / `blocking(f)` for `Send` work on the runtime's threads (not in WebAssembly) |

@@ -252,7 +252,7 @@ fn Ball() -> impl IntoElement {
             })
             .on_responder_move(move |e: &ResponderEvent| {
                 let g = e.gesture;
-                let (x, y) = start.with(|s| *s);
+                let (x, y) = start.get();
                 pos.set((x + g.delta.x.0, y + g.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {

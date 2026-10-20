@@ -369,7 +369,7 @@ fn LayoutAnimations() -> impl IntoElement {
                     ui::Button::new(
                         "Add",
                         animate(|items, next| {
-                            items.insert(0, next.with(|n| *n));
+                            items.insert(0, next.get());
                             next.with(|n| *n += 1);
                         }),
                     )

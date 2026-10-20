@@ -48,7 +48,7 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
     let placed = stored(false);
     let from_right = props.from_right;
     let place = move |share: f32| {
-        let width = width.with(|w| *w);
+        let width = width.get();
         if width <= 0.0 {
             return;
         }

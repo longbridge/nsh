@@ -473,6 +473,15 @@ impl<T: 'static> Stored<T> {
     }
 }
 
+impl<T: Clone + 'static> Stored<T> {
+    /// A copy of the value (reading it subscribes nothing, unlike
+    /// [`Signal::get`]).
+    #[track_caller]
+    pub fn get(&self) -> T {
+        self.with(|v| v.clone())
+    }
+}
+
 /// A value of the current owner that is not reactive: reading it subscribes
 /// nothing, changing it notifies nothing.
 pub fn stored<T: 'static>(value: T) -> Stored<T> {

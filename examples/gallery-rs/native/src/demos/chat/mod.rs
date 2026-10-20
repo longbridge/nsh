@@ -1478,7 +1478,7 @@ impl ChatState {
             dragging.replace(true);
         })
         .on_scroll(move |e: &ScrollEvent| {
-            if dragging.with(|d| *d) {
+            if dragging.get() {
                 following.set(e.offset.y + e.size.height >= e.content_size.height - px(40.0));
             }
         })

@@ -514,7 +514,7 @@ fn DayRange(props: StockProps) -> impl IntoElement {
     let width = stored(0.0_f32);
     let placed = stored(false);
     let place = move |q: Quote| {
-        let width = width.with(|w| *w);
+        let width = width.get();
         if width <= 0.0 {
             return;
         }
