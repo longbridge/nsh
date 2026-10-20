@@ -108,7 +108,7 @@ enum Command {
         #[arg(default_value = ".")]
         entry: PathBuf,
         /// Output directory.
-        #[arg(short, long, default_value = "out")]
+        #[arg(short, long, default_value = ".nsh/out")]
         out: PathBuf,
         /// Minify and strip debug info.
         #[arg(long)]
@@ -282,7 +282,7 @@ enum Command {
         /// Its certificate (`nsh certify`).
         #[arg(long)]
         cert: PathBuf,
-        /// The package to write (default: `out/<id>-<build>.nshpkg`).
+        /// The package to write (default: `.nsh/out/<id>-<build>.nshpkg`).
         #[arg(short, long)]
         out: Option<PathBuf>,
         /// App id, e.g. `com.example.app`.
@@ -365,7 +365,7 @@ struct PackageArgs {
     #[arg(long, value_enum)]
     target: package::PackageTarget,
     /// Output directory.
-    #[arg(short, long, default_value = "out")]
+    #[arg(short, long, default_value = ".nsh/out")]
     out: PathBuf,
     /// Display name.
     #[arg(long)]
@@ -727,6 +727,22 @@ mod command_tests {
     use clap::Parser as _;
 
     use super::{Cli, Command, run::Target};
+
+    #[test]
+    fn generated_outputs_default_to_the_project_cache() {
+        let cli = Cli::try_parse_from(["nsh", "build"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new(".nsh/out"))
+        );
+        let cli = Cli::try_parse_from(["nsh", "package", "--target", "web"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Package(args) if args.out == std::path::Path::new(".nsh/out"))
+        );
+        let cli = Cli::try_parse_from(["nsh", "build", "--out", "custom"]).unwrap();
+        assert!(
+            matches!(cli.command, Command::Build { out, .. } if out == std::path::Path::new("custom"))
+        );
+    }
 
     #[test]
     fn dev_and_run_default_to_this_systems_desktop_host() {

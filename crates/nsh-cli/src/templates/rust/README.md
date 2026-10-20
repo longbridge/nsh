@@ -42,3 +42,6 @@ and a `tsconfig.json` (copy one from `nsh init --template ts`), then run it with
 runs on QuickJS, while `nsh run` alone keeps running the Rust root. The first `nsh build App.tsx` writes the TypeScript
 declarations of `__SPECIFIER__` into `.nsh/types`. Register more with `registry.register::<…>()` (components),
 `registry.module::<…>()` and `registry.class::<…>()`.
+
+Generated files stay in `.nsh/`: build caches in `.nsh/target/`, runner sources in `.nsh/rust/`,
+and default packages in `.nsh/out/`. `.cargo/config.toml` makes direct Cargo commands share the cache.
