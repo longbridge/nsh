@@ -344,6 +344,16 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 6. **Changes to hot paths come with before / after `nsh trace` timings and item counts**, compared with the baselines
    in `docs/dev/performance.md` (update them when they move).
 
+## CI
+
+Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
+(`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
+CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
+restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
+release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
+`files` in `paths.py`.
+
 ## Verification after changes
 
 1. `cargo test --workspace`, plus fmt and clippy as listed above (including the Catalyst target, the macOS crates, `cargo xtask clippy-android`, on Linux the Linux crates, on Windows the Windows crates; for changes in `crates/gpui` or to what it uses, its own tests and clippy there).

@@ -28,6 +28,14 @@ concurrency:
   group: examples-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # CI builds each crate once: no incremental state and no debug info
+  # (faster builds, smaller caches; panics still name their file and line).
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # The toolchain file's iOS and Android targets are only the release's.
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -44,16 +52,11 @@ jobs:
         with:
           components: clippy
 
+      # Dependencies only: main's runs save it, pull requests restore it.
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-examples-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-examples-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Find the Rust examples
         id: crates
