@@ -179,7 +179,9 @@ mod tests {
 
     #[test]
     fn date_and_performance_read_a_manual_clock() {
-        let clock = Clock::manual(1_767_225_600_000.0);
+        let clock = Clock::manual(
+            std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(1_767_225_600_000),
+        );
         let _guard = clock.enter();
         let host = Host::new().unwrap();
         let check = |code: &str| {

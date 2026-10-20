@@ -17,7 +17,7 @@ pub use std::time::Instant;
 use std::{
     cell::RefCell,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -86,13 +86,13 @@ impl Clock {
         Clock(None)
     }
 
-    /// A manual clock standing at the wall time `unix_ms` (milliseconds
-    /// since the Unix epoch), which moves only when told.
-    pub fn manual(unix_ms: f64) -> Clock {
+    /// A manual clock standing at the wall time `start`, which moves only
+    /// when told.
+    pub fn manual(start: SystemTime) -> Clock {
         Clock(Some(Arc::new(Mutex::new(Manual {
             origin: Instant::now(),
             elapsed: Duration::ZERO,
-            unix_origin: unix_ms,
+            unix_origin: epoch_ms(start),
             alarms: Vec::new(),
         }))))
     }
@@ -124,11 +124,11 @@ impl Clock {
         }
     }
 
-    /// Sets a manual clock's wall time (`Date.now()`) to `unix_ms`, without
+    /// Sets a manual clock's wall time (`Date.now()`) to `at`, without
     /// moving its instants: no timer comes due. Nothing on the system's.
-    pub fn set_unix_ms(&self, unix_ms: f64) {
+    pub fn set_system_time(&self, at: SystemTime) {
         if let Some(mut m) = self.manual_state() {
-            m.unix_origin = unix_ms - m.elapsed.as_secs_f64() * 1000.0;
+            m.unix_origin = epoch_ms(at) - m.elapsed.as_secs_f64() * 1000.0;
         }
     }
 
@@ -195,6 +195,14 @@ impl Drop for ClockGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
         CURRENT.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// `at` in milliseconds since the Unix epoch (negative before it).
+fn epoch_ms(at: SystemTime) -> f64 {
+    match at.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(since) => since.as_secs_f64() * 1000.0,
+        Err(before) => -before.duration().as_secs_f64() * 1000.0,
     }
 }
 
@@ -308,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_manual_clock_moves_only_when_told_and_runs_its_alarms_in_order() {
-        let clock = Clock::manual(1_000.0);
+        let clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_secs(1));
         let start = clock.now();
         std::thread::sleep(Duration::from_millis(5));
         assert_eq!(clock.now(), start);
@@ -326,7 +334,7 @@ mod tests {
         // Never back.
         clock.advance_to(start);
         assert_eq!(clock.now(), start + Duration::from_millis(30));
-        clock.set_unix_ms(5_000.0);
+        clock.set_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(5));
         assert_eq!(
             (clock.unix_ms(), clock.now()),
             (5_000.0, start + Duration::from_millis(30))
@@ -336,7 +344,7 @@ mod tests {
     #[test]
     fn a_thread_reads_its_engine_s_clock_while_it_is_entered() {
         assert!(!manual());
-        let clock = Clock::manual(42.0);
+        let clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_millis(42));
         {
             let _guard = clock.enter();
             assert!(manual());

@@ -30,7 +30,9 @@ impl nsh_engine::MountSink for Sink {
 }
 
 /// The time the clock starts at: 2026-01-01T00:00:00Z.
-const START_MS: f64 = 1_767_225_600_000.0;
+fn start_time() -> std::time::SystemTime {
+    std::time::SystemTime::UNIX_EPOCH + Duration::from_millis(1_767_225_600_000)
+}
 
 const APP: &str = r#"import { mount, signal, Text } from "nsh";
 
@@ -119,7 +121,7 @@ fn advance(engine: &Engine, ms: u64) {
 
 #[test]
 fn a_manual_clock_moves_only_when_told_and_runs_what_comes_due_in_order() {
-    let (engine, rx) = start(Clock::manual(START_MS));
+    let (engine, rx) = start(Clock::manual(start_time()));
     let mut last = String::new();
     advance(&engine, 0);
     assert_eq!(
@@ -160,7 +162,7 @@ fn the_system_clock_ignores_moves() {
 #[test]
 fn rust_tasks_wait_on_the_manual_clock_too() {
     let config = EngineConfig {
-        clock: Clock::manual(START_MS),
+        clock: Clock::manual(start_time()),
         ..EngineConfig::new(App::Rust(Root::new::<Waiting>(|| ())))
     };
     let (tx, rx) = crossbeam_channel::unbounded();
