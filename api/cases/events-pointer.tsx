@@ -17,8 +17,8 @@ function App() {
       <View
         testID="press"
         style={{ height: 40 }}
-        onPressIn={() => press.set("in")}
-        onPressOut={() => press.set(press() + " out")}
+        onPressDown={() => press.set("in")}
+        onPressUp={() => press.set(press() + " out")}
       />
       <Text>Press: {press()}</Text>
       <View style={{ paddingLeft: 20 }}>

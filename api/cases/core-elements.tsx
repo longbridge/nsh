@@ -29,7 +29,7 @@ function missingModule(): string {
 }
 
 function App() {
-  const mobile = nativeModule<Record<string, unknown>>("nsh/ui/mobile");
+  const base = nativeModule<Record<string, unknown>>("nsh/base");
   const pan = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onPanResponderMove: () => {},
@@ -48,8 +48,8 @@ function App() {
       <Map testID="map" zoom={3} style={{ width: 100, height: 50 }} />
       <View testID="pan" {...pan.panHandlers} style={{ width: 50, height: 50 }} />
       <Text>Missing module: {missingModule()}</Text>
-      <Text>Mobile module: {typeof mobile === "object" && mobile !== null ? "object" : typeof mobile}</Text>
-      <Text>Same object: {String(nativeModule("nsh/ui/mobile") === mobile)}</Text>
+      <Text>Base module: {typeof base === "object" && base !== null ? "object" : typeof base}</Text>
+      <Text>Same object: {String(nativeModule("nsh/base") === base)}</Text>
       <Text>Pan handlers: {Object.keys(pan.panHandlers).length > 0 ? "some" : "none"}</Text>
       <Text>Pan start: {String(typeof pan.panHandlers.onStartShouldSetResponder === "function")}</Text>
     </View>

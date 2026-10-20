@@ -1,26 +1,63 @@
 # What a user does and sees (compat/apps.rs).
-expect Resource: empty state unresolved loading false error undefined
-expect Initialized: initial state refreshing
-tap id:start
-expect Resource: empty state pending loading true error undefined
-expect Load: 1 refetch false
+# Resources without a source: a value at once, an initial value while the
+# first load runs, a fetcher that throws.
+expect Now: ready 42
+expect Kept: refreshing first loading
+expect Thrown: errored Error: thrown
+expect Child: pending
+expect Child aborts: 0
+# The first load runs, then ends.
+expect State: pending
+expect Value: none
+expect Error: none
+expect Loading: yes
+expect Loads: 1
+expect Aborts: 0
 tap id:resolve
-expect Resource: loaded state ready loading false error undefined
-tap id:refresh
-expect Resource: loaded state refreshing loading true error undefined
-expect Load: 1 refetch true
-tap id:reject
-expect Resource: loaded state errored loading false error failed
-tap id:mutate
-expect Resource: optimistic state ready loading false error undefined
-tap id:refresh
-expect Resource: optimistic state refreshing loading true error undefined
+expect State: ready
+expect Value: user 1
+expect Loading: no
+# A new source loads again, keeping the value; another one supersedes
+# that load, which is aborted.
 tap id:next
-expect Load: 2 refetch false
-expect Aborted: true
-tap id:stale
-expect Resource: optimistic state refreshing loading true error undefined
-absent Resource: stale state ready loading false error undefined
+expect State: refreshing
+expect Loading: yes
+expect Loads: 2
+expect Value: user 1
+tap id:next
+expect Loads: 3
+expect Aborts: 1
+expect State: refreshing
+# The load fails: the value stays.
+tap id:reject
+expect State: errored
+expect Error: Error: no user 3
+expect Value: user 1
+expect Loading: no
+# A value set here clears the error.
+tap id:mutate
+expect State: ready
+expect Value: local
+expect Error: none
+# A refetch loads the same source again, and the fetcher knows.
+tap id:refetch
+expect State: refreshing
+expect Loads: 4
+expect Value: local
 tap id:resolve
-expect Resource: loaded state ready loading false error undefined
+expect State: ready
+expect Value: user 3 again
+# An unset source loads nothing.
+tap id:clear
+absent Loads: 5
+absent Loading: yes
+expect Loads: 4
+expect Aborts: 1
+expect State: ready
+expect Value: user 3 again
+# A resource whose component goes away aborts its load.
+tap id:hide
+expect Child gone
+absent Child: pending
+expect Child aborts: 1
 covers [nsh] resource

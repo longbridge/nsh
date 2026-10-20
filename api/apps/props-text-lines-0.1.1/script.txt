@@ -1,0 +1,17 @@
+# What a user does and sees (compat/apps.rs).
+prop id:two numberOfLines 2
+prop id:all numberOfLines 0
+frame id:two 0 64 100 24
+frame id:all 0 88 100 48
+prop id:head ellipsizeMode head
+prop id:plain ellipsizeMode tail
+prop id:selectable selectable true
+noprop id:plain selectable
+# Shrunk to fit: at most to minimumFontScale; what fits keeps its size.
+style id:fit fontSize 20
+style id:fit-min fontSize 10
+covers [props] numberOfLines
+covers [props] ellipsizeMode
+covers [props] selectable
+covers [props] adjustsFontSizeToFit
+covers [props] minimumFontScale

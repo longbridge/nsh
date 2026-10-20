@@ -1,0 +1,8 @@
+{
+  "name": "Base status bar",
+  "id": "com.example.base-status-bar",
+  "statusBar": {
+    "foreground": "dark",
+    "hidden": true
+  }
+}

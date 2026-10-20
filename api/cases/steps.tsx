@@ -11,7 +11,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <View
         testID="card"
-        accessibilityRole="button"
+        role="button"
         onLongPress={() => console.log("steps: long press")}
         style={{
           height: 40,

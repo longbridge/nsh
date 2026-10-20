@@ -1,0 +1,34 @@
+# What a user does and sees (compat/apps.rs).
+# `style`: an object, and a nested list merged left to right.
+frame id:styled 0 64 390 20
+style id:styled backgroundColor #3366ffff
+style id:styled opacity 0.5
+frame id:list 0 84 390 20
+style id:list backgroundColor #00ff00ff
+# `class`: Tailwind's classes, under `style`.
+frame id:classes 0 104 390 20
+style id:classes backgroundColor #fb2c36ff
+style id:classes borderRadius 8
+style id:over backgroundColor #0000ffff
+# `classList`: the classes whose value is truthy, as it changes.
+expect Busy
+style id:toggled opacity 0.5
+nostyle id:toggled backgroundColor
+tap id:toggle
+expect Idle
+style id:toggled backgroundColor #2b7fffff
+nostyle id:toggled opacity
+# `ref`: the function got the view's node.
+expect Ref: 120x12
+# `nativeID`: the input that names a mounted accessory view gets it.
+expect Accessory bar
+prop id:field ios.inputAccessoryViewID bar
+prop id:field inputAccessoryView true
+prop id:other inputAccessoryViewID missing
+noprop id:other inputAccessoryView
+covers [props] style
+covers [props] class
+covers [props] classList
+covers [props] ref
+covers [props] nativeID
+covers [props] ios.inputAccessoryViewID

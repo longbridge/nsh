@@ -9,7 +9,7 @@ frame id:web 0 338 180 60
 frame id:map 0 398 100 50
 frame id:pan 0 448 50 50
 expect Missing module: ReferenceError
-expect Mobile module: object
+expect Base module: object
 expect Same object: true
 expect Pan handlers: some
 expect Pan start: true

@@ -81,7 +81,6 @@ BackHandler.exitApp function
 Toast object
 Toast.show function
 isAvailable boolean
-setStatusBarBackgroundColor function
 
 [nsh/animated]
 Animated object
@@ -170,6 +169,22 @@ LayoutAnimation.easeInEaseOut function
 LayoutAnimation.linear function
 LayoutAnimation.spring function
 createAnimatedValue function
+
+[nsh/base]
+AlertDialog object
+AlertDialog.show function
+Button function
+Dialog function
+Keyboard object
+Keyboard.dismiss function
+KeyboardAvoidingView function
+NavPage function
+NavStack function
+SafeAreaView function
+createNavStack function
+keyboardFrame function
+safeArea function
+safeAreaInsets function
 
 [nsh/canvas]
 Canvas function
@@ -334,34 +349,6 @@ Storage.getAllKeys function
 Storage.getItem function
 Storage.removeItem function
 Storage.setItem function
-
-[nsh/ui/mobile]
-ActionSheet object
-ActionSheet.show function
-Alert object
-Alert.alert function
-Button function
-Card function
-Group function
-Keyboard object
-Keyboard.dismiss function
-KeyboardAvoidingView function
-ListView function
-Modal function
-SafeAreaView function
-Screen function
-SelectList function
-Sheet function
-Stack function
-StatusBar function
-StatusBar.setBarStyle function
-StatusBar.setHidden function
-Stepper function
-TextField function
-createNavigator function
-keyboard function
-safeArea function
-useSafeAreaInsets function
 
 [nsh/video]
 Video function

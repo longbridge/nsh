@@ -4,7 +4,7 @@
 // Kept with `cargo xtask api --keep api/cases/mod-android.tsx`; its script
 // checks each.
 import { Text, View, mount, signal } from "nsh";
-import { BackHandler, Toast, isAvailable, setStatusBarBackgroundColor } from "nsh/android";
+import { BackHandler, Toast, isAvailable } from "nsh/android";
 
 function App() {
   const calls = signal("not called");
@@ -20,7 +20,6 @@ function App() {
           listener.remove();
           Toast.show("Saved");
           Toast.show("Saved for long", "long");
-          setStatusBarBackgroundColor("#336699", true);
           calls.set(`done, remove ${typeof listener.remove}`);
         }}
       >

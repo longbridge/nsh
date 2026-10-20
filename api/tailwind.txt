@@ -4108,6 +4108,10 @@ group-hover/item:bg-accent - | group/item hovered: view.background_color=Color(#
 group-hover/item:p-4 - | group/item hovered: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
 group-hover:bg-accent - | group hovered: view.background_color=Color(#f5f5f5ff)
 group-hover:p-4 - | group hovered: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
+group-selected/item:bg-accent -
+group-selected/item:p-4 -
+group-selected:bg-accent -
+group-selected:p-4 -
 group/ - | groups: [""]
 group/item - | groups: ["item"]
 grow layout.flex_grow=1.0
@@ -8425,6 +8429,10 @@ select-all props.selectable=Some(true)
 select-auto -
 select-none props.selectable=Some(false)
 select-text props.selectable=Some(true)
+selected:bg-accent -
+selected:p-4 -
+selection:bg-accent -
+selection:p-4 -
 self-auto -
 self-baseline layout.align_self=Some(AlignItems { keyword: Baseline, safety: Default })
 self-center layout.align_self=Some(AlignItems { keyword: Center, safety: Default })

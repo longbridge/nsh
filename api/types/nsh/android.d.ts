@@ -11,9 +11,6 @@ export interface BackListeners {
 /** How long a toast shows. */
 export type ToastDuration = "short" | "long";
 
-/** The status bar's color (before edge-to-edge, API 35), under the rendered `<StatusBar android={{ backgroundColor }}>`s. */
-export declare function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): void;
-
 /** The back button, after modals and stacks had their turn. */
 export interface BackHandlerModule {
   /** Leaves the app. */

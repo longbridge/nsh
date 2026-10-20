@@ -1,0 +1,5 @@
+# What a user does and sees (compat/apps.rs).
+platform macos
+prop id:page source https://example.com/
+prop id:page desktop.allowsBackForwardNavigationGestures true
+covers [props] desktop.allowsBackForwardNavigationGestures

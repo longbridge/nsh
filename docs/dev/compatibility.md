@@ -73,12 +73,18 @@ api/
   cases/<case>.tsx      the sources of small fixtures: the tests of single APIs
   uncovered.txt         the API no fixture's script checks yet; it only shrinks
   closed.txt            the entries closed for security (rule 7), each with its reason
+  in-force.txt          the start marker: the record holds from the commit that added it on
 ```
 
 The record and the suite only grow, as the web platform does: a name that shipped is kept, whatever release shipped
 it. There are no copies per version. Git's history is the baseline: every change reaches `main` through a pull
 request, each pull request is held to `api/` as of its merge base, so by induction everything that ever reached
 `main`, every release included, is still offered and still passes its tests. Releases need nothing from `api/`.
+
+The record holds from the commit that added `api/in-force.txt` on. `nothing_merged_is_removed` and
+`uncovered_only_shrinks` read the marker at the base revision, not in the checkout: a base without it (a `main` from
+before the record was in force) holds nothing and both tests pass with a note, and a base with it holds every later
+change for good, so a pull request that deletes the marker is held all the same.
 
 The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pull request (the Core workflow):
 
@@ -95,12 +101,16 @@ The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pu
   script says. This is what catches what names cannot: `nsh:rt`'s calling conventions, props and styles that still
   parse, behavior.
 - `coverage::every_api_is_tested`: every export, global NSH provides (the language's own builtins aside), host prop,
-  event and style key is checked by a fixture's script, or listed in `uncovered.txt`; the list holds nothing a script
-  checks. A script claims what it checks with `covers <item>` steps (`[<module>] <name>`, `[globals] <name>`,
-  `[props] <name>`, `[events] <name>`, `[styles] <name>`; platform props as `ios.<name>`, `android.<name>`, ...).
-  Each claim is verified: the bundle uses the item, and for props, events and style keys, renaming the item in the
-  bundle makes a check step of the script fail. For exports and globals only the use can be verified: the claim is
-  the author's word that a step checks the result.
+  component prop, event and style key is checked by a fixture's script, or listed in `uncovered.txt`; the list holds
+  nothing a script checks. A script claims what it checks with `covers <item>` steps (`[<module>] <name>`,
+  `[globals] <name>`, `[props] <name>`, `[events] <name>`, `[styles] <name>`; platform props as `ios.<name>`,
+  `android.<name>`, ...). A component's own props and events, the members of its module's `<Component>Props` that are
+  not host props (which it inherits or passes on under their names), are `[props] <Component>.<name>` and
+  `[events] <Component>.<name>` (`[props] List.header`, `[events] Dialog.onOpenChange`); a member is an event when it
+  is an `on…` function. Each claim is verified: the bundle uses the item (for a component's, the component and the
+  name), and for props, events and style keys, renaming the item in the bundle makes a check step of the script fail
+  (or, for a prop the component requires, makes the app fail). For exports and globals only the use can be verified:
+  the claim is the author's word that a step checks the result.
 - `coverage::uncovered_only_shrinks`: `uncovered.txt` gains no entry over the merge base, so a new API lands with its
   test.
 - `declarations_are_understood`: every declaration is one `compare.rs` can read, so none escapes the comparison.
@@ -116,13 +126,14 @@ request records it with `cargo xtask api` and says so.
 ### Changing the API
 
 1. Make the change additive (the rules above).
-2. Test it: write `api/cases/<case>.tsx`, a small app that uses the new API and shows its result, keep its build with
-   `cargo xtask api --keep api/cases/<case>.tsx`, and write steps in `api/apps/<case>-<version>/script.txt` that check
-   the result, with a `covers <item>` step for each part. `--keep` records the surface before adding the fixture;
-   coverage is checked after its script is complete, by the following plain `cargo xtask api` run.
-3. Run `cargo xtask api` and commit `api/` with the change: the record's diff is the review of the API change, next
-   to the `## Public API` section of the pull request, and `uncovered.txt` loses what the scripts now check. Covering
-   an older entry of `uncovered.txt` is welcome the same way.
+2. Test it: write `api/cases/<case>.tsx`, a small app that uses the new API and shows its result, and keep its build
+   with `cargo xtask api --keep api/cases/<case>.tsx` (it only builds the fixture, `api/apps/<case>-<version>/`, with
+   a stub script, and records nothing yet). Write steps in its `script.txt` that check the result, with a
+   `covers <item>` step for each part, and run them (`compat::apps_still_run`).
+3. Then run `cargo xtask api` and commit `api/` with the change: it records the surface and checks that every part of
+   the API is covered, which the new fixture's `covers` steps now do. The record's diff is the review of the API
+   change, next to the `## Public API` section of the pull request, and `uncovered.txt` loses what the scripts now
+   check. Covering an older entry of `uncovered.txt` is welcome the same way.
 4. `cargo test -p nsh-engine --test engine compat::` must pass with the fixtures' bundles, assets and existing steps
    unchanged and nothing added to `api/closed.txt` (rule 7 aside).
 
@@ -137,25 +148,31 @@ cargo xtask api --keep <app>...
 ```
 
 `<app>` is an example's name, or the path of an app directory or of a single entry module (`api/cases/<case>.tsx`).
-It is built with this checkout into `api/apps/<name>-<version>/`, with the newest script of that app or a stub. Check
-that the scripts pass (`compat::apps_still_run`), extend them to what the change added, and commit the fixtures with
-the change. Existing steps stay.
+It is built with this checkout into `api/apps/<name>-<version>/`, with the newest script of that app or a stub;
+`--keep` records nothing. Check that the scripts pass (`compat::apps_still_run`), extend them to what the change added,
+run `cargo xtask api`, and commit the fixtures with the change. Existing steps stay. An app whose `nsh.json` declares
+`capabilities` (a case directory, `api/cases/<case>/`) keeps the `capabilities.json` and `app.json` its build wrote,
+and runs with them and a new, empty data directory, so a script checks what a grant allows and what stays refused
+(`api/cases/mod-standard-files/`).
 
 ### Scripts
 
 `script.txt` is one step per line (`compat/apps.rs` has the full list): `expect <text>` waits for a text on screen,
 `absent <text>` checks one is gone, `tap id:<testID>` / `label:<label>` / `text:<text>` presses a view (or its nearest
 pressable ancestor), `wait <ms>` runs timers, and `viewport <w> <h>` and `platform <os>` (first) size the screen and
-pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}` props apply. What a view looks
+pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}` props apply, and `fontscale <scale>` sets the user's text size. What a view looks
 like is checked as the platform receives it: `frame <selector> <x> <y> <width> <height>` (its layout, in points
 relative to its parent), `prop` / `noprop` (a host prop), `style` / `nostyle` (a paint or text style key), `listens`
-(an event the platform reports); `log <text>` checks a `console` line, and `covers <item>` is a claim, not a step.
+(an event the platform reports), `statusbar <key>=<value>...` (the status bar the platform was last told to show:
+`foreground`, `hidden`, `animated`); `log <text>` checks a `console` line, and `covers <item>` is a claim, not a step.
 Other steps stand in for the platform's input: `event <selector> <onEvent> [<key>=<value>...]` reports an event with
 its payload keys as the handler reads them (`event id:video onProgress currentTime=3.25 duration=12.5`),
 `touch start <selector> <x> <y>` / `touch move|end|cancel [<x> <y>]` move one finger through the touch handlers and
-the responder system, `type <selector> <text>` types into an input (`onKeyPress`, `onChangeText` and
-`onSelectionChange` per character), `key <selector> <key>` presses a key, and `scroll <selector> <x> <y>` scrolls a
-scroll view (`onScroll`).
+the responder system, `type <selector> <text>` types into an input (`onKeyPress`, `onChange` and
+`onSelectionChange` per character), `key <selector> <key>` presses a key, `scroll <selector> <x> <y>` scrolls a
+scroll view (`onScroll`), `keyboard <height> <duration>` shows the software keyboard (at height 0, hides it), and
+`state <selector> pressed|hovered|focused|none...` reports a view's interaction states as a platform does
+(`activeStyle`, `hover:`, ...), failing when the core did not ask the platform to track them.
 Props and style keys are named and written as apps write them (`style id:card backgroundColor #3366ffff`,
 `prop id:field ios.keyboardAppearance dark`), in the stable text forms `compat/values.rs` defines, never from the
 core's types, so the scripts stay valid while those change. A script should open every screen of its app and check

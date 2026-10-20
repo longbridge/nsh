@@ -1,0 +1,45 @@
+# What a user does and sees (compat/apps.rs): what the platform receives
+# for each input.
+prop id:keys keyboardType email-address
+prop id:plain keyboardType default
+prop id:keys returnKeyType send
+prop id:plain returnKeyType default
+prop id:keys autoCapitalize none
+prop id:plain autoCapitalize sentences
+prop id:keys autoCorrect false
+prop id:plain autoCorrect true
+prop id:complete autoComplete one-time-code
+prop id:content-type ios.textContentType email
+prop id:plain autoComplete default
+prop id:short maxLength 4
+noprop id:plain maxLength
+prop id:submit submitBehavior submit
+noprop id:plain submitBehavior
+prop id:focused autoFocus true
+prop id:plain autoFocus false
+prop id:focused caretHidden true
+prop id:plain caretHidden false
+# `defaultValue`: the initial text.
+prop id:initial value Hello
+noprop id:plain value
+expect Name: Ada
+# `value`: what the app sets, also after an edit.
+prop id:controlled value Ada
+type id:controlled x
+expect Name: ADAX
+prop id:controlled value ADAX
+tap id:reset
+expect Name: Grace
+prop id:controlled value Grace
+covers [props] keyboardType
+covers [props] returnKeyType
+covers [props] autoCapitalize
+covers [props] autoCorrect
+covers [props] autoComplete
+covers [props] ios.textContentType
+covers [props] maxLength
+covers [props] submitBehavior
+covers [props] autoFocus
+covers [props] caretHidden
+covers [props] defaultValue
+covers [props] value

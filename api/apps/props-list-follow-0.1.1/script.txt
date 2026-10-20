@@ -1,0 +1,13 @@
+# What a user does and sees (compat/apps.rs).
+expect Feed 0
+# At the end of its 10 items (400 points in 200), an item added below
+# keeps the list at the end.
+scroll scroll:text:"Feed 0" 0 200
+tap id:add
+prop scroll:text:"Feed 9" contentOffset y=240
+# Fully visible items only count as viewable: 0 and 1 of the 100 points,
+# not 2, half shown.
+expect Viewable: 0,1
+covers [props] maintainVisibleContentPosition
+covers [props] viewabilityConfig
+covers [events] List.onViewableItemsChanged

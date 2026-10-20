@@ -1,0 +1,28 @@
+# What a user does and sees (compat/apps.rs).
+expect Feed 0
+expect Ends: 0
+# 20 items of 40 points in 200: 600 points to scroll. A viewport from the
+# end is not within the threshold's fifth of one (40 points); 10 points
+# from it is.
+scroll scroll:text:"Feed 0" 0 420
+absent Ends: 1
+scroll scroll:text:"Feed 12" 0 590
+expect Ends: 1
+# A pull to refresh: the app shows it refreshing until it is done.
+prop scroll:text:"Feed 19" refreshing false
+event scroll:text:"Feed 19" onRefresh
+expect Refreshes: 1
+prop scroll:text:"Feed 19" refreshing true
+tap id:done
+prop scroll:text:"Feed 19" refreshing false
+# Starts at item 5, 200 points down, with the keys `keyExtractor` gives.
+prop scroll:text:"Jump 5" contentOffset y=200
+expect Jump 5
+expect Keys: k5,k6,k7
+covers [props] List.onEndReachedThreshold
+covers [events] onEndReached
+covers [events] onRefresh
+covers [props] refreshing
+covers [props] List.initialScrollIndex
+covers [props] List.keyExtractor
+covers [events] List.onViewableItemsChanged

@@ -1,0 +1,69 @@
+# What a user does and sees (compat/apps.rs).
+expect Presses: 0
+expect Disabled: true
+# Pressed: activeStyle goes over the style while the finger is down, and
+# the press still reaches the handler.
+style id:active backgroundColor #3366ffff
+style id:active opacity 1
+state id:active pressed
+style id:active backgroundColor #ff0000ff
+style id:active opacity 0.5
+state id:active none
+style id:active backgroundColor #3366ffff
+style id:active opacity 1
+tap id:active
+expect Presses: 1
+# Hovered: hoverStyle while the pointer is over the view.
+style id:hover backgroundColor #ffffffff
+style id:hover borderWidth 0
+state id:hover hovered
+style id:hover backgroundColor #eeeeeeff
+style id:hover borderWidth 2
+style id:hover borderColor #000000ff
+state id:hover none
+style id:hover backgroundColor #ffffffff
+style id:hover borderWidth 0
+# Focused: focusStyle while the input has focus.
+style id:field borderWidth 1
+style id:field borderColor #ccccccff
+state id:field focused
+style id:field borderWidth 2
+style id:field borderColor #3366ffff
+state id:field none
+style id:field borderWidth 1
+style id:field borderColor #ccccccff
+# Disabled: disabledStyle wins over every other state, and a press goes to
+# the pressable around the view.
+style id:target backgroundColor #888888ff
+style id:target opacity 0.4
+state id:target hovered
+style id:target backgroundColor #888888ff
+state id:target none
+tap id:target
+expect Outer: 1
+expect Presses: 1
+# Enabled again: its own style, the later state winning (active over
+# hover), and its presses its own.
+tap id:toggle
+expect Disabled: false
+style id:target backgroundColor #00ff00ff
+style id:target opacity 1
+state id:target hovered
+style id:target backgroundColor #0000ffff
+state id:target hovered pressed
+style id:target backgroundColor #ff0000ff
+state id:target none
+style id:target backgroundColor #00ff00ff
+tap id:target
+expect Presses: 2
+expect Outer: 1
+# Disabled once more: the state style comes back.
+tap id:toggle
+expect Disabled: true
+style id:target backgroundColor #888888ff
+style id:target opacity 0.4
+covers [props] activeStyle
+covers [props] hoverStyle
+covers [props] focusStyle
+covers [props] disabledStyle
+covers [props] disabled

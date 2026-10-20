@@ -61,6 +61,11 @@ pub(crate) struct Mounted {
     screen: Option<Box<ScreenConfig>>,
     modal: Option<ModalConfig>,
     native: Option<NativeProps>,
+    /// The interaction states the platform reports
+    /// ([`MountItem::TrackStates`]; bits of `nsh_core::tailwind::state`).
+    tracked: u8,
+    /// The keys [`Later`] reads.
+    later: Later,
 }
 
 impl Mounted {
@@ -99,8 +104,10 @@ impl Mounted {
             MountItem::ScreenConfig { config, .. } => self.screen = Some(config.clone()),
             MountItem::ModalConfig { config, .. } => self.modal = Some(*config),
             MountItem::NativeProps { props, .. } => self.native = Some(props.clone()),
+            MountItem::TrackStates { states, .. } => self.tracked = *states,
             _ => {}
         }
+        self.later.apply(item);
     }
 
     /// The view an item this module reads is addressed to.
@@ -120,7 +127,12 @@ impl Mounted {
             | MountItem::InputValue { id, .. }
             | MountItem::ScreenConfig { id, .. }
             | MountItem::ModalConfig { id, .. }
-            | MountItem::NativeProps { id, .. } => *id,
+            | MountItem::NativeProps { id, .. }
+            | MountItem::TrackStates { id, .. }
+            | MountItem::Gestures { id, .. }
+            | MountItem::StickyCells { id, .. }
+            | MountItem::ScrollBy { id, .. }
+            | MountItem::Command { id, .. } => *id,
             _ => return None,
         })
     }
@@ -136,6 +148,12 @@ impl Mounted {
     /// Whether the platform reports `event` (an `on…` prop) of the view.
     pub(crate) fn listens(&self, event: EventKind) -> bool {
         self.events.contains(event)
+    }
+
+    /// Whether the platform reports all the interaction states `states`
+    /// (bits of `nsh_core::tailwind::state`) of the view.
+    pub(crate) fn tracks(&self, states: u8) -> bool {
+        self.tracked & states == states
     }
 
     /// The view's props, by JS name.
@@ -165,7 +183,7 @@ impl Mounted {
         if let Some(v) = &a.hint {
             out.put("accessibilityHint", v.to_string());
         }
-        out.put("accessibilityRole", role(a.role).into());
+        out.put("role", role(a.role).into());
         let s = a.state;
         let mut o = Object::default();
         o.flag("disabled", s.disabled);
@@ -229,9 +247,6 @@ impl Mounted {
                 if let Some(v) = text.selectable {
                     out.put("selectable", v.to_string());
                 }
-                if let Some(v) = text.selection_color {
-                    out.put("selectionColor", color(v));
-                }
             }
             Some(ViewKind::Image) => {
                 let (source, resize, options) = self.image.clone().unwrap_or_default();
@@ -289,10 +304,7 @@ impl Mounted {
                     out.put("value", v.clone());
                 }
                 out.put("placeholder", c.placeholder.clone());
-                if let Some(v) = c.placeholder_color {
-                    out.put("placeholderTextColor", color(v));
-                }
-                out.put("secureTextEntry", c.secure.to_string());
+                out.put("masked", c.secure.to_string());
                 out.put("keyboardType", c.keyboard.js_name().into());
                 out.put("keyboardAppearance", c.keyboard_appearance.js_name().into());
                 out.put("returnKeyType", c.return_key.js_name().into());
@@ -302,19 +314,20 @@ impl Mounted {
                 if let Some(v) = c.max_length {
                     out.put("maxLength", v.to_string());
                 }
-                out.put("editable", c.editable.to_string());
-                out.put("blurOnSubmit", c.blur_on_submit.to_string());
+                out.put("readonly", (!c.editable).to_string());
                 if let Some(v) = c.submit_behavior {
                     out.put("submitBehavior", v.js_name().into());
                 }
                 out.put("autoFocus", c.auto_focus.to_string());
-                if let Some(v) = c.selection_color {
-                    out.put("selectionColor", color(v));
-                }
                 out.put("autoComplete", auto_fill(c.auto_fill).into());
                 out.put("caretHidden", c.caret_hidden.to_string());
                 if let Some(v) = &c.accessory_id {
                     out.put("inputAccessoryViewID", v.to_string());
+                }
+                // Whether a mounted `InputAccessoryView` has the `nativeID`
+                // it names.
+                if c.accessory.is_some() {
+                    out.put("inputAccessoryView", "true".into());
                 }
             }
             Some(ViewKind::Screen) => {
@@ -325,27 +338,23 @@ impl Mounted {
                 out.put("headerShown", c.header_shown.to_string());
                 out.put("headerLargeTitle", c.large_title.to_string());
                 out.put("headerTransparent", c.header_transparent.to_string());
-                if let Some(v) = c.tint_color {
-                    out.put("headerTintColor", color(v));
-                }
-                if let Some(v) = c.background_color {
-                    out.put("headerBackgroundColor", color(v));
-                }
-                if let Some(v) = c.title_color {
-                    out.put("headerTitleColor", color(v));
-                }
+                let mut o = Object::default();
+                o.opt("backgroundColor", c.background_color.map(color));
+                o.opt("color", c.title_color.map(color));
+                o.opt("tintColor", c.tint_color.map(color));
+                out.put("headerStyle", o.done());
                 if let Some(v) = &c.back_title {
                     out.put("headerBackTitle", v.to_string());
                 }
                 out.put("headerBackVisible", c.back_visible.to_string());
-                out.put("gestureEnabled", c.gesture_enabled.to_string());
-                out.put("preventBack", c.prevent_back.to_string());
+                out.put("popOnSwipe", c.gesture_enabled.to_string());
+                out.put("popOnBack", (!c.prevent_back).to_string());
                 out.put("animation", c.animation.js_name().into());
             }
             Some(ViewKind::Modal) => {
                 let c = self.modal.unwrap_or_default();
-                out.put("animationType", c.animation.js_name().into());
-                out.put("presentationStyle", c.presentation.js_name().into());
+                out.put("animation", c.animation.js_name().into());
+                out.put("presentation", c.presentation.js_name().into());
                 out.put("statusBarTranslucent", c.status_bar_translucent.to_string());
                 out.put(
                     "supportedOrientations",
@@ -362,7 +371,10 @@ impl Mounted {
                     ),
                 );
                 out.put("closeOnEscape", c.close_on_escape.to_string());
-                out.put("closeOnBackdropPress", c.close_on_backdrop_press.to_string());
+                out.put(
+                    "closeOnBackdropPress",
+                    c.close_on_backdrop_press.to_string(),
+                );
                 out.put("closeOnSwipe", c.close_on_swipe.to_string());
             }
             Some(ViewKind::WebView) => {
@@ -408,6 +420,7 @@ impl Mounted {
             }
             _ => {}
         }
+        self.later.props(self.kind, &mut out);
         out
     }
 
@@ -601,10 +614,19 @@ impl Mounted {
                     }
                     .into(),
                 );
+                if let Some(v) = text.selection_color {
+                    out.put("selectionColor", color(v));
+                }
                 (run.unwrap_or_default(), text.align)
             }
             Some(ViewKind::Input) => {
                 let c = self.input.as_deref().cloned().unwrap_or_default();
+                if let Some(v) = c.placeholder_color {
+                    out.put("placeholderColor", color(v));
+                }
+                if let Some(v) = c.selection_color {
+                    out.put("selectionColor", color(v));
+                }
                 (c.style, c.align)
             }
             _ => return out,
@@ -634,7 +656,6 @@ pub(crate) fn key(name: &str) -> &str {
         .find_map(|p| name.strip_prefix(p))
         .unwrap_or(name);
     match name {
-        "role" => "accessibilityRole",
         "textContentType" => "autoComplete",
         "experimental_backgroundImage" => "backgroundImage",
         other => other,
@@ -997,7 +1018,6 @@ fn values_are_written_as_apps_write_them() {
     );
     assert_eq!(insets(&EdgeInsets::default()), "{}");
     assert_eq!(key("ios.keyboardAppearance"), "keyboardAppearance");
-    assert_eq!(key("role"), "accessibilityRole");
     let view = Mounted {
         kind: Some(ViewKind::View),
         ..Default::default()
@@ -1008,4 +1028,180 @@ fn values_are_written_as_apps_write_them() {
     assert_eq!(styles["shadowOffset"], "width=0 height=-3");
     assert_eq!(styles["transformOrigin"], "50% 50% 0");
     assert_eq!(view.props()["accessibilityState"], "{}");
+}
+
+/// Keys added after the ones above, read from what the platform is told
+/// to do with a view rather than what it is set to:
+///
+/// - `contentOffset` (scroll views and lists): where the platform holds
+///   the view scrolled, `{ x?, y? }`: the last `ScrollTo` it was told
+///   (`contentOffset`, a list starting at its end, `scrollTo()`), moved
+///   by the `ScrollBy`s since and set by the script's `scroll` steps (the
+///   user); missing until one of them;
+/// - `zoomScale` (scroll views): the zoom the platform was last told;
+/// - `stickyHeaderIndices` (lists): the sticky cells as the platform pins
+///   them, `start=<n> end=<n>` each (content points along the main axis,
+///   `end` `Infinity` for the last), in the core's order;
+/// - `scrollValue`, `pan` (`{ x?, y? }`), `pinch` (`{ scale? }`),
+///   `rotation` (`{ angle? }`): the animated values the scroll offset
+///   and the gestures drive, each written as the value it was created
+///   with (so a script tells them apart);
+/// - `selectedRange` (inputs): the selection the platform was last told
+///   to make (`selectedRange`, a ref's `setSelection`), `start=<n> end=<n>`
+///   in UTF-16 units; missing until one;
+/// - the status bar (the root, the `statusbar` step): what the platform
+///   was last told to show (`Command::StatusBar`: `nsh.json`'s default
+///   under the pages' and dialogs' `statusBar`, field by field), as
+///   [`Mounted::status_bar`] writes it; missing until it is told.
+#[derive(Default, Clone)]
+struct Later {
+    offset: Option<(f32, f32)>,
+    selection: Option<(u32, u32)>,
+    zoom: Option<f32>,
+    sticky: Option<Vec<(f32, f32)>>,
+    /// `pan.x`, `pan.y`, `pinch.scale`, `rotation.angle`, by animated
+    /// node.
+    gestures: Option<[Option<nsh_core::nsh_animation::NodeId>; 4]>,
+    scroll_value: Option<nsh_core::nsh_animation::NodeId>,
+    status_bar: Option<nsh_core::StatusBarConfig>,
+}
+
+impl Later {
+    fn apply(&mut self, item: &MountItem) {
+        match item {
+            MountItem::Command { command, .. } => match *command {
+                nsh_core::Command::StatusBar(config) => self.status_bar = Some(config),
+                nsh_core::Command::ScrollTo { x, y, .. } => self.offset = Some((x, y)),
+                nsh_core::Command::ZoomTo { scale, .. } => self.zoom = Some(scale),
+                nsh_core::Command::SetSelection { start, end } => {
+                    self.selection = Some((start, end));
+                }
+                _ => {}
+            },
+            MountItem::ScrollBy { dx, dy, .. } => {
+                let (x, y) = self.offset.unwrap_or_default();
+                self.offset = Some((x + dx, y + dy));
+            }
+            MountItem::StickyCells { cells, .. } => {
+                self.sticky = Some(cells.iter().map(|c| (c.start, c.end)).collect());
+            }
+            MountItem::Gestures { values, .. } => {
+                self.gestures = Some([values.pan_x, values.pan_y, values.pinch, values.rotation]);
+            }
+            MountItem::ScrollConfig { scroll_value, .. } => self.scroll_value = *scroll_value,
+            _ => {}
+        }
+    }
+
+    fn props(&self, kind: Option<ViewKind>, out: &mut Out) {
+        let animated = |node: Option<nsh_core::nsh_animation::NodeId>| {
+            let node = node?;
+            ANIMATED.with(|a| a.borrow().get(&node).map(|v| num(*v)))
+        };
+        if kind == Some(ViewKind::Scroll) {
+            if let Some((x, y)) = self.offset {
+                let mut o = Object::default();
+                o.opt("x", (x != 0.0).then(|| num(x)));
+                o.opt("y", (y != 0.0).then(|| num(y)));
+                out.put("contentOffset", o.done());
+            }
+            if let Some(v) = self.zoom {
+                out.put("zoomScale", num(v));
+            }
+            if let Some(cells) = &self.sticky {
+                out.put(
+                    "stickyHeaderIndices",
+                    list(cells.iter().map(|(s, e)| {
+                        let end = if e.is_finite() {
+                            num(*e)
+                        } else {
+                            "Infinity".into()
+                        };
+                        format!("start={} end={end}", num(*s))
+                    })),
+                );
+            }
+            if let Some(v) = animated(self.scroll_value) {
+                out.put("scrollValue", v);
+            }
+        }
+        if let Some((start, end)) = self.selection {
+            let mut o = Object::default();
+            o.opt("start", Some(start.to_string()));
+            o.opt("end", Some(end.to_string()));
+            out.put("selectedRange", o.done());
+        }
+        if let Some([x, y, scale, angle]) = self.gestures {
+            let mut o = Object::default();
+            o.opt("x", animated(x));
+            o.opt("y", animated(y));
+            if x.is_some() || y.is_some() {
+                out.put("pan", o.done());
+            }
+            if scale.is_some() {
+                let mut o = Object::default();
+                o.opt("scale", animated(scale));
+                out.put("pinch", o.done());
+            }
+            if angle.is_some() {
+                let mut o = Object::default();
+                o.opt("angle", animated(angle));
+                out.put("rotation", o.done());
+            }
+        }
+    }
+}
+
+impl Mounted {
+    /// Whether the view is a scroll view (a list's included).
+    pub(crate) fn is_scroll(&self) -> bool {
+        self.kind == Some(ViewKind::Scroll)
+    }
+
+    /// The status bar the platform was last told to show (on the root):
+    /// `foreground` (`auto`, `light`, `dark`, as `StatusBarForeground`
+    /// names them), `hidden` and `animated`, each always written; `None`
+    /// until the platform is told.
+    pub(crate) fn status_bar(&self) -> Option<Out> {
+        let config = self.later.status_bar?;
+        let mut out = Out::new();
+        out.put(
+            "foreground",
+            match config.style {
+                nsh_core::StatusBarStyle::Default => "auto",
+                nsh_core::StatusBarStyle::Light => "light",
+                nsh_core::StatusBarStyle::Dark => "dark",
+            }
+            .into(),
+        );
+        out.put("hidden", config.hidden.to_string());
+        out.put("animated", config.animated.to_string());
+        Some(out)
+    }
+
+    /// The user scrolled the view to `x`, `y` (a script's `scroll` step).
+    pub(crate) fn scrolled(&mut self, x: f32, y: f32) {
+        self.later.offset = Some((x, y));
+    }
+}
+
+thread_local! {
+    /// The value each animated node of the run on this thread was created
+    /// with: the mount items create them before views bind them.
+    static ANIMATED: std::cell::RefCell<std::collections::HashMap<nsh_core::nsh_animation::NodeId, f32>> =
+        Default::default();
+}
+
+/// Takes in the animated values `item` creates; `None` starts a run.
+pub(crate) fn animated(item: Option<&MountItem>) {
+    ANIMATED.with(|a| match item {
+        None => a.borrow_mut().clear(),
+        Some(MountItem::Animation(nsh_core::nsh_animation::AnimationOp::CreateValue {
+            node,
+            value,
+        })) => {
+            a.borrow_mut().insert(*node, *value);
+        }
+        Some(_) => {}
+    });
 }
