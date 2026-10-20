@@ -1339,7 +1339,8 @@ impl<M: TextEngine> Core<M> {
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
         let kind = Kind::of(tag);
         let key = self.alloc(id, kind)?;
-        let style = Style::default().layout;
+        let mut style = Style::default().layout;
+        crate::style::resolve_normal_alignment(&mut style);
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
@@ -1568,6 +1569,7 @@ impl<M: TextEngine> Core<M> {
         }
         node.logical = (!logical.is_empty()).then(|| Box::new(logical));
         let rtl = self.resolved_rtl(key);
+        crate::style::resolve_normal_alignment(&mut layout);
         crate::style::apply_direction(&mut layout, &mut view, &logical, rtl);
         let node = &mut self.nodes[key as usize];
         if let Some([padding, margin]) = node.insets.as_deref() {
@@ -4654,13 +4656,15 @@ fn scaled(mut style: ResolvedTextStyle, multiplier: f32) -> ResolvedTextStyle {
 }
 
 fn root_style(viewport: Size) -> taffy::Style {
-    taffy::Style {
+    let mut style = taffy::Style {
         size: taffy::Size {
             width: taffy::Dimension::length(viewport.width),
             height: taffy::Dimension::length(viewport.height),
         },
         ..Style::default().layout
-    }
+    };
+    crate::style::resolve_normal_alignment(&mut style);
+    style
 }
 
 /// `align` in a layout of direction `rtl`: left and right trade places

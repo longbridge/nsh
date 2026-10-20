@@ -66,7 +66,7 @@ NSH 的默认值与 Web 不同：
 |---|---|
 | `flexDirection` | `"column"` |
 | `flexShrink` | `0`（子视图不会收缩，除非显式要求） |
-| `alignContent` | `"flex-start"` |
+| `alignContent` | `"flex-start"`（网格中为 CSS 的 `"normal"`） |
 | `position` | `"relative"` |
 | `minWidth` / `minHeight` | `0` |
 | `backgroundColor` | 透明 |

@@ -62,7 +62,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ## LayoutStyle
 
-布局在 Rust 中计算（flexbox 和 CSS 网格）。默认值与 CSS 不同：`display: "flex"`、`flexDirection: "column"`、`flexShrink: 0`、`alignContent: "flex-start"`、`alignItems: "stretch"`，并且没有自动最小尺寸。见 [布局](../docs/layout.md)。
+布局在 Rust 中计算（flexbox 和 CSS 网格）。默认值与 CSS 不同：`display: "flex"`、`flexDirection: "column"`、`flexShrink: 0`、`alignContent: "flex-start"`（网格中为 CSS 的 `"normal"`）、`alignItems: "stretch"`，并且没有自动最小尺寸。见 [布局](../docs/layout.md)。
 
 ### 显示与定位
 
@@ -89,10 +89,10 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `flexGrow` | `number` | 占用剩余空间的比例。默认 `0`。 |
 | `flexShrink` | `number` | 空间不足时的收缩比例。默认 `0`，而不是 CSS 的 `1`。 |
 | `flexBasis` | `DimensionValue` | 分配剩余空间之前的主轴尺寸。 |
-| `justifyContent` | `"flex-start" \| "flex-end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch"` | 子元素沿主轴的分布。默认 `"flex-start"`。 |
-| `alignItems` | `"flex-start" \| "flex-end" \| "center" \| "stretch" \| "baseline"` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
-| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "center" \| "stretch" \| "baseline"` | 为当前元素覆盖父元素的 `alignItems`。 |
-| `alignContent` | `"flex-start" \| "flex-end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly"` | 多行（及网格轨道）在交叉轴上的分布。默认 `"flex-start"`。 |
+| `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | 子元素沿主轴的分布。默认 `"normal"`：在 flex 容器中即 `"flex-start"`；在网格中，尺寸为 `auto` 的轨道会拉伸。 |
+| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
+| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 为当前元素覆盖父元素的 `alignItems`。 |
+| `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | 多行（及网格轨道）在交叉轴上的分布。flex 容器中默认 `"flex-start"`，网格中默认 `"normal"`，尺寸为 `auto` 的轨道会拉伸。`"start"` / `"end"` 跟随书写方向。 |
 | `gap` | `LengthValue` | 子元素行与列之间的间距。 |
 | `rowGap` | `LengthValue` | 行间距。 |
 | `columnGap` | `LengthValue` | 列间距。 |
@@ -103,19 +103,19 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 | 键 | 类型 | 说明 |
 |---|---|---|
-| `gridTemplateColumns` | `string` | 列轨道：`"repeat(3, 1fr)"`、`"200px 1fr"`、`minmax()`、`auto-fill` / `auto-fit`、网格线名称。 |
+| `gridTemplateColumns` | `string` | 列轨道：`"repeat(3, 1fr)"`、`"200px 1fr"`、`minmax()`、`auto-fill` / `auto-fit`、网格线名称（`"[a] 40px [b c] 1fr [d]"`）。 |
 | `gridTemplateRows` | `string` | 行轨道，语法同上。 |
 | `gridAutoColumns` | `string` | 隐式创建的列的尺寸。 |
 | `gridAutoRows` | `string` | 隐式创建的行的尺寸。 |
 | `gridAutoFlow` | `"row" \| "column" \| "dense" \| "row dense" \| "column dense"` | 未指定位置的项目如何填入网格。 |
-| `gridColumn` | `number \| string` | 列位置：`"1 / 3"`、`"span 2"`、网格线编号或名称。 |
+| `gridColumn` | `number \| string` | 列位置：`"1 / 3"`、`"span 2"`、网格线编号或名称（`"content-start / content-end"`、`"2 col"`、`"span col"`）。 |
 | `gridColumnStart` | `number \| string` | 起始列线。 |
 | `gridColumnEnd` | `number \| string` | 结束列线。 |
 | `gridRow` | `number \| string` | 行位置，语法同 `gridColumn`。 |
 | `gridRowStart` | `number \| string` | 起始行线。 |
 | `gridRowEnd` | `number \| string` | 结束行线。 |
-| `justifyItems` | `"flex-start" \| "flex-end" \| "center" \| "stretch" \| "baseline"` | 网格项在其区域内沿行方向的位置。 |
-| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "center" \| "stretch" \| "baseline"` | 为当前项覆盖 `justifyItems`。 |
+| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 网格项在其区域内沿行方向的位置。 |
+| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 为当前项覆盖 `justifyItems`。 |
 
 ```tsx
 <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>

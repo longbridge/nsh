@@ -49,7 +49,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped (Taffy runs a full rounding pass even over a clean root).
-- **Taffy defaults are CSS semantics**; `Style::default()` switches to RN semantics: column, flexShrink 0, alignContent flex-start, position relative,
+- **Taffy defaults are CSS semantics**; `Style::default()` switches to RN semantics: column, flexShrink 0, alignContent flex-start (stored as `normal` and
+  resolved per display by `style::resolve_normal_alignment`, so grids keep CSS's `normal`), position relative,
   and min sizes 0 (an unset or `auto` `minWidth` / `minHeight` is 0). Taffy's `auto` minimum is CSS's automatic minimum size (the
   min-content size); text has no cheap min-content and reports its natural width, so `flex: 1` text in a row could not shrink and
   overflowed instead of wrapping. Yoga has no automatic minimum.

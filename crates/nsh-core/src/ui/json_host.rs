@@ -147,7 +147,16 @@ impl JsHost for JsonHost {
                             JsonValue::Null => V::Null,
                             _ => continue,
                         };
-                        let _ = patch.set(style, key, v);
+                        // Reported as the JS host reports them.
+                        match patch.set(style, key, v) {
+                            Ok(()) => {}
+                            Err(crate::StyleError::UnknownProperty) => {
+                                log::warn!("unsupported style property `{key}`")
+                            }
+                            Err(crate::StyleError::InvalidValue) => {
+                                log::warn!("invalid value for style `{key}`: {v:?}")
+                            }
+                        }
                     }
                 }
                 JsonValue::Array(items) => {

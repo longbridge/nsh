@@ -32,8 +32,13 @@ export type TransformStep =
   | { skewY: number | string }
   | { perspective: number };
 
-type Align = "flex-start" | "flex-end" | "center" | "stretch" | "baseline";
-type Distribute = "flex-start" | "flex-end" | "center" | "stretch" | "space-between" | "space-around" | "space-evenly";
+/** `start` / `end` (and `self-start` / `self-end`, by the item's own
+ * direction) follow the writing direction, as in CSS; `flex-start` /
+ * `flex-end` follow the flex direction. */
+type Align = "flex-start" | "flex-end" | "center" | "stretch" | "baseline" | "start" | "end" | "self-start" | "self-end";
+/** `normal` is the default: `flex-start` in flex containers, while grid
+ * tracks sized `auto` stretch to fill the container (CSS). */
+type Distribute = "flex-start" | "flex-end" | "center" | "stretch" | "space-between" | "space-around" | "space-evenly" | "start" | "end" | "normal";
 "#;
 
 /// The interfaces, in the order they extend each other.

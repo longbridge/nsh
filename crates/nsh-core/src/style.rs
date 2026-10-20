@@ -807,6 +807,18 @@ pub(crate) fn swap_sides(layout: &mut taffy::Style, view: &mut ViewStyle) {
     view.corner_radius.swap(2, 3);
 }
 
+/// Gives an unset `alignContent` (taffy's `normal`) its meaning for the
+/// node's display: React Native's `flex-start` for flex (and block)
+/// containers, where taffy's `normal` would stretch wrapped lines, and
+/// CSS's `normal` for grids, whose auto tracks then stretch to fill the
+/// container. (`justifyContent`'s `normal` is already `flex-start` in
+/// flex containers.)
+pub(crate) fn resolve_normal_alignment(layout: &mut taffy::Style) {
+    if layout.display != Display::Grid && layout.align_content == AlignContent::NORMAL {
+        layout.align_content = AlignContent::FLEX_START;
+    }
+}
+
 /// Lays a node out in direction `rtl`: swaps its left and right
 /// properties when right to left, then places the start / end ones.
 pub(crate) fn apply_direction(
@@ -863,7 +875,9 @@ impl Default for Style {
             position: Position::Relative,
             flex_direction: FlexDirection::Column,
             flex_shrink: 0.0,
-            align_content: AlignContent::FLEX_START,
+            // Unset: `flex-start` (React Native) outside grids, CSS's
+            // `normal` in grids (`resolve_normal_alignment`).
+            align_content: AlignContent::NORMAL,
             // Yoga has no automatic minimum size (see `min_len`).
             min_size: taffy::Size {
                 width: LengthPercentageAuto::length(0.0),
@@ -1036,12 +1050,12 @@ style_keys! {
     TextDecorationStyle = "textDecorationStyle": Text "\"solid\" | \"double\" | \"dotted\" | \"dashed\" | \"wavy\"",
     TextDecorationThickness = "textDecorationThickness": Text "number | \"auto\" | \"from-font\"",
     TextUnderlineOffset = "textUnderlineOffset": Text "number | \"auto\"",
-    GridTemplateColumns = "gridTemplateColumns": Layout "string" "CSS grid tracks: `\"repeat(3, 1fr)\"`, `\"200px 1fr\"`, `minmax()`, `auto-fill` / `auto-fit`, line names.",
+    GridTemplateColumns = "gridTemplateColumns": Layout "string" "CSS grid tracks: `\"repeat(3, 1fr)\"`, `\"200px 1fr\"`, `minmax()`, `auto-fill` / `auto-fit`, line names (`\"[full-start] 1fr [content-start] 2fr [content-end full-end]\"`).",
     GridTemplateRows = "gridTemplateRows": Layout "string",
     GridAutoColumns = "gridAutoColumns": Layout "string" "Tracks of implicitly created columns.",
     GridAutoRows = "gridAutoRows": Layout "string",
     GridAutoFlow = "gridAutoFlow": Layout "\"row\" | \"column\" | \"dense\" | \"row dense\" | \"column dense\"",
-    GridColumn = "gridColumn": Layout "number | string" "`\"1 / 3\"`, `\"span 2\"`, a line number or name.",
+    GridColumn = "gridColumn": Layout "number | string" "`\"1 / 3\"`, `\"span 2\"`, a line number or name (`\"content-start / full-end\"`, `\"span col\"`).",
     GridColumnStart = "gridColumnStart": Layout "number | string",
     GridColumnEnd = "gridColumnEnd": Layout "number | string",
     GridRow = "gridRow": Layout "number | string",
@@ -1383,6 +1397,12 @@ fn align_items(v: StyleValue<'_>) -> Result<Option<AlignItems>, StyleError> {
         None => None,
         Some("flex-start") => Some(AlignItems::FLEX_START),
         Some("flex-end") => Some(AlignItems::FLEX_END),
+        // CSS's logical keywords: the writing direction's start and end
+        // (right to left, `start` is the right), not the flex direction's.
+        Some("start") => Some(AlignItems::START),
+        Some("end") => Some(AlignItems::END),
+        Some("self-start") => Some(AlignItems::SELF_START),
+        Some("self-end") => Some(AlignItems::SELF_END),
         Some("center") => Some(AlignItems::CENTER),
         Some("stretch") => Some(AlignItems::STRETCH),
         Some("baseline") => Some(AlignItems::BASELINE),
@@ -1390,11 +1410,16 @@ fn align_items(v: StyleValue<'_>) -> Result<Option<AlignItems>, StyleError> {
     })
 }
 
-fn align_content(v: StyleValue<'_>, default: AlignContent) -> Result<AlignContent, StyleError> {
+/// `alignContent` / `justifyContent`; unset (null, `normal`) is CSS's
+/// `normal`, which [`resolve_normal_alignment`] makes React Native's
+/// `flex-start` outside grids.
+fn align_content(v: StyleValue<'_>) -> Result<AlignContent, StyleError> {
     Ok(match keyword(v)? {
-        None => default,
+        None | Some("normal") => AlignContent::NORMAL,
         Some("flex-start") => AlignContent::FLEX_START,
         Some("flex-end") => AlignContent::FLEX_END,
+        Some("start") => AlignContent::START,
+        Some("end") => AlignContent::END,
         Some("center") => AlignContent::CENTER,
         Some("stretch") => AlignContent::STRETCH,
         Some("space-between") => AlignContent::SPACE_BETWEEN,
@@ -1514,6 +1539,13 @@ fn grid_value<T>(
     match keyword(v)? {
         None => Ok(Vec::new()),
         Some(s) => parse(s).ok_or(StyleError::InvalidValue),
+    }
+}
+
+fn grid_template(v: StyleValue<'_>) -> Result<grid::Template, StyleError> {
+    match keyword(v)? {
+        None => Ok((Vec::new(), Vec::new())),
+        Some(s) => grid::template(s).ok_or(StyleError::InvalidValue),
     }
 }
 
@@ -1704,9 +1736,7 @@ impl Style {
             StyleKey::FlexGrow => l.flex_grow = number(value, 0.0)?,
             StyleKey::FlexShrink => l.flex_shrink = number(value, 0.0)?,
             StyleKey::FlexBasis => l.flex_basis = Len::parse(value)?.dim(),
-            StyleKey::JustifyContent => {
-                l.justify_content = align_content(value, AlignContent::FLEX_START)?
-            }
+            StyleKey::JustifyContent => l.justify_content = align_content(value)?,
             StyleKey::AlignItems => {
                 l.align_items = align_items(value)?.unwrap_or(AlignItems::STRETCH)
             }
@@ -1716,9 +1746,7 @@ impl Style {
                     v => align_items(v)?,
                 }
             }
-            StyleKey::AlignContent => {
-                l.align_content = align_content(value, AlignContent::FLEX_START)?
-            }
+            StyleKey::AlignContent => l.align_content = align_content(value)?,
             StyleKey::Width => l.size.width = Len::parse(value)?.dim(),
             StyleKey::Height => l.size.height = Len::parse(value)?.dim(),
             StyleKey::MinWidth => l.min_size.width = min_len(value)?,
@@ -2147,10 +2175,10 @@ impl Style {
 
             // Grid
             StyleKey::GridTemplateColumns => {
-                l.grid_template_columns = grid_value(value, grid::template)?;
+                (l.grid_template_columns, l.grid_template_column_names) = grid_template(value)?;
             }
             StyleKey::GridTemplateRows => {
-                l.grid_template_rows = grid_value(value, grid::template)?;
+                (l.grid_template_rows, l.grid_template_row_names) = grid_template(value)?;
             }
             StyleKey::GridAutoColumns => {
                 l.grid_auto_columns = grid_value(value, grid::auto_tracks)?;
@@ -2207,8 +2235,46 @@ mod tests {
         assert_eq!(s.layout.flex_direction, FlexDirection::Column);
         assert_eq!(s.layout.flex_shrink, 0.0);
         assert_eq!(s.layout.position, Position::Relative);
-        assert_eq!(s.layout.align_content, AlignContent::FLEX_START);
+        // Unset: `flex-start` once laid out outside grids.
+        assert_eq!(s.layout.align_content, AlignContent::NORMAL);
+        let mut layout = s.layout.clone();
+        resolve_normal_alignment(&mut layout);
+        assert_eq!(layout.align_content, AlignContent::FLEX_START);
         assert_eq!(s.layout.min_size.width, LengthPercentageAuto::length(0.0));
+    }
+
+    #[test]
+    fn css_alignment_keywords() {
+        let mut s = Style::default();
+        let k = StyleValue::Str;
+        for key in ["alignItems", "alignSelf", "justifyItems", "justifySelf"] {
+            for v in ["start", "end", "self-start", "self-end"] {
+                s.set(key, k(v)).unwrap();
+            }
+        }
+        assert_eq!(s.layout.justify_self, Some(AlignItems::SELF_END));
+        for key in ["alignContent", "justifyContent"] {
+            s.set(key, k("end")).unwrap();
+            assert_eq!(s.set(key, k("self-end")), Err(StyleError::InvalidValue));
+        }
+        assert_eq!(s.layout.align_content, AlignContent::END);
+        s.set("alignContent", k("normal")).unwrap();
+        assert_eq!(s.layout.align_content, AlignContent::NORMAL);
+        s.set("justifyContent", StyleValue::Null).unwrap();
+        assert_eq!(s.layout.justify_content, AlignContent::NORMAL);
+        // A grid keeps CSS's `normal`; other containers take `flex-start`.
+        s.set("display", k("grid")).unwrap();
+        let mut grid = s.layout.clone();
+        resolve_normal_alignment(&mut grid);
+        assert_eq!(grid.align_content, AlignContent::NORMAL);
+        assert_eq!(
+            s.set("gridTemplateColumns", k("[a] 40px [b")),
+            Err(StyleError::InvalidValue)
+        );
+        s.set("gridTemplateRows", k("[a] 40px [b] 1fr")).unwrap();
+        assert_eq!(s.layout.grid_template_row_names.len(), 3);
+        s.set("gridTemplateRows", StyleValue::Null).unwrap();
+        assert!(s.layout.grid_template_row_names.is_empty());
     }
 
     #[test]

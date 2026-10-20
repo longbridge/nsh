@@ -66,7 +66,7 @@ NSH's defaults differ from the web's:
 |---|---|
 | `flexDirection` | `"column"` |
 | `flexShrink` | `0` (children do not shrink unless asked) |
-| `alignContent` | `"flex-start"` |
+| `alignContent` | `"flex-start"` (in grids, CSS's `"normal"`) |
 | `position` | `"relative"` |
 | `minWidth` / `minHeight` | `0` |
 | `backgroundColor` | transparent |

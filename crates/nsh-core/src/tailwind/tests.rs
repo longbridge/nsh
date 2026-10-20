@@ -450,6 +450,27 @@ fn grid() {
     assert_eq!(s.layout.display, taffy::Display::Grid);
     assert_eq!(s.layout.grid_template_columns.len(), 1);
     assert_eq!(s.layout.grid_column.start, taffy::GridPlacement::Span(2));
+    // Line names.
+    let s = styled("grid grid-cols-[[a]_40px_[b]_1fr] col-[a/b] row-start-[main]");
+    assert_eq!(s.layout.grid_template_columns.len(), 2);
+    assert_eq!(s.layout.grid_template_column_names.len(), 3);
+    let named = |n: &str| taffy::GridPlacement::NamedLine(n.to_owned(), 0);
+    assert_eq!(s.layout.grid_column.start, named("a"));
+    assert_eq!(s.layout.grid_column.end, named("b"));
+    assert_eq!(s.layout.grid_row.start, named("main"));
+    // Tailwind's `start` / `end` / `normal` are CSS's.
+    let s = styled("justify-items-end justify-self-start content-normal justify-normal");
+    assert_eq!(s.layout.justify_items, taffy::AlignItems::END);
+    assert_eq!(s.layout.justify_self, Some(taffy::AlignItems::START));
+    assert_eq!(s.layout.align_content, taffy::AlignContent::NORMAL);
+    assert_eq!(s.layout.justify_content, taffy::AlignContent::NORMAL);
+    // Invalid arbitrary placements and tracks are unknown classes (logged).
+    let theme = Theme::default();
+    let list = parse(
+        &theme,
+        "col-[1_2] row-start-[1a] auto-rows-[3zz] -col-start-[a]",
+    );
+    assert_eq!(list.unknown().len(), 4, "{:?}", list.unknown());
 }
 
 #[test]

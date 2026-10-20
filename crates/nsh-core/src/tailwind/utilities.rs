@@ -854,23 +854,25 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "grow" => setn(K::FlexGrow, 1.0),
         "shrink" => setn(K::FlexShrink, 1.0),
-        "justify-start" | "justify-normal" => sets(K::JustifyContent, "flex-start"),
+        "justify-start" => sets(K::JustifyContent, "flex-start"),
+        "justify-normal" => sets(K::JustifyContent, "normal"),
         "justify-end" => sets(K::JustifyContent, "flex-end"),
         "justify-center" => sets(K::JustifyContent, "center"),
         "justify-between" => sets(K::JustifyContent, "space-between"),
         "justify-around" => sets(K::JustifyContent, "space-around"),
         "justify-evenly" => sets(K::JustifyContent, "space-evenly"),
         "justify-stretch" => sets(K::JustifyContent, "stretch"),
-        "justify-items-start" => sets(K::JustifyItems, "flex-start"),
-        "justify-items-end" => sets(K::JustifyItems, "flex-end"),
+        "justify-items-start" => sets(K::JustifyItems, "start"),
+        "justify-items-end" => sets(K::JustifyItems, "end"),
         "justify-items-center" => sets(K::JustifyItems, "center"),
         "justify-items-stretch" | "justify-items-normal" => sets(K::JustifyItems, "stretch"),
         "justify-self-auto" => sets(K::JustifySelf, "auto"),
-        "justify-self-start" => sets(K::JustifySelf, "flex-start"),
-        "justify-self-end" => sets(K::JustifySelf, "flex-end"),
+        "justify-self-start" => sets(K::JustifySelf, "start"),
+        "justify-self-end" => sets(K::JustifySelf, "end"),
         "justify-self-center" => sets(K::JustifySelf, "center"),
         "justify-self-stretch" => sets(K::JustifySelf, "stretch"),
-        "content-start" | "content-normal" => sets(K::AlignContent, "flex-start"),
+        "content-start" => sets(K::AlignContent, "flex-start"),
+        "content-normal" => sets(K::AlignContent, "normal"),
         "content-end" => sets(K::AlignContent, "flex-end"),
         "content-center" => sets(K::AlignContent, "center"),
         "content-between" => sets(K::AlignContent, "space-between"),
@@ -1392,23 +1394,29 @@ static PREFIXES: &[(&str, Handler)] = &[
     }),
     ("col", |_, v, n| {
         let line = match arbitrary(v) {
-            Some(a) => a,
+            // Checked here: an invalid one is an unknown class (logged).
+            Some(a) => crate::grid::line(&a).map(|_| a)?,
             None => line_index(v, n)?,
         };
         one(sets(K::GridColumn, &line))
     }),
     ("row", |_, v, n| {
         let line = match arbitrary(v) {
-            Some(a) => a,
+            // Checked here: an invalid one is an unknown class (logged).
+            Some(a) => crate::grid::line(&a).map(|_| a)?,
             None => line_index(v, n)?,
         };
         one(sets(K::GridRow, &line))
     }),
     ("auto-cols", |_, v, _| {
-        one(sets(K::GridAutoColumns, &arbitrary(v)?))
+        let a = arbitrary(v)?;
+        crate::grid::auto_tracks(&a)?;
+        one(sets(K::GridAutoColumns, &a))
     }),
     ("auto-rows", |_, v, _| {
-        one(sets(K::GridAutoRows, &arbitrary(v)?))
+        let a = arbitrary(v)?;
+        crate::grid::auto_tracks(&a)?;
+        one(sets(K::GridAutoRows, &a))
     }),
     ("order", |_, _, _| Some(Vec::new())),
     // Typography.
@@ -1920,7 +1928,12 @@ fn line_index(v: &str, neg: bool) -> Option<String> {
         return Some("auto".into());
     }
     let n: i32 = match arbitrary(v) {
-        Some(a) => a.trim().parse().ok()?,
+        Some(a) => match a.trim().parse() {
+            Ok(n) => n,
+            // A named line (`col-start-[content-start]`).
+            Err(_) if !neg => return crate::grid::placement(&a).map(|_| a),
+            Err(_) => return None,
+        },
         None => v.parse().ok()?,
     };
     Some((if neg { -n } else { n }).to_string())

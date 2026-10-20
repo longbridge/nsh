@@ -10069,6 +10069,182 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         MountItem::Text { text, .. } if text.text == "4 5 14 25")));
 }
 
+/// A container `2` with `style` and empty children `4`, `6`, ... with
+/// theirs, laid out at the root; the children's frames.
+fn grid_frames(
+    container: &[(&str, StyleValue<'_>)],
+    children: &[&[(&str, StyleValue<'_>)]],
+) -> Vec<Rect> {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        style_op(2, container),
+    ];
+    for (i, child) in children.iter().enumerate() {
+        let id = 4 + 2 * i as NodeId;
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, child));
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    (0..children.len())
+        .map(|i| frame_of(&batch, 4 + 2 * i as NodeId).expect("a frame"))
+        .collect()
+}
+
+#[test]
+fn grids_place_items_by_line_name() {
+    let s = StyleValue::Str;
+    let grid = [
+        ("display", s("grid")),
+        ("width", StyleValue::Number(300.0)),
+        ("gridTemplateColumns", s("[a] 40px [b] 60px [c] 1fr [d]")),
+    ];
+    let f = grid_frames(
+        &grid,
+        &[
+            &[("gridColumnStart", s("b"))],
+            &[("gridColumn", s("a / c"))],
+            &[("gridColumn", s("b / span d"))],
+            &[("gridColumnStart", s("c")), ("gridColumnEnd", s("d"))],
+        ],
+    );
+    let xw = |r: Rect| (r.x, r.width);
+    assert_eq!(xw(f[0]), (40.0, 60.0));
+    assert_eq!(xw(f[1]), (0.0, 100.0));
+    assert_eq!(xw(f[2]), (40.0, 260.0));
+    assert_eq!(xw(f[3]), (100.0, 200.0));
+
+    // Several names per line, names in repetitions.
+    let f = grid_frames(
+        &[
+            ("display", s("grid")),
+            ("width", StyleValue::Number(300.0)),
+            (
+                "gridTemplateColumns",
+                s("[full-start] 20px [main-start] repeat(2, [col] 1fr) [main-end] 20px [full-end]"),
+            ),
+        ],
+        &[
+            &[("gridColumn", s("main-start / main-end"))],
+            &[("gridColumn", s("2 col / full-end"))],
+            &[("gridColumn", s("full-start / full-end"))],
+        ],
+    );
+    assert_eq!(xw(f[0]), (20.0, 260.0));
+    assert_eq!(xw(f[1]), (150.0, 150.0));
+    assert_eq!(xw(f[2]), (0.0, 300.0));
+}
+
+#[test]
+fn grid_auto_tracks_stretch_unless_aligned() {
+    let s = StyleValue::Str;
+    let n = StyleValue::Number;
+    let grid = [
+        ("display", s("grid")),
+        ("width", n(300.0)),
+        ("height", n(200.0)),
+        ("gridTemplateColumns", s("1fr 1fr")),
+    ];
+    // CSS's `normal`: the auto rows share the container's height.
+    let f = grid_frames(&grid, &[&[], &[], &[]]);
+    assert_eq!((f[0].y, f[0].height), (0.0, 100.0));
+    assert_eq!((f[2].y, f[2].height), (100.0, 100.0));
+    let mut normal = grid.to_vec();
+    normal.push(("alignContent", s("normal")));
+    assert_eq!(grid_frames(&normal, &[&[]])[0].height, 200.0);
+    // Columns too, without a template.
+    let f = grid_frames(&grid[..3], &[&[]]);
+    assert_eq!(f[0].width, 300.0);
+    // A value set explicitly applies.
+    let mut start = grid.to_vec();
+    start.push(("alignContent", s("flex-start")));
+    assert_eq!(grid_frames(&start, &[&[]])[0].height, 0.0);
+    let mut start = grid[..3].to_vec();
+    start.push(("justifyContent", s("start")));
+    assert_eq!(grid_frames(&start, &[&[]])[0].width, 0.0);
+    // Flex containers keep React Native's `flex-start` for wrapped lines.
+    let f = grid_frames(
+        &[
+            ("flexDirection", s("row")),
+            ("flexWrap", s("wrap")),
+            ("width", n(300.0)),
+            ("height", n(200.0)),
+        ],
+        &[&[("width", n(200.0))], &[("width", n(200.0))]],
+    );
+    assert_eq!((f[0].height, f[1].y), (0.0, 0.0));
+}
+
+#[test]
+fn start_and_end_follow_the_writing_direction() {
+    let s = StyleValue::Str;
+    let n = StyleValue::Number;
+    let item = [("width", n(50.0)), ("height", n(20.0))];
+    let grid = |justify: &'static str, direction: &'static str| {
+        [
+            ("display", s("grid")),
+            ("width", n(300.0)),
+            ("height", n(100.0)),
+            ("gridTemplateColumns", s("100px")),
+            ("gridTemplateRows", s("40px")),
+            ("justifyItems", s(justify)),
+            ("alignItems", s("end")),
+            ("direction", s(direction)),
+        ]
+    };
+    let f = grid_frames(&grid("start", "ltr"), &[&item]);
+    assert_eq!((f[0].x, f[0].y), (0.0, 20.0));
+    let f = grid_frames(&grid("end", "ltr"), &[&item]);
+    assert_eq!(f[0].x, 50.0);
+    // Right to left, the track is at the right and its start is its right.
+    let f = grid_frames(&grid("start", "rtl"), &[&item]);
+    assert_eq!(f[0].x, 250.0);
+    let f = grid_frames(&grid("end", "rtl"), &[&item]);
+    assert_eq!(f[0].x, 200.0);
+    // Per item, and `self-start` / `self-end`.
+    let f = grid_frames(
+        &grid("start", "ltr"),
+        &[&[
+            ("width", n(50.0)),
+            ("justifySelf", s("self-end")),
+            ("alignSelf", s("start")),
+        ]],
+    );
+    assert_eq!((f[0].x, f[0].y), (50.0, 0.0));
+    // Tracks: `justifyContent: end` puts the column at the end.
+    let mut end = grid("start", "ltr").to_vec();
+    end.push(("justifyContent", s("end")));
+    assert_eq!(grid_frames(&end, &[&item])[0].x, 200.0);
+    let mut end = grid("start", "rtl").to_vec();
+    end.push(("justifyContent", s("end")));
+    assert_eq!(grid_frames(&end, &[&item])[0].x, 50.0);
+    // In flex containers too.
+    let f = grid_frames(
+        &[
+            ("width", n(300.0)),
+            ("alignItems", s("end")),
+            ("justifyContent", s("end")),
+            ("height", n(100.0)),
+        ],
+        &[&item],
+    );
+    assert_eq!((f[0].x, f[0].y), (250.0, 80.0));
+}
+
 /// What builders take: listeners without arguments, children in an
 /// `Option`, a `Vec`, an array or an iterator.
 mod builders {

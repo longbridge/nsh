@@ -20,7 +20,7 @@ NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 |---|---|---|
 | `flexDirection` | `"column"` | `row` |
 | `flexShrink` | `0` | `1` |
-| `alignContent` | `"flex-start"` | `stretch` |
+| `alignContent` | `"flex-start"`（网格：`"normal"`） | `normal` |
 | `alignItems` | `"stretch"` | `stretch` |
 | `minWidth` / `minHeight` | `0` | `auto` |
 | `position` | `"relative"` | `static` |
@@ -39,14 +39,16 @@ NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 | 属性 | 取值 |
 |---|---|
 | `flexDirection` | `"column"`、`"row"`、`"column-reverse"`、`"row-reverse"` |
-| `justifyContent` | 主轴：`"flex-start"`、`"flex-end"`、`"center"`、`"space-between"`、`"space-around"`、`"space-evenly"`、`"stretch"` |
-| `alignItems` | 交叉轴：`"stretch"`、`"flex-start"`、`"flex-end"`、`"center"`、`"baseline"` |
+| `justifyContent` | 主轴：`"flex-start"`、`"flex-end"`、`"start"`、`"end"`、`"center"`、`"space-between"`、`"space-around"`、`"space-evenly"`、`"stretch"` |
+| `alignItems` | 交叉轴：`"stretch"`、`"flex-start"`、`"flex-end"`、`"start"`、`"end"`、`"self-start"`、`"self-end"`、`"center"`、`"baseline"` |
 | `alignSelf` | 单个子元素在交叉轴上的对齐；`"auto"` 跟随父元素的 `alignItems` |
 | `alignContent` | 换行容器中各行的对齐 |
 | `flexWrap` | `"nowrap"`、`"wrap"`、`"wrap-reverse"` |
 | `flex` | 单个数字的简写（见下文） |
 | `flexGrow`、`flexShrink`、`flexBasis` | 与 CSS 相同 |
 | `gap`、`rowGap`、`columnGap` | 子元素之间的间距 |
+
+`flex-start` 和 `flex-end` 跟随 flex 方向；`start` 和 `end` 与 CSS 一样跟随书写方向（从右到左时，`start` 是右侧），`self-start` / `self-end` 跟随子元素自身的方向。
 
 `flex` 只取一个数字，不是 CSS 简写：正数 `n` 表示按 `n` 增长、按 1 收缩、基准尺寸为 0，因此 `flex: 1` 的兄弟元素无论内容多少都会平分空间；`flex: 0`（默认值）让视图按内容确定大小；负数表示按该值收缩，直到最小尺寸。
 
@@ -101,9 +103,22 @@ NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 | `gridTemplateColumns`、`gridTemplateRows` | CSS 轨道列表：`"repeat(3, 1fr)"`、`"200px 1fr"`、`minmax()`、`auto-fill` / `auto-fit`、线名 |
 | `gridAutoColumns`、`gridAutoRows` | 隐式创建的列和行的轨道 |
 | `gridAutoFlow` | `"row"`、`"column"`、`"dense"`、`"row dense"`、`"column dense"` |
-| `gridColumn`、`gridRow` | `"1 / 3"`、`"span 2"`、线编号或线名 |
+| `gridColumn`、`gridRow` | `"1 / 3"`、`"span 2"`、线编号或线名：`"content-start / content-end"`、`"2 col"`（第二条名为 `col` 的线）、`"span col"`（跨到下一条名为 `col` 的线） |
 | `gridColumnStart`、`gridColumnEnd`、`gridRowStart`、`gridRowEnd` | 线编号或线名 |
-| `justifyItems`、`justifySelf` | 项目在其区域内沿行方向的位置 |
+| `justifyItems`、`justifySelf` | 项目在其区域内沿行方向的位置：`"start"`、`"end"`、`"center"`、`"stretch"` 等 |
+| `alignItems`、`alignSelf` | 项目在其区域内沿列方向的位置 |
+| `justifyContent`、`alignContent` | 轨道在网格中沿行方向和列方向的位置 |
+
+模板在方括号中为网格线命名，每条线可以有一个或多个名称，项目可以按名称放置，与 CSS 相同：
+
+```tsx
+<View style={{ display: "grid", gridTemplateColumns: "[full-start] 16px [content-start] 1fr [content-end] 16px [full-end]" }}>
+  <View style={{ gridColumn: "content-start / content-end", height: 60, backgroundColor: "#b083f0" }} />
+  <View style={{ gridColumn: "full-start / full-end", height: 60, backgroundColor: "#8250df" }} />
+</View>
+```
+
+在网格中，`justifyContent` 和 `alignContent` 默认是 CSS 的 `"normal"`：尺寸为 `auto` 的轨道会拉伸以填满容器，因此有高度但没有行模板的网格会把高度分给各行。显式设置的值（`"start"`、`"center"`、`"space-between"` 等）按 CSS 的方式放置轨道。
 
 `display: "block"` 使用 CSS 块布局（子元素依次堆叠，每个都与容器同宽），`display: "none"` 则把视图从布局中移除。
 
