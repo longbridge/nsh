@@ -50,7 +50,7 @@ use nsh_core::{BorderStyle, Borders, Color, Filter, Outline, ViewKind};
 use self::shape::{Pt, circular, clip_convex, grown, padding_box, rounded, side_quads};
 use crate::{
     geom::{Mat4, rect},
-    render::{DrawCx, corners, edges, fits},
+    render::{DrawCx, border_quad, corners, edges, fits},
     view::{NshView, ViewState},
 };
 
@@ -536,10 +536,9 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
     let bounds = cx.rect(0.0, 0.0, w, h);
     let quad_fits = cx.axis_aligned() && fits(bounds, corners(radii, k));
     if let (Some(color), Some(style), true) = (shared, quad_style, quad_fits) {
-        let quad = gpui::quad(
+        let quad = border_quad(
             bounds,
             corners(radii, k),
-            gpui::transparent_black(),
             edges(b.widths, k),
             cx.color(color),
             style,
@@ -616,10 +615,9 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
     let bounds = cx.rect(-d, -d, ow, oh);
     let quad_fits = cx.axis_aligned() && fits(bounds, corners(outer_radii, k));
     if let (Some(style), true) = (quad_style, quad_fits) {
-        let quad = gpui::quad(
+        let quad = border_quad(
             bounds,
             corners(outer_radii, k),
-            gpui::transparent_black(),
             edges([o.width; 4], k),
             cx.color(o.color),
             style,

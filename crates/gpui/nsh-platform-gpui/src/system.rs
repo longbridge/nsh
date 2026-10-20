@@ -60,7 +60,7 @@ use std::{
 };
 
 use gpui::{
-    AnyWindowHandle, Context, FontWeight, Hsla, SharedString, TextAlign, TextRun, Window,
+    AnyWindowHandle, Context, Edges, FontWeight, Hsla, SharedString, TextAlign, TextRun, Window,
     WindowAppearance, px,
 };
 use nsh_core::{
@@ -74,7 +74,7 @@ use crate::{
     app::AppView,
     geom::rect,
     input::{Cursor, KeyEvent, PointerKind},
-    render::{DrawCx, corners},
+    render::{DrawCx, border_quad, corners},
     surface::Surface,
     view::{Hosted, ItemPointer},
 };
@@ -1340,13 +1340,13 @@ fn stroke_rounded(cx: &mut DrawCx<'_>, r: Rect, radius: f32, color: Color, width
         return;
     }
     let k = cx.transform_scale();
-    let quad = gpui::fill(
+    let quad = border_quad(
         cx.rect(r.x, r.y, r.width, r.height),
-        gpui::transparent_black(),
-    )
-    .corner_radii(corners([radius; 4], k))
-    .border_widths(px(width * k))
-    .border_color(cx.color(color));
+        corners([radius; 4], k),
+        Edges::all(px(width * k)),
+        cx.color(color),
+        gpui::BorderStyle::Solid,
+    );
     cx.paint_quad(quad);
 }
 
