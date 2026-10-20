@@ -1,0 +1,23 @@
+# What a user does and sees (compat/apps.rs).
+absent In the modal
+tap text:Show the modal
+expect In the modal
+tap text:Hide the modal
+absent In the modal
+absent In the sheet
+tap text:Open the sheet
+expect In the sheet
+tap text:Done
+absent In the sheet
+expect Sheet closed: 0
+tap text:Alert
+expect Alert: pending
+tap text:Actions
+expect Actions: pending
+wait 300
+expect Alert: pending
+expect Actions: pending
+covers [nsh/ui/mobile] Modal
+covers [nsh/ui/mobile] Sheet
+covers [nsh/ui/mobile] Alert
+covers [nsh/ui/mobile] ActionSheet

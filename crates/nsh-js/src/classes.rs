@@ -445,7 +445,18 @@ pub(crate) fn send(
     promise: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(promise, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(promise, false, make)
+}
+
+/// [`send`] of a call that starts its task in the JS call (`Later`): JS
+/// gets a promise of the task, and what the start throws throws here.
+pub(crate) fn start(
+    ctx: Ctx,
+    this: Raw,
+    args: js::Args<'_>,
+    make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
+) -> Raw {
+    CallHost::new(ctx, this, UNDEFINED, args).send(true, true, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -500,6 +511,29 @@ unsafe extern "C" fn dispose(
 }
 
 /// Throws an `Error` with `message`.
+/// The JS error `thrown` is: its class, its message and its properties
+/// (Node's `code`, `syscall`, `path`, ...), as an own enumerable field each.
+pub(crate) fn error_value(ctx: Ctx, thrown: &Thrown) -> V {
+    use nsh_core::ui::ErrorClass;
+    let (class, message, fields) = match thrown {
+        Thrown::Type(m) => (ErrorClass::Type, m, &[][..]),
+        Thrown::Range(m) => (ErrorClass::Range, m, &[][..]),
+        Thrown::Error(m) => (ErrorClass::Error, m, &[][..]),
+        Thrown::Fields(f) => (f.class, &f.message, &f.fields[..]),
+    };
+    let _ = match class {
+        ErrorClass::Type => js::type_error(ctx, message),
+        ErrorClass::Range => js::range_error(ctx, message),
+        ErrorClass::Error => throw_error(ctx, message),
+    };
+    let error = js::take_exception(ctx);
+    for (key, value) in fields {
+        let value = V::own(ctx, crate::host::json_to_js(ctx, value));
+        let _ = js::define(ctx, error.raw(), key, value, true);
+    }
+    error
+}
+
 pub(crate) fn throw_error(ctx: Ctx, message: &str) -> Throw {
     // SAFETY: a new error the exception takes.
     unsafe {
@@ -603,7 +637,12 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => self.send(true, |host| start(host).map(RustCall::Task)),
+            MemberCall::Async(start) => {
+                self.send(true, false, |host| start(host).map(RustCall::Task))
+            }
+            MemberCall::Start(start) => {
+                self.send(true, true, |host| start(host).map(RustCall::Task))
+            }
         }
     }
 
@@ -620,10 +659,12 @@ impl<'a> CallHost<'a> {
     }
 
     /// Sends the call `make` converts this call's values into as an op
-    /// ([`send`]).
+    /// ([`send`]); with `throws`, what `make` throws throws even when the
+    /// call returns a promise (a call starting its task: [`start`]).
     fn send(
         &self,
         promise: bool,
+        throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
         let ctx = self.ctx;
@@ -640,9 +681,9 @@ impl<'a> CallHost<'a> {
             }
             Err(e) => {
                 // Thrown (or rethrown) as a synchronous call's error, then
-                // taken as the promise's.
+                // taken as the promise's unless the call throws.
                 let thrown = self.finish(Err(e));
-                return if promise {
+                return if promise && !throws {
                     rejected_with_exception(ctx)
                 } else {
                     thrown
@@ -705,12 +746,8 @@ impl<'a> CallHost<'a> {
                 from_raw(v)
             }
             Err(_) if self.pending.get() => qjs::JS_EXCEPTION,
-            Err(Thrown::Type(message)) => {
-                let _ = js::type_error(ctx, &message);
-                qjs::JS_EXCEPTION
-            }
-            Err(Thrown::Error(message)) => {
-                let _ = throw_error(ctx, &message);
+            Err(thrown) => {
+                let _ = js::throw(ctx, error_value(ctx, &thrown));
                 qjs::JS_EXCEPTION
             }
         }
@@ -720,6 +757,7 @@ impl<'a> CallHost<'a> {
     fn new_object(&self, proto: Raw, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
         let wrappers = classes(self.ctx).wrappers.clone();
         let k = key(&instance);
+        let def = instance.def();
         let obj = web::instance_of_proto(
             self.ctx,
             proto,
@@ -730,7 +768,34 @@ impl<'a> CallHost<'a> {
         )
         .map_err(|Throw| self.threw())?;
         wrappers.borrow_mut().insert(k, obj.raw());
+        if def.interface {
+            self.own_fields(def, &obj)?;
+        }
         Ok(to_raw(obj.take()))
+    }
+
+    /// An interface's getters, read once as its object's own enumerable
+    /// data properties (Node's `Stats`: `Object.keys`, spread and
+    /// `JSON.stringify` see them); its methods stay on the prototype.
+    fn own_fields(&self, def: &'static ClassDef, obj: &V) -> Result<(), PropError> {
+        for member in def.members.iter().filter(|m| m.kind == MemberKind::Getter) {
+            let MemberCall::Sync(get) = member.call else {
+                continue;
+            };
+            // SAFETY: no arguments.
+            let args = unsafe { js::Args::new(0, std::ptr::null_mut()) };
+            let host = CallHost::new(self.ctx, obj.raw(), UNDEFINED, args);
+            let value = get(&host).map_err(|thrown| PropError(thrown.to_string()))?;
+            js::define(
+                self.ctx,
+                obj.raw(),
+                member.name,
+                V::own(self.ctx, from_raw(value)),
+                true,
+            )
+            .map_err(|Throw| self.threw())?;
+        }
+        Ok(())
     }
 }
 
@@ -785,6 +850,16 @@ impl JsHost for CallHost<'_> {
         js::to_string(self.ctx, v).ok()
     }
 
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>> {
+        let v = from_raw(v);
+        let view = js::view(self.ctx, v)?;
+        if view.kind != Some(qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int) {
+            return None;
+        }
+        // SAFETY: copied at once, before any JS can detach the buffer.
+        Some(unsafe { js::bytes_of(self.ctx, v) }?.to_vec())
+    }
+
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError> {
         let v = from_raw(v);
         // SAFETY: a tag check of a live value, then its length.
@@ -817,6 +892,57 @@ impl JsHost for CallHost<'_> {
             return Ok(to_raw(UNDEFINED));
         }
         self.checked(js::get(self.ctx, v, key))
+    }
+
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError> {
+        let v = from_raw(v);
+        if !js::is_object(v) {
+            return Ok(Vec::new());
+        }
+        let mut table = std::ptr::null_mut();
+        let mut len = 0;
+        // SAFETY: v is a live object; QuickJS returns a table owned until
+        // JS_FreePropertyEnum (a proxy's trap may run JS meanwhile).
+        if unsafe {
+            qjs::JS_GetOwnPropertyNames(
+                self.ctx,
+                &mut table,
+                &mut len,
+                v,
+                (qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) as c_int,
+            )
+        } < 0
+        {
+            return Err(self.threw());
+        }
+        let keys = (|| {
+            self.read(len as usize)?;
+            let mut keys = Vec::with_capacity(len as usize);
+            for i in 0..len as usize {
+                // SAFETY: the table has `len` entries; JS_AtomToString
+                // returns an owned string.
+                let key = V::checked(self.ctx, unsafe {
+                    qjs::JS_AtomToString(self.ctx, (*table.add(i)).atom)
+                });
+                let key = self.checked(key)?;
+                let text = js::to_string(self.ctx, from_raw(key));
+                self.free(key);
+                keys.push(text.map_err(|Throw| self.threw())?);
+            }
+            Ok(keys)
+        })();
+        // SAFETY: the table and length QuickJS returned above.
+        unsafe { qjs::JS_FreePropertyEnum(self.ctx, table, len) };
+        keys
+    }
+
+    fn date(&self, v: JsRaw) -> Option<f64> {
+        let v = from_raw(v);
+        // SAFETY: a class check of a live value.
+        if !unsafe { qjs::JS_IsDate(v) } {
+            return None;
+        }
+        js::to_number(self.ctx, v).ok()
     }
 
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {
@@ -908,6 +1034,17 @@ impl JsHost for CallHost<'_> {
         self.checked(js::string(self.ctx, s))
     }
 
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
+        self.checked(js::uint8_array(self.ctx, bytes))
+    }
+
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {
+        // SAFETY: JS_NewDate returns an owned Date of this live context.
+        self.checked(V::checked(self.ctx, unsafe {
+            qjs::JS_NewDate(self.ctx, millis)
+        }))
+    }
+
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError> {
         let items = items
             .into_iter()
@@ -949,6 +1086,93 @@ impl JsHost for CallHost<'_> {
 
     fn this(&self) -> JsRaw {
         to_raw(self.this)
+    }
+
+    fn system(&self) -> nsh_core::ui::System {
+        let shared = crate::dom::shared(self.ctx);
+        nsh_core::ui::System::new(
+            std::sync::Arc::new(shared.system_access.borrow().clone()),
+            shared.system_data_dir.borrow().clone(),
+            shared.system_paths.borrow().clone(),
+            shared.system_quotas.clone(),
+        )
+        .with_locals(shared.system_locals.clone())
+        .with_exit(shared.system_exit_handler.borrow().clone())
+        .with_websocket(shared.system_websocket.borrow().clone())
+        .with_filesystem(shared.system_filesystem.borrow().clone())
+        // SAFETY: a short read of the live renderer state.
+        .with_os(unsafe { (*crate::state::state(self.ctx)).dom.os() })
+    }
+
+    fn start_task(&self, task: nsh_core::ui::TaskStart) {
+        // Past the op limit the app is stopped: the task goes with it.
+        let op = nsh_core::Op::Rust(RustOp {
+            call: 0,
+            run: RustCall::Task(task),
+        });
+        if crate::dom::push_op(self.ctx, op).is_err() {
+            let _ = js::take_exception(self.ctx);
+        }
+    }
+
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
+        let ctx = self.ctx;
+        // Cleared when the JS function goes (it ran and its owner let it
+        // go, or the VM went): the release then has nothing to find, and
+        // until then the function's address is its own.
+        struct Alive(Rc<Cell<bool>>);
+        impl Drop for Alive {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let alive = Rc::new(Cell::new(true));
+        let guard = Alive(alive.clone());
+        let f = RefCell::new(Some(f));
+        let cleanup = js::closure(ctx, Vec::new(), move |_, _, _| {
+            let _alive = &guard;
+            if let Some(f) = f.borrow_mut().take() {
+                f();
+            }
+            Ok(V::undefined())
+        });
+        let Ok(cleanup) = cleanup else {
+            let _ = js::take_exception(ctx);
+            return Box::new(|| {});
+        };
+        let raw = cleanup.raw();
+        // The reactive owner the call runs under, or the module's run
+        // (hot reload); otherwise the VM's end runs the module's teardown.
+        if crate::reactive::has_owner(ctx) {
+            // SAFETY: no other reference to the graph is held here.
+            let owner = unsafe { crate::reactive::graph(ctx) }.owner();
+            let mut callback = cleanup.raw();
+            // SAFETY: one borrowed callback; the owner duplicates it.
+            let result = unsafe { crate::reactive::on_cleanup(ctx, UNDEFINED, 1, &mut callback) };
+            // SAFETY: on_cleanup's owned result.
+            unsafe { qjs::JS_FreeValue(ctx, result) };
+            drop(cleanup);
+            Box::new(move || {
+                if !alive.get() {
+                    return;
+                }
+                // SAFETY: the function lives, and so does its VM; a release
+                // runs outside JS, holding no other reference to the graph.
+                let removed = unsafe { crate::reactive::graph(ctx) }
+                    .remove_cleanup(owner, |c| js::same(*c, raw));
+                if let Some(removed) = removed {
+                    // SAFETY: the owner's reference, taken back.
+                    unsafe { qjs::JS_FreeValue(ctx, removed) };
+                }
+            })
+        } else {
+            crate::hot::undo_on_rerun(ctx, cleanup);
+            Box::new(move || {
+                if alive.get() {
+                    drop(crate::hot::forget_undo(ctx, raw));
+                }
+            })
+        }
     }
 
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
@@ -1297,6 +1521,11 @@ pub(crate) mod tests {
     }
 
     thread_local! {
+        /// The cleanups `Tally.guard` registered that ran.
+        static CLEANED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    thread_local! {
         /// The callbacks `Tally.keep` keeps.
         static KEPT: std::cell::RefCell<Vec<Callback>> = const { std::cell::RefCell::new(Vec::new()) };
     }
@@ -1457,6 +1686,15 @@ pub(crate) mod tests {
         /// Drops the kept callbacks.
         pub(crate) fn forget() {
             KEPT.with(|k| k.borrow_mut().clear());
+        }
+
+        /// Counts a cleanup when the call's owner goes; `release` takes it
+        /// back at once.
+        pub(crate) fn guard(release: bool, cx: CallCx<'_>) {
+            let cleanup = cx.on_cleanup(|| CLEANED.with(|c| c.set(c.get() + 1)));
+            if release {
+                cleanup.release();
+            }
         }
 
         /// Raises `token`'s id.
@@ -2016,6 +2254,31 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(shown, ["9 undefined true"]);
+    }
+
+    #[test]
+    fn released_cleanups_leave_their_owner() {
+        let host = host();
+        host.with_raw(|raw| {
+            // SAFETY: the host owns the live context for this closure.
+            let ctx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+            crate::reactive::install_globals(&ctx);
+        });
+        run(
+            &host,
+            r#"
+            globalThis.dispose = __nsh_reactive.createRoot((dispose) => {
+                Tally.guard(false);
+                for (let i = 0; i < 5; i++) Tally.guard(true);
+                return dispose;
+            });
+            "#,
+        )
+        .unwrap();
+        assert_eq!(CLEANED.with(Cell::get), 0);
+        run(&host, "dispose();").unwrap();
+        // Only the cleanup never released ran.
+        assert_eq!(CLEANED.with(Cell::get), 1);
     }
 
     #[test]

@@ -1,0 +1,19 @@
+expect Standard grants files=true tcp=true websocket=true global=true
+covers [fs/promises] default
+covers [fs/promises] readFile
+covers [fs/promises] writeFile
+covers [fs/promises] readdir
+covers [fs/promises] exists
+covers [fs/promises] unlink
+covers [fs/promises] rmdir
+covers [fs/promises] mkdir
+covers [fs/promises] stat
+covers [fs/promises] lstat
+covers [fs/promises] rename
+covers [fs/promises] readlink
+covers [net] default
+covers [net] connect
+covers [websocket] WebSocket
+covers [globals] WebSocket
+covers [net] Socket
+covers [websocket] WebSocketConnection

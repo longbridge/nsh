@@ -11,8 +11,10 @@
 //!   `NativeShellDev.xcframework`) into `dist/nsh/embed/ios`.
 //! - `web`: the WebAssembly runtime, its player and the website's demos
 //!   (`website/public/play` by default).
-//! - `api`: records the API apps use in `api/current`; `--freeze` freezes
-//!   it in the baseline of a release's minor line (docs/dev/compatibility.md).
+//! - `api`: records the API apps use in `api/runtime.txt` and `api/types`
+//!   and shrinks `api/uncovered.txt`; `--keep <app>...` adds apps built by
+//!   this checkout (examples by name, other apps or `api/cases/<case>.tsx`
+//!   by path) to the fixtures in `api/apps` (docs/dev/compatibility.md).
 
 mod android;
 mod api;
@@ -78,13 +80,15 @@ enum Task {
         #[arg(long, default_value = "website/public/play")]
         out: std::path::PathBuf,
     },
-    /// Record the API apps use in `api/current`.
+    /// Record the API apps use in `api/runtime.txt` and `api/types`.
     Api {
-        /// Also freeze it for a release (the workspace's version by
-        /// default) in `api/v<major>.<minor>`: the API, and on the line's
-        /// first release the example apps built.
-        #[arg(long, value_name = "VERSION", num_args = 0..=1)]
-        freeze: Option<Option<String>>,
+        /// Also keep these apps, as this checkout builds them, in
+        /// `api/apps/<app>-<version>` (when the JSX compiler's output
+        /// changes, or for a new API); a kept fixture is never rewritten.
+        /// An app is an example's name or the path of an app's directory or
+        /// entry module (`api/cases/<case>.tsx`).
+        #[arg(long, value_name = "APP", num_args = 1..)]
+        keep: Vec<String>,
     },
 }
 
@@ -143,6 +147,6 @@ fn task(task: Task) -> anyhow::Result<()> {
         Task::Dist => dist::dist(),
         Task::IosEmbed => ios::build().map(|out| term::note(out.display())),
         Task::Web { out } => web::build(&out),
-        Task::Api { freeze } => api::api(freeze),
+        Task::Api { keep } => api::api(&keep),
     }
 }

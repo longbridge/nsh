@@ -12,7 +12,7 @@
 //!   methods of the component's ref in JS (`ref.setValue(5)`,
 //!   `await ref.value()`).
 //! - `#[module]` on an `impl` block of a unit struct: functions of a JS
-//!   object (`Alert.alert(...)`).
+//!   object (`AlertDialog.show(...)`).
 //! - `#[class]` on a struct and on its `impl` block: a JS class backed by
 //!   the Rust value (`new Tally(3)`, `tally.add(2)`).
 //!
@@ -39,9 +39,9 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, Data, DeriveInput, Expr, Fields, FnArg, GenericArgument, Ident, ImplItem, ItemFn,
-    ItemImpl, LitStr, Pat, PathArguments, ReturnType, Token, Type, bracketed, parse::Parse,
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned,
+    Attribute, Data, DeriveInput, Expr, Fields, FnArg, GenericArgument, Ident, ImplItem,
+    ImplItemFn, ItemFn, ItemImpl, LitStr, Pat, PathArguments, ReturnType, Token, Type, bracketed,
+    parse::Parse, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
 /// `text` as declaration text in generated code: left out of builds
@@ -237,6 +237,8 @@ struct PropAttr {
     aliases: Vec<String>,
     /// `Children` made only while the view places them.
     lazy: bool,
+    /// A `JsObject`'s `Option` field left out of the object when `None`.
+    skip_none: bool,
 }
 
 fn prop_attr(attrs: &[Attribute]) -> syn::Result<PropAttr> {
@@ -262,9 +264,12 @@ fn prop_attr(attrs: &[Attribute]) -> syn::Result<PropAttr> {
             } else if meta.path.is_ident("lazy") {
                 out.lazy = true;
                 Ok(())
+            } else if meta.path.is_ident("skip_none") {
+                out.skip_none = true;
+                Ok(())
             } else {
                 Err(meta.error(
-                    "expected `default`, `default = …`, `rename = \"…\"`, `alias = \"…\"` or `lazy`",
+                    "expected `default`, `default = …`, `rename = \"…\"`, `alias = \"…\"`, `lazy` or `skip_none`",
                 ))
             }
         })?;
@@ -1317,6 +1322,10 @@ fn methods_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
 /// JS (fields in camel case). A field is optional in TypeScript when it is
 /// an `Option` or has `#[prop(default)]` / `#[prop(default = expr)]`;
 /// missing, it takes its default. Doc comments document the fields.
+/// `#[prop(exact)]` on the struct refuses an object with other own
+/// enumerable keys (options where a typo must not pass unnoticed);
+/// `#[prop(skip_none)]` on an `Option` field leaves it out of the object
+/// when it is `None` (`"error" in exit` is false), instead of `null`.
 #[proc_macro_derive(JsObject, attributes(prop))]
 pub fn derive_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -1340,9 +1349,21 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
         ));
     };
     let ui = quote!(::nsh_core::ui);
+    let mut exact = false;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("prop")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("exact") {
+                exact = true;
+                Ok(())
+            } else {
+                Err(meta.error("expected `exact` on a `JsObject` struct"))
+            }
+        })?;
+    }
     let mut ts = Vec::new();
     let mut from_js = Vec::new();
     let mut to_js = Vec::new();
+    let mut keys = Vec::new();
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
         let ty = &field.ty;
@@ -1352,6 +1373,7 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
             .clone()
             .unwrap_or_else(|| camel(&ident.to_string()));
         let doc = docs(&field.attrs);
+        keys.push(js.clone());
         let is_option = matches!(last_segment(ty), Some((id, _)) if id == "Option");
         let optional = is_option || attr.default.is_some();
         let mark = if optional { "?" } else { "" };
@@ -1382,10 +1404,35 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 }
             }
         });
-        to_js.push(quote! {
-            host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+        if attr.skip_none && !is_option {
+            return Err(syn::Error::new(
+                field.span(),
+                "`skip_none` is for an `Option` field",
+            ));
+        }
+        to_js.push(if attr.skip_none {
+            quote! {
+                if let ::core::option::Option::Some(value) = &self.#ident {
+                    host.set_field(object, #js, #ui::JsValue::to_js(value, host)?.into_raw())?;
+                }
+            }
+        } else {
+            quote! {
+                host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+            }
         });
     }
+    let check = exact.then(|| {
+        quote! {
+            for key in value.keys()? {
+                if ![#(#keys),*].contains(&key.as_str()) {
+                    return ::core::result::Result::Err(#ui::PropError(
+                        ::std::format!("unknown field `{key}`"),
+                    ));
+                }
+            }
+        }
+    });
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let type_name = name.to_string();
     let doc = docs(&input.attrs);
@@ -1407,6 +1454,7 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 if value.kind() != #ui::JsKind::Object {
                     return ::core::result::Result::Err(value.expected("an object"));
                 }
+                #check
                 ::core::result::Result::Ok(Self { #(#from_js),* })
             }
 
@@ -1423,6 +1471,44 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
+/// Whether `ty` is `System`: the VM a call comes from, filled in by the
+/// call rather than passed by JS.
+fn system_param(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "System")
+}
+
+/// Whether `ty` is `CallCx`: what a synchronous call can do beyond
+/// computing, filled in by the call.
+fn call_cx_param(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "CallCx")
+}
+
+/// `Later<T>` -> `T`: work a synchronous call starts as a task.
+fn later_of(ty: &Type) -> Option<&Type> {
+    match last_segment(ty)? {
+        (id, Some(t)) if id == "Later" => Some(t),
+        _ => None,
+    }
+}
+
+/// What a function that is not `async` returns: its JS result's type, and
+/// whether it is a `Result` and a [`Later`]'s task.
+fn sync_returns(output: &ReturnType) -> (Option<&Type>, bool, bool) {
+    match output {
+        ReturnType::Default => (None, false, false),
+        ReturnType::Type(_, ty) => {
+            let (ok, fallible) = match result_ok(ty) {
+                Some(ok) => (ok, true),
+                None => (&**ty, false),
+            };
+            match later_of(ok) {
+                Some(t) => (Some(t), fallible, true),
+                None => (Some(ok), fallible, false),
+            }
+        }
+    }
+}
+
 /// Whether `ty` is `&mut ModuleCx`: a module function's context.
 fn module_cx(ty: &Type) -> bool {
     matches!(ty, Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx"))
@@ -1431,7 +1517,7 @@ fn module_cx(ty: &Type) -> bool {
 /// `#[module]` on an `impl` block of a unit struct: its functions with a
 /// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
 /// a JS object named after the struct
-/// (`Alert.alert(...)`), documented by their doc comments. The struct
+/// (`AlertDialog.show(...)`), documented by their doc comments. The struct
 /// takes `#[module]` too, and its doc comment documents the object (a doc
 /// comment on the block is an error: TS shows the struct's); a
 /// component's struct (`#[component]`) needs none. The signature decides
@@ -1455,25 +1541,23 @@ fn module_cx(ty: &Type) -> bool {
 /// (`Registry::module::<Alert>()`); a component exported under the same
 /// name gets the functions too (`Chart.clear(...)` for a `Chart` component).
 /// `#[module(flat)]` exports the functions one by one instead of as an
-/// object.
+/// object. `#[module(flat, default)]` also exports that object as `default`.
+/// Visible associated constants of type `&'static str`, `bool`, or a primitive
+/// numeric type are exported under their unchanged Rust names; their values
+/// determine both the native representation and TypeScript primitive type.
 #[proc_macro_attribute]
 pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let flat = match attr.to_string().as_str() {
-        "" => false,
-        "flat" => true,
-        _ => {
-            return syn::Error::new(Span::call_site(), "`#[module]` takes `flat` or nothing")
-                .into_compile_error()
-                .into();
-        }
+    let (flat, default) = match module_options(attr.into()) {
+        Ok(options) => options,
+        Err(error) => return error.into_compile_error().into(),
     };
     let item = parse_macro_input!(item as syn::Item);
     match item {
-        syn::Item::Struct(s) if !flat => module_struct(s),
-        syn::Item::Impl(i) => module_impl(i, flat),
+        syn::Item::Struct(s) if !flat && !default => module_struct(s),
+        syn::Item::Impl(i) => module_impl(i, flat, default),
         syn::Item::Struct(s) => Err(syn::Error::new(
             s.ident.span(),
-            "`flat` goes on the `#[module(flat)] impl` block; the struct takes `#[module]`",
+            "`flat` and `default` go on the `#[module(..)] impl` block; the struct takes `#[module]`",
         )),
         other => Err(syn::Error::new(
             other.span(),
@@ -1539,15 +1623,25 @@ fn no_block_doc(item: &ItemImpl, what: &str) -> syn::Result<()> {
 /// (`Instance<Other>`, not `&Other`). Doc comments document the class and
 /// its members. On the struct, the fields whose types name `Callback` or
 /// `Instance` report the callbacks they keep to JS's collector.
+/// `#[class(interface)]` on the struct: its objects come from members
+/// only, so the module exports no value of it and TypeScript declares an
+/// `interface` (no constructor or statics).
 #[proc_macro_attribute]
 pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return syn::Error::new(Span::call_site(), "`#[class]` takes no arguments")
+    let interface = match syn::parse::<Option<Ident>>(attr) {
+        Ok(None) => false,
+        Ok(Some(flag)) if flag == "interface" => true,
+        _ => {
+            return syn::Error::new(
+                Span::call_site(),
+                "`#[class]` takes nothing, or `interface` on the struct",
+            )
             .into_compile_error()
             .into();
-    }
+        }
+    };
     let item = parse_macro_input!(item as syn::Item);
-    class::class(item)
+    class::class(item, interface)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -1566,7 +1660,75 @@ fn result_ok(ty: &Type) -> Option<&Type> {
     }
 }
 
-fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
+/// Parse flags without depending on attribute token spacing or ordering.
+fn module_options(tokens: TokenStream2) -> syn::Result<(bool, bool)> {
+    struct Options(bool, bool);
+    impl Parse for Options {
+        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+            use syn::ext::IdentExt;
+            let mut options = Self(false, false);
+            while !input.is_empty() {
+                let flag = input.call(Ident::parse_any)?;
+                let target = match flag.to_string().as_str() {
+                    "flat" => &mut options.0,
+                    "default" => &mut options.1,
+                    _ => {
+                        return Err(syn::Error::new(
+                            flag.span(),
+                            "`#[module]` accepts only `flat` and `default`",
+                        ));
+                    }
+                };
+                if *target {
+                    return Err(syn::Error::new(flag.span(), "duplicate module flag"));
+                }
+                *target = true;
+                if !input.is_empty() {
+                    input.parse::<Token![,]>()?;
+                }
+            }
+            if options.1 && !options.0 {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "`default` requires `#[module(flat, default)]`",
+                ));
+            }
+            Ok(options)
+        }
+    }
+    syn::parse2::<Options>(tokens).map(|options| (options.0, options.1))
+}
+
+/// Primitive constants have a single runtime representation and TS type.
+fn module_constant_variant(ty: &Type) -> syn::Result<&'static str> {
+    if let Type::Reference(reference) = ty
+        && reference.mutability.is_none()
+        && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
+        && reference
+            .lifetime
+            .as_ref()
+            .is_none_or(|lifetime| lifetime.ident == "static")
+    {
+        return Ok("String");
+    }
+    if let Type::Path(path) = ty
+        && path.qself.is_none()
+        && let Some((name, _)) = last_segment(ty)
+    {
+        match name.to_string().as_str() {
+            "bool" => return Ok("Bool"),
+            "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
+            | "i128" | "isize" | "f32" | "f64" => return Ok("Number"),
+            _ => {}
+        }
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "module constants support only `&'static str`, `bool`, and primitive numeric types",
+    ))
+}
+
+fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
     let self_ty = &item.self_ty.clone();
@@ -1579,13 +1741,36 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
     let module_name = type_name.to_string();
     no_block_doc(&item, "#[module]")?;
     let mut entries = Vec::new();
+    let mut constants = Vec::new();
     for member in &item.items {
+        if let ImplItem::Const(constant) = member {
+            if matches!(constant.vis, syn::Visibility::Inherited) {
+                continue;
+            }
+            let ident = &constant.ident;
+            let name = ident.to_string();
+            let doc = decl(&docs(&constant.attrs));
+            let variant = module_constant_variant(&constant.ty)?;
+            let value = if variant == "Number" {
+                quote!(#ui::ConstantValue::Number(#self_ty::#ident as f64))
+            } else {
+                let variant = Ident::new(variant, constant.ty.span());
+                quote!(#ui::ConstantValue::#variant(#self_ty::#ident))
+            };
+            let cfgs = constant
+                .attrs
+                .iter()
+                .filter(|attr| attr.path().is_ident("cfg"));
+            constants.push(quote!(#(#cfgs)* #ui::Constant::new(#name, #doc, #value)));
+            continue;
+        }
         let ImplItem::Fn(f) = member else { continue };
         if !exported(&f.vis) {
             continue;
         }
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
+        let getter = f.attrs.iter().any(|a| a.path().is_ident("getter"));
         let what = if flat {
             js.clone()
         } else {
@@ -1607,10 +1792,33 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             .collect::<syn::Result<_>>()?;
         let takes_cx = typed.last().is_some_and(|t| module_cx(&t.ty));
         let mut params = Vec::new();
+        let mut params_ts = Vec::new();
         let mut names = Vec::new();
-        let mut ts = Vec::new();
+        // Where each argument of the Rust call comes from: JS's argument
+        // `Js(i)`, the call's `System` or its `CallCx`.
+        enum Source {
+            Js(usize),
+            System,
+            Cx,
+        }
+        let mut sources = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
+            if system_param(ty) {
+                sources.push(Source::System);
+                continue;
+            }
+            if call_cx_param(ty) {
+                if is_async || takes_cx {
+                    return Err(syn::Error::new(
+                        arg.span(),
+                        "`CallCx` is a synchronous call's (it borrows the call); an `async` \
+                         function starts no other task",
+                    ));
+                }
+                sources.push(Source::Cx);
+                continue;
+            }
             if module_cx(ty) {
                 if i + 1 != typed.len() || is_async {
                     return Err(syn::Error::new(
@@ -1634,9 +1842,23 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 ));
             };
             names.push(camel(&name.ident.to_string()));
-            ts.push(param_ts(ty, &arg.attrs)?);
+            sources.push(Source::Js(params.len()));
+            params_ts.push(param_ts(ty, &arg.attrs)?);
             params.push(ty);
         }
+        if getter
+            && (is_async
+                || takes_cx
+                || !params.is_empty()
+                || matches!(f.sig.output, ReturnType::Default))
+        {
+            return Err(syn::Error::new(
+                f.sig.span(),
+                "a module's getter takes no JS parameters, is not `async` and returns its value",
+            ));
+        }
+        let (sync_ret, _, starts) = sync_returns(&f.sig.output);
+        let starts = starts && !is_async && !takes_cx;
         // An `Option` parameter is optional when the ones after it are too.
         let mut optional = vec![false; params.len()];
         for i in (0..params.len()).rev() {
@@ -1645,7 +1867,7 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             }
             optional[i] = true;
         }
-        let param_specs = ts
+        let param_specs = params_ts
             .iter()
             .zip(&names)
             .zip(&optional)
@@ -1664,11 +1886,19 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 ),
             },
         };
+        // A task's start resolves with the task's value.
+        let returns = match (starts, sync_ret) {
+            (true, Some(t)) => quote!(::core::option::Option::Some(#private::ret_ts::<#t>())),
+            _ => returns,
+        };
         // The classes the signature names, registered with the module.
         let ret_refs = match &f.sig.output {
             ReturnType::Default => None,
             ReturnType::Type(_, ty) => {
-                let ty = result_ok(ty).unwrap_or(&**ty);
+                let ty = match (starts, sync_ret) {
+                    (true, Some(t)) => t,
+                    _ => result_ok(ty).unwrap_or(&**ty),
+                };
                 Some(quote!(#private::ret_classes::<#ty>(__out);))
             }
         };
@@ -1676,16 +1906,40 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             .iter()
             .map(|ty| quote!(#private::arg_classes::<#ty>(__out);))
             .chain(ret_refs);
-        let locals: Vec<_> = (0..params.len())
+        let locals: Vec<_> = (0..sources.len())
             .map(|i| format_ident!("__arg{}", i))
             .collect();
-        let call = if !is_async && !takes_cx {
-            // In the JS call, converting the values directly.
-            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
-                |(i, ((ty, name), local))| {
+        // Every argument of the Rust call: JS's converted, the `System`
+        // filled in.
+        let decoded: Vec<_> = sources
+            .iter()
+            .zip(&locals)
+            .map(|(source, local)| match source {
+                Source::Js(i) => {
+                    let (ty, name) = (params[*i], &names[*i]);
                     quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
-                },
-            );
+                }
+                Source::System => quote!(let #local = #private::system(host);),
+                Source::Cx => quote!(let #local = #private::call_cx(host);),
+            })
+            .collect();
+        let call = if starts {
+            // In the JS call; the task it returns runs in the core.
+            let finish = if fallible {
+                quote!(#private::start_result(__result))
+            } else {
+                quote!(#private::start(__result))
+            };
+            quote! {
+                #ui::FunctionCall::Start(|host| {
+                    #(#decoded)*
+                    let __result = #self_ty::#ident(#(#locals),*);
+                    #finish
+                })
+            }
+        } else if !is_async && !takes_cx {
+            // In the JS call, converting the values directly.
+            let decode = decoded.iter();
             let finish = if fallible {
                 quote!(#private::ret_result(host, __result))
             } else {
@@ -1700,11 +1954,7 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             }
         } else {
             // Converted in the JS call; the op carries them.
-            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
-                |(i, ((ty, name), local))| {
-                    quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
-                },
-            );
+            let decode = decoded.iter();
             let finish = if fallible {
                 quote!(#private::boxed_result(__result))
             } else {
@@ -1736,6 +1986,7 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 }
             }
         };
+        let (overloads, overload_refs) = overloads(f)?;
         // `#[cfg]` of the function applies to its entry too.
         let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
         entries.push(quote! {
@@ -1748,14 +1999,20 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 refs: |__out| {
                     let _ = &__out;
                     #(#refs)*
+                    #(#overload_refs)*
                 },
                 call: #call,
+                getter: #getter,
+                overloads: &[#(#overloads),*],
             }
         });
     }
+    // `#[getter]`, `#[args]` and the overloads' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
             strip_args(&mut f.sig);
+            f.attrs
+                .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("overload"));
         }
     }
     Ok(quote! {
@@ -1766,8 +2023,141 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             const DOC: &'static str = <Self as #ui::__private::ModuleDoc>::DOC;
             const FUNCTIONS: &'static [#ui::Function] = &[#(#entries),*];
             const FLAT: bool = #flat;
+            const DEFAULT: bool = #default;
+            const CONSTANTS: &'static [#ui::Constant] = &[#(#constants),*];
         }
     })
+}
+
+/// The `#[overload(fn(path: String, encoding: Encoding) -> String)]`
+/// signatures of module function `f`, and the classes they name: Rust
+/// types whose TypeScript types make the declaration (a trailing `Option`
+/// is optional; the result is a promise when the function's is).
+fn overloads(f: &ImplItemFn) -> syn::Result<(Vec<TokenStream2>, Vec<TokenStream2>)> {
+    let private = quote!(::nsh_core::ui::__private);
+    let mut overloads = Vec::new();
+    let mut refs = Vec::new();
+    for attr in f.attrs.iter().filter(|a| a.path().is_ident("overload")) {
+        let sig: syn::TypeBareFn = attr.parse_args()?;
+        let mut params = Vec::new();
+        for arg in &sig.inputs {
+            let Some((name, _)) = &arg.name else {
+                return Err(syn::Error::new(
+                    arg.span(),
+                    "an overload's parameters are named: `fn(path: String)`",
+                ));
+            };
+            params.push((
+                camel(&name.to_string()),
+                &arg.ty,
+                param_ts(&arg.ty, &arg.attrs)?,
+            ));
+        }
+        let mut optional = vec![false; params.len()];
+        for i in (0..params.len()).rev() {
+            if !matches!(last_segment(params[i].1), Some((id, _)) if id == "Option") {
+                break;
+            }
+            optional[i] = true;
+        }
+        let specs = params
+            .iter()
+            .zip(&optional)
+            .map(|((name, _, ts), optional)| quote!((#name, #ts, #optional)));
+        refs.extend(
+            params
+                .iter()
+                .map(|(_, ty, _)| quote!(#private::arg_classes::<#ty>(__out);)),
+        );
+        let returns = match &sig.output {
+            ReturnType::Default => quote!(::core::option::Option::None),
+            ReturnType::Type(_, ty) => {
+                refs.push(quote!(#private::ret_classes::<#ty>(__out);));
+                quote!(::core::option::Option::Some(#private::ret_ts::<#ty>()))
+            }
+        };
+        overloads.push(quote! {
+            ::nsh_core::ui::Overload { params: &[#(#specs),*], returns: #returns }
+        });
+    }
+    Ok((overloads, refs))
+}
+
+#[cfg(test)]
+mod module_tests {
+    use super::*;
+
+    #[test]
+    fn module_flags_accept_order_whitespace_and_trailing_comma() {
+        assert_eq!(module_options(quote!()).unwrap(), (false, false));
+        assert_eq!(module_options(quote!(flat)).unwrap(), (true, false));
+        assert_eq!(
+            module_options(quote!(flat, default,)).unwrap(),
+            (true, true)
+        );
+        assert_eq!(module_options(quote!(default, flat)).unwrap(), (true, true));
+        for flags in [
+            quote!(default),
+            quote!(flat, flat),
+            quote!(flat, unknown),
+            quote!(flat default),
+        ] {
+            assert!(module_options(flags.clone()).is_err(), "{flags}");
+        }
+    }
+
+    #[test]
+    fn primitive_constant_types_have_explicit_unsupported_type_diagnostics() {
+        for (ty, expected) in [
+            (quote!(&'static str), "String"),
+            (quote!(&str), "String"),
+            (quote!(bool), "Bool"),
+            (quote!(i32), "Number"),
+            (quote!(f64), "Number"),
+        ] {
+            assert_eq!(
+                module_constant_variant(&syn::parse2(ty).unwrap()).unwrap(),
+                expected
+            );
+        }
+        for ty in [
+            quote!(String),
+            quote!([u8; 2]),
+            quote!(Option<bool>),
+            quote!(&mut str),
+        ] {
+            let error = module_constant_variant(&syn::parse2(ty).unwrap()).unwrap_err();
+            assert!(error.to_string().contains("module constants support only"));
+        }
+    }
+
+    #[test]
+    fn constants_keep_associated_expressions_names_and_cfgs() {
+        let item = syn::parse_quote! {
+            impl Metadata {
+                /// Native line ending.
+                pub const EOL: &'static str = if cfg!(windows) { "\r\n" } else { "\n" };
+                pub const LIMIT: usize = 3;
+                #[cfg(any())]
+                pub const DISABLED: bool = false;
+                const PRIVATE: [u8; 2] = [1, 2];
+            }
+        };
+        let expanded = module_impl(item, true, true).unwrap().to_string();
+        assert!(expanded.contains("ConstantValue :: String (Metadata :: EOL)"));
+        assert!(expanded.contains("ConstantValue :: Number (Metadata :: LIMIT as f64)"));
+        assert!(expanded.contains("ConstantValue :: Bool (Metadata :: DISABLED)"));
+        assert!(expanded.contains("const DEFAULT : bool = true"));
+        assert!(!expanded.contains("Constant :: new (\"PRIVATE\""));
+        let unsupported =
+            syn::parse_quote! { impl Metadata { pub const BYTES: [u8; 2] = [1, 2]; } };
+        assert!(
+            module_impl(unsupported, true, false)
+                .unwrap_err()
+                .to_string()
+                .contains("module constants support only")
+        );
+    }
 }
 
 #[cfg(test)]

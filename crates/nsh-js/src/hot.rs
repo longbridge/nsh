@@ -197,6 +197,17 @@ pub(crate) fn undo_on_rerun(ctx: Ctx, f: V) {
     });
 }
 
+/// Takes `f` back from what undoes a module's run ([`undo_on_rerun`]):
+/// what it undoes ended by itself.
+pub(crate) fn forget_undo(ctx: Ctx, f: Raw) -> Option<V> {
+    with(ctx, |h| {
+        h.undo.values_mut().find_map(|list| {
+            let at = list.iter().position(|v| js::same(v.raw(), f))?;
+            Some(list.remove(at))
+        })
+    })
+}
+
 /// `mount(app, props)` is called while a module runs again: when its
 /// previous run's next render mounted the same `app` without props, that
 /// render stays and its disposer (a new reference) is returned. Otherwise

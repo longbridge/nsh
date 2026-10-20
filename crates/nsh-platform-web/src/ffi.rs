@@ -51,6 +51,20 @@ unsafe extern "C" {
     fn js_fetch_pause(id: u32, paused: u32);
     #[link_name = "fetch_cancel"]
     fn js_fetch_cancel(id: u32);
+    #[link_name = "filesystem_start"]
+    fn js_filesystem_start(id: u32, p: *const u8, l: usize, bp: *const u8, bl: usize);
+    #[link_name = "filesystem_cancel"]
+    fn js_filesystem_cancel(id: u32);
+    #[link_name = "websocket_start"]
+    fn js_websocket_start(id: u32, request: *const u8, len: usize) -> u32;
+    #[link_name = "websocket_send"]
+    fn js_websocket_send(id: u32, data: *const u8, len: usize, binary: u32) -> u32;
+    #[link_name = "websocket_close"]
+    fn js_websocket_close(id: u32, code: u32, reason: *const u8, len: usize) -> u32;
+    #[link_name = "websocket_buffered"]
+    fn js_websocket_buffered(id: u32) -> f64;
+    #[link_name = "websocket_cancel"]
+    fn js_websocket_cancel(id: u32);
     #[link_name = "load_chunk"]
     fn js_load_chunk(id: *const u8, id_len: usize);
     #[link_name = "storage_load"]
@@ -257,4 +271,53 @@ pub(crate) fn storage_clear(prefix: &str) -> Result<(), String> {
     crate::storage::take_reply();
     // SAFETY: the slice is valid for the call; JS only reads it.
     storage_result(unsafe { js_storage_clear(prefix.as_ptr(), prefix.len()) }).map(drop)
+}
+
+/// Opens a browser WebSocket with the serialized request.
+pub(crate) fn websocket_start(id: u32, request: &str) -> bool {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_websocket_start(id, request.as_ptr(), request.len()) != 0 }
+}
+
+/// Sends one text or binary message on the browser socket.
+pub(crate) fn websocket_send(id: u32, data: &[u8], binary: bool) -> bool {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_websocket_send(id, data.as_ptr(), data.len(), binary as u32) != 0 }
+}
+
+/// Requests the browser's closing handshake.
+pub(crate) fn websocket_close(id: u32, code: u16, reason: &str) -> bool {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_websocket_close(id, code as u32, reason.as_ptr(), reason.len()) != 0 }
+}
+
+/// Reads the browser's current queued byte count.
+pub(crate) fn websocket_buffered(id: u32) -> usize {
+    // SAFETY: no pointers.
+    unsafe { js_websocket_buffered(id) as usize }
+}
+
+/// Removes callbacks before closing a discarded browser socket.
+pub(crate) fn websocket_cancel(id: u32) {
+    // SAFETY: no pointers.
+    unsafe { js_websocket_cancel(id) }
+}
+
+/// Begins a browser OPFS operation.
+pub(crate) fn filesystem_start(id: u32, request: &str, bytes: &[u8]) {
+    // SAFETY: JS copies both slices during this call.
+    unsafe {
+        js_filesystem_start(
+            id,
+            request.as_ptr(),
+            request.len(),
+            bytes.as_ptr(),
+            bytes.len(),
+        )
+    }
+}
+/// Detaches an operation when its engine future is dropped.
+pub(crate) fn filesystem_cancel(id: u32) {
+    // SAFETY: only an opaque integer crosses the boundary.
+    unsafe { js_filesystem_cancel(id) }
 }

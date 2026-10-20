@@ -1,0 +1,46 @@
+# What a user does and sees (compat/apps.rs).
+expect Layout direction
+frame id:rtl-row 0 17 300 100
+frame id:rtl-row-a 250 0 50 20
+frame id:rtl-row-b 200 0 50 20
+frame id:ltr-row-a 0 0 50 20
+frame id:ltr-row-b 50 0 50 20
+frame id:rtl-column-a 250 0 50 20
+frame id:rtl-column-b 0 20 300 20
+frame id:rtl-justify-a 60 0 50 20
+frame id:rtl-justify-b 0 0 50 20
+frame id:rtl-wrap-a 70 0 50 20
+frame id:rtl-wrap-b 20 0 50 20
+frame id:rtl-wrap-c 70 20 50 20
+frame id:inherit-row 0 0 300 20
+frame id:inherit-row-a 250 0 50 20
+frame id:inherit-ltr 0 20 300 20
+frame id:inherit-ltr-a 0 0 50 20
+frame id:inherit-explicit 0 40 300 20
+frame id:inherit-explicit-a 250 0 50 20
+frame id:ltr-inset-start 10 0 50 20
+frame id:ltr-inset-end 240 30 50 20
+frame id:ltr-inset-both 20 60 240 20
+frame id:rtl-inset-start 240 0 50 20
+frame id:rtl-inset-end 10 30 50 20
+frame id:rtl-inset-both 40 60 240 20
+frame id:rtl-inset-percent-a 220 0 50 20
+frame id:rtl-sides-left 240 0 50 20
+frame id:rtl-sides-right 10 30 50 20
+frame id:start-wins-a 20 0 50 20
+frame id:ltr-margin-a 10 0 50 20
+frame id:ltr-margin-b 75 0 50 20
+frame id:rtl-margin-a 240 0 50 20
+frame id:rtl-margin-b 175 0 50 20
+frame id:rtl-margin-right-a 250 0 50 20
+frame id:rtl-margin-right-b 185 0 50 20
+frame id:ltr-padding-a 12 0 258 20
+frame id:rtl-padding-a 30 0 258 20
+frame id:rtl-padding-sides-a 30 0 258 20
+covers [styles] direction
+covers [styles] start
+covers [styles] end
+covers [styles] marginStart
+covers [styles] marginEnd
+covers [styles] paddingStart
+covers [styles] paddingEnd

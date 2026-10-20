@@ -1,0 +1,10 @@
+# What a user does and sees (compat/apps.rs). The headless runtime is iOS:
+# the accessory view's content exists, and takes no room in its parent.
+expect iOS: true
+expect Accessory bar
+expect Rendered
+frame id:above 0 0 390 30
+frame id:below 0 30 390 30
+frame id:column 0 81 390 60
+covers [nsh/ios] isAvailable
+covers [nsh/ios] InputAccessoryView

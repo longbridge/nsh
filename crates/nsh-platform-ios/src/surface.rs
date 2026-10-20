@@ -395,6 +395,8 @@ impl RootView {
             viewport,
             trace: self.ivars().options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(crate::image::AssetReader(
                 self.ivars().options.asset_base.clone(),
             ))),

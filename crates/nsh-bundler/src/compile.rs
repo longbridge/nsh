@@ -38,6 +38,9 @@ impl NativeModules {
                 .collect(),
             ..Self::default()
         };
+        for name in nsh_core::js::STANDARD_MODULES {
+            out.specifiers.insert((*name).to_owned());
+        }
         for r in nsh_core::runtime::registries() {
             if let Some(spec) = r.specifier() {
                 out.specifiers.insert(spec.to_owned());
@@ -78,14 +81,16 @@ pub(crate) struct Compiled {
 
 /// TSX -> JS with nsh's JSX compiler ([`crate::jsx`]), TypeScript removed
 /// in the same pass; `prologue` runs first; with `hot_key` the module's
-/// components are hot ([`crate::hot`]). Errors are rendered with a code
-/// frame.
+/// components are hot ([`crate::hot`]); with `meta_path` (the module's
+/// path in the app) its `import.meta.url` is its own. Errors are rendered
+/// with a code frame.
 pub(crate) fn compile_native(
     path: &Path,
     source_type: SourceType,
     source: &str,
     prologue: Option<&str>,
     hot_key: Option<&str>,
+    meta_path: Option<&str>,
     modules: &NativeModules,
 ) -> Result<Compiled, String> {
     let allocator = Allocator::default();
@@ -124,10 +129,10 @@ pub(crate) fn compile_native(
         &ret.scoping,
         source,
         prologue,
+        meta_path,
         modules,
     )?;
-    // The scopes once TypeScript and the JSX are compiled, for the checks
-    // and the elision of imports.
+    // The scopes once TypeScript and JSX are compiled, for checking imports.
     let scoping = SemanticBuilder::new()
         .build(&program)
         .semantic
@@ -135,7 +140,10 @@ pub(crate) fn compile_native(
     if let Some(err) = check_named_imports(&program, &scoping, modules) {
         return Err(err.render_with_source_code(source.to_owned()));
     }
-    elide_unused_imports(&mut program, &scoping);
+    // Plain JS keeps imports that may be present for their side effects.
+    if source_type.is_typescript() || source_type.is_jsx() {
+        elide_unused_imports(&mut program, &scoping);
+    }
     let out = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(path.to_path_buf()),

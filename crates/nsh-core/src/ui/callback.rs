@@ -297,7 +297,7 @@ impl<T: Ret> CallbackArgs for T {
 }
 
 macro_rules! callback_tuple {
-    ($(($($t:ident $v:ident $n:literal),*)),*) => {$(
+    ($(($($t:ident $v:ident $n:literal $i:literal),*)),*) => {$(
         impl<$($t: Ret),*> CallbackArgs for ($($t,)*) {
             const ARITY: usize = [$($n),*].len();
 
@@ -324,9 +324,9 @@ macro_rules! callback_tuple {
 }
 
 callback_tuple!(
-    (A a "a", B b "b"),
-    (A a "a", B b "b", C c "c"),
-    (A a "a", B b "b", C c "c", D d "d")
+    (A a "a" 0, B b "b" 1),
+    (A a "a" 0, B b "b" 1, C c "c" 2),
+    (A a "a" 0, B b "b" 1, C c "c" 2, D d "d" 3)
 );
 
 /// What a [`Callback`] returns: a [`JsValue`] type, or `()` (its result

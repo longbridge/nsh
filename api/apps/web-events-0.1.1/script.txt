@@ -1,0 +1,44 @@
+# What a user does and sees (compat/apps.rs): a line per check, `<name>=<result>`.
+expect event.init=[ping,false,false,false,false,false]
+expect event.idle=[0,null,null]
+expect event.timeStamp=true
+expect event.constants=[0,1,2,3,2]
+expect event.notCancelable=false
+expect event.cancelable=[true,true,false]
+expect event.noType=TypeError
+expect event.instance=true
+expect custom.detail={"n":1}
+expect custom.defaultDetail=null
+expect custom.isEvent=true
+expect target.order=[first,object:ping,once,first,object:ping]
+expect target.removed=[object:ping]
+expect target.during=true,true,2,true|0,,true
+expect target.canceled=[false,true]
+expect target.stopImmediate=[1,2]
+expect target.signal=1
+expect target.redispatch=InvalidStateError
+expect target.subclass=true|7|true
+expect target.addedDuring=[a]
+expect abort.before=[false,undefined,true,true]
+expect abort.after=[true,listener:abort+onabort]
+expect abort.reason=true|AbortError|20
+expect abort.throwIfAborted=AbortError
+expect abort.notAborted=nothing
+expect abort.customReason=why|value why
+expect abort.static=true|r|AbortError
+expect abort.any=false|true|b
+expect abort.anyAborted=x
+expect abort.timeoutBefore=false
+expect abort.timeoutAfter=true|TimeoutError|23
+expect domex.fields=[NotFoundError,missing,8]
+expect domex.defaults=[Error,"",0]
+expect domex.codes=[1,5,11,12,20,23,25,0]
+expect domex.isError=[true,true,[object DOMException]]
+expect domex.toString=NotFoundError: missing
+expect done
+covers [globals] Event
+covers [globals] EventTarget
+covers [globals] CustomEvent
+covers [globals] AbortController
+covers [globals] AbortSignal
+covers [globals] DOMException

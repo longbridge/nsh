@@ -30,8 +30,8 @@ use std::{
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
-    ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue,
-    SubmitBehavior,
+    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
+    PayloadValue, SubmitBehavior,
 };
 
 use self::screen::Selector;
@@ -135,6 +135,7 @@ pub struct Headless {
     screen: Screen,
     step: String,
     applied: u64,
+    exited: bool,
     observer: Option<Observer>,
 }
 
@@ -149,6 +150,7 @@ impl Headless {
             screen: Screen::default(),
             step: "open".to_owned(),
             applied: 0,
+            exited: false,
             observer: None,
         })
     }
@@ -189,6 +191,15 @@ impl Headless {
 
     fn apply(&mut self, batch: &MountBatch) {
         self.screen.apply(batch);
+        self.exited |= batch.items.iter().any(|item| {
+            matches!(
+                item,
+                MountItem::Command {
+                    command: Command::ExitApp,
+                    ..
+                }
+            )
+        });
         self.applied += 1;
         if let Some(observer) = &mut self.observer {
             observer(&self.step, batch);
@@ -219,6 +230,9 @@ impl Headless {
     /// Applies the next batch, waiting `timeout` at most: the batch, or
     /// `None` when none came.
     pub fn next_batch(&mut self, timeout: Duration) -> Option<MountBatch> {
+        if self.exited {
+            return None;
+        }
         let batch = self.batches.recv_timeout(timeout).ok()?;
         self.apply(&batch);
         Some(batch)
@@ -227,12 +241,20 @@ impl Headless {
     /// Applies batches until none comes for `quiet`, or for `limit` at
     /// most: false if the limit ended it.
     fn quiet(&mut self, quiet: Duration, limit: Duration) -> bool {
+        if self.exited {
+            return true;
+        }
         let end = Instant::now() + limit;
         loop {
             let left = end.saturating_duration_since(Instant::now());
             let timeout = quiet.min(left);
             match self.batches.recv_timeout(timeout) {
-                Ok(batch) => self.apply(&batch),
+                Ok(batch) => {
+                    self.apply(&batch);
+                    if self.exited {
+                        return true;
+                    }
+                }
                 Err(RecvTimeoutError::Disconnected) => return true,
                 Err(RecvTimeoutError::Timeout) => return timeout < left,
             }
@@ -271,6 +293,9 @@ impl Headless {
     /// Applies the next batch, waiting until `deadline` at most: false
     /// when none came; an error when the app threw first.
     fn next_until(&mut self, deadline: Instant) -> Result<bool, String> {
+        if self.exited {
+            return Ok(false);
+        }
         let timeout = deadline.saturating_duration_since(Instant::now());
         crossbeam_channel::select_biased! {
             recv(self.errors) -> error => {
@@ -318,7 +343,10 @@ impl Headless {
     pub fn wait(&mut self, time: Duration) -> Result<(), String> {
         self.step(format!("wait({})", time.as_millis()));
         let end = Instant::now() + time;
-        while let Ok(batch) = self.batches.recv_deadline(end) {
+        while !self.exited {
+            let Ok(batch) = self.batches.recv_deadline(end) else {
+                break;
+            };
             self.apply(&batch);
         }
         self.check()
@@ -547,6 +575,9 @@ impl Headless {
         // moves on from where the view is.
         let mut frames = ((target - start).abs() / SCROLL_STEP).ceil() as usize * 2 + 10;
         loop {
+            if self.exited {
+                break;
+            }
             let now = at(&self.screen);
             if (target - now).abs() < 0.5 || frames == 0 {
                 break;
@@ -613,7 +644,10 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ui::{Root, prelude::*};
+    use nsh_core::{
+        platform::Os,
+        ui::{Root, prelude::*},
+    };
 
     use super::*;
 
@@ -766,5 +800,20 @@ mod tests {
         let mut app = Headless::start(EngineConfig::new(app)).unwrap();
         let error = app.first_render().unwrap_err();
         assert!(error.starts_with("the app threw: Error: boom"), "{error}");
+    }
+    #[test]
+    fn process_exit_ends_a_timed_headless_wait() {
+        let bundle = crate::Bundle::source(
+            "import process from 'process'; setTimeout(() => process.exit(0), 10);".into(),
+        )
+        .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))
+        .unwrap();
+        let mut config = EngineConfig::new(bundle);
+        config.environment.os = Os::MacOs;
+        let mut app = Headless::start(config).unwrap();
+        let started = Instant::now();
+        app.wait(Duration::from_secs(5)).unwrap();
+        assert!(app.screen().sent(&Command::ExitApp));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

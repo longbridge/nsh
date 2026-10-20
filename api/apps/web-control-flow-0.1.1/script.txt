@@ -1,0 +1,64 @@
+# What a user does and sees (compat/apps.rs).
+# If: children while `when` is truthy, else `else`; a falsy number shows nothing.
+expect If: children
+absent If: else branch
+absent If: count is 0
+tap id:toggle
+expect If: else branch
+absent If: children
+tap id:toggle
+expect If: children
+absent If: else branch
+tap id:count
+expect If: count is 1
+tap id:count
+expect If: count is 2
+# Each, kept by item: order on screen, a row's own state, index().
+expect Alpha at 0 pressed 0
+expect Beta at 1 pressed 0
+expect Gamma at 2 pressed 0
+frame id:row-a 0 0 390 20
+frame id:row-b 0 20 390 20
+frame id:row-c 0 40 390 20
+tap id:row-a
+expect Alpha at 0 pressed 1
+tap id:reverse
+expect Gamma at 0 pressed 0
+expect Beta at 1 pressed 0
+expect Alpha at 2 pressed 1
+frame id:row-c 0 0 390 20
+frame id:row-a 0 40 390 20
+tap id:drop
+absent Beta at 1 pressed 0
+expect Alpha at 1 pressed 1
+frame id:row-a 0 20 390 20
+tap id:add
+expect Delta at 2 pressed 0
+frame id:row-d 0 40 390 20
+# Each with a key function: new items with the same keys keep their rows.
+expect One at 0 pressed 0
+expect Two at 1 pressed 0
+tap id:row-k1
+expect One at 0 pressed 1
+tap id:rekey
+expect Two again at 0 pressed 0
+expect One again at 1 pressed 1
+frame id:row-k1 0 20 390 20
+# Each with key="index": rows stay by position, item() changes.
+expect red at 0 pressed 0
+expect green at 1 pressed 0
+tap id:row-w0
+expect red at 0 pressed 1
+tap id:recolor
+expect blue at 0 pressed 1
+expect green at 1 pressed 0
+expect yellow at 2 pressed 0
+absent red at 0 pressed 1
+# Each of null shows nothing.
+absent Maybe: filled
+tap id:fill
+expect Maybe: filled
+tap id:fill
+absent Maybe: filled
+covers [globals] If
+covers [globals] Each

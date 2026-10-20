@@ -47,6 +47,10 @@ tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
 crossbeam-channel.workspace = true
+# A WebSocket server for `tests/engine/websocket.rs`.
+tokio-tungstenite.workspace = true
+# The record of Tailwind classes reads the lengths of resolved styles.
+taffy.workspace = true
 
 # Most of the engine's tests run JS apps.
 [[test]]

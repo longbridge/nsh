@@ -1041,28 +1041,52 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         let _ = write!(out, "{declaration}\n\n");
     }
     let module_of = |name: &str| modules.iter().find(|m| m.name == name);
-    let signature = |f: &FunctionSpec| {
-        let params = f
-            .params
-            .iter()
-            .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let value = f.returns.clone().unwrap_or_else(|| "void".to_owned());
-        let returns = if f.promises() {
-            format!("Promise<{value}>")
-        } else {
-            value
+    // A function's signatures: its own, or its overloads.
+    let signatures = |f: &FunctionSpec| {
+        let one = |params: &[(&str, String, bool)], returns: &Option<String>| {
+            let params = params
+                .iter()
+                .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let value = returns.clone().unwrap_or_else(|| "void".to_owned());
+            let returns = if f.promises() {
+                format!("Promise<{value}>")
+            } else {
+                value
+            };
+            (params, returns)
         };
-        (params, returns)
+        if f.overloads.is_empty() {
+            vec![one(&f.params, &f.returns)]
+        } else {
+            f.overloads
+                .iter()
+                .map(|(params, returns)| one(params, returns))
+                .collect()
+        }
     };
     // A module's object type.
     let module_object = |out: &mut String, m: &ModuleSpec| {
         out.push_str("{\n");
         for f in &m.functions {
-            doc(out, "  ", f.doc);
-            let (params, returns) = signature(f);
-            let _ = writeln!(out, "  {}({params}): {returns};", f.name);
+            for (params, returns) in signatures(f) {
+                doc(out, "  ", f.doc);
+                if f.getter {
+                    let _ = writeln!(out, "  readonly {}: {returns};", f.name);
+                    continue;
+                }
+                let _ = writeln!(out, "  {}({params}): {returns};", f.name);
+            }
+        }
+        for constant in &m.constants {
+            doc(out, "  ", constant.doc);
+            let _ = writeln!(
+                out,
+                "  readonly {}: {};",
+                constant.name,
+                constant.value.ts_type()
+            );
         }
         out.push('}');
     };
@@ -1147,14 +1171,40 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             continue;
         }
         if m.flat {
-            for f in m.functions.iter().filter(|f| !omit.contains(&f.name)) {
-                doc(&mut out, "", f.doc);
-                let (params, returns) = signature(f);
-                let _ = write!(
-                    out,
-                    "export declare function {}({params}): {returns};\n\n",
-                    f.name
-                );
+            for f in m
+                .functions
+                .iter()
+                .filter(|f| !f.getter && !omit.contains(&f.name))
+            {
+                for (params, returns) in signatures(f) {
+                    doc(&mut out, "", f.doc);
+                    let _ = writeln!(
+                        out,
+                        "export declare function {}({params}): {returns};",
+                        f.name
+                    );
+                }
+                out.push('\n');
+            }
+            for constant in &m.constants {
+                if !omit.contains(&constant.name) {
+                    doc(&mut out, "", constant.doc);
+                    let _ = writeln!(
+                        out,
+                        "export declare const {}: {};\n",
+                        constant.name,
+                        constant.value.ts_type()
+                    );
+                }
+            }
+            if m.default && !omit.contains(&"default") {
+                let _ = write!(out, "declare const defaultExport: ");
+                module_object(&mut out, m);
+                // The registry's values `nsh-js` makes are on the object too.
+                for native in registry.native_value_names() {
+                    let _ = write!(out, " & {{ {native}: typeof {native} }}");
+                }
+                out.push_str(";\nexport default defaultExport;\n\n");
             }
             continue;
         }
@@ -1165,6 +1215,13 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         if !omit.contains(&m.name) {
             doc(&mut out, "", m.doc);
             let _ = write!(out, "export declare const {0}: {0}Module;\n\n", m.name);
+        }
+        if m.default && !omit.contains(&"default") {
+            let _ = write!(
+                out,
+                "declare const defaultExport: {}Module;\nexport default defaultExport;\n\n",
+                m.name
+            );
         }
     }
     for c in classes.iter().filter(|c| !omit.contains(&c.name)) {
@@ -1182,24 +1239,76 @@ fn class_declaration(out: &mut String, c: &ClassSpec) {
         }
     };
     doc(out, "", c.doc);
+    if c.def.interface {
+        // No value: what its objects have.
+        let _ = writeln!(out, "export interface {} {{", c.name);
+        for m in &c.members {
+            let params = m
+                .params
+                .iter()
+                .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let value = m.returns.clone().unwrap_or_else(|| "void".to_owned());
+            let returns = if m.is_async {
+                format!("Promise<{value}>")
+            } else {
+                value
+            };
+            doc(out, "  ", m.doc);
+            let has_setter = |name| {
+                c.members
+                    .iter()
+                    .any(|s| s.kind == MemberKind::Setter && s.name == name)
+            };
+            let _ = match m.kind {
+                MemberKind::Method => writeln!(out, "  {}({params}): {returns};", m.name),
+                MemberKind::Getter if has_setter(m.name) => {
+                    writeln!(out, "  {}: {returns};", m.name)
+                }
+                MemberKind::Getter => writeln!(out, "  readonly {}: {returns};", m.name),
+                // A setter's property is its getter's; constructors and
+                // statics belong to a class value it has none of.
+                _ => Ok(()),
+            };
+        }
+        out.push_str("}\n\n");
+        return;
+    }
     let _ = writeln!(out, "export declare class {} {{", c.name);
     if !c.members.iter().any(|m| m.kind == MemberKind::Constructor) {
         out.push_str("  /** Made by the class's members only. */\n  private constructor();\n");
     }
-    for m in &c.members {
-        doc(out, "  ", m.doc);
-        let params = m
-            .params
+    let one = |m: &super::MemberSpec, params: &[(&str, String, bool)], returns: &Option<String>| {
+        let params = params
             .iter()
             .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
             .collect::<Vec<_>>()
             .join(", ");
-        let value = m.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let value = returns.clone().unwrap_or_else(|| "void".to_owned());
         let returns = if m.is_async {
             format!("Promise<{value}>")
         } else {
             value
         };
+        (params, returns)
+    };
+    for m in &c.members {
+        if !m.overloads.is_empty() {
+            for (params, returns) in &m.overloads {
+                doc(out, "  ", m.doc);
+                let (params, returns) = one(m, params, returns);
+                let _ = match m.kind {
+                    MemberKind::Static => {
+                        writeln!(out, "  static {}({params}): {returns};", m.name)
+                    }
+                    _ => writeln!(out, "  {}({params}): {returns};", m.name),
+                };
+            }
+            continue;
+        }
+        doc(out, "  ", m.doc);
+        let (params, returns) = one(m, &m.params, &m.returns);
         let _ = match m.kind {
             MemberKind::Constructor => writeln!(out, "  constructor({params});"),
             MemberKind::Method => writeln!(out, "  {}({params}): {returns};", m.name),

@@ -1,0 +1,36 @@
+# What a user does and sees (compat/apps.rs).
+expect Focus: none
+event id:field onFocus
+expect Focus: focused
+type id:field Hi
+expect Keys: H i
+expect Text: Hi
+expect Selection: 2-2
+type id:field !
+expect Keys: H i !
+expect Text: Hi!
+expect Selection: 3-3
+key id:field Backspace
+expect Keys: H i ! Backspace
+event id:field onSelectionChange start=0 end=2
+expect Selection: 0-2
+event id:field onBlur
+expect Focus: focused blurred
+# A multiline input's text wraps onto more lines as it is typed.
+expect Size: height,width numbers as tall
+type id:notes The quick brown fox jumps over the lazy dog
+expect Size: height,width numbers taller
+# The app changes what is typed; typing continues from its value.
+type id:upper ab
+expect Upper: AB
+prop id:upper value AB
+type id:upper c
+expect Upper: ABC
+covers [nsh] Input
+covers [props] multiline
+covers [events] onFocus
+covers [events] onBlur
+covers [events] onKeyPress
+covers [events] onChangeText
+covers [events] onSelectionChange
+covers [events] onContentSizeChange

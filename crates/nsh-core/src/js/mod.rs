@@ -34,6 +34,27 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/keymap",
 ];
 
+/// The exact gpui-shell standard catalog, using canonical bare specifiers.
+/// Privileged entries route through NSH capability adapters.
+pub const STANDARD_MODULES: &[&str] = &[
+    "buffer",
+    "console",
+    "crypto",
+    "fs/promises",
+    "net",
+    "os",
+    "path",
+    "process",
+    "url",
+    "websocket",
+    "zlib",
+];
+
+/// Whether a module is a standard builtin with its canonical spelling.
+pub fn is_standard_module(name: &str) -> bool {
+    STANDARD_MODULES.contains(&name)
+}
+
 /// The module name of an app's bundle (its entry chunk): stack traces show
 /// `bundle.js:LINE:COL`, and the chunks of a split bundle import it as
 /// `./bundle.js`.
