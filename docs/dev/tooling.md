@@ -197,12 +197,20 @@ applied to a model of the native views (`headless::Screen`, `headless/screen.rs`
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
 (`── press(id:save): 8 items`).
 
-The steps name views with selectors: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>` (an input's text or,
-while it is empty, its placeholder too), `view:<id>` or a bare string (testID, then label, then text), the first match
-where a user would look first: the top modal, then the rest in tree order below the root, of a stack only its top
-screen. Each step sends what a platform would, to the views that report it:
+The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
+`label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`
+with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
+text); `label:`, `text:` and names take `/regex/flags`, ` >> ` looks inside the previous part's matches, `nth=<n>`
+keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
+order below the root, of a stack only its top screen. Steps acting on a view are strict, as Playwright's: the matches
+are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
+and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
+(the accessibility state) fails too. Each step sends what a platform would, to the views that report it:
 
 - `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`;
+- `long_press`: the match or its nearest ancestor hearing long presses or presses gets `PressIn`, then after its
+  `delayLongPress` (500 ms) `LongPress` and `PressOut`;
+- `clear`: the input takes the focus, gets a `KeyPress` of `Backspace` and an edit to nothing;
 - `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
   `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
   break in a single line is the return key;
@@ -212,7 +220,9 @@ screen. Each step sends what a platform would, to the views that report it:
   points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
   `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
-- `wait`, `wait_for` / `wait_until` (until a selector matches), `idle` (until quiet for a while).
+- `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
+  screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
+  of its JS condition), `idle` (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
 for 100 ms and no native animation runs (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile

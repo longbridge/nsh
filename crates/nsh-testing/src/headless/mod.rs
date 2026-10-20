@@ -21,6 +21,7 @@
 mod animation;
 mod net;
 mod screen;
+mod selector;
 mod stub;
 
 use std::{
@@ -38,7 +39,8 @@ use nsh_engine::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, Mo
 
 use self::{
     animation::{Animator, FRAME},
-    screen::{Back, Selector},
+    screen::{Back, Pick},
+    selector::Selector,
 };
 pub use self::{
     net::{DirectoryAssets, UreqNetwork},
@@ -637,6 +639,42 @@ impl Headless {
         })
     }
 
+    /// The step `waitFor(<selector>, gone)`: applies batches until no view
+    /// on screen matches `selector`, `timeout` at most.
+    pub fn wait_for_gone(&mut self, selector: &str, timeout: Duration) -> Result<(), String> {
+        Selector::parse(selector)?;
+        self.step(format!("waitFor({selector}, gone)"));
+        self.wait_until(&format!("`{selector}` gone"), timeout, |s| {
+            s.matches(selector) == Ok(false)
+        })
+    }
+
+    /// Applies the next batch, or runs the native animations, for `timeout`
+    /// at most: what a test polling a condition waits for between looks.
+    pub fn next_change(&mut self, timeout: Duration) -> Result<(), String> {
+        if let Pumped::Error = self.pump(Instant::now() + timeout) {
+            self.check()?;
+        }
+        self.check()
+    }
+
+    /// The one view `pick` gave for `selector`, or the error a step on
+    /// `what` fails with.
+    fn picked(&self, pick: Pick, selector: &str, what: &str) -> Result<NodeId, String> {
+        match pick {
+            Pick::One(id) => Ok(id),
+            Pick::None => Err(format!(
+                "no {what} matches `{selector}`; {}",
+                self.on_screen()
+            )),
+            Pick::Many(n) => Err(format!(
+                "`{selector}` matches {n} {what}s: say which (`{selector} >> nth=0`), or look inside \
+                 a view around it (`id:list >> {selector}`)"
+            )),
+            Pick::Disabled => Err(format!("`{selector}` is disabled; {}", self.on_screen())),
+        }
+    }
+
     /// Whether a view on screen shows the text `text`.
     pub fn shows(&self, text: &str) -> bool {
         self.screen.shows(text)
@@ -649,14 +687,54 @@ impl Headless {
     pub fn press(&mut self, selector: &str) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("press({selector})"));
-        let id = self.screen.pressable(&parsed).ok_or_else(|| {
-            format!(
-                "no pressable view matches `{selector}`; {}",
-                self.on_screen()
-            )
-        })?;
+        let pick = self.screen.pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
         for kind in [EventKind::PressIn, EventKind::PressOut, EventKind::Press] {
             self.send(id, kind, EventPayload::None);
+        }
+        self.done()
+    }
+
+    /// The step `longPress(<selector>)`: holds a finger on what `selector`
+    /// names (or the nearest view around it that hears long presses or
+    /// presses) for its `delayLongPress` (500 ms), as a long press does:
+    /// `onPressIn`, `onLongPress`, then `onPressOut`; no `onPress` follows.
+    pub fn long_press(&mut self, selector: &str) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("longPress({selector})"));
+        let pick = self.screen.long_pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
+        let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
+        self.send(id, EventKind::PressIn, EventPayload::None);
+        let held = Instant::now() + Duration::from_secs_f64(f64::from(delay) / 1000.0);
+        while Instant::now() < held {
+            if let Pumped::Exited = self.pump(held) {
+                break;
+            }
+        }
+        self.send(id, EventKind::LongPress, EventPayload::None);
+        self.send(id, EventKind::PressOut, EventPayload::None);
+        self.done()
+    }
+
+    /// The step `clear(<selector>)`: empties the input `selector` names, as
+    /// selecting all and deleting does: one `onKeyPress` of `Backspace` and
+    /// an edit to nothing.
+    pub fn clear(&mut self, selector: &str) -> Result<(), String> {
+        let id = self.input_step(selector, format!("clear({selector})"))?;
+        self.key_press(id, "Backspace");
+        if let Some(input) = self.screen.input_mut(id)
+            && !input.text.is_empty()
+        {
+            input.text.clear();
+            input.count += 1;
+            let payload = EventPayload::Text {
+                text: String::new(),
+                count: input.count,
+            };
+            self.engine
+                .control()
+                .dispatch_event(id, EventKind::ChangeText, payload);
         }
         self.done()
     }
@@ -695,10 +773,8 @@ impl Headless {
     fn input_step(&mut self, selector: &str, step: String) -> Result<NodeId, String> {
         let parsed = Selector::parse(selector)?;
         self.step(step);
-        let id = self
-            .screen
-            .input_view(&parsed)
-            .ok_or_else(|| format!("no input matches `{selector}`; {}", self.on_screen()))?;
+        let pick = self.screen.input_view(&parsed);
+        let id = self.picked(pick, selector, "input")?;
         if self.screen.input(id).is_some_and(|i| !i.config.editable) {
             return Err(format!("the input `{selector}` is not editable"));
         }
@@ -792,10 +868,8 @@ impl Headless {
     pub fn scroll(&mut self, selector: &str, distance: f32) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("scroll({selector}, {distance})"));
-        let id = self
-            .screen
-            .scroll_view(&parsed)
-            .ok_or_else(|| format!("no scroll view matches `{selector}`; {}", self.on_screen()))?;
+        let pick = self.screen.scroll_view(&parsed);
+        let id = self.picked(pick, selector, "scroll view")?;
         let at = |screen: &Screen| {
             screen
                 .scroll(id)
@@ -1059,11 +1133,13 @@ mod tests {
         app.wait_for("At 600").unwrap();
         // Not past the end: 100 rows of 50 in what the screen leaves.
         app.scroll("id:rows", 100_000.0).unwrap();
-        let end = app.screen().scroll_end(
-            app.screen()
-                .scroll_view(&Selector::TestId("rows".into()))
-                .unwrap(),
-        );
+        let Pick::One(rows) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:rows").unwrap())
+        else {
+            panic!("one list");
+        };
+        let end = app.screen().scroll_end(rows);
         assert!(end > 4000.0 && end < 5000.0, "{end}");
         app.wait_for(&format!("At {end}")).unwrap();
         let error = app.scroll("id:rows", 10.0).unwrap_err();

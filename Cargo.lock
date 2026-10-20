@@ -3081,6 +3081,7 @@ dependencies = [
  "nsh-engine",
  "nsh-js",
  "nsh-ui-mobile",
+ "regex",
  "serde",
  "serde_json",
  "ureq",

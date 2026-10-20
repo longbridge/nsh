@@ -7,6 +7,8 @@ test("a controlled input shows what the app makes of each key", async () => {
   await app.press("label:Form");
   await app.type("id:shout", "hello");
   expect(app.value("id:shout")).toBe("HELLO");
+  await app.clear("id:shout");
+  expect(app.value("id:shout")).toBe("");
 });
 
 test("an input stops at its maxLength", async () => {

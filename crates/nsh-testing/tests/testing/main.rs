@@ -125,3 +125,17 @@ fn headless_runs_play_the_platform_s_part() {
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 8);
 }
+
+#[test]
+fn selectors_find_one_view_and_steps_act_on_it() {
+    let run = TestRun {
+        ui_sets: vec![nsh_ui_mobile::registry()],
+        compile: compiler(vec![nsh_ui_mobile::registry()]),
+        ..test_run(None)
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/queries");
+    let results = run_file(&run, &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 7);
+}
