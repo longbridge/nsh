@@ -131,7 +131,8 @@ disposed or busy instance passed for a borrowed parameter (``Account.transfer: `
 ## Functions
 
 Rust exports functions through `#[module]` (an object, `AlertDialog.show(..)`, or `#[module(flat)]`, top-level
-functions). Every call used to be an op ordered with the UI's, so every result was a promise. The class's split
+functions, which a module named like one with `#[module(name = "…")]` gives properties: `test.skip(..)`;
+`docs/dev/components.md`). Every call used to be an op ordered with the UI's, so every result was a promise. The class's split
 applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`) of each function with
 a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 

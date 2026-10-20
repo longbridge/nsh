@@ -877,6 +877,48 @@ fn classes_a_signature_names_are_exported_with_it() {
     assert_eq!(shown(&rx, "done"), "done true true twin");
 }
 
+/// Checks, exported one by one.
+#[module]
+pub(crate) struct Checks;
+
+#[module(flat, default)]
+impl Checks {
+    /// `name`, checked.
+    pub(crate) fn check(name: String) -> String {
+        format!("check {name}")
+    }
+}
+
+/// The variants of `check`.
+#[module]
+pub(crate) struct CheckVariants;
+
+#[module(name = "check")]
+impl CheckVariants {
+    /// The variants there are.
+    pub(crate) const COUNT: u32 = 1;
+
+    /// `name`, skipped.
+    pub(crate) fn skip(name: String) -> String {
+        format!("skip {name}")
+    }
+}
+
+const MEMBERS: &str = r#"import { mount, Text } from "nsh";
+import Checks, { check } from "test/checks";
+
+const lines = [check("a"), check.skip("b"), String(check.COUNT), Checks.check.skip("c"), typeof Checks.check.skip];
+mount(() => <Text>{`done ${lines.join("|")}`}</Text>);
+"#;
+
+#[test]
+fn a_module_named_like_a_function_is_on_the_function() {
+    let mut set = Registry::ui_set("test/checks");
+    set.module::<Checks>().module::<CheckVariants>();
+    let (_engine, rx) = start(MEMBERS, vec![set]);
+    assert_eq!(shown(&rx, "done"), "done check a|skip b|1|skip c|function");
+}
+
 const FRAMED: &str = r#"import { mount } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { Framed } from "test/classes";

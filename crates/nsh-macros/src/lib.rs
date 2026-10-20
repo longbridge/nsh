@@ -1542,22 +1542,25 @@ fn module_cx(ty: &Type) -> bool {
 /// name gets the functions too (`Chart.clear(...)` for a `Chart` component).
 /// `#[module(flat)]` exports the functions one by one instead of as an
 /// object. `#[module(flat, default)]` also exports that object as `default`.
+/// `#[module(name = "test")]` names the object in JS (the type's name
+/// otherwise); a module named like a function another flat module of the
+/// set exports puts its functions on that function (`test.skip(...)`).
 /// Visible associated constants of type `&'static str`, `bool`, or a primitive
 /// numeric type are exported under their unchanged Rust names; their values
 /// determine both the native representation and TypeScript primitive type.
 #[proc_macro_attribute]
 pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let (flat, default) = match module_options(attr.into()) {
+    let options = match module_options(attr.into()) {
         Ok(options) => options,
         Err(error) => return error.into_compile_error().into(),
     };
     let item = parse_macro_input!(item as syn::Item);
     match item {
-        syn::Item::Struct(s) if !flat && !default => module_struct(s),
-        syn::Item::Impl(i) => module_impl(i, flat, default),
+        syn::Item::Struct(s) if options == ModuleOptions::default() => module_struct(s),
+        syn::Item::Impl(i) => module_impl(i, options),
         syn::Item::Struct(s) => Err(syn::Error::new(
             s.ident.span(),
-            "`flat` and `default` go on the `#[module(..)] impl` block; the struct takes `#[module]`",
+            "`flat`, `default` and `name` go on the `#[module(..)] impl` block; the struct takes `#[module]`",
         )),
         other => Err(syn::Error::new(
             other.span(),
@@ -1660,43 +1663,77 @@ fn result_ok(ty: &Type) -> Option<&Type> {
     }
 }
 
+/// What `#[module(..)]` says.
+#[derive(Debug, Default, PartialEq)]
+struct ModuleOptions {
+    /// `flat`: the functions are exported one by one.
+    flat: bool,
+    /// `default`: the flat module's object is the default export too.
+    default: bool,
+    /// `name = "..."`: the object's JS name.
+    name: Option<String>,
+}
+
 /// Parse flags without depending on attribute token spacing or ordering.
-fn module_options(tokens: TokenStream2) -> syn::Result<(bool, bool)> {
-    struct Options(bool, bool);
+fn module_options(tokens: TokenStream2) -> syn::Result<ModuleOptions> {
+    struct Options(ModuleOptions);
     impl Parse for Options {
         fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
             use syn::ext::IdentExt;
-            let mut options = Self(false, false);
+            let mut options = ModuleOptions::default();
             while !input.is_empty() {
                 let flag = input.call(Ident::parse_any)?;
-                let target = match flag.to_string().as_str() {
-                    "flat" => &mut options.0,
-                    "default" => &mut options.1,
+                let duplicate = || syn::Error::new(flag.span(), "duplicate module flag");
+                match flag.to_string().as_str() {
+                    "flat" if options.flat => return Err(duplicate()),
+                    "flat" => options.flat = true,
+                    "default" if options.default => return Err(duplicate()),
+                    "default" => options.default = true,
+                    "name" if options.name.is_some() => return Err(duplicate()),
+                    "name" => {
+                        input.parse::<Token![=]>()?;
+                        let name = input.parse::<LitStr>()?;
+                        let value = name.value();
+                        let mut chars = value.chars();
+                        let identifier = chars
+                            .next()
+                            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+                            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$');
+                        if !identifier {
+                            return Err(syn::Error::new(
+                                name.span(),
+                                "a module's name is a JS identifier",
+                            ));
+                        }
+                        options.name = Some(value);
+                    }
                     _ => {
                         return Err(syn::Error::new(
                             flag.span(),
-                            "`#[module]` accepts only `flat` and `default`",
+                            "`#[module]` accepts only `flat`, `default` and `name = \"...\"`",
                         ));
                     }
-                };
-                if *target {
-                    return Err(syn::Error::new(flag.span(), "duplicate module flag"));
                 }
-                *target = true;
                 if !input.is_empty() {
                     input.parse::<Token![,]>()?;
                 }
             }
-            if options.1 && !options.0 {
+            if options.default && !options.flat {
                 return Err(syn::Error::new(
                     Span::call_site(),
                     "`default` requires `#[module(flat, default)]`",
                 ));
             }
-            Ok(options)
+            if options.flat && options.name.is_some() {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "a flat module exports no object to name",
+                ));
+            }
+            Ok(Options(options))
         }
     }
-    syn::parse2::<Options>(tokens).map(|options| (options.0, options.1))
+    syn::parse2::<Options>(tokens).map(|options| options.0)
 }
 
 /// Primitive constants have a single runtime representation and TS type.
@@ -1728,7 +1765,12 @@ fn module_constant_variant(ty: &Type) -> syn::Result<&'static str> {
     ))
 }
 
-fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
+fn module_impl(mut item: ItemImpl, options: ModuleOptions) -> syn::Result<TokenStream2> {
+    let ModuleOptions {
+        flat,
+        default,
+        name,
+    } = options;
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
     let self_ty = &item.self_ty.clone();
@@ -1738,7 +1780,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             "`#[module]` is for a named type",
         ));
     };
-    let module_name = type_name.to_string();
+    let module_name = name.unwrap_or_else(|| type_name.to_string());
     no_block_doc(&item, "#[module]")?;
     let mut entries = Vec::new();
     let mut constants = Vec::new();
@@ -2089,18 +2131,40 @@ mod module_tests {
 
     #[test]
     fn module_flags_accept_order_whitespace_and_trailing_comma() {
-        assert_eq!(module_options(quote!()).unwrap(), (false, false));
-        assert_eq!(module_options(quote!(flat)).unwrap(), (true, false));
+        let options = |flat, default, name: Option<&str>| ModuleOptions {
+            flat,
+            default,
+            name: name.map(str::to_owned),
+        };
+        assert_eq!(
+            module_options(quote!()).unwrap(),
+            options(false, false, None)
+        );
+        assert_eq!(
+            module_options(quote!(flat)).unwrap(),
+            options(true, false, None)
+        );
         assert_eq!(
             module_options(quote!(flat, default,)).unwrap(),
-            (true, true)
+            options(true, true, None)
         );
-        assert_eq!(module_options(quote!(default, flat)).unwrap(), (true, true));
+        assert_eq!(
+            module_options(quote!(default, flat)).unwrap(),
+            options(true, true, None)
+        );
+        assert_eq!(
+            module_options(quote!(name = "test")).unwrap(),
+            options(false, false, Some("test"))
+        );
         for flags in [
             quote!(default),
             quote!(flat, flat),
             quote!(flat, unknown),
             quote!(flat default),
+            quote!(name = "a-b"),
+            quote!(name = ""),
+            quote!(flat, name = "test"),
+            quote!(name = "a", name = "b"),
         ] {
             assert!(module_options(flags.clone()).is_err(), "{flags}");
         }
@@ -2143,7 +2207,16 @@ mod module_tests {
                 const PRIVATE: [u8; 2] = [1, 2];
             }
         };
-        let expanded = module_impl(item, true, true).unwrap().to_string();
+        let expanded = module_impl(
+            item,
+            ModuleOptions {
+                flat: true,
+                default: true,
+                name: None,
+            },
+        )
+        .unwrap()
+        .to_string();
         assert!(expanded.contains("ConstantValue :: String (Metadata :: EOL)"));
         assert!(expanded.contains("ConstantValue :: Number (Metadata :: LIMIT as f64)"));
         assert!(expanded.contains("ConstantValue :: Bool (Metadata :: DISABLED)"));
@@ -2152,10 +2225,16 @@ mod module_tests {
         let unsupported =
             syn::parse_quote! { impl Metadata { pub const BYTES: [u8; 2] = [1, 2]; } };
         assert!(
-            module_impl(unsupported, true, false)
-                .unwrap_err()
-                .to_string()
-                .contains("module constants support only")
+            module_impl(
+                unsupported,
+                ModuleOptions {
+                    flat: true,
+                    ..ModuleOptions::default()
+                },
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("module constants support only")
         );
     }
 }

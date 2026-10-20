@@ -132,7 +132,9 @@ impl SetDescription {
             add(&spec.export, ExportKind::Component);
         }
         for m in &modules {
-            if specs.iter().any(|s| s.export == m.name) {
+            if specs.iter().any(|s| s.export == m.name)
+                || (!m.flat && registry.function_members(m.name).is_some())
+            {
                 continue;
             }
             if m.flat {

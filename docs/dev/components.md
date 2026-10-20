@@ -369,7 +369,11 @@ core always serves (`Core::set_components` merges the UI sets after them); a cal
 runtime module's functions never clash with an app set's of the same name. Runtime modules
 use the same services as components (`cx.toast`, `cx.announce_for_accessibility`, `image_size`), and the core's
 internal actions for the rest (exiting the app, a ref's accessibility focus).
-`#[module(flat)]` exports functions one by one (top-level exports, not an object's); a function returning `Result` rejects
+`#[module(flat)]` exports functions one by one (top-level exports, not an object's). `#[module(name = "test")]` names a
+module's object in JS (the type's name otherwise); a module named like a function a flat module of the set exports
+is merged into it as into a component: its functions and constants are the function's properties (`test.skip(..)`,
+`describe.only(..)`: `Registry::function_members`; TS declares a namespace of the function's name, and the module is
+no export of its own). A function returning `Result` rejects
 the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `YNode` in TS (the node's
 id, and its object again as a result).
 
