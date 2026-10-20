@@ -84,12 +84,14 @@ fn mobile_ui_renders_and_answers_presses() {
             Some((five.0, plus))
         })
         .expect("the own stepper's value and its + button");
+    // Released at once: `drain` waits for quiet, and on a slow machine a
+    // press held through it outlasts the hold (400ms) and repeats.
     for kind in [EventKind::PressIn, EventKind::PressOut] {
         engine
             .control()
             .dispatch_event(plus, kind, EventPayload::None);
-        drain(&rx, &mut screen);
     }
+    drain(&rx, &mut screen);
     assert_eq!(
         screen
             .texts
