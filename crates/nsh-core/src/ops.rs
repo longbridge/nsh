@@ -1454,6 +1454,10 @@ pub enum Prop {
     /// `headerClass` of a page: the header's colors as classes (`bg-*`,
     /// `text-*`, `tint-*`); `headerStyle` wins over them.
     HeaderClass(Box<str>),
+    /// A page header's colors as typed styles lowered as classes are (Rust:
+    /// `Screen::header_style_with`), in place of `headerClass`;
+    /// `headerStyle` wins over them. Set by components, never by JS.
+    HeaderClassList(Option<Arc<crate::tailwind::ClassList>>),
     /// The surface lays out right to left (on the root, from
     /// `I18nManager`).
     #[prop(js = "layoutDirectionRtl", internal)]

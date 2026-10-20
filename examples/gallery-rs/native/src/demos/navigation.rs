@@ -14,7 +14,7 @@ use crate::{
     ui::{
         Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
         Inset, MONO, PageHeader, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors,
-        header_style, hint, icon, motion, press_with, radius, tints, titled, toggle, with_header,
+        hint, icon, motion, press_with, radius, tints, titled, toggle, with_header,
     },
 };
 
@@ -138,11 +138,11 @@ fn transparent() -> Screen {
         nav_page()
             .title("Transparent")
             .header_transparent(true)
-            .header_style(header_style(
-                AdaptiveColor::TRANSPARENT,
-                colors::TEXT,
-                colors::TEXT,
-            )),
+            .header_style_with(|s| {
+                s.bg(AdaptiveColor::TRANSPARENT)
+                    .text_color(colors::TEXT)
+                    .tint_color(colors::TEXT)
+            }),
         || {
             PageHeader::new("Transparent")
                 .colors(colors::TEXT, colors::TEXT)
@@ -233,11 +233,11 @@ fn custom_header() -> Screen {
     with_header(
         nav_page()
             .title("Custom")
-            .header_style(header_style(
-                colors::ACCENT_FILL,
-                colors::ON_ACCENT,
-                colors::ON_ACCENT,
-            ))
+            .header_style_with(|s| {
+                s.bg(colors::ACCENT_FILL)
+                    .text_color(colors::ON_ACCENT)
+                    .tint_color(colors::ON_ACCENT)
+            })
             .header_back_visible(false)
             .header_left(close())
             .header_title(title())

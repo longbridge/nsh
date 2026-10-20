@@ -2242,6 +2242,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_class(key, classes::Part::Header, &names);
                 return Ok(());
             }
+            Prop::HeaderClassList(list) => {
+                self.set_part_class_list(key, classes::Part::Header, list);
+                return Ok(());
+            }
             Prop::ListContentClass(names) => {
                 self.set_part_class(key, classes::Part::Content, &names);
                 return Ok(());

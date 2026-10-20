@@ -54,7 +54,7 @@
   gradients `encode.rs` sends as written, with their stop count negated; the web hands them to the browser as `px`), or
   at angles around conic ones (fractions of a turn), up to two per stop; transition hints are not parsed; a gradient
   that does not parse is logged (inline styles, `bg-[…]` classes, Rust components' `Style`); but press feedback must show, so a background color an interaction state sets (`active:` / `hover:` / `focus:` /
-  `focus-within:` / `group-*:` classes, Rust components' `.active(..)`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`) or a native
+  `focus-within:` / `group-*:` classes, Rust components' `.active(..)`, on a nested component's element too, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`) or a native
   animation drives (`Animated` `backgroundColor`) replaces the gradients, unless that state sets a gradient of its own:
   done in the core, so every platform shows it alike), `filter` (`brightness`, `contrast`,
   `grayscale`, `hue-rotate`, `invert`, `saturate`, `sepia`, `opacity`, `blur`, `drop-shadow`; color filters are composed into one

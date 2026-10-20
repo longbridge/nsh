@@ -594,6 +594,25 @@ impl Screen {
         self.bind_prop(style, |s: super::Style| Prop::HeaderStyle(s.0))
     }
 
+    /// The header's colors as typed styles: the background
+    /// ([`super::Styled::bg`]), the title's color
+    /// ([`super::Styled::text_color`]) and the buttons'
+    /// ([`super::Styled::tint_color`]), theme colors following the
+    /// appearance natively (TS: `headerClass`). `f` runs again when what it
+    /// reads changes. [`Self::header_style`] wins over it, key by key.
+    pub fn header_style_with(
+        self,
+        f: impl Fn(super::StyleRefinement) -> super::StyleRefinement + 'static,
+    ) -> Self {
+        let list = move || {
+            let style = f(super::StyleRefinement::default()).resolved();
+            (!style.is_empty()).then(|| Arc::new(style.lower()))
+        };
+        self.bind_prop(super::Reactive::Bound(std::rc::Rc::new(list)), |list| {
+            Prop::HeaderClassList(list)
+        })
+    }
+
     /// The label of the back button leading back to this screen (iOS).
     pub fn header_back_title(self, title: impl IntoReactive<super::SharedString>) -> Self {
         self.bind_prop(title, |t| {

@@ -41,8 +41,7 @@ pub(crate) use self::{
     page::DemoPage,
     parts::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, PageHeader,
-        RoundButton, Row, Section, Stat, caption, code, header, header_style, legend, titled,
-        with_header,
+        RoundButton, Row, Section, Stat, caption, code, header, legend, titled, with_header,
     },
     shapes::{lengths, pt, rect},
     sheet::{Sheet, SheetEvent, SheetProps},
