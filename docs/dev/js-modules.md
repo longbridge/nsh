@@ -21,7 +21,8 @@ host elements' props and events, the easings and the canvas methods from the cor
 element and JSX types `nsh` exports), `nsh/jsx-runtime.d.ts` and `nsh/globals.d.ts`, and tests check every module's
 exports against its declarations; the CLI writes them into `.nsh/types` (`tooling.md`).
 `nsh` itself only has the reactive API, `mount`, the primitives every UI is made of (`View`, `Text`, `Scroll`,
-`Input`) and the types; there is no catch-all module, and moved APIs get no compatibility re-exports. Each primitive
+`Input`) and the types; there is no catch-all module. A released API that moves keeps its old place as a deprecated
+alias (`compatibility.md`), so apps built before keep running. Each primitive
 has one home, which is where apps import its tag from (`native-pipeline.md`): the table below. `If` and `Each` are
 globals.
 
@@ -78,7 +79,8 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
 - Mobile UI or interaction: `nsh/ui/mobile`; its components are Rust, in `crates/nsh-ui-mobile` (see its README).
 - Something only one platform has: `nsh/ios` / `nsh/android`, or a prop in `ios={{…}}` / `android={{…}}` /
   `desktop={{…}}`.
-- Never a compatibility re-export when something moves, never a React Native compatibility wrapper.
+- Never a React Native compatibility wrapper. Something released that moves keeps its old name and module as a
+  deprecated alias (`compatibility.md`); something unreleased simply moves.
 
 ## Standard modules
 
