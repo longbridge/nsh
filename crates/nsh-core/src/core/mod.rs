@@ -3102,6 +3102,11 @@ impl<M: TextEngine> Core<M> {
                 {
                     props.pointer_events = p;
                 }
+                // A `disabled` view is so for screen readers too, as a Rust
+                // component's `disabled` and React Native's `Pressable`.
+                if node.states & crate::tailwind::state::DISABLED != 0 {
+                    props.accessibility.state.disabled = true;
+                }
                 self.mount.push(MountItem::ViewProps { id, props });
             } else if flags & dirty::LABEL != 0 {
                 let label = node

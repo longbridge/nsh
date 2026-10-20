@@ -3266,6 +3266,38 @@ fn disabled_views_take_no_presses() {
 }
 
 #[test]
+fn disabled_views_are_disabled_for_screen_readers() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "");
+    let disabled = |d| Op::SetProp {
+        id: 2,
+        prop: Prop::Native(NativeProp::Disabled(d)),
+    };
+    let state_of = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id: 2, props } => Some(props.accessibility.state.disabled),
+            _ => None,
+        })
+    };
+    apply(&mut c, vec![disabled(true)]);
+    assert_eq!(state_of(&c.commit().unwrap()), Some(true));
+    apply(&mut c, vec![disabled(false)]);
+    assert_eq!(state_of(&c.commit().unwrap()), Some(false));
+    // The app's own state stays when `disabled` is off.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
+                disabled: true,
+                ..Default::default()
+            })),
+        }],
+    );
+    assert_eq!(state_of(&c.commit().unwrap()), Some(true));
+}
+
+#[test]
 fn underlay_shows_while_pressed() {
     let mut c = core();
     view_with_classes(&mut c, 2, "bg-white");
