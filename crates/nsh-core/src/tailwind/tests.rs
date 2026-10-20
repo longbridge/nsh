@@ -159,9 +159,10 @@ fn theme_tokens() {
     );
     let g = &e.background_images[0];
     assert_eq!(g.stops[0].color, Color::from(ui.primary.light));
-    assert_eq!(g.stops.last().unwrap().color, Color::from(ui.accent.light));
+    let accent = ui.color("accent.background").unwrap();
+    assert_eq!(g.stops.last().unwrap().color, Color::from(accent.light));
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
-    assert_eq!(s.view.background_color, Color::from(ui.accent.dark));
+    assert_eq!(s.view.background_color, Color::from(accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
     assert_eq!(s.text.font_size, Some(ui.font_size));
     assert_eq!(s.view.border_radius, ui.radius_lg);

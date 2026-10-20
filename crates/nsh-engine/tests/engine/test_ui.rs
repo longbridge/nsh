@@ -74,13 +74,22 @@ fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColo
             theme.primary_active,
             theme.primary_foreground,
         ),
-        ButtonVariant::Secondary => (
-            theme.secondary,
-            theme.secondary_active,
-            theme.secondary_foreground,
-        ),
+        ButtonVariant::Secondary => {
+            let color = |key| theme.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
+            (
+                color("secondary.background"),
+                color("secondary.active.background"),
+                color("secondary.foreground"),
+            )
+        }
         ButtonVariant::Danger => (theme.danger, theme.danger_active, theme.danger_foreground),
-        ButtonVariant::Plain => (AdaptiveColor::TRANSPARENT, theme.accent, theme.foreground),
+        ButtonVariant::Plain => (
+            AdaptiveColor::TRANSPARENT,
+            theme
+                .color("accent.background")
+                .unwrap_or(AdaptiveColor::TRANSPARENT),
+            theme.foreground,
+        ),
     }
 }
 

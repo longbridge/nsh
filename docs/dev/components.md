@@ -109,10 +109,10 @@ pub fn Chip(props: ChipProps, cx: Scope<ChipEvent>) -> impl IntoElement {
         .px_3()
         .py_1()
         .rounded(move || theme().radius)
-        .bg(move || theme().secondary)
-        .active(|s| s.bg(move || theme().secondary_active))
+        .bg(move || theme().muted)
+        .active(|s| s.bg(move || theme().border))
         .on_press(move || cx.emit(ChipEvent::Press))
-        .child(text(props.label).text_color(move || theme().secondary_foreground))
+        .child(text(props.label).text_color(move || theme().foreground))
 }
 ```
 
@@ -521,9 +521,9 @@ is no string to parse and no `.class()`.
 
 ## The theme
 
-`Theme` (`ui/theme.rs`) has gpui-kit's semantic colors (`primary`, `primary_active`, `primary_foreground`,
-`secondary`, `danger`, `muted`, `border`, `group_box`, `list_*`, `switch*`, `tab*`, ...: the fields components
-use) plus `radius`, `radius_lg` and `font_size` (`Points`), and derefs to its colors (`theme.primary`). The default
+`Theme` (`ui/theme.rs`) has a few semantic colors as fields (`background`, `foreground`, `border`, `primary`,
+`primary_active`, `primary_foreground`, `danger`, `danger_active`, `danger_foreground`, `muted`,
+`muted_foreground`, `overlay`, `ring`: the ones components read; every other key is kept by key) plus `radius`, `radius_lg` and `font_size` (`Points`), and derefs to its colors (`theme.primary`). The default
 (`default-theme.json`) is gpui-kit's default theme with mobile radii. An app sets its own in `nsh.json`: `"theme":
 "brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys no field has (desktop
 components', the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` /

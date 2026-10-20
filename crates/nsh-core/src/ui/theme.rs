@@ -62,112 +62,32 @@ macro_rules! theme_colors {
 }
 
 theme_colors! {
-    /// Accents: the background of a selected or highlighted item.
-    accent = "accent.background",
-    /// Text on [`Self::accent`].
-    accent_foreground = "accent.foreground",
     /// The app's background.
     background = "background",
     /// Text and icons on [`Self::background`].
     foreground = "foreground",
     /// Borders and dividers.
     border = "border",
-    /// The text cursor.
-    caret = "caret",
     /// Destructive actions.
     danger = "danger.background",
     /// [`Self::danger`] while pressed.
     danger_active = "danger.active.background",
     /// Text on [`Self::danger`].
     danger_foreground = "danger.foreground",
-    /// A contained surface: cards, grouped content.
-    group_box = "group_box.background",
-    /// Text on [`Self::group_box`].
-    group_box_foreground = "group_box.foreground",
-    /// Informational messages.
-    info = "info.background",
-    /// [`Self::info`] while pressed.
-    info_active = "info.active.background",
-    /// Text on [`Self::info`].
-    info_foreground = "info.foreground",
-    /// The border of text inputs.
-    input = "input.border",
-    /// Links.
-    link = "link" | "link.foreground",
-    /// Links while pressed.
-    link_active = "link.active" | "link.active.foreground",
-    /// The background of lists.
-    list = "list.background",
-    /// The selected row.
-    list_active = "list.active.background",
-    /// The selected row's border.
-    list_active_border = "list.active.border",
-    /// Every other row.
-    list_even = "list.even.background",
-    /// List headers.
-    list_head = "list.head.background",
     /// Muted surfaces.
     muted = "muted.background",
     /// Secondary text: hints, captions, placeholders.
     muted_foreground = "muted.foreground",
     /// Dims what is under a sheet or a dialog.
     overlay = "overlay",
-    /// Floating surfaces: menus, popovers, sheets.
-    popover = "popover.background",
-    /// Text on [`Self::popover`].
-    popover_foreground = "popover.foreground",
     /// The main action.
     primary = "primary.background",
     /// [`Self::primary`] while pressed.
     primary_active = "primary.active.background",
     /// Text on [`Self::primary`].
     primary_foreground = "primary.foreground",
-    /// The filled part of progress bars.
-    progress_bar = "progress.bar.background" | "progress_bar.background",
     /// Focus rings.
     ring = "ring",
-    /// Secondary actions.
-    secondary = "secondary.background",
-    /// [`Self::secondary`] while pressed.
-    secondary_active = "secondary.active.background",
-    /// Text on [`Self::secondary`].
-    secondary_foreground = "secondary.foreground",
-    /// Selected text.
-    selection = "selection.background",
-    /// Loading placeholders.
-    skeleton = "skeleton.background",
-    /// A slider's filled track.
-    slider_bar = "slider.background" | "slider.bar.background",
-    /// A slider's thumb.
-    slider_thumb = "slider.thumb.background",
-    /// Success.
-    success = "success.background",
-    /// [`Self::success`] while pressed.
-    success_active = "success.active.background",
-    /// Text on [`Self::success`].
-    success_foreground = "success.foreground",
-    /// A switch's track while off.
-    switch = "switch.background",
-    /// A switch's thumb.
-    switch_thumb = "switch.thumb.background",
-    /// A tab.
-    tab = "tab.background",
-    /// The selected tab.
-    tab_active = "tab.active.background",
-    /// The selected tab's text.
-    tab_active_foreground = "tab.active.foreground",
-    /// The bar holding tabs.
-    tab_bar = "tab_bar.background",
-    /// A segmented tab bar.
-    tab_bar_segmented = "tab_bar.segmented.background",
-    /// A tab's text.
-    tab_foreground = "tab.foreground",
-    /// Warnings.
-    warning = "warning.background",
-    /// [`Self::warning`] while pressed.
-    warning_active = "warning.active.background",
-    /// Text on [`Self::warning`].
-    warning_foreground = "warning.foreground",
 }
 
 /// The theme components are drawn with ([`super::ambient::theme`]). Derefs
@@ -248,22 +168,9 @@ static PRESSED: &[(&str, &str, Field)] = &[
     ("primary.background", "primary.active.background", |c| {
         &mut c.primary_active
     }),
-    ("secondary.background", "secondary.active.background", |c| {
-        &mut c.secondary_active
-    }),
     ("danger.background", "danger.active.background", |c| {
         &mut c.danger_active
     }),
-    ("info.background", "info.active.background", |c| {
-        &mut c.info_active
-    }),
-    ("success.background", "success.active.background", |c| {
-        &mut c.success_active
-    }),
-    ("warning.background", "warning.active.background", |c| {
-        &mut c.warning_active
-    }),
-    ("link", "link.active", |c| &mut c.link_active),
 ];
 
 /// The pressed shade of `c`: 12% black over it in light appearance, 12%
@@ -507,7 +414,7 @@ mod tests {
         // Palette names; keys only desktop components use are ignored.
         assert_eq!(theme.border.light, PALETTE.colors["red-500"].into());
         assert_eq!(theme.radius, px(8.0));
-        assert_eq!(theme.secondary, Theme::default().secondary);
+        assert_eq!(theme.ring, Theme::default().ring);
         assert!(Theme::from_json(r#"{ "themes": [{ "colors": { "ring": 3 } }] }"#).is_err());
     }
 
@@ -575,15 +482,20 @@ mod tests {
         // WCAG's relative luminance.
         let contrast = |a: Hsla, b: Hsla| a.contrast_ratio(b);
         for (background, text) in [
-            (theme.danger, theme.danger_foreground),
-            (theme.danger_active, theme.danger_foreground),
-            (theme.info, theme.info_foreground),
-            (theme.info_active, theme.info_foreground),
-            (theme.success, theme.success_foreground),
-            (theme.success_active, theme.success_foreground),
-            (theme.warning, theme.warning_foreground),
-            (theme.warning_active, theme.warning_foreground),
-        ] {
+            "danger.background",
+            "danger.active.background",
+            "info.background",
+            "info.active.background",
+            "success.background",
+            "success.active.background",
+            "warning.background",
+            "warning.active.background",
+        ]
+        .map(|key| {
+            let status = key.split('.').next().unwrap();
+            let color = |key: &str| theme.color(key).unwrap();
+            (color(key), color(&format!("{status}.foreground")))
+        }) {
             for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
                 assert!(contrast(b, t) >= 4.5, "{b:?} / {t:?}: {}", contrast(b, t));
             }

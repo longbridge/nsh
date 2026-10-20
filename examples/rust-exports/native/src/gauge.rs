@@ -43,7 +43,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
         .gap_2()
         .p_4()
         .rounded(move || theme().radius_lg)
-        .bg(move || theme().group_box)
+        .bg(move || theme().muted)
         .border_1()
         .border_color(move || theme().border)
         .active(|s| s.opacity(0.7))
@@ -67,7 +67,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
                 .child(
                     text(move || props.label.get().unwrap_or_else(|| "Budget".into()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(move || theme().group_box_foreground),
+                        .text_color(move || theme().foreground),
                 )
                 .child(
                     text(move || format!("{:.0}%", fraction() * 100.0))
@@ -89,7 +89,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
                             if fraction() >= 1.0 {
                                 theme().danger
                             } else {
-                                theme().progress_bar
+                                theme().primary
                             }
                         }),
                 ),
