@@ -9,7 +9,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use nsh_core::platform::{Appearance, Locale};
+use nsh_core::{
+    geometry::{Size, px},
+    platform::{Appearance, Locale},
+};
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use windows::{
     Win32::{
@@ -202,7 +205,7 @@ impl AppView {
         let options = self.options.borrow();
         let config = EngineConfig {
             app,
-            viewport: nsh_core::Size::new(0.0, 0.0),
+            viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             network: Some(crate::net::network()),
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
@@ -270,7 +273,7 @@ impl AppView {
 
 fn initial_environment() -> Environment {
     Environment {
-        window: (0.0, 0.0),
+        window: Size::new(px(0.0), px(0.0)),
         color_scheme: ColorScheme::Light,
         os: Os::Windows,
         idiom: Idiom::Desktop,

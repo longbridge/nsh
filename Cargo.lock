@@ -2235,6 +2235,7 @@ dependencies = [
  "nsh-animation",
  "nsh-macros",
  "rustc-hash",
+ "serde",
  "serde_json",
  "slab",
  "taffy",

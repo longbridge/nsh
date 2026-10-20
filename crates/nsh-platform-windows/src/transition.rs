@@ -26,8 +26,9 @@
 use std::{rc::Rc, sync::Arc};
 
 use nsh_core::{
-    BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Rect, Transform, TransitionProps, ViewKind, ViewStyle,
+    Bounds, BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
+    LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind, ViewStyle,
+    geometry::{Point, Size},
 };
 
 use crate::{geom::Mat4, surface::Surface, view::NshView};
@@ -266,8 +267,8 @@ fn progress(curve: Curve, delay: f32, duration: f32, elapsed: f32) -> Option<(f3
 }
 
 struct FrameTrack {
-    from: Rect,
-    to: Rect,
+    from: Bounds<Points>,
+    to: Bounds<Points>,
     timing: Timing,
 }
 
@@ -512,12 +513,16 @@ fn lerp_style(
     }
 }
 
-fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
-    Rect {
-        x: lerp(a.x, b.x, t),
-        y: lerp(a.y, b.y, t),
-        width: lerp(a.width, b.width, t).max(0.0),
-        height: lerp(a.height, b.height, t).max(0.0),
+fn lerp_rect(a: Bounds<Points>, b: Bounds<Points>, t: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(lerp(a.origin.x.0, b.origin.x.0, t)),
+            y: Points(lerp(a.origin.y.0, b.origin.y.0, t)),
+        },
+        size: Size {
+            width: Points(lerp(a.size.width.0, b.size.width.0, t).max(0.0)),
+            height: Points(lerp(a.size.height.0, b.size.height.0, t).max(0.0)),
+        },
     }
 }
 
@@ -581,7 +586,7 @@ pub(crate) fn inserted(surface: &Rc<Surface>, view: &NshView, animation: Option<
         return;
     };
     // Views moved to another place were laid out before; new ones were not.
-    if view.state().frame != Rect::default() || reduce_motion(surface) || navigated(view) {
+    if view.state().frame != Bounds::default() || reduce_motion(surface) || navigated(view) {
         return;
     }
     animate(surface, view, |live| {
@@ -634,7 +639,7 @@ pub(crate) fn removing(
 }
 
 /// The frame a running layout animation of `view` is heading to, if any.
-pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
+pub(crate) fn frame_target(view: &NshView) -> Option<Bounds<Points>> {
     view.state().live.as_ref()?.frame.as_ref().map(|t| t.to)
 }
 
@@ -642,13 +647,13 @@ pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
 pub(crate) fn frame_changed(
     surface: &Rc<Surface>,
     view: &NshView,
-    old: Rect,
+    old: Bounds<Points>,
     animation: Option<&LayoutAnimation>,
 ) {
     // A view's first frame (from the zero rect) does not animate.
     let update = animation
         .and_then(|a| a.update)
-        .filter(|_| old != Rect::default() && !reduce_motion(surface) && !navigated(view));
+        .filter(|_| old != Bounds::default() && !reduce_motion(surface) && !navigated(view));
     let Some(t) = update else {
         // The new frame applies at once, stopping a running animation.
         if let Some(live) = view.state_mut().live.as_deref_mut() {
@@ -963,22 +968,33 @@ mod tests {
 
     #[test]
     fn rects_interpolate_and_never_go_negative() {
-        let a = Rect {
-            x: 0.0,
-            y: 10.0,
-            width: 100.0,
-            height: 40.0,
+        let a = Bounds {
+            origin: Point {
+                x: Points(0.0),
+                y: Points(10.0),
+            },
+            size: Size {
+                width: Points(100.0),
+                height: Points(40.0),
+            },
         };
-        let b = Rect {
-            x: 50.0,
-            y: 20.0,
-            width: 0.0,
-            height: 80.0,
+        let b = Bounds {
+            origin: Point {
+                x: Points(50.0),
+                y: Points(20.0),
+            },
+            size: Size {
+                width: Points(0.0),
+                height: Points(80.0),
+            },
         };
         let r = lerp_rect(a, b, 0.5);
-        assert_eq!((r.x, r.y, r.width, r.height), (25.0, 15.0, 50.0, 60.0));
+        assert_eq!(
+            (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
+            (25.0, 15.0, 50.0, 60.0)
+        );
         // A spring past its end does not make a negative size.
-        assert_eq!(lerp_rect(a, b, 1.2).width, 0.0);
+        assert_eq!(lerp_rect(a, b, 1.2).size.width.0, 0.0);
     }
 
     #[test]

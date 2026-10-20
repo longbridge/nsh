@@ -4,7 +4,7 @@
 use std::{cell::RefCell, ffi::c_void, ptr::NonNull};
 
 use nsh_core::{
-    AttributedText, Color, EllipsizeMode, FontFamily, ResolvedTextStyle, Size, TextAlign,
+    AttributedText, Color, EllipsizeMode, FontFamily, Points, ResolvedTextStyle, Size, TextAlign,
     TextEngine, TextLayout,
 };
 use objc2::rc::Retained;
@@ -707,7 +707,7 @@ impl TextEngine for CoreTextEngine {
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let width = max_width.map_or(CGFloat::MAX, |w| w as CGFloat);
         let range = if prepared.max_lines > 0 {
             CFRange {
@@ -727,11 +727,11 @@ impl TextEngine for CoreTextEngine {
                 std::ptr::null_mut(),
             )
         };
-        Size::new(size.width as f32, size.height as f32)
+        Size::new(Points(size.width as f32), Points(size.height as f32))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
-        let (width, height) = (size.width as CGFloat, size.height as CGFloat);
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
+        let (width, height) = (size.width.0 as CGFloat, size.height.0 as CGFloat);
         let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
         // SAFETY: a valid rectangle path and whole-string range.
         let frame: CFRetained<CTFrame> = unsafe {
@@ -936,10 +936,10 @@ pub(crate) fn draw_backgrounds(
     ctx: &objc2_core_graphics::CGContext,
     text: &AttributedText,
     layout: &CoreTextLayout,
-    content: nsh_core::Rect,
+    content: nsh_core::Bounds<nsh_core::Points>,
 ) {
     let c = Some(ctx);
-    let bottom = (content.y + content.height) as CGFloat;
+    let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
     let mut pieces = Vec::new();
     for line in &layout.lines {
         pieces.clear();
@@ -998,7 +998,7 @@ pub(crate) fn draw_backgrounds(
         nsh_core::BackgroundBox::join(pieces.iter().copied(), (left, right), |b| {
             let rect = CGRect::new(
                 CGPoint::new(
-                    content.x as CGFloat + b.x as CGFloat,
+                    content.origin.x.0 as CGFloat + b.x as CGFloat,
                     baseline - b.ascent as CGFloat,
                 ),
                 CGSize::new(b.width as CGFloat, (b.ascent + b.descent) as CGFloat),

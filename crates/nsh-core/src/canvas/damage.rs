@@ -26,7 +26,7 @@ use super::{
     CanvasOp, CanvasTextAlign, Composite, LineCap, LineJoin, Num, Paint, PathOp,
     hit::{IDENTITY, Matrix, apply, invert, mul, norm},
 };
-use crate::geometry::Rect;
+use crate::geometry::{self as geo, Points};
 
 /// What changes when animated values do ([`DamageScan::damage`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,7 +35,7 @@ pub enum Damage {
     None,
     /// This area, in view coordinates (anti-aliasing included, edges on
     /// whole points).
-    Rect(Rect),
+    Rect(geo::Bounds<Points>),
     /// Unknown: the whole canvas.
     All,
 }
@@ -46,16 +46,7 @@ impl Damage {
         match (self, other) {
             (Damage::All, _) | (_, Damage::All) => Damage::All,
             (Damage::None, d) | (d, Damage::None) => d,
-            (Damage::Rect(a), Damage::Rect(b)) => {
-                let x = a.x.min(b.x);
-                let y = a.y.min(b.y);
-                Damage::Rect(Rect {
-                    x,
-                    y,
-                    width: (a.x + a.width).max(b.x + b.width) - x,
-                    height: (a.y + a.height).max(b.y + b.height) - y,
-                })
-            }
+            (Damage::Rect(a), Damage::Rect(b)) => Damage::Rect(a.union(&b)),
         }
     }
 }
@@ -608,12 +599,12 @@ impl DamageScan {
         }
         let area = area.inflate(AA);
         let (x, y) = (area.min[0].floor(), area.min[1].floor());
-        Damage::Rect(Rect {
+        Damage::Rect(geo::rect(
             x,
             y,
-            width: area.max[0].ceil() - x,
-            height: area.max[1].ceil() - y,
-        })
+            area.max[0].ceil() - x,
+            area.max[1].ceil() - y,
+        ))
     }
 }
 
@@ -720,12 +711,7 @@ mod tests {
     }
 
     fn r(x: f32, y: f32, width: f32, height: f32) -> Damage {
-        Damage::Rect(Rect {
-            x,
-            y,
-            width,
-            height,
-        })
+        Damage::Rect(geo::rect(x, y, width, height))
     }
 
     fn arc(x: f32, y: f32, radius: Num) -> CanvasOp {
@@ -805,8 +791,11 @@ mod tests {
         };
         // Rotated a quarter turn: x in -10..0, y in 10..20 (give or take
         // rounding).
-        assert!((-13.0..=-12.0).contains(&rect.x) && rect.x + rect.width >= 2.0);
-        assert_eq!((rect.y, rect.height), (8.0, 14.0));
+        assert!(
+            (-13.0..=-12.0).contains(&rect.origin.x.0)
+                && rect.origin.x.0 + rect.size.width.0 >= 2.0
+        );
+        assert_eq!((rect.origin.y.0, rect.size.height.0), (8.0, 14.0));
     }
 
     #[test]

@@ -4,18 +4,7 @@
 
 pub mod clipboard;
 
-/// Edge insets in points.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Insets {
-    /// Top.
-    pub top: f32,
-    /// Right.
-    pub right: f32,
-    /// Bottom.
-    pub bottom: f32,
-    /// Left.
-    pub left: f32,
-}
+use crate::geometry::{Edges, Points, Size};
 
 /// The system appearance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -132,17 +121,17 @@ impl Idiom {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
     /// Size of the surface in points.
-    pub window: (f32, f32),
+    pub window: Size<Points>,
     /// Insets not covered by system UI (notch, home indicator, title bar).
-    pub safe_area: Insets,
+    pub safe_area: Edges<Points>,
     /// The title bar's area while the app hides it (desktops,
     /// [`crate::desktop::TitleBarStyle::Hidden`]): `top` is its height,
     /// `left` and `right` the widths the system's window controls take at
     /// its ends (`bottom` is 0); all 0 while the system shows its title
     /// bar.
-    pub title_bar: Insets,
+    pub title_bar: Edges<Points>,
     /// Height of the software keyboard over the surface; 0 when hidden.
-    pub keyboard_height: f32,
+    pub keyboard_height: Points,
     /// Duration of the keyboard's show / hide animation in seconds.
     pub keyboard_duration: f32,
     /// Light or dark appearance.
@@ -186,10 +175,10 @@ impl Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
-            window: (0.0, 0.0),
-            safe_area: Insets::default(),
-            title_bar: Insets::default(),
-            keyboard_height: 0.0,
+            window: Size::default(),
+            safe_area: Edges::default(),
+            title_bar: Edges::default(),
+            keyboard_height: Points(0.0),
             keyboard_duration: 0.25,
             color_scheme: ColorScheme::Light,
             font_scale: 1.0,

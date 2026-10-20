@@ -54,9 +54,9 @@ use std::{
 };
 
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, ROOT_ID, Rect, ScreenAnimation, ScreenConfig, Shadow, Size, ViewKind,
-    ViewStyle,
+    Bounds, Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig,
+    ModalPresentation, NodeId, PayloadValue, Points, ROOT_ID, ScreenAnimation, ScreenConfig,
+    Shadow, Size, ViewKind, ViewStyle, geometry::px,
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -183,8 +183,11 @@ fn with_alpha(color: Color, f: f32) -> Color {
     Color::rgba(c(r), c(g), c(b), c(a * f64::from(f)))
 }
 
-fn contains(r: Rect, x: f32, y: f32) -> bool {
-    x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height
+fn contains(r: Bounds<Points>, x: f32, y: f32) -> bool {
+    x >= r.origin.x.0
+        && y >= r.origin.y.0
+        && x < r.origin.x.0 + r.size.width.0
+        && y < r.origin.y.0 + r.size.height.0
 }
 
 /// A view navigation makes itself (see [`LAYER_ID`]).
@@ -192,7 +195,7 @@ fn layer_view() -> NshView {
     NshView::new(LAYER_ID, ViewKind::View)
 }
 
-fn set_frame(view: &NshView, frame: Rect) {
+fn set_frame(view: &NshView, frame: Bounds<Points>) {
     let changed = std::mem::replace(&mut view.state_mut().frame, frame) != frame;
     if changed {
         view.moved();
@@ -332,7 +335,7 @@ fn is_sheet(config: &ModalConfig) -> bool {
 /// window allows up to its kind's width (a desktop window is no phone: a
 /// sheet sliding up over all of it would look like a new page). `None`:
 /// it covers the window.
-fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Rect> {
+fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Bounds<Points>> {
     let (max_w, max_h) = match config.presentation {
         _ if !is_sheet(config) => return None,
         ModalPresentation::FullScreen => return None,
@@ -412,11 +415,11 @@ fn insets_payload(i: EdgeInsets) -> EventPayload {
 fn report(
     surface: &Surface,
     id: NodeId,
-    last: &mut Option<(Size, EdgeInsets)>,
-    size: Size,
+    last: &mut Option<(Size<Points>, EdgeInsets)>,
+    size: Size<Points>,
     insets: EdgeInsets,
 ) {
-    if size.width <= 0.0 || *last == Some((size, insets)) {
+    if size.width <= px(0.0) || *last == Some((size, insets)) {
         return;
     }
     let insets_changed = last.is_none_or(|(_, i)| i != insets);
@@ -655,7 +658,7 @@ struct BarState {
     /// Where the title goes; `None`: not shown (a title view replaces it).
     title_at: Option<(f32, f32)>,
     /// The back button's frame, when it shows.
-    back: Option<Rect>,
+    back: Option<Bounds<Points>>,
     back_label: Option<TextLine>,
     /// The appearance it was last drawn in.
     dark: Option<bool>,
@@ -719,7 +722,12 @@ impl Hosted for HeaderBar {
             };
             if let Some(color) = feedback {
                 let rr = D2D1_ROUNDED_RECT {
-                    rect: rect_f(back.x, back.y, back.width, back.height),
+                    rect: rect_f(
+                        back.origin.x.0,
+                        back.origin.y.0,
+                        back.size.width.0,
+                        back.size.height.0,
+                    ),
                     radiusX: BUTTON_RADIUS,
                     radiusY: BUTTON_RADIUS,
                 };
@@ -744,8 +752,8 @@ impl Hosted for HeaderBar {
                     .map(|st| (generation, ID2D1StrokeStyle::from(st)));
             }
             // The chevron: a "<" in its box, at the left of the button.
-            let x = back.x + BUTTON_PAD.0;
-            let y = back.y + (back.height - CHEVRON.1) / 2.0;
+            let x = back.origin.x.0 + BUTTON_PAD.0;
+            let y = back.origin.y.0 + (back.size.height.0 - CHEVRON.1) / 2.0;
             let (cw, ch) = CHEVRON;
             let top = Vector2 {
                 X: x + cw - 2.0,
@@ -768,7 +776,7 @@ impl Hosted for HeaderBar {
             }
             if let Some(label) = &s.back_label {
                 let lx = x + cw + CHEVRON_GAP;
-                let ly = back.y + (back.height - label.height) / 2.0;
+                let ly = back.origin.y.0 + (back.size.height.0 - label.height) / 2.0;
                 label.draw(cx, lx, ly, tint);
             }
         }
@@ -835,7 +843,7 @@ struct Header {
     item: Rc<dyn Hosted>,
     /// What it was laid out for (width, header height, the items' frames):
     /// unchanged, nothing moves.
-    laid_out: Option<(f32, f32, [Rect; 3])>,
+    laid_out: Option<(f32, f32, [Bounds<Points>; 3])>,
 }
 
 impl Header {
@@ -869,7 +877,7 @@ struct ScreenNav {
     /// The back button's label (the previous screen's `back_title`).
     back_title: Option<Arc<str>>,
     /// The size and insets last reported.
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// The header height last reported to the core (`None` inside: none
     /// measured, the core estimates it); `None`: never reported.
     header_reported: Option<Option<f32>>,
@@ -906,7 +914,7 @@ impl ScreenNav {
         let f = stack.state().frame;
         let insets = content_insets(&self.config);
         let id = self.view.id();
-        let size = Size::new(f.width, f.height);
+        let size = f.size;
         report(surface, id, &mut self.reported, size, insets);
     }
 
@@ -930,7 +938,7 @@ impl ScreenNav {
         let header = self.header.get_or_insert_with(|| Header::new(key, id));
         if header.view.parent_view().is_none() {
             header.view.insert_before(&self.view, None);
-            header.view.set_native(&header.item, Rect::default());
+            header.view.set_native(&header.item, Bounds::default());
         }
         let c = &self.config;
         {
@@ -965,12 +973,12 @@ impl ScreenNav {
     fn layout(&mut self, surface: &Surface) {
         let (w, h) = {
             let f = self.view.state().frame;
-            (f.width, f.height)
+            (f.size.width.0, f.size.height.0)
         };
         set_frame(&self.backdrop, rect(0.0, 0.0, w, h));
         let c = &self.config;
         let frames = [c.left, c.right, c.title_view]
-            .map(|id| find_item(&self.items, id).map_or(Rect::default(), |v| v.state().frame));
+            .map(|id| find_item(&self.items, id).map_or(Bounds::default(), |v| v.state().frame));
         let Some(header) = &mut self.header else {
             return;
         };
@@ -991,7 +999,10 @@ impl ScreenNav {
         let place = |v: &NshView, x: f32| {
             let f = v.state().frame;
             set_concealed(surface, v, false);
-            set_shift(v, (x - f.x, centered(f.height) - f.y));
+            set_shift(
+                v,
+                (x - f.origin.x.0, centered(f.size.height.0) - f.origin.y.0),
+            );
         };
         let mut s = header.bar.state.borrow_mut();
         let mut left = EDGE;
@@ -1011,12 +1022,12 @@ impl ScreenNav {
         }
         if let Some(v) = find_item(&self.items, c.left) {
             let x = left + GAP;
-            left = x + v.state().frame.width;
+            left = x + v.state().frame.size.width.0;
             place(v, x);
         }
         let mut right = w;
         if let Some(v) = find_item(&self.items, c.right) {
-            right = w - EDGE - GAP - v.state().frame.width;
+            right = w - EDGE - GAP - v.state().frame.size.width.0;
             place(v, right);
         }
         // Items no slot names stay hidden.
@@ -1027,7 +1038,7 @@ impl ScreenNav {
             }
         }
         if let Some(v) = find_item(&self.items, c.title_view) {
-            let fw = v.state().frame.width;
+            let fw = v.state().frame.size.width.0;
             place(v, ((w - fw) / 2.0).max(left));
             s.title_at = None;
         } else if let Some(title) = &s.title {
@@ -1093,7 +1104,7 @@ struct ModalNav {
     backdrop: Option<NshView>,
     /// Dims the window behind a sheet; clicking it asks to close.
     scrim: Option<Scrim>,
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// The field that had the keyboard focus when it was presented: it
     /// gets it back when the modal closes, as a desktop dialog gives it
     /// back.
@@ -1117,7 +1128,7 @@ impl Dim {
         });
         let item: Rc<dyn Hosted> = fill.clone();
         let f = view.state().frame;
-        view.set_native(&item, rect(0.0, 0.0, f.width, f.height));
+        view.set_native(&item, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         Dim {
             view: view.clone(),
             fill,
@@ -1264,7 +1275,7 @@ impl Nav {
                 dim,
                 fade,
             } => {
-                let w = stack.state().frame.width;
+                let w = stack.state().frame.size.width.0;
                 if *fade {
                     set_fade(entering, e);
                 } else {
@@ -1285,7 +1296,7 @@ impl Nav {
                 fade,
                 ..
             } => {
-                let w = stack.state().frame.width;
+                let w = stack.state().frame.size.width.0;
                 let v = match leaving {
                     Leaving::View(v) | Leaving::Image(v) => v,
                 };
@@ -1306,8 +1317,8 @@ impl Nav {
                     set_fade(view, e);
                 } else {
                     // From below the window's bottom edge.
-                    let h = surface.root.state().frame.height;
-                    let y = view.state().frame.y;
+                    let h = surface.root.state().frame.size.height.0;
+                    let y = view.state().frame.origin.y.0;
                     set_shift(view, (0.0, (h - y) * (1.0 - e)));
                 }
                 if let Some(scrim) = scrim {
@@ -1320,8 +1331,8 @@ impl Nav {
                 if *fade {
                     set_fade(layer, 1.0 - e);
                 } else {
-                    let h = surface.root.state().frame.height;
-                    let y = layer.state().frame.y;
+                    let h = surface.root.state().frame.size.height.0;
+                    let y = layer.state().frame.origin.y.0;
                     set_shift(layer, (0.0, (h - y) * e));
                 }
                 if let Some(scrim) = scrim {
@@ -1508,7 +1519,7 @@ impl Nav {
         let (Some(old), Some(new)) = (old, new) else {
             return;
         };
-        if old == new || frame.width <= 0.0 {
+        if old == new || frame.size.width.0 <= 0.0 {
             return;
         }
         let pushing = !prev.contains(&new);
@@ -1552,9 +1563,15 @@ impl Nav {
                         return;
                     };
                     let layer = layer_view();
-                    set_frame(&layer, rect(0.0, 0.0, frame.width, frame.height));
+                    set_frame(
+                        &layer,
+                        rect(0.0, 0.0, frame.size.width.0, frame.size.height.0),
+                    );
                     let item: Rc<dyn Hosted> = Rc::new(picture);
-                    layer.set_native(&item, rect(0.0, 0.0, frame.width, frame.height));
+                    layer.set_native(
+                        &item,
+                        rect(0.0, 0.0, frame.size.width.0, frame.size.height.0),
+                    );
                     layer.insert_before(&stack, None);
                     Leaving::Image(layer)
                 }
@@ -1664,7 +1681,7 @@ impl Nav {
         // Recorded when the batch began tearing it down, or now (the user
         // closed it: it is whole).
         let image = match motion {
-            Some(_) if frame.width > 0.0 => {
+            Some(_) if frame.size.width.0 > 0.0 => {
                 recorded.or_else(|| is_shown(&view).then(|| record(surface, &view)).flatten())
             }
             _ => None,
@@ -1690,7 +1707,10 @@ impl Nav {
                 let layer = layer_view();
                 set_frame(&layer, frame);
                 let item: Rc<dyn Hosted> = Rc::new(picture);
-                layer.set_native(&item, rect(0.0, 0.0, frame.width, frame.height));
+                layer.set_native(
+                    &item,
+                    rect(0.0, 0.0, frame.size.width.0, frame.size.height.0),
+                );
                 layer.insert_before(&surface.root, None);
                 let motion = Motion::ModalOut {
                     dismiss: (!reported).then_some(id),
@@ -1821,31 +1841,31 @@ impl Nav {
         };
         let Some(view) = &m.view else { return };
         let f = surface.root.state().frame;
-        let sheet = sheet_frame(&m.config, f.width, f.height);
+        let sheet = sheet_frame(&m.config, f.size.width.0, f.size.height.0);
         let insets = if sheet.is_some() {
             // A card inside the window: no system UI over it.
             EdgeInsets::default()
         } else {
             let safe = surface.environment.get().safe_area;
             EdgeInsets {
-                top: safe.top,
-                right: safe.right,
-                bottom: safe.bottom,
-                left: safe.left,
+                top: safe.top.0,
+                right: safe.right.0,
+                bottom: safe.bottom.0,
+                left: safe.left.0,
             }
         };
-        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.width, f.height));
+        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         set_frame(view, frame);
         if let Some(b) = &m.backdrop {
-            set_frame(b, rect(0.0, 0.0, frame.width, frame.height));
+            set_frame(b, rect(0.0, 0.0, frame.size.width.0, frame.size.height.0));
         }
         if let Some(scrim) = &m.scrim {
-            set_frame(&scrim.view, rect(0.0, 0.0, f.width, f.height));
+            set_frame(&scrim.view, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
             scrim
                 .view
-                .set_native(&scrim.item, rect(0.0, 0.0, f.width, f.height));
+                .set_native(&scrim.item, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         }
-        let size = Size::new(frame.width, frame.height);
+        let size = frame.size;
         report(surface, id, &mut m.reported, size, insets);
     }
 
@@ -1874,8 +1894,8 @@ impl Nav {
         let item: Rc<dyn Hosted> = fill.clone();
         let scrim = layer_view();
         let f = surface.root.state().frame;
-        set_frame(&scrim, rect(0.0, 0.0, f.width, f.height));
-        scrim.set_native(&item, rect(0.0, 0.0, f.width, f.height));
+        set_frame(&scrim, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
+        scrim.set_native(&item, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         // Right under the sheet.
         scrim.insert_before(&surface.root, Some(view));
         m.scrim = Some(Scrim {
@@ -1926,7 +1946,7 @@ impl Nav {
         });
         set_background(backdrop, t.window);
         let f = view.state().frame;
-        set_frame(backdrop, rect(0.0, 0.0, f.width, f.height));
+        set_frame(backdrop, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
     }
 
     /// Restyles the backgrounds, headers and sheets when the appearance

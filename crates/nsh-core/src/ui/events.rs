@@ -5,7 +5,8 @@ use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
 use crate::{
-    ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Rect, Size, TouchEvent,
+    Bounds, ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Points, Size,
+    TouchEvent,
 };
 
 /// Local files or directories dropped on an element (`on_file_drop`).
@@ -195,19 +196,14 @@ pub(crate) fn unit(_: &EventPayload) -> Option<Cow<'_, ()>> {
     Some(Cow::Owned(()))
 }
 
-pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Rect>> {
+pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Bounds<Points>>> {
     match *p {
         EventPayload::Layout {
             x,
             y,
             width,
             height,
-        } => Some(Cow::Owned(Rect {
-            x,
-            y,
-            width,
-            height,
-        })),
+        } => Some(Cow::Owned(crate::geometry::rect(x, y, width, height))),
         _ => None,
     }
 }
@@ -245,10 +241,12 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     }))
 }
 
-pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size>> {
+pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size<Points>>> {
     match *p {
-        EventPayload::Image { width, height } => Some(Cow::Owned(Size::new(width, height))),
-        _ => Some(Cow::Owned(Size::new(
+        EventPayload::Image { width, height } => {
+            Some(Cow::Owned(crate::geometry::size_pt(width, height)))
+        }
+        _ => Some(Cow::Owned(crate::geometry::size_pt(
             number(p, "width"),
             number(p, "height"),
         ))),

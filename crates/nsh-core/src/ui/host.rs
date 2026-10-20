@@ -14,9 +14,9 @@ use super::{
 };
 use crate::{
     AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Prop, ResizeMode,
-    ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size, SubmitBehavior, Tag,
-    WebSource,
+    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Points, Prop,
+    ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size, SubmitBehavior,
+    Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -483,7 +483,7 @@ impl Input {
     }
 
     /// The text's size changed (multiline inputs growing).
-    pub fn on_content_size_change<M>(self, listener: impl IntoListener<Size, M>) -> Self {
+    pub fn on_content_size_change<M>(self, listener: impl IntoListener<Size<Points>, M>) -> Self {
         self.listen(
             EventKind::ContentSizeChange,
             listener.into_listener(),

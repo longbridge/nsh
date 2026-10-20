@@ -374,7 +374,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(drawing) = canvas.drawing.as_ref() else {
         return;
     };
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if drawing.ops.is_empty() || w <= 0.0 || h <= 0.0 || cx.culled() {
         return;
     }
@@ -911,12 +911,17 @@ fn patch(
     args: &[Option<AnimationValue>],
     images: &FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
     text: (&WindowTextSystem, &Arc<gpui::TextSystem>),
-    damage: nsh_core::Rect,
+    damage: nsh_core::Bounds<nsh_core::Points>,
 ) -> bool {
     let [a, b, c, d] = recorded.key.linear;
     let frac = recorded.frac;
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    let (rx, ry, rw, rh) = (damage.x, damage.y, damage.width, damage.height);
+    let (rx, ry, rw, rh) = (
+        damage.origin.x.0,
+        damage.origin.y.0,
+        damage.size.width.0,
+        damage.size.height.0,
+    );
     for (x, y) in [(rx, ry), (rx + rw, ry), (rx, ry + rh), (rx + rw, ry + rh)] {
         let (px, py) = (a * x + c * y + frac.0, b * x + d * y + frac.1);
         x0 = x0.min(px);
@@ -3164,12 +3169,7 @@ mod tests {
             (0.0, 0.0),
         );
         // The damage, as the scan bounds it, reaches into the card.
-        let damage = nsh_core::Rect {
-            x: 55.0,
-            y: 5.0,
-            width: 40.0,
-            height: 90.0,
-        };
+        let damage = crate::geom::rect(55.0, 5.0, 40.0, 90.0);
         assert!(patch(
             &mut patched,
             &drawing,

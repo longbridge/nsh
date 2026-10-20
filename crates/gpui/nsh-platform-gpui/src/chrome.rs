@@ -64,7 +64,7 @@ pub(crate) use menus::{LocalItem, popup_actions};
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
     desktop::{DesktopCommand, Key, MenuItem, MenuRole, Shortcut, TitleBarStyle},
-    platform::Insets,
+    geometry::{Edges as Insets, Points},
 };
 
 use crate::{
@@ -592,24 +592,24 @@ fn title_bar_area(
     shown: bool,
     client_decorated: bool,
     height: Option<f32>,
-) -> Insets {
+) -> Insets<Points> {
     if !shown {
         return Insets::default();
     }
     match platform {
         Platform::Mac => Insets {
-            top: height.unwrap_or(MAC_TITLE_HEIGHT),
-            left: TRAFFIC_LIGHTS_X + TRAFFIC_LIGHTS_SIZE.1 + 8.0,
+            top: Points(height.unwrap_or(MAC_TITLE_HEIGHT)),
+            left: Points(TRAFFIC_LIGHTS_X + TRAFFIC_LIGHTS_SIZE.1 + 8.0),
             ..Insets::default()
         },
         Platform::Windows => Insets {
-            top: height.unwrap_or(WINDOWS_CAPTION_HEIGHT),
-            right: 3.0 * CAPTION_BUTTON_WIDTH,
+            top: Points(height.unwrap_or(WINDOWS_CAPTION_HEIGHT)),
+            right: Points(3.0 * CAPTION_BUTTON_WIDTH),
             ..Insets::default()
         },
         Platform::Linux if client_decorated => Insets {
-            top: height.unwrap_or(LINUX_HEADER_HEIGHT),
-            right: 3.0 * LINUX_BUTTON + 2.0 * LINUX_BUTTON_GAP + LINUX_BUTTON_MARGIN,
+            top: Points(height.unwrap_or(LINUX_HEADER_HEIGHT)),
+            right: Points(3.0 * LINUX_BUTTON + 2.0 * LINUX_BUTTON_GAP + LINUX_BUTTON_MARGIN),
             ..Insets::default()
         },
         Platform::Linux => Insets::default(),
@@ -688,7 +688,7 @@ pub(crate) fn render(
                 .absolute()
                 .top_0()
                 .right_0()
-                .child(controls(surface, height, &theme)),
+                .child(controls(surface, height.0, &theme)),
         );
     }
     root = root.child(body);
@@ -719,7 +719,12 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                 crate::input::window_drag_rects(&drag)
                     .into_iter()
                     .map(|r| {
-                        let b = crate::render::bounds(ox + r.x, oy + r.y, r.width, r.height);
+                        let b = crate::render::bounds(
+                            ox + r.origin.x.0,
+                            oy + r.origin.y.0,
+                            r.size.width.0,
+                            r.size.height.0,
+                        );
                         window.insert_hitbox(b.intersect(&bounds), HitboxBehavior::Normal)
                     })
                     .collect()
@@ -1381,11 +1386,11 @@ mod tests {
         );
         let windows = title_bar_area(Platform::Windows, true, false, Some(40.0));
         assert_eq!(
-            (windows.top, windows.right, windows.left),
+            (windows.top.0, windows.right.0, windows.left.0),
             (40.0, 138.0, 0.0)
         );
         let mac = title_bar_area(Platform::Mac, true, false, None);
-        assert_eq!((mac.top, mac.left, mac.right), (28.0, 71.0, 0.0));
+        assert_eq!((mac.top.0, mac.left.0, mac.right.0), (28.0, 71.0, 0.0));
         // Linux reports an area only when the window draws its own
         // decorations.
         assert_eq!(
@@ -1393,7 +1398,7 @@ mod tests {
             Insets::default()
         );
         let linux = title_bar_area(Platform::Linux, true, true, None);
-        assert_eq!((linux.top, linux.right), (46.0, 98.0));
+        assert_eq!((linux.top.0, linux.right.0), (46.0, 98.0));
     }
 
     #[test]

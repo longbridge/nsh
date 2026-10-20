@@ -48,7 +48,7 @@ use gpui::{
 };
 use nsh_core::{
     ATTACHMENT_CHAR, AttributedText, Color, DecorationStyle, EllipsizeMode, EventKind, FontFamily,
-    Rect, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
+    Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
 };
 use rustc_hash::FxHashMap;
 use unicode_bidi::{Level, ParagraphBidiInfo};
@@ -1339,7 +1339,7 @@ impl TextEngine for GpuiTextEngine {
         }
     }
 
-    fn measure(&self, p: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, p: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let max = match max_width {
             Some(m) if !p.text.no_wrap => m.max(0.0),
             _ => f32::INFINITY,
@@ -1377,13 +1377,13 @@ impl TextEngine for GpuiTextEngine {
         if max.is_finite() {
             width = width.min(max);
         }
-        Size::new(width.ceil(), height.ceil())
+        Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
-    fn layout(&self, p: &Prepared, size: Size) -> TextLayout {
+    fn layout(&self, p: &Prepared, size: Size<Points>) -> TextLayout {
         let t = &p.text;
-        let avail = size.width.max(0.0);
-        let max = if t.no_wrap { f32::INFINITY } else { avail };
+        let avail = size.width.max(Points(0.0));
+        let max = if t.no_wrap { f32::INFINITY } else { avail.0 };
         let limit = t.max_lines as usize;
         let mut broken: Vec<Broken> = Vec::new();
         let mut more = false;
@@ -1401,7 +1401,7 @@ impl TextEngine for GpuiTextEngine {
             Some(c)
                 if p.ellipsizes()
                     && p.cuts_inside()
-                    && p.width(c.start, c.end) > avail + EPSILON =>
+                    && p.width(c.start, c.end) > avail.0 + EPSILON =>
             {
                 Some(c)
             }
@@ -1416,7 +1416,7 @@ impl TextEngine for GpuiTextEngine {
                 last: true,
             };
             rows.push(Row {
-                items: self.cut(p, c.start, c.end, avail),
+                items: self.cut(p, c.start, c.end, avail.0),
                 range: p.line_range(&line),
                 last: true,
                 ellipsis: true,
@@ -1427,9 +1427,9 @@ impl TextEngine for GpuiTextEngine {
             for (k, line) in broken.iter().enumerate() {
                 let mut items: Vec<Item> = (line.start..line.end).map(Item::Cluster).collect();
                 let trim = p.ellipsizes()
-                    && ((k + 1 == count && more) || (t.no_wrap && line.width > avail + EPSILON));
+                    && ((k + 1 == count && more) || (t.no_wrap && line.width > avail.0 + EPSILON));
                 if trim {
-                    self.trim_tail(p, line, &mut items, avail);
+                    self.trim_tail(p, line, &mut items, avail.0);
                 }
                 rows.push(Row {
                     items,
@@ -1446,7 +1446,7 @@ impl TextEngine for GpuiTextEngine {
         };
         let mut y = 0.0;
         for row in &rows {
-            y += self.place(p, row, avail, y, &mut out);
+            y += self.place(p, row, avail.0, y, &mut out);
         }
         TextLayout(Arc::new(out))
     }
@@ -2021,13 +2021,18 @@ pub(crate) struct DrawnText {
     /// The engine's layout of it.
     pub(crate) layout: TextLayout,
     /// Where the layout goes inside the view.
-    pub(crate) content: Rect,
+    pub(crate) content: nsh_core::Bounds<Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Rc<Selection>>,
 }
 
 /// `Text`: a text view's content changed.
-pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
+pub(crate) fn set(
+    view: &NshView,
+    text: &Arc<AttributedText>,
+    layout: &TextLayout,
+    content: nsh_core::Bounds<Points>,
+) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let selection = match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
@@ -2120,8 +2125,8 @@ pub(crate) fn draw_shadow(cx: &mut DrawCx<'_>, state: &ViewState) {
         return;
     }
     let (ox, oy) = (
-        drawn.content.x + shadow.offset_x,
-        drawn.content.y + shadow.offset_y,
+        drawn.content.origin.x.0 + shadow.offset_x,
+        drawn.content.origin.y.0 + shadow.offset_y,
     );
     let k = cx.transform_scale();
     // GPUI blurs no glyphs: a blurred shadow is the glyphs painted on
@@ -2167,7 +2172,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
         return;
     }
     let text = &drawn.text;
-    let (ox, oy) = (drawn.content.x, drawn.content.y);
+    let (ox, oy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
     if text.has_backgrounds() {
         layout.background_rects(text, |x, y, w, h, r, color| {
             cx.fill_rect(crate::geom::rect(ox + x, oy + y, w, h), [r; 4], color);
@@ -2377,7 +2382,7 @@ pub(crate) fn draw_silhouette(
         return;
     }
     let k = cx.transform_scale();
-    let (ox, oy) = (drawn.content.x, drawn.content.y);
+    let (ox, oy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
     let tint = Some(cx.color(color));
     let mut glyphs = Vec::with_capacity(layout.glyphs.len() * offsets.len());
     // Emoji draw in their own colors: they cast no silhouette.
@@ -2395,7 +2400,7 @@ pub(crate) fn draw_silhouette(
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<GpuiLayout>()?;
-    layout.char_at(x - drawn.content.x, y - drawn.content.y)
+    layout.char_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0)
 }
 
 // --- Selection ----------------------------------------------------------------------
@@ -2506,7 +2511,7 @@ pub(crate) fn window_pressed(surface: &crate::surface::Surface, x: f32, y: f32) 
         .and_then(|m| m.unproject(x, y))
         .is_some_and(|(lx, ly)| {
             let s = view.state();
-            lx >= 0.0 && ly >= 0.0 && lx < s.frame.width && ly < s.frame.height
+            lx >= 0.0 && ly >= 0.0 && lx < s.frame.size.width.0 && ly < s.frame.size.height.0
         });
     if !inside {
         select(surface.key(), &view, None);
@@ -2567,7 +2572,7 @@ fn pressed(key: u64, view: &NshView, s: &Selection, clicks: u32, x: f32, y: f32,
         let Some(layout) = drawn.layout.downcast::<GpuiLayout>() else {
             return;
         };
-        let (lx, ly) = (x - drawn.content.x, y - drawn.content.y);
+        let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = layout.char_at(lx, ly);
         let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
         let over_press = press.iter().any(|&k| state.events.contains(k))
@@ -2636,7 +2641,7 @@ fn dragged(key: u64, view: &NshView, s: &Selection, dx: f32, dy: f32, x: f32, y:
         let Some(layout) = drawn.layout.downcast::<GpuiLayout>() else {
             return;
         };
-        let caret = layout.caret_at(x - drawn.content.x, y - drawn.content.y);
+        let caret = layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         extend(&drawn.text.text, s.anchor.get(), caret, s.unit.get())
     };
     select(key, view, Some(range));
@@ -2924,7 +2929,7 @@ mod tests {
         engine: &GpuiTextEngine,
         t: &AttributedText,
         width: Option<f32>,
-    ) -> (Size, TextLayout) {
+    ) -> (Size<Points>, TextLayout) {
         let prepared = engine.prepare(t);
         let size = engine.measure(&prepared, width);
         (size, engine.layout(&prepared, size))
@@ -3066,13 +3071,13 @@ mod tests {
                 assert_eq!(lines.len(), measured, "{:?} at {width}", t.text);
                 let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
                 assert!(
-                    bottom <= size.height,
+                    bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
                     t.text
                 );
                 for line in &lines {
                     assert!(
-                        line.x >= -0.01 && line.x + line.width <= size.width + 0.01,
+                        line.x >= -0.01 && line.x + line.width <= size.width.0 + 0.01,
                         "{:?} at {width}: {line:?} in {size:?}",
                         t.text
                     );
@@ -3089,7 +3094,7 @@ mod tests {
         let t = text(&[("The quick brown fox jumps over the lazy dog", plain(15.0))]);
         let prepared = engine.prepare(&t);
         let one = engine.measure(&prepared, None);
-        let wrapped = engine.measure(&prepared, Some(one.width / 2.0));
+        let wrapped = engine.measure(&prepared, Some((one.width / 2.0).0));
         assert!(wrapped.width <= (one.width / 2.0).ceil(), "{wrapped:?}");
         assert!(wrapped.height >= one.height * 2.0, "{wrapped:?} vs {one:?}");
         // No wrapping: as wide as the text, past the width.
@@ -3107,7 +3112,7 @@ mod tests {
         let t = text(&[("alpha beta gamma delta", plain(15.0))]);
         let prepared = engine.prepare(&t);
         let word = engine.measure(&engine.prepare(&text(&[("alpha beta", plain(15.0))])), None);
-        let (_, layout) = layout_of(&engine, &t, Some(word.width + 2.0));
+        let (_, layout) = layout_of(&engine, &t, Some(word.width.0 + 2.0));
         // Spaces end lines; the next line starts with a word.
         let lines = line_texts(&t, &layout);
         assert_eq!(lines[0], "alpha beta ", "{lines:?}");
@@ -3135,7 +3140,7 @@ mod tests {
         let prepared = engine.prepare(&t);
         let natural = engine.measure(&prepared, None).width;
         // Two characters and more a line (narrower, any break goes).
-        for width in (40..natural as i32).step_by(5) {
+        for width in (40..natural.0 as i32).step_by(5) {
             let (_, layout) = layout_of(&engine, &t, Some(width as f32));
             let lines = line_texts(&t, &layout);
             for l in &lines[1..] {
@@ -3172,7 +3177,7 @@ mod tests {
             let half = (30.0 - l.ascender - l.descender).abs();
             assert!(half < 0.01, "{l:?}");
         }
-        assert_eq!(size.height, (30.0 * lines.len() as f32).ceil());
+        assert_eq!(size.height, Points((30.0 * lines.len() as f32).ceil()));
         // A bigger span only grows its own line.
         let small = plain(14.0);
         let t = text(&[
@@ -3206,7 +3211,7 @@ mod tests {
         let a = engine.measure(&engine.prepare(&t), None);
         let b = engine.measure(&engine.prepare(&spaced), None);
         // Seven letters, four points after each.
-        assert!((b.width - a.width - 28.0).abs() <= 1.0, "{a:?} {b:?}");
+        assert!(((b.width - a.width).0 - 28.0).abs() <= 1.0, "{a:?} {b:?}");
         assert_eq!(a.height, b.height);
     }
 
@@ -3289,7 +3294,7 @@ mod tests {
         let s = shown(&t, &layout);
         assert!(s.ends_with('…'), "{s}");
         for line in engine.lines(&layout) {
-            assert!(line.x + line.width <= two.width + 0.01, "{line:?}");
+            assert!(line.x + line.width <= two.width.0 + 0.01, "{line:?}");
         }
 
         let mut t = text(&[("One\ntwo\nthree", style)]);
@@ -3322,7 +3327,7 @@ mod tests {
             t.ellipsize = mode;
             let prepared = engine.prepare(&t);
             let size = engine.measure(&prepared, Some(160.0));
-            assert!(size.width <= 160.0, "{mode:?} {size:?}");
+            assert!(size.width.0 <= 160.0, "{mode:?} {size:?}");
             let layout = engine.layout(&prepared, size);
             let lines = engine.lines(&layout);
             assert_eq!(lines.len(), 1, "{mode:?}");
@@ -3356,7 +3361,7 @@ mod tests {
         t.no_wrap = true;
         t.max_lines = 2;
         let prepared = engine.prepare(&t);
-        let layout = engine.layout(&prepared, Size::new(80.0, 40.0));
+        let layout = engine.layout(&prepared, Size::new(Points(80.0), Points(40.0)));
         let s = shown(&t, &layout);
         assert_eq!(s.matches('…').count(), 2, "{s}");
     }
@@ -3388,7 +3393,7 @@ mod tests {
             return;
         };
         let mut t = text(&[("Short", plain(15.0))]);
-        let size = Size::new(300.0, 30.0);
+        let size = Size::new(Points(300.0), Points(30.0));
         let x = |t: &AttributedText| {
             let p = engine.prepare(t);
             engine.lines(&engine.layout(&p, size))[0].x
@@ -3422,10 +3427,10 @@ mod tests {
         let lines = engine.lines(&layout);
         assert!(lines.len() > 2);
         for l in &lines[..lines.len() - 1] {
-            assert!((l.x + l.width - size.width).abs() < 0.5, "{l:?} {size:?}");
+            assert!((l.x + l.width - size.width.0).abs() < 0.5, "{l:?} {size:?}");
         }
         let last = lines.last().unwrap();
-        assert!(last.x < 0.01 && last.width < size.width - 5.0, "{last:?}");
+        assert!(last.x < 0.01 && last.width < size.width.0 - 5.0, "{last:?}");
     }
 
     #[test]
@@ -3474,7 +3479,7 @@ mod tests {
         );
         let line = &engine.lines(&layout)[0];
         assert!(
-            line.x >= -0.01 && line.x + line.width <= size.width + 0.01,
+            line.x >= -0.01 && line.x + line.width <= size.width.0 + 0.01,
             "{line:?}"
         );
     }
@@ -3557,7 +3562,7 @@ mod tests {
         assert_eq!(rects.len(), 1, "{rects:?}");
         let (x, y, w, h, r, c) = rects[0];
         // The code's own font: lower than the line, around its baseline.
-        assert!(x > 0.0 && x + w < size.width, "{rects:?}");
+        assert!(x > 0.0 && x + w < size.width.0, "{rects:?}");
         assert!(y >= 0.0 && h < l.lines[0].info.height + 0.01, "{rects:?}");
         assert_eq!((r, c), (4.0, Color(0xeeee_eeff)));
         // Wrapped: a box on each line the span reaches.
@@ -3580,10 +3585,10 @@ mod tests {
         let l = layout.downcast::<GpuiLayout>().unwrap();
         assert_eq!(l.lines.len(), 2);
         assert_eq!(l.caret_at(-5.0, 2.0), 0);
-        assert_eq!(l.caret_at(size.width + 20.0, 2.0), 15);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, 2.0), 15);
         // Below the text: the last line.
-        assert_eq!(l.caret_at(size.width + 20.0, size.height + 50.0), 22);
-        let mid = l.caret_at(size.width / 2.0, 2.0);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, size.height.0 + 50.0), 22);
+        let mid = l.caret_at((size.width / 2.0).0, 2.0);
         assert!(mid > 3 && mid < 12, "{mid}");
         // Nearest edge: just right of a box's start is before it.
         let b = l.boxes[l.lines[0].boxes.clone()][2];
@@ -3604,7 +3609,7 @@ mod tests {
         let (size, layout) = layout_of(&engine, &rtl, None);
         let l = layout.downcast::<GpuiLayout>().unwrap();
         // Right to left: the right edge is the start.
-        assert_eq!(l.caret_at(size.width + 5.0, 2.0), 0);
+        assert_eq!(l.caret_at(size.width.0 + 5.0, 2.0), 0);
         assert_eq!(l.caret_at(-5.0, 2.0), 9);
     }
 
@@ -3640,7 +3645,7 @@ mod tests {
         );
         assert_eq!(&*engine.face(&style).font.family, "Pacifico");
         // Pacifico is tall: its lines are more than 1.5 ems.
-        assert!(after.height > 30.0, "{after:?}");
+        assert!(after.height.0 > 30.0, "{after:?}");
     }
 
     #[test]
@@ -3686,8 +3691,8 @@ mod tests {
         };
         let t = AttributedText::default();
         let (size, layout) = layout_of(&engine, &t, Some(100.0));
-        assert_eq!(size.width, 0.0);
-        assert!(size.height > 10.0);
+        assert_eq!(size.width, Points(0.0));
+        assert!(size.height.0 > 10.0);
         assert_eq!(engine.lines(&layout).len(), 1);
         // A text ending in a line break has an empty last line.
         let t = text(&[("one\n", plain(14.0))]);
@@ -3714,7 +3719,7 @@ mod tests {
             ("é\u{301}x", plain(15.0)),
         ]);
         let (size, layout) = layout_of(&engine, &t, None);
-        assert!(size.width > 0.0);
+        assert!(size.width.0 > 0.0);
         let shown = shown(&t, &layout);
         for part in ["2×3×", "中文", "😀"] {
             assert!(shown.contains(part), "{shown}");

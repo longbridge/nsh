@@ -268,7 +268,7 @@ impl AppView {
         let options = self.options.borrow();
         let config = EngineConfig {
             app,
-            viewport: nsh_core::Size::new(0.0, 0.0),
+            viewport: nsh_core::Size::default(),
             trace: options.trace,
             network: Some(crate::net::network()),
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
@@ -682,7 +682,7 @@ impl Render for AppView {
 
 fn initial_environment() -> Environment {
     Environment {
-        window: (0.0, 0.0),
+        window: nsh_core::Size::default(),
         color_scheme: ColorScheme::Light,
         os: if cfg!(target_os = "macos") {
             Os::MacOs

@@ -431,7 +431,7 @@ pub fn measure_line(engine: &impl crate::text::TextEngine, font: &CanvasFont, te
         return 0.0;
     }
     let prepared = engine.prepare(&attributed);
-    engine.measure(&prepared, None).width
+    (engine.measure(&prepared, None).width).0
 }
 
 /// Where text sits horizontally relative to its x (`textAlign`).

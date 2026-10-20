@@ -35,7 +35,7 @@ use std::{
 };
 
 use nsh_core::{
-    EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size,
+    EventKind, EventPayload, MountBatch, MountItem, PayloadValue, Points, ROOT_ID, Size,
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn nsh_asset_bytes(ptr: *const u8, len: usize) {
 
 fn environment(width: f32, height: f32, dark: bool, pixel_ratio: f32) -> Environment {
     Environment {
-        window: (width, height),
+        window: nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height)),
         color_scheme: if dark {
             ColorScheme::Dark
         } else {
@@ -351,14 +351,15 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         .filter(|a| a.len() == 4)
         .map(|a| [0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(0.0) as f32))
     {
-        env.safe_area = nsh_core::platform::Insets {
+        env.safe_area = nsh_core::Edges {
             top,
             right,
             bottom,
             left,
-        };
+        }
+        .map(|&v| nsh_core::Points(v));
     }
-    env.keyboard_height = num("keyboard").unwrap_or(env.keyboard_height);
+    env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -501,7 +502,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
     let config = EngineConfig {
         app,
-        viewport: Size::new(width, height),
+        viewport: Size::new(Points(width), Points(height)),
         trace: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         assets: Some(std::sync::Arc::new(PageAssets)),
@@ -1254,7 +1255,7 @@ pub extern "C" fn nsh_root_size(
             left,
         };
         app.control
-            .set_root_size(id, Size::new(width, height), insets);
+            .set_root_size(id, Size::new(Points(width), Points(height)), insets);
         let n = |v: f32| PayloadValue::Number(v as f64);
         app.control.dispatch_event(
             id,
@@ -1280,8 +1281,9 @@ pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_resize(width: f32, height: f32) -> f64 {
     send(|app| {
-        app.environment.window = (width, height);
-        app.control.resize(Size::new(width, height));
+        app.environment.window =
+            nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
+        app.control.resize(Size::new(Points(width), Points(height)));
         app.control.set_environment(app.environment);
     })
 }

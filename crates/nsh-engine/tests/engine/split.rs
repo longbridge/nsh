@@ -4,7 +4,9 @@
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size};
+use nsh_core::{
+    ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size, geometry::px,
+};
 use nsh_engine::{Bundle, Chunk, Engine, EngineConfig, MountSink};
 
 const APP: &str = r#"
@@ -88,7 +90,7 @@ fn bundle(name: &str) -> nsh_bundler::Bundle {
 fn config(bundle: Bundle) -> EngineConfig {
     EngineConfig {
         app: nsh_engine::App::Js(bundle),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

@@ -9,7 +9,7 @@
 
 use crate::{
     desktop::{DesktopCommand, TitleBarStyle},
-    platform::Insets,
+    geometry::{Edges, Points},
 };
 
 /// Hides the system title text so the app can draw its own title bar, or
@@ -31,7 +31,7 @@ pub fn set_title_bar(style: TitleBarStyle, height: Option<f32>) {
 /// controls occupy (`left` and `right`), in points. Reading subscribes to
 /// changes, including entering and leaving full screen. These are zero
 /// with a system title bar and on platforms without desktop windows.
-pub fn title_bar() -> Insets {
+pub fn title_bar() -> Edges<Points> {
     super::ambient::title_bar()
 }
 

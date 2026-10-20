@@ -10,7 +10,7 @@ use std::{
 };
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     canvas::{
         CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite, FillRule,
         LineCap, LineJoin, Num, PathOp, svg_path,
@@ -160,7 +160,7 @@ fn measured(height: f32, draw: impl Fn(Palette, f32) -> Painter + 'static) -> Ca
         }
     })
     .h(px(height))
-    .on_layout(move |frame: &Rect| width.set(frame.width))
+    .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
 }
 
 /// A value that sweeps 0 → 1 once mounted and again on [`replay`]:
@@ -1163,7 +1163,7 @@ fn Sketch() -> impl IntoElement {
         strokes.with(|strokes| draw_sketch(Palette::now(), width.get(), height, strokes))
     })
     .h(px(height))
-    .on_layout(move |frame: &Rect| width.set(frame.width))
+    .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
     .claim_touches(TouchClaim::on_start())
     .keep_touches(true)
     .on_responder_grant(move |e: &ResponderEvent| {

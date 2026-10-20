@@ -49,9 +49,10 @@
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, ROOT_ID, Rect, ScreenAnimation, ScreenConfig, Shadow, Size, ViewKind,
-    ViewStyle,
+    Bounds, Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig,
+    ModalPresentation, NodeId, PayloadValue, Points, ROOT_ID, ScreenAnimation, ScreenConfig,
+    Shadow, Size, ViewKind, ViewStyle,
+    geometry::{Point, px},
 };
 use nsh_engine::ColorScheme;
 use objc2::{
@@ -427,7 +428,7 @@ struct Header {
     back: Retained<BackButton>,
     /// What it was laid out for (width, header height, the items' frames):
     /// unchanged, nothing moves.
-    laid_out: Option<(f32, f32, [Rect; 3])>,
+    laid_out: Option<(f32, f32, [Bounds<Points>; 3])>,
 }
 
 /// One screen.
@@ -444,7 +445,7 @@ struct ScreenNav {
     /// The back button's label (the previous screen's `back_title`).
     back_title: Option<Arc<str>>,
     /// The size and insets last reported.
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// The header height last reported to the core (`None` inside: none
     /// measured, the core estimates it); `None`: never reported.
     header_reported: Option<Option<f32>>,
@@ -477,7 +478,7 @@ struct ModalNav {
     backdrop: Option<Retained<Container>>,
     /// Dims the window behind a sheet; clicking it asks to close.
     scrim: Option<Retained<Scrim>>,
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// The input or pressable view that had the keyboard focus when it was
     /// presented (a popover's trigger, a field; held weakly, as the app
     /// may remove it meanwhile): it gets the focus back when the modal
@@ -519,7 +520,7 @@ enum Motion {
         dismiss: Option<NodeId>,
         image: Shot,
         /// Where the modal was (a sheet's card, or the whole window).
-        frame: Rect,
+        frame: Bounds<Points>,
         scrim: Option<Retained<Scrim>>,
         fade: bool,
     },
@@ -570,12 +571,16 @@ fn dark(surface: &Surface) -> bool {
     surface.environment.get().color_scheme == ColorScheme::Dark
 }
 
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
+fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 
@@ -600,7 +605,7 @@ fn modal_motion(surface: &Surface, animation: ModalAnimation) -> Option<(f64, bo
 /// over the dimmed window, as wide as the window allows up to its kind's
 /// width (a desktop window is no phone: a sheet sliding up over all of it
 /// would look like a new page). `None`: it covers the window.
-fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Rect> {
+fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Bounds<Points>> {
     let (max_w, max_h) = match config.presentation {
         _ if !is_sheet(config) => return None,
         ModalPresentation::FullScreen => return None,
@@ -686,11 +691,11 @@ fn insets_payload(i: EdgeInsets) -> EventPayload {
 fn report(
     surface: &Surface,
     id: NodeId,
-    last: &mut Option<(Size, EdgeInsets)>,
-    size: Size,
+    last: &mut Option<(Size<Points>, EdgeInsets)>,
+    size: Size<Points>,
     insets: EdgeInsets,
 ) {
-    if size.width <= 0.0 || *last == Some((size, insets)) {
+    if size.width <= px(0.0) || *last == Some((size, insets)) {
         return;
     }
     let insets_changed = last.is_none_or(|(_, i)| i != insets);
@@ -825,7 +830,7 @@ fn find_item(items: &[NshView], id: Option<NodeId>) -> Option<&NshView> {
 fn image_of(surface: &Surface, view: &NshView) -> Option<CFRetained<CGImage>> {
     let layer = view.ns().layer()?;
     let f = view.state().frame;
-    if f.width <= 0.0 || f.height <= 0.0 {
+    if f.size.width.0 <= 0.0 || f.size.height.0 <= 0.0 {
         return None;
     }
     let scale = surface
@@ -834,8 +839,8 @@ fn image_of(surface: &Surface, view: &NshView) -> Option<CFRetained<CGImage>> {
         .window()
         .map_or(2.0, |w| w.backingScaleFactor());
     let (pw, ph) = (
-        (f.width as f64 * scale).ceil() as usize,
-        (f.height as f64 * scale).ceil() as usize,
+        (f.size.width.0 as f64 * scale).ceil() as usize,
+        (f.size.height.0 as f64 * scale).ceil() as usize,
     );
     let space = CGColorSpace::new_device_rgb()?;
     // SAFETY: CoreGraphics allocates the pixels (null data) for an RGBA
@@ -996,7 +1001,7 @@ impl ScreenNav {
         let f = stack.state().frame;
         let insets = content_insets(&self.config);
         let id = self.view.id();
-        let size = Size::new(f.width, f.height);
+        let size = f.size;
         report(surface, id, &mut self.reported, size, insets);
     }
 
@@ -1063,7 +1068,7 @@ impl ScreenNav {
     fn layout(&mut self, surface: &Surface) {
         let (w, h) = {
             let f = self.view.state().frame;
-            (f.width, f.height)
+            (f.size.width.0, f.size.height.0)
         };
         if self.backdrop_size != (w, h) {
             self.backdrop_size = (w, h);
@@ -1071,7 +1076,7 @@ impl ScreenNav {
         }
         let c = &self.config;
         let frames = [c.left, c.right, c.title_view]
-            .map(|id| find_item(&self.items, id).map_or(Rect::default(), |v| v.state().frame));
+            .map(|id| find_item(&self.items, id).map_or(Bounds::default(), |v| v.state().frame));
         let Some(header) = &mut self.header else {
             return;
         };
@@ -1091,7 +1096,10 @@ impl ScreenNav {
         let place = |v: &NshView, x: f32| {
             let f = v.state().frame;
             show(v);
-            set_shift(v, (x - f.x, centered(f.height) - f.y));
+            set_shift(
+                v,
+                (x - f.origin.x.0, centered(f.size.height.0) - f.origin.y.0),
+            );
         };
         let mut left = EDGE;
         header.back.setHidden(!self.can_go_back);
@@ -1101,16 +1109,16 @@ impl ScreenNav {
             view.set_native(&header.back, rect(EDGE, centered(bh), bw, bh));
             left += bw;
         } else {
-            view.set_native(&header.back, Rect::default());
+            view.set_native(&header.back, Bounds::default());
         }
         if let Some(v) = find_item(&self.items, c.left) {
             let x = left + GAP;
-            left = x + v.state().frame.width;
+            left = x + v.state().frame.size.width.0;
             place(v, x);
         }
         let mut right = w;
         if let Some(v) = find_item(&self.items, c.right) {
-            right = w - EDGE - GAP - v.state().frame.width;
+            right = w - EDGE - GAP - v.state().frame.size.width.0;
             place(v, right);
         }
         // Items no slot names stay hidden.
@@ -1121,7 +1129,7 @@ impl ScreenNav {
             }
         }
         if let Some(v) = find_item(&self.items, c.title_view) {
-            let fw = v.state().frame.width;
+            let fw = v.state().frame.size.width.0;
             place(v, ((w - fw) / 2.0).max(left));
             header.title.setHidden(true);
             return;
@@ -1133,14 +1141,24 @@ impl ScreenNav {
         if c.large_title {
             let r = rect(16.0, top + BAR + (BAR - th) / 2.0, (w - 32.0).max(0.0), th);
             header.title.setAlignment(NSTextAlignment::Left);
-            header.title.setFrame(ns_rect(r.x, r.y, r.width, r.height));
+            header.title.setFrame(ns_rect(
+                r.origin.x.0,
+                r.origin.y.0,
+                r.size.width.0,
+                r.size.height.0,
+            ));
         } else {
             // Centered in the bar, as long as it fits between the items.
             let side = left.max(w - right) + GAP;
             let tw = tw.min((w - 2.0 * side).max(0.0));
             header.title.setAlignment(NSTextAlignment::Center);
             let r = rect((w - tw) / 2.0, centered(th), tw, th);
-            header.title.setFrame(ns_rect(r.x, r.y, r.width, r.height));
+            header.title.setFrame(ns_rect(
+                r.origin.x.0,
+                r.origin.y.0,
+                r.size.width.0,
+                r.size.height.0,
+            ));
         }
     }
 
@@ -1212,7 +1230,7 @@ impl Nav {
                 below,
                 fade,
             } => {
-                let w = stack.state().frame.width;
+                let w = stack.state().frame.size.width.0;
                 if *fade {
                     set_fade(entering, e);
                 } else {
@@ -1232,19 +1250,19 @@ impl Nav {
                 let f = stack.state().frame;
                 match leaving {
                     Leaving::View(v) if *fade => set_fade(v, 1.0 - e),
-                    Leaving::View(v) => set_shift(v, (f.width * e, 0.0)),
+                    Leaving::View(v) => set_shift(v, (f.size.width.0 * e, 0.0)),
                     Leaving::Image(image) => {
                         let x = if *fade {
                             image.set_opacity(1.0 - e);
                             0.0
                         } else {
-                            f.width * e
+                            f.size.width.0 * e
                         };
-                        stack.set_native(image, rect(x, 0.0, f.width, f.height));
+                        stack.set_native(image, rect(x, 0.0, f.size.width.0, f.size.height.0));
                     }
                 }
                 if let (Some(below), false) = (below, fade) {
-                    set_shift(below, (-PARALLAX * f.width * (1.0 - e), 0.0));
+                    set_shift(below, (-PARALLAX * f.size.width.0 * (1.0 - e), 0.0));
                 }
             }
             Motion::ModalIn { view, scrim, fade } => {
@@ -1253,8 +1271,8 @@ impl Nav {
                 } else {
                     // From below the window's bottom edge (a sheet's
                     // shadow too).
-                    let h = surface.root.state().frame.height + shadow_room(view);
-                    let y = view.state().frame.y;
+                    let h = surface.root.state().frame.size.height.0 + shadow_room(view);
+                    let y = view.state().frame.origin.y.0;
                     set_shift(view, (0.0, (h - y) * (1.0 - e)));
                 }
                 if let Some(scrim) = scrim {
@@ -1270,16 +1288,17 @@ impl Nav {
             } => {
                 // Sheets leave with their shadow.
                 let room = if scrim.is_some() { SHADOW_ROOM } else { 0.0 };
-                let h = surface.root.state().frame.height + room;
+                let h = surface.root.state().frame.size.height.0 + room;
                 let y = if *fade {
                     image.set_opacity(1.0 - e);
-                    frame.y
+                    frame.origin.y.0
                 } else {
-                    frame.y + (h - frame.y) * e
+                    frame.origin.y.0 + (h - frame.origin.y.0) * e
                 };
-                surface
-                    .root
-                    .set_native(image, rect(frame.x, y, frame.width, frame.height));
+                surface.root.set_native(
+                    image,
+                    rect(frame.origin.x.0, y, frame.size.width.0, frame.size.height.0),
+                );
                 if let Some(scrim) = scrim {
                     scrim.set_opacity(1.0 - e);
                 }
@@ -1471,7 +1490,7 @@ impl Nav {
         let (Some(old), Some(new)) = (old, new) else {
             return;
         };
-        if old == new || frame.width <= 0.0 {
+        if old == new || frame.size.width.0 <= 0.0 {
             return;
         }
         let pushing = !prev.contains(&new);
@@ -1655,9 +1674,15 @@ impl Nav {
         set_fade(&view, 1.0);
         match (motion, image) {
             (Some((duration, fade)), Some(image)) => {
-                surface
-                    .root
-                    .set_native(&image, rect(frame.x, frame.y, frame.width, frame.height));
+                surface.root.set_native(
+                    &image,
+                    rect(
+                        frame.origin.x.0,
+                        frame.origin.y.0,
+                        frame.size.width.0,
+                        frame.size.height.0,
+                    ),
+                );
                 let motion = Motion::ModalOut {
                     dismiss: (!reported).then_some(id),
                     image,
@@ -1771,32 +1796,32 @@ impl Nav {
         };
         let Some(view) = &m.view else { return };
         let f = surface.root.state().frame;
-        let sheet = sheet_frame(&m.config, f.width, f.height);
+        let sheet = sheet_frame(&m.config, f.size.width.0, f.size.height.0);
         let insets = if sheet.is_some() {
             // A card inside the window: no system UI over it.
             EdgeInsets::default()
         } else {
             let safe = surface.environment.get().safe_area;
             EdgeInsets {
-                top: safe.top,
-                right: safe.right,
-                bottom: safe.bottom,
-                left: safe.left,
+                top: safe.top.0,
+                right: safe.right.0,
+                bottom: safe.bottom.0,
+                left: safe.left.0,
             }
         };
-        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.width, f.height));
+        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         if std::mem::replace(&mut view.state_mut().frame, frame) != frame {
             view.moved();
         }
         if let Some(b) = &m.backdrop {
-            b.setFrame(ns_rect(0.0, 0.0, frame.width, frame.height));
+            b.setFrame(ns_rect(0.0, 0.0, frame.size.width.0, frame.size.height.0));
         }
         if let Some(scrim) = &m.scrim {
             surface
                 .root
-                .set_native(scrim, rect(0.0, 0.0, f.width, f.height));
+                .set_native(scrim, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         }
-        let size = Size::new(frame.width, frame.height);
+        let size = frame.size;
         report(surface, id, &mut m.reported, size, insets);
     }
 
@@ -1822,7 +1847,7 @@ impl Nav {
         let f = surface.root.state().frame;
         surface
             .root
-            .set_native(&scrim, rect(0.0, 0.0, f.width, f.height));
+            .set_native(&scrim, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         m.scrim = Some(scrim);
         // Right under the sheet.
         self.raise_modals(surface);
@@ -1867,7 +1892,7 @@ impl Nav {
         let backdrop = m.backdrop.get_or_insert_with(|| new_backdrop(view));
         set_layer_color(backdrop, Some(t.window));
         let f = view.state().frame;
-        backdrop.setFrame(ns_rect(0.0, 0.0, f.width, f.height));
+        backdrop.setFrame(ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0));
     }
 }
 

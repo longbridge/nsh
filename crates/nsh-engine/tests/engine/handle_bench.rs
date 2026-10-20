@@ -82,7 +82,7 @@ fn run(_: &()) {
 #[test]
 #[ignore]
 fn bench_handles() {
-    let mut core = Core::new(ApproxTextEngine, Size::new(390.0, 844.0));
+    let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
     core.mount_root(&Root::new::<Handles>(|| ()));
     let batch = core.commit().expect("the first frame");
     let host = batch

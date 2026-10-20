@@ -51,10 +51,12 @@ use std::{
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
-    Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    Rect, platform::clipboard,
+    Bounds, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
+    Points, ROOT_ID,
+    geometry::{Point, Size, px},
+    platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Environment, Insets, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Locale};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -291,8 +293,8 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.screen_reader = appearance.screen_reader;
     env.pixel_ratio = pixel_ratio(&surface.root);
     env.os_version = OS_VERSION.with(|v| *v);
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = px(0.0);
     surface.set_environment(env);
 }
 
@@ -562,11 +564,15 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
             sized.set_width_request((width - gutter).min(*max).max(0.0) as i32);
             overlay.root.set_native(
                 &overlay.widget,
-                Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width,
-                    height,
+                Bounds {
+                    origin: Point {
+                        x: Points(0.0),
+                        y: Points(0.0),
+                    },
+                    size: Size {
+                        width: Points(width),
+                        height: Points(height),
+                    },
                 },
             );
         }
@@ -577,11 +583,15 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
             let (_, h, _, _) = label.measure(gtk::Orientation::Vertical, w);
             overlay.root.set_native(
                 &overlay.widget,
-                Rect {
-                    x: ((width - w as f32) / 2.0).round(),
-                    y: height - 64.0 - h as f32,
-                    width: w as f32,
-                    height: h as f32,
+                Bounds {
+                    origin: Point {
+                        x: Points(((width - w as f32) / 2.0).round()),
+                        y: Points(height - 64.0 - h as f32),
+                    },
+                    size: Size {
+                        width: Points(w as f32),
+                        height: Points(h as f32),
+                    },
                 },
             );
         }
@@ -597,7 +607,7 @@ fn add_overlay(surface: &Surface, widget: gtk::Widget, kind: OverlayKind) {
         kind,
     };
     let env = surface.environment.get();
-    place(&overlay, env.window.0, env.window.1);
+    place(&overlay, env.window.width.0, env.window.height.0);
     SYSTEM.with(|s| s.borrow_mut().overlays.push(overlay));
     widget.set_opacity(0.0);
     fade(

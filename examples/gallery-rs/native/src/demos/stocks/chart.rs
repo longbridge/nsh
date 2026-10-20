@@ -6,7 +6,7 @@
 use std::{f32::consts::TAU, rc::Rc};
 
 use nsh_core::{
-    PanActivation, Rect,
+    Bounds, PanActivation, Points,
     canvas::{CanvasGradient, CanvasTextAlign, CanvasTextBaseline, LineJoin},
     ui::{AnimatedNode, prelude::*},
 };
@@ -745,7 +745,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                                 .map_or("", |p| p.2);
                             format!("{code} {name} chart")
                         })
-                        .on_layout(move |frame: &Rect| width.set(frame.width))
+                        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                         // The platform gives the chart the finger only once
                         // it has moved sideways, so vertical drags still
                         // scroll the page.

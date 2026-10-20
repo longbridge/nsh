@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nsh_animation::{AnimationOp, AnimationProp};
 
 use crate::{
-    geometry::{Rect, Size},
+    geometry::{Bounds, Points, Size},
     ops::{
         AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, ResizeMode,
@@ -540,7 +540,7 @@ pub enum MountItem {
         /// View.
         id: NodeId,
         /// New frame.
-        frame: Rect,
+        frame: Bounds<Points>,
     },
     /// The area the view's descendants cover outside its bounds, in its
     /// own coordinates (it contains the bounds), while overflow is visible;
@@ -553,7 +553,7 @@ pub enum MountItem {
         /// View.
         id: NodeId,
         /// The area, or `None`.
-        extent: Option<Rect>,
+        extent: Option<Bounds<Points>>,
     },
     /// Set the visual style of a view.
     ViewStyle {
@@ -571,7 +571,7 @@ pub enum MountItem {
         /// The final layout, ready to draw.
         layout: TextLayout,
         /// Where `layout` goes inside the view (inside padding and border).
-        content: Rect,
+        content: Bounds<Points>,
     },
     /// Set which events the view must report.
     Events {
@@ -613,7 +613,7 @@ pub enum MountItem {
         /// Scroll view.
         id: NodeId,
         /// Content size.
-        size: Size,
+        size: Size<Points>,
     },
     /// Shift the scroll position, keeping visible content in place when
     /// items above the viewport change size.
@@ -732,7 +732,7 @@ pub enum MountItem {
         /// Input view.
         id: NodeId,
         /// Content box relative to the view.
-        content: Rect,
+        content: Bounds<Points>,
     },
     /// Configure a screen (sent before the screen is inserted into its
     /// stack, and on every change).

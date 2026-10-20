@@ -84,10 +84,14 @@ fn label(content: &'static str) -> Text {
 /// shaded (bound: it follows the window, the insets and the keyboard).
 fn safe_area_diagram() -> AnyElement {
     let width = 76.0;
-    let band = move |pt: f32| px((pt * width / window().width.max(1.0)).round().max(0.0));
+    let band = move |pt: f32| {
+        px((pt * width / window().width.max(px(1.0)).0)
+            .round()
+            .max(0.0))
+    };
     view()
         .w(px(width))
-        .h(move || px((window().height * width / window().width.max(1.0)).round()))
+        .h(move || px((window().height * width / window().width.max(px(1.0))).round()))
         .rounded(px(14.0))
         .border_curve(BorderCurve::Continuous)
         .border(1.5)
@@ -146,7 +150,11 @@ fn environment() -> AnyElement {
                             view().gap(px(2.0)).child(label("Window")).child(
                                 Figure::new(|| {
                                     let window = window();
-                                    format!("{} × {}", window.width.round(), window.height.round())
+                                    format!(
+                                        "{} × {}",
+                                        window.width.0.round(),
+                                        window.height.0.round()
+                                    )
                                 })
                                 .unit("pt"),
                             ),

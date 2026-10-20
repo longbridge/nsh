@@ -10,7 +10,7 @@ use std::{
 };
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineJoin},
     ui::{
         Animation, LayoutAnimation, LayoutCurve, LayoutTransition, prelude::*, sample_easing,
@@ -431,7 +431,7 @@ fn EasingPlot() -> impl IntoElement {
         .child(
             canvas(move || draw_plot(width.get(), selected.get(), &dot_x, &dot_y))
                 .h(px(PLOT))
-                .on_layout(move |frame: &Rect| width.set(frame.width)),
+                .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
         .child(
             scroll()
@@ -474,8 +474,8 @@ fn EasingRace() -> impl IntoElement {
                         .h(px(12.0))
                         .justify_center()
                         .when(i == 0, |v| {
-                            v.on_layout(move |frame: &Rect| {
-                                travel.set((frame.width - 12.0).max(0.0));
+                            v.on_layout(move |frame: &Bounds<Points>| {
+                                travel.set((frame.size.width.0 - 12.0).max(0.0));
                             })
                         })
                         .child(view().h(px(2.0)).rounded(px(1.0)).bg(colors::RAISED))
@@ -788,7 +788,7 @@ fn Springs() -> impl IntoElement {
                 .bg(colors::BACKGROUND)
                 .finish(Finish::Track)
                 .when(i == 0, |v| {
-                    v.on_layout(move |frame: &Rect| width.set(frame.width))
+                    v.on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 })
                 .child(
                     view()
@@ -827,7 +827,7 @@ fn Springs() -> impl IntoElement {
         .child(
             canvas(move || draw_springs(plot.get(), width.get(), there.get(), &clock, &xs))
                 .h(px(150.0))
-                .on_layout(move |frame: &Rect| plot.set(frame.width)),
+                .on_layout(move |frame: &Bounds<Points>| plot.set(frame.size.width.0)),
         )
         .child(
             view().flex_row().gap(px(14.0)).flex_wrap().children(

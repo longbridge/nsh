@@ -65,8 +65,8 @@ use std::{
 
 use gpui::{Font, FontFeatures, FontStyle, FontWeight, SharedString, TextSystem, px};
 use nsh_core::{
-    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Rect, ReturnKeyType,
-    SubmitBehavior, TextAlign, tailwind::state,
+    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points,
+    ReturnKeyType, SubmitBehavior, TextAlign, tailwind::state,
 };
 use rustc_hash::FxHashMap;
 
@@ -116,7 +116,7 @@ pub(crate) struct InputState {
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
-    content: Cell<Option<Rect>>,
+    content: Cell<Option<nsh_core::Bounds<Points>>>,
     /// The size the editor was hosted (and last drawn) at.
     size: Cell<(f32, f32)>,
     /// User edits reported to the engine.
@@ -920,8 +920,11 @@ pub(crate) mod ime {
         let m = view.to_root()?;
         let (ox, oy) = surface.origin.get();
         let (Some(a), Some(b)) = (
-            m.map(content.x + x0, content.y + y0),
-            m.map(content.x + x1 + CARET_WIDTH, content.y + y0 + h),
+            m.map(content.origin.x.0 + x0, content.origin.y.0 + y0),
+            m.map(
+                content.origin.x.0 + x1 + CARET_WIDTH,
+                content.origin.y.0 + y0 + h,
+            ),
         ) else {
             return None;
         };
@@ -943,7 +946,7 @@ pub(crate) mod ime {
         let m = view.to_root()?;
         let (x, y) = m.unproject(f32::from(point.x) - ox, f32::from(point.y) - oy)?;
         let content = content_rect(&view, &input);
-        let at = input.hit(x - content.x, y - content.y);
+        let at = input.hit(x - content.origin.x.0, y - content.origin.y.0);
         let model = input.model.borrow();
         Some(model::byte_to_utf16(model.text(), at) as usize)
     }
@@ -1211,14 +1214,18 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The content box in the view.
-fn content_rect(view: &NshView, input: &InputState) -> Rect {
+fn content_rect(view: &NshView, input: &InputState) -> nsh_core::Bounds<Points> {
     input.content.get().unwrap_or_else(|| {
         let f = view.state().frame;
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f.width,
-            height: f.height,
+        nsh_core::Bounds {
+            origin: nsh_core::Point {
+                x: Points(0.0),
+                y: Points(0.0),
+            },
+            size: nsh_core::Size {
+                width: f.size.width,
+                height: f.size.height,
+            },
         }
     })
 }
@@ -1226,10 +1233,10 @@ fn content_rect(view: &NshView, input: &InputState) -> Rect {
 /// Hosts the editor at the content box.
 fn place(view: &NshView, input: &Rc<InputState>) {
     let content = content_rect(view, input);
-    if content.width <= 0.0 || content.height <= 0.0 {
+    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
         return;
     }
-    input.set_size((content.width, content.height));
+    input.set_size((content.size.width.0, content.size.height.0));
     let item: Rc<dyn Hosted> = input.clone();
     view.set_native(&item, content);
 }
@@ -1264,7 +1271,7 @@ pub(crate) fn animated(view: &NshView) {
 }
 
 /// `InputContent`: where the text goes inside the view.
-pub(crate) fn content(view: &NshView, content: Rect) {
+pub(crate) fn content(view: &NshView, content: nsh_core::Bounds<Points>) {
     let Some(input) = input_of(view) else {
         return;
     };
@@ -1366,7 +1373,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
         return false;
     };
     let content = content_rect(view, &input);
-    let (x, y) = (event.x - content.x, event.y - content.y);
+    let (x, y) = (event.x - content.origin.x.0, event.y - content.origin.y.0);
     match event.kind {
         PointerKind::Down => {
             if input.composing() && focused(surface).as_ref() == Some(view) {

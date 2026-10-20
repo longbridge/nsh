@@ -490,7 +490,7 @@ fn describe(
     }
     let mut actions = vec![Action::ScrollIntoView];
     if let Some(sc) = &s.scroll {
-        let (mx, my) = sc.max((s.frame.width, s.frame.height));
+        let (mx, my) = sc.max((s.frame.size.width.0, s.frame.size.height.0));
         node.set_scroll_x(sc.x as f64);
         node.set_scroll_x_min(0.0);
         node.set_scroll_x_max(mx as f64);
@@ -676,7 +676,9 @@ fn walk(
         walk(w, child, &cm, folds, live, &mut sub);
         let s = child.state();
         let (mut node, actions) = describe(child, &s, role, field.as_ref(), live);
-        if let Some((x, y, bw, bh)) = cm.bounds(0.0, 0.0, s.frame.width, s.frame.height) {
+        if let Some((x, y, bw, bh)) =
+            cm.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)
+        {
             let k = w.scale as f64;
             node.set_bounds(accesskit::Rect {
                 x0: x as f64 * k,
@@ -1098,7 +1100,7 @@ fn perform(
             let target = {
                 let s = view.state();
                 s.scroll.as_ref().map(|sc| {
-                    let (w, h) = (s.frame.width, s.frame.height);
+                    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
                     let (mx, my) = sc.max((w, h));
                     let (dx, dy) = match action {
                         Action::ScrollUp => (0.0, -scroll_step(data, h)),

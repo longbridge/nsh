@@ -31,7 +31,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use dispatch2::DispatchQueue;
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
+use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink, perf::PerfMonitor};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
@@ -51,7 +51,7 @@ enum Message {
     Frame,
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
-    Resized(Size),
+    Resized(Size<Points>),
 }
 
 /// How long the main thread waits for the layout at a new window size
@@ -113,7 +113,7 @@ impl MountSink for Sink {
         self.send(Message::HotUpdateFailed);
     }
 
-    fn resized(&self, size: Size) {
+    fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
     }
 }
@@ -270,7 +270,7 @@ impl Surface {
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();
         let env = self.environment.get();
-        config.viewport = Size::new(env.window.0, env.window.1);
+        config.viewport = Size::new(env.window.width, env.window.height);
         config.environment = env;
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
@@ -352,29 +352,29 @@ impl Surface {
     pub(crate) fn resized(self: &Rc<Self>, width: f32, height: f32) {
         {
             let mut s = self.root.state_mut();
-            if s.frame.width == width && s.frame.height == height {
+            if s.frame.size.width.0 == width && s.frame.size.height.0 == height {
                 return;
             }
-            s.frame.width = width;
-            s.frame.height = height;
+            s.frame.size.width.0 = width;
+            s.frame.size.height.0 = height;
         }
         let mut env = self.environment.get();
-        env.window = (width, height);
+        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
         self.environment.set(env);
         self.control(|c| {
-            c.resize(Size::new(width, height));
+            c.resize(Size::new(Points(width), Points(height)));
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);
-        self.await_layout(Size::new(width, height));
+        self.await_layout(Size::new(Points(width), Points(height)));
     }
 
     /// Waits for the engine's layout at `size` and applies what it sent
     /// meanwhile ([`Surface::resized`]).
-    fn await_layout(self: &Rc<Self>, size: Size) {
+    fn await_layout(self: &Rc<Self>, size: Size<Points>) {
         if self.resize_late.get() || self.mounter.try_borrow_mut().is_err() {
             return;
         }

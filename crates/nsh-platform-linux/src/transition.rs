@@ -27,8 +27,9 @@ use std::{rc::Rc, sync::Arc};
 
 use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
-    BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Rect, Transform, TransitionProps, ViewKind, ViewStyle,
+    Bounds, BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
+    LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind, ViewStyle,
+    geometry::{Point, Size},
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -260,8 +261,8 @@ fn progress(curve: Curve, delay: f32, duration: f32, elapsed: f32) -> Option<(f3
 }
 
 struct FrameTrack {
-    from: Rect,
-    to: Rect,
+    from: Bounds<Points>,
+    to: Bounds<Points>,
     timing: Timing,
 }
 
@@ -506,12 +507,14 @@ fn lerp_style(
     }
 }
 
-fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
-    Rect {
-        x: lerp(a.x, b.x, t),
-        y: lerp(a.y, b.y, t),
-        width: lerp(a.width, b.width, t).max(0.0),
-        height: lerp(a.height, b.height, t).max(0.0),
+fn lerp_rect(a: Bounds<Points>, b: Bounds<Points>, t: f32) -> Bounds<Points> {
+    let l = |a: Points, b: Points| Points(lerp(a.0, b.0, t));
+    Bounds {
+        origin: Point::new(l(a.origin.x, b.origin.x), l(a.origin.y, b.origin.y)),
+        size: Size::new(
+            l(a.size.width, b.size.width).max(Points::ZERO),
+            l(a.size.height, b.size.height).max(Points::ZERO),
+        ),
     }
 }
 
@@ -568,7 +571,7 @@ pub(crate) fn inserted(surface: &Rc<Surface>, view: &NshView, animation: Option<
         return;
     };
     // Views moved to another place were laid out before; new ones were not.
-    if view.state().frame != Rect::default() || reduce_motion(surface) || navigated(view) {
+    if view.state().frame != Bounds::default() || reduce_motion(surface) || navigated(view) {
         return;
     }
     animate(view, |live| {
@@ -622,7 +625,7 @@ pub(crate) fn removing(
 }
 
 /// The frame a running layout animation of `view` is heading to, if any.
-pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
+pub(crate) fn frame_target(view: &NshView) -> Option<Bounds<Points>> {
     view.state().live.as_ref()?.frame.as_ref().map(|t| t.to)
 }
 
@@ -630,13 +633,13 @@ pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
 pub(crate) fn frame_changed(
     surface: &Rc<Surface>,
     view: &NshView,
-    old: Rect,
+    old: Bounds<Points>,
     animation: Option<&LayoutAnimation>,
 ) {
     // A view's first frame (from the zero rect) does not animate.
     let update = animation
         .and_then(|a| a.update)
-        .filter(|_| old != Rect::default() && !reduce_motion(surface) && !navigated(view));
+        .filter(|_| old != Bounds::default() && !reduce_motion(surface) && !navigated(view));
     let Some(t) = update else {
         // The new frame applies at once, stopping a running animation.
         if let Some(live) = view.state_mut().live.as_deref_mut() {
@@ -767,7 +770,8 @@ fn tick(view: &NshView, clock: &gdk::FrameClock) -> glib::ControlFlow {
         } else {
             lerp_rect(track.from, track.to, p)
         };
-        resized = frame.width != s.frame.width || frame.height != s.frame.height;
+        resized = frame.size.width.0 != s.frame.size.width.0
+            || frame.size.height.0 != s.frame.size.height.0;
         s.frame = frame;
         if done {
             live.frame = None;

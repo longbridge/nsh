@@ -31,7 +31,9 @@
 
 use std::{f32::consts::PI, rc::Rc};
 
-use nsh_core::{Command, EventKind, EventPayload, ScrollBehavior, Size, StickyCell, ViewKind};
+use nsh_core::{
+    Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
+};
 use objc2::{MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{NSResponder, NSView};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -319,9 +321,9 @@ fn thumb_scroll(d: f32, range: f32, travel: f32) -> f32 {
 
 fn viewport(state: &ViewState, horizontal: bool) -> f32 {
     if horizontal {
-        state.frame.width
+        state.frame.size.width.0
     } else {
-        state.frame.height
+        state.frame.size.height.0
     }
 }
 
@@ -335,7 +337,7 @@ fn limits(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let max = s.max((state.frame.width, state.frame.height));
+    let max = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let min = if !s.horizontal && s.live.refreshing {
         -REFRESH_SPACE
     } else {
@@ -350,7 +352,7 @@ fn reported(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let (mx, my) = s.max((state.frame.width, state.frame.height));
+    let (mx, my) = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let inset = s.behavior.content_inset;
     (
         s.x.clamp(0.0, mx) - inset.left,
@@ -905,7 +907,7 @@ fn thumb(s: &ScrollState, w: f32, h: f32) -> Option<(CGRect, f32)> {
 /// Updates the indicator and the refresh spinner of `view` to its offset.
 fn update_overlays(view: &NshView) {
     let mut state = view.state_mut();
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let refresh_listened = state.events.contains(EventKind::Refresh);
     let Some(s) = state.scroll.as_mut() else {
         return;
@@ -1134,13 +1136,13 @@ pub(crate) fn config(
 /// `ScrollContent`. Content that shrank below the offset pulls it back on
 /// the next frame, once the rest of the batch (the `ScrollBy` that keeps
 /// the visible content in place) is applied.
-pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size) {
+pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size<Points>) {
     let past = {
         let mut state = view.state_mut();
         let Some(s) = state.scroll.as_mut() else {
             return;
         };
-        s.content = (size.width, size.height);
+        s.content = (size.width.0, size.height.0);
         let pos = main(s);
         pos > limits(&state).1 + 0.5
     };
@@ -1364,7 +1366,7 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
     if !s.indicator || !s.behavior.enabled {
         return false;
     }
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let Some((frame, _)) = thumb(s, w, h) else {
         return false;
     };
@@ -1383,7 +1385,7 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
 pub(crate) fn hovered(surface: &Rc<Surface>, view: &NshView) {
     {
         let mut state = view.state_mut();
-        let (w, h) = (state.frame.width, state.frame.height);
+        let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
         let Some(s) = state.scroll.as_mut() else {
             return;
         };
@@ -1428,7 +1430,8 @@ pub(crate) fn thumb_move(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32
     let pos = {
         let state = view.state();
         let Some(s) = &state.scroll else { return };
-        let Some((_, travel)) = thumb(s, state.frame.width, state.frame.height) else {
+        let Some((_, travel)) = thumb(s, state.frame.size.width.0, state.frame.size.height.0)
+        else {
             return;
         };
         let (min, max) = limits(&state);

@@ -51,11 +51,12 @@ use std::{
 };
 
 use nsh_core::{
-    Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
-    ROOT_ID, Rect,
+    Bounds, Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId,
+    PayloadValue, Points, ROOT_ID,
+    geometry::px,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Environment, Insets, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Locale};
 use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
@@ -127,7 +128,7 @@ thread_local! {
     static NEXT_SERIAL: Cell<u64> = const { Cell::new(1) };
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // The environment
 
 /// What the system's settings say.
@@ -141,7 +142,7 @@ struct Settings {
     locale: Locale,
 }
 
-/// Makes the system look dark (or light) from now on (`--script`).
+/// Makes the system look dark (or light) from now on (`-> Rect {script`).
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SIMULATED.with(|s| s.set(Some(dark)));
 }
@@ -258,8 +259,8 @@ fn update(surface: &Surface, settings: Settings) {
         env.pixel_ratio = surface.scale();
     }
     env.os_version = os_version();
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = px(0.0);
     surface.set_environment(env);
 }
 
@@ -429,7 +430,7 @@ fn accent(dark: bool) -> Color {
     if dark { dark_shade } else { light }
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Commands
 
 /// A command not addressed to a kind of view.
@@ -523,7 +524,7 @@ fn dialog_answer(id: u32, index: i32) -> EventPayload {
     ])
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Overlays
 
 /// A dialog or toast over a surface.
@@ -660,7 +661,7 @@ fn add_overlay(surface: &Rc<Surface>, serial: u64, kind: OverlayKind) {
         crate::native::take_keyboard(surface);
     }
     let env = surface.environment.get();
-    place(surface, &kind, env.window.0, env.window.1);
+    place(surface, &kind, env.window.width.0, env.window.height.0);
     OVERLAYS.with(|o| {
         o.borrow_mut().push(Overlay {
             key: surface.key(),
@@ -731,7 +732,7 @@ fn fade(surface: &Rc<Surface>, serial: u64, to: f32, secs: f64, remove: bool) {
     });
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Drawing helpers
 
 /// One piece of text laid out by DirectWrite.
@@ -811,15 +812,15 @@ impl Label {
     }
 }
 
-fn rounded(r: Rect, radius: f32) -> D2D1_ROUNDED_RECT {
+fn rounded(r: Bounds<Points>, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT {
-        rect: rect_f(r.x, r.y, r.width, r.height),
+        rect: rect_f(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
         radiusX: radius,
         radiusY: radius,
     }
 }
 
-fn fill_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color) {
+fn fill_rounded(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, color: Color) {
     // SAFETY: a COM call between BeginDraw and EndDraw.
     unsafe {
         cx.dc
@@ -827,9 +828,14 @@ fn fill_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color) {
     };
 }
 
-fn stroke_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color, width: f32) {
+fn stroke_rounded(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, color: Color, width: f32) {
     let i = width / 2.0;
-    let r = rect(r.x + i, r.y + i, r.width - width, r.height - width);
+    let r = rect(
+        r.origin.x.0 + i,
+        r.origin.y.0 + i,
+        r.size.width.0 - width,
+        r.size.height.0 - width,
+    );
     // SAFETY: a COM call between BeginDraw and EndDraw.
     unsafe {
         cx.dc.DrawRoundedRectangle(
@@ -844,16 +850,16 @@ fn stroke_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color, width: f3
 /// A soft shadow under a card: rounded rectangles growing outward with
 /// falling opacity (Direct2D's blur would need an offscreen target in the
 /// middle of the pass).
-fn draw_shadow(cx: &DrawCx<'_>, r: Rect, radius: f32, dy: f32, alpha: f32) {
+fn draw_shadow(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, dy: f32, alpha: f32) {
     const STEPS: usize = 14;
     for i in (0..STEPS).rev() {
         let grow = (i + 1) as f32 * 2.0;
         let a = alpha * (1.0 - i as f32 / STEPS as f32).powi(2) / STEPS as f32 * 2.5;
         let shadow = rect(
-            r.x - grow,
-            r.y - grow + dy,
-            r.width + 2.0 * grow,
-            r.height + 2.0 * grow,
+            r.origin.x.0 - grow,
+            r.origin.y.0 - grow + dy,
+            r.size.width.0 + 2.0 * grow,
+            r.size.height.0 + 2.0 * grow,
         );
         fill_rounded(cx, shadow, radius + grow, with_alpha(Color::BLACK, a));
     }
@@ -937,7 +943,7 @@ impl Palette {
     }
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Dialog layout
 
 /// Sizes of dialogs (points), after Windows 11's content dialog.
@@ -970,15 +976,15 @@ enum Part {
 #[derive(Debug, Default, Clone, PartialEq)]
 struct Geometry {
     /// The cards (an alert's one; a sheet's options and its cancel card).
-    cards: Vec<Rect>,
+    cards: Vec<Bounds<Points>>,
     /// An alert's footer (the buttons' band at the bottom of the card).
-    footer: Option<Rect>,
+    footer: Option<Bounds<Points>>,
     /// A sheet's line between its text and its options.
-    separator: Option<Rect>,
-    title: Option<Rect>,
-    message: Option<Rect>,
+    separator: Option<Bounds<Points>>,
+    title: Option<Bounds<Points>>,
+    message: Option<Bounds<Points>>,
     /// The buttons, by index.
-    buttons: Vec<Rect>,
+    buttons: Vec<Bounds<Points>>,
     /// An alert's buttons are in one row (else a column).
     row: bool,
 }
@@ -1045,14 +1051,14 @@ fn layout_alert(
             if row {
                 rect(
                     x + PAD + i * (column + BUTTON_GAP),
-                    footer.y + PAD,
+                    footer.origin.y.0 + PAD,
                     column,
                     BUTTON_HEIGHT,
                 )
             } else {
                 rect(
                     x + PAD,
-                    footer.y + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
+                    footer.origin.y.0 + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
                     inner,
                     BUTTON_HEIGHT,
                 )
@@ -1217,7 +1223,7 @@ fn step_focus(order: &[usize], current: Option<usize>, step: isize) -> Option<us
     Some(order[next as usize])
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Dialogs
 
 /// What a press on a dialog started on.
@@ -1301,10 +1307,10 @@ impl DialogItem {
             )
         };
         if let (Some(l), Some(r)) = (&t.title, geometry.title) {
-            l.fit(r.width, r.height);
+            l.fit(r.size.width.0, r.size.height.0);
         }
         if let (Some(l), Some(r)) = (&t.message, geometry.message) {
-            l.fit(r.width, r.height);
+            l.fit(r.size.width.0, r.size.height.0);
         }
         for (l, r) in t.buttons.iter().zip(&geometry.buttons) {
             let pad = if self.sheet {
@@ -1312,7 +1318,7 @@ impl DialogItem {
             } else {
                 metrics::BUTTON_PAD
             };
-            l.fit(r.width - 2.0 * pad, r.height);
+            l.fit(r.size.width.0 - 2.0 * pad, r.size.height.0);
         }
         *layout = Some(DialogLayout {
             size,
@@ -1325,7 +1331,12 @@ impl DialogItem {
         let Some(g) = self.layout.borrow().as_ref().map(|l| l.geometry.clone()) else {
             return Target::Outside;
         };
-        let inside = |r: &Rect| x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+        let inside = |r: &Bounds<Points>| {
+            x >= r.origin.x.0
+                && y >= r.origin.y.0
+                && x < r.origin.x.0 + r.size.width.0
+                && y < r.origin.y.0 + r.size.height.0
+        };
         if let Some(i) = g.buttons.iter().position(inside) {
             Target::Button(i)
         } else if g.cards.iter().any(inside) {
@@ -1414,8 +1425,8 @@ impl Hosted for DialogItem {
         {
             let last = g.cards.last().unwrap_or(first);
             let (mx, my) = (
-                first.x + first.width / 2.0,
-                (first.y + last.y + last.height) / 2.0,
+                first.origin.x.0 + first.size.width.0 / 2.0,
+                (first.origin.y.0 + last.origin.y.0 + last.size.height.0) / 2.0,
             );
             let s = 1.0 + 0.04 * (1.0 - opacity);
             cx.set_transform(
@@ -1436,7 +1447,12 @@ impl Hosted for DialogItem {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.FillRectangle(
-                    &rect_f(footer.x, footer.y, footer.width, footer.height),
+                    &rect_f(
+                        footer.origin.x.0,
+                        footer.origin.y.0,
+                        footer.size.width.0,
+                        footer.size.height.0,
+                    ),
                     cx.solid(p.footer),
                 )
             };
@@ -1449,17 +1465,32 @@ impl Hosted for DialogItem {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.FillRectangle(
-                    &rect_f(sep.x, sep.y, sep.width, sep.height),
+                    &rect_f(
+                        sep.origin.x.0,
+                        sep.origin.y.0,
+                        sep.size.width.0,
+                        sep.size.height.0,
+                    ),
                     cx.solid(p.separator),
                 )
             };
         }
         let t = &self.texts;
         if let (Some(l), Some(r)) = (&t.title, g.title) {
-            l.draw(cx, r.x, r.y, if self.sheet { p.secondary } else { p.text });
+            l.draw(
+                cx,
+                r.origin.x.0,
+                r.origin.y.0,
+                if self.sheet { p.secondary } else { p.text },
+            );
         }
         if let (Some(l), Some(r)) = (&t.message, g.message) {
-            l.draw(cx, r.x, r.y, if self.sheet { p.secondary } else { p.text });
+            l.draw(
+                cx,
+                r.origin.x.0,
+                r.origin.y.0,
+                if self.sheet { p.secondary } else { p.text },
+            );
         }
         let hover = self.hover.get();
         let pressed = match self.pressed.get() {
@@ -1514,9 +1545,14 @@ impl Hosted for DialogItem {
             } else {
                 BUTTON_PAD
             };
-            label.draw(cx, r.x + pad, r.y, text);
+            label.draw(cx, r.origin.x.0 + pad, r.origin.y.0, text);
             if self.keyboard.get() && self.focus.get() == Some(i) {
-                let ring = rect(r.x - 3.0, r.y - 3.0, r.width + 6.0, r.height + 6.0);
+                let ring = rect(
+                    r.origin.x.0 - 3.0,
+                    r.origin.y.0 - 3.0,
+                    r.size.width.0 + 6.0,
+                    r.size.height.0 + 6.0,
+                );
                 stroke_rounded(cx, ring, BUTTON_RADIUS + 3.0, p.focus, 2.0);
             }
         }
@@ -1680,7 +1716,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Toasts
 
 /// A short message at the bottom of the surface; never takes the pointer.
@@ -1767,7 +1803,7 @@ fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
     });
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // The clipboard
 
 /// Puts `text` on the clipboard (Unicode text).
@@ -2100,23 +2136,32 @@ mod tests {
         let g = layout_alert((1000.0, 800.0), true, true, 2, &measure(&["Cancel", "OK"]));
         let card = g.cards[0];
         // As wide as the message, up to the maximum, centered.
-        assert_eq!(card.width, metrics::MAX_WIDTH);
-        assert_eq!(card.x, ((1000.0 - card.width) / 2.0).round());
+        assert_eq!(card.size.width.0, metrics::MAX_WIDTH);
+        assert_eq!(
+            card.origin.x.0,
+            ((1000.0 - card.size.width.0) / 2.0).round()
+        );
         assert!(g.row);
         // Equal columns in the footer.
-        assert_eq!(g.buttons[0].width, g.buttons[1].width);
-        assert_eq!(g.buttons[0].y, g.buttons[1].y);
+        assert_eq!(g.buttons[0].size.width.0, g.buttons[1].size.width.0);
+        assert_eq!(g.buttons[0].origin.y.0, g.buttons[1].origin.y.0);
         assert_eq!(
-            g.buttons[1].x + g.buttons[1].width,
-            card.x + card.width - metrics::PAD
+            g.buttons[1].origin.x.0 + g.buttons[1].size.width.0,
+            card.origin.x.0 + card.size.width.0 - metrics::PAD
         );
         let footer = g.footer.unwrap();
-        assert_eq!(footer.y + footer.height, card.y + card.height);
+        assert_eq!(
+            footer.origin.y.0 + footer.size.height.0,
+            card.origin.y.0 + card.size.height.0
+        );
         // The message wraps at the inner width, below the title.
         let message = g.message.unwrap();
-        assert_eq!(message.width, card.width - 2.0 * metrics::PAD);
-        assert!(message.height > 20.0);
-        assert_eq!(message.y, g.title.unwrap().y + 20.0 + metrics::TITLE_GAP);
+        assert_eq!(message.size.width.0, card.size.width.0 - 2.0 * metrics::PAD);
+        assert!(message.size.height.0 > 20.0);
+        assert_eq!(
+            message.origin.y.0,
+            g.title.unwrap().origin.y.0 + 20.0 + metrics::TITLE_GAP
+        );
     }
 
     #[test]
@@ -2133,7 +2178,7 @@ mod tests {
         assert!(
             g.buttons
                 .windows(2)
-                .all(|b| b[1].y > b[0].y && b[1].x == b[0].x)
+                .all(|b| b[1].origin.y.0 > b[0].origin.y.0 && b[1].origin.x.0 == b[0].origin.x.0)
         );
         // So do labels too long for their column.
         let g = layout_alert(
@@ -2145,7 +2190,7 @@ mod tests {
         );
         assert!(!g.row);
         // A narrow window: the card fits it, less the gutters.
-        assert_eq!(g.cards[0].width, 360.0 - 2.0 * metrics::GUTTER);
+        assert_eq!(g.cards[0].size.width.0, 360.0 - 2.0 * metrics::GUTTER);
     }
 
     #[test]
@@ -2160,12 +2205,18 @@ mod tests {
         );
         assert_eq!(g.cards.len(), 2);
         let (options, cancel) = (g.cards[0], g.cards[1]);
-        assert_eq!(options.width, metrics::SHEET_MAX_WIDTH);
-        assert_eq!(cancel.y + cancel.height, 800.0 - 2.0 * metrics::BUTTON_GAP);
-        assert_eq!(options.y + options.height + metrics::BUTTON_GAP, cancel.y);
+        assert_eq!(options.size.width.0, metrics::SHEET_MAX_WIDTH);
+        assert_eq!(
+            cancel.origin.y.0 + cancel.size.height.0,
+            800.0 - 2.0 * metrics::BUTTON_GAP
+        );
+        assert_eq!(
+            options.origin.y.0 + options.size.height.0 + metrics::BUTTON_GAP,
+            cancel.origin.y.0
+        );
         // The options in order in the first card, the cancel button alone.
-        assert!(g.buttons[0].y < g.buttons[2].y);
-        assert!(g.buttons[1].y > cancel.y);
+        assert!(g.buttons[0].origin.y.0 < g.buttons[2].origin.y.0);
+        assert!(g.buttons[1].origin.y.0 > cancel.origin.y.0);
         assert!(g.separator.is_some());
     }
 

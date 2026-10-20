@@ -1,6 +1,6 @@
 use std::{cell::RefCell, sync::Arc};
 
-use nsh_core::{AttributedText, Rect, TextLayout, TextLink};
+use nsh_core::{AttributedText, Bounds, Points, TextLayout, TextLink};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::Retained,
@@ -170,7 +170,7 @@ fn stroke_decoration(
 
 #[derive(Default)]
 pub(crate) struct TextViewIvars {
-    pub(crate) layout: RefCell<Option<(TextLayout, Rect)>>,
+    pub(crate) layout: RefCell<Option<(TextLayout, Bounds<Points>)>>,
     /// The content, for accessibility and the block's shadow.
     pub(crate) text: RefCell<Option<Arc<AttributedText>>>,
     /// `selectable`: the range selection (`text_selection.rs`).
@@ -287,7 +287,7 @@ define_class!(
             // CoreText draws in a y-up space with the origin at the bottom of
             // the box.
             CGContext::set_text_matrix(c, CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 });
-            CGContext::translate_ctm(c, content.x as CGFloat, (content.y + content.height) as CGFloat);
+            CGContext::translate_ctm(c, content.origin.x.0 as CGFloat, (content.origin.y.0 + content.size.height.0) as CGFloat);
             CGContext::scale_ctm(c, 1.0, -1.0);
             if let Some(shadow) = self.ivars().text.borrow().as_ref().and_then(|t| t.shadow) {
                 let (r, g, b, a) = shadow.color.to_f64();
@@ -531,7 +531,12 @@ impl TextView {
         }
     }
 
-    pub(crate) fn set_layout(&self, text: Arc<AttributedText>, layout: TextLayout, content: Rect) {
+    pub(crate) fn set_layout(
+        &self,
+        text: Arc<AttributedText>,
+        layout: TextLayout,
+        content: Bounds<Points>,
+    ) {
         let (selectable, color) = (text.is_selectable(), text.selection_color);
         let changed = self
             .ivars()
@@ -581,8 +586,8 @@ impl TextView {
         let (layout, content) = layout.as_ref()?;
         let lines = &layout.downcast::<CoreTextLayout>()?.lines;
         // CoreText's y-up space from the bottom of the box.
-        let x = point.x - content.x as CGFloat;
-        let y = (content.y + content.height) as CGFloat - point.y;
+        let x = point.x - content.origin.x.0 as CGFloat;
+        let y = (content.origin.y.0 + content.size.height.0) as CGFloat - point.y;
         let mut best: Option<(&LaidLine, CGFloat)> = None;
         for line in lines {
             let (mut ascent, mut descent) = (0.0, 0.0);

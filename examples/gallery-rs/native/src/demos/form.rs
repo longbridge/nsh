@@ -6,7 +6,7 @@
 //! (as the TSX gallery's `demos/Form.tsx`).
 
 use nsh_core::{
-    Size,
+    Points, Size,
     ui::{
         AutoCapitalize, AutoFill, KeyboardDismissMode, LayoutAnimation, ReturnKeyType, View,
         prelude::*,
@@ -953,9 +953,9 @@ fn AutoGrow() -> impl IntoElement {
         .multiline()
         .render(|i| {
             i.placeholder("Type several lines")
-                .on_content_size_change(move |e: &Size| {
-                    size.set(format!("{}×{}", e.width.round(), e.height.round()));
-                    height.set(e.height.min(110.0));
+                .on_content_size_change(move |e: &Size<Points>| {
+                    size.set(format!("{}×{}", e.width.0.round(), e.height.0.round()));
+                    height.set(e.height.min(px(110.0)).0);
                 })
                 .h(move || px(height.get().max(20.0) + 26.0))
         })

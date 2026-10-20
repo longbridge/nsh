@@ -461,7 +461,7 @@ impl<M: TextEngine> Core<M> {
                 0
             };
             let positional = pos != 0 && node.parent != NO_KEY;
-            let window = (self.viewport.width, self.viewport.height);
+            let window = (self.viewport.width.0, self.viewport.height.0);
             let cx = Context {
                 env: self.class_env,
                 window,

@@ -65,10 +65,10 @@ use gpui::{
 };
 use nsh_core::{
     Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
-    ROOT_ID, Rect,
+    Points, ROOT_ID,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Environment, Insets, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Locale};
 
 use crate::{
     app::AppView,
@@ -325,8 +325,8 @@ fn update(surface: &Surface) {
     env.rtl = settings.rtl;
     env.screen_reader = settings.screen_reader;
     env.os_version = settings.os_version;
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = Points(0.0);
     surface.set_environment(env);
 }
 
@@ -1306,21 +1306,21 @@ impl Label {
 
     /// Draws it in the box `r` (current coordinates; alignment applies in
     /// its width), centered vertically when it is one unwrapped line.
-    fn draw(&self, cx: &mut DrawCx<'_>, r: Rect, color: Color) {
+    fn draw(&self, cx: &mut DrawCx<'_>, r: nsh_core::Bounds<Points>, color: Color) {
         if cx.culled() {
             return;
         }
         let lh = self.line_height();
-        let lines = self.shape(cx.window, r.width, cx.color(color));
+        let lines = self.shape(cx.window, r.size.width.0, cx.color(color));
         let mut y = if self.wrap {
-            r.y
+            r.origin.y.0
         } else {
-            r.y + ((r.height - lh) / 2.0).round()
+            r.origin.y.0 + ((r.size.height.0 - lh) / 2.0).round()
         };
         let k = cx.transform_scale();
         for line in lines {
-            let origin = cx.map(r.x, y);
-            let b = cx.rect(r.x, y, r.width, lh);
+            let origin = cx.map(r.origin.x.0, y);
+            let b = cx.rect(r.origin.x.0, y, r.size.width.0, lh);
             let height = f32::from(line.size(px(lh)).height);
             let align = self.align;
             cx.paint(|window, app| {
@@ -1331,17 +1331,23 @@ impl Label {
     }
 }
 
-fn fill_rounded(cx: &mut DrawCx<'_>, r: Rect, radius: f32, color: Color) {
+fn fill_rounded(cx: &mut DrawCx<'_>, r: nsh_core::Bounds<Points>, radius: f32, color: Color) {
     cx.fill_rect(r, [radius; 4], color);
 }
 
-fn stroke_rounded(cx: &mut DrawCx<'_>, r: Rect, radius: f32, color: Color, width: f32) {
+fn stroke_rounded(
+    cx: &mut DrawCx<'_>,
+    r: nsh_core::Bounds<Points>,
+    radius: f32,
+    color: Color,
+    width: f32,
+) {
     if color.0 & 0xff == 0 {
         return;
     }
     let k = cx.transform_scale();
     let quad = gpui::fill(
-        cx.rect(r.x, r.y, r.width, r.height),
+        cx.rect(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
         gpui::transparent_black(),
     )
     .corner_radii(corners([radius; 4], k))
@@ -1351,12 +1357,12 @@ fn stroke_rounded(cx: &mut DrawCx<'_>, r: Rect, radius: f32, color: Color, width
 }
 
 /// A soft shadow under a card (GPUI's blurred drop shadow).
-fn draw_shadow(cx: &mut DrawCx<'_>, r: Rect, radius: f32, dy: f32, alpha: f32) {
+fn draw_shadow(cx: &mut DrawCx<'_>, r: nsh_core::Bounds<Points>, radius: f32, dy: f32, alpha: f32) {
     if cx.culled() {
         return;
     }
     let k = cx.transform_scale();
-    let b = cx.rect(r.x, r.y, r.width, r.height);
+    let b = cx.rect(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0);
     let shadow = gpui::BoxShadow {
         color: cx.color(with_alpha(Color::BLACK, alpha)),
         offset: gpui::point(px(0.0), px(dy * k)),
@@ -1507,15 +1513,15 @@ enum Part {
 #[derive(Debug, Default, Clone, PartialEq)]
 struct Geometry {
     /// The cards (an alert's one; a sheet's options and its cancel card).
-    cards: Vec<Rect>,
+    cards: Vec<nsh_core::Bounds<Points>>,
     /// An alert's footer (the buttons' band at the bottom of the card).
-    footer: Option<Rect>,
+    footer: Option<nsh_core::Bounds<Points>>,
     /// A sheet's line between its text and its options.
-    separator: Option<Rect>,
-    title: Option<Rect>,
-    message: Option<Rect>,
+    separator: Option<nsh_core::Bounds<Points>>,
+    title: Option<nsh_core::Bounds<Points>>,
+    message: Option<nsh_core::Bounds<Points>>,
     /// The buttons, by index.
-    buttons: Vec<Rect>,
+    buttons: Vec<nsh_core::Bounds<Points>>,
     /// An alert's buttons are in one row (else a column).
     row: bool,
 }
@@ -1582,14 +1588,14 @@ fn layout_alert(
             if row {
                 rect(
                     x + PAD + i * (column + BUTTON_GAP),
-                    footer.y + PAD,
+                    footer.origin.y.0 + PAD,
                     column,
                     BUTTON_HEIGHT,
                 )
             } else {
                 rect(
                     x + PAD,
-                    footer.y + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
+                    footer.origin.y.0 + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
                     inner,
                     BUTTON_HEIGHT,
                 )
@@ -1840,7 +1846,12 @@ impl DialogItem {
         let Some((_, g)) = &*layout else {
             return Target::Outside;
         };
-        let inside = |r: &Rect| x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+        let inside = |r: &nsh_core::Bounds<Points>| {
+            x >= r.origin.x.0
+                && y >= r.origin.y.0
+                && x < r.origin.x.0 + r.size.width.0
+                && y < r.origin.y.0 + r.size.height.0
+        };
         if let Some(i) = g.buttons.iter().position(inside) {
             Target::Button(i)
         } else if g.cards.iter().any(inside) {
@@ -1993,11 +2004,21 @@ impl Hosted for DialogItem {
             };
             label.draw(
                 cx,
-                rect(r.x + pad, r.y, r.width - 2.0 * pad, r.height),
+                rect(
+                    r.origin.x.0 + pad,
+                    r.origin.y.0,
+                    r.size.width.0 - 2.0 * pad,
+                    r.size.height.0,
+                ),
                 text,
             );
             if self.keyboard.get() && self.focus.get() == Some(i) {
-                let ring = rect(r.x - 3.0, r.y - 3.0, r.width + 6.0, r.height + 6.0);
+                let ring = rect(
+                    r.origin.x.0 - 3.0,
+                    r.origin.y.0 - 3.0,
+                    r.size.width.0 + 6.0,
+                    r.size.height.0 + 6.0,
+                );
                 stroke_rounded(cx, ring, BUTTON_RADIUS + 3.0, p.focus, 2.0);
             }
         }
@@ -2163,7 +2184,7 @@ impl ToastItem {
     const BOTTOM: f32 = 64.0;
 
     /// Where it goes in a surface of `size`.
-    fn frame(&self, window: &Window, size: (f32, f32)) -> Rect {
+    fn frame(&self, window: &Window, size: (f32, f32)) -> nsh_core::Bounds<Points> {
         let max = (size.0 - 48.0).min(Self::MAX_WIDTH) - 2.0 * Self::PAD_X;
         let (w, h) = self.label.measure(window, max.max(1.0));
         let (w, h) = (w + 2.0 * Self::PAD_X, h + 2.0 * Self::PAD_Y);
@@ -2189,14 +2210,14 @@ impl Hosted for ToastItem {
             (Color(0x1717_17eb), Color(0xfafa_faff))
         };
         let r = self.frame(cx.window, size);
-        let radius = 18.0_f32.min(r.height / 2.0);
+        let radius = 18.0_f32.min(r.size.height.0 / 2.0);
         draw_shadow(cx, r, radius, 2.0, 0.12);
         fill_rounded(cx, r, radius, fill);
         let inner = rect(
-            r.x + Self::PAD_X,
-            r.y + Self::PAD_Y,
-            r.width - 2.0 * Self::PAD_X,
-            r.height - 2.0 * Self::PAD_Y,
+            r.origin.x.0 + Self::PAD_X,
+            r.origin.y.0 + Self::PAD_Y,
+            r.size.width.0 - 2.0 * Self::PAD_X,
+            r.size.height.0 - 2.0 * Self::PAD_Y,
         );
         self.label.draw(cx, inner, text);
         cx.pop();
@@ -2372,22 +2393,31 @@ mod tests {
         let g = layout_alert((1000.0, 800.0), true, true, 2, &measure(&["Cancel", "OK"]));
         let card = g.cards[0];
         // As wide as the message, up to the maximum, centered.
-        assert_eq!(card.width, metrics::MAX_WIDTH);
-        assert_eq!(card.x, ((1000.0 - card.width) / 2.0).round());
+        assert_eq!(card.size.width.0, metrics::MAX_WIDTH);
+        assert_eq!(
+            card.origin.x.0,
+            ((1000.0 - card.size.width.0) / 2.0).round()
+        );
         assert!(g.row);
         // Equal columns in the footer.
-        assert_eq!(g.buttons[0].width, g.buttons[1].width);
-        assert_eq!(g.buttons[0].y, g.buttons[1].y);
+        assert_eq!(g.buttons[0].size.width.0, g.buttons[1].size.width.0);
+        assert_eq!(g.buttons[0].origin.y.0, g.buttons[1].origin.y.0);
         assert_eq!(
-            g.buttons[1].x + g.buttons[1].width,
-            card.x + card.width - metrics::PAD
+            g.buttons[1].origin.x.0 + g.buttons[1].size.width.0,
+            card.origin.x.0 + card.size.width.0 - metrics::PAD
         );
         let footer = g.footer.unwrap();
-        assert_eq!(footer.y + footer.height, card.y + card.height);
+        assert_eq!(
+            footer.origin.y.0 + footer.size.height.0,
+            card.origin.y.0 + card.size.height.0
+        );
         let message = g.message.unwrap();
-        assert_eq!(message.width, card.width - 2.0 * metrics::PAD);
-        assert!(message.height > 20.0);
-        assert_eq!(message.y, g.title.unwrap().y + 20.0 + metrics::TITLE_GAP);
+        assert_eq!(message.size.width.0, card.size.width.0 - 2.0 * metrics::PAD);
+        assert!(message.size.height.0 > 20.0);
+        assert_eq!(
+            message.origin.y.0,
+            g.title.unwrap().origin.y.0 + 20.0 + metrics::TITLE_GAP
+        );
     }
 
     #[test]
@@ -2403,7 +2433,7 @@ mod tests {
         assert!(
             g.buttons
                 .windows(2)
-                .all(|b| b[1].y > b[0].y && b[1].x == b[0].x)
+                .all(|b| b[1].origin.y.0 > b[0].origin.y.0 && b[1].origin.x.0 == b[0].origin.x.0)
         );
         let g = layout_alert(
             (360.0, 800.0),
@@ -2413,7 +2443,7 @@ mod tests {
             &measure(&["A rather long button label", "OK"]),
         );
         assert!(!g.row);
-        assert_eq!(g.cards[0].width, 360.0 - 2.0 * metrics::GUTTER);
+        assert_eq!(g.cards[0].size.width.0, 360.0 - 2.0 * metrics::GUTTER);
     }
 
     #[test]
@@ -2428,11 +2458,17 @@ mod tests {
         );
         assert_eq!(g.cards.len(), 2);
         let (options, cancel) = (g.cards[0], g.cards[1]);
-        assert_eq!(options.width, metrics::SHEET_MAX_WIDTH);
-        assert_eq!(cancel.y + cancel.height, 800.0 - 2.0 * metrics::BUTTON_GAP);
-        assert_eq!(options.y + options.height + metrics::BUTTON_GAP, cancel.y);
-        assert!(g.buttons[0].y < g.buttons[2].y);
-        assert!(g.buttons[1].y > cancel.y);
+        assert_eq!(options.size.width.0, metrics::SHEET_MAX_WIDTH);
+        assert_eq!(
+            cancel.origin.y.0 + cancel.size.height.0,
+            800.0 - 2.0 * metrics::BUTTON_GAP
+        );
+        assert_eq!(
+            options.origin.y.0 + options.size.height.0 + metrics::BUTTON_GAP,
+            cancel.origin.y.0
+        );
+        assert!(g.buttons[0].origin.y.0 < g.buttons[2].origin.y.0);
+        assert!(g.buttons[1].origin.y.0 > cancel.origin.y.0);
         assert!(g.separator.is_some());
     }
 

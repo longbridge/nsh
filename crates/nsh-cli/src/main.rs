@@ -150,7 +150,7 @@ enum Command {
         /// Simulated safe area insets in points: `top,right,bottom,left`
         /// (or one value for all four), e.g. `47,0,34,0`.
         #[arg(long, value_name = "INSETS", value_parser = nsh_engine::headless::parse_insets)]
-        safe_area: Option<nsh_engine::Insets>,
+        safe_area: Option<nsh_engine::Edges<nsh_engine::Points>>,
         /// Scroll the first scroll view / list by this many points, in
         /// 10 pt frames, and print each frame's batch.
         #[arg(long)]

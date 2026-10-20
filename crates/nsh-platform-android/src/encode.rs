@@ -164,7 +164,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::Frame { id, frame } => {
                 e.int(FRAME);
                 e.int(id as i32);
-                for v in [frame.x, frame.y, frame.width, frame.height] {
+                for v in [
+                    frame.origin.x.0,
+                    frame.origin.y.0,
+                    frame.size.width.0,
+                    frame.size.height.0,
+                ] {
                     e.float(v);
                 }
             }
@@ -188,7 +193,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.int(e.objects.len() as i32);
                 e.objects.push(Obj::Layout(layout.clone()));
-                for v in [content.x, content.y, content.width, content.height] {
+                for v in [
+                    content.origin.x.0,
+                    content.origin.y.0,
+                    content.size.width.0,
+                    content.size.height.0,
+                ] {
                     e.float(v);
                 }
                 // Pressable spans: start, end, node, events (low, high).
@@ -263,8 +273,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::ScrollContent { id, size } => {
                 e.int(SCROLL_CONTENT);
                 e.int(id as i32);
-                e.float(size.width);
-                e.float(size.height);
+                e.float(size.width.0);
+                e.float(size.height.0);
             }
             MountItem::StickyCells { id, cells } => {
                 e.int(STICKY_CELLS);
@@ -296,10 +306,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.bool(extent.is_some());
                 let r = extent.unwrap_or_default();
-                e.float(r.x);
-                e.float(r.y);
-                e.float(r.width);
-                e.float(r.height);
+                e.float(r.origin.x.0);
+                e.float(r.origin.y.0);
+                e.float(r.size.width.0);
+                e.float(r.size.height.0);
             }
             MountItem::TrackStates { id, states } => {
                 e.int(TRACK_STATES);
@@ -434,7 +444,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::InputContent { id, content } => {
                 e.int(INPUT_CONTENT);
                 e.int(id as i32);
-                for v in [content.x, content.y, content.width, content.height] {
+                for v in [
+                    content.origin.x.0,
+                    content.origin.y.0,
+                    content.size.width.0,
+                    content.size.height.0,
+                ] {
                     e.float(v);
                 }
             }

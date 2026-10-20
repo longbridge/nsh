@@ -198,7 +198,7 @@ impl Mounter {
                     // Where a modal sits is the platform's (a sheet is a
                     // card inside the window): the core only sizes it.
                     let old = view.state().frame;
-                    (frame.x, frame.y) = (old.x, old.y);
+                    (frame.origin.x.0, frame.origin.y.0) = (old.origin.x.0, old.origin.y.0);
                 }
                 let frame = &frame;
                 // Compared with where a running layout animation is headed,

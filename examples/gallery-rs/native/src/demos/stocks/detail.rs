@@ -6,7 +6,7 @@
 use std::f32::consts::TAU;
 
 use nsh_core::{
-    ModalPresentation, Rect,
+    Bounds, ModalPresentation, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineCap},
     nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
@@ -539,8 +539,8 @@ fn DayRange(props: StockProps) -> impl IntoElement {
         .child(range_label(move || format!("L {}", p(quote.get().low))))
         .child(
             view()
-                .on_layout(move |frame: &Rect| {
-                    if width.replace(frame.width) != frame.width {
+                .on_layout(move |frame: &Bounds<Points>| {
+                    if width.replace(frame.size.width.0) != frame.size.width.0 {
                         place(quote.get_untracked());
                     }
                 })
@@ -677,6 +677,6 @@ fn Ranges(props: StockProps) -> impl IntoElement {
             })
             .h(px(HORIZONS.len() as f32 * 34.0 + 16.0))
             .label("Price ranges")
-            .on_layout(move |frame: &Rect| width.set(frame.width)),
+            .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
 }

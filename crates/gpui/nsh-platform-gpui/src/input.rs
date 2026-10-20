@@ -375,8 +375,8 @@ impl Item {
         };
         match self {
             Item::Hosted(_, native) => {
-                event.x -= native.rect.x;
-                event.y -= native.rect.y;
+                event.x -= native.rect.origin.x.0;
+                event.y -= native.rect.origin.y.0;
                 native.item.pointer(&event)
             }
             Item::Input(view) => crate::text_input::pointer(surface, view, &event),
@@ -772,7 +772,10 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
     };
     if let Some(native) = &hit.item {
         let (lx, ly) = local(&hit.view, x, y);
-        if let Some(c) = native.item.cursor(lx - native.rect.x, ly - native.rect.y) {
+        if let Some(c) = native
+            .item
+            .cursor(lx - native.rect.origin.x.0, ly - native.rect.origin.y.0)
+        {
             return c;
         }
     }
@@ -822,7 +825,7 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
 /// that set `windowDrag`, less what is nearer and takes presses (text
 /// fields, hosted items, views with press or touch handlers or with
 /// `windowDrag: false`). Transforms are not followed.
-pub(crate) fn window_drag_rects(surface: &Surface) -> Vec<nsh_core::Rect> {
+pub(crate) fn window_drag_rects(surface: &Surface) -> Vec<nsh_core::Bounds<nsh_core::Points>> {
     let mut drag = Vec::new();
     let mut block = Vec::new();
     collect_drag(&surface.root, (0.0, 0.0), false, &mut drag, &mut block);
@@ -839,14 +842,19 @@ fn collect_drag(
     view: &NshView,
     origin: (f32, f32),
     mut inside: bool,
-    drag: &mut Vec<nsh_core::Rect>,
-    block: &mut Vec<nsh_core::Rect>,
+    drag: &mut Vec<nsh_core::Bounds<nsh_core::Points>>,
+    block: &mut Vec<nsh_core::Bounds<nsh_core::Points>>,
 ) {
     let s = view.state();
     if s.style.hidden || s.concealed || s.props.pointer_events == PointerEvents::None {
         return;
     }
-    let r = crate::geom::rect(origin.0, origin.1, s.frame.width, s.frame.height);
+    let r = crate::geom::rect(
+        origin.0,
+        origin.1,
+        s.frame.size.width.0,
+        s.frame.size.height.0,
+    );
     match s.props.window_drag {
         Some(true) => {
             drag.push(r);
@@ -873,10 +881,10 @@ fn collect_drag(
         for n in &s.natives {
             let n = n.rect;
             block.push(crate::geom::rect(
-                origin.0 + n.x,
-                origin.1 + n.y,
-                n.width,
-                n.height,
+                origin.0 + n.origin.x.0,
+                origin.1 + n.origin.y.0,
+                n.size.width.0,
+                n.size.height.0,
             ));
         }
     }
@@ -1182,7 +1190,7 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
     }
     let pe = s.props.pointer_events;
     let clip = s.clips();
-    let (w, h) = (s.frame.width, s.frame.height);
+    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
     let inside = x >= 0.0 && y >= 0.0 && x < w && y < h;
     let slop = s.props.hit_slop;
     let in_slop = x >= -slop.left && y >= -slop.top && x < w + slop.right && y < h + slop.bottom;
@@ -1190,8 +1198,12 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         inside
     } else if laid_out(s.kind, s.id) {
         in_slop
-            || s.overflow
-                .is_some_and(|e| x >= e.x && y >= e.y && x < e.x + e.width && y < e.y + e.height)
+            || s.overflow.is_some_and(|e| {
+                x >= e.origin.x.0
+                    && y >= e.origin.y.0
+                    && x < e.origin.x.0 + e.size.width.0
+                    && y < e.origin.y.0 + e.size.height.0
+            })
     } else {
         // The platform places these views' children (screens, header
         // items) and the core knows no area for them.
@@ -1203,7 +1215,11 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         drop(s);
         for native in natives.iter().rev() {
             let r = native.rect;
-            if native.item.hit(x - r.x, y - r.y, (r.width, r.height)) {
+            if native.item.hit(
+                x - r.origin.x.0,
+                y - r.origin.y.0,
+                (r.size.width.0, r.size.height.0),
+            ) {
                 return Some(Hit {
                     view: view.clone(),
                     item: Some(native.clone()),
@@ -1890,8 +1906,8 @@ fn released_inside(view: &NshView, x: f32, y: f32) -> bool {
     let r = PRESS_RETENTION;
     lx >= -slop.left - r
         && ly >= -slop.top - r
-        && lx <= s.frame.width + slop.right + r
-        && ly <= s.frame.height + slop.bottom + r
+        && lx <= s.frame.size.width.0 + slop.right + r
+        && ly <= s.frame.size.height.0 + slop.bottom + r
 }
 
 /// Fades `view` to `opacity` times its fade before the press, or back
@@ -2696,12 +2712,17 @@ fn touchpad_wait(last: Option<f64>, now: f64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{EdgeInsets, Rect, TransformKind};
+    use nsh_core::{EdgeInsets, Points, TransformKind};
 
     use super::*;
     use crate::view::Hosted;
 
-    fn view(parent: &NshView, id: NodeId, kind: ViewKind, frame: Rect) -> NshView {
+    fn view(
+        parent: &NshView,
+        id: NodeId,
+        kind: ViewKind,
+        frame: nsh_core::Bounds<Points>,
+    ) -> NshView {
         let v = NshView::new(id, kind);
         v.state_mut().frame = frame;
         v.insert_before(parent, None);

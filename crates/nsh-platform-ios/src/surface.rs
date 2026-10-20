@@ -7,9 +7,9 @@ use std::{
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
-use nsh_core::{MountBatch, Size};
+use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{
-    App, ColorScheme, Engine, EngineConfig, Environment, Idiom, Insets, MountSink, Policy,
+    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, MountSink, Policy,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -133,7 +133,7 @@ define_class!(
                 return;
             }
             self.ivars().size.set(size);
-            let viewport = Size::new(size.width as f32, size.height as f32);
+            let viewport = Size::new(Points(size.width as f32), Points(size.height as f32));
             if let Some(running) = self.ivars().running.borrow().as_ref() {
                 running.engine.control().resize(viewport);
                 self.publish_environment();
@@ -199,16 +199,16 @@ impl RootView {
             )
         };
         let mut env = Environment {
-            window: (size.width as f32, size.height as f32),
-            safe_area: Insets {
-                top: insets.top as f32,
-                right: insets.right as f32,
-                bottom: insets.bottom as f32,
-                left: insets.left as f32,
+            window: Size::new(Points(size.width as f32), Points(size.height as f32)),
+            safe_area: Edges {
+                top: Points(insets.top as f32),
+                right: Points(insets.right as f32),
+                bottom: Points(insets.bottom as f32),
+                left: Points(insets.left as f32),
             },
             // UIKit draws no title bar an app could hide.
-            title_bar: Insets::default(),
-            keyboard_height,
+            title_bar: Edges::default(),
+            keyboard_height: Points(keyboard_height),
             keyboard_duration,
             color_scheme: if style == UIUserInterfaceStyle::Dark {
                 ColorScheme::Dark
@@ -377,7 +377,7 @@ impl RootView {
         }
     }
 
-    fn start(&self, mut app: App, viewport: Size) {
+    fn start(&self, mut app: App, viewport: Size<Points>) {
         let mtm = self.mtm();
         let access = Arc::new(match &mut app {
             App::Js(bundle) => {
@@ -583,8 +583,10 @@ impl Surface {
         self.view.stop();
         let size = self.view.ivars().size.get();
         if size.width > 0.0 && size.height > 0.0 {
-            self.view
-                .start(app, Size::new(size.width as f32, size.height as f32));
+            self.view.start(
+                app,
+                Size::new(Points(size.width as f32), Points(size.height as f32)),
+            );
         } else {
             *self.view.ivars().pending.borrow_mut() = Some(app);
         }

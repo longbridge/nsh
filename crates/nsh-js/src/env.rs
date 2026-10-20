@@ -231,17 +231,17 @@ pub(crate) fn set_environment(ctx: *mut JsContext, next: &Environment) -> Result
         Some(p) => !f(p),
         None => true,
     };
-    let insets = |i: &nsh_core::platform::Insets| {
+    let insets = |i: &nsh_core::Edges<nsh_core::Points>| {
         [
-            (c"top", number(i.top)),
-            (c"right", number(i.right)),
-            (c"bottom", number(i.bottom)),
-            (c"left", number(i.left)),
+            (c"top", number(i.top.0)),
+            (c"right", number(i.right.0)),
+            (c"bottom", number(i.bottom.0)),
+            (c"left", number(i.left.0)),
         ]
     };
     let mut writes: Vec<(Part, JsValue)> = Vec::new();
     if changed(&|p| p.window == next.window) {
-        let (w, h) = next.window;
+        let (w, h) = (next.window.width.0, next.window.height.0);
         writes.push((
             Part::Window,
             object(ctx, &[(c"width", number(w)), (c"height", number(h))]),
@@ -257,9 +257,9 @@ pub(crate) fn set_environment(ctx: *mut JsContext, next: &Environment) -> Result
             object(
                 ctx,
                 &[
-                    (c"height", number(t.top)),
-                    (c"left", number(t.left)),
-                    (c"right", number(t.right)),
+                    (c"height", number(t.top.0)),
+                    (c"left", number(t.left.0)),
+                    (c"right", number(t.right.0)),
                 ],
             ),
         ));
@@ -272,7 +272,7 @@ pub(crate) fn set_environment(ctx: *mut JsContext, next: &Environment) -> Result
             object(
                 ctx,
                 &[
-                    (c"height", number(next.keyboard_height)),
+                    (c"height", number(next.keyboard_height.0)),
                     (c"duration", number(next.keyboard_duration)),
                 ],
             ),

@@ -5,8 +5,8 @@
 use std::cell::Cell;
 
 use nsh_core::{
-    AutoCapitalize, AutoFill, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId, Rect,
-    ReturnKeyType, SubmitBehavior, TextAlign,
+    AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
+    Points, ReturnKeyType, SubmitBehavior, TextAlign,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -334,7 +334,7 @@ pub(crate) struct Input {
     /// Edits reported to the engine.
     pub(crate) count: u32,
     config: Option<InputConfig>,
-    content: Rect,
+    content: Bounds<Points>,
 }
 
 impl Input {
@@ -348,7 +348,7 @@ impl Input {
             id,
             count: 0,
             config: None,
-            content: Rect::default(),
+            content: Bounds::default(),
         };
         input.attach(target);
         input
@@ -540,14 +540,15 @@ impl Input {
     }
 
     /// Where the text goes, relative to the container.
-    pub(crate) fn set_content(&mut self, content: Rect) {
+    pub(crate) fn set_content(&mut self, content: Bounds<Points>) {
         self.content = content;
         let bounds = self.container.bounds().size;
         let insets = UIEdgeInsets {
-            top: content.y as CGFloat,
-            left: content.x as CGFloat,
-            bottom: (bounds.height - (content.y + content.height) as CGFloat).max(0.0),
-            right: (bounds.width - (content.x + content.width) as CGFloat).max(0.0),
+            top: content.origin.y.0 as CGFloat,
+            left: content.origin.x.0 as CGFloat,
+            bottom: (bounds.height - (content.origin.y.0 + content.size.height.0) as CGFloat)
+                .max(0.0),
+            right: (bounds.width - (content.origin.x.0 + content.size.width.0) as CGFloat).max(0.0),
         };
         match &self.editor {
             Editor::Line(field) => {
@@ -557,14 +558,17 @@ impl Input {
             Editor::Area { view, placeholder } => {
                 view.setTextContainerInset(insets);
                 placeholder.setFrame(CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(content.width as CGFloat, content.height as CGFloat),
+                    CGPoint::new(content.origin.x.0 as CGFloat, content.origin.y.0 as CGFloat),
+                    CGSize::new(
+                        content.size.width.0 as CGFloat,
+                        content.size.height.0 as CGFloat,
+                    ),
                 ));
                 placeholder.sizeToFit();
                 let size = placeholder.frame().size;
                 placeholder.setFrame(CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(content.width as CGFloat, size.height),
+                    CGPoint::new(content.origin.x.0 as CGFloat, content.origin.y.0 as CGFloat),
+                    CGSize::new(content.size.width.0 as CGFloat, size.height),
                 ));
             }
         }

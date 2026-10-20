@@ -11,8 +11,8 @@
 use std::{cell::RefCell, sync::Arc};
 
 use nsh_core::{
-    AttributedText, EllipsizeMode, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout,
-    TextLine,
+    AttributedText, EllipsizeMode, Points, ResolvedTextStyle, Size, TextAlign, TextEngine,
+    TextLayout, TextLine,
 };
 use rustc_hash::FxHashMap;
 
@@ -457,7 +457,7 @@ impl TextEngine for WebTextEngine {
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let (_, lines) = self.break_lines(prepared, max_width);
         let shown = match prepared.max_lines {
             0 => lines.len(),
@@ -470,11 +470,11 @@ impl TextEngine for WebTextEngine {
             Some(max) => width.min(max),
             None => width,
         };
-        Size::new(width.ceil(), height.ceil())
+        Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
-        let (atoms, mut lines) = self.break_lines(prepared, Some(size.width));
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
+        let (atoms, mut lines) = self.break_lines(prepared, Some(size.width.0));
         let mut truncated = false;
         if prepared.max_lines > 0 && lines.len() > prepared.max_lines as usize {
             lines.truncate(prepared.max_lines as usize);
@@ -512,7 +512,7 @@ impl TextEngine for WebTextEngine {
                 let font = &styles[style as usize].font;
                 let ellipsis = self.width(font, "…");
                 // Drop characters from the end until the ellipsis fits.
-                while width + ellipsis > size.width + 0.01 && !pieces.is_empty() {
+                while width + ellipsis > size.width.0 + 0.01 && !pieces.is_empty() {
                     let (text, style, w, kind) = pieces.pop().expect("not empty");
                     width -= w;
                     if kind == AtomKind::Text && text.chars().count() > 1 {
@@ -531,7 +531,7 @@ impl TextEngine for WebTextEngine {
                 pieces.push(("…".to_owned(), style, ellipsis, AtomKind::Text));
                 width += ellipsis;
             }
-            let free = (size.width - width).max(0.0);
+            let free = (size.width.0 - width).max(0.0);
             let align = match prepared.align {
                 TextAlign::Auto | TextAlign::Justify if prepared.rtl => TextAlign::Right,
                 TextAlign::Auto | TextAlign::Justify => TextAlign::Left,

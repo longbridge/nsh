@@ -2,7 +2,7 @@
 //! selected one in a pane beside it; the phone layout below 900 pt (700 pt
 //! on desktops), what is open carrying over.
 
-use nsh_core::Size;
+use nsh_core::{Size, geometry::px};
 
 use crate::common::{Screen, drain, press, shows, start_at};
 
@@ -11,7 +11,7 @@ const PHOTOS: &str = "A long recycled list: images, pull to refresh, paging";
 
 #[test]
 fn the_sidebar_shows_the_selected_demo_in_the_pane() {
-    let (engine, rx) = start_at(Size::new(1200.0, 800.0));
+    let (engine, rx) = start_at(Size::new(px(1200.0), px(800.0)));
     let mut screen = Screen::default();
     drain(&rx, &mut screen);
     for label in [
@@ -39,12 +39,12 @@ fn the_sidebar_shows_the_selected_demo_in_the_pane() {
 
 #[test]
 fn resizing_switches_layouts_and_keeps_the_open_demo() {
-    let (engine, rx) = start_at(Size::new(1200.0, 800.0));
+    let (engine, rx) = start_at(Size::new(px(1200.0), px(800.0)));
     let mut screen = Screen::default();
     drain(&rx, &mut screen);
     press(&engine, &rx, &mut screen, "Photos");
     // The phone layout: the index with the demo pushed over it.
-    engine.control().resize(Size::new(390.0, 844.0));
+    engine.control().resize(Size::new(px(390.0), px(844.0)));
     drain(&rx, &mut screen);
     for title in ["Rust Gallery", "Photos"] {
         assert!(
@@ -57,7 +57,7 @@ fn resizing_switches_layouts_and_keeps_the_open_demo() {
     let footer = "Narrower than 700 pt: the phone layout";
     assert!(!shows(&screen, footer), "{:?}", screen.texts);
     // Back to the desktop layout: the demo the phone had open.
-    engine.control().resize(Size::new(1200.0, 800.0));
+    engine.control().resize(Size::new(px(1200.0), px(800.0)));
     drain(&rx, &mut screen);
     assert!(screen.titles.is_empty(), "{:?}", screen.titles);
     for label in [footer, PHOTOS, "Photo stream"] {

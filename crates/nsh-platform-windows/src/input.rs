@@ -370,8 +370,8 @@ impl Item {
         };
         match self {
             Item::Hosted(_, native) => {
-                event.x -= native.rect.x;
-                event.y -= native.rect.y;
+                event.x -= native.rect.origin.x.0;
+                event.y -= native.rect.origin.y.0;
                 native.item.pointer(&event)
             }
             Item::Input(view) => crate::text_input::pointer(surface, view, &event),
@@ -543,7 +543,7 @@ impl VelocityTracker {
     }
 }
 
-// --- Timers -------------------------------------------------------------------------
+// -> Rect {- Timers -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 thread_local! {
     /// Callbacks of pending thread timers, by timer id.
@@ -580,7 +580,7 @@ unsafe extern "system" fn on_timer(
     }
 }
 
-// --- The views' hooks ---------------------------------------------------------------
+// -> Rect {- The views' hooks -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// Forgets every gesture (the app stopped).
 pub(crate) fn reset(surface: &Surface) {
@@ -718,7 +718,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     }
 }
 
-// --- Cursors ------------------------------------------------------------------------
+// -> Rect {- Cursors -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The cursor of a CSS `cursor` value, `None` to inherit the parent's.
 fn css_cursor(cursor: nsh_core::Cursor, pressable: bool) -> Option<Cursor> {
@@ -774,7 +774,10 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
     };
     if let Some(native) = &hit.item {
         let (lx, ly) = local(&hit.view, x, y);
-        if let Some(c) = native.item.cursor(lx - native.rect.x, ly - native.rect.y) {
+        if let Some(c) = native
+            .item
+            .cursor(lx - native.rect.origin.x.0, ly - native.rect.origin.y.0)
+        {
             return c;
         }
     }
@@ -866,7 +869,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     }
 }
 
-// --- Events from the window ---------------------------------------------------------
+// -> Rect {- Events from the window -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A pointer event from the window.
 pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
@@ -965,8 +968,8 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
     let (lx, ly) = local(view, x, y);
     native.item.pointer(&ItemPointer {
         kind: event.kind,
-        x: lx - native.rect.x,
-        y: ly - native.rect.y,
+        x: lx - native.rect.origin.x.0,
+        y: ly - native.rect.origin.y.0,
         clicks: event.clicks,
         modifiers: event.modifiers,
         button: event.button,
@@ -1020,9 +1023,11 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
         return false;
     };
     let (lx, ly) = local(&hit.view, event.x, event.y);
-    native
-        .item
-        .wheel(lx - native.rect.x, ly - native.rect.y, event)
+    native.item.wheel(
+        lx - native.rect.origin.x.0,
+        ly - native.rect.origin.y.0,
+        event,
+    )
 }
 
 /// A wheel event from the window.
@@ -1124,7 +1129,7 @@ fn collect_fields(view: &NshView, out: &mut Vec<NshView>) {
     });
 }
 
-// --- Hit testing --------------------------------------------------------------------
+// -> Rect {- Hit testing -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// What is under a point.
 struct Hit {
@@ -1166,7 +1171,7 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
     }
     let pe = s.props.pointer_events;
     let clip = s.clips();
-    let (w, h) = (s.frame.width, s.frame.height);
+    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
     let inside = x >= 0.0 && y >= 0.0 && x < w && y < h;
     let slop = s.props.hit_slop;
     let in_slop = x >= -slop.left && y >= -slop.top && x < w + slop.right && y < h + slop.bottom;
@@ -1174,8 +1179,12 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         inside
     } else if laid_out(s.kind, s.id) {
         in_slop
-            || s.overflow
-                .is_some_and(|e| x >= e.x && y >= e.y && x < e.x + e.width && y < e.y + e.height)
+            || s.overflow.is_some_and(|e| {
+                x >= e.origin.x.0
+                    && y >= e.origin.y.0
+                    && x < e.origin.x.0 + e.size.width.0
+                    && y < e.origin.y.0 + e.size.height.0
+            })
     } else {
         // The platform places these views' children (screens, header
         // items) and the core knows no area for them.
@@ -1187,7 +1196,11 @@ fn pick_in(view: &NshView, x: f32, y: f32, items: bool) -> Option<Hit> {
         drop(s);
         for native in natives.iter().rev() {
             let r = native.rect;
-            if native.item.hit(x - r.x, y - r.y, (r.width, r.height)) {
+            if native.item.hit(
+                x - r.origin.x.0,
+                y - r.origin.y.0,
+                (r.size.width.0, r.size.height.0),
+            ) {
                 return Some(Hit {
                     view: view.clone(),
                     item: Some(native.clone()),
@@ -1273,7 +1286,7 @@ fn transforms(values: &GestureValues, events: EventMask) -> (bool, bool) {
     )
 }
 
-// --- Pointers -----------------------------------------------------------------------
+// -> Rect {- Pointers -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 fn take(surface: &Surface, key: Key) -> Option<Pointer> {
     let mut pointers = surface.input.pointers.borrow_mut();
@@ -1768,7 +1781,7 @@ fn release_pressed(surface: &Surface, p: &mut Pointer) {
     }
 }
 
-// --- Presses ------------------------------------------------------------------------
+// -> Rect {- Presses -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The press a pointer down at `(x, y)` on `target` starts: the pressable
 /// text span under it, else the innermost enabled view listening to
@@ -1874,8 +1887,8 @@ fn released_inside(view: &NshView, x: f32, y: f32) -> bool {
     let r = PRESS_RETENTION;
     lx >= -slop.left - r
         && ly >= -slop.top - r
-        && lx <= s.frame.width + slop.right + r
-        && ly <= s.frame.height + slop.bottom + r
+        && lx <= s.frame.size.width.0 + slop.right + r
+        && ly <= s.frame.size.height.0 + slop.bottom + r
 }
 
 /// Fades `view` to `opacity` times its fade before the press, or back
@@ -1925,7 +1938,7 @@ fn fade(surface: &Rc<Surface>, view: &NshView, opacity: Option<f32>) {
     });
 }
 
-// --- Pans ---------------------------------------------------------------------------
+// -> Rect {- Pans -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
@@ -1975,7 +1988,7 @@ fn pan_end(surface: &Rc<Surface>, view: &NshView, p: &Pointer, write: bool) {
     }
 }
 
-// --- Pinch and rotation -------------------------------------------------------------
+// -> Rect {- Pinch and rotation -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 fn transform_payload(key: &'static str, amount: f32) -> EventPayload {
     EventPayload::Map(vec![
@@ -2175,7 +2188,7 @@ fn zoom_factor(dy: f32) -> f32 {
     ZOOM_STEP.powf(-dy / ZOOM_NOTCH)
 }
 
-// --- Hover --------------------------------------------------------------------------
+// -> Rect {- Hover -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The mouse moved to `(x, y)`: updates `HOVERED` along the views under it
 /// and the hosted item under it.
@@ -2279,7 +2292,7 @@ fn set_hover_item(surface: &Rc<Surface>, item: Option<Item>, at: (f32, f32), mod
     }
 }
 
-// --- Wheel and touchpad scrolling ---------------------------------------------------
+// -> Rect {- Wheel and touchpad scrolling -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// How a scroll event scrolls.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2454,12 +2467,12 @@ fn touchpad_wait(last: Option<f64>, now: f64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{EdgeInsets, Rect, TransformKind};
+    use nsh_core::{Bounds, EdgeInsets, Points, TransformKind};
 
     use super::*;
     use crate::view::Hosted;
 
-    fn view(parent: &NshView, id: NodeId, kind: ViewKind, frame: Rect) -> NshView {
+    fn view(parent: &NshView, id: NodeId, kind: ViewKind, frame: Bounds<Points>) -> NshView {
         let v = NshView::new(id, kind);
         v.state_mut().frame = frame;
         v.insert_before(parent, None);

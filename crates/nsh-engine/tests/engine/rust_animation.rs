@@ -93,7 +93,7 @@ impl Platform {
         let (tx, rx) = crossbeam_channel::unbounded();
         let config = EngineConfig {
             app: App::Rust(Root::of::<Jumper>()),
-            viewport: Size::new(390.0, 844.0),
+            viewport: Size::new(px(390.0), px(844.0)),
             trace: false,
             network: None,
             assets: None,

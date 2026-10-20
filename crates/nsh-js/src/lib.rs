@@ -40,7 +40,7 @@ mod web;
 
 pub use nsh_core::{
     js::Limits,
-    platform::{ColorScheme, Environment, Idiom, Insets, Os},
+    platform::{ColorScheme, Environment, Idiom, Os},
 };
 
 pub use crate::{

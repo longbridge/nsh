@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
-    PanActivation, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint,
+    PanActivation, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, geometry::px,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -67,7 +67,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

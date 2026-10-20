@@ -19,7 +19,7 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(root),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -310,7 +310,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: App::Js(unsafe { nsh_engine::Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

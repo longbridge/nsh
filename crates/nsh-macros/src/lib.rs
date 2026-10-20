@@ -1155,7 +1155,7 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
                 fn #method(mut self) -> Self {
                     self.style().lengths(
                         &[#(crate::style::StyleKey::#keys),*],
-                        crate::ui::Length::Points(#points),
+                        crate::geometry::px(#points),
                     );
                     self
                 }

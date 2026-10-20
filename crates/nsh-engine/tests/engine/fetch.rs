@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size};
+use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, geometry::px};
 use nsh_engine::{
     Bundle, Engine, EngineConfig, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead,
     HttpRequest, MountSink, Network,
@@ -120,7 +120,7 @@ fn fetch_round_trips_through_the_platform_network() {
         app: nsh_engine::App::Js(unsafe {
             Bundle::bytecode(nsh_js::compile_bytecode(&bundle.code, false).unwrap())
         }),
-        viewport: Size::new(320.0, 480.0),
+        viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: Some(network),
         assets: None,
@@ -223,7 +223,7 @@ fn fetch_stays_within_the_capabilities() {
                 .with_capabilities_json(Some(r#"{ "network": { "hosts": ["api.example.com"] } }"#))
                 .unwrap(),
         ),
-        viewport: Size::new(320.0, 480.0),
+        viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: Some(Arc::new(RedirectNetwork { seen: seen.clone() })),
         assets: None,
@@ -285,7 +285,7 @@ fn rust_components_fetch_through_the_platform_network() {
     let (tx, rx) = mpsc::channel();
     let config = EngineConfig {
         app: nsh_engine::App::Rust(nsh_core::ui::Root::of::<Fetcher>()),
-        viewport: Size::new(320.0, 480.0),
+        viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: Some(network),
         assets: None,

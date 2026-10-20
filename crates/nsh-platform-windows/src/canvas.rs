@@ -234,7 +234,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(drawing) = canvas.drawing.as_ref() else {
         return;
     };
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if drawing.ops.is_empty() || w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -272,7 +272,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     }
 }
 
-// --- Recording -------------------------------------------------------------
+// -> Rect {- Recording -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// The device contexts recording uses, by nesting level, and the stroke
 /// styles of the device's factory.
@@ -367,7 +367,7 @@ fn push_mask(dc: &ID2D1DeviceContext, mask: &ID2D1Geometry, opacity: f32) {
     }
 }
 
-// --- Replay ----------------------------------------------------------------
+// -> Rect {- Replay -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// Canvas' drawing state (`save` / `restore`).
 #[derive(Clone)]
@@ -616,7 +616,7 @@ impl<'a> Replay<'a> {
         Ok(())
     }
 
-    // --- Paths ---
+    // -> Rect {- Paths -> Rect {-
 
     /// Adds `op` (in user space) to `path` (in the view's coordinates).
     fn path_op(&self, path: &mut PathBuf, op: &PathOp) {
@@ -889,7 +889,7 @@ impl<'a> Replay<'a> {
         Ok(())
     }
 
-    // --- Painting ---
+    // -> Rect {- Painting -> Rect {-
 
     /// Fills or strokes `geometry` (user space) with the state's paint,
     /// alpha, composite operation and shadow.
@@ -1423,7 +1423,7 @@ impl<'a> Replay<'a> {
         Ok(style)
     }
 
-    // --- Text ---
+    // -> Rect {- Text -> Rect {-
 
     fn text_op(
         &mut self,
@@ -1503,7 +1503,7 @@ impl<'a> Replay<'a> {
         self.paint_geometry(&geometry, mode)
     }
 
-    // --- Images ---
+    // -> Rect {- Images -> Rect {-
 
     /// The bitmap of the image `uri`, once loaded.
     fn bitmap(&self, uri: &str) -> Option<ID2D1Bitmap1> {
@@ -1615,7 +1615,7 @@ fn gradient_stops(stops: &[(f32, Color)], reversed: bool, inner: f64) -> Vec<D2D
         .collect()
 }
 
-// --- Geometry ----------------------------------------------------------------
+// -> Rect {- Geometry -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// A point.
 type Pt = (f64, f64);
@@ -1924,7 +1924,7 @@ fn radial([x0, y0, r0, x1, y1, r1]: [f32; 6]) -> Option<Radial> {
     })
 }
 
-// --- Strokes -----------------------------------------------------------------
+// -> Rect {- Strokes -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A stroke style's parameters, as a hash key.
 #[derive(PartialEq, Eq, Hash)]
@@ -1967,7 +1967,7 @@ fn dash_pattern(dash: &[f32], width: f64, offset: f64) -> Option<(Vec<f32>, f32)
     ))
 }
 
-// --- Composite operations ----------------------------------------------------
+// -> Rect {- Composite operations -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// How an effect combines a source with what was drawn.
 enum Blend {
@@ -2020,7 +2020,7 @@ fn destructive(c: Composite) -> bool {
     )
 }
 
-// --- Conic gradients ---------------------------------------------------------
+// -> Rect {- Conic gradients -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// The gradient's color at `t` (0..1): at a hard stop (two stops at one
 /// offset), the one before it, or the one after it with `after`.
@@ -2064,7 +2064,7 @@ fn conic_steps(g: &CanvasGradient) -> Vec<f32> {
     steps
 }
 
-// --- Text --------------------------------------------------------------------
+// -> Rect {- Text -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// A laid-out line of canvas text.
 #[derive(Clone)]

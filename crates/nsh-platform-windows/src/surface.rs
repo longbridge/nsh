@@ -20,7 +20,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
+use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
 use rustc_hash::FxHashMap;
 use windows::Win32::Foundation::{HWND, RECT};
@@ -261,7 +261,7 @@ impl Surface {
     /// The surface's size in points.
     pub(crate) fn size(&self) -> (f32, f32) {
         let s = self.root.state();
-        (s.frame.width, s.frame.height)
+        (s.frame.size.width.0, s.frame.size.height.0)
     }
 
     /// The current frame's time (seconds, the animation clock).
@@ -278,7 +278,7 @@ impl Surface {
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();
         let env = self.environment.get();
-        config.viewport = Size::new(env.window.0, env.window.1);
+        config.viewport = env.window;
         config.environment = env;
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
@@ -364,18 +364,18 @@ impl Surface {
         let height = pixels.1 as f32 / scale;
         {
             let mut s = self.root.state_mut();
-            if !scale_changed && s.frame.width == width && s.frame.height == height {
+            if !scale_changed && s.frame.size.width.0 == width && s.frame.size.height.0 == height {
                 return;
             }
-            s.frame.width = width;
-            s.frame.height = height;
+            s.frame.size.width.0 = width;
+            s.frame.size.height.0 = height;
         }
         let mut env = self.environment.get();
-        env.window = (width, height);
+        env.window = Size::new(Points(width), Points(height));
         env.pixel_ratio = scale;
         self.environment.set(env);
         self.control(|c| {
-            c.resize(Size::new(width, height));
+            c.resize(Size::new(Points(width), Points(height)));
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);

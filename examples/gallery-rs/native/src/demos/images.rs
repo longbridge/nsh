@@ -3,7 +3,7 @@
 //! `demos/Images.tsx`).
 
 use nsh_core::{
-    Size,
+    Points, Size,
     ui::{AnyElement, Image, ImageProgress, ImageSize, prelude::*},
 };
 
@@ -284,7 +284,7 @@ fn info() -> AnyElement {
                 .on_progress(move |e: &ImageProgress| {
                     progress.set(e.loaded / e.total.max(1.0));
                 })
-                .on_load(move |_: &Size| {
+                .on_load(move |_: &Size<Points>| {
                     status.set(if progress.get_untracked() == 0.0 {
                         "loaded (no download)"
                     } else {
@@ -360,9 +360,9 @@ fn events() -> AnyElement {
     let thumb = |image: Image| frame(image).w(px(96.0)).h(px(64.0));
     let loads = thumb(image(photo(1084, 600, 400)))
         .on_load_start(log("onLoadStart"))
-        .on_load(move |size: &Size| {
+        .on_load(move |size: &Size<Points>| {
             events.update(|e| e.push("onLoad"));
-            loaded.set(format!("{}×{}", size.width, size.height));
+            loaded.set(format!("{}×{}", size.width.0, size.height.0));
         })
         .on_error(move |message: &str| loaded.set(message.to_owned()))
         .on_load_end(log("onLoadEnd"));

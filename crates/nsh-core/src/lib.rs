@@ -17,7 +17,7 @@ mod css_named;
 pub mod desktop;
 mod effects;
 mod fenwick;
-mod geometry;
+pub mod geometry;
 mod grid;
 pub mod js;
 pub mod keymap;
@@ -52,7 +52,7 @@ pub use crate::{
         GradientSize, KeyframeAnimation, Keyframes, Outline, StopPosition, Transition,
         TransitionProps, blur_radius, compose_color_matrices,
     },
-    geometry::{Rect, Size},
+    geometry::{Bounds, Corners, Edges, Point, Points, Size},
     mount::{
         ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig,
         ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,

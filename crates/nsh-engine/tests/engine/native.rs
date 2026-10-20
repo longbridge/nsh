@@ -6,7 +6,7 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, JsonValue, MountBatch, MountItem, Size,
-    ViewKind,
+    ViewKind, geometry::px,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 use serde_json::json;
@@ -59,7 +59,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
-        viewport: Size::new(320.0, 480.0),
+        viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: None,
         assets: None,

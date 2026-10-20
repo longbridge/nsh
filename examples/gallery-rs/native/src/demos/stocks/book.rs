@@ -2,7 +2,7 @@
 //! `demos/stocks/Book.tsx`).
 
 use nsh_core::{
-    LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Rect,
+    Bounds, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline},
     ui::prelude::*,
 };
@@ -407,7 +407,7 @@ pub(crate) fn Depth(props: StockProps) -> impl IntoElement {
             })
             .h(px(120.0))
             .label("Depth chart")
-            .on_layout(move |frame: &Rect| width.set(frame.width)),
+            .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
         .child(
             view()

@@ -921,7 +921,7 @@ fn pick_in(view: &NshView, p: graphene::Point) -> Option<Hit> {
                 s.kind,
                 ViewKind::Scroll | ViewKind::Image | ViewKind::Stack | ViewKind::Input
             );
-        let (w, h) = (s.frame.width, s.frame.height);
+        let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
         let (x, y) = (p.x(), p.y());
         let inside = x >= 0.0 && y >= 0.0 && x < w && y < h;
         let slop = s.props.hit_slop;
@@ -932,7 +932,10 @@ fn pick_in(view: &NshView, p: graphene::Point) -> Option<Hit> {
         } else if laid_out(s.kind, s.id) {
             in_slop
                 || s.overflow.is_some_and(|e| {
-                    x >= e.x && y >= e.y && x < e.x + e.width && y < e.y + e.height
+                    x >= e.origin.x.0
+                        && y >= e.origin.y.0
+                        && x < e.origin.x.0 + e.size.width.0
+                        && y < e.origin.y.0 + e.size.height.0
                 })
         } else {
             // The platform places these views' children (screens, header
@@ -1561,8 +1564,8 @@ fn released_inside(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
     let r = PRESS_RETENTION;
     lx >= -slop.left - r
         && ly >= -slop.top - r
-        && lx <= s.frame.width + slop.right + r
-        && ly <= s.frame.height + slop.bottom + r
+        && lx <= s.frame.size.width.0 + slop.right + r
+        && ly <= s.frame.size.height.0 + slop.bottom + r
 }
 
 /// Fades `view` to `opacity` times its fade before the press, or back
@@ -2068,7 +2071,10 @@ fn wheel_input(
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             let (dx, dy) = if notches {
                 let s = view.state();
-                (dx * notch(s.frame.width), dy * notch(s.frame.height))
+                (
+                    dx * notch(s.frame.size.width.0),
+                    dy * notch(s.frame.size.height.0),
+                )
             } else {
                 (dx, dy)
             };

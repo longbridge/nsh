@@ -34,8 +34,9 @@ use std::{
 };
 
 use nsh_core::{
-    ATTACHMENT_CHAR, AttributedText, Color, DecorationStyle, EllipsizeMode, EventKind, FontFamily,
-    Rect, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
+    ATTACHMENT_CHAR, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind,
+    FontFamily, Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine,
+    TextSpan, geometry::px,
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -124,7 +125,7 @@ unsafe impl<T> Send for Shared<T> {}
 // SAFETY: as above.
 unsafe impl<T> Sync for Shared<T> {}
 
-// --- Custom fonts ---------------------------------------------------------------------
+// -> Rect {- Custom fonts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// Fonts registered by any engine (`register_font`): one collection every
 /// engine searches before the system's.
@@ -213,7 +214,7 @@ fn custom_collection() -> Option<IDWriteFontCollection> {
     registry.0.collection.as_ref().and_then(|c| c.cast().ok())
 }
 
-// --- Fonts ------------------------------------------------------------------------------
+// -> Rect {- Fonts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The family of the system's UI font (the message font: Segoe UI).
 pub(crate) fn ui_family() -> Arc<str> {
@@ -379,7 +380,7 @@ impl std::fmt::Debug for Shared<IDWriteFontFace> {
     }
 }
 
-// --- The final layout ---------------------------------------------------------------------
+// -> Rect {- The final layout -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A layer of a color glyph run (an emoji's colored parts).
 struct Layer {
@@ -462,7 +463,7 @@ pub(crate) struct WinLayout {
     attachments: Vec<Option<(f32, f32)>>,
 }
 
-// --- Recording ------------------------------------------------------------------------------
+// -> Rect {- Recording -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// A glyph run as DirectWrite drew it.
 struct RawRun {
@@ -714,7 +715,7 @@ impl IDWriteInlineObject_Impl for Placeholder_Impl {
     }
 }
 
-// --- The engine ---------------------------------------------------------------------------
+// -> Rect {- The engine -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A span's line box: its primary font's ascent and descent (points) and
 /// its `lineHeight` (0: the font's).
@@ -1601,10 +1602,10 @@ impl TextEngine for DWriteTextEngine {
         }
     }
 
-    fn measure(&self, p: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, p: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let shown = self.configure(p, max_width);
         let Some(layout) = &p.layout else {
-            return Size::new(0.0, 0.0);
+            return Size::new(px(0.0), px(0.0));
         };
         let mut height = 0.0;
         let mut start = 0;
@@ -1635,11 +1636,11 @@ impl TextEngine for DWriteTextEngine {
         {
             width = width.min(max.max(0.0));
         }
-        Size::new(width.ceil(), height.ceil())
+        Size::new(Points(width.ceil()), Points(height.ceil()))
     }
 
-    fn layout(&self, p: &Prepared, size: Size) -> TextLayout {
-        let shown = self.configure(p, Some(size.width));
+    fn layout(&self, p: &Prepared, size: Size<Points>) -> TextLayout {
+        let shown = self.configure(p, Some(size.width.0));
         let Some(layout) = &p.layout else {
             return TextLayout(Arc::new(WinLayout::default()));
         };
@@ -1648,7 +1649,7 @@ impl TextEngine for DWriteTextEngine {
             metrics
                 .first()
                 .is_some_and(|l| l.isTrimmed.as_bool())
-                .then(|| self.cut(p, size.width))
+                .then(|| self.cut(p, size.width.0))
                 .flatten()
         } else if Self::ends_paragraph(p, shown) {
             // DirectWrite (as Pango) only trims a line its paragraph goes
@@ -1656,7 +1657,7 @@ impl TextEngine for DWriteTextEngine {
             // of the line break.
             let end = metrics.iter().map(|l| l.length).sum::<u32>()
                 - metrics.last().map_or(0, |l| l.newlineLength);
-            self.paragraph_cut(p, end, size.width, shown)
+            self.paragraph_cut(p, end, size.width.0, shown)
         } else {
             None
         };
@@ -1866,7 +1867,7 @@ impl TextEngine for DWriteTextEngine {
     }
 }
 
-// --- Drawing --------------------------------------------------------------------------------
+// -> Rect {- Drawing -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The text a view draws.
 pub(crate) struct DrawnText {
@@ -1875,7 +1876,7 @@ pub(crate) struct DrawnText {
     /// The engine's layout of it.
     pub(crate) layout: TextLayout,
     /// Where the layout goes inside the view.
-    pub(crate) content: Rect,
+    pub(crate) content: Bounds<Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Rc<Selection>>,
     /// The text shadow's effect, made on first draw (and again on a new
@@ -1884,7 +1885,12 @@ pub(crate) struct DrawnText {
 }
 
 /// `Text`: a text view's content changed.
-pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
+pub(crate) fn set(
+    view: &NshView,
+    text: &Arc<AttributedText>,
+    layout: &TextLayout,
+    content: Bounds<Points>,
+) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let selection = match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
@@ -2237,7 +2243,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(layout) = drawn.layout.downcast::<WinLayout>() else {
         return;
     };
-    let (ox, oy) = (drawn.content.x, drawn.content.y);
+    let (ox, oy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
     if drawn.text.has_backgrounds() {
         layout.background_rects(&drawn.text, |x, y, w, h, r, color| {
             let rr = windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
@@ -2315,8 +2321,8 @@ fn draw_shadow(
                 painter.paint(
                     &drawn.text,
                     layout,
-                    drawn.content.x,
-                    drawn.content.y,
+                    drawn.content.origin.x.0,
+                    drawn.content.origin.y.0,
                     Some(Color::BLACK),
                 );
                 let ended = res.recorder.EndDraw(None, None);
@@ -2376,10 +2382,10 @@ fn draw_shadow(
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<WinLayout>()?;
-    layout.char_at(x - drawn.content.x, y - drawn.content.y)
+    layout.char_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0)
 }
 
-// --- Selection ----------------------------------------------------------------------
+// -> Rect {- Selection -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// How far (points) the mouse moves on selectable text before a drag
 /// selects: past input's press slop where the press would fire (a link, an
@@ -2487,7 +2493,7 @@ pub(crate) fn window_pressed(surface: &crate::surface::Surface, x: f32, y: f32) 
         .and_then(|m| m.unproject(x, y))
         .is_some_and(|(lx, ly)| {
             let s = view.state();
-            lx >= 0.0 && ly >= 0.0 && lx < s.frame.width && ly < s.frame.height
+            lx >= 0.0 && ly >= 0.0 && lx < s.frame.size.width.0 && ly < s.frame.size.height.0
         });
     if !inside {
         select(surface.key(), &view, None);
@@ -2544,7 +2550,7 @@ fn pressed(key: u64, view: &NshView, s: &Selection, clicks: u32, x: f32, y: f32,
         let Some(layout) = drawn.layout.downcast::<WinLayout>() else {
             return;
         };
-        let (lx, ly) = (x - drawn.content.x, y - drawn.content.y);
+        let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = layout.char_at(lx, ly);
         let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
         let over_press = press.iter().any(|&k| state.events.contains(k))
@@ -2613,7 +2619,7 @@ fn dragged(key: u64, view: &NshView, s: &Selection, dx: f32, dy: f32, x: f32, y:
         let Some(layout) = drawn.layout.downcast::<WinLayout>() else {
             return;
         };
-        let caret = layout.caret_at(x - drawn.content.x, y - drawn.content.y);
+        let caret = layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         extend(&drawn.text.text, s.anchor.get(), caret, s.unit.get())
     };
     select(key, view, Some(range));
@@ -2961,7 +2967,7 @@ mod tests {
         engine: &DWriteTextEngine,
         t: &AttributedText,
         width: Option<f32>,
-    ) -> (Size, TextLayout) {
+    ) -> (Size<Points>, TextLayout) {
         let prepared = engine.prepare(t);
         let size = engine.measure(&prepared, width);
         (size, engine.layout(&prepared, size))
@@ -3085,13 +3091,13 @@ mod tests {
                 assert_eq!(lines.len(), measured_lines, "{:?} at {width}", t.text);
                 let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
                 assert!(
-                    bottom <= size.height,
+                    bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
                     t.text
                 );
                 for line in &lines {
                     assert!(
-                        line.x >= -0.01 && line.x + line.width <= size.width + 2.0,
+                        line.x >= -0.01 && line.x + line.width <= (size.width + px(2.0)).0,
                         "{:?} at {width}: {line:?} in {size:?}",
                         t.text
                     );
@@ -3106,7 +3112,7 @@ mod tests {
         let t = text(&[("The quick brown fox jumps over the lazy dog", plain(15.0))]);
         let prepared = engine.prepare(&t);
         let one = engine.measure(&prepared, None);
-        let wrapped = engine.measure(&prepared, Some(one.width / 2.0));
+        let wrapped = engine.measure(&prepared, Some((one.width / 2.0).0));
         assert!(wrapped.width <= (one.width / 2.0).ceil(), "{wrapped:?}");
         assert!(wrapped.height >= one.height * 2.0, "{wrapped:?} vs {one:?}");
         // No wrapping: as wide as the text, past the width.
@@ -3134,7 +3140,7 @@ mod tests {
             assert!((l.height - 30.0).abs() < 0.01, "{l:?}");
             assert!((l.y - 30.0 * i as f32).abs() < 0.01, "{l:?}");
         }
-        assert_eq!(size.height, (30.0 * lines.len() as f32).ceil());
+        assert_eq!(size.height, Points((30.0 * lines.len() as f32).ceil()));
         // A bigger span only grows its own line.
         let small = plain(14.0);
         let t = text(&[
@@ -3166,7 +3172,10 @@ mod tests {
         let a = engine.measure(&engine.prepare(&t), None);
         let b = engine.measure(&engine.prepare(&spaced), None);
         // Seven letters, four points after each.
-        assert!((b.width - a.width - 28.0).abs() <= 1.0, "{a:?} {b:?}");
+        assert!(
+            (b.width - a.width - px(28.0)).abs() <= px(1.0),
+            "{a:?} {b:?}"
+        );
         assert_eq!(a.height, b.height);
     }
 
@@ -3187,7 +3196,7 @@ mod tests {
         // Segoe UI's digits are tabular; proportional ones make "1" narrow.
         let proportional = digits(nsh_core::FontVariant::PROPORTIONAL_NUMS);
         assert!(
-            proportional < digits(0) - 5.0,
+            proportional < digits(0) - px(5.0),
             "{proportional} {}",
             digits(0)
         );
@@ -3302,7 +3311,7 @@ mod tests {
     fn alignment() {
         let engine = engine();
         let mut t = text(&[("Short", plain(15.0))]);
-        let size = Size::new(300.0, 30.0);
+        let size = Size::new(px(300.0), px(30.0));
         let x = |t: &AttributedText| {
             let p = engine.prepare(t);
             engine.lines(&engine.layout(&p, size))[0].x
@@ -3340,7 +3349,7 @@ mod tests {
         assert_ne!(before, after);
         assert!(engine.face(&style).custom);
         // Pacifico is tall: its lines are more than 1.5 ems.
-        assert!(after.height > 30.0, "{after:?}");
+        assert!(after.height > px(30.0), "{after:?}");
     }
 
     #[test]
@@ -3370,8 +3379,8 @@ mod tests {
         let engine = engine();
         let t = AttributedText::default();
         let (size, layout) = layout_of(&engine, &t, Some(100.0));
-        assert_eq!(size.width, 0.0);
-        assert!(size.height > 10.0);
+        assert_eq!(size.width, px(0.0));
+        assert!(size.height > px(10.0));
         assert_eq!(engine.lines(&layout).len(), 1);
     }
 
@@ -3441,7 +3450,11 @@ mod tests {
             }),
             ..style
         };
-        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
+        let t = text(&[
+            ("Run ", style),
+            ("cargo test -> Rect {all", code),
+            (" now", style),
+        ]);
         let boxes = |width: Option<f32>| {
             let (size, layout) = layout_of(&engine, &t, width);
             let l = layout.downcast::<WinLayout>().unwrap();
@@ -3453,7 +3466,7 @@ mod tests {
         assert_eq!(rects.len(), 1, "{rects:?}");
         let (x, y, w, h, r) = rects[0];
         assert!(
-            x > 0.0 && x + w < size.width && y >= 0.0 && h <= size.height,
+            x > 0.0 && x + w < size.width.0 && y >= 0.0 && h <= size.height.0,
             "{rects:?}"
         );
         assert_eq!(r, 4.0);
@@ -3472,10 +3485,13 @@ mod tests {
         let l = layout.downcast::<WinLayout>().unwrap();
         assert_eq!(l.lines.len(), 2);
         assert_eq!(l.caret_at(-5.0, 2.0), 0);
-        assert_eq!(l.caret_at(size.width + 20.0, 2.0), 15);
+        assert_eq!(l.caret_at((size.width + px(20.0)).0, 2.0), 15);
         // Below the text: the last line.
-        assert_eq!(l.caret_at(size.width + 20.0, size.height + 50.0), 22);
-        let mid = l.caret_at(size.width / 2.0, 2.0);
+        assert_eq!(
+            l.caret_at((size.width + px(20.0)).0, (size.height + px(50.0)).0),
+            22
+        );
+        let mid = l.caret_at((size.width / 2.0).0, 2.0);
         assert!(mid > 3 && mid < 12, "{mid}");
         // Nearest glyph edge: just right of a glyph's start is before it.
         let (gx, w, index, _) = l.line_glyphs(&l.lines[0]).nth(2).unwrap();
@@ -3496,7 +3512,7 @@ mod tests {
         let (size, layout) = layout_of(&engine, &rtl, None);
         let l = layout.downcast::<WinLayout>().unwrap();
         // Right to left: the right edge is the start.
-        assert_eq!(l.caret_at(size.width + 5.0, 2.0), 0);
+        assert_eq!(l.caret_at((size.width + px(5.0)).0, 2.0), 0);
         assert_eq!(l.caret_at(-5.0, 2.0), 9);
     }
 }

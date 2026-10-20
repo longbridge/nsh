@@ -42,7 +42,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         app: App::Rust(Root::new::<Counter>(|| CounterProps {
             label: "Taps".into(),
         })),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -108,7 +108,7 @@ fn a_rust_app_starts_in_its_appearance() {
     let config = EngineConfig {
         // `nsh.json` `"appearance": "dark"` of a Rust app (`nsh.json` "root").
         app: App::Rust(Root::of::<WithCard>().appearance(nsh_core::platform::Appearance::Dark)),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -156,7 +156,7 @@ fn rust_components_navigate_with_native_stacks() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Navigation>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -240,7 +240,7 @@ fn rust_components_pass_content_to_rust_components() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<WithCard>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -332,7 +332,7 @@ fn rust_components_take_the_back_button() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<BackCounter>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -389,7 +389,7 @@ fn Measured() -> impl IntoElement {
     let scrolled = signal(0.0_f32);
     view()
         .flex_1()
-        .on_layout(move |frame: &nsh_core::Rect| width.set(frame.width))
+        .on_layout(move |frame: &nsh_core::Bounds<nsh_core::Points>| width.set(frame.size.width.0))
         .child(text(move || {
             format!("width {} scrolled {}", width.get(), scrolled.get())
         }))
@@ -406,7 +406,7 @@ fn rust_components_hear_layouts_and_scrolls() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Measured>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -472,7 +472,7 @@ fn nested_components_in_list_rows_reach_the_list_owner() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<ButtonRows>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -533,7 +533,7 @@ fn content_a_component_does_not_place_is_not_shown() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<WithSheet>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

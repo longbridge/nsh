@@ -915,7 +915,9 @@ impl IntoElement for Meter {
             .bg(colors::RAISED)
             .child(
                 view()
-                    .w(self.value.map(|v| relative(v.clamp(0.0, 1.0))))
+                    .w(self
+                        .value
+                        .map(|v| Length::from(relative(v.clamp(0.0, 1.0)))))
                     .h(px(6.0))
                     .rounded(px(3.0))
                     .bg(self.tone.map(Tone::color)),

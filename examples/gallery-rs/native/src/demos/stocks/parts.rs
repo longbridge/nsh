@@ -4,7 +4,7 @@
 //! of.
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     nsh_animation::{Curve, EaseMode},
     ui::{AnyElement, prelude::*},
 };
@@ -77,8 +77,8 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
         .h(px(props.height))
         .overflow_hidden()
         .rounded(px(radius))
-        .on_layout(move |frame: &Rect| {
-            if width.replace(frame.width) != frame.width {
+        .on_layout(move |frame: &Bounds<Points>| {
+            if width.replace(frame.size.width.0) != frame.size.width.0 {
                 place(props.share.get_untracked());
             }
         })

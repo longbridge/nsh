@@ -23,8 +23,8 @@ use std::cell::{Ref, RefCell, RefMut};
 
 use gtk4::{self as gtk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use nsh_core::{
-    EventMask, MAX_TRANSFORMS, NodeId, PointerEvents, Rect, TransformKind, ViewKind, ViewProps,
-    ViewStyle,
+    Bounds, EventMask, MAX_TRANSFORMS, NodeId, PointerEvents, Points, TransformKind, ViewKind,
+    ViewProps, ViewStyle,
 };
 
 /// Values native animations set on a view; they win over the style's.
@@ -93,7 +93,7 @@ pub(crate) struct Native {
     /// The widget (a child of the view).
     pub(crate) widget: gtk::Widget,
     /// Where it goes.
-    pub(crate) rect: Rect,
+    pub(crate) rect: Bounds<Points>,
 }
 
 /// Everything the mounter set on one view.
@@ -103,7 +103,7 @@ pub(crate) struct ViewState {
     /// What it is.
     pub(crate) kind: ViewKind,
     /// Frame in the parent (points).
-    pub(crate) frame: Rect,
+    pub(crate) frame: Bounds<Points>,
     /// Visual style.
     pub(crate) style: Box<ViewStyle>,
     /// Native animation values.
@@ -134,7 +134,7 @@ pub(crate) struct ViewState {
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// hit testing looks there too.
-    pub(crate) overflow: Option<Rect>,
+    pub(crate) overflow: Option<Bounds<Points>>,
     /// Running layout / style transitions and keyframes.
     pub(crate) live: Option<Box<crate::transition::Live>>,
     /// What accessibility last gave GTK.
@@ -146,7 +146,7 @@ impl ViewState {
         ViewState {
             id,
             kind,
-            frame: Rect::default(),
+            frame: Bounds::default(),
             style: Box::default(),
             anim: AnimValues::default(),
             events: EventMask::default(),
@@ -203,7 +203,7 @@ impl ViewState {
         let s = &self.style;
         let mut r: [f32; 4] =
             std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
         let lens = [w, h, w, h];
         let f = sums
@@ -234,8 +234,8 @@ impl ViewState {
             &graphene::Rect::new(
                 -m,
                 -m,
-                self.frame.width + 2.0 * m,
-                self.frame.height + 2.0 * m,
+                self.frame.size.width.0 + 2.0 * m,
+                self.frame.size.height.0 + 2.0 * m,
             ),
         );
     }
@@ -252,7 +252,7 @@ impl ViewState {
     /// The rounded rectangle of its bounds.
     pub(crate) fn rounded_bounds(&self) -> gsk::RoundedRect {
         rounded(
-            graphene::Rect::new(0.0, 0.0, self.frame.width, self.frame.height),
+            graphene::Rect::new(0.0, 0.0, self.frame.size.width.0, self.frame.size.height.0),
             self.radii(),
         )
     }
@@ -266,7 +266,7 @@ impl ViewState {
         if extra.is_none() && (t.ops().is_empty() || (!animated && t.is_identity())) {
             return None;
         }
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let o = self.style.transform_origin;
         let (ox, oy) = (o.x.resolve(w), o.y.resolve(h));
         let mut m = gsk::Transform::new().translate(&graphene::Point::new(ox, oy));
@@ -438,17 +438,17 @@ mod imp {
                 .scroll
                 .as_ref()
                 .is_some_and(|s| s.mirrored)
-                .then_some(state.frame.width);
+                .then_some(state.frame.size.width.0);
             let natives: Vec<Native> = state.natives.clone();
             drop(state);
             let mut child = self.obj().first_child();
             while let Some(widget) = child {
                 child = widget.next_sibling();
                 if let Some(rect) = natives.iter().find(|n| n.widget == widget).map(|n| n.rect) {
-                    let t = placement(rect.x, rect.y, None);
+                    let t = placement(rect.origin.x.0, rect.origin.y.0, None);
                     widget.allocate(
-                        rect.width.ceil().max(0.0) as i32,
-                        rect.height.ceil().max(0.0) as i32,
+                        rect.size.width.0.ceil().max(0.0) as i32,
+                        rect.size.height.0.ceil().max(0.0) as i32,
                         -1,
                         Some(t),
                     );
@@ -465,15 +465,15 @@ mod imp {
                 };
                 let s = view.state();
                 let f = s.frame;
-                let mut x = f.x - sx + s.shift.0;
+                let mut x = f.origin.x.0 - sx + s.shift.0;
                 if let Some(w) = mirror {
-                    x = w - x - f.width;
+                    x = w - x - f.size.width.0;
                 }
-                let t = placement(x, f.y - sy + s.shift.1, s.transform());
+                let t = placement(x, f.origin.y.0 - sy + s.shift.1, s.transform());
                 drop(s);
                 widget.allocate(
-                    f.width.ceil().max(0.0) as i32,
-                    f.height.ceil().max(0.0) as i32,
+                    f.size.width.0.ceil().max(0.0) as i32,
+                    f.size.height.0.ceil().max(0.0) as i32,
                     -1,
                     Some(t),
                 );
@@ -511,8 +511,8 @@ mod imp {
                 snapshot.push_clip(&graphene::Rect::new(
                     0.0,
                     0.0,
-                    state.frame.width,
-                    state.frame.height,
+                    state.frame.size.width.0,
+                    state.frame.size.height.0,
                 ));
             }
             crate::text::draw(snapshot, &state);
@@ -532,8 +532,8 @@ mod imp {
                 if let Some(view) = widget.downcast_ref::<super::NshView>()
                     && widget.width() == 0
                     && widget.height() == 0
-                    && view.state().frame.width >= 1.0
-                    && view.state().frame.height >= 1.0
+                    && view.state().frame.size.width.0 >= 1.0
+                    && view.state().frame.size.height.0 >= 1.0
                 {
                     continue;
                 }
@@ -561,8 +561,8 @@ mod imp {
             let h = s.props.hit_slop;
             x >= -(h.left as f64)
                 && y >= -(h.top as f64)
-                && x < (s.frame.width + h.right) as f64
-                && y < (s.frame.height + h.bottom) as f64
+                && x < (s.frame.size.width.0 + h.right) as f64
+                && y < (s.frame.size.height.0 + h.bottom) as f64
         }
     }
 }
@@ -639,7 +639,7 @@ impl NshView {
     }
 
     /// Hosts `widget` at `rect` (or moves it there).
-    pub(crate) fn set_native(&self, widget: &impl IsA<gtk::Widget>, rect: Rect) {
+    pub(crate) fn set_native(&self, widget: &impl IsA<gtk::Widget>, rect: Bounds<Points>) {
         let widget = widget.as_ref();
         {
             let mut s = self.state_mut();

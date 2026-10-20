@@ -4,7 +4,9 @@
 use std::{path::Path, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size};
+use nsh_core::{
+    ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size, geometry::px,
+};
 use nsh_engine::{Bundle, Engine, EngineConfig, HotUpdate, MountSink};
 
 struct ChannelSink(Sender<MountBatch>, Sender<()>, Sender<String>);
@@ -159,7 +161,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
     let (errors_tx, errors) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(Bundle::source(code).with_source_map(map.unwrap())),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -306,7 +308,7 @@ fn entry_edits_keep_navigation_and_state() {
         let (errors_tx, errors) = crossbeam_channel::unbounded();
         let config = EngineConfig {
             app: nsh_engine::App::Js(Bundle::source(code).with_source_map(map.unwrap())),
-            viewport: Size::new(390.0, 844.0),
+            viewport: Size::new(px(390.0), px(844.0)),
             trace: false,
             network: None,
             assets: None,

@@ -1462,7 +1462,7 @@ fn draw_one(
     size: (u32, u32),
     source: Option<&ImageSource>,
 ) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(image.mode, natural(size, source), (w, h));
     if fw <= 0.0 || fh <= 0.0 {
         return;

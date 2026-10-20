@@ -43,8 +43,10 @@ use std::{
 
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{
-    AutoCapitalize, EventKind, EventPayload, InputConfig, KeyboardType, PayloadValue, Rect,
-    SubmitBehavior, TextAlign, tailwind::state,
+    AutoCapitalize, Bounds, EventKind, EventPayload, InputConfig, KeyboardType, PayloadValue,
+    Points, SubmitBehavior, TextAlign,
+    geometry::{Point, Size},
+    tailwind::state,
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -171,7 +173,7 @@ pub(crate) struct InputState {
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
-    content: Cell<Option<Rect>>,
+    content: Cell<Option<Bounds<Points>>>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// A change made here, not by the user, is being applied.
@@ -810,14 +812,18 @@ fn auto_focus(input: &Rc<InputState>, editor: &Editor) {
 fn place(view: &NshView, input: &InputState) {
     let content = input.content.get().unwrap_or_else(|| {
         let f = view.state().frame;
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f.width,
-            height: f.height,
+        Bounds {
+            origin: Point {
+                x: Points(0.0),
+                y: Points(0.0),
+            },
+            size: Size {
+                width: f.size.width,
+                height: f.size.height,
+            },
         }
     });
-    if content.width <= 0.0 || content.height <= 0.0 {
+    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
         return;
     }
     let label = &input.placeholder;
@@ -828,13 +834,17 @@ fn place(view: &NshView, input: &InputState) {
             // a box shorter than the line grows around its center.
             let min = |w: &gtk::Widget| w.measure(gtk::Orientation::Vertical, -1).0 as f32;
             let height = content
+                .size
                 .height
+                .0
                 .max(min(t.upcast_ref()))
                 .max(min(label.upcast_ref()));
-            let rect = Rect {
-                y: content.y + (content.height - height) / 2.0,
-                height,
-                ..content
+            let rect = Bounds {
+                origin: Point::new(
+                    content.origin.x,
+                    content.origin.y + (content.size.height - Points(height)) / 2.0,
+                ),
+                size: Size::new(content.size.width, Points(height)),
             };
             view.set_native(label, rect);
             view.set_native(t, rect);
@@ -850,17 +860,17 @@ fn place(view: &NshView, input: &InputState) {
             // Ending it lets the allocation coming for the new height set
             // the adjustment up again (and back to the top if everything
             // fits).
-            if scroller.height() as f32 != content.height
+            if scroller.height() as f32 != content.size.height.0
                 && let Some(adjustment) = text.vadjustment()
             {
                 adjustment.set_value(adjustment.value());
             }
-            let width = content.width.max(0.0) as i32;
+            let width = content.size.width.0.max(0.0) as i32;
             let height = label.measure(gtk::Orientation::Vertical, width).0 as f32;
             view.set_native(
                 label,
-                Rect {
-                    height: content.height.max(height),
+                Bounds {
+                    size: Size::new(content.size.width, content.size.height.max(Points(height))),
                     ..content
                 },
             );
@@ -1016,7 +1026,7 @@ pub(crate) fn animated(view: &NshView) {
 }
 
 /// `InputContent`.
-pub(crate) fn content(view: &NshView, content: Rect) {
+pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     let Some(input) = view.state().input.clone() else {
         return;
     };

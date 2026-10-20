@@ -28,7 +28,9 @@
 use std::{f32::consts::PI, rc::Rc};
 
 use gtk4::{self as gtk, gdk, glib, graphene, prelude::*};
-use nsh_core::{Command, EventKind, EventPayload, ScrollBehavior, Size, StickyCell, ViewKind};
+use nsh_core::{
+    Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
+};
 
 use crate::{
     surface::Surface,
@@ -237,9 +239,9 @@ fn thumb_scroll(d: f32, range: f32, travel: f32) -> f32 {
 
 fn viewport(state: &ViewState, horizontal: bool) -> f32 {
     if horizontal {
-        state.frame.width
+        state.frame.size.width.0
     } else {
-        state.frame.height
+        state.frame.size.height.0
     }
 }
 
@@ -253,7 +255,7 @@ fn limits(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let max = s.max((state.frame.width, state.frame.height));
+    let max = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let min = if !s.horizontal && s.live.refreshing {
         -REFRESH_SPACE
     } else {
@@ -268,7 +270,7 @@ fn reported(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let (mx, my) = s.max((state.frame.width, state.frame.height));
+    let (mx, my) = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let inset = s.behavior.content_inset;
     (
         s.x.clamp(0.0, mx) - inset.left,
@@ -763,13 +765,13 @@ pub(crate) fn config(
 /// `ScrollContent`. Content that shrank below the offset pulls it back on
 /// the next frame, once the rest of the batch (the `ScrollBy` that keeps
 /// the visible content in place) is applied.
-pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size) {
+pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size<Points>) {
     let past = {
         let mut state = view.state_mut();
         let Some(s) = state.scroll.as_mut() else {
             return;
         };
-        s.content = (size.width, size.height);
+        s.content = (size.width.0, size.height.0);
         let pos = main(s);
         pos > limits(&state).1 + 0.5
     };
@@ -1016,7 +1018,7 @@ const INDICATOR_THICK: f32 = 3.0;
 fn thumb(state: &ViewState) -> Option<(graphene::Rect, f32)> {
     const EDGE: f32 = 2.0;
     let s = state.scroll.as_ref()?;
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let inset = s.behavior.content_inset;
     let (dim, total, offset) = if s.horizontal {
         (w, s.content.0 + inset.left + inset.right, s.x)
@@ -1047,9 +1049,9 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
         return false;
     };
     let (along, across, start, len, edge) = if s.horizontal {
-        (x, y, rect.x(), rect.width(), state.frame.height)
+        (x, y, rect.x(), rect.width(), state.frame.size.height.0)
     } else {
-        (y, x, rect.y(), rect.height(), state.frame.width)
+        (y, x, rect.y(), rect.height(), state.frame.size.width.0)
     };
     (edge - THUMB_GRAB..=edge).contains(&across)
         && (start - THUMB_SLOP..=start + len + THUMB_SLOP).contains(&along)
@@ -1143,7 +1145,7 @@ pub(crate) fn thumb_end(surface: &Rc<Surface>, view: &NshView) {
 /// and the refresh spinner.
 pub(crate) fn draw_indicator(snapshot: &gtk::Snapshot, state: &ViewState) {
     let Some(s) = &state.scroll else { return };
-    let w = state.frame.width;
+    let w = state.frame.size.width.0;
     if !s.horizontal
         && s.y < 0.0
         && (s.live.refreshing || state.events.contains(EventKind::Refresh))

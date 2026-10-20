@@ -17,7 +17,7 @@ use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
 use self::list::{ExtraKind, Follow, ListState, PinTarget};
 pub use self::measure::Measurement;
 use crate::{
-    geometry::{Rect, Size},
+    geometry::{Bounds, Point, Points, Size, rect, size_pt},
     mount::{
         InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig, ScrollBehavior,
         StickyCell, VideoProps, ViewKind,
@@ -90,7 +90,7 @@ mod dirty {
 #[derive(Debug, Default)]
 struct RootState {
     /// Size the platform reported for the root (modals).
-    reported: Option<Size>,
+    reported: Option<Size<Points>>,
     /// Safe-area insets the platform reported for the root (modals).
     insets: EdgeInsets,
     /// Height of the header the platform measured above the content
@@ -98,7 +98,7 @@ struct RootState {
     /// area).
     header: Option<f32>,
     /// The size and header height the root was last laid out with.
-    laid_out: Option<(Size, f32)>,
+    laid_out: Option<(Size<Points>, f32)>,
     /// Screen options (screens).
     screen: ScreenConfig,
     /// Modal options (modals).
@@ -275,7 +275,7 @@ struct ScrollState {
     scroll_value: Option<nsh_animation::NodeId>,
     keyboard_dismiss: KeyboardDismissMode,
     /// Last content size sent to the platform.
-    content: Option<Size>,
+    content: Option<Size<Points>>,
     /// Where in the mount items the last `ScrollContent` was queued: a
     /// later size in the same batch replaces it, so a row relaid in two
     /// passes never sends the platform a transient size (which would clamp
@@ -320,9 +320,9 @@ struct InputState {
     /// Everything but the text style, which comes from the node's style.
     config: InputConfig,
     /// Last content box sent to the platform.
-    content: Option<Rect>,
+    content: Option<Bounds<Points>>,
     /// Last size `onContentSizeChange` reported.
-    content_size: Option<Size>,
+    content_size: Option<Size<Points>>,
 }
 
 #[derive(Debug, Default)]
@@ -399,10 +399,10 @@ struct Node {
     /// The native view exists.
     created: bool,
     /// Last frame sent to the platform.
-    frame: Rect,
+    frame: Bounds<Points>,
     /// The area descendants cover outside the bounds, as last mounted
     /// (`MountItem::Overflow`).
-    overflow: Option<Rect>,
+    overflow: Option<Bounds<Points>>,
     dirty: u32,
     queued: bool,
     /// In `Core::pending_text`.
@@ -440,10 +440,10 @@ impl Node {
         let mut style = Box::new(self.view_style.clone());
         style.elevation = self.elevation;
         if style.transform.has_fractions() {
-            let (w, h) = if self.frame.width.is_nan() {
+            let (w, h) = if self.frame.size.width.0.is_nan() {
                 (0.0, 0.0)
             } else {
-                (self.frame.width, self.frame.height)
+                (self.frame.size.width.0, self.frame.size.height.0)
             };
             style.transform = style.transform.resolve_fractions(w, h);
         }
@@ -495,7 +495,7 @@ impl Node {
             slot: None,
             gestures: GestureValues::default(),
             created: false,
-            frame: Rect::UNSET,
+            frame: Bounds::UNSET,
             overflow: None,
             attached: Vec::new(),
             elevation: 0.0,
@@ -515,10 +515,10 @@ struct TextContext<P> {
     /// Platform typesetting state, created on first use.
     prepared: Option<P>,
     /// Last measurement: `(max_width, size)`.
-    cache: Option<(Option<f32>, Size)>,
+    cache: Option<(Option<f32>, Size<Points>)>,
     /// Last final layout sent to the platform and the content box it was
     /// made for (where in the view the text goes).
-    laid_out: Option<(Rect, TextLayout)>,
+    laid_out: Option<(Bounds<Points>, TextLayout)>,
 }
 
 impl<P> TextContext<P> {
@@ -536,9 +536,9 @@ impl<P> TextContext<P> {
 /// Measured leaves: text blocks and images with a known natural size.
 enum LeafContext<P> {
     Text(TextContext<P>),
-    Image(Option<Size>),
+    Image(Option<Size<Points>>),
     /// A registered native component's own size, once it reported one.
-    Native(Option<Size>),
+    Native(Option<Size<Points>>),
 }
 
 /// A request for the JS runtime to render list items into cells.
@@ -619,7 +619,7 @@ pub struct Core<M: TextEngine> {
     /// Reused buffer of `(item index, cell)` for list updates.
     cells_scratch: Vec<(u32, Key)>,
     root: Key,
-    viewport: Size,
+    viewport: Size<Points>,
     mount: Vec<MountItem>,
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
@@ -653,7 +653,7 @@ pub struct Core<M: TextEngine> {
 
 impl<M: TextEngine + 'static> Core<M> {
     /// Creates a core whose root view (id [`ROOT_ID`]) fills `viewport`.
-    pub fn new(text_engine: M, viewport: Size) -> Self {
+    pub fn new(text_engine: M, viewport: Size<Points>) -> Self {
         let core = Self::with_engine(text_engine, viewport);
         // Components that run once measure text with it.
         let engine = core.text_engine.clone();
@@ -667,7 +667,7 @@ impl<M: TextEngine + 'static> Core<M> {
 }
 
 impl<M: TextEngine> Core<M> {
-    fn with_engine(text_engine: M, viewport: Size) -> Self {
+    fn with_engine(text_engine: M, viewport: Size<Points>) -> Self {
         let mut layout = TaffyTree::with_capacity(256);
         let root_layout = layout.new_leaf(root_style(viewport)).expect("taffy root");
         let mut nodes = Slab::with_capacity(256);
@@ -733,7 +733,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
     /// of it covered by system UI.
-    pub fn set_root_size(&mut self, id: NodeId, size: Size, insets: EdgeInsets) {
+    pub fn set_root_size(&mut self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let Ok(key) = self.key(id) else { return };
         if let Some(root) = self.nodes[key as usize].root.as_mut()
             && (root.reported != Some(size) || root.insets != insets)
@@ -820,7 +820,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Changes the size of the root view.
-    pub fn set_viewport(&mut self, viewport: Size) {
+    pub fn set_viewport(&mut self, viewport: Size<Points>) {
         if viewport != self.viewport {
             self.viewport = viewport;
             let root = self.nodes[self.root as usize].layout.expect("root layout");
@@ -858,7 +858,7 @@ impl<M: TextEngine> Core<M> {
 
     /// A registered native component reported its own size: it is laid out
     /// at it where its style leaves a dimension open.
-    pub fn set_component_size(&mut self, id: NodeId, size: Size) {
+    pub fn set_component_size(&mut self, id: NodeId, size: Size<Points>) {
         let Ok(key) = self.key(id) else { return };
         let Some(layout) = self.nodes[key as usize].layout else {
             return;
@@ -875,21 +875,16 @@ impl<M: TextEngine> Core<M> {
     /// What `onScroll` reports for scroll view `id`, if it listens to it:
     /// the minimum milliseconds between events, the content size (zoomed),
     /// the viewport size and the zoom scale.
-    pub fn scroll_listener(&self, id: NodeId) -> Option<(f32, Size, Size, f32)> {
+    pub fn scroll_listener(&self, id: NodeId) -> Option<(f32, Size<Points>, Size<Points>, f32)> {
         let node = &self.nodes[self.key(id).ok()? as usize];
         if !node.events.contains(EventKind::Scroll) {
             return None;
         }
         let scroll = node.scroll.as_ref()?;
-        let frame = Size::new(node.frame.width, node.frame.height);
+        let frame = node.frame.size;
         let content = scroll.content.unwrap_or(frame);
         let z = scroll.zoom;
-        Some((
-            scroll.event_throttle_ms,
-            Size::new(content.width * z, content.height * z),
-            frame,
-            z,
-        ))
+        Some((scroll.event_throttle_ms, content * z, frame, z))
     }
 
     /// Moves list render requests produced by the last commit into `out`.
@@ -1018,15 +1013,15 @@ impl<M: TextEngine> Core<M> {
                 // A listener added after layout still learns the frame.
                 if event == EventKind::Layout && enabled && !before.contains(event) {
                     let f = node.frame;
-                    if !f.x.is_nan() {
+                    if !f.origin.x.0.is_nan() {
                         self.events.push(crate::ui::JsEvent::Event(
                             id,
                             event,
                             EventPayload::Layout {
-                                x: f.x,
-                                y: f.y,
-                                width: f.width,
-                                height: f.height,
+                                x: f.origin.x.0,
+                                y: f.origin.y.0,
+                                width: f.size.width.0,
+                                height: f.size.height.0,
                             },
                         ));
                     }
@@ -1261,9 +1256,12 @@ impl<M: TextEngine> Core<M> {
                     let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
                     let frame = node.frame;
                     let (x, y) = if horizontal {
-                        ((content.width - frame.width).max(0.0), 0.0)
+                        ((content.width - frame.size.width).max(Points::ZERO).0, 0.0)
                     } else {
-                        (0.0, (content.height - frame.height).max(0.0))
+                        (
+                            0.0,
+                            (content.height - frame.size.height).max(Points::ZERO).0,
+                        )
                     };
                     command = Command::ScrollTo { x, y, animated };
                 }
@@ -1823,7 +1821,7 @@ impl<M: TextEngine> Core<M> {
                     let size = source
                         .as_ref()
                         .and_then(|s| s.size)
-                        .map(|(w, h)| Size::new(w, h));
+                        .map(|(w, h)| size_pt(w, h));
                     image.source = source;
                     flags |= dirty::IMAGE;
                     let layout = node.layout.expect("image layout");
@@ -2829,7 +2827,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
-        node.frame = Rect::UNSET;
+        node.frame = Bounds::UNSET;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;
         }
@@ -3191,8 +3189,8 @@ impl<M: TextEngine> Core<M> {
             id,
             EventKind::ContentSizeChange,
             EventPayload::Map(vec![
-                ("width", PayloadValue::Number(size.width as f64)),
-                ("height", PayloadValue::Number(size.height as f64)),
+                ("width", PayloadValue::Number(size.width.0 as f64)),
+                ("height", PayloadValue::Number(size.height.0 as f64)),
             ]),
         ));
     }
@@ -3483,8 +3481,8 @@ impl<M: TextEngine> Core<M> {
     fn layout_main(&mut self) -> bool {
         let root = self.nodes[self.root as usize].layout.expect("root layout");
         let available = taffy::Size {
-            width: AvailableSpace::Definite(self.viewport.width),
-            height: AvailableSpace::Definite(self.viewport.height),
+            width: AvailableSpace::Definite(self.viewport.width.0),
+            height: AvailableSpace::Definite(self.viewport.height.0),
         };
         // Even a clean root costs a full rounding walk in taffy: skip it.
         let main = self.layout.dirty(root).unwrap_or(true);
@@ -3577,8 +3575,8 @@ impl<M: TextEngine> Core<M> {
                 };
                 return (inset - y).max(0.0);
             }
-            if !n.frame.y.is_nan() {
-                y += n.frame.y;
+            if !n.frame.origin.y.0.is_nan() {
+                y += n.frame.origin.y.0;
             }
             if n.parent == NO_KEY {
                 return 0.0;
@@ -3616,7 +3614,7 @@ impl<M: TextEngine> Core<M> {
                     };
                     bar + self.top_overlap(parent)
                 };
-                let size = Size::new(s.width, s.height);
+                let size = size_pt(s.width, s.height);
                 (size, header, definite(size))
             }
             Kind::Modal => {
@@ -3625,10 +3623,10 @@ impl<M: TextEngine> Core<M> {
             }
             // As wide as the window, as tall as its content.
             Kind::InputAccessory => (
-                Size::new(self.viewport.width, 0.0),
+                size_pt(self.viewport.width.0, 0.0),
                 0.0,
                 taffy::Size {
-                    width: AvailableSpace::Definite(self.viewport.width),
+                    width: AvailableSpace::Definite(self.viewport.width.0),
                     height: AvailableSpace::MaxContent,
                 },
             ),
@@ -3647,7 +3645,7 @@ impl<M: TextEngine> Core<M> {
         }
         if kind == Kind::InputAccessory {
             let mut style = self.layout.style(layout).expect("taffy style").clone();
-            style.size.width = taffy::Dimension::length(size.width);
+            style.size.width = taffy::Dimension::length(size.width.0);
             self.layout.set_style(layout, style).expect("taffy style");
         } else if kind != Kind::HeaderItem {
             let config_padding = match kind {
@@ -3662,8 +3660,8 @@ impl<M: TextEngine> Core<M> {
                 .cloned()
                 .unwrap_or_default();
             style.size = taffy::Size {
-                width: taffy::Dimension::length(size.width),
-                height: taffy::Dimension::length(size.height),
+                width: taffy::Dimension::length(size.width.0),
+                height: taffy::Dimension::length(size.height.0),
             };
             if config_padding > 0.0 {
                 let base = match style.padding.top.into_raw() {
@@ -3793,16 +3791,16 @@ impl<M: TextEngine> Core<M> {
                             };
                             let measured = measure_text(engine, cache, ctx, max_width);
                             taffy::Size {
-                                width: known.width.unwrap_or(measured.width),
-                                height: known.height.unwrap_or(measured.height),
+                                width: known.width.unwrap_or(measured.width.0),
+                                height: known.height.unwrap_or(measured.height.0),
                             }
                         }
                         Some(LeafContext::Image(Some(natural))) => {
                             image_size(*natural, known.width, known.height)
                         }
                         Some(LeafContext::Native(Some(own))) => taffy::Size {
-                            width: known.width.unwrap_or(own.width),
-                            height: known.height.unwrap_or(own.height),
+                            width: known.width.unwrap_or(own.width.0),
+                            height: known.height.unwrap_or(own.height.0),
                         },
                         _ => taffy::Size::ZERO,
                     },
@@ -3825,7 +3823,7 @@ impl<M: TextEngine> Core<M> {
     fn flush_text(&mut self) {
         let mut pending = std::mem::take(&mut self.pending_text);
         // Attachment views to place: (block, its final layout, content box).
-        let mut placements: Vec<(Key, TextLayout, Rect)> = Vec::new();
+        let mut placements: Vec<(Key, TextLayout, Bounds<Points>)> = Vec::new();
         for &key in &pending {
             let Some(node) = self.nodes.get_mut(key as usize) else {
                 continue;
@@ -3852,19 +3850,20 @@ impl<M: TextEngine> Core<M> {
             };
             if ctx.text.no_wrap {
                 // One line at its natural width, past the box if need be.
-                content.width = content
+                content.size.width = content
+                    .size
                     .width
                     .max(measure_text(engine, cache, ctx, None).width);
             }
             if align_vertical > 0.0 {
                 // Text shorter than its box: moved down within it.
-                let height = measure_text(engine, cache, ctx, Some(content.width)).height;
-                if height < content.height {
-                    content.y += (content.height - height) * align_vertical;
-                    content.height = height;
+                let height = measure_text(engine, cache, ctx, Some(content.size.width.0)).height;
+                if height < content.size.height {
+                    content.origin.y += (content.size.height - height) * align_vertical;
+                    content.size.height = height;
                 }
             }
-            let size = Size::new(content.width, content.height);
+            let size = content.size;
             if let Some(min) = fit {
                 // Shrunk to fit: its own text, laid out on its own.
                 if matches!(&ctx.laid_out, Some((r, _)) if *r == content) {
@@ -3895,7 +3894,7 @@ impl<M: TextEngine> Core<M> {
             let text_layout = match &ctx.laid_out {
                 Some((r, _)) if *r == content => continue,
                 // Only moved (padding, vertical alignment): the same layout.
-                Some((r, l)) if r.width == size.width && r.height == size.height => l.clone(),
+                Some((r, l)) if r.size == size => l.clone(),
                 _ => {
                     let prepared = ctx
                         .prepared
@@ -3932,7 +3931,7 @@ impl<M: TextEngine> Core<M> {
     /// Moves the views of text block `key`'s attachments onto their
     /// placeholders in `layout` (content box `content`); cut off ones out
     /// of sight.
-    fn place_attachments(&mut self, key: Key, layout: &TextLayout, content: Rect) {
+    fn place_attachments(&mut self, key: Key, layout: &TextLayout, content: Bounds<Points>) {
         let points = self.text_engine.attachments(layout);
         let attached = std::mem::take(&mut self.nodes[key as usize].attached);
         for (i, &id) in attached.iter().enumerate() {
@@ -3942,19 +3941,11 @@ impl<M: TextEngine> Core<M> {
             };
             let size = self.layout.layout(l).expect("taffy layout").size;
             let (x, y) = match points.get(i).copied().flatten() {
-                Some((x, y)) => (content.x + x, content.y + y),
+                Some((x, y)) => (content.origin.x.0 + x, content.origin.y.0 + y),
                 // Far away, like unbound list cells.
                 None => (-100_000.0, 0.0),
             };
-            self.set_frame(
-                a,
-                Rect {
-                    x,
-                    y,
-                    width: size.width,
-                    height: size.height,
-                },
-            );
+            self.set_frame(a, rect(x, y, size.width, size.height));
         }
         self.nodes[key as usize].attached = attached;
     }
@@ -3967,12 +3958,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let l = self.layout.layout(layout).expect("taffy layout");
-        let mut frame = Rect {
-            x: l.location.x,
-            y: l.location.y,
-            width: l.size.width,
-            height: l.size.height,
-        };
+        let mut frame = rect(l.location.x, l.location.y, l.size.width, l.size.height);
         // Children of a right-to-left horizontal scroll view: mirrored in
         // its content.
         if let Some(parent) = self.nodes.get(node.parent as usize)
@@ -3984,7 +3970,7 @@ impl<M: TextEngine> Core<M> {
             }) = parent.scroll.as_deref()
             && parent.kind == Kind::Scroll
         {
-            frame.x = content.width - frame.x - frame.width;
+            frame.origin.x = content.width - frame.origin.x - frame.size.width;
         }
         self.set_frame(key, frame);
         let kind = self.nodes[key as usize].kind;
@@ -4000,7 +3986,7 @@ impl<M: TextEngine> Core<M> {
                 });
             }
             if node.events.contains(EventKind::ContentSizeChange) {
-                self.report_content_size(key, content.width);
+                self.report_content_size(key, content.size.width.0);
             }
         }
         if kind == Kind::Scroll {
@@ -4009,7 +3995,7 @@ impl<M: TextEngine> Core<M> {
             // add the leading border and trailing padding.
             let l = self.layout.layout(layout).expect("taffy layout");
             let o = l.scrollable_overflow_rect;
-            let size = Size::new(
+            let size = size_pt(
                 l.size.width.max(l.border.left + o.right + l.padding.right),
                 l.size
                     .height
@@ -4031,7 +4017,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    fn set_frame(&mut self, key: Key, frame: Rect) {
+    fn set_frame(&mut self, key: Key, frame: Bounds<Points>) {
         let node = &mut self.nodes[key as usize];
         if node.frame != frame {
             node.frame = frame;
@@ -4041,10 +4027,10 @@ impl<M: TextEngine> Core<M> {
                     id,
                     EventKind::Layout,
                     EventPayload::Layout {
-                        x: frame.x,
-                        y: frame.y,
-                        width: frame.width,
-                        height: frame.height,
+                        x: frame.origin.x.0,
+                        y: frame.origin.y.0,
+                        width: frame.size.width.0,
+                        height: frame.size.height.0,
                     },
                 ));
             }
@@ -4061,9 +4047,9 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    fn set_scroll_content(&mut self, key: Key, size: Size) {
+    fn set_scroll_content(&mut self, key: Key, size: Size<Points>) {
         let node = &mut self.nodes[key as usize];
-        let (id, rtl, kind, viewport) = (node.id, node.rtl, node.kind, node.frame.width);
+        let (id, rtl, kind, viewport) = (node.id, node.rtl, node.kind, node.frame.size.width.0);
         if let Some(scroll) = node.scroll.as_mut()
             && scroll.content != Some(size)
         {
@@ -4100,14 +4086,14 @@ impl<M: TextEngine> Core<M> {
                     None => self.commands.push((
                         id,
                         Command::ScrollTo {
-                            x: (size.width - viewport).max(0.0),
+                            x: (size.width - Points(viewport)).max(Points::ZERO).0,
                             y: 0.0,
                             animated: false,
                         },
                     )),
                     Some(old) if old.width != size.width => self.mount.push(MountItem::ScrollBy {
                         id,
-                        dx: size.width - old.width,
+                        dx: (size.width - old.width).0,
                         dy: 0.0,
                     }),
                     Some(_) => {}
@@ -4316,26 +4302,26 @@ impl<M: TextEngine> Core<M> {
                 .collect();
             for cell in hidden {
                 let frame = self.nodes[cell as usize].frame;
-                if frame.width.is_nan() {
+                if frame.size.width.0.is_nan() {
                     // Never placed: nothing to see yet.
                     continue;
                 }
                 let (start, size) = if horizontal {
-                    (frame.x, frame.width)
+                    (frame.origin.x.0, frame.size.width.0)
                 } else {
-                    (frame.y, frame.height)
+                    (frame.origin.y.0, frame.size.height.0)
                 };
                 if start + size <= window_start || start >= window_end {
                     continue;
                 }
                 let away = if horizontal {
-                    Rect {
-                        x: -HIDDEN,
+                    Bounds {
+                        origin: Point::new(Points(-HIDDEN), frame.origin.y),
                         ..frame
                     }
                 } else {
-                    Rect {
-                        y: -HIDDEN,
+                    Bounds {
+                        origin: Point::new(frame.origin.x, Points(-HIDDEN)),
                         ..frame
                     }
                 };
@@ -4350,19 +4336,9 @@ impl<M: TextEngine> Core<M> {
                 let list = this.nodes[key as usize].list.as_ref().expect("list");
                 let main_at = list.to_content(at, row.max(main_of(size)));
                 let frame = if horizontal {
-                    Rect {
-                        x: main_at,
-                        y: x,
-                        width: size.width,
-                        height: width,
-                    }
+                    rect(main_at, x, size.width, width)
                 } else {
-                    Rect {
-                        x,
-                        y: main_at,
-                        width,
-                        height: size.height,
-                    }
+                    rect(x, main_at, width, size.height)
                 };
                 this.set_frame(cell, frame);
                 if std::mem::take(&mut this.nodes[cell as usize].relaid) {
@@ -4419,9 +4395,9 @@ impl<M: TextEngine> Core<M> {
             }
 
             let content = if horizontal {
-                Size::new(content_len, cross)
+                size_pt(content_len, cross)
             } else {
-                Size::new(cross, content_len)
+                size_pt(cross, content_len)
             };
             // Platforms clamp the offset to the content: grow the content
             // before scrolling, scroll before shrinking it.
@@ -4429,7 +4405,7 @@ impl<M: TextEngine> Core<M> {
                 .scroll
                 .as_ref()
                 .and_then(|s| s.content)
-                .map_or(0.0, |c| if horizontal { c.width } else { c.height });
+                .map_or(0.0, |c| if horizontal { c.width.0 } else { c.height.0 });
             if anchor != 0.0 {
                 self.nodes[key as usize]
                     .list
@@ -4478,21 +4454,20 @@ impl<M: TextEngine> Core<M> {
 const HIDDEN: f32 = 1.0e6;
 
 /// The content box (inside padding and border) of a laid-out node.
-fn content_box(l: &taffy::Layout) -> Rect {
-    Rect {
-        x: l.padding.left + l.border.left,
-        y: l.padding.top + l.border.top,
-        width: (l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right)
+fn content_box(l: &taffy::Layout) -> Bounds<Points> {
+    rect(
+        l.padding.left + l.border.left,
+        l.padding.top + l.border.top,
+        (l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right).max(0.0),
+        (l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom)
             .max(0.0),
-        height: (l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom)
-            .max(0.0),
-    }
+    )
 }
 
 /// Size of an image with a known natural size: fill a known dimension and
 /// keep the aspect ratio for the other.
-fn image_size(natural: Size, w: Option<f32>, h: Option<f32>) -> taffy::Size<f32> {
-    let ratio = if natural.height > 0.0 {
+fn image_size(natural: Size<Points>, w: Option<f32>, h: Option<f32>) -> taffy::Size<f32> {
+    let ratio = if natural.height > Points::ZERO {
         natural.width / natural.height
     } else {
         1.0
@@ -4501,7 +4476,7 @@ fn image_size(natural: Size, w: Option<f32>, h: Option<f32>) -> taffy::Size<f32>
         (Some(w), None) => (w, w / ratio),
         (None, Some(h)) => (h * ratio, h),
         (Some(w), Some(h)) => (w, h),
-        (None, None) => (natural.width, natural.height),
+        (None, None) => (natural.width.0, natural.height.0),
     };
     taffy::Size { width, height }
 }
@@ -4531,7 +4506,7 @@ fn text_lines<M: TextEngine>(
 fn fitted<M: TextEngine>(
     engine: &M,
     text: &AttributedText,
-    size: Size,
+    size: Size<Points>,
     min: f32,
 ) -> AttributedText {
     let scaled = |scale: f32| {
@@ -4550,13 +4525,16 @@ fn fitted<M: TextEngine>(
             max_lines: 0,
             ..t.clone()
         };
-        let full = engine.measure(&engine.prepare(&all), Some(size.width));
+        let full = engine.measure(&engine.prepare(&all), Some(size.width.0));
         let limited = if t.max_lines > 0 {
-            engine.measure(&engine.prepare(t), Some(size.width)).height
+            engine
+                .measure(&engine.prepare(t), Some(size.width.0))
+                .height
         } else {
-            f32::INFINITY
+            Points(f32::INFINITY)
         };
-        full.height <= size.height.min(limited) + 0.5 && full.width <= size.width + 0.5
+        full.height <= size.height.min(limited) + Points(0.5)
+            && full.width <= size.width + Points(0.5)
     };
     if fits(text) {
         return text.clone();
@@ -4581,7 +4559,7 @@ fn measure_text<M: TextEngine>(
     cache: &mut MeasureCache,
     ctx: &mut TextContext<M::Prepared>,
     max_width: Option<f32>,
-) -> Size {
+) -> Size<Points> {
     if let Some((w, size)) = ctx.cache
         && w == max_width
     {
@@ -4595,7 +4573,7 @@ fn measure_text<M: TextEngine>(
                 .get_or_insert_with(|| engine.prepare(&ctx.text));
             let size = engine.measure(prepared, max_width);
             // Round up so rendering never truncates the last glyph.
-            let size = Size::new(size.width.ceil(), size.height.ceil());
+            let size = size.map(Points::ceil);
             cache.insert(ctx.layout_hash, max_width, size);
             size
         }
@@ -4604,10 +4582,10 @@ fn measure_text<M: TextEngine>(
     size
 }
 
-fn definite(size: Size) -> taffy::Size<AvailableSpace> {
+fn definite(size: Size<Points>) -> taffy::Size<AvailableSpace> {
     taffy::Size {
-        width: AvailableSpace::Definite(size.width),
-        height: AvailableSpace::Definite(size.height),
+        width: AvailableSpace::Definite(size.width.0),
+        height: AvailableSpace::Definite(size.height.0),
     }
 }
 
@@ -4655,11 +4633,11 @@ fn scaled(mut style: ResolvedTextStyle, multiplier: f32) -> ResolvedTextStyle {
     style
 }
 
-fn root_style(viewport: Size) -> taffy::Style {
+fn root_style(viewport: Size<Points>) -> taffy::Style {
     let mut style = taffy::Style {
         size: taffy::Size {
-            width: taffy::Dimension::length(viewport.width),
-            height: taffy::Dimension::length(viewport.height),
+            width: taffy::Dimension::length(viewport.width.0),
+            height: taffy::Dimension::length(viewport.height.0),
         },
         ..Style::default().layout
     };

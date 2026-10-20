@@ -40,7 +40,9 @@ use std::{
 };
 
 use nsh_core::{
-    Color, EventKind, EventPayload, InputConfig, PayloadValue, Rect, SubmitBehavior, TextAlign,
+    Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
+    TextAlign,
+    geometry::{Point, Size, px},
     tailwind::state,
 };
 use objc2::{
@@ -207,7 +209,7 @@ pub(crate) struct InputState {
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
-    content: Cell<Option<Rect>>,
+    content: Cell<Option<Bounds<Points>>>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// A change made here, not by the user, is being applied.
@@ -1304,23 +1306,32 @@ fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
 /// the pad at the view's size).
 fn place(view: &NshView, input: &InputState) {
     let frame = view.state().frame;
-    let bounds = Rect {
-        x: 0.0,
-        y: 0.0,
-        width: frame.width,
-        height: frame.height,
+    let bounds = Bounds {
+        origin: Point {
+            x: Points(0.0),
+            y: Points(0.0),
+        },
+        size: Size {
+            width: frame.size.width,
+            height: frame.size.height,
+        },
     };
     let content = input.content.get().unwrap_or(bounds);
-    if content.width <= 0.0 || content.height <= 0.0 {
+    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
         return;
     }
     view.set_native(&input.pad, bounds);
     let pad = &input.pad;
-    let host = |sub: &NSView, r: Rect| {
+    let host = |sub: &NSView, r: Bounds<Points>| {
         if crate::view::superview(sub).as_deref() != Some(&**pad) {
             pad.addSubview(sub);
         }
-        sub.setFrame(ns_rect(r.x, r.y, r.width, r.height));
+        sub.setFrame(ns_rect(
+            r.origin.x.0,
+            r.origin.y.0,
+            r.size.width.0,
+            r.size.height.0,
+        ));
     };
     if let Some(window) = view.ns().window()
         && !window.autorecalculatesKeyViewLoop()
@@ -1338,21 +1349,27 @@ fn place(view: &NshView, input: &InputState) {
             // the content box.
             let pad = FIELD_PADDING;
             let height = field.intrinsicContentSize().height as f32;
-            let rect = Rect {
-                x: content.x - pad,
-                y: content.y + (content.height - height) / 2.0,
-                width: content.width + 2.0 * pad,
-                height,
+            let rect = Bounds {
+                origin: Point {
+                    x: Points(content.origin.x.0 - pad),
+                    y: Points(content.origin.y.0 + (content.size.height.0 - height) / 2.0),
+                },
+                size: Size {
+                    width: Points(content.size.width.0 + 2.0 * pad),
+                    height: Points(height),
+                },
             };
             host(field, rect);
         }
         Editor::Area { scroller, .. } => {
             // The placeholder goes first: hosted views stack in order. A
             // label insets its text as a field does.
-            let label = Rect {
-                x: content.x - FIELD_PADDING,
-                width: content.width + 2.0 * FIELD_PADDING,
-                ..content
+            let label = Bounds {
+                origin: Point::new(content.origin.x - px(FIELD_PADDING), content.origin.y),
+                size: Size::new(
+                    content.size.width + px(2.0 * FIELD_PADDING),
+                    content.size.height,
+                ),
             };
             host(&input.placeholder, label);
             host(scroller, content);
@@ -1398,7 +1415,7 @@ pub(crate) fn animated(view: &NshView) {
 }
 
 /// `InputContent`.
-pub(crate) fn content(view: &NshView, content: Rect) {
+pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     let Some(input) = view.state().input.clone() else {
         return;
     };

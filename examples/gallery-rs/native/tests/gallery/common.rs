@@ -8,7 +8,8 @@ use std::{sync::Arc, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     AttributedText, Command, EventKind, EventMask, EventPayload, GestureValues, MountBatch,
-    MountItem, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing, ui::Root,
+    MountItem, Points, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing,
+    geometry::px, ui::Root,
 };
 use nsh_engine::{Engine, EngineConfig};
 
@@ -197,19 +198,19 @@ pub fn logger() {
 
 /// A headless engine running the gallery on a phone, and its batches.
 pub fn start() -> (nsh_engine::Engine, Receiver<MountBatch>) {
-    start_at(Size::new(390.0, 844.0))
+    start_at(Size::new(px(390.0), px(844.0)))
 }
 
 /// A headless engine running the gallery in a window of `viewport`, and
 /// its batches.
-pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
+pub fn start_at(viewport: Size<Points>) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     start_with(viewport, None)
 }
 
 /// A headless engine running the gallery in a window of `viewport`,
 /// keeping its data in `data_dir` (`None`: in memory), and its batches.
 pub fn start_with(
-    viewport: Size,
+    viewport: Size<Points>,
     data_dir: Option<std::path::PathBuf>,
 ) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();

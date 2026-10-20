@@ -4,7 +4,7 @@
 use std::f32::consts::TAU;
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline},
     nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
@@ -133,7 +133,7 @@ pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
         })
         .h(px(SHOWN as f32 * ROW))
         .label("Recent trades")
-        .on_layout(move |frame: &Rect| width.set(frame.width)),
+        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
     )
 }
 

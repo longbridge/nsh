@@ -4,7 +4,7 @@
 //! accessibility labels (as the TSX gallery's `demos/Gestures.tsx`).
 
 use nsh_core::{
-    Rect, Ripple, TouchPhase, TouchPoint, UNDERLAY_OPACITY,
+    Bounds, Points, Ripple, TouchPhase, TouchPoint, UNDERLAY_OPACITY,
     nsh_animation::{Curve, EaseMode},
     ui::{Animation, BoxShadow, TouchEvent, prelude::*},
 };
@@ -40,7 +40,9 @@ fn Dots() -> impl IntoElement {
             })
             .flex_1(),
         )
-        .on_layout(move |frame: &Rect| size.set((frame.width, frame.height)))
+        .on_layout(move |frame: &Bounds<Points>| {
+            size.set((frame.size.width.0, frame.size.height.0))
+        })
 }
 
 /// [`Dots`] filling its stage.
@@ -721,7 +723,7 @@ fn pointer_events() -> impl IntoElement {
         .child(
             view()
                 .h(px(88.0))
-                .on_layout(move |frame: &Rect| overlay.set(frame.width))
+                .on_layout(move |frame: &Bounds<Points>| overlay.set(frame.size.width.0))
                 .child(
                     press_with(
                         PressProps {

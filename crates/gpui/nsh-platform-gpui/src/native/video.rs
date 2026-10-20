@@ -814,7 +814,7 @@ mod player {
             let Some(surface) = self.surface.upgrade() else {
                 return false;
             };
-            let Some(width) = surface.view(self.id).map(|v| v.state().frame.width) else {
+            let Some(width) = surface.view(self.id).map(|v| v.state().frame.size.width.0) else {
                 return false;
             };
             match event.kind {

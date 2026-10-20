@@ -51,7 +51,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         if let Some(task) = closing.replace(None) {
             task.cancel();
         }
-        offset.set(window().height);
+        offset.set(window().height.0);
         offset.spring(0.0, settle(None));
     };
     // Slides away, then tells the app.
@@ -59,7 +59,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         if closing.with(|c| c.is_some()) {
             return;
         }
-        let end = offset.timing(untracked(window).height, 220.0, Easing::EaseIn);
+        let end = offset.timing(untracked(window).height.0, 220.0, Easing::EaseIn);
         closing.replace(Some(spawn(async move {
             // Ended or interrupted: closed either way.
             let _ = end.await;
@@ -85,7 +85,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     .absolute()
                     .inset_0()
                     .bg(move || theme().overlay)
-                    .bind_opacity(&offset.interpolate(&[0.0, height], &[1.0, 0.0]))
+                    .bind_opacity(&offset.interpolate(&[0.0, height.0], &[1.0, 0.0]))
                     .label("Close")
                     // For the pointer: Escape and the back button close it
                     // from the keyboard, which goes straight to the panel.

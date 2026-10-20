@@ -18,7 +18,7 @@ mod scripts;
 use std::{rc::Rc, time::Duration};
 
 use nsh_core::{
-    LayoutAnimation, Size,
+    LayoutAnimation, Points, Size,
     time::Instant,
     ui::{AccessibilityState, ScrollEvent, ScrollOffset, View, prelude::*},
 };
@@ -1093,8 +1093,8 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))
                         .on_focus(move |_: &()| menu.set(false))
-                        .on_content_size_change(move |size: &Size| {
-                            input_height.set(size.height.clamp(20.0, 100.0));
+                        .on_content_size_change(move |size: &Size<Points>| {
+                            input_height.set((size.height.clamp(px(20.0), px(100.0))).0);
                         })
                         .on_change_text(move |text: &str| draft.set(text.to_owned()))
                         .h(move || px(input_height.get() + 20.0))

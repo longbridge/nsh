@@ -26,14 +26,15 @@ use crossbeam_channel::{Receiver, Sender};
 pub use local_storage::local_storage_prefix;
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
-    PayloadValue, Size, TextEngine, time::Instant, ui::JsEvent,
+    PayloadValue, TextEngine, time::Instant, ui::JsEvent,
 };
 pub use nsh_core::{
     access::{Access, Capabilities},
+    geometry::{self, Bounds, Edges, Points, Size},
     js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
-        HttpRequest, Idiom, Insets, Locale, Os,
+        HttpRequest, Idiom, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
     ui::{Root, Theme},
@@ -531,7 +532,7 @@ pub trait MountSink: Send + 'static {
     /// changed anything, its batch came before), once per turn, with the
     /// latest size. A platform that waits for the layout at a new size, to
     /// show it in the frame the window takes the size, stops waiting here.
-    fn resized(&self, _size: Size) {}
+    fn resized(&self, _size: Size<Points>) {}
 
     /// The app imports chunk `id` of a split bundle (`import()`), which its
     /// [`Bundle`] does not hold: load it and hand it over with
@@ -583,7 +584,7 @@ pub struct EngineConfig {
     /// The app.
     pub app: App,
     /// Initial size of the root view.
-    pub viewport: Size,
+    pub viewport: Size<Points>,
     /// Log per-commit timings (target `nsh::perf`, level info).
     pub trace: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
@@ -626,7 +627,7 @@ impl EngineConfig {
     pub fn new(app: impl Into<App>) -> Self {
         Self {
             app: app.into(),
-            viewport: Size::new(390.0, 844.0),
+            viewport: Size::new(Points(390.0), Points(844.0)),
             trace: false,
             network: None,
             assets: None,
@@ -694,13 +695,13 @@ enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, f32, f32, u32),
     Zoom(NodeId, f32),
-    ComponentSize(NodeId, Size),
+    ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_animation::Finished>),
-    Resize(Size),
+    Resize(Size<Points>),
     /// A component's task was woken: it runs in the loop.
     Wake,
     Environment(Environment),
-    RootSize(NodeId, Size, EdgeInsets),
+    RootSize(NodeId, Size<Points>, EdgeInsets),
     ScreenHeader(NodeId, Option<f32>),
     Frame,
     States(NodeId, u8),
@@ -767,7 +768,7 @@ impl EngineControl {
 
     /// A registered native component's own size (points): it is laid out at
     /// it where its style leaves a dimension open.
-    pub fn set_component_size(&self, id: NodeId, size: Size) {
+    pub fn set_component_size(&self, id: NodeId, size: Size<Points>) {
         let _ = self.tx.send(Message::ComponentSize(id, size));
     }
 
@@ -777,7 +778,7 @@ impl EngineControl {
     }
 
     /// Resizes the root view.
-    pub fn resize(&self, size: Size) {
+    pub fn resize(&self, size: Size<Points>) {
         let _ = self.tx.send(Message::Resize(size));
     }
 
@@ -789,7 +790,7 @@ impl EngineControl {
 
     /// The platform presents root `id` (a modal) at `size`, with `insets`
     /// of it covered by system UI.
-    pub fn set_root_size(&self, id: NodeId, size: Size, insets: EdgeInsets) {
+    pub fn set_root_size(&self, id: NodeId, size: Size<Points>, insets: EdgeInsets) {
         let _ = self.tx.send(Message::RootSize(id, size, insets));
     }
 
@@ -1162,7 +1163,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
 
         let mut environment = config.environment;
-        environment.window = (config.viewport.width, config.viewport.height);
+        environment.window = config.viewport;
         let start = Instant::now();
         let mut driver = Driver {
             state,
@@ -1331,8 +1332,8 @@ impl<M: TextEngine + 'static> Driver<M> {
 struct ScrollEvent {
     x: f32,
     y: f32,
-    content: Size,
-    viewport: Size,
+    content: Size<Points>,
+    viewport: Size<Points>,
     /// The zoom scale.
     zoom: f32,
     throttle: Duration,
@@ -1372,7 +1373,7 @@ struct State<M: TextEngine> {
     /// When `hover_moves` were last delivered.
     hover_moved: Option<Instant>,
     /// The viewport size a resize set this turn ([`MountSink::resized`]).
-    resized: Option<Size>,
+    resized: Option<Size<Points>>,
 }
 
 /// Who made a request: JS (`fetch`), or a Rust component's task
@@ -1628,10 +1629,10 @@ impl<M: TextEngine> State<M> {
             let payload = EventPayload::Map(vec![
                 ("x", n(e.x)),
                 ("y", n(e.y)),
-                ("contentWidth", n(e.content.width)),
-                ("contentHeight", n(e.content.height)),
-                ("width", n(e.viewport.width)),
-                ("height", n(e.viewport.height)),
+                ("contentWidth", n(e.content.width.0)),
+                ("contentHeight", n(e.content.height.0)),
+                ("width", n(e.viewport.width.0)),
+                ("height", n(e.viewport.height.0)),
                 ("zoomScale", n(e.zoom)),
             ]);
             // A Rust component's scroll view is the component's.
@@ -1805,20 +1806,20 @@ impl<M: TextEngine> State<M> {
 fn insets(env: &Environment) -> EdgeInsets {
     let a = env.safe_area;
     EdgeInsets {
-        top: a.top,
-        right: a.right,
-        bottom: a.bottom,
-        left: a.left,
+        top: a.top.0,
+        right: a.right.0,
+        bottom: a.bottom.0,
+        left: a.left.0,
     }
 }
 
 /// What Rust components read from the environment.
-fn ui_environment(env: &Environment, window: Size) -> nsh_core::ui::Environment {
+fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::ui::Environment {
     nsh_core::ui::Environment {
         window,
         safe_area: insets(env),
         title_bar: env.title_bar,
-        keyboard_height: env.keyboard_height,
+        keyboard_height: env.keyboard_height.0,
         keyboard_duration: env.keyboard_duration,
         dark: env.color_scheme == ColorScheme::Dark,
         font_scale: env.font_scale,
@@ -1939,7 +1940,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.core.set_font_scale(env.font_scale);
             state.core.set_class_environment(class_environment(&env));
             state.core.set_safe_area(insets(&env));
-            let window = Size::new(env.window.0, env.window.1);
+            let window = env.window;
             state.core.set_environment(ui_environment(&env, window));
             if let Some(script) = script {
                 script.set_environment(&env);
@@ -2016,52 +2017,57 @@ fn extend_frame(frame: &mut Vec<nsh_core::MountItem>, items: Vec<nsh_core::Mount
 mod tests {
     #[test]
     fn rust_environment_preserves_native_title_bar_insets() {
-        let title_bar = nsh_core::platform::Insets {
-            top: 42.0,
-            left: 78.0,
-            right: 138.0,
-            bottom: 0.0,
+        use super::{Edges, Points};
+        let title_bar = Edges {
+            top: Points(42.0),
+            left: Points(78.0),
+            right: Points(138.0),
+            bottom: Points(0.0),
         };
         let environment = super::Environment {
             title_bar,
             ..Default::default()
         };
         assert_eq!(
-            super::ui_environment(&environment, nsh_core::Size::new(840.0, 630.0)).title_bar,
+            super::ui_environment(
+                &environment,
+                nsh_core::Size::new(Points(840.0), Points(630.0))
+            )
+            .title_bar,
             title_bar
         );
     }
 
-    use nsh_core::{MountItem, Size};
+    use nsh_core::{MountItem, Points, Size};
 
     #[test]
     fn a_frame_sends_a_scroll_views_last_content_size() {
         let content = |height| MountItem::ScrollContent {
             id: 2,
-            size: Size::new(390.0, height),
+            size: Size::new(Points(390.0), height),
         };
         let heights = |frame: &[MountItem]| -> Vec<f32> {
             frame
                 .iter()
                 .filter_map(|m| match m {
-                    MountItem::ScrollContent { size, .. } => Some(size.height),
+                    MountItem::ScrollContent { size, .. } => Some(size.height.0),
                     _ => None,
                 })
                 .collect()
         };
-        let mut frame = vec![content(313.0)];
-        super::extend_frame(&mut frame, vec![content(544.0)]);
+        let mut frame = vec![content(Points(313.0))];
+        super::extend_frame(&mut frame, vec![content(Points(544.0))]);
         assert_eq!(heights(&frame), [544.0, 544.0]);
         // A scroll in between keeps the size it scrolled against.
         let mut frame = vec![
-            content(313.0),
+            content(Points(313.0)),
             MountItem::ScrollBy {
                 id: 2,
                 dx: 0.0,
                 dy: 10.0,
             },
         ];
-        super::extend_frame(&mut frame, vec![content(544.0)]);
+        super::extend_frame(&mut frame, vec![content(Points(544.0))]);
         assert_eq!(heights(&frame), [313.0, 544.0]);
     }
 }

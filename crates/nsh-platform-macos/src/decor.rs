@@ -677,7 +677,7 @@ pub(crate) fn apply(view: &NshView) {
 /// What shapes `s`'s layers.
 fn shape_of(s: &ViewState, kind: Kind) -> Shape {
     let style = &s.style;
-    let (w, h) = (s.frame.width, s.frame.height);
+    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
     let borders = s.borders();
     let shadow = s.shadow();
     Shape {

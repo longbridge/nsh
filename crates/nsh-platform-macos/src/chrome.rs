@@ -46,7 +46,7 @@ use nsh_core::{
         DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
         WindowLevel,
     },
-    platform::Insets,
+    geometry::{Edges, Points},
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -192,18 +192,18 @@ pub(crate) fn update_area(surface: &Surface) {
                 })
                 .filter(|w| *w > 8.0)
                 .unwrap_or(TRAFFIC_LIGHTS_WIDTH);
-            Insets {
-                top: if height > 0.0 {
+            Edges {
+                top: Points(if height > 0.0 {
                     height
                 } else {
                     TITLE_BAR_HEIGHT
-                },
-                left,
-                right: 0.0,
-                bottom: 0.0,
+                }),
+                left: Points(left),
+                right: Points(0.0),
+                bottom: Points(0.0),
             }
         }
-        _ => Insets::default(),
+        _ => Edges::default(),
     };
     let mut env = surface.environment.get();
     if env.title_bar != area {

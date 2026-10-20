@@ -24,51 +24,24 @@ use crate::{
     BlendMode, BoxShadow, Cursor, FontVariant, TransformOrigin, TransitionProps,
     color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
+    geometry::{
+        AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Rems, px, relative,
+    },
     style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
     transform::TransformKind,
 };
 
-/// A length: points, a fraction of the parent, or automatic.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Length {
-    /// Points.
-    Points(f32),
-    /// A fraction of the parent's size (`0.5` is 50%).
-    Relative(f32),
-    /// Sized by layout.
-    Auto,
-}
-
-impl Eq for Length {}
-
-impl Hash for Length {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Length::Points(p) => (0u8, p.to_bits()).hash(state),
-            Length::Relative(f) => (1u8, f.to_bits()).hash(state),
-            Length::Auto => 2u8.hash(state),
+/// The style value of a length.
+fn length_patch(length: Length) -> PatchValue {
+    match length {
+        Length::Definite(DefiniteLength::Absolute(a)) => {
+            PatchValue::Number(a.to_points(REM_SIZE).0)
         }
-    }
-}
-
-/// `points` points.
-pub const fn px(points: f32) -> Length {
-    Length::Points(points)
-}
-
-/// `fraction` of the parent (`relative(0.5)` is 50%).
-pub const fn relative(fraction: f32) -> Length {
-    Length::Relative(fraction)
-}
-
-impl Length {
-    fn patch(self) -> PatchValue {
-        match self {
-            Length::Points(p) => PatchValue::Number(p),
-            Length::Relative(f) => PatchValue::Str(format!("{}%", f * 100.0).into()),
-            Length::Auto => PatchValue::Str("auto".into()),
+        Length::Definite(DefiniteLength::Fraction(f)) => {
+            PatchValue::Str(format!("{}%", f.0 * 100.0).into())
         }
+        Length::Auto => PatchValue::Str("auto".into()),
     }
 }
 
@@ -482,7 +455,7 @@ impl Declaration {
         let part = |out: &mut Vec<Decl>, p: Part| out.push(Decl::Part(p));
         match self {
             Declaration::Number(key, n) => out.push(Decl::Set(*key, PatchValue::Number(n.0))),
-            Declaration::Length(key, l) => out.push(Decl::Set(*key, l.patch())),
+            Declaration::Length(key, l) => out.push(Decl::Set(*key, length_patch(*l))),
             Declaration::Keyword(key, k) => out.push(Decl::Set(*key, PatchValue::Str((*k).into()))),
             Declaration::Str(key, s) => {
                 out.push(Decl::Set(*key, PatchValue::Str(s.as_str().into())))
@@ -665,7 +638,7 @@ impl Declaration {
 type Entries = Vec<(Variant, Declaration)>;
 
 crate::static_reactive!(AdaptiveColor: AdaptiveColor, Hsla, Rgba, Color);
-crate::static_reactive!(Length: Length);
+crate::static_reactive!(Length: Length, Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
 crate::static_reactive!(u16: u16);
 crate::static_reactive!(i16: i16);
 
@@ -775,7 +748,8 @@ impl StyleRefinement {
         self.entries.push((Variant::default(), decl));
     }
 
-    pub(crate) fn lengths(&mut self, keys: &[StyleKey], length: Length) {
+    pub(crate) fn lengths(&mut self, keys: &[StyleKey], length: impl Into<Length>) {
+        let length = length.into();
         for key in keys {
             self.push(Declaration::Length(*key, length));
         }

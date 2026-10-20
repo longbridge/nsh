@@ -458,7 +458,7 @@ fn place(ui: &DevUi, size: (f32, f32)) {
 
 fn root_size(ui: &DevUi) -> (f32, f32) {
     let s = ui.root.state();
-    (s.frame.width, s.frame.height)
+    (s.frame.size.width.0, s.frame.size.height.0)
 }
 
 fn show_status(ui: &RefCell<DevUi>, status: Status<'_>) {
@@ -504,7 +504,7 @@ fn hide_error(ui: &RefCell<DevUi>) {
     }
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Drawing
 
 const WHITE: Color = Color::rgba(255, 255, 255, 255);
@@ -891,7 +891,7 @@ impl Hosted for ErrorOverlay {
     }
 }
 
-// ---------------------------------------------------------------------------
+// -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 // Text helpers (pure, tested)
 
 /// The message as the overlay shows it: terminal color codes removed

@@ -23,7 +23,8 @@ use std::{
 };
 
 use nsh_core::{
-    EventMask, MAX_TRANSFORMS, NodeId, Rect, TransformKind, ViewKind, ViewProps, ViewStyle,
+    Bounds, EventMask, MAX_TRANSFORMS, NodeId, Points, TransformKind, ViewKind, ViewProps,
+    ViewStyle,
 };
 
 use crate::{geom::Mat4, render::DrawCx};
@@ -195,7 +196,7 @@ pub(crate) struct Native {
     /// The item.
     pub(crate) item: Rc<dyn Hosted>,
     /// Where it goes.
-    pub(crate) rect: Rect,
+    pub(crate) rect: Bounds<Points>,
 }
 
 /// Everything the mounter set on one view.
@@ -205,7 +206,7 @@ pub(crate) struct ViewState {
     /// What it is.
     pub(crate) kind: ViewKind,
     /// Frame in the parent (points).
-    pub(crate) frame: Rect,
+    pub(crate) frame: Bounds<Points>,
     /// Visual style.
     pub(crate) style: Box<ViewStyle>,
     /// Native animation values.
@@ -238,7 +239,7 @@ pub(crate) struct ViewState {
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// hit testing looks there too.
-    pub(crate) overflow: Option<Rect>,
+    pub(crate) overflow: Option<Bounds<Points>>,
     /// Running layout / style transitions and keyframes.
     pub(crate) live: Option<Box<crate::transition::Live>>,
     /// What accessibility last exposed.
@@ -250,7 +251,7 @@ impl ViewState {
         ViewState {
             id,
             kind,
-            frame: Rect::default(),
+            frame: Bounds::default(),
             style: Box::default(),
             anim: AnimValues::default(),
             events: EventMask::default(),
@@ -308,7 +309,7 @@ impl ViewState {
         let s = &self.style;
         let mut r: [f32; 4] =
             std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
         let lens = [w, h, w, h];
         let f = sums
@@ -341,7 +342,7 @@ impl ViewState {
         if extra.is_none() && (t.ops().is_empty() || (!animated && t.is_identity())) {
             return None;
         }
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let o = self.style.transform_origin;
         let (ox, oy) = (o.x.resolve(w), o.y.resolve(h));
         let mut m = Mat4::new().translate_3d(ox, oy, o.z);
@@ -372,13 +373,13 @@ impl ViewState {
     /// Where a child at `frame` (with its `shift`) goes in this view's
     /// coordinates: its frame's origin, less the scroll offset, mirrored in
     /// a right-to-left list.
-    pub(crate) fn child_origin(&self, frame: Rect, shift: (f32, f32)) -> (f32, f32) {
+    pub(crate) fn child_origin(&self, frame: Bounds<Points>, shift: (f32, f32)) -> (f32, f32) {
         let (sx, sy) = self.scroll.as_ref().map_or((0.0, 0.0), ScrollState::origin);
-        let mut x = frame.x - sx + shift.0;
+        let mut x = frame.origin.x.0 - sx + shift.0;
         if self.scroll.as_ref().is_some_and(|s| s.mirrored) {
-            x = self.frame.width - x - frame.width;
+            x = self.frame.size.width.0 - x - frame.size.width.0;
         }
-        (x, frame.y - sy + shift.1)
+        (x, frame.origin.y.0 - sy + shift.1)
     }
 }
 
@@ -532,7 +533,7 @@ impl NshView {
     }
 
     /// Hosts `item` at `rect` (or moves it there).
-    pub(crate) fn set_native(&self, item: &Rc<dyn Hosted>, rect: Rect) {
+    pub(crate) fn set_native(&self, item: &Rc<dyn Hosted>, rect: Bounds<Points>) {
         {
             let mut s = self.state_mut();
             match s.natives.iter_mut().find(|n| Rc::ptr_eq(&n.item, item)) {

@@ -120,7 +120,7 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Sketch>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

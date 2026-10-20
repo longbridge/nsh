@@ -10,9 +10,9 @@ use super::{
     style::{StyleRefinement, Styled, Variant},
 };
 use crate::{
-    AccessibilityProp, AccessibilityRole, AccessibilityState, ContextMenuEvent, EdgeInsets,
+    AccessibilityProp, AccessibilityRole, AccessibilityState, Bounds, ContextMenuEvent, EdgeInsets,
     EventKind, EventPayload, HoverEvent, Hsla, ImageSource, ListContentStyle, NativeProp, NodeId,
-    PointerEvents, Prop, Rect, Size, Tag, TouchEvent, style::Color,
+    PointerEvents, Points, Prop, Size, Tag, TouchEvent, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -1045,7 +1045,7 @@ pub trait Interactive: Element {
     }
 
     /// Its frame changed (relative to its parent).
-    fn on_layout<M>(self, listener: impl IntoListener<Rect, M>) -> Self {
+    fn on_layout<M>(self, listener: impl IntoListener<Bounds<Points>, M>) -> Self {
         self.on(
             EventKind::Layout,
             events::typed(listener.into_listener(), events::layout),
@@ -1563,7 +1563,7 @@ impl Image {
     }
 
     /// It loaded: its size in pixels.
-    pub fn on_load<M>(self, listener: impl IntoListener<Size, M>) -> Self {
+    pub fn on_load<M>(self, listener: impl IntoListener<Size<Points>, M>) -> Self {
         self.on(
             EventKind::Load,
             events::typed(listener.into_listener(), events::size),

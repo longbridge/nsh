@@ -48,7 +48,8 @@ use std::{
 };
 
 use nsh_core::{
-    Command, EventKind, EventPayload, NativeProps, NodeId, PayloadValue, Rect, Size, ViewKind,
+    Bounds, Command, EventKind, EventPayload, NativeProps, NodeId, PayloadValue, Points, Size,
+    ViewKind, geometry::Point,
 };
 use nsh_engine::{Access, EngineControl};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -174,7 +175,7 @@ impl ComponentContext {
     /// dimension open.
     pub fn set_size(&self, width: f32, height: f32) {
         self.control
-            .set_component_size(self.id, Size::new(width, height));
+            .set_component_size(self.id, Size::new(Points(width), Points(height)));
     }
 
     /// What the component draws changed: the window draws again (from any
@@ -351,7 +352,7 @@ pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
 /// The view's frame changed: its item fills it again.
 pub(crate) fn resized(view: &NshView) {
     let mut s = view.state_mut();
-    let rect = bounds(s.frame.width, s.frame.height);
+    let rect = bounds(s.frame.size.width.0, s.frame.size.height.0);
     for native in &mut s.natives {
         native.rect = rect;
     }
@@ -499,15 +500,19 @@ fn component_item(surface: &Surface, id: NodeId) -> Option<Rc<ComponentItem>> {
 /// Hosts `item` in `view`, filling it ([`resized`] follows the frame).
 fn fill(view: &NshView, item: &Rc<dyn Hosted>) {
     let frame = view.state().frame;
-    view.set_native(item, bounds(frame.width, frame.height));
+    view.set_native(item, bounds(frame.size.width.0, frame.size.height.0));
 }
 
-fn bounds(width: f32, height: f32) -> Rect {
-    Rect {
-        x: 0.0,
-        y: 0.0,
-        width,
-        height,
+fn bounds(width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(0.0),
+            y: Points(0.0),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 
@@ -693,7 +698,7 @@ fn clip(surface: &Surface, view: &NshView, rect: RECT) -> Option<(RECT, i32)> {
         if clips {
             let (w, h) = {
                 let s = p.state();
-                (s.frame.width, s.frame.height)
+                (s.frame.size.width.0, s.frame.size.height.0)
             };
             if let Some((x, y, bw, bh)) = p.to_root().and_then(|m| m.bounds(0.0, 0.0, w, h)) {
                 let r = RECT {

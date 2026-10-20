@@ -52,9 +52,9 @@ use std::{
 
 use gtk4::{self as gtk, gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, ROOT_ID, Rect, ScreenAnimation, ScreenConfig, Shadow, Size, ViewKind,
-    ViewStyle,
+    Bounds, Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig,
+    ModalPresentation, NodeId, PayloadValue, Point, Points, ROOT_ID, ScreenAnimation, ScreenConfig,
+    Shadow, Size, ViewKind, ViewStyle,
 };
 use nsh_engine::ColorScheme;
 use rustc_hash::FxHashMap;
@@ -219,7 +219,7 @@ struct Header {
     chevron_area: gtk::DrawingArea,
     /// What it was laid out for (width, header height, the items' frames):
     /// unchanged, nothing moves.
-    laid_out: Option<(f32, f32, [Rect; 3])>,
+    laid_out: Option<(f32, f32, [Bounds<Points>; 3])>,
 }
 
 /// One screen.
@@ -236,7 +236,7 @@ struct ScreenNav {
     /// The back button's label (the previous screen's `back_title`).
     back_title: Option<Arc<str>>,
     /// The size and insets last reported.
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// The header height last reported to the core (`None` inside: none
     /// measured, the core estimates it); `None`: never reported.
     header_reported: Option<Option<f32>>,
@@ -267,7 +267,7 @@ struct ModalNav {
     backdrop: Option<Layer>,
     /// Dims the window behind a sheet; clicking it asks to close.
     scrim: Option<Layer>,
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Option<(Size<Points>, EdgeInsets)>,
     /// Watches it while it is presented: keeps its last image.
     paintable: Option<gtk::WidgetPaintable>,
     /// What had the keyboard focus when it was presented: it gets it back
@@ -309,7 +309,7 @@ enum Motion {
         dismiss: Option<NodeId>,
         layer: Layer,
         /// Where the modal was (a sheet's card, or the whole window).
-        frame: Rect,
+        frame: Bounds<Points>,
         scrim: Option<Layer>,
         fade: bool,
     },
@@ -360,12 +360,16 @@ fn dark(surface: &Surface) -> bool {
     surface.environment.get().color_scheme == ColorScheme::Dark
 }
 
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
+fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 
@@ -390,7 +394,7 @@ fn modal_motion(surface: &Surface, animation: ModalAnimation) -> Option<(f64, bo
 /// over the dimmed window, as wide as the window allows up to its kind's
 /// width (a desktop window is no phone: a sheet sliding up over all of it
 /// would look like a new page). `None`: it covers the window.
-fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Rect> {
+fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Bounds<Points>> {
     let (max_w, max_h) = match config.presentation {
         _ if !is_sheet(config) => return None,
         ModalPresentation::FullScreen => return None,
@@ -476,11 +480,11 @@ fn insets_payload(i: EdgeInsets) -> EventPayload {
 fn report(
     surface: &Surface,
     id: NodeId,
-    last: &mut Option<(Size, EdgeInsets)>,
-    size: Size,
+    last: &mut Option<(Size<Points>, EdgeInsets)>,
+    size: Size<Points>,
     insets: EdgeInsets,
 ) {
-    if size.width <= 0.0 || *last == Some((size, insets)) {
+    if size.width.0 <= 0.0 || *last == Some((size, insets)) {
         return;
     }
     let insets_changed = last.is_none_or(|(_, i)| i != insets);
@@ -697,7 +701,7 @@ impl ScreenNav {
         let f = stack.state().frame;
         let insets = content_insets(&self.config);
         let id = self.view.id();
-        let size = Size::new(f.width, f.height);
+        let size = f.size;
         report(surface, id, &mut self.reported, size, insets);
     }
 
@@ -760,7 +764,7 @@ impl ScreenNav {
     fn layout(&mut self) {
         let (w, h) = {
             let f = self.view.state().frame;
-            (f.width, f.height)
+            (f.size.width.0, f.size.height.0)
         };
         if self.backdrop_size != (w, h) {
             self.backdrop_size = (w, h);
@@ -768,7 +772,7 @@ impl ScreenNav {
         }
         let c = &self.config;
         let frames = [c.left, c.right, c.title_view]
-            .map(|id| find_item(&self.items, id).map_or(Rect::default(), |v| v.state().frame));
+            .map(|id| find_item(&self.items, id).map_or(Bounds::default(), |v| v.state().frame));
         let Some(header) = &mut self.header else {
             return;
         };
@@ -787,7 +791,10 @@ impl ScreenNav {
         let place = |v: &NshView, x: f32| {
             let f = v.state().frame;
             v.set_child_visible(true);
-            set_shift(v, (x - f.x, centered(f.height) - f.y));
+            set_shift(
+                v,
+                (x - f.origin.x.0, centered(f.size.height.0) - f.origin.y.0),
+            );
         };
         let mut left = EDGE;
         header.back.set_visible(self.can_go_back);
@@ -796,16 +803,16 @@ impl ScreenNav {
             view.set_native(&header.back, rect(EDGE, centered(bh), bw, bh));
             left += bw;
         } else {
-            view.set_native(&header.back, Rect::default());
+            view.set_native(&header.back, Bounds::default());
         }
         if let Some(v) = find_item(&self.items, c.left) {
             let x = left + GAP;
-            left = x + v.state().frame.width;
+            left = x + v.state().frame.size.width.0;
             place(v, x);
         }
         let mut right = w;
         if let Some(v) = find_item(&self.items, c.right) {
-            right = w - EDGE - GAP - v.state().frame.width;
+            right = w - EDGE - GAP - v.state().frame.size.width.0;
             place(v, right);
         }
         // Items no slot names stay hidden.
@@ -816,10 +823,10 @@ impl ScreenNav {
             }
         }
         if let Some(v) = find_item(&self.items, c.title_view) {
-            let fw = v.state().frame.width;
+            let fw = v.state().frame.size.width.0;
             place(v, ((w - fw) / 2.0).max(left));
             header.title.set_visible(false);
-            view.set_native(&header.title, Rect::default());
+            view.set_native(&header.title, Bounds::default());
             return;
         }
         header.title.set_visible(true);
@@ -887,7 +894,7 @@ impl Nav {
                 below,
                 fade,
             } => {
-                let w = stack.state().frame.width;
+                let w = stack.state().frame.size.width.0;
                 if *fade {
                     set_fade(entering, e);
                 } else {
@@ -907,19 +914,19 @@ impl Nav {
                 let f = stack.state().frame;
                 match leaving {
                     Leaving::View(v) if *fade => set_fade(v, 1.0 - e),
-                    Leaving::View(v) => set_shift(v, (f.width * e, 0.0)),
+                    Leaving::View(v) => set_shift(v, (f.size.width.0 * e, 0.0)),
                     Leaving::Image(layer) => {
                         let x = if *fade {
                             layer.set_opacity((1.0 - e) as f64);
                             0.0
                         } else {
-                            f.width * e
+                            f.size.width.0 * e
                         };
-                        stack.set_native(layer, rect(x, 0.0, f.width, f.height));
+                        stack.set_native(layer, rect(x, 0.0, f.size.width.0, f.size.height.0));
                     }
                 }
                 if let (Some(below), false) = (below, fade) {
-                    set_shift(below, (-PARALLAX * f.width * (1.0 - e), 0.0));
+                    set_shift(below, (-PARALLAX * f.size.width.0 * (1.0 - e), 0.0));
                 }
             }
             Motion::ModalIn { view, scrim, fade } => {
@@ -927,8 +934,8 @@ impl Nav {
                     set_fade(view, e);
                 } else {
                     // From below the window's bottom edge.
-                    let h = surface.root.state().frame.height;
-                    let y = view.state().frame.y;
+                    let h = surface.root.state().frame.size.height.0;
+                    let y = view.state().frame.origin.y.0;
                     set_shift(view, (0.0, (h - y) * (1.0 - e)));
                 }
                 if let Some(scrim) = scrim {
@@ -942,16 +949,17 @@ impl Nav {
                 fade,
                 ..
             } => {
-                let h = surface.root.state().frame.height;
+                let h = surface.root.state().frame.size.height.0;
                 let y = if *fade {
                     layer.set_opacity((1.0 - e) as f64);
-                    frame.y
+                    frame.origin.y.0
                 } else {
-                    frame.y + (h - frame.y) * e
+                    frame.origin.y.0 + (h - frame.origin.y.0) * e
                 };
-                surface
-                    .root
-                    .set_native(layer, rect(frame.x, y, frame.width, frame.height));
+                surface.root.set_native(
+                    layer,
+                    rect(frame.origin.x.0, y, frame.size.width.0, frame.size.height.0),
+                );
                 if let Some(scrim) = scrim {
                     scrim.set_opacity((1.0 - e) as f64);
                 }
@@ -1110,7 +1118,7 @@ impl Nav {
             (Some(old), Some((watched, paintable)))
                 if Some(old) != new && *watched == old && find(old).is_none() =>
             {
-                image_of(paintable, frame.width, frame.height)
+                image_of(paintable, frame.size.width.0, frame.size.height.0)
             }
             _ => None,
         };
@@ -1160,7 +1168,7 @@ impl Nav {
         let (Some(old), Some(new)) = (old, new) else {
             return;
         };
-        if old == new || frame.width <= 0.0 {
+        if old == new || frame.size.width.0 <= 0.0 {
             return;
         }
         let pushing = !prev.contains(&new);
@@ -1313,7 +1321,9 @@ impl Nav {
             view.unparent();
         }
         let image = match (motion, paintable) {
-            (Some(_), Some(paintable)) if mapped => image_of(&paintable, frame.width, frame.height),
+            (Some(_), Some(paintable)) if mapped => {
+                image_of(&paintable, frame.size.width.0, frame.size.height.0)
+            }
             _ => None,
         };
         set_shift(&view, (0.0, 0.0));
@@ -1470,31 +1480,31 @@ impl Nav {
         };
         let Some(view) = &m.view else { return };
         let f = surface.root.state().frame;
-        let sheet = sheet_frame(&m.config, f.width, f.height);
+        let sheet = sheet_frame(&m.config, f.size.width.0, f.size.height.0);
         let insets = if sheet.is_some() {
             // A card inside the window: no system UI over it.
             EdgeInsets::default()
         } else {
             let safe = surface.environment.get().safe_area;
             EdgeInsets {
-                top: safe.top,
-                right: safe.right,
-                bottom: safe.bottom,
-                left: safe.left,
+                top: safe.top.0,
+                right: safe.right.0,
+                bottom: safe.bottom.0,
+                left: safe.left.0,
             }
         };
-        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.width, f.height));
+        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.size.width.0, f.size.height.0));
         if std::mem::replace(&mut view.state_mut().frame, frame) != frame {
             view.queue_allocate();
             view.moved();
         }
         if let Some(b) = &m.backdrop {
-            view.set_native(b, rect(0.0, 0.0, frame.width, frame.height));
+            view.set_native(b, rect(0.0, 0.0, frame.size.width.0, frame.size.height.0));
         }
         if let Some(scrim) = &m.scrim {
             surface.root.set_native(scrim, f);
         }
-        let size = Size::new(frame.width, frame.height);
+        let size = frame.size;
         report(surface, id, &mut m.reported, size, insets);
     }
 
@@ -1578,7 +1588,7 @@ impl Nav {
         });
         backdrop.set_colors(Some(t.window), None);
         let f = view.state().frame;
-        view.set_native(backdrop, rect(0.0, 0.0, f.width, f.height));
+        view.set_native(backdrop, rect(0.0, 0.0, f.size.width.0, f.size.height.0));
     }
 
     /// Listens to the window's back keys and the mouse's back button.

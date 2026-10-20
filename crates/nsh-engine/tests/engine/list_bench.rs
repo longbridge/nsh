@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use nsh_core::{ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind};
+use nsh_core::{ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind, geometry::px};
 use nsh_js::Host;
 
 enum Gap {
@@ -37,11 +37,11 @@ fn bench_gallery_scroll() {
     let host = Host::new().unwrap();
     // The runtime reads the environment while it loads.
     host.set_environment(&nsh_js::Environment {
-        window: (390.0, 844.0),
+        window: Size::new(px(390.0), px(844.0)),
         ..Default::default()
     });
     host.eval_bytecode(&bytecode).unwrap();
-    let mut core = Core::new(ApproxTextEngine, Size::new(390.0, 844.0));
+    let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
     let mut ops = Vec::new();
     let mut binds: Vec<ListBind> = Vec::new();
     let list = std::cell::Cell::new(None);

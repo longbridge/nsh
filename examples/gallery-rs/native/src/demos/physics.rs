@@ -5,7 +5,7 @@
 
 use std::f32::consts::TAU;
 
-use nsh_core::{Rect, ui::prelude::*};
+use nsh_core::{Bounds, Points, ui::prelude::*};
 
 use crate::ui::{
     Badge, Finish, Finished, IconName, IconTile, MONO, Segment, Segmented, SegmentedEvent,
@@ -272,7 +272,9 @@ pub(crate) fn Physics() -> impl IntoElement {
                 .finish(Finish::Inset)
                 .items_center()
                 .justify_center()
-                .on_layout(move |frame: &Rect| stage.set((frame.width, frame.height)))
+                .on_layout(move |frame: &Bounds<Points>| {
+                    stage.set((frame.size.width.0, frame.size.height.0))
+                })
                 .child(
                     canvas(move || backdrop(stage.get(), mode.get(), &x, &y))
                         .pointer_events(PointerEvents::None)

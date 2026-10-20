@@ -3,7 +3,7 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use nsh_core::{ApproxTextEngine, MountItem, Size};
+use nsh_core::{ApproxTextEngine, MountItem, Size, geometry::px};
 use nsh_engine::{
     Engine, EngineConfig,
     package::{App, Contents, SecretKey, TrustStore, build, certify},
@@ -41,7 +41,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(bundle),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

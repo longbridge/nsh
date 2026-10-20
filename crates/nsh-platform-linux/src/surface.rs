@@ -18,7 +18,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use gtk4::{self as gtk, glib, prelude::*};
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
+use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
 use rustc_hash::FxHashMap;
 
@@ -180,7 +180,7 @@ impl Surface {
             nsh_engine::App::Rust(_) => nsh_engine::Policy::default().access(),
         });
         let env = self.environment.get();
-        config.viewport = Size::new(env.window.0, env.window.1);
+        config.viewport = Size::new(env.window.width, env.window.height);
         config.environment = env;
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
@@ -254,17 +254,17 @@ impl Surface {
     fn resized(&self, width: f32, height: f32) {
         {
             let mut s = self.root.state_mut();
-            if s.frame.width == width && s.frame.height == height {
+            if s.frame.size.width.0 == width && s.frame.size.height.0 == height {
                 return;
             }
-            s.frame.width = width;
-            s.frame.height = height;
+            s.frame.size.width.0 = width;
+            s.frame.size.height.0 = height;
         }
         let mut env = self.environment.get();
-        env.window = (width, height);
+        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
         self.environment.set(env);
         self.control(|c| {
-            c.resize(Size::new(width, height));
+            c.resize(Size::new(Points(width), Points(height)));
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);

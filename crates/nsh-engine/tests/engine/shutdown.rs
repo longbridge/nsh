@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nsh_core::{ApproxTextEngine, MountBatch, Size};
+use nsh_core::{ApproxTextEngine, MountBatch, Size, geometry::px};
 use nsh_engine::{Bundle, Engine, EngineConfig, MountSink};
 
 /// Records the errors reported.
@@ -26,7 +26,7 @@ impl MountSink for Sink {
 fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
     let config = EngineConfig {
         app: nsh_engine::App::Js(Bundle::source(code.to_owned())),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

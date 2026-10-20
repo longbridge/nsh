@@ -1745,7 +1745,7 @@ fn draw_one(
     source: Option<&ImageSource>,
     alpha: f32,
 ) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(image.mode, natural(picture.size, source), (w, h));
     if fw <= 0.0 || fh <= 0.0 || cx.culled() {
         return;

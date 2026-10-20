@@ -34,7 +34,7 @@ use nsh_core::{
         DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
         WindowLevel,
     },
-    platform::Insets,
+    geometry::{Edges, Points},
 };
 use windows::{
     Win32::{
@@ -188,14 +188,14 @@ fn frame_thickness(hwnd: HWND) -> i32 {
 fn update_area(surface: &Surface) {
     let mut env = surface.environment.get();
     env.title_bar = if hidden(surface) {
-        Insets {
-            top: caption_height(surface),
-            right: 3.0 * BUTTON_WIDTH,
-            bottom: 0.0,
-            left: 0.0,
+        Edges {
+            top: Points(caption_height(surface)),
+            right: Points(3.0 * BUTTON_WIDTH),
+            bottom: Points(0.0),
+            left: Points(0.0),
         }
     } else {
-        Insets::default()
+        Edges::default()
     };
     surface.set_environment(env);
 }
@@ -216,7 +216,7 @@ fn frame_changed(hwnd: HWND) {
     };
 }
 
-// --- Commands ---------------------------------------------------------------------------
+// -> Rect {- Commands -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A desktop command (on the root).
 pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
@@ -441,7 +441,7 @@ pub(crate) fn full_screen_changed(surface: &Surface) {
     surface.invalidate();
 }
 
-// --- The hidden title bar ---------------------------------------------------------------
+// -> Rect {- The hidden title bar -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// `WM_NCCALCSIZE`: with the title bar hidden, the client area reaches the
 /// window's top.
@@ -730,7 +730,7 @@ pub(crate) fn draw(surface: &Surface, dc: &ID2D1DeviceContext, scale: f32) {
     }
 }
 
-// --- Menus ------------------------------------------------------------------------------
+// -> Rect {- Menus -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
 type FlushMenuThemes = unsafe extern "system" fn();
@@ -1066,7 +1066,7 @@ pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     }
 }
 
-// --- The dark menu bar ------------------------------------------------------------------
+// -> Rect {- The dark menu bar -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 fn colorref(c: u32) -> COLORREF {
     COLORREF(c)

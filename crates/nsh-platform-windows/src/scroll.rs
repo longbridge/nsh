@@ -29,7 +29,7 @@
 use std::{f32::consts::PI, rc::Rc};
 
 use nsh_core::{
-    Color, Command, EventKind, EventPayload, ScrollBehavior, Size, StickyCell, ViewKind,
+    Color, Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
 };
 use windows::Win32::{
     Graphics::Direct2D::D2D1_ROUNDED_RECT,
@@ -278,9 +278,9 @@ fn shifted(phase: Phase, d: f32) -> Phase {
 
 fn viewport(state: &ViewState, horizontal: bool) -> f32 {
     if horizontal {
-        state.frame.width
+        state.frame.size.width.0
     } else {
-        state.frame.height
+        state.frame.size.height.0
     }
 }
 
@@ -303,7 +303,7 @@ fn limits(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let max = s.max((state.frame.width, state.frame.height));
+    let max = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let min = if !s.horizontal && s.live.refreshing {
         -REFRESH_SPACE
     } else {
@@ -318,7 +318,7 @@ fn reported(state: &ViewState) -> (f32, f32) {
     let Some(s) = &state.scroll else {
         return (0.0, 0.0);
     };
-    let (mx, my) = s.max((state.frame.width, state.frame.height));
+    let (mx, my) = s.max((state.frame.size.width.0, state.frame.size.height.0));
     let inset = s.behavior.content_inset;
     (
         s.x.clamp(0.0, mx) - inset.left,
@@ -801,13 +801,13 @@ pub(crate) fn config(
 /// `ScrollContent`. Content that shrank below the offset pulls it back on
 /// the next frame, once the rest of the batch (the `ScrollBy` that keeps
 /// the visible content in place) is applied.
-pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size) {
+pub(crate) fn content(surface: &Rc<Surface>, view: &NshView, size: Size<Points>) {
     let past = {
         let mut state = view.state_mut();
         let Some(s) = state.scroll.as_mut() else {
             return;
         };
-        s.content = (size.width, size.height);
+        s.content = (size.width.0, size.height.0);
         let pos = main(s);
         pos > limits(&state).1 + 0.5
     };
@@ -1056,9 +1056,9 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
         return false;
     };
     let (along, across, start, len, edge) = if s.horizontal {
-        (x, y, tx, tw, state.frame.height)
+        (x, y, tx, tw, state.frame.size.height.0)
     } else {
-        (y, x, ty, th, state.frame.width)
+        (y, x, ty, th, state.frame.size.width.0)
     };
     (edge - THUMB_GRAB..=edge).contains(&across)
         && (start - THUMB_SLOP..=start + len + THUMB_SLOP).contains(&along)
@@ -1151,7 +1151,7 @@ pub(crate) fn thumb_end(surface: &Rc<Surface>, view: &NshView) {
 fn thumb(state: &ViewState) -> Option<((f32, f32, f32, f32), f32)> {
     const EDGE: f32 = 2.0;
     let s = state.scroll.as_ref()?;
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let inset = s.behavior.content_inset;
     let (dim, total, offset) = if s.horizontal {
         (w, s.content.0 + inset.left + inset.right, s.x)
@@ -1172,7 +1172,7 @@ fn thumb(state: &ViewState) -> Option<((f32, f32, f32, f32), f32)> {
 /// and the refresh spinner; the context is in the view's coordinates.
 pub(crate) fn draw_indicator(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(s) = &state.scroll else { return };
-    let w = state.frame.width;
+    let w = state.frame.size.width.0;
     if !s.horizontal
         && s.y < 0.0
         && (s.live.refreshing || state.events.contains(EventKind::Refresh))
@@ -1442,7 +1442,7 @@ fn reveal_delta(start: f32, end: f32, viewport: f32) -> f32 {
 pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
     let Some(bounds) = target.to_root().and_then(|m| {
         let s = target.state();
-        m.bounds(0.0, 0.0, s.frame.width, s.frame.height)
+        m.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)
     }) else {
         return;
     };
@@ -1588,7 +1588,8 @@ fn pick(view: &NshView, x: f32, y: f32) -> Option<NshView> {
     if state.style.hidden || state.concealed {
         return None;
     }
-    let inside = x >= 0.0 && y >= 0.0 && x < state.frame.width && y < state.frame.height;
+    let inside =
+        x >= 0.0 && y >= 0.0 && x < state.frame.size.width.0 && y < state.frame.size.height.0;
     if !inside && (state.clips() || state.overflow.is_none()) {
         return None;
     }
@@ -1612,7 +1613,7 @@ fn pick(view: &NshView, x: f32, y: f32) -> Option<NshView> {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{EdgeInsets, Rect};
+    use nsh_core::{Bounds, EdgeInsets, Point, Points, Size};
 
     use super::*;
     use crate::input::Modifiers;
@@ -1621,11 +1622,15 @@ mod tests {
         let view = NshView::new(2, ViewKind::Scroll);
         {
             let mut state = view.state_mut();
-            state.frame = Rect {
-                x: 0.0,
-                y: 0.0,
-                width: w,
-                height: h,
+            state.frame = Bounds {
+                origin: Point {
+                    x: Points(0.0),
+                    y: Points(0.0),
+                },
+                size: Size {
+                    width: Points(w),
+                    height: Points(h),
+                },
             };
             let s = state.scroll.as_mut().unwrap();
             s.content = content;
@@ -1913,20 +1918,28 @@ mod tests {
     #[test]
     fn pick_finds_scrolled_children() {
         let root = NshView::new(0, ViewKind::View);
-        root.state_mut().frame = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 300.0,
-            height: 400.0,
+        root.state_mut().frame = Bounds {
+            origin: Point {
+                x: Points(0.0),
+                y: Points(0.0),
+            },
+            size: Size {
+                width: Points(300.0),
+                height: Points(400.0),
+            },
         };
         let scroll = scroll_view(300.0, 400.0, (300.0, 1000.0), false);
         scroll.insert_before(&root, None);
         let cell = NshView::new(4, ViewKind::View);
-        cell.state_mut().frame = Rect {
-            x: 0.0,
-            y: 500.0,
-            width: 300.0,
-            height: 50.0,
+        cell.state_mut().frame = Bounds {
+            origin: Point {
+                x: Points(0.0),
+                y: Points(500.0),
+            },
+            size: Size {
+                width: Points(300.0),
+                height: Points(50.0),
+            },
         };
         cell.insert_before(&scroll, None);
         assert_eq!(pick(&root, 10.0, 10.0), Some(scroll.clone()));

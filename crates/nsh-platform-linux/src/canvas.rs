@@ -141,7 +141,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     let Some(drawing) = canvas.drawing.as_ref() else {
         return;
     };
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if drawing.ops.is_empty() || w <= 0.0 || h <= 0.0 {
         return;
     }

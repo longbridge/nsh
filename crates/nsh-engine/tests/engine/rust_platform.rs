@@ -13,7 +13,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    ApproxTextEngine, AttributedText, EventKind, EventPayload, MountBatch, MountItem, Size,
+    ApproxTextEngine, AttributedText, EventKind, EventPayload, MountBatch, MountItem, Points, Size,
     TextEngine, TextLayout,
     platform::{Idiom, Locale, Os},
     ui::{AssetFile, AssetKind, Registry, Root, prelude::*},
@@ -39,7 +39,7 @@ impl MountSink for FrameSink {
 fn config(app: App) -> EngineConfig {
     EngineConfig {
         app,
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -107,11 +107,11 @@ impl TextEngine for Fonts {
         self.0.prepare(text)
     }
 
-    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size<Points> {
         self.0.measure(prepared, max_width)
     }
 
-    fn layout(&self, prepared: &Self::Prepared, size: Size) -> TextLayout {
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         self.0.layout(prepared, size)
     }
 

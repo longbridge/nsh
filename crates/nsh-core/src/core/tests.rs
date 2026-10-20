@@ -23,16 +23,16 @@ impl TextEngine for FakeEngine {
         )
     }
 
-    fn measure(&self, &(chars, _): &(usize, Vec<u32>), max_width: Option<f32>) -> Size {
+    fn measure(&self, &(chars, _): &(usize, Vec<u32>), max_width: Option<f32>) -> Size<Points> {
         self.measures.set(self.measures.get() + 1);
         let w = chars as f32 * 8.0;
         match max_width {
-            Some(max) if w > max && max > 0.0 => Size::new(max, (w / max).ceil() * 16.0),
-            _ => Size::new(w, 16.0),
+            Some(max) if w > max && max > 0.0 => size_pt(max, (w / max).ceil() * 16.0),
+            _ => size_pt(w, 16.0),
         }
     }
 
-    fn layout(&self, (_, attachments): &(usize, Vec<u32>), _: Size) -> TextLayout {
+    fn layout(&self, (_, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
         self.layouts.set(self.layouts.get() + 1);
         // One line; the third attachment on is cut off.
         let points: Vec<Option<(f32, f32)>> = attachments
@@ -216,7 +216,7 @@ fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
 }
 
 fn core() -> Core<FakeEngine> {
-    Core::new(FakeEngine::default(), Size::new(320.0, 480.0))
+    Core::new(FakeEngine::default(), size_pt(320.0, 480.0))
 }
 
 fn style(props: &[(&str, StyleValue<'_>)]) -> Box<Style> {
@@ -242,7 +242,7 @@ fn apply(core: &mut Core<FakeEngine>, ops: Vec<Op>) {
     }
 }
 
-fn frame_of(batch: &MountBatch, id: NodeId) -> Option<Rect> {
+fn frame_of(batch: &MountBatch, id: NodeId) -> Option<Bounds<Points>> {
     batch.items.iter().rev().find_map(|i| match i {
         MountItem::Frame { id: i, frame } if *i == id => Some(*frame),
         _ => None,
@@ -301,24 +301,8 @@ fn mounts_subtree_built_detached() {
         _ => None,
     });
     assert_eq!(text.unwrap().text, "hello");
-    assert_eq!(
-        frame_of(&batch, 2),
-        Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 320.0,
-            height: 36.0
-        })
-    );
-    assert_eq!(
-        frame_of(&batch, 3),
-        Some(Rect {
-            x: 10.0,
-            y: 10.0,
-            width: 300.0,
-            height: 16.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 36.0)));
+    assert_eq!(frame_of(&batch, 3), Some(rect(10.0, 10.0, 300.0, 16.0)));
     assert!(c.commit().is_none(), "second commit is a no-op");
 }
 
@@ -417,15 +401,7 @@ fn flex_text_in_a_row_shrinks_and_wraps() {
     );
     let batch = c.commit().unwrap();
     // 400pt of text in 200pt: two lines.
-    assert_eq!(
-        frame_of(&batch, 4),
-        Some(Rect {
-            x: 120.0,
-            y: 0.0,
-            width: 200.0,
-            height: 32.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 4), Some(rect(120.0, 0.0, 200.0, 32.0)));
 }
 
 #[test]
@@ -917,15 +893,7 @@ fn color_change_skips_layout_and_identical_texts_share_measurements() {
         } => Some(*content),
         _ => None,
     });
-    assert_eq!(
-        content,
-        Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 320.0,
-            height: 16.0
-        })
-    );
+    assert_eq!(content, Some(rect(0.0, 0.0, 320.0, 16.0)));
 
     c.apply(style_op(10, &[("color", StyleValue::Str("red"))]))
         .unwrap();
@@ -1010,11 +978,11 @@ fn image_uses_natural_size_and_aspect_ratio() {
     )));
     // Stretched to the column width, height from the aspect ratio.
     assert_eq!(
-        frame_of(&batch, 2).map(|f| (f.width, f.height)),
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
         Some((320.0, 160.0))
     );
     assert_eq!(
-        frame_of(&batch, 3).map(|f| (f.width, f.height)),
+        frame_of(&batch, 3).map(|f| (f.size.width.0, f.size.height.0)),
         Some((50.0, 25.0))
     );
 }
@@ -1078,7 +1046,7 @@ fn native_components_get_their_name_props_and_size() {
     )));
     // No size of its own yet.
     assert_eq!(
-        frame_of(&batch, 2).map(|f| (f.width, f.height)),
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
         Some((0.0, 0.0))
     );
 
@@ -1108,10 +1076,10 @@ fn native_components_get_their_name_props_and_size() {
     );
 
     // The size it reports lays it out.
-    c.set_component_size(2, Size::new(120.0, 40.0));
+    c.set_component_size(2, size_pt(120.0, 40.0));
     let batch = c.commit().unwrap();
     assert_eq!(
-        frame_of(&batch, 2).map(|f| (f.width, f.height)),
+        frame_of(&batch, 2).map(|f| (f.size.width.0, f.size.height.0)),
         Some((120.0, 40.0))
     );
 }
@@ -1149,10 +1117,10 @@ fn scroll_reports_content_size() {
         MountItem::ScrollContent { id: 2, size } => Some(*size),
         _ => None,
     });
-    assert_eq!(content, Some(Size::new(320.0, 500.0)));
+    assert_eq!(content, Some(size_pt(320.0, 500.0)));
     // Children are not shrunk to the scroll view's height.
     assert_eq!(
-        frame_of(&batch, 14).map(|f| (f.y, f.height)),
+        frame_of(&batch, 14).map(|f| (f.origin.y.0, f.size.height.0)),
         Some((400.0, 100.0))
     );
     assert!(batch.items.iter().any(|i| matches!(
@@ -1188,13 +1156,13 @@ fn scroll_content_is_sent_once_per_batch() {
     );
     c.commit();
     let key = c.key(2).unwrap();
-    c.set_scroll_content(key, Size::new(320.0, 277.0));
-    c.set_scroll_content(key, Size::new(320.0, 909.0));
+    c.set_scroll_content(key, size_pt(320.0, 277.0));
+    c.set_scroll_content(key, size_pt(320.0, 909.0));
     let sizes: Vec<_> = c
         .mount
         .iter()
         .filter_map(|i| match i {
-            MountItem::ScrollContent { id: 2, size } => Some(size.height),
+            MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
             _ => None,
         })
         .collect();
@@ -1202,7 +1170,7 @@ fn scroll_content_is_sent_once_per_batch() {
     // The next batch sends its own.
     c.mount.clear();
     c.batches += 1;
-    c.set_scroll_content(key, Size::new(320.0, 300.0));
+    c.set_scroll_content(key, size_pt(320.0, 300.0));
     assert!(matches!(
         c.mount[..],
         [MountItem::ScrollContent { id: 2, .. }]
@@ -1295,15 +1263,10 @@ fn list_renders_window_and_recycles_cells() {
     // Rows are really 100 pt: positioned by measured sizes.
     assert_eq!(
         frame_of(&batch, cells[3]),
-        Some(Rect {
-            x: 0.0,
-            y: 300.0,
-            width: 320.0,
-            height: 100.0
-        })
+        Some(rect(0.0, 300.0, 320.0, 100.0))
     );
     let content = batch.items.iter().rev().find_map(|i| match i {
-        MountItem::ScrollContent { id: 2, size } => Some(size.height),
+        MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
         _ => None,
     });
     assert_eq!(content, Some(17.0 * 100.0 + 983.0 * 50.0));
@@ -1445,7 +1408,7 @@ fn scroll_commands_follow_their_target_as_rows_are_measured() {
         .unwrap()
         .content
         .unwrap();
-    assert_eq!(at, content.height - 400.0);
+    assert_eq!(at, (content.height - Points(400.0)).0);
 
     // Item 50 in the middle of the viewport.
     c.apply(Op::Command {
@@ -1529,7 +1492,7 @@ fn animated_scroll_commands_retarget_while_rows_are_measured() {
         .unwrap()
         .content
         .unwrap();
-    assert_eq!(target, content.height - 400.0);
+    assert_eq!(target, (content.height - Points(400.0)).0);
 }
 
 #[test]
@@ -1671,25 +1634,20 @@ fn leaf_styles_are_resolved() {
         ],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 2).map(|f| f.height), Some(16.0 + 20.0));
+    assert_eq!(
+        frame_of(&batch, 2).map(|f| f.size.height.0),
+        Some(16.0 + 20.0)
+    );
     let content = batch.items.iter().find_map(|i| match i {
         MountItem::Text { id: 2, content, .. } => Some(*content),
         _ => None,
     });
+    assert_eq!(content, Some(rect(10.0, 10.0, 300.0, 16.0)));
     assert_eq!(
-        content,
-        Some(Rect {
-            x: 10.0,
-            y: 10.0,
-            width: 300.0,
-            height: 16.0
-        })
-    );
-    assert_eq!(
-        frame_of(&batch, 4).map(|f| (f.width, f.height)),
+        frame_of(&batch, 4).map(|f| (f.size.width.0, f.size.height.0)),
         Some((100.0, 50.0))
     );
-    assert_eq!(frame_of(&batch, 5).map(|f| f.height), Some(80.0));
+    assert_eq!(frame_of(&batch, 5).map(|f| f.size.height.0), Some(80.0));
 }
 
 /// `cargo test --release -p nsh-core bench_row_relayout -- --ignored --nocapture`
@@ -1813,7 +1771,7 @@ fn bench_row_relayout() {
 #[test]
 #[ignore]
 fn bench_cell_relayout() {
-    let mut c = Core::new(crate::ApproxTextEngine, Size::new(390.0, 800.0));
+    let mut c = Core::new(crate::ApproxTextEngine, size_pt(390.0, 800.0));
     let s = |p: &[(&str, StyleValue<'_>)]| style(p);
     let mut ops = vec![
         Op::Create {
@@ -2013,11 +1971,11 @@ fn input_measures_its_placeholder_and_reports_its_content_box() {
     let mut c = input_core();
     let batch = c.commit().unwrap();
     // One line of text (16pt) plus padding, stretched across the root.
-    assert_eq!(frame_of(&batch, 2).map(|f| f.height), Some(28.0));
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(28.0));
     assert!(batch.items.iter().any(|i| matches!(i,
         MountItem::Input { id: 2, config } if config.placeholder == "Name" && !config.multiline)));
     assert!(batch.items.iter().any(|i| matches!(i,
-        MountItem::InputContent { id: 2, content } if *content == Rect { x: 6.0, y: 6.0, width: 308.0, height: 16.0 })));
+        MountItem::InputContent { id: 2, content } if *content == rect(6.0, 6.0, 308.0, 16.0))));
     // No text yet: nothing to send.
     assert!(
         !batch
@@ -2117,11 +2075,11 @@ fn multiline_inputs_grow_with_their_text() {
     // 50 characters at 8pt in 308pt: two lines.
     c.input_changed(2, &"x".repeat(50), 1);
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 2).map(|f| f.height), Some(44.0));
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(44.0));
     // A trailing line break starts an empty line that still takes space.
     c.input_changed(2, "x\n", 2);
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 2).map(|f| f.height), Some(28.0));
+    assert_eq!(frame_of(&batch, 2).map(|f| f.size.height.0), Some(28.0));
 }
 
 #[test]
@@ -2519,24 +2477,8 @@ fn screens_fill_their_stack_below_the_header() {
     let batch = c.commit().unwrap();
     // The screen fills the stack; its content starts below the status bar
     // and the 44pt bar.
-    assert_eq!(
-        frame_of(&batch, 3),
-        Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 320.0,
-            height: 480.0
-        })
-    );
-    assert_eq!(
-        frame_of(&batch, 4),
-        Some(Rect {
-            x: 0.0,
-            y: 64.0,
-            width: 320.0,
-            height: 416.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 480.0)));
+    assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 64.0, 320.0, 416.0)));
     assert!(batch.items.iter().any(
         |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == 64.0)
     ));
@@ -2544,15 +2486,7 @@ fn screens_fill_their_stack_below_the_header() {
     // can show its bar in the window's title bar).
     c.set_screen_header(3, Some(52.0));
     let batch = c.commit().unwrap();
-    assert_eq!(
-        frame_of(&batch, 4),
-        Some(Rect {
-            x: 0.0,
-            y: 52.0,
-            width: 320.0,
-            height: 428.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 52.0, 320.0, 428.0)));
     assert!(batch.items.iter().any(
         |i| matches!(i, MountItem::ScreenConfig { id: 3, config } if config.header_height == 52.0)
     ));
@@ -2565,15 +2499,7 @@ fn screens_fill_their_stack_below_the_header() {
         }],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(
-        frame_of(&batch, 4),
-        Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 320.0,
-            height: 480.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 320.0, 480.0)));
 }
 
 #[test]
@@ -2605,10 +2531,10 @@ fn modals_lay_out_at_the_reported_size() {
     );
     let batch = c.commit().unwrap();
     // The viewport until the platform reports the presented size.
-    assert_eq!(frame_of(&batch, 3).map(|f| f.height), Some(480.0));
-    c.set_root_size(2, Size::new(320.0, 400.0), crate::EdgeInsets::default());
+    assert_eq!(frame_of(&batch, 3).map(|f| f.size.height.0), Some(480.0));
+    c.set_root_size(2, size_pt(320.0, 400.0), crate::EdgeInsets::default());
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 3).map(|f| f.height), Some(400.0));
+    assert_eq!(frame_of(&batch, 3).map(|f| f.size.height.0), Some(400.0));
 }
 
 #[test]
@@ -2652,8 +2578,8 @@ fn right_to_left_layouts() {
     });
     apply(&mut c, ops);
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 3).map(|f| f.x), Some(10.0));
-    assert_eq!(frame_of(&batch, 4).map(|f| f.x), Some(70.0));
+    assert_eq!(frame_of(&batch, 3).map(|f| f.origin.x.0), Some(10.0));
+    assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x.0), Some(70.0));
 
     // The surface turns right to left: the row runs from the right.
     apply(
@@ -2670,9 +2596,12 @@ fn right_to_left_layouts() {
             .iter()
             .any(|i| matches!(i, MountItem::LayoutDirection { rtl: true }))
     );
-    assert_eq!(frame_of(&batch, 3).map(|f| f.x), Some(300.0 - 10.0 - 50.0));
     assert_eq!(
-        frame_of(&batch, 4).map(|f| f.x),
+        frame_of(&batch, 3).map(|f| f.origin.x.0),
+        Some(300.0 - 10.0 - 50.0)
+    );
+    assert_eq!(
+        frame_of(&batch, 4).map(|f| f.origin.x.0),
         Some(300.0 - 60.0 - 10.0 - 50.0)
     );
 
@@ -2718,7 +2647,7 @@ fn right_to_left_layouts() {
         ],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 6).map(|f| f.x), Some(5.0));
+    assert_eq!(frame_of(&batch, 6).map(|f| f.origin.x.0), Some(5.0));
 
     // Back to left to right.
     apply(
@@ -2729,8 +2658,8 @@ fn right_to_left_layouts() {
         }],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 3).map(|f| f.x), Some(10.0));
-    assert_eq!(frame_of(&batch, 4).map(|f| f.x), Some(70.0));
+    assert_eq!(frame_of(&batch, 3).map(|f| f.origin.x.0), Some(10.0));
+    assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x.0), Some(70.0));
 }
 
 #[test]
@@ -2780,8 +2709,11 @@ fn right_to_left_horizontal_scrolls() {
     apply(&mut c, ops);
     let batch = c.commit().unwrap();
     // Content: 10 (start padding) + 200; the first child at the right end.
-    assert_eq!(frame_of(&batch, 3).map(|f| f.x), Some(210.0 - 10.0 - 100.0));
-    assert_eq!(frame_of(&batch, 4).map(|f| f.x), Some(0.0));
+    assert_eq!(
+        frame_of(&batch, 3).map(|f| f.origin.x.0),
+        Some(210.0 - 10.0 - 100.0)
+    );
+    assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x.0), Some(0.0));
     // It starts scrolled to its right end.
     assert!(batch.items.iter().any(|i| matches!(
         i,
@@ -2826,7 +2758,7 @@ fn classes_style_views_and_inline_styles_win() {
     let mut c = core();
     view_with_classes(&mut c, 2, "w-20 h-10 p-2 bg-blue-500 rounded-lg");
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 2).unwrap().width, 80.0);
+    assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 80.0);
     let v = view_style_of(&batch, 2).unwrap();
     assert_eq!(v.background_color, Color(0x2b7f_ffff));
     assert_eq!(v.border_radius, 8.0);
@@ -2843,7 +2775,7 @@ fn classes_style_views_and_inline_styles_win() {
     );
     c.apply(class_op(2, "w-24 h-10 bg-green-500")).unwrap();
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 2).unwrap().width, 96.0);
+    assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 96.0);
     let v = view_style_of(&batch, 2).unwrap();
     assert_eq!(v.background_color, Color(0xff00_00ff));
     assert_eq!(v.border_radius, 0.0);
@@ -2952,10 +2884,10 @@ fn dark_mode_and_breakpoints_restyle_natively() {
         ],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 3).unwrap().x, 8.0);
-    c.set_viewport(Size::new(1024.0, 768.0));
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 8.0);
+    c.set_viewport(size_pt(1024.0, 768.0));
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 3).unwrap().x, 32.0);
+    assert_eq!(frame_of(&batch, 3).unwrap().origin.x.0, 32.0);
 }
 
 #[test]
@@ -3354,7 +3286,7 @@ fn input_accessories_are_found_by_native_id() {
     assert_eq!(accessory(&batch), Some(Some(3)));
     // As wide as the window, as tall as its content.
     let frame = frame_of(&batch, 3).unwrap();
-    assert_eq!((frame.width, frame.height), (320.0, 44.0));
+    assert_eq!((frame.size.width.0, frame.size.height.0), (320.0, 44.0));
     apply(
         &mut c,
         vec![Op::Remove {
@@ -3417,7 +3349,7 @@ fn inputs_report_their_content_size() {
 
 #[test]
 fn text_shrinks_to_fit_its_lines() {
-    let mut c = Core::new(crate::text::ApproxTextEngine, Size::new(320.0, 480.0));
+    let mut c = Core::new(crate::text::ApproxTextEngine, size_pt(320.0, 480.0));
     let ops = vec![
         Op::Create {
             id: 2,
@@ -3574,24 +3506,11 @@ fn views_inside_text_are_attachments() {
     assert_eq!(inserts, vec![4, 8]);
     assert_eq!(
         frame_of(&batch, 4),
-        Some(Rect {
-            x: 5.0 + 16.0,
-            y: 5.0 + 2.0,
-            width: 20.0,
-            height: 10.0
-        })
+        Some(rect(5.0 + 16.0, 5.0 + 2.0, 20.0, 10.0))
     );
-    assert_eq!(frame_of(&batch, 8).map(|f| f.x), Some(5.0 + 40.0));
+    assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x.0), Some(5.0 + 40.0));
     // The attachment's own subtree is laid out inside it.
-    assert_eq!(
-        frame_of(&batch, 5),
-        Some(Rect {
-            x: 2.0,
-            y: 2.0,
-            width: 16.0,
-            height: 3.0
-        })
-    );
+    assert_eq!(frame_of(&batch, 5), Some(rect(2.0, 2.0, 16.0, 3.0)));
 
     // Growing an attachment builds the text again.
     apply(
@@ -3614,7 +3533,7 @@ fn views_inside_text_are_attachments() {
         })
         .unwrap();
     assert_eq!(text.attachments[0].width, 30.0);
-    assert_eq!(frame_of(&batch, 4).map(|f| f.width), Some(30.0));
+    assert_eq!(frame_of(&batch, 4).map(|f| f.size.width.0), Some(30.0));
 
     // Taken out of the text: its view leaves the text view.
     apply(
@@ -3640,7 +3559,7 @@ fn views_inside_text_are_attachments() {
         })
         .unwrap();
     assert_eq!(text.text, "abcd\u{FFFC}");
-    assert_eq!(frame_of(&batch, 8).map(|f| f.x), Some(5.0 + 32.0));
+    assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x.0), Some(5.0 + 32.0));
 }
 
 #[test]
@@ -4495,7 +4414,7 @@ mod components {
                 ..
             }
         )));
-        assert_eq!(frame_of(&batch, 4).map(|f| f.height), Some(44.0));
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height.0), Some(44.0));
         // The children sit below it, after `mt_2` (the slot is filled).
         let holder = batch
             .items
@@ -4507,7 +4426,7 @@ mod components {
                 _ => None,
             })
             .unwrap();
-        assert_eq!(frame_of(&batch, holder).map(|f| f.y), Some(52.0));
+        assert_eq!(frame_of(&batch, holder).map(|f| f.origin.y.0), Some(52.0));
 
         // Emptying the slot: no header, `mt_0`.
         apply(
@@ -4524,7 +4443,7 @@ mod components {
                 .iter()
                 .any(|i| matches!(i, MountItem::Remove { id: 4 }))
         );
-        assert_eq!(frame_of(&batch, holder).map(|f| f.y), Some(0.0));
+        assert_eq!(frame_of(&batch, holder).map(|f| f.origin.y.0), Some(0.0));
     }
 
     /// Renders a Tally and counts its taps.
@@ -4659,7 +4578,7 @@ mod components {
             })
             .unwrap();
         let frame = frame_of(&batch, text_id).unwrap();
-        assert_eq!((frame.x, frame.y), (32.0, 32.0));
+        assert_eq!((frame.origin.x.0, frame.origin.y.0), (32.0, 32.0));
         // The unknown one is an empty view.
         assert!(
             batch
@@ -4714,7 +4633,7 @@ mod components {
         let theme = crate::ui::Theme::default();
         let batch = c.commit().unwrap();
         assert_eq!(background(&batch), Some(Color::from(theme.primary.light)));
-        assert_eq!(frame_of(&batch, 2).map(|f| f.width), Some(40.0));
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(40.0));
         // The platform reports presses on it (`active`).
         assert!(batch.items.iter().any(|i| matches!(
             i,
@@ -4985,12 +4904,12 @@ mod components {
         assert!(w4 % 2 == 1 && w6 % 2 == 1 && w4 != w6);
         // 4pt padding, 10pt children, 8pt between the rows.
         assert_eq!(
-            frame_of(&batch, w4).map(|f| (f.y, f.height)),
+            frame_of(&batch, w4).map(|f| (f.origin.y.0, f.size.height.0)),
             Some((0.0, 18.0))
         );
         // The last has 8pt below.
         assert_eq!(
-            frame_of(&batch, w6).map(|f| (f.y, f.height)),
+            frame_of(&batch, w6).map(|f| (f.origin.y.0, f.size.height.0)),
             Some((26.0, 22.0))
         );
 
@@ -5006,8 +4925,8 @@ mod components {
         let batch = c.commit().unwrap();
         let w8 = wrapper_of(&batch, 8).unwrap();
         assert!(![w4, w6].contains(&w8));
-        assert_eq!(frame_of(&batch, w8).map(|f| f.y), Some(0.0));
-        assert_eq!(frame_of(&batch, w4).map(|f| f.y), Some(26.0));
+        assert_eq!(frame_of(&batch, w8).map(|f| f.origin.y.0), Some(0.0));
+        assert_eq!(frame_of(&batch, w4).map(|f| f.origin.y.0), Some(26.0));
         assert!(wrapper_of(&batch, 4).is_none() && wrapper_of(&batch, 6).is_none());
 
         // A child removed takes its wrapper away; the child itself stays JS's.
@@ -5026,7 +4945,7 @@ mod components {
                 .any(|i| matches!(i, MountItem::Delete { id } if *id == w4))
         );
         assert!(c.key(4).is_ok());
-        assert_eq!(frame_of(&batch, w6).map(|f| f.y), Some(26.0));
+        assert_eq!(frame_of(&batch, w6).map(|f| f.origin.y.0), Some(26.0));
     }
 
     /// Ticks every 20ms from `start` until 3, then reports it; shows
@@ -5062,7 +4981,7 @@ mod components {
             },
         )));
         view().child(text(move || {
-            let width = if window().width > 500.0 {
+            let width = if window().width > Points(500.0) {
                 "wide"
             } else {
                 "narrow"
@@ -5166,7 +5085,7 @@ mod components {
         // What a binding read of the environment updates it; the rest does
         // not.
         let env = crate::ui::Environment {
-            window: Size::new(390.0, 844.0),
+            window: size_pt(390.0, 844.0),
             ..Default::default()
         };
         c.set_environment(crate::ui::Environment {
@@ -5174,7 +5093,7 @@ mod components {
             ..env
         });
         assert!(c.commit().is_none());
-        c.set_viewport(Size::new(800.0, 600.0));
+        c.set_viewport(size_pt(800.0, 600.0));
         assert!(texts(&c.commit().unwrap()).contains(&"10 wide".to_owned()));
 
         // A task with background work and a tokio timer.
@@ -5375,10 +5294,10 @@ mod components {
                     let m = m.expect("laid out");
                     shown.set(format!(
                         "{},{} {}x{} at {},{} {}",
-                        m.frame.x,
-                        m.frame.y,
-                        m.frame.width,
-                        m.frame.height,
+                        m.frame.origin.x.0,
+                        m.frame.origin.y.0,
+                        m.frame.size.width.0,
+                        m.frame.size.height.0,
                         m.page_x,
                         m.page_y,
                         none.is_none()
@@ -7014,22 +6933,12 @@ fn overflowing_children_mount_their_area() {
     // 120 below it.
     assert_eq!(
         overflow(&batch, 2),
-        Some(Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 300.0,
-            height: 160.0,
-        }))
+        Some(Some(rect(0.0, 0.0, 300.0, 160.0)))
     );
     // In the card (60 tall: 40 + padding) at (10, 10): down to 170.
     assert_eq!(
         overflow(&batch, 5),
-        Some(Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 320.0,
-            height: 170.0,
-        }))
+        Some(Some(rect(0.0, 0.0, 320.0, 170.0)))
     );
     // Leaves have nothing to report, and nothing is sent again unchanged.
     assert_eq!(overflow(&batch, 4), None);
@@ -7096,7 +7005,7 @@ fn a_view_that_loses_its_absolute_child_lays_out() {
     let batch = c.commit().unwrap();
     assert!(batch.items.iter().any(|i| matches!(
         i,
-        MountItem::Frame { id: 6, frame, .. } if frame.y == 30.0
+        MountItem::Frame { id: 6, frame, .. } if frame.origin.y.0 == 30.0
     )));
 }
 
@@ -7160,15 +7069,7 @@ fn measures_in_root_coordinates() {
     );
     c.commit().unwrap();
     let m = c.measure(6).unwrap();
-    assert_eq!(
-        m.frame,
-        Rect {
-            x: 20.0,
-            y: 520.0,
-            width: 280.0,
-            height: 30.0,
-        }
-    );
+    assert_eq!(m.frame, rect(20.0, 520.0, 280.0, 30.0));
     assert_eq!((m.page_x, m.page_y), (20.0, 570.0));
     c.set_scroll_offset(2, 0.0, 400.0, u32::MAX);
     let m = c.measure(6).unwrap();
@@ -8117,7 +8018,7 @@ mod views {
             .items
             .iter()
             .filter_map(|i| match i {
-                MountItem::Frame { frame, .. } => Some(frame.y),
+                MountItem::Frame { frame, .. } => Some(frame.origin.y.0),
                 _ => None,
             })
             .collect();
@@ -9787,7 +9688,7 @@ mod rust_desktop {
     use super::*;
     use crate::{
         desktop::{DesktopCommand, TitleBarStyle},
-        platform::Insets,
+        geometry::{Edges, Points},
         ui::{
             Root,
             desktop::{close_window, set_title_bar, title_bar},
@@ -9810,7 +9711,7 @@ mod rust_desktop {
             .child(text(move || {
                 READS.set(READS.get() + 1);
                 let area = title_bar();
-                format!("{} {} {}", area.top, area.left, area.right)
+                format!("{} {} {}", area.top.0, area.left.0, area.right.0)
             }))
             .child(
                 text("Close window")
@@ -9824,11 +9725,11 @@ mod rust_desktop {
         let mut c = core();
         READS.set(0);
         c.set_environment(crate::ui::Environment {
-            title_bar: Insets {
-                top: 42.0,
-                left: 78.0,
-                right: 0.0,
-                bottom: 0.0,
+            title_bar: Edges {
+                top: Points(42.0),
+                left: Points(78.0),
+                right: Points(0.0),
+                bottom: Points(0.0),
             },
             ..Default::default()
         });
@@ -9873,11 +9774,11 @@ mod rust_desktop {
         let reads = READS.get();
         c.set_environment(crate::ui::Environment {
             dark: true,
-            title_bar: Insets {
-                top: 42.0,
-                left: 78.0,
-                right: 0.0,
-                bottom: 0.0,
+            title_bar: Edges {
+                top: Points(42.0),
+                left: Points(78.0),
+                right: Points(0.0),
+                bottom: Points(0.0),
             },
             ..Default::default()
         });
@@ -9888,11 +9789,11 @@ mod rust_desktop {
             "other environment changes do not rerun title_bar readers"
         );
         c.set_environment(crate::ui::Environment {
-            title_bar: Insets {
-                top: 42.0,
-                left: 0.0,
-                right: 138.0,
-                bottom: 0.0,
+            title_bar: Edges {
+                top: Points(42.0),
+                left: Points(0.0),
+                right: Points(138.0),
+                bottom: Points(0.0),
             },
             ..Default::default()
         });
@@ -10074,7 +9975,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
 fn grid_frames(
     container: &[(&str, StyleValue<'_>)],
     children: &[&[(&str, StyleValue<'_>)]],
-) -> Vec<Rect> {
+) -> Vec<Bounds<Points>> {
     let mut c = core();
     let mut ops = vec![
         Op::Create {
@@ -10122,7 +10023,7 @@ fn grids_place_items_by_line_name() {
             &[("gridColumnStart", s("c")), ("gridColumnEnd", s("d"))],
         ],
     );
-    let xw = |r: Rect| (r.x, r.width);
+    let xw = |r: Bounds<Points>| (r.origin.x.0, r.size.width.0);
     assert_eq!(xw(f[0]), (40.0, 60.0));
     assert_eq!(xw(f[1]), (0.0, 100.0));
     assert_eq!(xw(f[2]), (40.0, 260.0));
@@ -10161,21 +10062,21 @@ fn grid_auto_tracks_stretch_unless_aligned() {
     ];
     // CSS's `normal`: the auto rows share the container's height.
     let f = grid_frames(&grid, &[&[], &[], &[]]);
-    assert_eq!((f[0].y, f[0].height), (0.0, 100.0));
-    assert_eq!((f[2].y, f[2].height), (100.0, 100.0));
+    assert_eq!((f[0].origin.y.0, f[0].size.height.0), (0.0, 100.0));
+    assert_eq!((f[2].origin.y.0, f[2].size.height.0), (100.0, 100.0));
     let mut normal = grid.to_vec();
     normal.push(("alignContent", s("normal")));
-    assert_eq!(grid_frames(&normal, &[&[]])[0].height, 200.0);
+    assert_eq!(grid_frames(&normal, &[&[]])[0].size.height.0, 200.0);
     // Columns too, without a template.
     let f = grid_frames(&grid[..3], &[&[]]);
-    assert_eq!(f[0].width, 300.0);
+    assert_eq!(f[0].size.width.0, 300.0);
     // A value set explicitly applies.
     let mut start = grid.to_vec();
     start.push(("alignContent", s("flex-start")));
-    assert_eq!(grid_frames(&start, &[&[]])[0].height, 0.0);
+    assert_eq!(grid_frames(&start, &[&[]])[0].size.height.0, 0.0);
     let mut start = grid[..3].to_vec();
     start.push(("justifyContent", s("start")));
-    assert_eq!(grid_frames(&start, &[&[]])[0].width, 0.0);
+    assert_eq!(grid_frames(&start, &[&[]])[0].size.width.0, 0.0);
     // Flex containers keep React Native's `flex-start` for wrapped lines.
     let f = grid_frames(
         &[
@@ -10186,7 +10087,7 @@ fn grid_auto_tracks_stretch_unless_aligned() {
         ],
         &[&[("width", n(200.0))], &[("width", n(200.0))]],
     );
-    assert_eq!((f[0].height, f[1].y), (0.0, 0.0));
+    assert_eq!((f[0].size.height.0, f[1].origin.y.0), (0.0, 0.0));
 }
 
 #[test]
@@ -10207,14 +10108,14 @@ fn start_and_end_follow_the_writing_direction() {
         ]
     };
     let f = grid_frames(&grid("start", "ltr"), &[&item]);
-    assert_eq!((f[0].x, f[0].y), (0.0, 20.0));
+    assert_eq!((f[0].origin.x.0, f[0].origin.y.0), (0.0, 20.0));
     let f = grid_frames(&grid("end", "ltr"), &[&item]);
-    assert_eq!(f[0].x, 50.0);
+    assert_eq!(f[0].origin.x.0, 50.0);
     // Right to left, the track is at the right and its start is its right.
     let f = grid_frames(&grid("start", "rtl"), &[&item]);
-    assert_eq!(f[0].x, 250.0);
+    assert_eq!(f[0].origin.x.0, 250.0);
     let f = grid_frames(&grid("end", "rtl"), &[&item]);
-    assert_eq!(f[0].x, 200.0);
+    assert_eq!(f[0].origin.x.0, 200.0);
     // Per item, and `self-start` / `self-end`.
     let f = grid_frames(
         &grid("start", "ltr"),
@@ -10224,14 +10125,14 @@ fn start_and_end_follow_the_writing_direction() {
             ("alignSelf", s("start")),
         ]],
     );
-    assert_eq!((f[0].x, f[0].y), (50.0, 0.0));
+    assert_eq!((f[0].origin.x.0, f[0].origin.y.0), (50.0, 0.0));
     // Tracks: `justifyContent: end` puts the column at the end.
     let mut end = grid("start", "ltr").to_vec();
     end.push(("justifyContent", s("end")));
-    assert_eq!(grid_frames(&end, &[&item])[0].x, 200.0);
+    assert_eq!(grid_frames(&end, &[&item])[0].origin.x.0, 200.0);
     let mut end = grid("start", "rtl").to_vec();
     end.push(("justifyContent", s("end")));
-    assert_eq!(grid_frames(&end, &[&item])[0].x, 50.0);
+    assert_eq!(grid_frames(&end, &[&item])[0].origin.x.0, 50.0);
     // In flex containers too.
     let f = grid_frames(
         &[
@@ -10242,7 +10143,7 @@ fn start_and_end_follow_the_writing_direction() {
         ],
         &[&item],
     );
-    assert_eq!((f[0].x, f[0].y), (250.0, 80.0));
+    assert_eq!((f[0].origin.x.0, f[0].origin.y.0), (250.0, 80.0));
 }
 
 /// What builders take: listeners without arguments, children in an

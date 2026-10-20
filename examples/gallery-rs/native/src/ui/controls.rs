@@ -2,7 +2,7 @@
 //! [`Segmented`].
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     ui::{JsObject, PropEnum, prelude::*},
 };
 
@@ -270,7 +270,7 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
         .border_1()
         .border_color(colors::BORDER)
         .role(AccessibilityRole::Tablist)
-        .on_layout(move |frame: &Rect| width.set(frame.width))
+        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
         .child(
             view()
                 .absolute()

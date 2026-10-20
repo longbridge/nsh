@@ -6,6 +6,7 @@ use std::time::Duration;
 use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem, Size,
     canvas::{CanvasOp, Drawing, LineCap, Num, PathOp},
+    geometry::px,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -68,7 +69,7 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(app),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

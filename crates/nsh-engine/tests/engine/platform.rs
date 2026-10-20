@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use nsh_core::{ApproxTextEngine, MountItem, Size};
+use nsh_core::{ApproxTextEngine, MountItem, Size, geometry::px};
 use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Idiom, Os};
 
 use crate::ChannelSink;
@@ -46,7 +46,7 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
-        viewport: Size::new(320.0, 480.0),
+        viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: None,
         assets: None,

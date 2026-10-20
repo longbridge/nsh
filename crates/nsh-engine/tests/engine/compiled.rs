@@ -5,7 +5,9 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use nsh_core::{ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, Size};
+use nsh_core::{
+    ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, Size, geometry::px,
+};
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
 use crate::ChannelSink;
@@ -60,7 +62,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -197,7 +199,7 @@ fn start_app(app: &str) -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

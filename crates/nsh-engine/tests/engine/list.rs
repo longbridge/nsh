@@ -3,7 +3,7 @@
 
 use std::{sync::mpsc, time::Duration};
 
-use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, ViewKind};
+use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, ViewKind, geometry::px};
 use nsh_engine::{Bundle, Engine, EngineConfig, MountSink};
 
 struct Sink(mpsc::Sender<MountBatch>);
@@ -101,7 +101,7 @@ fn scrolls_with_recycled_cells(app: &str) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(320.0, 500.0),
+        viewport: Size::new(px(320.0), px(500.0)),
         trace: false,
         network: None,
         assets: None,
@@ -147,10 +147,9 @@ fn scrolls_with_recycled_cells(app: &str) {
     engine.control().scroll(list, 0.0, 4600.0, u32::MAX);
     let mut grew = false;
     while let Ok(batch) = rx.recv_timeout(Duration::from_secs(2)) {
-        grew |= batch
-            .items
-            .iter()
-            .any(|i| matches!(i, MountItem::ScrollContent { size, .. } if size.height >= 10_000.0));
+        grew |= batch.items.iter().any(
+            |i| matches!(i, MountItem::ScrollContent { size, .. } if size.height >= px(10_000.0)),
+        );
         if grew {
             break;
         }

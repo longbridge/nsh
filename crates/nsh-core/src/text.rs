@@ -8,7 +8,7 @@ use std::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    geometry::Size,
+    geometry::{Points, Size, size_pt},
     ops::{EventMask, NodeId},
     style::{
         Color, DecorationStyle, EllipsizeMode, FontFamily, FontVariant, TextAlign, TextDecoration,
@@ -471,10 +471,10 @@ pub trait TextEngine {
     fn prepare(&self, text: &AttributedText) -> Self::Prepared;
 
     /// Size of the prepared text with an optional maximum width.
-    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size;
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size<Points>;
 
     /// The final layout in a box of exactly `size`, for drawing.
-    fn layout(&self, prepared: &Self::Prepared, size: Size) -> TextLayout;
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout;
 
     /// The lines of a final layout (`onTextLayout`); `text` is left empty
     /// (the core fills it in).
@@ -510,11 +510,11 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
         (**self).prepare(text)
     }
 
-    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size<Points> {
         (**self).measure(prepared, max_width)
     }
 
-    fn layout(&self, prepared: &Self::Prepared, size: Size) -> TextLayout {
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         (**self).layout(prepared, size)
     }
 
@@ -583,7 +583,7 @@ impl TextEngine for ApproxTextEngine {
         &self,
         &(chars, size, max_lines, _): &Self::Prepared,
         max_width: Option<f32>,
-    ) -> Size {
+    ) -> Size<Points> {
         let width = chars as f32 * size * 0.55;
         let line = size * 1.2;
         let (width, mut lines) = match max_width {
@@ -593,10 +593,10 @@ impl TextEngine for ApproxTextEngine {
         if max_lines > 0 {
             lines = lines.min(max_lines as f32);
         }
-        Size::new(width, lines * line)
+        size_pt(width, lines * line)
     }
 
-    fn layout(&self, prepared: &Self::Prepared, size: Size) -> TextLayout {
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         // On one line, each character as wide as the others.
         let (_, font, _, attachments) = prepared;
         let line = font * 1.2;
@@ -609,7 +609,7 @@ impl TextEngine for ApproxTextEngine {
 
     fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
         layout
-            .downcast::<(Size, Vec<Option<(f32, f32)>>)>()
+            .downcast::<(Size<Points>, Vec<Option<(f32, f32)>>)>()
             .map_or_else(Vec::new, |(_, p)| p.clone())
     }
 
@@ -627,8 +627,8 @@ impl TextEngine for ApproxTextEngine {
 /// entries.
 #[derive(Default)]
 pub(crate) struct MeasureCache {
-    current: FxHashMap<(u64, u32), Size>,
-    previous: FxHashMap<(u64, u32), Size>,
+    current: FxHashMap<(u64, u32), Size<Points>>,
+    previous: FxHashMap<(u64, u32), Size<Points>>,
 }
 
 impl MeasureCache {
@@ -640,7 +640,7 @@ impl MeasureCache {
         (layout_hash, max_width.unwrap_or(f32::NAN).to_bits())
     }
 
-    pub(crate) fn get(&mut self, layout_hash: u64, max_width: Option<f32>) -> Option<Size> {
+    pub(crate) fn get(&mut self, layout_hash: u64, max_width: Option<f32>) -> Option<Size<Points>> {
         let key = Self::key(layout_hash, max_width);
         if let Some(&size) = self.current.get(&key) {
             return Some(size);
@@ -650,11 +650,11 @@ impl MeasureCache {
         Some(size)
     }
 
-    pub(crate) fn insert(&mut self, layout_hash: u64, max_width: Option<f32>, size: Size) {
+    pub(crate) fn insert(&mut self, layout_hash: u64, max_width: Option<f32>, size: Size<Points>) {
         self.insert_key(Self::key(layout_hash, max_width), size);
     }
 
-    fn insert_key(&mut self, key: (u64, u32), size: Size) {
+    fn insert_key(&mut self, key: (u64, u32), size: Size<Points>) {
         if self.current.len() >= Self::GENERATION {
             self.previous = std::mem::take(&mut self.current);
             self.current.reserve(Self::GENERATION);
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn measure_cache_is_bounded_and_promotes() {
         let mut cache = MeasureCache::default();
-        cache.insert(1, Some(100.0), Size::new(1.0, 1.0));
+        cache.insert(1, Some(100.0), size_pt(1.0, 1.0));
         for i in 0..10_000u64 {
             cache.insert(1000 + i, None, Size::default());
             // Keep entry 1 hot: every lookup promotes it.

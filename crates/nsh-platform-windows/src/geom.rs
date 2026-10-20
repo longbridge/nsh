@@ -9,16 +9,20 @@
 //! [`Mat4::to_3x2`], [`Mat4::unproject`]); perspective makes it projective,
 //! which [`crate::render`] draws through an offscreen bitmap.
 
-use nsh_core::Rect;
+use nsh_core::{Bounds, Point, Points, Size};
 use windows_numerics::Matrix3x2;
 
 /// A rectangle of `width` x `height` at `(x, y)`.
-pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
+pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 

@@ -31,13 +31,14 @@ use std::{
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
-    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size,
+    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points,
+    Size,
     ui::{Registry, Root},
 };
 use serde_json::{Value, json};
 
 pub use self::net::{DirectoryAssets, UreqNetwork};
-use crate::{App, Assets, Engine, EngineConfig, EngineControl, Environment, Insets, MountSink};
+use crate::{App, Assets, Edges, Engine, EngineConfig, EngineControl, Environment, MountSink};
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
@@ -69,7 +70,7 @@ pub struct TraceOptions {
     /// Viewport height in points.
     pub height: f32,
     /// The simulated safe area insets.
-    pub safe_area: Insets,
+    pub safe_area: Edges<Points>,
 }
 
 impl TraceOptions {
@@ -113,35 +114,35 @@ impl TraceOptions {
             scroll: number("scroll").map(|v| v as f32),
             width: number("width")? as f32,
             height: number("height")? as f32,
-            safe_area: Insets {
-                top,
-                right,
-                bottom,
-                left,
+            safe_area: Edges {
+                top: Points(top),
+                right: Points(right),
+                bottom: Points(bottom),
+                left: Points(left),
             },
         })
     }
 }
 
 /// Parses `--safe-area <top,right,bottom,left>` (one value: all four).
-pub fn parse_insets(value: &str) -> Result<Insets, String> {
+pub fn parse_insets(value: &str) -> Result<Edges<Points>, String> {
     let parts = value
         .split(',')
         .map(|p| p.trim().parse::<f32>())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("{e}: expected top,right,bottom,left in points"))?;
     match parts[..] {
-        [all] => Ok(Insets {
-            top: all,
-            right: all,
-            bottom: all,
-            left: all,
+        [all] => Ok(Edges {
+            top: Points(all),
+            right: Points(all),
+            bottom: Points(all),
+            left: Points(all),
         }),
-        [top, right, bottom, left] => Ok(Insets {
-            top,
-            right,
-            bottom,
-            left,
+        [top, right, bottom, left] => Ok(Edges {
+            top: Points(top),
+            right: Points(right),
+            bottom: Points(bottom),
+            left: Points(left),
         }),
         _ => Err("expected top,right,bottom,left in points (or one value for all)".into()),
     }
@@ -208,7 +209,7 @@ pub fn trace(
         .map(|s| Selector::parse(s))
         .collect::<Result<Vec<_>, _>>()?;
     let config = EngineConfig {
-        viewport: Size::new(options.width, options.height),
+        viewport: Size::new(Points(options.width), Points(options.height)),
         trace: true,
         network: Some(Arc::new(UreqNetwork::new())),
         assets: Some(assets),
@@ -690,12 +691,16 @@ fn print_batch(out: &mut dyn Write, title: &str, batch: &MountBatch) {
             } => writeln!(
                 out,
                 "   Text {{ id: {id}, text: {:?}, content: {}x{} @ {},{} }}",
-                text.text, content.width, content.height, content.x, content.y
+                text.text,
+                content.size.width.0,
+                content.size.height.0,
+                content.origin.x.0,
+                content.origin.y.0
             ),
             MountItem::Frame { id, frame } => writeln!(
                 out,
                 "   Frame {{ id: {id}, x: {}, y: {}, w: {}, h: {} }}",
-                frame.x, frame.y, frame.width, frame.height
+                frame.origin.x.0, frame.origin.y.0, frame.size.width.0, frame.size.height.0
             ),
             other => writeln!(out, "   {other:?}"),
         };
@@ -1007,8 +1012,11 @@ mod tests {
     #[test]
     fn insets_parse() {
         let i = parse_insets("47,0,34,0").unwrap();
-        assert_eq!((i.top, i.right, i.bottom, i.left), (47.0, 0.0, 34.0, 0.0));
-        assert_eq!(parse_insets("10").unwrap().left, 10.0);
+        assert_eq!(
+            (i.top.0, i.right.0, i.bottom.0, i.left.0),
+            (47.0, 0.0, 34.0, 0.0)
+        );
+        assert_eq!(parse_insets("10").unwrap().left, Points(10.0));
         assert!(parse_insets("1,2").is_err());
     }
 
@@ -1033,7 +1041,7 @@ mod tests {
             scroll: None,
             width: 390.0,
             height: 844.0,
-            safe_area: Insets::default(),
+            safe_area: Edges::default(),
         };
         let mut out = Vec::new();
         let mut warnings = Vec::new();
@@ -1086,11 +1094,11 @@ mod tests {
                 scroll: Some(3000.0),
                 width: 390.0,
                 height: 844.0,
-                safe_area: Insets {
-                    top: 47.0,
-                    right: 0.0,
-                    bottom: 34.0,
-                    left: 0.0,
+                safe_area: Edges {
+                    top: Points(47.0),
+                    right: Points(0.0),
+                    bottom: Points(34.0),
+                    left: Points(0.0),
                 },
             },
         };

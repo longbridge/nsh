@@ -151,7 +151,7 @@ fn outset_shadow(
 /// content; the border too when the children are not clipped. `soft`
 /// draws outer shadows as blurred shapes ([`soft_shadows`]).
 pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft: bool) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -231,7 +231,7 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
 /// The border and the outline, over the children (as UIKit draws layer
 /// borders, so content the core placed under a border never covers it).
 pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -306,7 +306,7 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         snapshot.append_border(outline, &b.widths, &b.colors.map(rgba));
         return;
     }
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let radii = state.radii();
     let line = |bw: f32| {
         let half = bw / 2.0;

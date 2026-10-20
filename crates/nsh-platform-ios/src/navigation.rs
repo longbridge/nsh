@@ -14,7 +14,7 @@ use std::cell::Cell;
 
 use nsh_core::{
     Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, ScreenAnimation, ScreenConfig, Size,
+    NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig, Size,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -274,7 +274,7 @@ impl ModalController {
         let ivars = self.ivars();
         ivars.control.set_root_size(
             ivars.id,
-            Size::new(size.width as f32, size.height as f32),
+            Size::new(Points(size.width as f32), Points(size.height as f32)),
             insets,
         );
         ivars

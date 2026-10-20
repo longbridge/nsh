@@ -50,7 +50,9 @@ use std::{
 };
 
 use nsh_core::{
-    Color, EventKind, EventPayload, InputConfig, PayloadValue, Rect, SubmitBehavior, TextAlign,
+    Bounds, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points, SubmitBehavior,
+    TextAlign,
+    geometry::{Point, Size},
     tailwind::state,
 };
 use rustc_hash::FxHashMap;
@@ -128,7 +130,7 @@ pub(crate) struct InputState {
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
-    content: Cell<Option<Rect>>,
+    content: Cell<Option<Bounds<Points>>>,
     /// The size the editor was hosted (and last drawn) at.
     size: Cell<(f32, f32)>,
     /// User edits reported to the engine.
@@ -695,7 +697,7 @@ fn dwrite_align(config: &InputConfig) -> DWRITE_TEXT_ALIGNMENT {
     }
 }
 
-// --- Focus -------------------------------------------------------------------
+// -> Rect {- Focus -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// A surface's focused field, and whether its window is active.
 #[derive(Default)]
@@ -818,7 +820,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     place_ime(surface);
 }
 
-// --- The IME -----------------------------------------------------------------
+// -> Rect {- The IME -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// Enables the IME while an editable, non-secure field has the focus.
 fn update_ime(surface: &Surface) {
@@ -892,8 +894,8 @@ fn place_ime(surface: &Surface) {
         y: (y * s).round() as i32,
     };
     let (Some(top), Some(bottom)) = (
-        m.map(content.x + x, content.y + y),
-        m.map(content.x + x, content.y + y + h),
+        m.map(content.origin.x.0 + x, content.origin.y.0 + y),
+        m.map(content.origin.x.0 + x, content.origin.y.0 + y + h),
     ) else {
         return;
     };
@@ -1056,7 +1058,7 @@ pub(crate) fn ime(
     }
 }
 
-// --- Edits and events ----------------------------------------------------------
+// -> Rect {- Edits and events -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// Sends `kind` if JS listens to it.
 fn send(
@@ -1170,7 +1172,7 @@ fn return_key(behavior: SubmitBehavior, multiline: bool, modifiers: Modifiers) -
     }
 }
 
-// --- Contracts -----------------------------------------------------------------
+// -> Rect {- Contracts -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-
 
 /// Sets up an input view.
 pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
@@ -1241,14 +1243,18 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The content box in the view.
-fn content_rect(view: &NshView, input: &InputState) -> Rect {
+fn content_rect(view: &NshView, input: &InputState) -> Bounds<Points> {
     input.content.get().unwrap_or_else(|| {
         let f = view.state().frame;
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f.width,
-            height: f.height,
+        Bounds {
+            origin: Point {
+                x: Points(0.0),
+                y: Points(0.0),
+            },
+            size: Size {
+                width: f.size.width,
+                height: f.size.height,
+            },
         }
     })
 }
@@ -1256,10 +1262,10 @@ fn content_rect(view: &NshView, input: &InputState) -> Rect {
 /// Hosts the editor at the content box.
 fn place(view: &NshView, input: &Rc<InputState>) {
     let content = content_rect(view, input);
-    if content.width <= 0.0 || content.height <= 0.0 {
+    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
         return;
     }
-    input.set_size((content.width, content.height));
+    input.set_size((content.size.width.0, content.size.height.0));
     let item: Rc<dyn Hosted> = input.clone();
     view.set_native(&item, content);
 }
@@ -1294,7 +1300,7 @@ pub(crate) fn animated(view: &NshView) {
 }
 
 /// `InputContent`: where the text goes inside the view.
-pub(crate) fn content(view: &NshView, content: Rect) {
+pub(crate) fn content(view: &NshView, content: Bounds<Points>) {
     let Some(input) = input_of(view) else {
         return;
     };
@@ -1444,7 +1450,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
         return false;
     };
     let content = content_rect(view, &input);
-    let (x, y) = (event.x - content.x, event.y - content.y);
+    let (x, y) = (event.x - content.origin.x.0, event.y - content.origin.y.0);
     match event.kind {
         PointerKind::Down => {
             if input.model.borrow().composition.is_some() {
@@ -1841,7 +1847,7 @@ fn vertical(input: &InputState, down: bool, page: bool) -> usize {
     model.text_at(at, secure)
 }
 
-// --- The caret's blinking ----------------------------------------------------
+// -> Rect {- The caret's blinking -> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {-> Rect {
 
 /// The caret blinks on one thread timer for all surfaces (a `TIMERPROC`,
 /// so no window procedure is involved), running only while some field

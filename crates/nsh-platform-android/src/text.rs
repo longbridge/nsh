@@ -10,7 +10,9 @@ use jni::{
     signature::{Primitive, ReturnType},
     sys::jvalue,
 };
-use nsh_core::{AttributedText, EllipsizeMode, Size, TextAlign, TextEngine, TextLayout};
+use nsh_core::{
+    AttributedText, EllipsizeMode, Points, Size, TextAlign, TextEngine, TextLayout, geometry::px,
+};
 
 use crate::java::{java, with_env};
 
@@ -182,9 +184,9 @@ impl TextEngine for AndroidTextEngine {
         }))
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let Some(obj) = &prepared.0 else {
-            return Size::new(0.0, 0.0);
+            return Size::new(px(0.0), px(0.0));
         };
         let packed = with_env(|env| {
             let j = java();
@@ -206,17 +208,17 @@ impl TextEngine for AndroidTextEngine {
         // Two f32 bit patterns: width high, height low.
         let width = f32::from_bits((packed as u64 >> 32) as u32);
         let height = f32::from_bits(packed as u64 as u32);
-        Size::new(width, height)
+        Size::new(Points(width), Points(height))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
         let layout = prepared.0.as_ref().and_then(|obj| {
             with_env(|env| {
                 let j = java();
                 let args: [jvalue; 3] = [
                     JValue::Object(obj.as_obj()).as_jni(),
-                    JValue::Float(size.width).as_jni(),
-                    JValue::Float(size.height).as_jni(),
+                    JValue::Float(size.width.0).as_jni(),
+                    JValue::Float(size.height.0).as_jni(),
                 ];
                 // SAFETY: matches the signature checked in `java::init`.
                 let layout = unsafe {

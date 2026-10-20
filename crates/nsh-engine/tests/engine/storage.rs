@@ -61,7 +61,7 @@ fn launch(
                 .unwrap()
                 .with_app_id(app_id),
         ),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -158,7 +158,7 @@ fn rust_shares_the_entries_of_js() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::new::<Reader>(|| ReaderProps {})),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -245,7 +245,7 @@ fn rust_edits_the_storage() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::new::<Editor>(|| EditorProps {})),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,
@@ -312,7 +312,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::new::<Writer>(|| WriterProps {}).app_id("com.example.rusty")),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
         assets: None,

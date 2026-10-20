@@ -641,7 +641,7 @@ fn layout() -> AnyElement {
             view()
                 .flex_col()
                 .gap_2()
-                .style_when(|| window().width >= 640.0, |s| s.flex_row())
+                .style_when(|| window().width.0 >= 640.0, |s| s.flex_row())
                 .child(
                     view()
                         .h_8()

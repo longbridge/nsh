@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::{
     ApproxTextEngine, Core, EventKind, EventPayload, ListBind, MountItem, Size, ViewKind,
+    geometry::px,
 };
 use nsh_js::Host;
 
@@ -49,10 +50,10 @@ impl App {
         .unwrap();
         // The runtime reads the environment while it loads.
         host.set_environment(&nsh_js::Environment {
-            window: (390.0, 844.0),
+            window: Size::new(px(390.0), px(844.0)),
             ..Default::default()
         });
-        let mut core = Core::new(ApproxTextEngine, Size::new(390.0, 844.0));
+        let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
         core.set_components(nsh_ui_mobile::registry());
         Self {
             host,

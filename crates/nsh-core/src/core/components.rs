@@ -567,7 +567,7 @@ impl Default for Components {
 }
 
 impl Components {
-    pub(super) fn for_viewport(viewport: crate::Size) -> Self {
+    pub(super) fn for_viewport(viewport: crate::Size<crate::Points>) -> Self {
         let mut components = Self::default();
         components.environment.window = viewport;
         // What components that run once read of the core.
@@ -747,7 +747,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The surface's size changed (the environment's window).
-    pub(super) fn components_viewport(&mut self, size: crate::Size) {
+    pub(super) fn components_viewport(&mut self, size: crate::Size<crate::Points>) {
         let environment = Environment {
             window: size,
             ..self.components.environment

@@ -1105,7 +1105,7 @@ fn draw_one(
     texture: &gdk::Texture,
     source: Option<&ImageSource>,
 ) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(image.mode, natural(texture, source), (w, h));
     let mut rect = graphene::Rect::new(x, y, fw, fh);
     let blur = image.options.blur_radius.max(0.0);

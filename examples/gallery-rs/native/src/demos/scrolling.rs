@@ -4,7 +4,7 @@
 //! gallery's `demos/Scrolling.tsx`).
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     ui::{View, prelude::*},
 };
 
@@ -166,7 +166,9 @@ fn Backdrop(props: BackdropProps) -> impl IntoElement {
         .right_0()
         .bottom_0()
         .child(canvas(move || backdrop(size.get(), tone, seed)).flex_1())
-        .on_layout(move |frame: &Rect| size.set((frame.width, frame.height)))
+        .on_layout(move |frame: &Bounds<Points>| {
+            size.set((frame.size.width.0, frame.size.height.0))
+        })
 }
 
 /// The pages: a title, a figure, its note and tone.
@@ -186,7 +188,7 @@ fn Pager() -> impl IntoElement {
     // The pages' width: the scroll view's. Until the layout tells, as wide
     // as the scroll view would be (the section's inset is 32 + 12 + 28
     // narrower than the window).
-    let width = signal(untracked(window).width - 72.0);
+    let width = signal(untracked(window).width.0 - 72.0);
     let page = signal(0_usize);
     // The scroll offset, fed natively, and the pages' width as an animated
     // value: the offset in pages (`at`) moves the parallax and the
@@ -249,7 +251,7 @@ fn Pager() -> impl IntoElement {
                 .finish(Finish::Card)
                 .border_1()
                 .border_color(colors::LINE)
-                .on_layout(move |frame: &Rect| width.set(frame.width))
+                .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 .on_momentum_scroll_end(settle)
                 .on_scroll_end(settle)
                 .child(view().flex_row().children(pages)),

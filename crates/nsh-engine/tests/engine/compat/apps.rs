@@ -26,7 +26,10 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
-use nsh_core::{ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size};
+use nsh_core::{
+    ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, Size,
+    geometry::px,
+};
 use nsh_engine::{Assets, Bundle, Engine, EngineConfig, EngineControl, MountSink};
 
 /// The surface's root view.
@@ -204,7 +207,7 @@ struct Run {
 }
 
 impl Run {
-    fn start(bundle: Bundle, viewport: Size, assets: &Path) -> Run {
+    fn start(bundle: Bundle, viewport: Size<Points>, assets: &Path) -> Run {
         let (tx, rx) = crossbeam_channel::unbounded();
         let errors = Arc::new(Mutex::new(Vec::new()));
         let config = EngineConfig {
@@ -277,12 +280,12 @@ pub(crate) fn run_app(dir: &Path) -> Result<(), String> {
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .peekable();
-    let mut viewport = Size::new(390.0, 844.0);
+    let mut viewport = Size::new(px(390.0), px(844.0));
     if let Some(line) = lines.peek()
         && let Some(size) = line.strip_prefix("viewport ")
     {
         let (w, h) = size.split_once(' ').ok_or("viewport <width> <height>")?;
-        viewport = Size::new(w.parse().unwrap(), h.parse().unwrap());
+        viewport = Size::new(px(w.parse().unwrap()), px(h.parse().unwrap()));
         lines.next();
     }
     let mut run = Run::start(Bundle::source(code), viewport, &dir.join("assets"));

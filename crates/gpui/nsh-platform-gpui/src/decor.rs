@@ -285,7 +285,7 @@ fn inset_shadow(
         return;
     }
     let (padding, inner) = padding_box(w, h, radii, widths);
-    if padding.width <= 0.0 || padding.height <= 0.0 {
+    if padding.size.width.0 <= 0.0 || padding.size.height.0 <= 0.0 {
         return;
     }
     if cx.axis_aligned() {
@@ -297,7 +297,12 @@ fn inset_shadow(
             spread_radius: px(spec.spread * k),
             inset: true,
         }];
-        let b = cx.rect(padding.x, padding.y, padding.width, padding.height);
+        let b = cx.rect(
+            padding.origin.x.0,
+            padding.origin.y.0,
+            padding.size.width.0,
+            padding.size.height.0,
+        );
         // GPUI's corners are circular: the padding box's elliptical ones
         // (borders of different widths) are averaged.
         let c = corners(inner.map(|(x, y)| (x + y) / 2.0), k);
@@ -314,13 +319,13 @@ fn inset_shadow(
     for g in grow {
         let s = spec.spread - g;
         let hole = rect(
-            padding.x + spec.dx + s,
-            padding.y + spec.dy + s,
-            padding.width - 2.0 * s,
-            padding.height - 2.0 * s,
+            padding.origin.x.0 + spec.dx + s,
+            padding.origin.y.0 + spec.dy + s,
+            padding.size.width.0 - 2.0 * s,
+            padding.size.height.0 - 2.0 * s,
         );
         let mut contours = vec![outline.clone()];
-        if hole.width > 0.0 && hole.height > 0.0 {
+        if hole.size.width.0 > 0.0 && hole.size.height.0 > 0.0 {
             let hole_corners = inner.map(|(x, y)| ((x - s).max(0.0), (y - s).max(0.0)));
             contours.push(clip_convex(&rounded(hole, hole_corners, px_per), &outline));
         }
@@ -386,7 +391,7 @@ fn cast(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, spec: &ShadowSpec, opa
         return;
     }
     if casts_shadow(&state) {
-        let (w, h) = (state.frame.width, state.frame.height);
+        let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
         cx.set_transform(world);
         let s = ShadowSpec {
             dx: 0.0,
@@ -430,7 +435,7 @@ fn cast(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, spec: &ShadowSpec, opa
 /// Draws the view's shadows, background color, gradients and inset
 /// shadows, under its content (view coordinates set on `cx`).
 pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 || cx.culled() {
         return;
     }
@@ -492,7 +497,7 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
 /// layer borders, so content the core placed under a border never covers
 /// it).
 pub(crate) fn draw_border(cx: &mut DrawCx<'_>, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 || cx.culled() {
         return;
     }
@@ -632,7 +637,7 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
         let mut contours = vec![rounded(rect(-d, -d, ow, oh), circular(outer_radii), px_per)];
         let off = o.offset;
         let inner = rect(-off, -off, w + 2.0 * off, h + 2.0 * off);
-        if inner.width > 0.0 && inner.height > 0.0 {
+        if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
             contours.push(rounded(
                 inner,
                 circular(radii.map(|r| grown(r, off))),

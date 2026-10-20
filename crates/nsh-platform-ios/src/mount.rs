@@ -6,9 +6,9 @@ use std::{cell::RefCell, sync::Arc};
 use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_animation::{AnimationProp, AnimationValue};
 use nsh_core::{
-    Color, Command, EventKind, EventMask, EventPayload, GestureValues, ImageSource,
+    Bounds, Color, Command, EventKind, EventMask, EventPayload, GestureValues, ImageSource,
     KeyboardDismissMode, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    MountBatch, MountItem, NodeId, PayloadValue, Rect, ResizeMode, StickyCell, SubmitBehavior,
+    MountBatch, MountItem, NodeId, PayloadValue, Points, ResizeMode, StickyCell, SubmitBehavior,
     ViewKind, ViewProps, ViewStyle,
 };
 use nsh_engine::EngineControl;
@@ -641,7 +641,10 @@ impl Mounter {
                     let origin = view.frame().origin;
                     view.setFrame(CGRect::new(
                         origin,
-                        CGSize::new(frame.width as CGFloat, frame.height as CGFloat),
+                        CGSize::new(
+                            frame.size.width.0 as CGFloat,
+                            frame.size.height.0 as CGFloat,
+                        ),
                     ));
                     return false;
                 }
@@ -652,10 +655,10 @@ impl Mounter {
                 {
                     // The keyboard places it and sets its width.
                     let old = view.frame();
-                    let height = frame.height as CGFloat;
+                    let height = frame.size.height.0 as CGFloat;
                     view.setFrame(CGRect::new(
                         old.origin,
-                        CGSize::new(old.size.width.max(frame.width as CGFloat), height),
+                        CGSize::new(old.size.width.max(frame.size.width.0 as CGFloat), height),
                     ));
                     if old.size.height != height {
                         let view = Retained::into_super(view.clone());
@@ -684,7 +687,7 @@ impl Mounter {
                         _ => set_frame(view, frame),
                     }
                     if let Some(Refresh::Custom { spinner, .. }) = &s.gestures.refresh {
-                        place_spinner(spinner, frame.width);
+                        place_spinner(spinner, frame.size.width.0);
                     }
                     if let Native::Video(video) = &s.native {
                         video.layout();
@@ -703,7 +706,7 @@ impl Mounter {
                     crate::interaction::keyframes(
                         &s.native.view().layer(),
                         Some(&a),
-                        frame.height as f64,
+                        frame.size.height.0 as f64,
                     );
                 }
                 // The origin of the transform depends on the size.
@@ -721,8 +724,8 @@ impl Mounter {
                 if let Some(view) = self.slot(id).and_then(|s| s.native.nsh()) {
                     view.set_overflow(extent.map(|e| {
                         CGRect::new(
-                            CGPoint::new(e.x as CGFloat, e.y as CGFloat),
-                            CGSize::new(e.width as CGFloat, e.height as CGFloat),
+                            CGPoint::new(e.origin.x.0 as CGFloat, e.origin.y.0 as CGFloat),
+                            CGSize::new(e.size.width.0 as CGFloat, e.size.height.0 as CGFloat),
                         )
                     }));
                 }
@@ -820,7 +823,7 @@ impl Mounter {
                     },
                 ) = self.slot(id)
                 {
-                    let size = CGSize::new(size.width as CGFloat, size.height as CGFloat);
+                    let size = CGSize::new(size.width.0 as CGFloat, size.height.0 as CGFloat);
                     match s.zoom_view() {
                         Some(zoom) => crate::zoom::layout(scroll, &zoom, size, s.centers()),
                         None => scroll.setContentSize(size),
@@ -3016,15 +3019,18 @@ fn toggle<G: AsRef<UIGestureRecognizer>>(
 /// Sets a frame through `bounds` + `center`: `frame` is undefined for
 /// transformed views, and a scroll view's bounds origin is its scroll
 /// offset, which must be kept.
-fn set_frame(view: &UIView, frame: Rect) {
+fn set_frame(view: &UIView, frame: Bounds<Points>) {
     let origin = view.bounds().origin;
     view.setBounds(CGRect::new(
         origin,
-        CGSize::new(frame.width as CGFloat, frame.height as CGFloat),
+        CGSize::new(
+            frame.size.width.0 as CGFloat,
+            frame.size.height.0 as CGFloat,
+        ),
     ));
     view.setCenter(CGPoint::new(
-        (frame.x + frame.width / 2.0) as CGFloat,
-        (frame.y + frame.height / 2.0) as CGFloat,
+        (frame.origin.x.0 + frame.size.width.0 / 2.0) as CGFloat,
+        (frame.origin.y.0 + frame.size.height.0 / 2.0) as CGFloat,
     ));
 }
 

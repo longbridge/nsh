@@ -940,10 +940,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::Frame { id, frame } => {
             out.item("f")
                 .num(*id)
-                .num(frame.x)
-                .num(frame.y)
-                .num(frame.width)
-                .num(frame.height)
+                .num(frame.origin.x.0)
+                .num(frame.origin.y.0)
+                .num(frame.size.width.0)
+                .num(frame.size.height.0)
                 .end();
         }
         MountItem::ViewStyle { id, style } => {
@@ -995,10 +995,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             };
             out.item("t")
                 .num(*id)
-                .num(content.x)
-                .num(content.y)
-                .num(content.width)
-                .num(content.height);
+                .num(content.origin.x.0)
+                .num(content.origin.y.0)
+                .num(content.size.width.0)
+                .num(content.size.height.0);
             let Some(layout) = layout else {
                 out.raw("[]").raw("[]").end();
                 return;
@@ -1097,8 +1097,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ScrollContent { id, size } => {
             out.item("scs")
                 .num(*id)
-                .num(size.width)
-                .num(size.height)
+                .num(size.width.0)
+                .num(size.height.0)
                 .end();
         }
         MountItem::ScrollBy { id, dx, dy } => {
@@ -1166,10 +1166,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::InputContent { id, content } => {
             out.item("ic")
                 .num(*id)
-                .num(content.x)
-                .num(content.y)
-                .num(content.width)
-                .num(content.height)
+                .num(content.origin.x.0)
+                .num(content.origin.y.0)
+                .num(content.size.width.0)
+                .num(content.size.height.0)
                 .end();
         }
         MountItem::ScreenConfig { id, config } => {

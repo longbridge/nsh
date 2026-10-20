@@ -38,7 +38,7 @@ use gpui::{
     HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
     Window, point, px, size,
 };
-use nsh_core::{Color, Rect};
+use nsh_core::{Color, Points};
 
 use crate::{
     decor::shape,
@@ -254,9 +254,14 @@ impl<'a> DrawCx<'a> {
     /// Clips what follows to the rounded rectangle `rect` (current
     /// coordinates): paths exactly, quads and images by rounding their
     /// corners, the rest to its rectangle.
-    pub(crate) fn push_clip_rounded(&mut self, rect: Rect, radii: [f32; 4]) {
+    pub(crate) fn push_clip_rounded(&mut self, rect: nsh_core::Bounds<Points>, radii: [f32; 4]) {
         self.save();
-        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        let (x, y, w, h) = (
+            rect.origin.x.0,
+            rect.origin.y.0,
+            rect.size.width.0,
+            rect.size.height.0,
+        );
         let b = self.rect(x, y, w, h);
         self.clip = self.clip.intersect(&b);
         let round = radii.iter().any(|r| *r > 0.0);
@@ -382,13 +387,23 @@ impl<'a> DrawCx<'a> {
     /// Fills `rect` (current coordinates) with corner radii (clockwise
     /// from the top left) in `color`: a quad (its corners following the
     /// rounded clip), or a path when the transform rotates.
-    pub(crate) fn fill_rect(&mut self, rect: Rect, radii: [f32; 4], color: Color) {
+    pub(crate) fn fill_rect(
+        &mut self,
+        rect: nsh_core::Bounds<Points>,
+        radii: [f32; 4],
+        color: Color,
+    ) {
         if color.0 & 0xff == 0 || self.culled() {
             return;
         }
         if self.axis_aligned() {
             let c = self.color(color);
-            let b = self.rect(rect.x, rect.y, rect.width, rect.height);
+            let b = self.rect(
+                rect.origin.x.0,
+                rect.origin.y.0,
+                rect.size.width.0,
+                rect.size.height.0,
+            );
             let k = self.transform_scale();
             let (cut, cut_radii) = self.clip_rounded(b, corners(radii, k));
             if fits(cut, cut_radii) {
@@ -600,7 +615,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     let state = view.state();
     crate::decor::draw_background(cx, &state);
     let clip = state.clips();
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if clip {
         cx.push_clip_rounded(crate::geom::rect(0.0, 0.0, w, h), state.radii());
         crate::text::draw_shadow(cx, &state);
@@ -643,10 +658,12 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     cx.set_transform(world);
     for native in &natives {
         let r = native.rect;
-        let m = Mat4::new().translate(r.x, r.y).then(&world);
+        let m = Mat4::new()
+            .translate(r.origin.x.0, r.origin.y.0)
+            .then(&world);
         cx.set_transform(m);
-        native.item.draw(cx, (r.width, r.height));
-        let b = cx.rect(0.0, 0.0, r.width, r.height);
+        native.item.draw(cx, (r.size.width.0, r.size.height.0));
+        let b = cx.rect(0.0, 0.0, r.size.width.0, r.size.height.0);
         cx.drawn.push((native.item.clone(), b));
     }
     cx.set_transform(world);

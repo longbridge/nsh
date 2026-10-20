@@ -964,7 +964,9 @@ pub(crate) fn resume(view: &NshView) {
     let key = {
         let s = view.state();
         match &s.image {
-            Some(i) if i.pending && s.frame.width > 0.0 && s.frame.height > 0.0 => i.surface,
+            Some(i) if i.pending && s.frame.size.width.0 > 0.0 && s.frame.size.height.0 > 0.0 => {
+                i.surface
+            }
             _ => return,
         }
     };
@@ -997,7 +999,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
     let (generation, source, placeholder, decoding, events, id) = {
         let mut guard = view.state_mut();
         let s = &mut *guard;
-        let (w, h) = (s.frame.width, s.frame.height);
+        let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
         let filters = s
             .style
             .effects

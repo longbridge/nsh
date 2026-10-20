@@ -23,8 +23,8 @@ use std::{
 
 use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
-    ATTACHMENT_CHAR, AttributedText, Color, DecorationStyle, EllipsizeMode, EventKind, Rect,
-    ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
+    ATTACHMENT_CHAR, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind,
+    Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
 };
 use rustc_hash::FxHashMap;
 
@@ -719,7 +719,7 @@ impl TextEngine for PangoTextEngine {
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
         let shown = self.configure(prepared, max_width);
         let mut iter = prepared.layout.iter();
         let mut width = 0i32;
@@ -738,11 +738,11 @@ impl TextEngine for PangoTextEngine {
         {
             width = width.min(max.max(0.0));
         }
-        Size::new(width, from_pango(bottom).ceil())
+        Size::new(Points(width), Points(from_pango(bottom).ceil()))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
-        let shown = self.configure(prepared, Some(size.width));
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
+        let shown = self.configure(prepared, Some(size.width.0));
         let layout = &prepared.layout;
         let utf16 = &prepared.utf16;
         let at = |byte: i32| utf16[(byte.max(0) as usize).min(utf16.len() - 1)];
@@ -751,9 +751,9 @@ impl TextEngine for PangoTextEngine {
         // lines it aligned in the box with the slack move back.
         let dx = if layout.width() < 0 {
             let (_, logical) = layout.extents();
-            (size.width - from_pango(logical.width())).max(0.0) * prepared.flush
+            (size.width.0 - from_pango(logical.width())).max(0.0) * prepared.flush
         } else {
-            -from_pango(prepared.slack) * prepared.flush
+            (Points(-from_pango(prepared.slack) * prepared.flush)).0
         };
         let mut out = LinuxLayout {
             attachments: vec![None; prepared.attachments.len()],
@@ -1037,7 +1037,7 @@ pub(crate) struct DrawnText {
     /// The content.
     pub(crate) text: Arc<AttributedText>,
     /// Where the layout goes in the view.
-    pub(crate) content: Rect,
+    pub(crate) content: Bounds<Points>,
     /// The engine's layout of it.
     layout: TextLayout,
     /// The render node, built on first draw.
@@ -1047,7 +1047,12 @@ pub(crate) struct DrawnText {
 }
 
 /// A text view's new content.
-pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
+pub(crate) fn set(
+    view: &NshView,
+    text: &Arc<AttributedText>,
+    layout: &TextLayout,
+    content: Bounds<Points>,
+) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let mut selection = None;
@@ -1089,7 +1094,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     if drawn.text.has_backgrounds()
         && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
     {
-        let (cx, cy) = (drawn.content.x, drawn.content.y);
+        let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
         layout.background_rects(&drawn.text, |x, y, w, h, r, color| {
             let rect = graphene::Rect::new(cx + x, cy + y, w, h);
             snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, r));
@@ -1108,7 +1113,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
             color.blue(),
             color.alpha() * 0.3,
         );
-        let (cx, cy) = (drawn.content.x, drawn.content.y);
+        let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
         layout.selection_rects(&drawn.text, range, |x, y, w, h| {
             snapshot.append_color(&color, &graphene::Rect::new(cx + x, cy + y, w, h));
         });
@@ -1154,7 +1159,11 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
 
 /// The render node of a laid out text: glyph runs split where the color
 /// or decoration changes, decorations, the shadow.
-fn build(text: &AttributedText, layout: &LinuxLayout, content: Rect) -> Option<gsk::RenderNode> {
+fn build(
+    text: &AttributedText,
+    layout: &LinuxLayout,
+    content: Bounds<Points>,
+) -> Option<gsk::RenderNode> {
     if layout.runs.is_empty() {
         return None;
     }
@@ -1172,8 +1181,8 @@ fn build(text: &AttributedText, layout: &LinuxLayout, content: Rect) -> Option<g
         let Some(font) = main_font(&run.font.desc) else {
             continue;
         };
-        let baseline = content.y + run.baseline;
-        let mut x = content.x + run.x;
+        let baseline = content.origin.y.0 + run.baseline;
+        let mut x = content.origin.x.0 + run.x;
         let mut i = 0;
         while i < run.glyphs.len() {
             let span = span_at(&text.spans, run.glyphs[i].index);
@@ -1327,7 +1336,7 @@ fn decorate(
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<LinuxLayout>()?;
-    let (x, y) = (x - drawn.content.x, y - drawn.content.y);
+    let (x, y) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
     let line = layout
         .lines
         .iter()
@@ -1589,7 +1598,7 @@ fn pressed(view: &NshView, n: i32, x: f32, y: f32, modifiers: gtk::gdk::Modifier
         let Some(layout) = drawn.layout.downcast::<LinuxLayout>() else {
             return;
         };
-        let (lx, ly) = (x - drawn.content.x, y - drawn.content.y);
+        let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = char_at(&state, x, y);
         let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
         let over_press = press.iter().any(|&k| state.events.contains(k))
@@ -1657,7 +1666,7 @@ fn dragged(view: &NshView, dx: f32, dy: f32, x: f32, y: f32) {
         let Some(layout) = drawn.layout.downcast::<LinuxLayout>() else {
             return;
         };
-        let caret = layout.caret_at(x - drawn.content.x, y - drawn.content.y);
+        let caret = layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         extend(&drawn.text.text, s.anchor.get(), caret, s.unit.get())
     };
     select(view, Some(range));
@@ -2030,7 +2039,7 @@ mod tests {
                 assert_eq!(lines.len(), measured_lines, "{:?} at {width}", t.text);
                 let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
                 assert!(
-                    bottom <= size.height,
+                    bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
                     t.text
                 );
@@ -2038,7 +2047,7 @@ mod tests {
                 let slack = from_pango(prepared.slack) + 0.01;
                 for line in &lines {
                     assert!(
-                        line.x + line.width <= size.width + slack,
+                        line.x + line.width <= size.width.0 + slack,
                         "{:?} at {width}: {line:?}",
                         t.text
                     );
@@ -2233,7 +2242,7 @@ mod tests {
         assert_eq!(rects.len(), 1, "{rects:?}");
         let (x, y, w, h, r) = rects[0];
         assert!(
-            x > 0.0 && x + w < size.width && y >= 0.0 && h <= size.height,
+            x > 0.0 && x + w < size.width.0 && y >= 0.0 && h <= size.height.0,
             "{rects:?}"
         );
         assert_eq!(r, 4.0);
@@ -2257,10 +2266,10 @@ mod tests {
         let l = layout.downcast::<LinuxLayout>().unwrap();
         assert_eq!(l.lines.len(), 2);
         assert_eq!(l.caret_at(-5.0, 2.0), 0);
-        assert_eq!(l.caret_at(size.width + 20.0, 2.0), 15);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, 2.0), 15);
         // Below the text: the last line.
-        assert_eq!(l.caret_at(size.width + 20.0, size.height + 50.0), 22);
-        let mid = l.caret_at(size.width / 2.0, 2.0);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, size.height.0 + 50.0), 22);
+        let mid = l.caret_at((size.width / 2.0).0, 2.0);
         assert!(mid > 3 && mid < 12, "{mid}");
         // Nearest glyph edge: just right of a glyph's start is before it.
         let (gx, w, g, _) = l.line_glyphs(&l.lines[0]).nth(2).unwrap();
@@ -2282,7 +2291,7 @@ mod tests {
         let layout = engine.layout(&prepared, size);
         let l = layout.downcast::<LinuxLayout>().unwrap();
         // Right to left: the right edge is the start.
-        assert_eq!(l.caret_at(size.width + 5.0, 2.0), 0);
+        assert_eq!(l.caret_at(size.width.0 + 5.0, 2.0), 0);
         assert_eq!(l.caret_at(-5.0, 2.0), 9);
     }
 }

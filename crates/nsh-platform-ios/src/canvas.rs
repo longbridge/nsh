@@ -155,8 +155,8 @@ impl CanvasView {
         match damage {
             Damage::None => {}
             Damage::Rect(r) => self.setNeedsDisplayInRect(CGRect::new(
-                CGPoint::new(r.x as CGFloat, r.y as CGFloat),
-                CGSize::new(r.width as CGFloat, r.height as CGFloat),
+                CGPoint::new(r.origin.x.0 as CGFloat, r.origin.y.0 as CGFloat),
+                CGSize::new(r.size.width.0 as CGFloat, r.size.height.0 as CGFloat),
             )),
             Damage::All => self.setNeedsDisplay(),
         }

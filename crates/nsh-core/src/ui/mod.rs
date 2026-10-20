@@ -153,14 +153,16 @@ pub use self::{
     scrollable::Scrollable,
     services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     status_bar::StatusBarEntry,
-    style::{
-        AdaptiveColor, BorderCurve, FontWeight, Length, StyleRefinement, Styled, WritingDirection,
-        px, relative,
-    },
+    style::{AdaptiveColor, BorderCurve, FontWeight, StyleRefinement, Styled, WritingDirection},
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
     theme::{Theme, ThemeColors, ThemeError},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
+};
+/// The geometry Rust components style with (`crate::geometry`).
+pub use crate::geometry::{
+    AbsoluteLength, DefiniteLength, Length, Percentage, Points, Radians, Rems, auto, deg,
+    percentage, px, relative, rems,
 };
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow,
@@ -185,6 +187,7 @@ pub mod prelude {
     #[cfg(not(target_arch = "wasm32"))]
     pub use super::ambient::{background, blocking};
     pub use super::{
+        AbsoluteLength,
         AccessibilityRole,
         AccessibilityState,
         Accessible,
@@ -213,6 +216,7 @@ pub mod prelude {
         ContextMenuEvent,
         Cursor,
         Curve,
+        DefiniteLength,
         DialogAnswer,
         EaseMode,
         // Native animation values.
@@ -273,11 +277,15 @@ pub mod prelude {
         PanEvent,
         PanGesture,
         ParentElement,
+        Percentage,
         PointerEvents,
+        Points,
         Position,
         PropEnum,
         Props,
+        Radians,
         Registry,
+        Rems,
         ResizeMode,
         ResponderEvent,
         ReturnKeyType,
@@ -314,9 +322,11 @@ pub mod prelude {
         WritingDirection,
         asset,
         assets,
+        auto,
         black,
         canvas,
         class,
+        deg,
         hsl,
         hsla,
         image,
@@ -328,8 +338,10 @@ pub mod prelude {
         native,
         native_module,
         opaque_grey,
+        percentage,
         px,
         relative,
+        rems,
         rgb,
         rgba,
         screen,

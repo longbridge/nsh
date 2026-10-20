@@ -9,14 +9,15 @@ use std::{
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
-    Command, EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size,
+    Command, EventKind, EventPayload, MountBatch, MountItem, PayloadValue, Points, ROOT_ID, Size,
+    geometry::px,
 };
 use nsh_engine::Engine;
 
 use crate::common::{Screen, drain, press, shows, start_with};
 
-const PHONE: Size = Size::new(390.0, 844.0);
-const WINDOW: Size = Size::new(1200.0, 800.0);
+const PHONE: Size<Points> = Size::new(px(390.0), px(844.0));
+const WINDOW: Size<Points> = Size::new(px(1200.0), px(800.0));
 
 /// An empty data directory of the test's own, under the temporary
 /// directory (never the user's).
@@ -28,7 +29,7 @@ fn data_dir(name: &str) -> PathBuf {
 }
 
 /// The gallery keeping its data in `dir`, once it has settled.
-fn run(viewport: Size, dir: &Path) -> (Engine, Receiver<MountBatch>, Screen) {
+fn run(viewport: Size<Points>, dir: &Path) -> (Engine, Receiver<MountBatch>, Screen) {
     let (engine, rx) = start_with(viewport, Some(dir.to_path_buf()));
     let mut screen = Screen::default();
     drain(&rx, &mut screen);

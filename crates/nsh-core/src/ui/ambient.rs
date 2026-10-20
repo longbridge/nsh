@@ -25,7 +25,7 @@ use super::{
     task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
 };
 use crate::{
-    Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Size, StatusBarSetting,
+    Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size, StatusBarSetting,
     canvas::CanvasFont,
     color::Hsla,
     platform::{Appearance, Idiom, Locale, Os},
@@ -62,9 +62,9 @@ impl Ambient {
 /// the readers of the parts that changed).
 struct EnvSignals {
     env: Signal<Environment>,
-    window: Memo<Size>,
+    window: Memo<Size<Points>>,
     safe_area: Memo<EdgeInsets>,
-    title_bar: Memo<crate::platform::Insets>,
+    title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
     keyboard_height: Memo<f32>,
     keyboard_duration: Memo<f32>,
     dark: Memo<bool>,
@@ -192,7 +192,7 @@ fn act(action: Action) {
 // --- The environment ---------------------------------------------------------
 
 /// The surface's size in points (TS: `windowSize()`).
-pub fn window() -> Size {
+pub fn window() -> Size<Points> {
     env(|e| e.window)
 }
 
@@ -811,7 +811,7 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
     cleanup(move || drop(subscription));
 }
 
-pub(crate) fn title_bar() -> crate::platform::Insets {
+pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
 }
 
