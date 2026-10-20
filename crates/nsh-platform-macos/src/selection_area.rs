@@ -182,7 +182,8 @@ struct Active {
 
 impl Active {
     fn area(&self) -> Option<NshView> {
-        NshView::from_ns(&self.area.load()?)
+        let view = self.area.load()?;
+        NshView::from_ns(&view)
     }
 
     /// Sets each text's part of the selection, and clears it where the
