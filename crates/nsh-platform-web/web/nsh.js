@@ -510,6 +510,12 @@ class Player {
   }
 
   async load(url) {
+    // An app's crates that call JS through wasm-bindgen (web-sys, js-sys):
+    // the CLI ran `wasm-bindgen --target web` on the runtime, and its glue
+    // provides the module's other imports. It loads while the module
+    // compiles; a failed compile does not leave its rejection unhandled.
+    const glueLoad = this.options.glue ? importGlue(this.options.glue) : null;
+    glueLoad?.catch(() => {});
     const imports = {
       env: {
         __rquickjs_host_now_us: () => Date.now() * 1000,
@@ -619,12 +625,6 @@ class Player {
         }),
       },
     };
-    // An app's crates that call JS through wasm-bindgen (web-sys, js-sys):
-    // the CLI ran `wasm-bindgen --target web` on the runtime, and its glue
-    // provides the module's other imports. It loads while the module
-    // compiles; a failed compile does not leave its rejection unhandled.
-    const glueLoad = this.options.glue ? importGlue(this.options.glue) : null;
-    glueLoad?.catch(() => {});
     // One request either way: a host that does not serve exactly
     // `application/wasm` (streaming compilation rejects any other type,
     // parameters such as `; charset=utf-8` included) gets the body compiled
