@@ -3576,6 +3576,41 @@ fn checked_style_follows_the_accessibility_state() {
 }
 
 #[test]
+fn projected_states_style_a_part_without_its_accessibility() {
+    use crate::tailwind::state;
+    // A switch's thumb: styled by the switch's value and disabled state,
+    // with no accessibility state or listeners of its own.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "h-4 w-4 checked:translate-x-4 disabled:opacity-50",
+    );
+    let projected = |states| Op::SetProp {
+        id: 2,
+        prop: Prop::ProjectedStates(states),
+    };
+    apply(&mut c, vec![projected(state::CHECKED | state::DISABLED)]);
+    let batch = c.commit().unwrap();
+    let thumb = view_style_of(&batch, 2).unwrap();
+    assert_eq!(thumb.transform.ops()[0].value, 16.0);
+    assert_eq!(thumb.opacity, 0.5);
+    assert!(
+        !batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::ViewProps { id: 2, .. } | MountItem::Events { id: 2, .. }
+        )),
+        "{:?}",
+        batch.items
+    );
+    apply(&mut c, vec![projected(0)]);
+    let batch = c.commit().unwrap();
+    let thumb = view_style_of(&batch, 2).unwrap();
+    assert!(thumb.transform.ops().is_empty());
+    assert_eq!(thumb.opacity, 1.0);
+}
+
+#[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
     let accessory = |batch: &MountBatch| {

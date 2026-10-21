@@ -3021,7 +3021,8 @@ pub trait Styled: Sized {
 
     /// Styles while checked (Tailwind's `checked:`): the element's
     /// accessibility state says so, not mixed (a checkbox's, a switch's, a
-    /// radio's).
+    /// radio's), or the control it is a part of is
+    /// (`Interactive::project_checked`: a switch's thumb).
     fn checked(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::CHECKED, s);

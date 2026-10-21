@@ -182,6 +182,9 @@ pub struct Attrs {
     pub(crate) class: Option<SharedString>,
     /// The view is a selection area ([`crate::selection`]).
     pub(crate) selection_area: bool,
+    /// The states it shows as its control's part
+    /// ([`Interactive::project_checked`]).
+    pub(crate) projected_states: u8,
     /// Where a JS renderer's content goes (the element is its
     /// placeholder: [`super::Renderer::render`]).
     pub(crate) render: Option<super::renderer::RenderAt>,
@@ -233,6 +236,9 @@ impl Attrs {
         }
         if self.selection_area != old.selection_area {
             out.push(Prop::SelectionArea(self.selection_area));
+        }
+        if self.projected_states != old.projected_states {
+            out.push(Prop::ProjectedStates(self.projected_states));
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -1463,6 +1469,38 @@ pub trait Interactive: Element {
             super::host::set_in(&mut a.props, Prop::CheckedStyle(patch))
         });
         self
+    }
+
+    /// Styles it as checked while `checked` holds (its `checked:` classes
+    /// and [`Self::checked_style`]), as a part of a control that is: a
+    /// switch's track and thumb, a checkbox's mark (`gpui-base`'s
+    /// `SwitchThumb::new(checked)`). Screen readers hear it from the
+    /// control alone, so the part is no second checkable element.
+    fn project_checked(mut self, checked: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(checked, |a, checked| {
+            project(a, crate::tailwind::state::CHECKED, checked)
+        });
+        self
+    }
+
+    /// Styles it as disabled while `disabled` holds (its `disabled:`
+    /// classes and [`Self::disabled_style`]), as a part of a disabled
+    /// control (`gpui-base`'s `SwitchThumb::disabled`). The control takes
+    /// no presses and tells screen readers; the part keeps its own.
+    fn project_disabled(mut self, disabled: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(disabled, |a, disabled| {
+            project(a, crate::tailwind::state::DISABLED, disabled)
+        });
+        self
+    }
+}
+
+/// Sets or clears `bit` of the states an element shows as a part.
+fn project(a: &mut Attrs, bit: u8, on: bool) {
+    if on {
+        a.projected_states |= bit;
+    } else {
+        a.projected_states &= !bit;
     }
 }
 

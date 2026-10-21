@@ -23,7 +23,10 @@
   win, `disabled` over all. `selected` and `checked` are value states the core sets from the accessibility state
   (never reported by the platform), below the interaction states: `checked`, then `selected`, then `hover`, `focus`,
   `active` (gpui-base's order of value states). `disabled` (any element) applies `disabled:` and drops
-  the node's press listeners from what is mounted, so it shows no press feedback either. `dark:` follows the appearance
+  the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
+  shows its control's `checked` and `disabled` to its own classes and state styles (`Interactive::project_checked`,
+  `project_disabled`; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
+  state or press change on the part, so screen readers hear the control alone. `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown

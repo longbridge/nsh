@@ -243,6 +243,16 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The states `key` shows as a part of a control: its classes and
+    /// state styles read them, its events and accessibility do not.
+    pub(super) fn set_projected_states(&mut self, key: Key, states: u8) {
+        let node = &mut self.nodes[key as usize];
+        if node.projected != states {
+            node.projected = states;
+            self.states_changed(key);
+        }
+    }
+
     /// The view style of `key` as platforms take it: fractional
     /// translations resolved.
     pub(super) fn mounted_view_style(&self, key: Key) -> Box<ViewStyle> {
@@ -652,7 +662,9 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let n = &self.nodes[k as usize];
-            if n.states != 0 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty()) {
+            if n.states | n.projected != 0
+                && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty())
+            {
                 break;
             }
             k = n.parent;
@@ -726,7 +738,7 @@ impl<M: TextEngine> Core<M> {
                 .as_ref()
                 .is_some_and(|c| c.groups().iter().any(|g| **g == *name))
             {
-                return node.states;
+                return node.states | node.projected;
             }
             k = node.parent;
         }
@@ -751,7 +763,7 @@ impl<M: TextEngine> Core<M> {
                 env: self.class_env,
                 window,
                 rtl: node.rtl,
-                states: node.states,
+                states: node.states | node.projected,
                 position: pos,
                 group: &group,
             };

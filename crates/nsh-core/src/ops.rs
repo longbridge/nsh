@@ -1460,6 +1460,13 @@ pub enum Prop {
     /// `checkedStyle`: the style while `accessibilityState.checked` (true,
     /// not mixed: a checkbox's, a switch's, a radio's), and not disabled.
     CheckedStyle(Option<Arc<StylePatch>>),
+    /// The states a part of a control shows its classes and state styles
+    /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
+    /// `disabled`): a switch's thumb styled `checked:` while the switch is
+    /// on. They tell screen readers nothing and take no presses away: the
+    /// control announces and handles them. Set by components
+    /// (`Interactive::project_checked`, `project_disabled`), never by JS.
+    ProjectedStates(u8),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
     HeaderStyle(Option<Arc<StylePatch>>),

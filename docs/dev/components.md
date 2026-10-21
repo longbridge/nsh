@@ -597,7 +597,11 @@ it changes, and they are resolved again when the tokens change (`Components::app
   rules on the view's interaction states (Tailwind's ranks): press feedback is native. On a nested component's element
   they style its root. `.group()` makes a view a group and `.group_active(|s| ..)`
   (`_hover`, `_focus_within`, `_named` for `group/name`) styles what is inside it by the group's states;
-  `.dark(|s| ..)` styles what is not a color in dark appearance. Nested variants all have to hold.
+  `.dark(|s| ..)` styles what is not a color in dark appearance. Nested variants all have to hold. A part of a control
+  shows the control's value and disabled state to its own classes and state styles with
+  `.project_checked(props.checked)` / `.project_disabled(props.disabled)` (`gpui-base`'s `SwitchThumb::new(checked)`):
+  the app writes `checked:` / `disabled:` in the part's class, and only the control's root is an accessibility
+  element.
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).

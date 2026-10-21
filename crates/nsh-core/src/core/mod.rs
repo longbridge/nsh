@@ -372,6 +372,9 @@ struct Node {
     states: u8,
     /// States the platform reports for the view.
     tracked: u8,
+    /// States it shows as a part of a control (`Prop::ProjectedStates`):
+    /// its classes read them with its own, nothing else does.
+    projected: u8,
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
@@ -478,6 +481,7 @@ impl Node {
             class_props: None,
             states: 0,
             tracked: 0,
+            projected: 0,
             parts: None,
             positional_children: false,
             insets: None,
@@ -2234,6 +2238,10 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::CheckedStyle(patch) => {
                 self.set_part_style(key, classes::Part::Checked, patch);
+                return Ok(());
+            }
+            Prop::ProjectedStates(states) => {
+                self.set_projected_states(key, states);
                 return Ok(());
             }
             Prop::HeaderStyle(patch) => {
