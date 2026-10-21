@@ -866,8 +866,10 @@ impl Agent {
         // When an animation last ran: what it ends with (a screen popped
         // once it slid out) comes after it.
         let mut moved = start;
+        let mut first = None;
         loop {
             let activity = self.scene.activity()?;
+            let first = *first.get_or_insert(activity.batches);
             if self.native.animating() {
                 moved = Instant::now();
             }
@@ -877,7 +879,18 @@ impl Agent {
                 .since_last
                 .map_or(start.elapsed(), |d| d.min(start.elapsed()))
                 .min(moved.elapsed());
-            if since >= QUIET || start.elapsed() >= SETTLE {
+            if since >= QUIET {
+                break;
+            }
+            if start.elapsed() >= SETTLE {
+                // The step goes on all the same; why it waited this long
+                // tells why a run is slow.
+                log::info!(
+                    "test agent: the app did not settle in {} s: {} batches came, an animation ran {} ms ago",
+                    SETTLE.as_secs(),
+                    activity.batches - first,
+                    moved.elapsed().as_millis()
+                );
                 break;
             }
             self.scene.wait_for_batch(activity.batches, POLL);
