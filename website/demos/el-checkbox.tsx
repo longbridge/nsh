@@ -1,12 +1,11 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
 import { Checkbox } from "nsh/base";
-import { platform } from "nsh/device";
-import { ui } from "./palette";
+import { desktop, Log, Panel, size, Split, ui } from "./palette";
 
 // The parts: geometry in classes (`disabled:` dims the row, following the
 // checkbox; `group-checked:` / `group-indeterminate:` show the mark of the
 // indicator's state), colors from the palette by the value the app owns.
-const row = "flex-row items-center gap-3 px-4 py-3 active:opacity-70 disabled:opacity-40";
+const row = `flex-row items-center gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`;
 const indicator = "group size-5 items-center justify-center rounded-md border transition-colors";
 
 /** The indicator's surface: the accent while checked or indeterminate. */
@@ -31,17 +30,8 @@ const items = [
 function Label(props: { label: string; detail: string; strong?: boolean }) {
   return (
     <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: 15, fontWeight: props.strong ? "600" : "500", color: ui().text }}>{props.label}</Text>
-      <Text style={{ fontSize: 12, color: ui().muted }}>{props.detail}</Text>
-    </View>
-  );
-}
-
-function Panel(props: { title: string; children: JSX.Element; minHeight?: number }) {
-  return (
-    <View style={{ ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight }}>
-      <Text style={{ fontSize: 12, color: ui().muted }}>{props.title}</Text>
-      {props.children}
+      <Text style={{ fontSize: size.label, fontWeight: props.strong ? "600" : "500", color: ui().text }}>{props.label}</Text>
+      <Text style={{ fontSize: size.detail, color: ui().muted }}>{props.detail}</Text>
     </View>
   );
 }
@@ -52,15 +42,27 @@ function App() {
   const log = (e: string) => events.set([e, ...events()].slice(0, 3));
   const all = () => selected().length === items.length;
   const some = () => selected().length > 0 && !all();
-  const line = () => <View style={{ height: 1, marginLeft: 48, backgroundColor: ui().line }} />;
+  const line = () => <View style={{ height: 1, marginLeft: desktop ? 44 : 48, backgroundColor: ui().line }} />;
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>checkbox</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Click a row, or Tab to a checkbox and press Space" : "Tap a row: the label toggles it too"}
+        {desktop ? "Click a row, or Tab to a checkbox and press Space" : "Tap a row: the label toggles it too"}
       </Text>
 
-      <View style={{ maxWidth: 390, gap: 14 }}>
+      <Split
+        gap={14}
+        inspector={
+          <>
+            <Panel title="checked · indeterminate">
+              <Text style={{ fontSize: 13, color: ui().text }}>
+                Back up everything: {all() ? "checked" : some() ? "indeterminate" : "unchecked"} · [{selected().join(", ")}]
+              </Text>
+            </Panel>
+            <Log title="onChange(checked)" lines={events()} minHeight={92} />
+          </>
+        }
+      >
         <View style={{ ...ui().card, borderRadius: 16, overflow: "hidden" }}>
           <Checkbox
             checked={all()}
@@ -87,7 +89,7 @@ function App() {
                     log(`${item().label} → ${next}`);
                   }}
                   class={row}
-                        indicatorClass={indicator}
+                  indicatorClass={indicator}
                   indicatorStyle={box(selected().includes(item().id))}
                   indicator={mark()}
                 >
@@ -103,16 +105,7 @@ function App() {
             <Label label="System settings" detail="Always backed up" />
           </Checkbox>
         </View>
-
-        <Panel title="checked · indeterminate">
-          <Text style={{ fontSize: 13, color: ui().text }}>
-            Back up everything: {all() ? "checked" : some() ? "indeterminate" : "unchecked"} · [{selected().join(", ")}]
-          </Text>
-        </Panel>
-        <Panel title="onChange(checked)" minHeight={92}>
-          <Each of={events()}>{(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}</Each>
-        </Panel>
-      </View>
+      </Split>
     </View>
   );
 }

@@ -1,7 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
-import { platform } from "nsh/device";
-import { tint, ui } from "./palette";
+import { desktop, Log, size, Split, tint, ui } from "./palette";
 
 // What each section shows: the app switches the content by its own value.
 const sections = [
@@ -49,12 +48,12 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>tabs</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Click a tab, or Tab to one and press Space" : "Tap a tab to show its section"}
+        {desktop ? "Click a tab, or Tab to one and press Space" : "Tap a tab to show its section"}
       </Text>
 
-      <View style={{ maxWidth: 390, gap: 14 }}>
+      <Split gap={14} inspector={<Log title={`onPress · ${section()}, ${folder()}`} lines={events()} minHeight={76} />}>
         {/* A segmented tab list: each tab is a segment, `selectedStyle` raises the selected one. */}
-        <Tabs style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset }}>
+        <Tabs style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset, ...(desktop ? { alignSelf: "flex-start" } : {}) }}>
           <Each of={sections}>
             {(s) => (
               <Tab
@@ -63,7 +62,11 @@ function App() {
                   section.set(s().id);
                   log(`${s().label} pressed`);
                 }}
-                style={{ flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }}
+                style={
+                  desktop
+                    ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                    : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                }
                 selectedStyle={ui().raised}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: section() === s().id ? ui().text : ui().muted }}>
@@ -79,9 +82,15 @@ function App() {
           <Each of={current().rows}>
             {(row, i) => (
               <>
-                {i() > 0 ? <View style={{ height: 1, marginLeft: 16, backgroundColor: ui().line }} /> : null}
-                <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 }}>
-                  <Text style={{ flex: 1, fontSize: 15, color: ui().text }}>{row()[0]}</Text>
+                {i() > 0 ? <View style={{ height: 1, marginLeft: desktop ? 12 : 16, backgroundColor: ui().line }} /> : null}
+                <View
+                  style={
+                    desktop
+                      ? { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, height: size.row }
+                      : { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 }
+                  }
+                >
+                  <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>{row()[0]}</Text>
                   <Text style={{ fontSize: 14, fontWeight: "600", fontVariant: ["tabular-nums"], color: ui().muted }}>{row()[1]}</Text>
                 </View>
               </>
@@ -101,7 +110,7 @@ function App() {
                   log(`${f().label} pressed`);
                 }}
                 class="active:opacity-70 disabled:opacity-40"
-                style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 30, paddingHorizontal: 12, borderRadius: 8 }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6, height: desktop ? size.controlSm : 30, paddingHorizontal: desktop ? 10 : 12, borderRadius: 8 }}
                 selectedStyle={{ backgroundColor: tint(ui().accent, 0.16) }}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: folder() === f().id ? ui().accent : ui().muted }}>
@@ -114,16 +123,7 @@ function App() {
             )}
           </Each>
         </Tabs>
-
-        <View style={{ ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: 76 }}>
-          <Text style={{ fontSize: 12, color: ui().muted }}>
-            onPress · {section()}, {folder()}
-          </Text>
-          <Each of={events()}>
-            {(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}
-          </Each>
-        </View>
-      </View>
+      </Split>
     </View>
   );
 }
