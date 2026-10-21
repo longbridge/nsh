@@ -9,8 +9,8 @@ import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, 
 // Fixed photos (in color), large enough to stay sharp at 3x.
 const wide = "https://picsum.photos/id/1015/1200/600";
 const photo = (id: number, w: number, h: number) => `https://picsum.photos/id/${id}/${w}/${h}`;
-// A remote SVG (Wikimedia Commons' SVG logo).
-const remoteSvg = "https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg";
+// A remote SVG (the W3C's SVG logo).
+const remoteSvg = "https://www.w3.org/Icons/SVG/svg-logo.svg";
 
 /** Every photo's frame: rounded, a hairline border, a raised fill while it loads. */
 const frame = () => ({ borderRadius: radius.control, borderCurve: "continuous", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.raised }) as const;
