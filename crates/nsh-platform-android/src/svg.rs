@@ -5,16 +5,17 @@
 
 use jni::{
     JNIEnv,
-    objects::{JByteArray, JClass, JIntArray},
+    objects::{JByteArray, JClass, JFloatArray, JIntArray},
     sys::{jfloat, jint},
 };
 
-/// `Native.svg(bytes, maxPx, density, size)`: draws the SVG `bytes` for a
+/// `Native.svg(bytes, maxPx, density, size, intrinsic)`: draws the SVG `bytes` for a
 /// view `max_px` pixels on its longer side, with its shorter side that
 /// long, so it stays sharp in every resize mode (0: at its intrinsic size,
 /// `density` pixels per point), as premultiplied RGBA, and sets `size` to
 /// the raster's width and height and the SVG's intrinsic size in whole
-/// points; `max_px` below 0 only measures (an empty array). Null when the
+/// points, and `intrinsic` to its unrounded size in points; `max_px` below
+/// 0 only measures (an empty array). Null when the
 /// bytes are not an SVG or not a valid one. Called on the image threads.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_svg<'local>(
@@ -24,6 +25,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_svg<'local>(
     max_px: jint,
     density: jfloat,
     size: JIntArray<'local>,
+    intrinsic: JFloatArray<'local>,
 ) -> JByteArray<'local> {
     let Ok(bytes) = env.convert_byte_array(&bytes) else {
         return JByteArray::default();
@@ -47,6 +49,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_svg<'local>(
             return JByteArray::default();
         }
     };
+    if env
+        .set_float_array_region(&intrinsic, 0, &[points.width.0, points.height.0])
+        .is_err()
+    {
+        return JByteArray::default();
+    }
     let reported = nsh_core::svg::reported_size(points);
     let sizes = [
         width as jint,

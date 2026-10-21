@@ -47,16 +47,20 @@ final class Images {
         final int width, height;
         /** An SVG drawn into a bitmap: {@code width} and {@code height} are its size in points. */
         final boolean vector;
+        /** Unrounded intrinsic SVG size in points, used for drawing. */
+        final float intrinsicWidth, intrinsicHeight;
 
         Image(Object content, int width, int height) {
-            this(content, width, height, false);
+            this(content, width, height, false, 0, 0);
         }
 
-        Image(Object content, int width, int height, boolean vector) {
+        Image(Object content, int width, int height, boolean vector, float intrinsicWidth, float intrinsicHeight) {
             this.content = content;
             this.width = width;
             this.height = height;
             this.vector = vector;
+            this.intrinsicWidth = intrinsicWidth;
+            this.intrinsicHeight = intrinsicHeight;
         }
     }
 
@@ -210,7 +214,7 @@ final class Images {
                     int[] size = new int[4];
                     boolean svg;
                     try {
-                        svg = Native.svg(bytes, -1, 0, size) != null;
+                        svg = Native.svg(bytes, -1, 0, size, new float[2]) != null;
                     } catch (Throwable e) {
                         String error = String.valueOf(e);
                         main.post(() -> info.done(0, 0, error));
@@ -282,12 +286,13 @@ final class Images {
     private static Image decodeSvg(byte[] bytes, int maxPx, int blurPx) {
         int[] size = new int[4];
         float density = android.content.res.Resources.getSystem().getDisplayMetrics().density;
-        byte[] pixels = Native.svg(bytes, maxPx, density, size);
+        float[] intrinsic = new float[2];
+        byte[] pixels = Native.svg(bytes, maxPx, density, size, intrinsic);
         if (pixels == null) return null;
         Bitmap bitmap = Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888);
         bitmap.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(pixels));
         if (blurPx > 0) bitmap = Blur.blurred(bitmap, blurPx);
-        return new Image(bitmap, size[2], size[3], true);
+        return new Image(bitmap, size[2], size[3], true, intrinsic[0], intrinsic[1]);
     }
 
     /** GIF, animated WebP (VP8X with the animation flag) or APNG (acTL). */
