@@ -70,4 +70,5 @@ name, test id and selected state (`Drawing::nodes`, sent with the drawing). A pr
 a pointer there makes it: it goes to the view under that point that takes presses, so a canvas drawn over the view that
 handles presses (`pointerEvents: "none"`) keeps working. The GPUI backend makes them AccessKit nodes (`access.rs`
 `canvas_nodes`, no actions of their own) and the headless driver views of its model (`label:`, `text:`, `id:` and
-`role:` find them, `press` presses under them); the other backends do not show them yet.
+`role:` find them, `press` presses under them, `Screen::selected` reads their selected state as it reads a view's);
+the other backends do not show them yet.

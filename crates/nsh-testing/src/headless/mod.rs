@@ -1355,6 +1355,8 @@ mod tests {
         app.wait_for("id:cell-b1").unwrap();
         assert_eq!(app.screen().count("label:Total"), Ok(1));
         assert!(app.shows("12"));
+        assert_eq!(app.screen().selected("id:cell-b1"), Ok(true));
+        assert_eq!(app.screen().selected("id:cell-a1"), Ok(false));
         app.press("id:cell-b1").unwrap();
         app.wait_for("pressed: 1").unwrap();
         app.press("text:12").unwrap();
