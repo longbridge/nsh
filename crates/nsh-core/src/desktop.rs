@@ -25,6 +25,20 @@ pub enum TitleBarStyle {
     Hidden,
 }
 
+/// When the window's menu bar shows (`Window.setMenuBar`), where the app's
+/// window draws one (the GPUI backend on Windows and Linux).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum MenuBarMode {
+    /// Always, above the app.
+    #[default]
+    Shown,
+    /// Hidden until Alt is pressed and released alone, which shows it until
+    /// Alt alone hides it again. F10 and Alt with a menu's initial open a
+    /// menu, and the bar shows while it is open.
+    #[prop(rename = "autoHide")]
+    AutoHide,
+}
+
 /// A window's frame (`Window.setFrame`): the part of it to move, in
 /// points, in screen coordinates; a field left out keeps its value. TS
 /// gives `origin` (`x`, `y`) and `size` (`width`, `height`) as
@@ -703,6 +717,8 @@ pub enum DesktopCommand {
     /// Windows and Linux; not shown there while the title bar is hidden,
     /// its shortcuts still work); `None` restores the platform's default.
     SetMenu(Option<Arc<[MenuItem]>>),
+    /// When the menu bar the window draws for the application menu shows.
+    SetMenuBar(MenuBarMode),
     /// Shows a context menu at `at` (root coordinates, points) or at the
     /// pointer.
     PopupMenu {

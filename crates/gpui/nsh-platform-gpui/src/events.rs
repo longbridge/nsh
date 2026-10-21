@@ -330,7 +330,11 @@ pub(crate) fn install(
 
     let s = surface.clone();
     window.on_key_event(move |e: &KeyDownEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || crate::native::focused(&s, window) {
+        if phase != DispatchPhase::Bubble {
+            return;
+        }
+        crate::chrome::key_pressed(&s);
+        if crate::native::focused(&s, window) {
             return;
         }
         let Some(vk) = crate::keys::vk_of(&e.keystroke.key) else {
@@ -371,7 +375,12 @@ pub(crate) fn install(
         );
         crate::rt::flush(cx);
     });
-    // The keymap's held key (see `crate::keymap::forget_held`).
+    // The keymap's held key (see `crate::keymap::forget_held`), and Alt
+    // alone showing a menu bar that hides itself.
     let s = surface.clone();
-    window.on_modifiers_changed(move |_, _, _| crate::keymap::forget_held(&s));
+    window.on_modifiers_changed(move |e, _, cx| {
+        crate::keymap::forget_held(&s);
+        crate::chrome::modifiers_changed(&s, &crate::keys::modifiers(&e.modifiers));
+        crate::rt::flush(cx);
+    });
 }
