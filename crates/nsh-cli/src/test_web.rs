@@ -341,6 +341,11 @@ impl Native for WebNative {
     }
 
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        // From next to it, as a mouse arrives: the browser reports no move
+        // to where the mouse already is (scrolling into view can leave it
+        // there, the page moving under it).
+        let near = Point::new(at.x - Points(1.0), at.y - Points(1.0));
+        self.mouse("mouseMoved", near, 0);
         self.mouse("mouseMoved", at, 0);
         Ok(())
     }
