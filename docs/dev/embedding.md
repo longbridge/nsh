@@ -43,7 +43,9 @@
   `MountItem::Component { name }` and `ComponentProps` (all props, then the changed ones). The component fills the box,
   emits events (`ComponentContext::emit` → `onNativeEvent` `{ name, data }` → the `on<Name>` handler) and may report
   its own size (`set_size`; the leaf measures to it where the style leaves a dimension open, like an image's natural
-  size). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
+  size). A component is destroyed once, when its element is deleted or its app stops: on Android a stopped engine
+  sends no `Delete`, so `NshView.destroy()` and a load replacing the app (`Host::load` → `NshView.appStopped`) call
+  `NshComponent.destroy()` on every component still alive (`Mounter.destroyComponents`). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
   cross the C ABI / JNI as JSON text (Swift `JSONSerialization`, Java `org.json` as maps and lists). Registered
   components are the embedding app's own code: capabilities do not apply to them.
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element

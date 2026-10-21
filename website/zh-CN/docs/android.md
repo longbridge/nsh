@@ -167,7 +167,7 @@ setContentView(column);
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
 | `connectDevServer(String url)` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用 release 版 AAR 时返回 `false`。 |
 | `handleBack()` | 让应用处理返回键（关闭对话框、弹出页面、执行 `BackHandler` 监听器）；返回它是否处理了。 |
-| `destroy()` | 停止应用。此后该视图不能再使用。 |
+| `destroy()` | 停止应用，并对它的每个原生组件调用 `destroy()`。此后该视图不能再使用。 |
 
 > [!IMPORTANT]
 > 编译字节码（`.nshc`）只能从 APK 自身的 assets 或签名包中加载。存储上的文件可能被替换，而 QuickJS 不校验字节码，所以

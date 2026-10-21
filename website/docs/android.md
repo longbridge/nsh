@@ -174,7 +174,7 @@ again replaces the running app. The complete sample is
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
 | `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
-| `destroy()` | Stops the app. The view can no longer be used. |
+| `destroy()` | Stops the app and calls `destroy()` on each of its native components. The view can no longer be used. |
 
 > [!IMPORTANT]
 > Compiled bytecode (`.nshc`) only loads from the APK's own assets or from a signed package. Files on storage can be replaced,

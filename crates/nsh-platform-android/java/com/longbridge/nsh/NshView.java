@@ -327,12 +327,26 @@ public class NshView extends FrameLayout {
         return Native.connectDevServer(handle, url);
     }
 
-    /** Stops the app. The view can no longer be used. */
+    /**
+     * Stops the app and calls {@link NshComponent#destroy} on each of its
+     * native components. The view can no longer be used.
+     */
     public void destroy() {
         if (handle != 0) {
             Native.destroy(handle);
             handle = 0;
         }
+        mounter.destroyComponents();
+    }
+
+    /**
+     * Called by the native side when the running app stopped because another
+     * one replaced it ({@code Host::load}). Batches the old app sent before
+     * are already queued, so its components go after them and before the
+     * new app's first batch.
+     */
+    void appStopped() {
+        main.post(mounter::destroyComponents);
     }
 
     @Override

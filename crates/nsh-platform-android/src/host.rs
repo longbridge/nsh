@@ -116,7 +116,13 @@ impl Host {
         }
         // Stop the old engine first: its batches must not reach the new app.
         *self.answers.lock().expect("answers") = None;
-        drop(self.engine.lock().expect("engine").take());
+        let old = self.engine.lock().expect("engine").take();
+        if let Some(old) = old {
+            drop(old);
+            // No `Delete` follows for its views: its native components
+            // are told here (`NshComponent.destroy`).
+            self.app_stopped();
+        }
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
         *self.ui.lock().expect("ui") = UiAnimation::default();
         #[allow(unused_mut)]
@@ -169,6 +175,22 @@ impl Host {
             }
             None => false,
         }
+    }
+
+    /// Tells Java the running app stopped for another one.
+    fn app_stopped(&self) {
+        with_env(|env| {
+            // SAFETY: matches the signature checked in `java::init`.
+            unsafe {
+                env.call_method_unchecked(
+                    self.view.as_obj(),
+                    java().view_app_stopped,
+                    ReturnType::Primitive(Primitive::Void),
+                    &[],
+                )
+            }
+            .map(|_| ())
+        });
     }
 
     pub(crate) fn report_error(&self, message: &str) {
