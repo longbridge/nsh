@@ -254,11 +254,16 @@ impl Attrs {
 /// A nested component's props, with their type erased.
 pub(crate) trait AnyProps {
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn clone_box(&self) -> Box<dyn AnyProps>;
 }
 
 impl<P: Clone + 'static> AnyProps for P {
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
@@ -1787,13 +1792,35 @@ impl IntoElement for Children {
 /// [`Styled::checked`]) follow the states of that root, as an app's
 /// `active:` / `hover:` classes on a TSX component do. It hears and is to
 /// assistive technologies what the component says (its events and props):
-/// it is not [`Interactive`] or [`Accessible`].
+/// it is not [`Interactive`] or [`Accessible`]. The element a
+/// `#[component]`'s constructor makes (`button()`) wraps one
+/// ([`ComponentBuilder`]).
 pub struct ComponentElement<C: Component> {
     node: ElNode,
     _component: PhantomData<fn() -> C>,
 }
 
 impl<C: Component> ComponentElement<C> {
+    /// The element of `C` given `props`: what a component's constructor
+    /// (`button()`) and [`Component::element`] start from.
+    #[doc(hidden)]
+    pub fn __new(props: C::Props) -> Self {
+        Self::new(props)
+    }
+
+    /// Its props, for the setters a `#[component]` makes on its element.
+    #[doc(hidden)]
+    pub fn __props_mut(&mut self) -> &mut C::Props {
+        match &mut self.node.kind {
+            ElKind::Component(c) => c
+                .props
+                .as_any_mut()
+                .downcast_mut::<C::Props>()
+                .expect("a component element holds its component's props"),
+            _ => unreachable!("a component element is a component's"),
+        }
+    }
+
     pub(crate) fn new(props: C::Props) -> Self {
         let mut node = ElNode::new(Tag::View);
         node.kind = ElKind::Component(ComponentEl {
@@ -1880,7 +1907,10 @@ impl<C: Component> ComponentElement<C> {
     }
 
     /// Handles its events (they then do not reach the app). Given several
-    /// times, every listener hears them, in order.
+    /// times, every listener hears them, in order. The element a
+    /// `#[component]`'s constructor makes has a listener method per event
+    /// instead (`.on_press(..)`: [`ComponentBuilder`]); this stays for
+    /// components implemented by hand.
     pub fn on_event<M>(mut self, listener: impl IntoListener<C::Event, M>) -> Self {
         let listener = listener.into_listener();
         if let ElKind::Component(c) = &mut self.node.kind {
@@ -1890,6 +1920,141 @@ impl<C: Component> ComponentElement<C> {
                 }
             }));
         }
+        self
+    }
+
+    /// Handles the events `pick` picks, with the data it gives: the listener
+    /// method of one event (`on_press`) that `#[derive(Event)]` generates
+    /// calls it.
+    #[doc(hidden)]
+    pub fn __on_variant<T: ?Sized + 'static, M>(
+        self,
+        pick: fn(&C::Event) -> Option<&T>,
+        listener: impl IntoListener<T, M>,
+    ) -> Self {
+        let listener = listener.into_listener();
+        self.on_event(listener.wrap(move |inner, event: &C::Event| {
+            if let Some(data) = pick(event) {
+                inner(data);
+            }
+        }))
+    }
+}
+
+/// The element of a `#[component]`, as its constructor makes it: a
+/// component is made and set up in Rust as a primitive is (`view()`),
+/// as JSX does in TSX. `#[component] fn Picker` makes `picker()` (the
+/// function's name in snake case), which returns a `PickerElement` with
+/// each prop at its default and
+///
+/// - a setter per prop, named as its field (`.disabled(..)`): a value, a
+///   signal, a memo or a prop of the field's type, or a closure returning
+///   one (bound); an `Option<T>` prop takes a `T` (`.label("Pick one")`),
+///   a slot the content to fill it with (`.header(text(..))`), the
+///   children are its [`ParentElement::child`]ren;
+/// - a listener method per event, named as its TSX handler in snake case
+///   (`onSelect` is `.on_select(..)`): a unit variant's takes
+///   `move || ..`, a one-field variant's `move |value: &T| ..`, a
+///   named-field variant's the event itself;
+/// - styles ([`Styled`]: they go on the component's root), with this
+///   trait's for the root's states, and a
+///   [`ComponentRef`](super::ComponentRef).
+///
+/// A prop's setter comes before an element method of the same name (a
+/// component's `selected` prop before [`Styled::selected`], its `size`
+/// before [`Styled::size`]; call those as `Styled::selected(element, ..)`).
+///
+/// ```
+/// use nsh_core::ui::prelude::*;
+///
+/// /// The props of [`Picker`].
+/// #[derive(Clone, PartialEq, Props)]
+/// pub struct PickerProps {
+///     /// The options.
+///     pub options: Prop<Vec<SharedString>>,
+///     /// No presses.
+///     #[prop(default)]
+///     pub disabled: Prop<bool>,
+///     /// What screen readers say.
+///     pub label: Prop<Option<SharedString>>,
+/// }
+///
+/// /// What a [`Picker`] reports.
+/// #[derive(Event)]
+/// pub enum PickerEvent {
+///     /// Pressed.
+///     Press,
+///     /// An option was picked: its index.
+///     Select(u32),
+/// }
+///
+/// /// Picks an option.
+/// #[component]
+/// pub fn Picker(props: PickerProps, cx: Scope<PickerEvent>) -> impl IntoElement {
+///     view()
+///         .disabled(props.disabled)
+///         .on_press(move || cx.emit(PickerEvent::Select(0)))
+/// }
+///
+/// #[component]
+/// pub fn Form() -> impl IntoElement {
+///     let busy = signal(false);
+///     let picked = signal(None::<u32>);
+///     view().child(
+///         picker()
+///             .options(vec![SharedString::from("Tea"), "Coffee".into()])
+///             .disabled(move || busy.get())
+///             .label("Drink")
+///             .on_press(move || log::info!("pressed"))
+///             .on_select(move |&index: &u32| picked.set(Some(index)))
+///             .px_4()
+///             .active(|s| s.opacity(0.6)),
+///     )
+/// }
+/// ```
+pub trait ComponentBuilder: Element {
+    /// Its component.
+    type Component: Component;
+
+    /// The element it builds.
+    #[doc(hidden)]
+    fn __element(&mut self) -> &mut ComponentElement<Self::Component>;
+
+    /// Styles while its root is pressed (Tailwind's `active:`; TS: an
+    /// `active:` class or `activeStyle` given the component), applied
+    /// natively. The root follows presses when it handles them (a
+    /// [`Interactive::on_press`] of the component's view).
+    fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::ACTIVE, s);
+        self
+    }
+
+    /// Styles while a pointer hovers its root (`hover:`).
+    fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::HOVER, s);
+        self
+    }
+
+    /// Styles while its root has focus (`focus:`).
+    fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root is disabled (`disabled:`): the component's
+    /// view disables it ([`Interactive::disabled`], a `disabled` prop).
+    fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::DISABLED, s);
+        self
+    }
+
+    /// Puts `handle` on this component: its updates go to it.
+    fn component_ref(mut self, handle: &super::ComponentRef<Self::Component>) -> Self {
+        self.__element().node.attrs.element_ref = handle.element().target();
         self
     }
 }

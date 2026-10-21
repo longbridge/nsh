@@ -236,12 +236,10 @@ fn rust_components_navigate_with_native_stacks() {
 fn WithCard() -> impl IntoElement {
     let taps = signal(0);
     view().flex_1().child(
-        crate::test_ui::Card::element(crate::test_ui::CardProps::default())
-            .fill("header", text("card header"))
-            .child(
-                text(move || format!("card body {}", taps.get()))
-                    .on_press(move |_: &()| taps.update(|t| *t += 1)),
-            ),
+        crate::test_ui::card().header(text("card header")).child(
+            text(move || format!("card body {}", taps.get()))
+                .on_press(move |_: &()| taps.update(|t| *t += 1)),
+        ),
     )
 }
 
@@ -551,11 +549,9 @@ fn ButtonRows() -> impl IntoElement {
         .child(text(move || format!("pressed {:?}", pressed.get())))
         .child(
             virtual_list(20, move |at| {
-                crate::test_ui::Button::element(crate::test_ui::ButtonProps {
-                    title: Prop::bind(move || format!("row {}", at.index()).into()),
-                    ..Default::default()
-                })
-                .on_event(move |_: &crate::test_ui::ButtonEvent| pressed.set(Some(at.index())))
+                crate::test_ui::button()
+                    .title(move || format!("row {}", at.index()))
+                    .on_press(move || pressed.set(Some(at.index())))
             })
             .flex_1(),
         )
@@ -616,13 +612,7 @@ fn WithSheet() -> impl IntoElement {
     view()
         .flex_1()
         .child(text("open").on_press(move |_: &()| open.set(true)))
-        .child(
-            crate::test_ui::Sheet::element(crate::test_ui::SheetProps {
-                open: open.into(),
-                ..Default::default()
-            })
-            .child(text("sheet body")),
-        )
+        .child(crate::test_ui::sheet().open(open).child(text("sheet body")))
 }
 
 #[test]

@@ -9,9 +9,7 @@ use super::{
     glyphs::{GlyphName, glyph},
     scripts::{FileRef, Source, Tool, ToolKind, ToolState},
 };
-use crate::ui::{
-    Badge, Finish, Finished, IconName, MONO, PressProps, Tone, colors, icon, press_with, radius,
-};
+use crate::ui::{Badge, Finish, Finished, IconName, MONO, Tone, colors, icon, press, radius};
 
 /// A ring that spins natively, its arc in `tint` (a value, or bound).
 pub(crate) fn spinner(size: f32, tint: impl IntoReactive<AdaptiveColor>) -> View {
@@ -44,46 +42,44 @@ pub(crate) fn action_button(
     tone: Tone,
     on_press: impl Into<Listener<()>>,
 ) -> AnyElement {
-    press_with(
-        PressProps {
-            scale: 0.86.into(),
-            label: Some(label.into()).into(),
-            selected: active,
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
-        view()
-            .size(px(36.0))
-            .rounded(px(18.0))
-            .items_center()
-            .justify_center()
-            .m_1()
-            .child(
-                view()
-                    .absolute()
-                    .size(px(32.0))
-                    .rounded(px(16.0))
-                    .bg(move || {
-                        if active.get() {
-                            tone.tint()
-                        } else {
-                            AdaptiveColor::TRANSPARENT
-                        }
-                    })
-                    .transition_colors()
-                    .duration(180.0),
-            )
-            .child(glyph(name, 17.0, move || {
-                if active.get() {
-                    tone.color()
-                } else {
-                    colors::MUTED
-                }
-            })),
-    )
-    .into_element()
+    let name: Prop<GlyphName> = name.into();
+    let on_press: Listener<()> = on_press.into();
+    press()
+        .scale(0.86)
+        .label(label)
+        .selected(active)
+        .on_press(on_press)
+        .child(
+            view()
+                .size(px(36.0))
+                .rounded(px(18.0))
+                .items_center()
+                .justify_center()
+                .m_1()
+                .child(
+                    view()
+                        .absolute()
+                        .size(px(32.0))
+                        .rounded(px(16.0))
+                        .bg(move || {
+                            if active.get() {
+                                tone.tint()
+                            } else {
+                                AdaptiveColor::TRANSPARENT
+                            }
+                        })
+                        .transition_colors()
+                        .duration(180.0),
+                )
+                .child(glyph().name(name).size(17.0).tint(move || {
+                    if active.get() {
+                        tone.color()
+                    } else {
+                        colors::MUTED
+                    }
+                })),
+        )
+        .into_element()
 }
 
 /// A row between days.
@@ -129,7 +125,12 @@ pub(crate) fn file_chip(file: &FileRef, on_remove: Option<Listener<()>>) -> View
                 .bg(Tone::Danger.tint())
                 .items_center()
                 .justify_center()
-                .child(glyph(GlyphName::File, 16.0, colors::DANGER)),
+                .child(
+                    glyph()
+                        .name(GlyphName::File)
+                        .size(16.0)
+                        .tint(colors::DANGER),
+                ),
         )
         .child(
             view()
@@ -149,22 +150,23 @@ pub(crate) fn file_chip(file: &FileRef, on_remove: Option<Listener<()>>) -> View
                 ),
         )
         .children(on_remove.map(|remove| {
-            press_with(
-                PressProps {
-                    scale: 0.85.into(),
-                    label: Some("Remove file".into()).into(),
-                    ..PressProps::default()
-                },
-                remove,
-            )
-            .child(
-                view()
-                    .w(px(40.0))
-                    .h(px(44.0))
-                    .items_center()
-                    .justify_center()
-                    .child(glyph(GlyphName::Close, 14.0, colors::MUTED)),
-            )
+            press()
+                .scale(0.85)
+                .label("Remove file")
+                .on_press(remove)
+                .child(
+                    view()
+                        .w(px(40.0))
+                        .h(px(44.0))
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            glyph()
+                                .name(GlyphName::Close)
+                                .size(14.0)
+                                .tint(colors::MUTED),
+                        ),
+                )
         }))
 }
 
@@ -234,11 +236,12 @@ pub(crate) fn tool_card(tool: ReadSignal<Tool>) -> View {
                         .finish(Finish::Raised)
                         .border_1()
                         .border_color(colors::BORDER)
-                        .child(glyph(
-                            Prop::bind(move || head.with(|h| h.0)),
-                            16.0,
-                            colors::TEXT,
-                        )),
+                        .child(
+                            glyph()
+                                .name(move || head.with(|h| h.0))
+                                .size(16.0)
+                                .tint(colors::TEXT),
+                        ),
                 )
                 .child(
                     view()
@@ -463,6 +466,7 @@ pub(crate) fn error_row(
     message: impl IntoReactive<SharedString>,
     on_retry: impl Into<Listener<()>>,
 ) -> View {
+    let on_retry: Listener<()> = on_retry.into();
     view()
         .flex_row()
         .items_center()
@@ -473,7 +477,12 @@ pub(crate) fn error_row(
         .bg(Tone::Danger.tint())
         .border_1()
         .border_color(colors::DANGER.opacity(0.32))
-        .child(glyph(GlyphName::Alert, 18.0, colors::DANGER))
+        .child(
+            glyph()
+                .name(GlyphName::Alert)
+                .size(18.0)
+                .tint(colors::DANGER),
+        )
         .child(
             text(message)
                 .flex_1()
@@ -482,14 +491,7 @@ pub(crate) fn error_row(
                 .text_color(colors::TEXT),
         )
         .child(
-            press_with(
-                PressProps {
-                    label: Some("Retry".into()).into(),
-                    ..PressProps::default()
-                },
-                on_retry,
-            )
-            .child(
+            press().label("Retry").on_press(on_retry).child(
                 view()
                     .h(px(36.0))
                     .px(px(14.0))
@@ -499,7 +501,12 @@ pub(crate) fn error_row(
                     .gap(px(6.0))
                     .bg(colors::LIGHT)
                     .finish(Finish::Light)
-                    .child(glyph(GlyphName::Regenerate, 14.0, colors::ON_LIGHT))
+                    .child(
+                        glyph()
+                            .name(GlyphName::Regenerate)
+                            .size(14.0)
+                            .tint(colors::ON_LIGHT),
+                    )
                     .child(
                         text("Retry")
                             .text_size(px(13.0))
@@ -521,5 +528,5 @@ pub(crate) fn avatar() -> View {
         .finish(Finish::Raised)
         .border_1()
         .border_color(colors::BORDER)
-        .child(icon(IconName::Spark, 14.0, colors::ACCENT))
+        .child(icon().name(IconName::Spark).size(14.0).tint(colors::ACCENT))
 }

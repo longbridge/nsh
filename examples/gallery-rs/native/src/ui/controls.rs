@@ -114,18 +114,6 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
         )
 }
 
-/// A [`Toggle`] at `value` with accessibility label `label`; its owner
-/// handles [`ToggleEvent::Change`] with `.on_event(..)`.
-pub(crate) fn toggle(
-    value: impl Into<Prop<bool>>,
-    label: impl Into<SharedString>,
-) -> ComponentElement<Toggle> {
-    Toggle::element(ToggleProps {
-        value: value.into(),
-        label: Some(label.into()).into(),
-    })
-}
-
 /// A segment of [`Segmented`].
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub(crate) struct Segment {
@@ -285,17 +273,4 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
                 .bind_translate_x(&x),
         )
         .child(segments)
-}
-
-/// A [`Segmented`] of `options` with `selected` selected; its owner
-/// handles [`SegmentedEvent::Change`] with `.on_event(..)`.
-pub(crate) fn segmented(
-    options: impl IntoIterator<Item = Segment>,
-    selected: impl Into<Prop<u32>>,
-) -> ComponentElement<Segmented> {
-    Segmented::element(SegmentedProps {
-        options: options.into_iter().collect::<Vec<_>>().into(),
-        selected: selected.into(),
-        size: SegmentedSize::Regular,
-    })
 }

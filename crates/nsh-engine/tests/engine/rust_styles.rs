@@ -181,19 +181,18 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
 }
 
 /// `nsh/base`'s `Button` styled per state by a Rust app, as a TSX app's
-/// `active:` / `selected:` classes style it.
+/// `active:` / `selected:` classes style it. (Its `selected` prop's setter
+/// comes before `Styled::selected`, the state's style.)
 #[component]
 fn Buttons() -> impl IntoElement {
     let button = |selected: bool| {
-        nsh_base::Button::element(nsh_base::ButtonProps {
-            selected: selected.into(),
-            ..nsh_base::ButtonProps::default()
-        })
-        .p_2()
-        .bg(rgb(0x0000ff))
-        .selected(|s| s.bg(rgb(0x00ff00)))
-        .active(|s| s.bg(rgb(0xff0000)))
-        .child(text(if selected { "On" } else { "Off" }))
+        let button = nsh_base::button()
+            .selected(selected)
+            .p_2()
+            .bg(rgb(0x0000ff))
+            .active(|s| s.bg(rgb(0xff0000)))
+            .child(text(if selected { "On" } else { "Off" }));
+        Styled::selected(button, |s| s.bg(rgb(0x00ff00)))
     };
     view().flex_1().child(button(false)).child(button(true))
 }
@@ -233,4 +232,32 @@ fn a_rust_apps_button_takes_its_state_styles() {
     assert_eq!(background(&seen(&rx), plain), Some(red));
     engine.control().set_states(plain, 0);
     assert_eq!(background(&seen(&rx), plain), Some(blue));
+}
+
+/// `nsh/base`'s `Button` heard by a Rust app through its event's listener
+/// method, as `onPress` in TSX (styled while pressed, so its view's id
+/// shows in the states the platform reports).
+#[component]
+fn PressedButton() -> impl IntoElement {
+    let presses = signal(0);
+    view()
+        .flex_1()
+        .child(
+            nsh_base::button()
+                .active(|s| s.opacity(0.5))
+                .on_press(move || presses.update(|n| *n += 1))
+                .child(text("Press")),
+        )
+        .child(text(move || format!("pressed {}", presses.get())))
+}
+
+#[test]
+fn a_rust_apps_button_hears_its_press() {
+    let (engine, rx) = start_root(Root::new::<PressedButton>(|| ()));
+    let first = seen(&rx);
+    assert_eq!(first.tracked.len(), 1, "the button");
+    engine
+        .control()
+        .dispatch_event(first.tracked[0], EventKind::Press, EventPayload::None);
+    assert!(seen(&rx).texts.iter().any(|(_, t)| t.text == "pressed 1"));
 }

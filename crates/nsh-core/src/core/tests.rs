@@ -4925,17 +4925,10 @@ mod components {
         let inner_taps = signal(0);
         view()
             .child(text(move || format!("outer {}", inner_taps.get())))
-            .child(
-                Tally::element(TallyProps {
-                    label: "In".into(),
-                    ..TallyProps::initial()
-                })
-                .on_event(move |event: &TallyEvent| {
-                    let TallyEvent::Tap { .. } = event;
-                    inner_taps.update(|t| *t += 1);
-                    cx.emit(OuterEvent::InnerTap(inner_taps.get_untracked()));
-                }),
-            )
+            .child(tally().label("In").on_tap(move |_: &TallyEvent| {
+                inner_taps.update(|t| *t += 1);
+                cx.emit(OuterEvent::InnerTap(inner_taps.get_untracked()));
+            }))
     }
 
     #[test]
@@ -6621,13 +6614,7 @@ mod components {
                     .h(px(10.0))
                     .on_press(move |_: &()| open.update(|o| *o = !*o)),
             )
-            .child(
-                Drawer::element(DrawerProps {
-                    open: open.into(),
-                    children: Children::default(),
-                })
-                .child(Opened::element(())),
-            )
+            .child(drawer().open(open).child(opened()))
     }
 
     #[test]
@@ -7075,7 +7062,7 @@ mod touch {
 
     /// The pad mounted: the core, the outer node and the inner one (both
     /// listen to touches).
-    fn pad(keep: bool) -> (Core<FakeEngine>, NodeId, NodeId) {
+    fn mount_pad(keep: bool) -> (Core<FakeEngine>, NodeId, NodeId) {
         let mut c = core();
         c.mount_root(&crate::ui::Root::new::<Pad>(move || PadProps { keep }));
         let batch = c.commit().unwrap();
@@ -7095,7 +7082,7 @@ mod touch {
 
     #[test]
     fn an_element_claims_the_touches_on_start_and_blocks_scrolling() {
-        let (mut c, outer, inner) = pad(false);
+        let (mut c, outer, inner) = mount_pad(false);
         let path = [inner, outer];
         // The root's touches: the components hear theirs, JS still gets
         // the event for its own nodes.
@@ -7132,7 +7119,7 @@ mod touch {
 
     #[test]
     fn a_capturing_claim_takes_the_touches_over_unless_they_are_kept() {
-        let (mut c, outer, inner) = pad(false);
+        let (mut c, outer, inner) = mount_pad(false);
         let path = [inner, outer];
         let send = |c: &mut Core<FakeEngine>, phase, x, t| {
             c.component_event(ROOT_ID, EventKind::Touch, &touch(phase, &path, x, t));
@@ -7153,7 +7140,7 @@ mod touch {
         );
 
         // An inner responder that keeps the touches rejects the claim.
-        let (mut c, outer, inner) = pad(true);
+        let (mut c, outer, inner) = mount_pad(true);
         let path = [inner, outer];
         let send = |c: &mut Core<FakeEngine>, phase, x, t| {
             c.component_event(ROOT_ID, EventKind::Touch, &touch(phase, &path, x, t));
@@ -7171,7 +7158,7 @@ mod touch {
 
     #[test]
     fn js_and_component_responders_share_the_native_block() {
-        let (mut c, outer, inner) = pad(false);
+        let (mut c, outer, inner) = mount_pad(false);
         apply(
             &mut c,
             vec![
@@ -7875,6 +7862,57 @@ mod views {
         assert!(texts(&c.commit().unwrap()).contains(&"log abcd".to_owned()));
     }
 
+    #[derive(Event)]
+    enum ChooserEvent {
+        Press,
+        Pick(u32),
+        Placed { at: u32 },
+    }
+
+    /// Emits each of its events on a press: a press, the pick 7, the
+    /// placement at 9.
+    #[component]
+    fn Chooser(cx: Scope<ChooserEvent>) -> impl IntoElement {
+        view().child(text("choose")).on_press(move || {
+            cx.emit(ChooserEvent::Press);
+            cx.emit(ChooserEvent::Pick(7));
+            cx.emit(ChooserEvent::Placed { at: 9 });
+        })
+    }
+
+    /// A [`Chooser`] heard through its events' listener methods.
+    #[component]
+    fn Chosen() -> impl IntoElement {
+        let log = signal(String::new());
+        let note = move |s: String| log.update(|l| l.push_str(&s));
+        view()
+            .child(
+                chooser()
+                    .on_press(move || note("press ".into()))
+                    .on_press(move |_: &()| note("again ".into()))
+                    .on_pick(move |index: &u32| note(format!("pick {index} ")))
+                    .on_placed(move |event: &ChooserEvent| {
+                        if let ChooserEvent::Placed { at } = event {
+                            note(format!("placed {at}"));
+                        }
+                    }),
+            )
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    #[test]
+    fn a_components_listener_methods_hear_their_event_and_its_data() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Chosen>(|| ()));
+        let batch = c.commit().unwrap();
+        let chooser = native_parent(&c, text_node(&batch, "choose")).unwrap();
+        assert!(c.component_event(chooser, EventKind::Press, &EventPayload::None));
+        assert_eq!(
+            texts(&c.commit().unwrap()),
+            ["log press again pick 7 placed 9"]
+        );
+    }
+
     /// A region made again with what it read: its pressable text is kept
     /// (the same node), its listener the new run's.
     #[component]
@@ -8170,9 +8208,7 @@ mod views {
         view()
             .on_press(move |_: &()| first.update(|f| *f = !*f))
             .child(dynamic(move || {
-                Intro::element(IntroProps {
-                    label: if first.get() { "one" } else { "two" }.into(),
-                })
+                intro().label(if first.get() { "one" } else { "two" })
             }))
     }
 
@@ -8681,7 +8717,7 @@ mod views {
             })
             .child(If::new(open, || {
                 vec![
-                    Label::element(()).into_element(),
+                    label().into_element(),
                     text("plain").into_element(),
                     Holder::element(HolderProps {
                         children: Children::default(),
@@ -9035,12 +9071,9 @@ mod views {
     #[component]
     fn Giver() -> impl IntoElement {
         let on = signal(true);
-        view().on_press(move || on.update(|o| *o = !*o)).child(
-            PassOn::element(HolderProps {
-                children: Children::default(),
-            })
-            .child(If::new(on, || text("given"))),
-        )
+        view()
+            .on_press(move || on.update(|o| *o = !*o))
+            .child(pass_on().child(If::new(on, || text("given"))))
     }
 
     #[test]
@@ -9591,15 +9624,12 @@ mod views {
         let n = signal(0);
         view()
             .on_press(move || n.update(|n| *n += 1))
-            .child(Mid::element(MidProps::default()).fill("corner", text("deep")))
-            .child(Mid::element(MidProps::default()).fill(
-                "corner",
-                dynamic(move || match n.get() % 3 {
-                    0 => Some(text("switched").into_element()),
-                    1 => None,
-                    _ => Some(view().child(text("boxed")).into_element()),
-                }),
-            ))
+            .child(mid().corner(text("deep")))
+            .child(mid().corner(dynamic(move || match n.get() % 3 {
+                0 => Some(text("switched").into_element()),
+                1 => None,
+                _ => Some(view().child(text("boxed")).into_element()),
+            })))
     }
 
     #[test]
@@ -9887,9 +9917,9 @@ mod views {
     /// A dial with a ref, as its view's root or inside a view.
     #[component]
     fn DialPanel(props: DialPanelProps) -> impl IntoElement {
-        let dial = component_ref::<Dial>();
-        DIAL.with(|d| d.set(Some(dial)));
-        let el = Dial::element(()).component_ref(&dial);
+        let handle = component_ref::<Dial>();
+        DIAL.with(|d| d.set(Some(handle)));
+        let el = Dial::element(()).component_ref(&handle);
         if props.rooted {
             el.into_element()
         } else {
@@ -10272,7 +10302,7 @@ mod views {
                 } else {
                     crate::ui::Prop::bind(move || format!("n {}", n.get()).into())
                 };
-                Shown::element(ShownProps { value })
+                shown().value(value)
             }))
     }
 
@@ -10388,7 +10418,7 @@ mod views {
         let shown = signal(true);
         view()
             .on_press(move |_: &()| shown.set(false))
-            .child(If::new(shown, || Leafy::element(())))
+            .child(If::new(shown, leafy))
     }
 
     #[test]

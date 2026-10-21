@@ -5,9 +5,7 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
-use nsh_base::{
-    KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps, dialog,
-};
+use nsh_base::{dialog, keyboard_avoiding_view, safe_area_view};
 use nsh_core::{
     Points, Size,
     ui::{
@@ -20,8 +18,8 @@ use crate::{
     nav,
     ui::{
         Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, Inset,
-        MONO, Meter, PressProps, RoundButton, Section, Segment, SegmentedEvent, Tone, appear,
-        caption, colors, hint, icon, press_with, radius, segmented, tints, titled,
+        MONO, Meter, RoundButton, Section, Segment, Tone, appear, caption, colors, hint, icon,
+        press, radius, segmented, tints, titled,
     },
 };
 
@@ -298,15 +296,8 @@ fn link_row(
     first: bool,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            scale: 0.98.into(),
-            label: Some(title.into()).into(),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
+    let on_press: Listener<()> = on_press.into();
+    press().scale(0.98).label(title).on_press(on_press).child(
         view()
             .min_h(px(60.0))
             .flex_row()
@@ -334,7 +325,12 @@ fn link_row(
                             .font_family(MONO),
                     ),
             )
-            .child(icon(IconName::Chevron, 14.0, colors::FAINT)),
+            .child(
+                icon()
+                    .name(IconName::Chevron)
+                    .size(14.0)
+                    .tint(colors::FAINT),
+            ),
     )
 }
 
@@ -506,14 +502,12 @@ pub(crate) fn Form() -> impl IntoElement {
                 }),
             )
             .child(
-                segmented(
-                    MODES.map(|m| Segment::new(m.1)),
-                    Prop::bind(move || mode.get() as u32),
-                )
-                .on_event(move |e: &SegmentedEvent| {
-                    let SegmentedEvent::Change(i) = *e;
-                    mode.set(i as usize);
-                }),
+                segmented()
+                    .options(MODES.map(|m| Segment::new(m.1)))
+                    .selected(move || mode.get() as u32)
+                    .on_change(move |&i: &u32| {
+                        mode.set(i as usize);
+                    }),
             )
             .child(caption(
                 hint(
@@ -749,7 +743,7 @@ pub(crate) fn Form() -> impl IntoElement {
                         }),
                     ),
             )
-            .child(AutoGrow::element(()))
+            .child(auto_grow())
             .child(
                 field(&fx[f::CARET], "No caret")
                     .api("caretHidden")
@@ -814,11 +808,12 @@ pub(crate) fn Form() -> impl IntoElement {
                             .p_3()
                             .rounded(px(radius::CONTROL))
                             .bg(if up { tints::UP } else { tints::DANGER })
-                            .child(icon(
-                                if up { IconName::Check } else { IconName::Bell },
-                                16.0,
-                                fg,
-                            ))
+                            .child(
+                                icon()
+                                    .name(if up { IconName::Check } else { IconName::Bell })
+                                    .size(16.0)
+                                    .tint(fg),
+                            )
                             .child(
                                 text(message.clone())
                                     .flex_1()
@@ -858,9 +853,7 @@ pub(crate) fn Form() -> impl IntoElement {
                         "KeyboardAvoidingView",
                         false,
                         |_: &()| {
-                            nav::push("message-bar", || {
-                                titled("Message bar").child(MessageBar::element(()))
-                            });
+                            nav::push("message-bar", || titled("Message bar").child(message_bar()));
                         },
                     )),
             )
@@ -875,7 +868,7 @@ pub(crate) fn Form() -> impl IntoElement {
         .card(|| {
             Section::new("Selection and keys")
                 .note("onSelectionChange")
-                .child(SelectionDemo::element(()))
+                .child(selection_demo())
         })
         .card(texts)
         .card(submit_card)
@@ -895,50 +888,47 @@ fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
         .presentation(ModalPresentation::PageSheet)
         .on_cancel(close)
         .child(
-            SafeAreaView::element(SafeAreaViewProps::default())
-                .flex_1()
-                .bg(colors::BACKGROUND)
-                .child(
-                    scroll()
-                        .flex_1()
-                        .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-                        .child(
-                            view()
-                                .p_4()
-                                .pb(px(40.0))
-                                .gap_4()
-                                .child(
-                                    view()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap_3()
-                                        .pt_2()
-                                        .pl_1()
-                                        .child(
-                                            view()
-                                                .flex_1()
-                                                .gap(px(2.0))
-                                                .child(
-                                                    text("A sheet")
-                                                        .text_size(px(24.0))
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .letter_spacing(px(-0.4))
-                                                        .text_color(colors::TEXT),
-                                                )
-                                                .child(
-                                                    text("Its inputs stay above the keyboard too")
-                                                        .text_size(px(13.0))
-                                                        .text_color(colors::MUTED),
-                                                ),
-                                        )
-                                        .child(
-                                            Button::new("Done", close)
-                                                .variant(ButtonVariant::Secondary),
-                                        ),
-                                )
-                                .child(Inset::new().children(fields)),
-                        ),
-                ),
+            safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+                scroll()
+                    .flex_1()
+                    .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+                    .child(
+                        view()
+                            .p_4()
+                            .pb(px(40.0))
+                            .gap_4()
+                            .child(
+                                view()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_3()
+                                    .pt_2()
+                                    .pl_1()
+                                    .child(
+                                        view()
+                                            .flex_1()
+                                            .gap(px(2.0))
+                                            .child(
+                                                text("A sheet")
+                                                    .text_size(px(24.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .letter_spacing(px(-0.4))
+                                                    .text_color(colors::TEXT),
+                                            )
+                                            .child(
+                                                text("Its inputs stay above the keyboard too")
+                                                    .text_size(px(13.0))
+                                                    .text_color(colors::MUTED),
+                                            ),
+                                    )
+                                    .child(
+                                        Button::new("Done", close)
+                                            .variant(ButtonVariant::Secondary),
+                                    ),
+                            )
+                            .child(Inset::new().children(fields)),
+                    ),
+            ),
         )
 }
 
@@ -1122,7 +1112,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         |(i, _): &(usize, Message)| *i,
         |m, _| {
             let mine = m.with_untracked(|(_, (mine, _))| *mine);
-            appear(0).child(
+            appear().index(0).child(
                 view()
                     .map(|v| if mine { v.self_end() } else { v.self_start() })
                     .max_w(relative(0.8))
@@ -1153,7 +1143,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         },
     );
     view().flex_1().child(
-        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+        keyboard_avoiding_view()
             .flex_1()
             .bg(colors::BACKGROUND)
             .child(

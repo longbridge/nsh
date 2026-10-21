@@ -116,7 +116,7 @@ fn note_card(
                 .min_h(px(16.0))
                 .child(If::new(
                     move || saved.get() == NoteState::Saved,
-                    || icon(IconName::Check, 14.0, colors::UP),
+                    || icon().name(IconName::Check).size(14.0).tint(colors::UP),
                 ))
                 .child(text(hint).flex_1().text_size(px(12.0)).text_color(
                     move || match saved.get() {

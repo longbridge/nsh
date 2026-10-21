@@ -277,7 +277,7 @@ fn info() -> AnyElement {
     };
     let toggle = move |_: &()| show.update(|s| *s = !*s);
     let shown = If::new(show, move || {
-        appear(0).child(
+        appear().index(0).child(
             frame(image(big()))
                 .h(px(170.0))
                 .on_load_start(move |_: &()| status.set("loading"))
