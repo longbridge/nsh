@@ -253,15 +253,11 @@ adb reverse tcp:8790 tcp:8790
 
 ## Activity 配置
 
-- **返回键。** 在 Android 13 及更高版本上，当应用需要处理返回键时（有打开的对话框、有被推入的页面、有 `BackHandler`
-  监听器），`NshView` 会注册自己的返回回调。在 Android 12 及更早版本上，需要手动转发返回键：
-
-  ```java
-  @Override
-  public void onBackPressed() {
-      if (!nsh.handleBack()) super.onBackPressed();
-  }
-  ```
+- **返回键。** 当应用需要处理返回键时（有打开的对话框、有被推入的页面、有 `BackHandler` 监听器），`NshView`
+  会自己接收返回键，否则交给 Activity。在 Android 13 及更高版本上设置了 `android:enableOnBackInvokedCallback="true"`
+  时，它注册一个 `OnBackInvokedCallback`；其他情况下（Android 12 及更早版本，或未开启该属性），它在 Activity 的
+  `onBackPressed` 之前接收返回键事件，因此也先于 AndroidX 的 `OnBackPressedDispatcher` 和 Fragment 的回调。无论在
+  Activity 还是 Fragment 中都无需手动转发。已经把返回键转发给 `handleBack()` 的宿主照常工作：一次按键只交给应用一次。
 
   如需在 Android 13+ 上支持预测性返回，请像打包出的 NSH 应用那样，在 `<application>` 上设置
   `android:enableOnBackInvokedCallback="true"`。

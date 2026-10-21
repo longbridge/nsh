@@ -264,15 +264,12 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## Activity setup
 
-- **Back button.** On Android 13 and newer, `NshView` registers its own back callback while the app wants back presses
-  (an open dialog, a pushed page, a `BackHandler` listener). On Android 12 and older, forward the press:
-
-  ```java
-  @Override
-  public void onBackPressed() {
-      if (!nsh.handleBack()) super.onBackPressed();
-  }
-  ```
+- **Back button.** `NshView` gets back presses by itself while the app wants them (an open dialog, a pushed page, a
+  `BackHandler` listener), and leaves them to the activity otherwise. With `android:enableOnBackInvokedCallback="true"`
+  on Android 13 and newer it registers an `OnBackInvokedCallback`; elsewhere (Android 12 and older, or the attribute
+  off) it takes the back key before the activity's `onBackPressed`, so before AndroidX's `OnBackPressedDispatcher`
+  and the fragments' callbacks. No forwarding is needed, in an activity or a fragment. A host that already forwards
+  presses to `handleBack()` keeps working: a press goes to the app once.
 
   For predictive back on Android 13+, set `android:enableOnBackInvokedCallback="true"` on the `<application>`, as
   packaged NSH apps do.

@@ -196,6 +196,11 @@ Things that were found the hard way. Read the section of the area you change bef
   `usesCleartextTraffic`; the release AAR does not.
 - **Android, activities**: create the decor view (`getDecorView()`) before asking for the insets controller; apps draw edge to edge
   and get the system bars through `safeArea()`.
+- **Android, the back key without `OnBackInvokedCallback`** (below 13, or `enableOnBackInvokedCallback` off): the window
+  sends `KEYCODE_BACK` down the focus path, then the activity's `onKeyDown` / `onKeyUp` take it (`onBackPressed`), so an
+  unfocused view only hears it through `View.addOnUnhandledKeyEventListener` (API 28+, called by the decor view between
+  the two, whatever has focus). With the callback in effect the window turns the key into the callback before any view,
+  so `NshView` taking the key never doubles its callback (seen on Android 16, both settings).
 - **Android widgets**: `MediaPlayer.setPlaybackParams` starts playback (set the rate only while playing) and a paused player draws nothing until
   it seeks; `WebView` JavaScript bridge calls arrive on a binder thread (post to the UI thread).
 - **Android, negative letter spacing**: Minikin adds half the spacing on both sides of each glyph and trims the halves at line edges,
