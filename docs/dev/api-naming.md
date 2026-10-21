@@ -60,15 +60,22 @@ go elsewhere under these rules rather than into them.
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
   the current item, `checked` / `pressed` the value of a checkbox / toggle (*guides*; `Selectable`, `Disableable`,
   `Toggle::pressed`). Booleans are named after the state, positively (`open`, `hidden`), with no `is` prefix and no
-  `Enabled` suffix when a state word exists: what the user may do is an adjective (`scrollable`, `zoomable`,
-  `selectable`), what something blocks is `disabled` (a menu item too, never `enabled`). A part shown by default is
-  `<part>Hidden` (default `false`: `headerHidden`, `indicatorHidden`, `caretHidden`), never `<part>Shown`,
-  `<part>Visible` or `shows<Part>`.
-- **Begin and end**: a phase is `<act>Start` / `<act>End` (`onPanStart`, `onLoadStart`, `onScrollDragStart`,
-  `onMomentumEnd`), never `Begin`; a pointer over a view is `Enter` / `Leave` (`onHoverEnter`, `onFileDragEnter`,
-  DOM `pointerenter`), never `In` / `Out`.
+  `Enabled` suffix when a state word exists: what the user may do is `gpui-kit`'s adjective (`scrollable`,
+  `zoomable`, `selectable`, `resizable`), and only a feature with no adjective is `<feature>Enabled`
+  (`pagingEnabled`, `javaScriptEnabled`; *guides* "a positive `enabled` / `visible` contract"); what something
+  blocks is `disabled` (a menu item too, `PopupMenu::disabled`). Whether a part shows is `<part>Visible`, default
+  `true` (`gpui-component` `scrollbar_visible`, `header_visible`, `cursor_visible`: `headerVisible`,
+  `scrollbarVisible`, `caretVisible`), never `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
+  boolean (a constant, a payload's field) is `is<Adjective>` / `has<Noun>`, as `gpui-kit`'s readers (`isAvailable`,
+  `isViewable`, `isBuffering`); props never are (*guides*: builders `disabled(bool)`, readers `is_disabled()`).
+- **Begin and end**: a phase is `<act>Start` / `<act>End` (`gpui-kit`'s `on_start` / `on_end`: `onPanStart`,
+  `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. Hovering is one callback with the state,
+  `onHover(hovered)` (GPUI `on_hover(&bool)`); a drag over a view is `Enter` / `Leave` (`onFileDragEnter`, the DOM's
+  `dragenter`), never `In` / `Out`.
+- **Intent over geometry**: an event says what the app should do when the act has a name (`onLoadMore`, as
+  `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`).
 - **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
-  (`onChange(text)`, `onOpenChange(open, reason)`); every other event passes one object, even with one field
+  (`onChange(text)`, `onOpenChange(open, reason)`, `onHover(hovered)`); every other event passes one object, even with one field
   (`onLinkPress({ url })`, `onSubmit({ text })`), so a later field is an addition. An event with nothing to report
   passes nothing; it can gain an object later. Never several positional arguments outside the frozen modules.
 - **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
@@ -128,22 +135,24 @@ members, so a shape decides what can ever be added to it.
 
 Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, their old names listed
 in `api/closed.txt` as made before the first compatible release (`compatibility.md` rule 7). The frozen RN-shaped
-modules keep their names.
+modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
+(*guides*: "Preserve established public names when changing them would cause needless churn"): `pagingEnabled`,
+`javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`; and
+`StatusBar`'s `hidden`, as the user decided on 2026-10-20 after UIKit's `prefersStatusBarHidden`.
 
 | Now | New | Rule | Notes |
 |---|---|---|---|
 | **Scroll, List, WebView** | | | |
 | `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
-| `pagingEnabled` | `paging` | States | |
 | `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
-| `showsIndicator` | `indicatorHidden` (default `false`) | States | |
+| `showsIndicator` | `scrollbarVisible` (default `true`) | States | `gpui-component` `scrollbar_visible` |
 | `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
 | `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
-| List `onEndReached`, `onEndReachedThreshold` | `onEndReach`, `endReachThreshold` | Events (present tense) | Also in `ListItemsProps` |
+| List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
-| `ViewToken.isViewable` | `ViewToken.viewable` | States (no `is` prefix) | |
 | **Every element** | | | |
-| `onHoverIn`, `onHoverOut` | `onHoverEnter`, `onHoverLeave` | Begin and end | As `onFileDragEnter` / `onFileDragLeave`; `onHoverMove` stays |
+| `onHoverIn`, `onHoverOut` | `onHover(hovered: boolean)` | Begin and end | GPUI `on_hover(&bool)`; `onHoverMove` stays |
+| Input `caretHidden` | `caretVisible` (default `true`) | States | `gpui-component` `cursor_visible`; replaces the 2026-10-20 row keeping it |
 | `onFileDrop({ uris })` | `onFileDrop({ urls })` | Addresses | `file:` URLs |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
@@ -152,14 +161,11 @@ modules keep their names.
 | `ImageAsset.uri` | `ImageAsset.url` | Addresses | What `import logo from "./logo.png"` gives |
 | **Video** | | | |
 | `source: string \| { uri }` | `src: string` | Addresses | |
-| `onBuffer({ isBuffering })` | `onBuffer({ buffering })` | States (no `is` prefix) | |
 | **WebView** | | | |
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
-| `javaScriptEnabled` | `javaScript` (default `true`) | States | |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
 | **NavPage** | | | |
-| `headerShown` | `headerHidden` (default `false`) | States | |
-| `headerBackVisible` | `headerBackHidden` (default `false`) | States | |
+| `headerShown` | `headerVisible` (default `true`) | States | `header_visible`; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
 | `onLinkPress(url)` | `onLinkPress({ url })` | Payloads | |
 | **`nsh/desktop`** | | | |
@@ -176,20 +182,17 @@ modules keep their names.
 | `I18nManager.doLeftAndRightSwapInRTL` | (dropped) | | Always true, documented with `direction` |
 | `OS` (type) | unchanged | | `platform.os`'s type |
 | **`nsh/accessibility`** | | | |
-| `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderRunning()`, `reduceMotion()` |
-| `screenReaderEnabled` (accessor) | `screenReaderRunning` | States | UIKit's `isVoiceOverRunning` |
+| `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
 | `AccessibilityInfo.announceForAccessibility(message)` | `announce(message)` | Environment | A function of the module |
 | `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
 | **`nsh/android`** | | | |
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
 | **`nsh/clipboard`** | | | |
-| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard` |
+| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
 | `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
 | **`nsh/storage`** | | | |
 | `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
-| **`nsh/ios`, `nsh/android`, `nsh/desktop`** | | | |
-| `isAvailable` | `available` | States (no `is` prefix) | |
 | **Styles** | | | |
 | `experimental_backgroundImage` | (dropped) | Where names come from | React Native's name of `backgroundImage` |
 
