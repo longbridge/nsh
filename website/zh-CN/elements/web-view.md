@@ -57,7 +57,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | 在每个页面自身的脚本之前执行。 |
 | `userAgent` | `.user_agent(..)` | `string` | | 浏览器的 user agent 字符串。 |
 | `javaScriptEnabled` | `.java_script_enabled(..)` | `boolean` | `true` | 页面可以运行脚本。 |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动页面。 |
 
 | `ios` 键 | Rust | 类型 | 说明 |
 |---|---|---|---|

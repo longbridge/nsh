@@ -66,7 +66,7 @@ pub struct WebProps {
     /// User agent; the platform's when `None`.
     pub user_agent: Option<Arc<str>>,
     /// The page scrolls.
-    pub scroll_enabled: bool,
+    pub scrollable: bool,
     /// The page may run JavaScript.
     pub javascript_enabled: bool,
     /// Swipes go back and forward (iOS).
@@ -80,7 +80,7 @@ impl Default for WebProps {
             injected_js: None,
             injected_js_before: None,
             user_agent: None,
-            scroll_enabled: true,
+            scrollable: true,
             javascript_enabled: true,
             back_forward_gestures: false,
         }
@@ -165,7 +165,7 @@ pub struct ScrollBehavior {
     pub max_zoom: f32,
     /// `bouncesZoom`: pinching may go past the limits and springs back.
     pub bounces_zoom: bool,
-    /// `pinchGestureEnabled`: the user can pinch to zoom.
+    /// `zoomable`: the user can pinch to zoom.
     pub pinch: bool,
     /// `centerContent`: content smaller than the viewport is centered.
     pub center_content: bool,
@@ -308,7 +308,7 @@ pub struct ScreenConfig {
     /// Title in the header.
     pub title: Option<Arc<str>>,
     /// Show the native header.
-    pub header_shown: bool,
+    pub header_visible: bool,
     /// Large title (iOS; the content scrolls under the header).
     pub large_title: bool,
     /// The content extends under the header.
@@ -355,7 +355,7 @@ impl Default for ScreenConfig {
     fn default() -> Self {
         Self {
             title: None,
-            header_shown: true,
+            header_visible: true,
             large_title: false,
             header_transparent: false,
             tint_color: None,
@@ -472,7 +472,7 @@ pub struct InputConfig {
     pub auto_fill: crate::ops::AutoFill,
     /// The text runs right to left.
     pub rtl: bool,
-    /// `caretHidden`.
+    /// No caret is drawn (`caret={false}`).
     pub caret_hidden: bool,
     /// `inputAccessoryViewID` as set.
     pub accessory_id: Option<Box<str>>,
@@ -646,7 +646,7 @@ pub enum MountItem {
         /// Scrolls horizontally.
         horizontal: bool,
         /// Shows the scroll indicator.
-        shows_indicator: bool,
+        scrollbar_visible: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,
         /// When dragging dismisses the keyboard.

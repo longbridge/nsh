@@ -24,7 +24,7 @@ import { colorScheme, fontScale, I18nManager, locale, PixelRatio, Platform, wind
 ## windowSize
 
 ```ts
-const windowSize: Accessor<{ width: number; height: number }>;
+const windowSize: Accessor<Size>;
 ```
 
 界面的尺寸（点）：窗口，或嵌入时的 `NshAppView` / `NshView`。响应式。Rust：`window() -> Size<Points>`。

@@ -16,17 +16,17 @@ Web 视图和视频播放器把平台自己的网页引擎和媒体播放器作�
 
 它们背后的框架（WebKit、AVFoundation）在应用第一次用到时才加载，所以从不显示网页或视频的应用不会在启动时为它们付出代价。
 
-在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollEnabled={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
+在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollable={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
 而不是页面；页面仍可用键盘和它自己的脚本滚动。
 
 在 [Linux](./linux.md) 上，Web 视图是绘制在它的视图之内的 WebKitGTK 页面：绘制在它上方的 NSH 内容（对话框、sheet）会遮住它，父视图会裁剪它。
-那里的 `webview` 权限同样作用于框架的导航（未获授权的主机的 `iframe` 保持空白），`scrollEnabled: false` 让页面本身不滚动（页面中的元素仍可滚动）。
+那里的 `webview` 权限同样作用于框架的导航（未获授权的主机的 `iframe` 保持空白），`scrollable: false` 让页面本身不滚动（页面中的元素仍可滚动）。
 应用需要装有 WebKitGTK 6.0；不带它构建的运行时显示中性的占位视图。视频能播放哪些格式取决于已安装的
 GStreamer 插件；不支持 `rate`（始终以 1× 播放），`onEnd` 只对不循环的视频触发。
 
 在 [Windows](./windows.md) 上，Web 视图是位于子窗口中的 WebView2 控件，跟随它的视图移动：它会被父视图和圆角裁剪，但绘制在它上方的
 NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图；
-不支持 HTML 的 `source.baseUrl`、`scrollEnabled` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
+不支持 HTML 的 `source.baseUrl`、`scrollable` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
 变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
 
 ## WebView
@@ -62,7 +62,7 @@ mount(App);
 
 ### 属性
 
-在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scroll_enabled`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -70,7 +70,7 @@ mount(App);
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自己的脚本之前运行。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
-| `scrollEnabled` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `userAgent` | `string` | | 浏览器的 user agent 字符串。 |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS：滑动在页面历史中前进后退。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |

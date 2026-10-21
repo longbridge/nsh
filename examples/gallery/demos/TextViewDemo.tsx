@@ -246,7 +246,7 @@ function Markdown() {
         selectable
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
-        onLinkPress={(url) => pressed.set(url)}
+        onLinkPress={({ url }) => pressed.set(url)}
         onImagePress={(image) => viewing.set(image)}
       />
       <Caption label="Link pressed" note={pressed()} />
@@ -355,7 +355,7 @@ function Streaming() {
       <TextView
         markdown={text()}
         options={{ streaming: streaming() }}
-        caret={streaming() ? <Caret /> : undefined}
+        streamingCaret={streaming() ? <Caret /> : undefined}
         selectable
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
       />

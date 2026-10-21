@@ -21,7 +21,7 @@ it. Each part takes the app's styles over these defaults: `classes` and `styles`
 (`TextViewParts`) in Rust. Rust makes one with `nsh_base::text_view()`, TSX with `<TextView>` from `nsh/base`.
 
 ```rust tabs
-use nsh_base::{text_view, theme};
+use nsh_base::{TextViewLinkPressEvent, text_view, theme};
 use nsh_core::ui::prelude::*;
 
 const README: &str = "# Release notes
@@ -39,7 +39,7 @@ fn release_notes() -> impl IntoElement {
     scroll().flex_1().child(
         text_view()
             .markdown(README)
-            .on_link_press(|url: &SharedString| log::info!("open {url}"))
+            .on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| log::info!("open {url}"))
             .p_5()
             .text_base()
             .text_color(theme().foreground()),
@@ -74,7 +74,7 @@ function App() {
           link: "text-blue-600",
           alertTip: "border-l-4 border-green-600 pl-3",
         }}
-        onLinkPress={(url) => console.log("open", url)}
+        onLinkPress={({ url }) => console.log("open", url)}
       />
     </Scroll>
   );
@@ -273,7 +273,7 @@ syntax open (`**bold`, `` `code ``, `[a link](htt`, a table whose header just ar
 look once closed, so the reader never sees stray `**` or `[`. Blocks are kept by position: the blocks that are complete
 keep their views, and only the block being written is made again, so a long reply stays cheap to update.
 
-`caret` follows the end of the document: inline at the end of the last text, wherever the last block ends (a
+`streamingCaret` follows the end of the document: inline at the end of the last text, wherever the last block ends (a
 paragraph, a list item, a code block, a table's last cell), else on a line of its own after the last block (a rule,
 content of a render function). Remove it when the reply is done.
 
@@ -286,7 +286,7 @@ fn reply(text: Signal<SharedString>, done: Signal<bool>) -> impl IntoElement {
     text_view()
         .markdown(move || text.get())
         .options(move || MarkdownOptions { streaming: !done.get(), ..Default::default() })
-        .caret(when(
+        .streaming_caret(when(
             move || !done.get(),
             || view().ml_0p5().h_4().w_2().rounded_sm().bg(rgb(0xa3a3a3)),
         ))
@@ -308,7 +308,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
     <TextView
       markdown={text()}
       options={{ streaming: !done() }}
-      caret={done() ? undefined : <View class="ml-0.5 h-4 w-2 rounded-sm bg-neutral-400" />}
+      streamingCaret={done() ? undefined : <View class="ml-0.5 h-4 w-2 rounded-sm bg-neutral-400" />}
     />
   );
 }
@@ -319,17 +319,17 @@ blocks can fade in with the app's animations.
 
 ## Links
 
-Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with its URL; the app decides what it opens (a page of its own, a
+Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress` with `{ url }`; the app decides what it opens (a page of its own, a
 [`WebView`](./web-view.md), a scroll to a heading). Headings have anchors (GitHub's: `## Getting started` is
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
 `#footnote-<label>`.
 
 ```rust tabs
-use nsh_base::text_view;
+use nsh_base::{TextViewLinkPressEvent, text_view};
 use nsh_core::ui::prelude::*;
 
 fn doc(markdown: &'static str) -> impl IntoElement {
-    text_view().markdown(markdown).on_link_press(|url: &SharedString| {
+    text_view().markdown(markdown).on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| {
         match url.strip_prefix('#') {
             Some(anchor) => scroll_to_anchor(anchor),
             None => open_web(url),
@@ -341,7 +341,7 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 ```tsx tabs
 <TextView
   markdown={doc}
-  onLinkPress={(url) => {
+  onLinkPress={({ url }) => {
     if (url.startsWith("#")) scrollToAnchor(url.slice(1));
     else nav.push({ name: "web", url });
   }}
@@ -773,9 +773,9 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 | `classes` | `.classes(..)` | `TextViewClasses` | `{}` | Tailwind classes by part. |
 | `styles` | `.styles(..)` | `TextViewStyles` | `{}` | Inline styles by part (each a `StyleProp<TextStyle>`), over the classes. |
 | `selectable` | `.selectable(..)` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([SelectionArea](./selection-area.md)). |
-| `codeBlockScrollIndicator` | `.code_block_scroll_indicator(..)` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
-| `tableScrollIndicator` | `.table_scroll_indicator(..)` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
-| `caret` | `.caret(..)` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
+| `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
+| `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
+| `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | Shows custom nodes. |
 | `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows code blocks. |
 | `codeBlockActions` | `.code_block_actions(..)` | `TextViewCodeAction[]` | `[]` | The actions over each code block's top right corner: `{ id: "copy" }` built in, others the app's. |
@@ -792,7 +792,7 @@ parts with [`TextViewParts`](#typed-part-styles).
 
 | Event | Rust | Description |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|url: &SharedString\| ..)` | A link was pressed: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | A link was pressed: `{ url }`: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | An image not in a link was pressed: the image, for the app to show it larger (a zoomable viewer of its own). |
 

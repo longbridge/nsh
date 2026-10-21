@@ -219,7 +219,7 @@ the props' snake-case names.
 |---|---|---|---|---|
 | `header` | `.header(..)` | `JSX.Element` | none | Desktops and the web: the page's header, placed at the top of the page, as wide as the page and as tall as it lays out, with the content below it. |
 | `title` | `.title(..)` | `string` | none | iOS and Android: the system header's title. |
-| `headerShown` | `.header_shown(..)` | `boolean` | `true` | iOS and Android: the system header shows. |
+| `headerVisible` | `.header_visible(..)` | `boolean` | `true` | iOS and Android: the system header shows. |
 | `headerTransparent` | `.header_transparent(..)` | `boolean` | `false` | iOS and Android: the content extends under a transparent system header. |
 | `headerLargeTitle` | `.header_large_title(..)` | `boolean` | `false` | iOS: a large title that shrinks into the bar as the content scrolls; the content scrolls under the header. |
 | `headerBackTitle` | `.header_back_title(..)` | `string` | none | iOS and Android: the label of the back button that leads back to this page (on Android, its description for screen readers). |
@@ -276,7 +276,7 @@ fn profile(edit: impl Fn() + 'static) -> Screen {
 ```
 
 The page's content starts below the header: below an opaque system header on iOS and Android, below `header` on the
-desktops and the web. With `headerTransparent`, `headerLargeTitle` or `headerShown={false}`, it starts at the top of
+desktops and the web. With `headerTransparent`, `headerLargeTitle` or `headerVisible={false}`, it starts at the top of
 the page on iOS and Android; use [SafeAreaView](./safe-area-view.md) or `safeAreaInsets()` to keep it clear of the
 header and the status bar.
 

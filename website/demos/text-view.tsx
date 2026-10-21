@@ -48,7 +48,7 @@ function App() {
         <TextView
           markdown={text()}
           options={{ streaming: streaming() }}
-          caret={streaming() ? <View style={{ width: 8, height: 16, marginLeft: 2, borderRadius: 2, backgroundColor: ui().accent }} /> : undefined}
+          streamingCaret={streaming() ? <View style={{ width: 8, height: 16, marginLeft: 2, borderRadius: 2, backgroundColor: ui().accent }} /> : undefined}
           selectable
         />
         <View

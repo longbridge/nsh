@@ -23,7 +23,7 @@ final class WebBox extends WidgetBox {
     /** Source kind (0 none, 1 uri, 2 html) and fields; null before the first load. */
     private Object[] source;
     private String injected, injectedBefore, userAgent;
-    private boolean scrollEnabled = true;
+    private boolean scrollable = true;
 
     WebBox(Context context, Mounter mounter, int id) {
         super(context, mounter, id, new WebView(context));
@@ -36,7 +36,7 @@ final class WebBox extends WidgetBox {
                 // The page scrolls itself: keep enclosing scroll views out.
                 v.getParent().requestDisallowInterceptTouchEvent(true);
             }
-            return !scrollEnabled && e.getActionMasked() == MotionEvent.ACTION_MOVE;
+            return !scrollable && e.getActionMasked() == MotionEvent.ACTION_MOVE;
         });
     }
 
@@ -91,14 +91,14 @@ final class WebBox extends WidgetBox {
     }
 
     void configure(Object[] source, String injected, String injectedBefore, String userAgent,
-            boolean scrollEnabled, boolean javaScriptEnabled) {
+            boolean scrollable, boolean javaScriptEnabled) {
         boolean scriptsChanged = !Objects.equals(injected, this.injected)
                 || !Objects.equals(injectedBefore, this.injectedBefore);
         this.injected = injected;
         this.injectedBefore = injectedBefore;
-        this.scrollEnabled = scrollEnabled;
-        web.setVerticalScrollBarEnabled(scrollEnabled);
-        web.setHorizontalScrollBarEnabled(scrollEnabled);
+        this.scrollable = scrollable;
+        web.setVerticalScrollBarEnabled(scrollable);
+        web.setHorizontalScrollBarEnabled(scrollable);
         web.getSettings().setJavaScriptEnabled(javaScriptEnabled);
         if (!Objects.equals(userAgent, this.userAgent)) {
             this.userAgent = userAgent;

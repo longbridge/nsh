@@ -31,7 +31,7 @@ function App() {
       </View>
       <View
         ref={(node) => {
-          node.measure().then((m) => measured.set(`${m.width}x${m.height}`));
+          node.measure().then((m) => measured.set(`${m.bounds.size.width}x${m.bounds.size.height}`));
         }}
         style={{ width: 120, height: 12 }}
       />

@@ -88,11 +88,11 @@ function App() {
               margin={12}
               onPosition={(e) =>
                 position.set(
-                  `${e.placement} at ${Math.round(e.x)}, ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)} · room ${Math.round(e.availableWidth)}×${Math.round(e.availableHeight)}`,
+                  `${e.placement} at ${Math.round(e.bounds.origin.x)}, ${Math.round(e.bounds.origin.y)} · ${Math.round(e.bounds.size.width)}×${Math.round(e.bounds.size.height)} · room ${Math.round(e.available.width)}×${Math.round(e.available.height)}`,
                 )
               }
               onPressOutside={(e) => {
-                closed.set(`onPressOutside at ${Math.round(e.pageX)}, ${Math.round(e.pageY)}`);
+                closed.set(`onPressOutside at ${Math.round(e.pagePosition.x)}, ${Math.round(e.pagePosition.y)}`);
                 open.set(false);
               }}
               onCancel={() => {

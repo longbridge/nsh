@@ -40,7 +40,7 @@ function App() {
       <View style={{ paddingHorizontal: 16, gap: 6, paddingBottom: 8 }}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>list</Text>
         <Text style={{ color: ui().muted }}>
-          {trades().length} rows · onEndReached {loads()}× · visible {visible()}
+          {trades().length} rows · onLoadMore {loads()}× · visible {visible()}
         </Text>
       </View>
       <List
@@ -52,8 +52,8 @@ function App() {
         estimatedItemSize={64}
         style={{ flex: 1 }}
         contentStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16, gap: 8 }}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
+        onLoadMore={loadMore}
+        loadMoreThreshold={0.5}
         refreshing={refreshing()}
         onRefresh={() => {
           refreshing.set(true);
@@ -65,7 +65,7 @@ function App() {
           }, 800);
         }}
         viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-        onViewableItemsChanged={({ viewableItems }) =>
+        onViewableItemsChange={({ viewableItems }) =>
           visible.set(viewableItems.length ? `${viewableItems[0].index}–${viewableItems[viewableItems.length - 1].index}` : "")
         }
         header={

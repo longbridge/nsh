@@ -220,7 +220,7 @@ fn Grid() -> impl IntoElement {
             item_visible_percent: Some(50.0),
             ..Viewability::default()
         })
-        .on_viewable_items_changed(move |rows: &ViewableItems| visible.set(rows.viewable))
+        .on_viewable_items_change(move |rows: &ViewableItems| visible.set(rows.viewable))
         .header(header)
         .footer(
             text("End of the list")
@@ -556,8 +556,8 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     .row_gap(px(6.0))
     .flex_1()
     .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-    .on_end_reached(load_older)
-    .end_reached_threshold(0.5);
+    .on_load_more(load_older)
+    .load_more_threshold(0.5);
     let room = view()
         .flex_row()
         .items_center()
@@ -775,7 +775,7 @@ fn ranges(range: Signal<&'static str>) -> Section {
             view().mx(px(-14.0)).child(
                 scroll()
                     .horizontal()
-                    .shows_indicator(false)
+                    .scrollbar(false)
                     .child(view().flex_row().gap_2().px(px(14.0)).children(chips)),
             ),
         )
@@ -822,7 +822,7 @@ fn cards() -> Section {
     })
     .horizontal()
     .estimated_item_size(px(130.0))
-    .shows_indicator(false)
+    .scrollbar(false)
     .content_padding_x(px(14.0))
     .column_gap(px(10.0))
     .h(px(124.0));

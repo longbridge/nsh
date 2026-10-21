@@ -708,7 +708,7 @@ impl ScreenHost {
         ivars.padded.set(padded);
         ivars
             .measure
-            .set(c.header_shown && !c.header_transparent && !c.large_title);
+            .set(c.header_visible && !c.header_transparent && !c.large_title);
         self.controller.report_insets();
     }
 }

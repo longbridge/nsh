@@ -7,9 +7,9 @@ test("a right click shows the menu, and its items are chosen", async () => {
   await app.press("label:System");
   await app.rightClick("id:menu-target");
   expect(app.menu()).toEqual([
-    { label: "Copy", enabled: true },
-    { label: "Paste", enabled: false },
-    { label: "Share > Mail", enabled: true },
+    { label: "Copy", disabled: false },
+    { label: "Paste", disabled: true },
+    { label: "Share > Mail", disabled: false },
   ]);
   await expect(() => app.chooseMenuItem("Paste")).rejects.toThrow("disabled");
   await app.chooseMenuItem("Share > Mail");

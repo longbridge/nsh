@@ -88,7 +88,7 @@ function NameField() {
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `caretHidden` | `.caret_hidden(..)` | `boolean` | 不绘制光标。 |
+| `caret` | `.caret(..)` | `boolean` | 绘制光标（默认 `true`；`false` 隐藏光标）。 |
 | `selectedRange` | `.selected_range((start, end))` | `{ start: number; end?: number }` | 受控选区，以 UTF-16 为单位；`end` 默认等于 `start`（即光标）。 |
 
 ### 颜色

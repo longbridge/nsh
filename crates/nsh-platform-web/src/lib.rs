@@ -1060,12 +1060,10 @@ pub unsafe extern "C" fn nsh_event(
     };
     let payload = match kind {
         EventKind::ScrollEnd
-        | EventKind::ScrollBeginDrag
-        | EventKind::ScrollEndDrag
-        | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd => {
-            EventPayload::Scroll(point(Points(num("x")), Points(num("y"))))
-        }
+        | EventKind::ScrollDragStart
+        | EventKind::ScrollDragEnd
+        | EventKind::MomentumStart
+        | EventKind::MomentumEnd => EventPayload::Scroll(point(Points(num("x")), Points(num("y")))),
         // A video's and a web view's loads carry more than an image's.
         EventKind::Load if value.get("duration").is_none() && value.get("url").is_none() => {
             // `naturalWidth` / `naturalHeight`: whole pixels.
@@ -1077,31 +1075,44 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
-        EventKind::HoverMove => {
-            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-            EventPayload::Hover(nsh_core::HoverEvent {
-                location: point(Points(num("locationX")), Points(num("locationY"))),
-                page: point(Points(num("pageX")), Points(num("pageY"))),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flag("ctrlKey"),
-                    alt: flag("altKey"),
-                    shift: flag("shiftKey"),
-                    cmd: flag("metaKey"),
-                },
-            })
-        }
-        EventKind::ContextMenu => {
-            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-            EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-                location: point(Points(num("locationX")), Points(num("locationY"))),
-                page: point(Points(num("pageX")), Points(num("pageY"))),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flag("ctrlKey"),
-                    alt: flag("altKey"),
-                    shift: flag("shiftKey"),
-                    cmd: flag("metaKey"),
-                },
-            })
+        EventKind::HoverMove | EventKind::ContextMenu => {
+            // `{ position, pagePosition, modifiers }`, as handlers get it.
+            let at = |k: &str| {
+                let p = value.get(k);
+                let n = |c: &str| {
+                    p.and_then(|p| p.get(c))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as f32
+                };
+                point(Points(n("x")), Points(n("y")))
+            };
+            let flag = |k: &str| {
+                value
+                    .get("modifiers")
+                    .and_then(|m| m.get(k))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            };
+            let (position, page_position) = (at("position"), at("pagePosition"));
+            let modifiers = nsh_core::keymap::Modifiers {
+                ctrl: flag("control"),
+                alt: flag("alt"),
+                shift: flag("shift"),
+                cmd: flag("platform"),
+            };
+            if kind == EventKind::HoverMove {
+                EventPayload::Hover(nsh_core::HoverEvent {
+                    position,
+                    page_position,
+                    modifiers,
+                })
+            } else {
+                EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                    position,
+                    page_position,
+                    modifiers,
+                })
+            }
         }
         EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
             text: text("text"),

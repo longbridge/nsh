@@ -55,10 +55,11 @@ NSH-owned declarations and behavior rather than copying the upstream API into it
    closes it adds the entries it removes to `api/closed.txt`, each with its reason (`<entry> -- <reason>`, the entry
    as the `compat` tests report the break: `[<module>] <path>`, `<file>: <Name>` or `<file>: <Name>.<member>`; the
    file's header has the details), and says why in its description and the release notes. `api/closed.txt` is the
-   only list of removals there will ever be. Its only entries not made for security record two changes made before
-   the first compatible release (v0.1.2): the alignment and grid utilities, changed to resolve exactly as Tailwind CSS
-   does (#181), and the fixtures of single cases, merged into one fixture per domain that runs the same cases and
-   steps (`apps/<fixture>` entries).
+   only list of removals there will ever be. Its only entries not made for security record changes made before the
+   first compatible release (v0.1.2): the alignment and grid utilities, changed to resolve exactly as Tailwind CSS
+   does (#181), the fixtures of single cases, merged into one fixture per domain that runs the same cases and steps
+   (`apps/<fixture>` entries), and the renames of docs/dev/api-naming.md's "Renames before the first compatible
+   release" (with the fixtures that used the old names, kept again from their updated sources).
 
 ## How it is enforced
 

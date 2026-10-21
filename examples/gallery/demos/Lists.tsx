@@ -49,7 +49,7 @@ function Grid() {
       style={{ flex: 1 }}
       contentStyle={wide ? { padding: 24, gap: 12 } : { padding: 16, gap: 8 }}
       viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-      onViewableItemsChanged={({ viewableItems }) => {
+      onViewableItemsChange={({ viewableItems }) => {
         first.set(viewableItems.length ? viewableItems[0].index : -1);
         last.set(viewableItems.length ? viewableItems[viewableItems.length - 1].index : -1);
       }}
@@ -273,8 +273,8 @@ function Chat() {
         style={{ flex: 1 }}
         contentStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}
         keyboardDismissMode="interactive"
-        onEndReached={loadOlder}
-        onEndReachedThreshold={0.5}
+        onLoadMore={loadOlder}
+        loadMoreThreshold={0.5}
       >
         {(m) => (
           <View style={{ alignSelf: m().mine ? "flex-end" : "flex-start", maxWidth: "78%", gap: 3, alignItems: m().mine ? "flex-end" : "flex-start" }}>
@@ -383,7 +383,7 @@ function More() {
 
         <Section title="Horizontal scroll view" note={range()}>
           <View style={{ marginHorizontal: -14 }}>
-            <Scroll horizontal showsIndicator={false}>
+            <Scroll horizontal scrollbar={false}>
               <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 14 }}>
                 <Each of={ranges}>
                   {(label) => (
@@ -412,7 +412,7 @@ function More() {
 
         <Section title="Horizontal list" note="1,000 recycled cards">
           <View style={{ marginHorizontal: -14 }}>
-            <List each={cards} horizontal estimatedItemSize={130} showsIndicator={false} style={{ height: 124 }} contentStyle={{ paddingHorizontal: 14, gap: 10 }}>
+            <List each={cards} horizontal estimatedItemSize={130} scrollbar={false} style={{ height: 124 }} contentStyle={{ paddingHorizontal: 14, gap: 10 }}>
               {(i) => {
                 const tone = () => tones[i() % (tones.length - 1)];
                 const load = () => ((i() * 37) % 100) / 100;

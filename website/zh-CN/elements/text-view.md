@@ -13,7 +13,7 @@ demo: text-view
 它负责行为，并自带一套阅读排版：15pt 正文、宽松的 25.5pt 行高，半粗体标题且上方留有空间，链接以主题的链接色加下划线，代码放在带边框的圆角框中，表格四边都有线、表头行带底色，引用在一侧带一条线，提示块是带图标的着色框。颜色取自主题的令牌（`foreground`、`muted.foreground`、`border`、`muted.background`、`link`、`list.head.background` 和各状态色），因此主题和深色外观都会作用于它。每个部件在这些默认样式之上接收应用的样式：TSX 中是 `classes` 和 `styles`，Rust 中是按部件给出的类型化样式（`TextViewParts`）。Rust 用 `nsh_base::text_view()` 创建它，TSX 用从 `nsh/base` 导入的 `<TextView>`。
 
 ```rust tabs
-use nsh_base::{text_view, theme};
+use nsh_base::{TextViewLinkPressEvent, text_view, theme};
 use nsh_core::ui::prelude::*;
 
 const README: &str = "# Release notes
@@ -31,7 +31,7 @@ fn release_notes() -> impl IntoElement {
     scroll().flex_1().child(
         text_view()
             .markdown(README)
-            .on_link_press(|url: &SharedString| log::info!("open {url}"))
+            .on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| log::info!("open {url}"))
             .p_5()
             .text_base()
             .text_color(theme().foreground()),
@@ -66,7 +66,7 @@ function App() {
           link: "text-blue-600",
           alertTip: "border-l-4 border-green-600 pl-3",
         }}
-        onLinkPress={(url) => console.log("open", url)}
+        onLinkPress={({ url }) => console.log("open", url)}
       />
     </Scroll>
   );
@@ -243,7 +243,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 
 随着回复增长传入它，并设置 `options={{ streaming: true }}`（Rust 中是 `MarkdownOptions { streaming: true, .. }`）。仍在到达的文本末尾常常留着未闭合的语法（`**bold`、`` `code ``、`[a link](htt`、刚到达表头的表格）；流式模式会把它显示成闭合后的样子，读者不会看到零散的 `**` 或 `[`。文档块按位置保留：已完成的块保留它们的视图，只有正在写的块会重新生成，因此长回复的更新依然很轻。
 
-`caret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）；否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
+`streamingCaret` 跟随文档末尾：以行内方式显示在最后一段文本的末尾，无论最后一个块在哪里结束（段落、列表项、代码块、表格的最后一个单元格）；否则单独一行显示在最后一个块之后（分隔线、渲染函数的内容）。回复结束后去掉它。
 
 ```rust tabs
 use nsh_base::{MarkdownOptions, text_view};
@@ -254,7 +254,7 @@ fn reply(text: Signal<SharedString>, done: Signal<bool>) -> impl IntoElement {
     text_view()
         .markdown(move || text.get())
         .options(move || MarkdownOptions { streaming: !done.get(), ..Default::default() })
-        .caret(when(
+        .streaming_caret(when(
             move || !done.get(),
             || view().ml_0p5().h_4().w_2().rounded_sm().bg(rgb(0xa3a3a3)),
         ))
@@ -276,7 +276,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
     <TextView
       markdown={text()}
       options={{ streaming: !done() }}
-      caret={done() ? undefined : <View class="ml-0.5 h-4 w-2 rounded-sm bg-neutral-400" />}
+      streamingCaret={done() ? undefined : <View class="ml-0.5 h-4 w-2 rounded-sm bg-neutral-400" />}
     />
   );
 }
@@ -288,14 +288,14 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 
 ## 链接
 
-链接是[可点击的片段](./text.md#链接)。点击链接会以其 URL 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。
+链接是[可点击的片段](./text.md#链接)。点击链接会以 `{ url }` 调用 `onLinkPress`；打开什么由应用决定（应用自己的页面、[`WebView`](./web-view.md)、滚动到某个标题）。标题带有锚点（GitHub 的规则：`## Getting started` 是 `#getting-started`），因此指向 `#getting-started` 的链接会以这个字符串到达，脚注引用则以 `#footnote-<label>` 到达。
 
 ```rust tabs
-use nsh_base::text_view;
+use nsh_base::{TextViewLinkPressEvent, text_view};
 use nsh_core::ui::prelude::*;
 
 fn doc(markdown: &'static str) -> impl IntoElement {
-    text_view().markdown(markdown).on_link_press(|url: &SharedString| {
+    text_view().markdown(markdown).on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| {
         match url.strip_prefix('#') {
             Some(anchor) => scroll_to_anchor(anchor),
             None => open_web(url),
@@ -307,7 +307,7 @@ fn doc(markdown: &'static str) -> impl IntoElement {
 ```tsx tabs
 <TextView
   markdown={doc}
-  onLinkPress={(url) => {
+  onLinkPress={({ url }) => {
     if (url.startsWith("#")) scrollToAnchor(url.slice(1));
     else nav.push({ name: "web", url });
   }}
@@ -721,9 +721,9 @@ fn chat() -> impl IntoElement {
 | `classes` | `.classes(..)` | `TextViewClasses` | `{}` | 按部件设定的 Tailwind 类。 |
 | `styles` | `.styles(..)` | `TextViewStyles` | `{}` | 按部件设定的内联样式（每个都是 `StyleProp<TextStyle>`），优先于类。 |
 | `selectable` | `.selectable(..)` | `boolean` | `false` | 整个文档作为一体可选择：选区可以跨越它的段落、标题、单元格和代码块（[SelectionArea](./selection-area.md)）。 |
-| `codeBlockScrollIndicator` | `.code_block_scroll_indicator(..)` | `boolean` | `true` | 代码块显示其水平滚动指示器。 |
-| `tableScrollIndicator` | `.table_scroll_indicator(..)` | `boolean` | `true` | 表格显示其水平滚动指示器。 |
-| `caret` | `.caret(..)` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |
+| `codeBlockScrollbar` | `.code_block_scrollbar(..)` | `boolean` | `true` | 代码块显示其水平滚动指示器。 |
+| `tableScrollbar` | `.table_scrollbar(..)` | `boolean` | `true` | 表格显示其水平滚动指示器。 |
+| `streamingCaret` | `.streaming_caret(..)` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |
 | `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | 显示自定义节点。 |
 | `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | 显示代码块。 |
 | `codeBlockActions` | `.code_block_actions(..)` | `TextViewCodeAction[]` | `[]` | 每个代码块右上角的操作：`{ id: "copy" }` 内置，其余由应用定义。 |
@@ -741,7 +741,7 @@ fn chat() -> impl IntoElement {
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onLinkPress` | `.on_link_press(\|url: &SharedString\| ..)` | 链接被点击：其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
+| `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
 | `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 

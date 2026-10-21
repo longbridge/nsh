@@ -51,14 +51,14 @@ pub struct TextViewProps {
     /// Whether code blocks show the scroll indicator of their horizontal
     /// scroll view (default true).
     #[prop(default = true)]
-    pub code_block_scroll_indicator: Prop<bool>,
+    pub code_block_scrollbar: Prop<bool>,
     /// Whether tables show the scroll indicator of their horizontal scroll
     /// view (default true).
     #[prop(default = true)]
-    pub table_scroll_indicator: Prop<bool>,
+    pub table_scrollbar: Prop<bool>,
     /// Shown inline at the end of the last block (a streaming reply's
     /// caret).
-    pub caret: Prop<Option<Slot>>,
+    pub streaming_caret: Prop<Option<Slot>>,
     /// Shows a custom node (an extension's or the document's): `node.name`
     /// tells which. Without it, a custom node shows its content.
     pub render_custom: Prop<Option<Renderer<CustomNode>>>,
@@ -108,8 +108,8 @@ pub enum TextViewEvent {
     /// A link was pressed: its URL (`#anchor` for a heading of the
     /// document, `#footnote-<label>` for a footnote). Nothing opens it:
     /// the app decides.
-    #[args(url)]
-    LinkPress(SharedString),
+    #[args(event)]
+    LinkPress(TextViewLinkPressEvent),
     /// An image that is not in a link was pressed: the image (its `src`,
     /// `alt`, `title`, size), for the app to show it larger (a zoomable
     /// viewer of its own).
@@ -147,6 +147,15 @@ impl TextViewCodeAction {
     }
 }
 
+/// A press on a link of a [`TextView`] (`onLinkPress`).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct TextViewLinkPressEvent {
+    /// The link's URL (`#anchor` for a heading of the document,
+    /// `#footnote-<label>` for a footnote).
+    pub url: SharedString,
+}
+
 /// A press on a code block's action (`onCodeBlockAction`).
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub struct TextViewCodeActionEvent {
@@ -173,7 +182,7 @@ pub struct TextViewCodeActionEvent {
 /// custom nodes (`renderCustom`), code blocks and their actions, tables'
 /// actions, formulas, images. Made for replies streamed by AI models:
 /// blocks are kept by position, so only those that changed are made
-/// again, and `caret` follows the end of the text.
+/// again, and `streaming_caret` follows the end of the text.
 #[component]
 pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElement {
     let plugins = use_context::<MarkdownPlugins>().unwrap_or_default();
@@ -338,7 +347,7 @@ struct Cx {
     styles: TextViewStyles,
     selectable: bool,
     code_scroll_indicator: bool,
-    table_scroll_indicator: bool,
+    table_scrollbar: bool,
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
@@ -374,9 +383,9 @@ impl Cx {
             classes: props.classes.get(),
             styles: props.styles.get(),
             selectable: props.selectable.get(),
-            code_scroll_indicator: props.code_block_scroll_indicator.get(),
-            table_scroll_indicator: props.table_scroll_indicator.get(),
-            caret: props.caret.get(),
+            code_scroll_indicator: props.code_block_scrollbar.get(),
+            table_scrollbar: props.table_scrollbar.get(),
+            caret: props.streaming_caret.get(),
             render_custom: props.render_custom.get(),
             render_code_block: props.render_code_block.get(),
             render_code_block_action: props.render_code_block_action.get(),
@@ -824,9 +833,7 @@ impl Cx {
         self.part(block, Part::CodeBlock)
             .child(
                 self.part(
-                    scroll()
-                        .horizontal()
-                        .shows_indicator(self.code_scroll_indicator),
+                    scroll().horizontal().scrollbar(self.code_scroll_indicator),
                     Part::CodeBlockScroll,
                 )
                 .child(self.part(body, Part::CodeBlockCode)),
@@ -1040,9 +1047,7 @@ impl Cx {
             .child(actions)
             .child(
                 self.part(
-                    scroll()
-                        .horizontal()
-                        .shows_indicator(self.table_scroll_indicator),
+                    scroll().horizontal().scrollbar(self.table_scrollbar),
                     Part::TableScroll,
                 )
                 .child(grid),
@@ -1204,7 +1209,11 @@ impl Cx {
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
-                    .on_press(move || scope.emit(TextViewEvent::LinkPress(url.clone())));
+                    .on_press(move || {
+                        scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                            url: url.clone(),
+                        }))
+                    });
                 self.part(el, Part::Link).into_element()
             }
             Inline::Image(image) => {
@@ -1234,7 +1243,11 @@ impl Cx {
                         .text_size(rems(0.75))
                         .text_color(move || theme().link())
                         .role(AccessibilityRole::Link)
-                        .on_press(move || scope.emit(TextViewEvent::LinkPress(url.clone()))),
+                        .on_press(move || {
+                            scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                                url: url.clone(),
+                            }))
+                        }),
                     Part::FootnoteReference,
                 )
                 .into_element()
@@ -1293,7 +1306,9 @@ impl Cx {
         let is_link = link.is_some();
         // In a link it is the link's; else a press reports the image.
         let press = Some(move || match &link {
-            Some(url) => scope.emit(TextViewEvent::LinkPress(url.clone())),
+            Some(url) => scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
+                url: url.clone(),
+            })),
             None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
         });
         let role = if is_link {
@@ -1830,7 +1845,7 @@ mod tests {
                 .selectable(true)
                 .render_image(|image: &Image| text(image.alt.clone()))
                 .render_code_block(|code: &CodeBlock| text(code.code.clone()))
-                .on_link_press(|_url: &SharedString| {})
+                .on_link_press(|_event: &TextViewLinkPressEvent| {})
                 .into_element()
         };
     }

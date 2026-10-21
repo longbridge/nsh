@@ -45,11 +45,11 @@ pub(crate) fn markdown(
             ..MarkdownOptions::default()
         })
         .selectable(true)
-        .code_block_scroll_indicator(false)
+        .code_block_scrollbar(false)
         .code_block_actions(vec![
             TextViewCodeAction::new("copy").with_label("Copy code"),
         ])
-        .caret(when(streaming, caret))
+        .streaming_caret(when(streaming, caret))
         .gap_3()
         .text_size(px(15.0))
         .line_height(px(22.0))

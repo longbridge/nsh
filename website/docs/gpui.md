@@ -172,7 +172,7 @@ What draws or behaves differently from the native desktop backends:
 - **Web views** are native views above everything NSH draws at their place. On Linux they need X11 (see
   [Requirements](#requirements)); where pages stay black under Xwayland ("Failed to create GBM buffer" in the log),
   run the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`. On macOS and Windows clipping ancestors do not cut them and
-  failed loads report no `onError`. `source.baseUrl`, `scrollEnabled` and `allowsBackForwardNavigationGestures` are
+  failed loads report no `onError`. `source.baseUrl`, `scrollable` and `allowsBackForwardNavigationGestures` are
   not supported.
 - **Accessibility** goes through AccessKit: screen readers can activate, focus, set values and scroll elements into
   view everywhere; custom actions and the context-menu action are not passed on yet.

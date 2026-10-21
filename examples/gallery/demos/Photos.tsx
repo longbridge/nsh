@@ -219,7 +219,7 @@ export function Photos() {
             scrollValue={scrollY}
             refreshing={refreshing()}
             onRefresh={refresh}
-            onEndReached={loadMore}
+            onLoadMore={loadMore}
             header={phoneHero}
             footer={footer()}
           >
@@ -242,7 +242,7 @@ export function Photos() {
               scrollValue={scrollY}
               refreshing={refreshing()}
               onRefresh={refresh}
-              onEndReached={loadMore}
+              onLoadMore={loadMore}
               header={hero()}
               footer={footer()}
             >

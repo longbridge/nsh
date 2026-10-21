@@ -209,7 +209,7 @@ Not supported, or different:
 - **`mixBlendMode`**, and `brightness()` above 1.
 - **Inputs**: content types and autofill, keyboard types, autocapitalization, letter spacing; input accessory views
   are never shown (there is no software keyboard) and `keyboardShouldPersistTaps` is ignored.
-- **`WebView`'s `scrollEnabled={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll
+- **`WebView`'s `scrollable={false}`** keeps the mouse wheel and the trackpad from scrolling the page: they scroll
   the app's scroll views around it, as on iOS. The page still scrolls with its keyboard (Space, the arrows) and its own
   scripts, and trackpad swipes between its pages (`allowsBackForwardNavigationGestures`) stop as well.
 - **Accessibility**: custom `accessibilityActions`.

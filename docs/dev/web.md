@@ -450,7 +450,7 @@ browsers' touches into what phones report:
   notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
   event goes on to the page around (an embedding page scrolls). Ctrl + wheel (a touchpad's pinch) pinches the view
   under the pointer and never zooms the page. Scroll events follow the desktop backends: touch drags send
-  `onScrollBeginDrag` / `EndDrag`, glides and snaps `onMomentumScrollBegin` / `End`, every scroll ends with one
+  `onScrollDragStart` / `EndDrag`, glides and snaps `onMomentumStart` / `End`, every scroll ends with one
   `onScrollEnd` (the browser's `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
 - **Mouse drags never scroll**, in every idiom, as on the desktop backends: dragging the content is a touchscreen's
   way to scroll, the mouse has the wheel, the keyboard and the scroll bar. Its drags go to pans, the responder system
@@ -460,9 +460,9 @@ browsers' touches into what phones report:
   (they would take 6 px from content the core laid out for the whole view), and a 4 px thumb in a sticky, zero-size
   `.nsh-bar` at the view's top left (it stays put as the content scrolls, in step with the compositor) shows while
   the view scrolls or the mouse reaches its draggable thumb and fades 700 ms after.
-  Hovering content leaves its visibility and fade timer unchanged. Views along one axis with `showsIndicator`, and
+  Hovering content leaves its visibility and fade timer unchanged. Views along one axis with `scrollbar`, and
   horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
-  (`grabBar`: `onScrollBeginDrag` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
+  (`grabBar`: `onScrollDragStart` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are

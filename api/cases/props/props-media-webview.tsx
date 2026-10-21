@@ -21,7 +21,7 @@ function App() {
         injectedJavaScriptBeforeContentLoaded="window.before = 1;"
         javaScriptEnabled={false}
         userAgent="CompatAgent/1"
-        scrollEnabled={false}
+        scrollable={false}
         ios={{ allowsBackForwardNavigationGestures: true }}
         style={{ width: 200, height: 120 }}
       />

@@ -98,20 +98,20 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | 条目之间的分隔（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前先滚动到该条目。 |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。在 Rust 中是各行的标识，前面的行增删时，行保留自己的单元格和尺寸。 |
-| `onEndReached` | `.on_end_reached(..)` | `() => void` | | 快到末端了：加载更多。 |
-| `onEndReachedThreshold` | `.end_reached_threshold(viewports)` | `number` | `1` | 距末端多近（以视口为单位）时触发 `onEndReached`。 |
-| `onViewableItemsChanged` | `.on_viewable_items_changed(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | 有条目变为可见或不再可见。 |
+| `onLoadMore` | `.on_load_more(..)` | `() => void` | | 快到末端了：加载更多。 |
+| `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | 距末端多近（以视口为单位）时触发 `onLoadMore`。 |
+| `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | 有条目变为可见或不再可见。 |
 | `viewabilityConfig` | `.viewability(..)`、`.minimum_view_time(..)` | `ViewabilityConfig` | | 条目何时算作可见（见下文）。 |
 | `refreshing` | `.refreshing(..)` | `boolean` | | 显示下拉刷新的转圈。 |
 | `onRefresh` | `.on_refresh(..)` | `() => void` | | 用户下拉刷新。 |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `scrollValue` | `.scroll_value(&value)` | `AnimatedValue` | | 接收滚动偏移的动画值，用于随滚动变化的动画。 |
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `style` | `Styled` 方法 | `StyleProp<ViewStyle>` | | 列表自身的样式（需要有确定的尺寸：`flex: 1` 或高度）。 |
 | `testID` | `.test_id(id)` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
 | `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | | 列表的节点（见 [ref 方法](#ref-方法)）。 |
 
-列表同样支持 [`Scroll`](./scroll.md#滚动) 的滚动属性（Rust 中为 `Scrollable` 方法）：`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`disableIntervalMomentum`、`decelerationRate`、`bounces`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`scrollEventThrottle` 和 `scrollEnabled`。列表保持原有比例。
+列表同样支持 [`Scroll`](./scroll.md#滚动) 的滚动属性（Rust 中为 `Scrollable` 方法）：`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`disableIntervalMomentum`、`decelerationRate`、`bounces`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`scrollEventThrottle` 和 `scrollable`。列表保持原有比例。
 
 所有元素通用的属性（[通用属性](./index.md#通用属性)）原样传给列表的滚动视图：`testID`、`accessibilityLabel` 等无障碍属性、样式、`onLayout`、触摸和响应者属性。UI 测试按 `testID` 找到列表，和找其他视图一样。
 
@@ -130,11 +130,11 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | 事件 | Rust | 载荷 | 时机 |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | 偏移发生变化。 |
-| `onScrollBeginDrag` / `onScrollEndDrag` | `.on_scroll_begin_drag` / `.on_scroll_end_drag` | `{ x, y }` | 开始 / 结束拖动。 |
-| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `.on_momentum_scroll_begin` / `.on_momentum_scroll_end` | `{ x, y }` | 惯性滑动开始 / 结束。 |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` | 开始 / 结束拖动。 |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | 惯性滑动开始 / 结束。 |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | 滚动停止。 |
-| `onEndReached` | `.on_end_reached` | 无 | 距末端不足 `onEndReachedThreshold` 个视口。 |
-| `onViewableItemsChanged` | `.on_viewable_items_changed` | `{ viewableItems, changed }`（`ViewableItems`） | 可见性变化。 |
+| `onLoadMore` | `.on_load_more` | 无 | 距末端不足 `loadMoreThreshold` 个视口。 |
+| `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }`（`ViewableItems`） | 可见性变化。 |
 | `onRefresh` | `.on_refresh` | 无 | 下拉刷新。 |
 
 ## ref 方法
@@ -164,7 +164,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 .row_gap(px(8.0))
 .column_gap(px(8.0))
 .viewability(Viewability { item_visible_percent: Some(50.0), ..Viewability::default() })
-.on_viewable_items_changed(move |items: &ViewableItems| {
+.on_viewable_items_change(move |items: &ViewableItems| {
     visible.set(format!("{} 项可见", items.indices().count()).into())
 })
 .header(
@@ -185,7 +185,7 @@ let list!: YNode;
   estimatedItemSize={120}
   contentStyle={{ padding: 12, gap: 8 }}
   viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-  onViewableItemsChanged={({ viewableItems }) => visible.set(`${viewableItems.length} 项可见`)}
+  onViewableItemsChange={({ viewableItems }) => visible.set(`${viewableItems.length} 项可见`)}
   header={<Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>跳到第 60 项</Text>}
   style={{ flex: 1 }}
 >

@@ -1645,7 +1645,7 @@ struct State<M: TextEngine> {
     ops: Vec<Op>,
     /// List render requests not yet sent to JS.
     binds: Vec<ListBind>,
-    /// Events raised by the core (e.g. `onEndReached`, `onLayout`).
+    /// Events raised by the core (e.g. `onLoadMore`, `onLayout`).
     events: Vec<JsEvent>,
     trace: bool,
     /// Where commit timings go ([`EngineControl::set_perf_monitor`]).
@@ -1919,12 +1919,12 @@ impl<M: TextEngine> State<M> {
             e.last = Some(now);
             let n = |v: f32| PayloadValue::Number(v as f64);
             let payload = EventPayload::Map(vec![
-                ("x", n(e.x)),
-                ("y", n(e.y)),
-                ("contentWidth", n(e.content.width.0)),
-                ("contentHeight", n(e.content.height.0)),
-                ("width", n(e.viewport.width.0)),
-                ("height", n(e.viewport.height.0)),
+                (
+                    "offset",
+                    PayloadValue::Point(geometry::point(Points(e.x), Points(e.y))),
+                ),
+                ("contentSize", PayloadValue::Size(e.content)),
+                ("size", PayloadValue::Size(e.viewport)),
                 ("zoomScale", n(e.zoom)),
             ]);
             // A Rust component's scroll view is the component's.

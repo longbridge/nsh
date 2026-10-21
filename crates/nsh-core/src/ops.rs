@@ -161,7 +161,7 @@ events! {
     PanStart = "onPanStart": "A drag started (payload: [`EventPayload::Pan`]).",
     PanEnd = "onPanEnd": "A drag ended (payload: [`EventPayload::Pan`] with velocity).",
     Refresh = "onRefresh": "Pull-to-refresh was triggered on a scroll or list.",
-    EndReached = "onEndReached": "A list was scrolled close to its end.",
+    LoadMore = "onLoadMore": "A list was scrolled close to its end.",
     ScrollEnd = "onScrollEnd": "Scrolling came to rest (payload: [`EventPayload::Scroll`]).",
     Load = "onLoad": "An image loaded (payload: [`EventPayload::Image`]).",
     Error = "onError": "An image failed to load (payload: [`EventPayload::Error`]).",
@@ -187,13 +187,13 @@ events! {
     Progress = "onProgress": "Video playback progressed (payload: `currentTime`, `duration`).",
     End = "onEnd": "A video played to its end.",
     Buffer = "onBuffer": "A video started or stopped buffering (payload: `isBuffering`).",
-    ViewableItemsChanged = "onViewableItemsChanged": "The range of visible list items changed (payload: `first`, `last`).",
+    ViewableItemsChange = "onViewableItemsChange": "The range of visible list items changed (payload: `first`, `last`).",
     BackPress = "onBackPress" as "": "The Android back button was pressed and nothing native handled it (root only).",
     Scroll = "onScroll": "A scroll view moved, at most once per frame (payload: `x`, `y`, `contentWidth`, `contentHeight`, `width`, `height`).",
-    ScrollBeginDrag = "onScrollBeginDrag": "The user started dragging a scroll view (payload: [`EventPayload::Scroll`]).",
-    ScrollEndDrag = "onScrollEndDrag": "The user let go of a scroll view (payload: [`EventPayload::Scroll`]).",
-    MomentumScrollBegin = "onMomentumScrollBegin": "A scroll view started gliding after a fling (payload: [`EventPayload::Scroll`]).",
-    MomentumScrollEnd = "onMomentumScrollEnd": "A scroll view stopped gliding (payload: [`EventPayload::Scroll`]).",
+    ScrollDragStart = "onScrollDragStart": "The user started dragging a scroll view (payload: [`EventPayload::Scroll`]).",
+    ScrollDragEnd = "onScrollDragEnd": "The user let go of a scroll view (payload: [`EventPayload::Scroll`]).",
+    MomentumStart = "onMomentumStart": "A scroll view started gliding after a fling (payload: [`EventPayload::Scroll`]).",
+    MomentumEnd = "onMomentumEnd": "A scroll view stopped gliding (payload: [`EventPayload::Scroll`]).",
     Dialog = "onDialog": "An alert or action sheet closed (root only; payload: `id`, `index`, -1 when dismissed).",
     Touch = "onTouch": "Touches on the view or inside it, for the JS touch and responder handlers (payload: [`EventPayload::Touch`]).",
     SelectionChange = "onSelectionChange": "The selection (or caret) of an input moved (payload: `start`, `end` in UTF-16 units).",
@@ -361,10 +361,10 @@ pub struct TouchPoint {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HoverEvent {
     /// Position in the view, its transforms undone.
-    pub location: Point<Points>,
+    pub position: Point<Points>,
     /// Position in the root view the view is in (the surface, or its
     /// modal), as touches' `page`.
-    pub page: Point<Points>,
+    pub page_position: Point<Points>,
     /// The modifier keys held.
     pub modifiers: crate::keymap::Modifiers,
 }
@@ -374,10 +374,10 @@ pub struct HoverEvent {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ContextMenuEvent {
     /// Position in the view, its transforms undone.
-    pub location: Point<Points>,
+    pub position: Point<Points>,
     /// Position in the root view the view is in (the surface, or its
     /// modal): where `Menu.popup` opens a menu.
-    pub page: Point<Points>,
+    pub page_position: Point<Points>,
     /// The modifier keys held.
     pub modifiers: crate::keymap::Modifiers,
 }
@@ -450,6 +450,12 @@ pub enum PayloadValue {
     Str(String),
     /// `null`.
     Null,
+    /// A position (`{ x, y }`).
+    Point(Point<Points>),
+    /// An extent (`{ width, height }`).
+    Size(Size<Points>),
+    /// A position and an extent (`{ origin, size }`).
+    Bounds(Bounds<Points>),
 }
 
 /// Data delivered with an event.
@@ -833,7 +839,7 @@ pub enum ScrollProp {
     #[prop(js = "contentInset", on = SCROLLING)]
     ContentInset(EdgeInsets),
     /// `contentOffset`: where it starts.
-    #[prop(js = "contentOffset", with = crate::js::host_values::content_offset, once, ts = "{ x?: number; y?: number }", on = SCROLLING)]
+    #[prop(js = "contentOffset", with = crate::js::host_values::content_offset, once, ts = "Partial<Point>", on = SCROLLING)]
     ContentOffset(Point<Points>),
     /// `keyboardShouldPersistTaps`: whether a tap dismisses the keyboard: `"never"`
     /// (default: the tap only dismisses it), `"always"` (never dismisses),
@@ -862,8 +868,8 @@ pub enum ScrollProp {
     /// true).
     #[prop(js = "bouncesZoom", default = true, on = SCROLL)]
     BouncesZoom(bool),
-    /// `pinchGestureEnabled`: the user can pinch to zoom (default true).
-    #[prop(js = "pinchGestureEnabled", default = true, on = SCROLL)]
+    /// `zoomable`: the user can pinch to zoom (default true).
+    #[prop(js = "zoomable", default = true, on = SCROLL)]
     Pinch(bool),
     /// `centerContent`: content smaller than the viewport (zoomed out) is centered.
     #[prop(js = "centerContent", on = SCROLL)]
@@ -933,17 +939,17 @@ pub enum ScreenAnimation {
     None,
 }
 
-/// A screen option (`<NavPage title headerShown ...>`).
+/// A screen option (`<NavPage title headerVisible ...>`).
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ScreenProp {
     /// `title`: the header's title (iOS and Android: the system header;
     /// ignored on the desktops and the web, which show the app's `header`).
     #[prop(js = "title", on = SCREEN)]
     Title(Option<Arc<str>>),
-    /// `headerShown`: the system header shows (default true; iOS and
+    /// `headerVisible`: the system header shows (default true; iOS and
     /// Android).
-    #[prop(js = "headerShown", default = true, on = SCREEN)]
-    HeaderShown(bool),
+    #[prop(js = "headerVisible", default = true, on = SCREEN)]
+    HeaderVisible(bool),
     /// `headerLargeTitle` (iOS: the system header; ignored elsewhere): a
     /// large title; the content scrolls under the header.
     #[prop(js = "headerLargeTitle", on = SCREEN)]
@@ -1055,7 +1061,7 @@ pub enum OverlayProp {
     /// as touches' `pageX` / `pageY`) it is placed against, following a
     /// view as it moves; without one it is laid out as a `position: fixed`
     /// box of its root view.
-    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | { x: number; y: number } | null", on = OVERLAY)]
+    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | null", on = OVERLAY)]
     Anchor(OverlayAnchor),
     /// `placement`: the side of the anchor it goes on (default `"bottom"`);
     /// the other side when only that one has room.
@@ -1437,10 +1443,10 @@ pub enum Prop {
     /// Scrolling behavior of a scroll view or list.
     #[prop(nested)]
     Scroll(ScrollProp),
-    /// `showsIndicator`: the scroll indicator shows (default true). On the
+    /// `scrollbar`: the scroll indicator shows (default true). On the
     /// desktop a horizontal view keeps it: it is the mouse's scroll bar.
-    #[prop(js = "showsIndicator", default = true, on = SCROLL | LIST)]
-    ShowsIndicator(bool),
+    #[prop(js = "scrollbar", default = true, on = SCROLL | LIST)]
+    Scrollbar(bool),
     /// `refreshing`: the pull-to-refresh spinner shows.
     #[prop(js = "refreshing", on = SCROLL | LIST)]
     Refreshing(bool),
@@ -1486,9 +1492,9 @@ pub enum Prop {
     /// `viewabilityConfig`: when items count as viewable.
     #[prop(js = "viewabilityConfig", on = LIST)]
     Viewability(Viewability),
-    /// How close to the end `onEndReached` fires, in viewports.
-    #[prop(js = "endReachedThreshold", default = 1.0, internal)]
-    EndReachedThreshold(f32),
+    /// How close to the end `onLoadMore` fires, in viewports.
+    #[prop(js = "loadMoreThreshold", default = 1.0, internal)]
+    LoadMoreThreshold(f32),
     /// The item index a list cell now renders (set by the runtime after
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
@@ -1560,9 +1566,9 @@ pub enum Prop {
     /// `autoFocus`: focused when it appears.
     #[prop(js = "autoFocus", on = INPUT)]
     AutoFocus(bool),
-    /// `caretHidden`: no caret is drawn.
-    #[prop(js = "caretHidden", on = INPUT)]
-    CaretHidden(bool),
+    /// `caret`: the caret is drawn (default true; `false` hides it).
+    #[prop(js = "caret", default = true, on = INPUT)]
+    Caret(bool),
     /// `inputAccessoryViewID`: the `nativeID` of an `InputAccessoryView`
     /// (`nsh/ios`) shown over the keyboard while the input has focus.
     #[prop(ios = "inputAccessoryViewID", on = INPUT)]
@@ -1593,7 +1599,7 @@ pub enum Prop {
     #[prop(js = "pointerEvents")]
     PointerEvents(PointerEvents),
     /// `hitSlop`: extends the touch area beyond the bounds.
-    #[prop(js = "hitSlop", with = crate::js::host_values::hit_slop, reset = Prop::HitSlop(EdgeInsets::default()), ts = "number | { top?: number; right?: number; bottom?: number; left?: number }")]
+    #[prop(js = "hitSlop", with = crate::js::host_values::hit_slop, reset = Prop::HitSlop(EdgeInsets::default()), ts = "number | Partial<Edges>")]
     HitSlop(EdgeInsets),
     /// `panActivation`: the view's touch responder waits for a pan that the
     /// platform activates past an offset on one axis (and fails past one on
@@ -1798,9 +1804,9 @@ pub enum NativeProp {
     /// `userAgent` (web views): the browser's user agent string.
     #[prop(js = "userAgent", on = WEBVIEW)]
     UserAgent(Option<Arc<str>>),
-    /// `scrollEnabled`: the user can scroll it (default true).
-    #[prop(js = "scrollEnabled", default = true, on = WEBVIEW | SCROLLING)]
-    ScrollEnabled(bool),
+    /// `scrollable`: the user can scroll it (default true).
+    #[prop(js = "scrollable", default = true, on = WEBVIEW | SCROLLING)]
+    Scrollable(bool),
     /// `javaScriptEnabled` (web views): pages run scripts (default true).
     #[prop(js = "javaScriptEnabled", default = true, on = WEBVIEW)]
     JavaScriptEnabled(bool),

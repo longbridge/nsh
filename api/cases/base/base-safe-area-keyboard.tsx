@@ -11,7 +11,7 @@ import { Text, View, signal } from "nsh";
 import {
   Button,
   Dialog,
-  type Insets,
+  type Edges,
   Keyboard,
   KeyboardAvoidingView,
   NavPage,
@@ -23,7 +23,7 @@ import {
   safeAreaInsets,
 } from "nsh/base";
 
-const show = (i: Insets) => `${i.top} ${i.right} ${i.bottom} ${i.left}`;
+const show = (i: Edges) => `${i.top} ${i.right} ${i.bottom} ${i.left}`;
 
 function Here(props: { name: string }) {
   const insets = safeAreaInsets();

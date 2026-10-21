@@ -16,9 +16,9 @@ function App() {
           style={{ height: 60, paddingTop: 10 }}
           onContextMenu={(e) =>
             menu.set(
-              `at ${e.locationX},${e.locationY} page ${e.pageX},${e.pageY}` +
-                `${e.altKey ? " alt" : ""}${e.ctrlKey ? " ctrl" : ""}` +
-                `${e.metaKey ? " meta" : ""}${e.shiftKey ? " shift" : ""}`,
+              `at ${e.position.x},${e.position.y} page ${e.pagePosition.x},${e.pagePosition.y}` +
+                `${e.modifiers.alt ? " alt" : ""}${e.modifiers.control ? " ctrl" : ""}` +
+                `${e.modifiers.platform ? " meta" : ""}${e.modifiers.shift ? " shift" : ""}`,
             )
           }
         >

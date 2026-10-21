@@ -29,9 +29,9 @@ function App() {
           onHoverIn={() => hover.set("in")}
           onHoverMove={(e) =>
             hover.set(
-              `move ${e.locationX},${e.locationY} page ${e.pageX},${e.pageY}` +
-                `${e.altKey ? " alt" : ""}${e.ctrlKey ? " ctrl" : ""}` +
-                `${e.metaKey ? " meta" : ""}${e.shiftKey ? " shift" : ""}`,
+              `move ${e.position.x},${e.position.y} page ${e.pagePosition.x},${e.pagePosition.y}` +
+                `${e.modifiers.alt ? " alt" : ""}${e.modifiers.control ? " ctrl" : ""}` +
+                `${e.modifiers.platform ? " meta" : ""}${e.modifiers.shift ? " shift" : ""}`,
             )
           }
           onHoverOut={() => hover.set(hover() + " out")}

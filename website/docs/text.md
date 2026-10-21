@@ -281,7 +281,7 @@ text(move || body.get()).on(EventKind::TextLayout, move |e: &EventPayload| {
 <Text
   onTextLayout={(e) => {
     lines.set(e.lines.length);
-    console.log(e.lines.map((l) => `${l.text} (${l.width.toFixed(0)}pt)`));
+    console.log(e.lines.map((l) => `${l.text} (${l.bounds.size.width.toFixed(0)}pt)`));
   }}
 >
   {body()}

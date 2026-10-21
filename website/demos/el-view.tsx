@@ -47,7 +47,7 @@ function App() {
         </View>
 
         <View
-          onLayout={(e) => size.set(`${Math.round(e.width)} × ${Math.round(e.height)} pt`)}
+          onLayout={(e) => size.set(`${Math.round(e.size.width)} × ${Math.round(e.size.height)} pt`)}
           style={{ flex: 1, borderRadius: 12, borderWidth: 2, borderStyle: "dashed", borderColor: ui().faint, alignItems: "center", justifyContent: "center" }}
         >
           <Text style={{ color: ui().muted }}>onLayout: {size()}</Text>

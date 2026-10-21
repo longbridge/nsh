@@ -352,7 +352,7 @@ export function Form() {
               <Meter value={notes().length / 280} tone={notes().length > 250 ? "warn" : "accent"} />
             </View>
             <AutoGrow />
-            <Field label="No caret" api="caretHidden" caretHidden defaultValue="No caret here" />
+            <Field label="No caret" api="caret" caret={false} defaultValue="No caret here" />
           </Section>
         ),
         () => (

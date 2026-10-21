@@ -24,7 +24,7 @@ See [Device and environment](../docs/device-and-environment.md) for the guide.
 ## windowSize
 
 ```ts
-const windowSize: Accessor<{ width: number; height: number }>;
+const windowSize: Accessor<Size>;
 ```
 
 The size of the surface in points: the window, or the embedded `NshAppView` / `NshView`. Reactive. Rust: `window() -> Size<Points>`.

@@ -1,13 +1,13 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `TextView`
 // of `nsh/base`, a document shown with texts and views: Markdown (a
 // heading, a link, a list, a table, code), HTML, the app's own blocks
-// (`document`), streaming repair (`options`) with a `caret`, an extension
+// (`document`), streaming repair (`options`) with a `streamingCaret`, an extension
 // of each kind shown by `renderCustom`, the other render functions
 // (`renderCodeBlock`, `renderCodeBlockAction`, `renderTableActions`,
 // `renderMath`, `renderImage`), parts styled by `classes` and `styles`
 // (the root's text styles passing to every part), code blocks without
-// their scroll indicator (`codeBlockScrollIndicator`), tables without
-// theirs (`tableScrollIndicator`),
+// their scroll indicator (`codeBlockScrollbar`), tables without
+// theirs (`tableScrollbar`),
 // code blocks' actions (`codeBlockActions`, the built-in copy and one of
 // the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
 // images' presses (`onImagePress`), and the static functions
@@ -66,10 +66,10 @@ function App() {
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <TextView
         markdown={MARKDOWN}
-        codeBlockScrollIndicator={false}
-        tableScrollIndicator={false}
+        codeBlockScrollbar={false}
+        tableScrollbar={false}
         classes={{ root: "text-[#0000ff]" }}
-        onLinkPress={(url) => link.set(url)}
+        onLinkPress={({ url }) => link.set(url)}
         codeBlockActions={[{ id: "copy", label: "Copy code" }, { id: "run", label: "Run code" }]}
         renderCodeBlockAction={(action) => <Text>{`Action ${action.id}`}</Text>}
         onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.language}`)}
@@ -83,7 +83,7 @@ function App() {
       <TextView
         markdown="Streaming **stream-bold"
         options={{ streaming: true }}
-        caret={
+        streamingCaret={
           <View>
             <Text>CARET</Text>
           </View>

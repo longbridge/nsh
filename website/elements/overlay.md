@@ -90,7 +90,7 @@ full-window layer; `class="bottom-0 left-0 right-0"` is a bar along the bottom.
 
 With `anchor`, NSH places it next to the anchor:
 
-- `anchor` is a view (a `ref`) or a point `{ x, y }` in the root view's coordinates, the `pageX` / `pageY` of a touch
+- `anchor` is a view (a `ref`) or a `Point` (`{ x, y }`) in the root view's coordinates, the `pageX` / `pageY` of a touch
   (a menu where the pointer is).
 - `placement` is the side it goes on: `"top"`, `"bottom"` (the default), `"left"` or `"right"`. When it does not fit
   there and fits on the other side, it goes there; when it fits on neither, it goes on the side with more room.
@@ -108,7 +108,7 @@ limit its height:
   anchor={anchor}
   onPosition={(e) => {
     side.set(e.placement); // "top" when it flipped
-    maxHeight.set(e.availableHeight);
+    maxHeight.set(e.available.height);
   }}
 />
 ```
@@ -143,9 +143,9 @@ It also takes the [common props](./index.md#common-props) of a view.
 
 | Event | Rust | Description |
 |---|---|---|
-| `onPressOutside` | `.on_press_outside(\|point\| ..)` | A press went down outside it, its anchor and the overlays inside it (`pageX`, `pageY`). |
+| `onPressOutside` | `.on_press_outside(\|point\| ..)` | A press went down outside it, its anchor and the overlays inside it (`pagePosition`, a `Point`). |
 | `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button, while it is the top overlay listening. |
-| `onPosition` | `.on_position(\|position\| ..)` | NSH placed it: `placement` (the side it went on), `x`, `y`, `width`, `height` in the root view, and `availableWidth` / `availableHeight` (the room on that side). |
+| `onPosition` | `.on_position(\|position\| ..)` | NSH placed it: `placement` (the side it went on), `bounds` in the root view, and `available` (a `Size`: the room on that side). |
 
 ## Platform notes
 

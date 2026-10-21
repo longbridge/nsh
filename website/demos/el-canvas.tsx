@@ -49,7 +49,7 @@ function App() {
       <View style={{ flex: 1, flexDirection: wide() ? "row" : "column", gap: 14 }}>
         <Canvas
           style={{ ...ui().inset, flex: 1, minHeight: 200, borderRadius: 14 }}
-          onLayout={(e) => (chartWidth = e.width)}
+          onLayout={(e) => (chartWidth = e.size.width)}
           onStartShouldSetResponder={() => true}
           onResponderGrant={(e) => {
             pick(e.locationX, chartWidth);

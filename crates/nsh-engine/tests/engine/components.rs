@@ -823,7 +823,8 @@ const detached = <View ref={(n: YNode) => (ghost = n)} />;
 setTimeout(async () => {
   const m = (await box.measure())!;
   const none = await ghost.measure();
-  shown.set(`at ${m.x},${m.y} ${m.width}x${m.height} page ${m.pageX},${m.pageY} ${none}`);
+  const b = m.bounds;
+  shown.set(`at ${b.origin.x},${b.origin.y} ${b.size.width}x${b.size.height} page ${m.pagePosition.x},${m.pagePosition.y} ${none}`);
 }, 0);
 
 mount(() => (
@@ -831,7 +832,7 @@ mount(() => (
     <Text>{shown()}</Text>
     <Scroll
       style={{ marginTop: 50, height: 300 }}
-      onScroll={async () => shown.set(`scrolled ${(await box.measure())!.pageY}`)}
+      onScroll={async () => shown.set(`scrolled ${(await box.measure())!.pagePosition.y}`)}
     >
       <View style={{ padding: 20, height: 1000 }}>
         <View ref={box} style={{ marginTop: 500, height: 30 }} />

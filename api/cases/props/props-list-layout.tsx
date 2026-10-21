@@ -37,7 +37,7 @@ function App() {
         each={range(30)}
         estimatedItemSize={100}
         style={{ height: 200 }}
-        onScroll={(e) => content.set(`${e.contentHeight}`)}
+        onScroll={(e) => content.set(`${e.contentSize.height}`)}
       >
         {(item) => (
           <View style={{ height: 100 }}>

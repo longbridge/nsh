@@ -253,7 +253,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::ScrollConfig {
                 id,
                 horizontal,
-                shows_indicator,
+                scrollbar_visible,
                 scroll_value,
                 keyboard_dismiss,
                 mirrored,
@@ -261,7 +261,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(SCROLL_CONFIG);
                 e.int(id as i32);
                 e.bool(horizontal);
-                e.bool(shows_indicator);
+                e.bool(scrollbar_visible);
                 e.int(match keyboard_dismiss {
                     KeyboardDismissMode::None => 0,
                     KeyboardDismissMode::OnDrag => 1,
@@ -271,7 +271,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.animation.push(MountItem::ScrollConfig {
                     id,
                     horizontal,
-                    shows_indicator,
+                    scrollbar_visible,
                     scroll_value,
                     keyboard_dismiss,
                     mirrored,
@@ -892,7 +892,7 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
             e.opt_string(w.injected_js.as_deref());
             e.opt_string(w.injected_js_before.as_deref());
             e.opt_string(w.user_agent.as_deref());
-            e.bool(w.scroll_enabled);
+            e.bool(w.scrollable);
             e.bool(w.javascript_enabled);
         }
         NativeProps::Video(v) => {
@@ -916,7 +916,7 @@ fn native_props(e: &mut Encoded, p: &NativeProps) {
 
 fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
     e.opt_string(c.title.as_deref());
-    e.bool(c.header_shown);
+    e.bool(c.header_visible);
     e.bool(c.large_title);
     e.bool(c.header_transparent);
     opt_color(e, c.tint_color);

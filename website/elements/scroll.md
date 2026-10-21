@@ -48,8 +48,8 @@ are methods of the `Scrollable` trait, which lists share.
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | The user can scroll it. |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll it. |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
 | `pagingEnabled` | `.paging(..)` | `boolean` | `false` | Stops at multiples of the viewport. |
 | `snapToInterval` | `.snap_interval(px(..))` | `number` | `0` | Stops at multiples of this length (0: off). |
@@ -57,7 +57,7 @@ are methods of the `Scrollable` trait, which lists share.
 | `snapToAlignment` | `.snap_alignment(SnapAlignment::Center)` | `"start" \| "center" \| "end"` | `"start"` | Which point of an item aligns with the viewport with `snapToInterval`. |
 | `disableIntervalMomentum` | `.disable_interval_momentum(..)` | `boolean` | `false` | A fling moves one snap point at most. |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | platform | How fast a fling slows down: the velocity kept per millisecond (`normal` 0.998, `fast` 0.99). |
-| `contentInset` | `.content_inset(EdgeInsets { .. })` | `{ top?, right?, bottom?, left? }` | | Room around the content. |
+| `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Room around the content. |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | Where it starts. |
 | `contentStyle` | the content view's own styles | `ViewStyle` | | The style of a view around the children that scrolls with them; `flexGrow: 1` makes it at least as tall as the viewport (a centered empty state). |
 | `contentClass` | the content view's own styles | `string` | | The same as classes, e.g. `"grow justify-center p-4"`. |
@@ -113,7 +113,7 @@ pinch; zoomed in, it scrolls both ways. Lists keep their scale.
 | `maximumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | The largest zoom. |
 | `zoomScale` | `.zoom(..)` | `number` | | Zooms to this scale when it changes; otherwise the user's zoom is kept. |
 | `bouncesZoom` | `.bounces_zoom(..)` | `boolean` | `true` | Pinching may go past the limits and springs back. |
-| `pinchGestureEnabled` | `.pinch_gesture_enabled(..)` | `boolean` | `true` | The user can pinch to zoom. |
+| `zoomable` | `.zoomable(..)` | `boolean` | `true` | The user can pinch to zoom. |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | Content smaller than the viewport (zoomed out) is centered. |
 
 ```rust tabs
@@ -145,12 +145,12 @@ let photo!: YNode;
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | The offset changed (at most once per frame, and no more often than `scrollEventThrottle`). |
-| `onScrollBeginDrag` / `onScrollEndDrag` | `.on_scroll_begin_drag` / `.on_scroll_end_drag` | `{ x, y }` (`Point<Points>`) | The user started / stopped dragging. |
-| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `.on_momentum_scroll_begin` / `.on_momentum_scroll_end` | `{ x, y }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumScrollEnd`. |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` (`Point<Points>`) | The user started / stopped dragging. |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumEnd`. |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
 | `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 
-`ScrollEvent` is `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` (in Rust `offset`, `content_size`,
+`ScrollEvent` is `{ offset: Point; contentSize: Size; size: Size; zoomScale }` (in Rust `offset`, `content_size`,
 `size`, `zoom_scale`): the offset, the (zoomed) content size, the viewport size and the zoom scale (1 unless the view
 zooms).
 

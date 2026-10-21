@@ -21,14 +21,14 @@ function App() {
         style={{ width: 300, height: 200 }}
         onScroll={(e) =>
           scroll.set(
-            `${e.x},${e.y} content ${e.contentWidth}x${e.contentHeight} ` +
-              `size ${e.width}x${e.height} zoom ${e.zoomScale}`,
+            `${e.offset.x},${e.offset.y} content ${e.contentSize.width}x${e.contentSize.height} ` +
+              `size ${e.size.width}x${e.size.height} zoom ${e.zoomScale}`,
           )
         }
-        onScrollBeginDrag={step("begin")}
-        onScrollEndDrag={step("end")}
-        onMomentumScrollBegin={step("glide")}
-        onMomentumScrollEnd={step("stop")}
+        onScrollDragStart={step("begin")}
+        onScrollDragEnd={step("end")}
+        onMomentumStart={step("glide")}
+        onMomentumEnd={step("stop")}
         onScrollEnd={step("rest")}
       >
         <View style={{ height: 1000 }} />

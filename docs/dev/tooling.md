@@ -241,8 +241,8 @@ and more than one fails the step; a press whose match, or a view between it and 
 - `submit`: the return key as the input's `submitBehavior` resolves (`InputConfig::submit`): `KeyPress` `Enter` and
   `SubmitEditing` (then `Blur` for blur-and-submit), or a line break;
 - `scroll`: the scroll view (the match, the nearest one around it, else the first in it) moves along its axis 10
-  points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
-  `ScrollEndDrag`, `ScrollEnd`), and fails on one the user cannot scroll (`scrollEnabled={false}`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
+  points per frame within its content (`ScrollDragStart`, offsets with the applied count as platforms report them,
+  `ScrollDragEnd`, `ScrollEnd`), and fails on one the user cannot scroll (`scrollable={false}`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
 - `drag` (`headless/pointer.rs`): a finger lands on the match's middle (`Screen::bounds_in_root`), rests 100 ms,
   moves 10 points a frame and lifts, and what takes it is decided as the desktop backends decide it, with

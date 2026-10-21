@@ -772,10 +772,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
     };
     let payload = match kind {
         EventKind::ScrollEnd
-        | EventKind::ScrollBeginDrag
-        | EventKind::ScrollEndDrag
-        | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd => EventPayload::Scroll(point(px(x), px(y))),
+        | EventKind::ScrollDragStart
+        | EventKind::ScrollDragEnd
+        | EventKind::MomentumStart
+        | EventKind::MomentumEnd => EventPayload::Scroll(point(px(x), px(y))),
         // The bitmap's width and height: whole pixels.
         EventKind::Load => {
             EventPayload::Image(size(DevicePixels(x as i32), DevicePixels(y as i32)))
@@ -821,8 +821,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_hover(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let event = nsh_core::HoverEvent {
-        location: point(px(x), px(y)),
-        page: point(px(page_x), px(page_y)),
+        position: point(px(x), px(y)),
+        page_position: point(px(page_x), px(page_y)),
         modifiers: nsh_core::keymap::Modifiers {
             ctrl: modifiers & 1 != 0,
             alt: modifiers & 2 != 0,

@@ -184,7 +184,7 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
 - **`mixBlendMode`**，以及大于 1 的 `brightness()`。
 - **输入框**：内容类型与自动填充、键盘类型、自动大写、字间距；输入辅助视图从不显示（没有软键盘），`keyboardShouldPersistTaps` 被忽略。
-- **`WebView` 的 `scrollEnabled={false}`** 让鼠标滚轮和触控板不再滚动页面，而是像 iOS 上一样滚动它外面的应用滚动视图。
+- **`WebView` 的 `scrollable={false}`** 让鼠标滚轮和触控板不再滚动页面，而是像 iOS 上一样滚动它外面的应用滚动视图。
   页面仍可用键盘（空格、方向键）和它自己的脚本滚动，触控板在页面之间的轻扫（`allowsBackForwardNavigationGestures`）也会停用。
 - **无障碍**：自定义 `accessibilityActions`。
 - **状态栏**和**触感反馈**（桌面上没有对应物）。

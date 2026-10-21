@@ -57,7 +57,7 @@ mount(Browser);
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `string` | platform's | The user agent string. |
-| `scrollEnabled` | `boolean` | `true` | The user can scroll the page. |
+| `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | iOS only: swipe from the edges to go back and forward. |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS: two-finger trackpad swipes go back and forward; Windows: touchscreen swipes; Linux: touchpad swipes. |

@@ -18,7 +18,7 @@ pub struct Measurement {
     pub frame: Bounds<Points>,
     /// The top left corner in the coordinates of the root view the view is
     /// in (the surface, or the modal it is shown in): those of touches'
-    /// `pageX` / `pageY`. Scroll offsets and zoom scales of the scroll
+    /// `pageX` / `pageY` (`pagePosition`). Scroll offsets and zoom scales of the scroll
     /// views and lists around it are applied; transforms are not.
     pub page: Point<Points>,
 }
@@ -27,12 +27,11 @@ impl Measurement {
     /// The JS object `ref.measure()` resolves to.
     pub(crate) fn to_json(self) -> JsonValue {
         serde_json::json!({
-            "x": self.frame.origin.x.0,
-            "y": self.frame.origin.y.0,
-            "width": self.frame.size.width.0,
-            "height": self.frame.size.height.0,
-            "pageX": self.page.x.0,
-            "pageY": self.page.y.0,
+            "bounds": {
+                "origin": { "x": self.frame.origin.x.0, "y": self.frame.origin.y.0 },
+                "size": { "width": self.frame.size.width.0, "height": self.frame.size.height.0 },
+            },
+            "pagePosition": { "x": self.page.x.0, "y": self.page.y.0 },
         })
     }
 }

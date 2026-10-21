@@ -320,7 +320,7 @@ function Desktop() {
         {(route) => {
           if (route.name !== "page") {
             return (
-              <NavPage headerShown={false}>
+              <NavPage headerVisible={false}>
                 <DemoPane />
               </NavPage>
             );

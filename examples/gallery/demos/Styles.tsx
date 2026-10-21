@@ -503,7 +503,7 @@ function RightToLeft() {
         Text aligns to the start side; the first box has marginStart 16 and a round top-start corner.
       </Text>
       <Caption label="Horizontal scroll view" note={<Text style={{ fontFamily: mono }}>Scroll</Text>} />
-      <Scroll horizontal showsIndicator={false} style={{ height: 40 }}>
+      <Scroll horizontal scrollbar={false} style={{ height: 40 }}>
         <View style={{ flexDirection: "row", gap: 6 }}>
           <Each of={Array.from({ length: 12 }, (_, i) => i + 1)}>
             {(n) => (
@@ -515,7 +515,7 @@ function RightToLeft() {
         </View>
       </Scroll>
       <Caption label="Horizontal list" note={<Text style={{ fontFamily: mono }}>List</Text>} />
-      <List each={Array.from({ length: 30 }, (_, i) => i + 1)} horizontal estimatedItemSize={46} showsIndicator={false} style={{ height: 40 }}>
+      <List each={Array.from({ length: 30 }, (_, i) => i + 1)} horizontal estimatedItemSize={46} scrollbar={false} style={{ height: 40 }}>
         {(n) => (
           <View style={{ ...chip, marginEnd: 6, backgroundColor: tints.accent }}>
             <Text style={{ fontSize: 13, color: colors.accent, fontVariant: ["tabular-nums"] }}>{String(n())}</Text>

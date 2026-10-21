@@ -34,7 +34,7 @@ function Second() {
     <NavPage
       {...{ testID: "second" }}
       title="Second title"
-      headerShown={false}
+      headerVisible={false}
       headerLargeTitle
       headerTransparent
       headerBackTitle="Back to second"

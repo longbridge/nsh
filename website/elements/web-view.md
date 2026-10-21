@@ -61,7 +61,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `.user_agent(..)` | `string` | | The browser's user agent string. |
 | `javaScriptEnabled` | `.java_script_enabled(..)` | `boolean` | `true` | Pages run scripts. |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | The user can scroll the page. |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll the page. |
 
 | `ios` key | Rust | Type | Description |
 |---|---|---|---|

@@ -107,7 +107,7 @@ export function ImageViewer(props: { image: TextViewImage | null; onClose: () =>
         testID="image-viewer"
         focusable={false}
         onPress={props.onClose}
-        onLayout={(e) => viewport.set({ width: e.width, height: e.height })}
+        onLayout={(e) => viewport.set({ width: e.size.width, height: e.size.height })}
         pinch={{ scale }}
         pan={{ x, y }}
         onPinchEnd={async () => settle({ ...at, scale: await scale.getValue() })}

@@ -141,13 +141,6 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
  * tooltip, layout events and the ref (`ref.command(name, args)`). */
 export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
-export interface Insets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
 /** An operating system (`Platform.OS`). */
 export type OS = "ios" | "android" | "macos" | "windows" | "linux" | "web";
 

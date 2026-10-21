@@ -227,13 +227,13 @@ Pages stay mounted while their route is in the stack: going back shows the previ
 
 A page (`nav_page()` in Rust, `NavPage` in TSX) wraps a page's content and carries its header. iOS and Android show their system header, set up by the title and the header options. The desktops and the web show the page's header slot (`.header(..)`, TSX `header`), your own views, at the top of the page: as wide as the page, as tall as it lays out, with the content below it. Give a page both, as the example above does, and it looks at home everywhere. All options are reactive: change a signal and the header follows.
 
-In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_shown(..)`, `.header_transparent(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
+In Rust, each prop below is a method of `nav_page()` in snake case: `.title(..)`, `.header(..)`, `.header_visible(..)`, `.header_transparent(..)`, `.header_style_with(..)`, `.header_style(..)`, `.header_back_visible(..)`, `.header_left(..)`, `.header_right(..)`, `.header_title(..)`, `.header_large_title(..)`, `.header_back_title(..)`, `.animation(ScreenAnimation::Fade)`, `.status_bar(..)`, `.pop_on_swipe(..)`, `.pop_on_back(..)`, `.on_back_press(..)`, `.on_dismiss(..)`; its children are its content.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `header` | `JSX.Element` | | The desktops and the web: the page's header, drawn by the app (a title, a back button, toolbar buttons). |
 | `title` | `string` | | iOS and Android: the system header's title. |
-| `headerShown` | `boolean` | `true` | iOS and Android: the system header shows. |
+| `headerVisible` | `boolean` | `true` | iOS and Android: the system header shows. |
 | `headerTransparent` | `boolean` | `false` | iOS and Android: the content extends under the header. |
 | `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS and Android: the header's background, the title's color (`color`) and the buttons' (`tintColor`). |
 | `headerClass` | `string` | | The same as classes: `bg-*`, `text-*` for the title, `tint-*` for the buttons; `headerStyle` wins over them. |
@@ -351,12 +351,12 @@ A page that shows no header still has the system bars around it; pad its content
 use nsh_base::{nav_page, safe_area_view};
 
 nav_page()
-    .header_shown(false)
+    .header_visible(false)
     .child(safe_area_view().flex_1().p(px(16.0)) /* … */)
 ```
 
 ```tsx tabs
-<NavPage headerShown={false}>
+<NavPage headerVisible={false}>
   <SafeAreaView style={{ flex: 1, padding: 16 }}>…</SafeAreaView>
 </NavPage>
 ```

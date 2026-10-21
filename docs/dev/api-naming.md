@@ -190,6 +190,8 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
 | `onLinkPress(url)` | `onLinkPress({ url })` | Payloads | |
+| `caret` (a slot: the streaming reply's caret) | `streamingCaret` | States | Input's boolean `caret` is the part's switch; `cursor` is a style key. Rust `streaming_caret` |
+| `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
 | **`nsh/desktop`** | | | |
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
 | **`nsh/device`** | | | |

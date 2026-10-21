@@ -3967,7 +3967,7 @@ impl<M: TextEngine> Core<M> {
         let payload = virtual_list::viewable_payload(state.latest, state.reported);
         state.reported = state.latest;
         let owner = state.owner;
-        self.handle(owner, list, EventKind::ViewableItemsChanged, &payload);
+        self.handle(owner, list, EventKind::ViewableItemsChange, &payload);
     }
 
     fn release_id(&mut self, id: NodeId) {
@@ -4154,8 +4154,7 @@ impl<M: TextEngine> Core<M> {
             return self.handle(base, base, kind, payload);
         }
         // A component's own list reports its viewable rows as they settle.
-        if kind == EventKind::ViewableItemsChanged
-            && self.components.virtual_lists.contains_key(&id)
+        if kind == EventKind::ViewableItemsChange && self.components.virtual_lists.contains_key(&id)
         {
             self.viewable_changed(id, payload);
             return true;

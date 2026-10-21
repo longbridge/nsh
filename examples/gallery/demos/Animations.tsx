@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
+import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
 import { Animated, type CompositeAnimation, createAnimatedValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type AnimatedNode } from "nsh/animated";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, Press, radius, Segmented, tints } from "../ui";
@@ -21,7 +21,7 @@ function Api(props: { label: string; api: string }) {
 /** The width of a track, measured once laid out (the dots move by it). */
 function useWidth() {
   const width = signal(0);
-  return [width, (e: { width: number }) => width.set(e.width)] as const;
+  return [width, (bounds: Bounds) => width.set(bounds.size.width)] as const;
 }
 
 // --- Hero -------------------------------------------------------------------
@@ -287,7 +287,7 @@ function EasingPlot() {
           cx.fill();
         }}
       />
-      <Scroll horizontal showsIndicator={false}>
+      <Scroll horizontal scrollbar={false}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Each of={curves}>
             {(c, i) => (

@@ -243,7 +243,8 @@ function Overlay(props: OverlayProps): YNode;
 | `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`InputProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
 | `ViewStyle`、`TextStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
-| `GestureResponderEvent`、`LayoutEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
+| `GestureResponderEvent`、`HoverEvent`、`ContextMenuEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
+| `Point`、`Size`、`Bounds`、`Edges`、`Modifiers` | 事件数据和属性所用的形状，字段与 GPUI 相同（`nsh_core::geometry`） |
 | `ImageAsset` | 导入图片文件得到的对象（`{ uri, width, height, scales? }`；`scales` 列出它的[像素密度变体](../docs/images-and-assets.md#像素密度)） |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`、`AccessibilityState` | 无障碍属性 |

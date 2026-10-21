@@ -287,7 +287,7 @@ struct ComponentState {
 #[derive(Debug)]
 struct ScrollState {
     horizontal: bool,
-    shows_indicator: bool,
+    scrollbar_visible: bool,
     refreshing: bool,
     scroll_value: Option<crate::animation::NodeId>,
     keyboard_dismiss: KeyboardDismissMode,
@@ -313,7 +313,7 @@ impl Default for ScrollState {
         Self {
             horizontal: false,
             // React Native shows scroll indicators by default.
-            shows_indicator: true,
+            scrollbar_visible: true,
             refreshing: false,
             scroll_value: None,
             keyboard_dismiss: KeyboardDismissMode::None,
@@ -978,7 +978,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Moves what the core hands JS (events it raised, such as
-    /// `onEndReached` and `onLayout`, Rust components' events, calls'
+    /// `onLoadMore` and `onLayout`, Rust components' events, calls'
     /// results) into `out`, in order.
     pub fn take_events(&mut self, out: &mut Vec<crate::ui::JsEvent>) {
         out.append(&mut self.events);
@@ -2040,9 +2040,9 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            Prop::ShowsIndicator(shows) => {
+            Prop::Scrollbar(shows) => {
                 if let Some(scroll) = node.scroll.as_mut() {
-                    scroll.shows_indicator = shows;
+                    scroll.scrollbar_visible = shows;
                     flags |= dirty::SCROLL;
                 }
             }
@@ -2165,7 +2165,7 @@ impl<M: TextEngine> Core<M> {
                     list.dirty = true;
                 }
             }
-            Prop::EndReachedThreshold(threshold) => {
+            Prop::LoadMoreThreshold(threshold) => {
                 if let Some(list) = node.list.as_mut() {
                     list.end_threshold = threshold.max(0.0);
                 }
@@ -2493,7 +2493,7 @@ impl<M: TextEngine> Core<M> {
                     let c = &mut root.screen;
                     match prop {
                         ScreenProp::Title(v) => c.title = v,
-                        ScreenProp::HeaderShown(v) => c.header_shown = v,
+                        ScreenProp::HeaderVisible(v) => c.header_visible = v,
                         ScreenProp::HeaderLargeTitle(v) => c.large_title = v,
                         ScreenProp::HeaderTransparent(v) => c.header_transparent = v,
                         ScreenProp::HeaderBackTitle(v) => c.back_title = v,
@@ -2568,8 +2568,8 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            // `scrollEnabled` of scroll views and lists.
-            Prop::Native(NativeProp::ScrollEnabled(on)) if node.scroll.is_some() => {
+            // `scrollable` of scroll views and lists.
+            Prop::Native(NativeProp::Scrollable(on)) if node.scroll.is_some() => {
                 if let Some(scroll) = node.scroll.as_mut() {
                     scroll.behavior.enabled = on;
                     flags |= dirty::SCROLL_BEHAVIOR;
@@ -2693,8 +2693,8 @@ impl<M: TextEngine> Core<M> {
                         c.auto_focus = on;
                         false
                     }
-                    Prop::CaretHidden(on) => {
-                        c.caret_hidden = on;
+                    Prop::Caret(on) => {
+                        c.caret_hidden = !on;
                         false
                     }
                     Prop::InputAccessoryViewId(name) => {
@@ -3373,7 +3373,7 @@ impl<M: TextEngine> Core<M> {
                     self.mount.push(MountItem::ScrollConfig {
                         id,
                         horizontal: scroll.horizontal,
-                        shows_indicator: scroll.shows_indicator,
+                        scrollbar_visible: scroll.scrollbar_visible,
                         scroll_value: scroll.scroll_value,
                         keyboard_dismiss: scroll.keyboard_dismiss,
                         mirrored: node.kind == Kind::List && scroll.horizontal && node.rtl,
@@ -4055,7 +4055,7 @@ impl<M: TextEngine> Core<M> {
                     .filter(|_| !c.large_title && !c.header_transparent);
                 let header = if !native_header {
                     drawn_header
-                } else if !c.header_shown {
+                } else if !c.header_visible {
                     0.0
                 } else if let Some(measured) = measured {
                     measured
@@ -4771,14 +4771,14 @@ impl<M: TextEngine> Core<M> {
             if list.update_window(&mut binds) {
                 self.events.push(crate::ui::JsEvent::Event(
                     id,
-                    EventKind::EndReached,
+                    EventKind::LoadMore,
                     EventPayload::None,
                 ));
             }
             if !binds.is_empty() {
                 self.list_binds.push(ListBind { list: id, binds });
             }
-            if events.contains(EventKind::ViewableItemsChanged) {
+            if events.contains(EventKind::ViewableItemsChange) {
                 let viewable = list.viewable_items();
                 if viewable != list.viewable {
                     list.viewable = viewable;
@@ -4786,7 +4786,7 @@ impl<M: TextEngine> Core<M> {
                         viewable.map_or((-1.0, -1.0), |(f, l)| (f as f64, l as f64));
                     self.events.push(crate::ui::JsEvent::Event(
                         id,
-                        EventKind::ViewableItemsChanged,
+                        EventKind::ViewableItemsChange,
                         EventPayload::Map(vec![
                             ("first", PayloadValue::Number(first)),
                             ("last", PayloadValue::Number(last)),
@@ -5119,7 +5119,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
         (NativeProps::WebView(p), P::InjectedJavaScript(v)) => p.injected_js = v,
         (NativeProps::WebView(p), P::InjectedJavaScriptBefore(v)) => p.injected_js_before = v,
         (NativeProps::WebView(p), P::UserAgent(v)) => p.user_agent = v,
-        (NativeProps::WebView(p), P::ScrollEnabled(v)) => p.scroll_enabled = v,
+        (NativeProps::WebView(p), P::Scrollable(v)) => p.scrollable = v,
         (NativeProps::WebView(p), P::JavaScriptEnabled(v)) => p.javascript_enabled = v,
         (NativeProps::WebView(p), P::BackForwardGestures(v)) => p.back_forward_gestures = v,
         (NativeProps::Video(p), P::Source(v)) => {

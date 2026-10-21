@@ -7,7 +7,7 @@ use super::element::Listener;
 use crate::{
     Bounds, ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Point, Points,
     Size, TouchEvent,
-    geometry::{DevicePixels, Radians, point, px},
+    geometry::{DevicePixels, Radians},
 };
 
 /// Local files or directories dropped on an element (`on_file_drop`).
@@ -181,6 +181,27 @@ fn string<'a>(payload: &'a EventPayload, key: &str) -> Option<&'a str> {
     }
 }
 
+fn point_field(payload: &EventPayload, key: &str) -> Point<Points> {
+    match field(payload, key) {
+        Some(PayloadValue::Point(p)) => *p,
+        _ => Point::default(),
+    }
+}
+
+fn size_field(payload: &EventPayload, key: &str) -> Size<Points> {
+    match field(payload, key) {
+        Some(PayloadValue::Size(s)) => *s,
+        _ => Size::default(),
+    }
+}
+
+fn bounds_field(payload: &EventPayload, key: &str) -> Bounds<Points> {
+    match field(payload, key) {
+        Some(PayloadValue::Bounds(b)) => *b,
+        _ => Bounds::default(),
+    }
+}
+
 /// How a typed event comes out of a payload (`None`: not this event's).
 pub(crate) type Decode<T> = for<'a> fn(&'a EventPayload) -> Option<Cow<'a, T>>;
 
@@ -212,26 +233,14 @@ pub(crate) fn overlay_position(p: &EventPayload) -> Option<Cow<'_, OverlayPositi
     };
     Some(Cow::Owned(OverlayPosition {
         placement,
-        bounds: Bounds {
-            origin: point(px(number(p, "x")), px(number(p, "y"))),
-            size: Size {
-                width: px(number(p, "width")),
-                height: px(number(p, "height")),
-            },
-        },
-        available: Size {
-            width: px(number(p, "availableWidth")),
-            height: px(number(p, "availableHeight")),
-        },
+        bounds: bounds_field(p, "bounds"),
+        available: size_field(p, "available"),
     }))
 }
 
 /// Where a press went down, in the root view (`Overlay::on_press_outside`).
 pub(crate) fn page_point(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
-    Some(Cow::Owned(point(
-        px(number(p, "pageX")),
-        px(number(p, "pageY")),
-    )))
+    Some(Cow::Owned(point_field(p, "pagePosition")))
 }
 
 pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Bounds<Points>>> {
@@ -301,12 +310,9 @@ pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
             ..ScrollEvent::default()
         },
         _ => ScrollEvent {
-            offset: point(px(number(p, "x")), px(number(p, "y"))),
-            content_size: Size::new(
-                px(number(p, "contentWidth")),
-                px(number(p, "contentHeight")),
-            ),
-            size: Size::new(px(number(p, "width")), px(number(p, "height"))),
+            offset: point_field(p, "offset"),
+            content_size: size_field(p, "contentSize"),
+            size: size_field(p, "size"),
             zoom_scale: match field(p, "zoomScale") {
                 Some(PayloadValue::Number(n)) => *n as f32,
                 _ => 1.0,
@@ -318,7 +324,7 @@ pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
 pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
     Some(Cow::Owned(match *p {
         EventPayload::Scroll(offset) => offset,
-        _ => point(px(number(p, "x")), px(number(p, "y"))),
+        _ => point_field(p, "offset"),
     }))
 }
 

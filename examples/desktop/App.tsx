@@ -26,7 +26,7 @@ function App() {
       submenu: [
         { label: "New", shortcut: "mod+n", onSelect: () => say("File > New") },
         { label: "Open…", shortcut: "mod+o", onSelect: () => say("File > Open") },
-        { label: "Save", shortcut: "mod+s", enabled: false },
+        { label: "Save", shortcut: "mod+s", disabled: true },
         { type: "separator" },
         { label: "Recent", submenu: [{ label: "notes.txt", onSelect: () => say("Recent > notes.txt") }] },
         ...(mac ? [] : [{ type: "separator" } as const, { role: "quit", label: "Exit" } as const]),
@@ -114,7 +114,7 @@ function App() {
           <Each of={menus()}>
             {(menu) => (
               <View
-                onLayout={(e) => (buttons[menu().label] = { x: e.x, width: e.width })}
+                onLayout={(e) => (buttons[menu().label] = { x: e.origin.x, width: e.size.width })}
                 onPress={() => {
                   const label = menu().label;
                   opened.set(label);
@@ -158,7 +158,7 @@ function App() {
             onPress={() =>
               Menu.popup([
                 { label: "Say hello", onSelect: () => say("Context > Say hello") },
-                { label: "Disabled", enabled: false },
+                { label: "Disabled", disabled: true },
                 { type: "separator" },
                 { label: "Word Wrap", checked: wrap(), onSelect: () => wrap.update((w) => !w) },
               ])

@@ -516,11 +516,11 @@ export function Chat(props: { autoplay?: string } = {}) {
                 keyboardDismissMode="interactive"
                 maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
                 scrollEventThrottle={100}
-                onScrollBeginDrag={() => (dragging = true)}
+                onScrollDragStart={() => (dragging = true)}
                 onScroll={(e) => {
-                  if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
+                  if (dragging) following.set(e.offset.y + e.size.height >= e.contentSize.height - 40);
                 }}
-                onMomentumScrollEnd={() => (dragging = false)}
+                onMomentumEnd={() => (dragging = false)}
                 onScrollEnd={() => (dragging = false)}
               >
                 {(item) => {
@@ -666,7 +666,7 @@ export function Chat(props: { autoplay?: string } = {}) {
 
         {/* Suggestions while the conversation is empty. */}
         <If when={!messages().length}>
-          <Scroll horizontal showsIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
+          <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
               <Each of={chips}>
                 {(chip) => (

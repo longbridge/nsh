@@ -32,7 +32,7 @@ test("shows its fields", () => {
     "0/280",
     "Grows with its text",
     "No caret",
-    "caretHidden",
+    "caret",
     "Create the account",
     "More keyboards",
   ]) {

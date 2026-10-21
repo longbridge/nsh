@@ -21,7 +21,7 @@ function App() {
           Window.setTitle("Compat");
           Window.setTitleBar("hidden", 40);
           Window.setTitleBar("default");
-          Window.setFrame({ width: 800, height: 600, animated: false, anchorTop: true });
+          Window.setFrame({ size: { width: 800, height: 600 }, animated: false, anchorTop: true });
           Window.setLevel("floating");
           Window.setLevel("normal");
           Window.orderFront();
@@ -35,7 +35,7 @@ function App() {
         onPress={() => {
           Menu.setApplicationMenu([
             { label: "File", submenu: [{ label: "New", shortcut: "mod+n", onSelect: () => {} }, { type: "separator" }, { role: "quit" }] },
-            { label: "Edit", submenu: [{ role: "copy" }, { role: "paste" }, false, { label: "Checked", checked: true, enabled: false }] },
+            { label: "Edit", submenu: [{ role: "copy" }, { role: "paste" }, false, { label: "Checked", checked: true, disabled: true }] },
           ]);
           Menu.setApplicationMenu(null);
           const shown = Menu.popup([{ label: "Rename", onSelect: () => {} }], { x: 10, y: 20 });

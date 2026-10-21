@@ -65,8 +65,8 @@ pub use crate::{
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
         TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewStyles,
-        text_view,
+        TextViewEvent, TextViewLinkPressEvent, TextViewMath, TextViewPart, TextViewParts,
+        TextViewProps, TextViewStyles, text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
@@ -100,10 +100,7 @@ pub fn registry() -> Registry {
         .module::<Keyboard>()
         .module::<TextView>()
         // The environment's accessors and hooks, as they are.
-        .reexport(
-            &["safeArea", "safeAreaInsets", "keyboardFrame"],
-            &["Insets"],
-        )
+        .reexport(&["safeArea", "safeAreaInsets", "keyboardFrame"], &["Edges"])
         // Navigation: made by `nsh-js` (`navigation.rs`), declared by hand.
         .native_values(&["NavStack", "NavPage", "Dialog", "createNavStack"])
         // The theme: the app's over the default, as design tokens.

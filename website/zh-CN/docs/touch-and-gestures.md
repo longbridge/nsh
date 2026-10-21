@@ -409,14 +409,14 @@ let origin = 0;
   onStartShouldSetResponder={() => true}
   onResponderGrant={async (e) => {
     const x = e.pageX;
-    origin = (await track.measure())?.pageX ?? 0;
+    origin = (await track.measure())?.pagePosition.x ?? 0;
     seek(x - origin);
   }}
   onResponderMove={(e) => seek(e.pageX - origin)}
 />;
 ```
 
-它在此前的改动完成布局后返回：Rust 中是一个 `Measurement`（`frame`，即布局处理函数报告的、相对于父视图的框架；以及 `page`，即左上角），TSX 中是 `{ x, y, width, height, pageX, pageY }`。左上角位于 surface 中，或位于视图所在的对话框中，与触摸的 page 坐标相同。周围滚动视图和列表的偏移会计入；transform（包括动画）不计入。视图不在屏幕上时返回 `None` / `null`。
+它在此前的改动完成布局后返回：Rust 中是一个 `Measurement`（`frame`，即布局处理函数报告的、相对于父视图的框架；以及 `page`，即左上角），TSX 中是 `{ bounds, pagePosition }`。左上角位于 surface 中，或位于视图所在的对话框中，与触摸的 page 坐标相同。周围滚动视图和列表的偏移会计入；transform（包括动画）不计入。视图不在屏幕上时返回 `None` / `null`。
 
 ## 手势响应者系统
 

@@ -22,7 +22,7 @@ function App() {
         maximumZoomScale={4}
         zoomScale={zoom()}
         bouncesZoom={false}
-        pinchGestureEnabled={false}
+        zoomable={false}
         centerContent
         scrollValue={offset}
       >

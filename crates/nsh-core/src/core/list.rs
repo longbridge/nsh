@@ -41,7 +41,7 @@ use crate::{
 
 /// How far beyond the viewport cells are kept rendered, in viewports.
 const OVERSCAN: f32 = 1.0;
-/// Default `onEndReachedThreshold`, in viewports.
+/// Default `loadMoreThreshold`, in viewports.
 const END_THRESHOLD: f32 = 1.0;
 
 /// A recycling slot: one cell node, bound to at most one item.
@@ -198,7 +198,7 @@ pub(super) struct ListState {
     pub(super) viewability: Viewability,
     /// Last reported viewable items (`first..=last`).
     pub(super) viewable: Option<(u32, u32)>,
-    /// `onEndReachedThreshold`, in viewports.
+    /// `loadMoreThreshold`, in viewports.
     pub(super) end_threshold: f32,
     /// Main-axis scroll offset reported by the platform (content
     /// coordinates).
@@ -209,7 +209,7 @@ pub(super) struct ListState {
     pub(super) dirty: bool,
     /// Cross-axis size the cells were last laid out at.
     pub(super) cells_cross: f32,
-    end_reached_at: Option<u32>,
+    load_more_at: Option<u32>,
     /// `content_len - viewport` when the offset was last anchored
     /// (inverted lists and `follow_end`; NaN before the first layout).
     anchored_end: f32,
@@ -256,7 +256,7 @@ impl ListState {
             viewport: 0.0,
             dirty: true,
             cells_cross: f32::NAN,
-            end_reached_at: None,
+            load_more_at: None,
             anchored_end: f32::NAN,
             issued: 0,
             pending: Vec::new(),
@@ -325,8 +325,8 @@ impl ListState {
         self.free.sort_unstable();
         self.free.dedup();
         self.rebuild_offsets();
-        if self.end_reached_at.is_some() {
-            self.end_reached_at = None;
+        if self.load_more_at.is_some() {
+            self.load_more_at = None;
         }
         if let Some((index, from_top)) = anchor
             && index >= at + removed
@@ -646,8 +646,8 @@ impl ListState {
         self.count = count;
         self.sizes.resize(count as usize, f32::NAN);
         self.rebuild_offsets();
-        if self.end_reached_at.is_some_and(|c| c != count) {
-            self.end_reached_at = None;
+        if self.load_more_at.is_some_and(|c| c != count) {
+            self.load_more_at = None;
         }
     }
 
@@ -981,7 +981,7 @@ impl ListState {
     }
 
     /// Recomputes the render window. New `(slot, index)` bindings are
-    /// pushed to `binds`. Returns true if `onEndReached` should fire.
+    /// pushed to `binds`. Returns true if `onLoadMore` should fire.
     pub(super) fn update_window(&mut self, binds: &mut Vec<(u32, u32)>) -> bool {
         self.dirty = false;
         if self.count == 0 || self.viewport <= 0.0 {
@@ -1035,8 +1035,8 @@ impl ListState {
 
         let total = self.blocks().total;
         let near_end = at + self.viewport >= total - self.viewport * self.end_threshold;
-        if near_end && self.end_reached_at != Some(self.count) {
-            self.end_reached_at = Some(self.count);
+        if near_end && self.load_more_at != Some(self.count) {
+            self.load_more_at = Some(self.count);
             return true;
         }
         false
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn end_reached_fires_once_per_count() {
+    fn load_more_fires_once_per_count() {
         let mut l = list(10, 50.0, 400.0);
         let mut binds = Vec::new();
         assert!(

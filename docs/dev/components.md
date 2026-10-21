@@ -195,7 +195,7 @@ reasons: `reactive-components.md`.
     holder or with the component (`core/renders.rs`; `nsh-js` `components.rs`). The decoded prop names its host, so a
     view may pass it on to a nested component's prop. Keys are unique among a component's renders of one prop.
   - `items: Items`: virtualized rows. In JS the component takes `List`'s data props (`each`, the row renderer as
-    children, `keyExtractor`, `onEndReached`, `header`, ... : `ListItemsProps<T>`, so the component is
+    children, `keyExtractor`, `onLoadMore`, `header`, ... : `ListItemsProps<T>`, so the component is
     generic over the row type). `.list(props.items, |l| l.flex_1().estimated_item_size(px(48.0)), |row, at|
     view().px_4().style_when(move || at.is_last(), |v| v.rounded_b(px(16.0))).child(row))` places the list, lays it
     out (size, columns, padding, gaps, direction; bound layout values update it in place) and wraps each row; only
@@ -219,7 +219,7 @@ reasons: `reactive-components.md`.
   accessor; an image's `blur_radius` alone takes a value)
   (`input().value(move || name.get()).on_change_text(move |text: &str| ..)`, `scroll().on_scroll(..)`,
   `dialog().on_cancel(..)`; how scroll views and lists scroll is `Scrollable`, shared by `scroll()`,
-  `virtual_list(..)` and a placed `ListElement`: snapping, `scroll_enabled`, `keyboard_dismiss_mode`,
+  `virtual_list(..)` and a placed `ListElement`: snapping, `scrollable`, `keyboard_dismiss_mode`,
   `scroll_value(&v)`, refresh, the scroll events); `on(kind, listener)` takes any native event with its raw
   payload. Host props are the core's `Prop`s, kept one per property and diffed by kind against what the binding
   applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured; listener
@@ -297,7 +297,7 @@ reasons: `reactive-components.md`.
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (`frame: Bounds<Points>`, `page: Point<Points>`) to await in a task |
   | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(px(10.0), px(10.0)))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
-  | `<List header footer empty separator stickyHeaderIndices viewabilityConfig onViewableItemsChanged onEndReachedThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).viewability(..).minimum_view_time(..).on_viewable_items_changed(..).end_reached_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
+  | `<List header footer empty separator stickyHeaderIndices viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
   | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
@@ -753,7 +753,7 @@ what changed.
   handlers, responders and `on_event` listeners its last run gave it, so it hears the new run's only. A listener runs
   in the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
 - A slot's node (JS's holder, the app's list of an `Items` prop, or another component's content) gets the
-  handlers of the component it is a slot of, then its maker's: JS's (the app's `onEndReached` on a component with rows)
+  handlers of the component it is a slot of, then its maker's: JS's (the app's `onLoadMore` on a component with rows)
   or the view's that passed it.
 - A component's own list reports its viewable rows to it in the core, waiting for `minimum_view_time` when set
   (a task of the list's owner).

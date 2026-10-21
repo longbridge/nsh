@@ -210,7 +210,7 @@ impl Decoder {
             return Ok(Some(MenuItem::Separator));
         }
         let label = string(cx, v, c"label");
-        let enabled = flag(cx, v, c"enabled").unwrap_or(true);
+        let enabled = !flag(cx, v, c"disabled").unwrap_or(false);
         let submenu = get(cx, v, c"submenu");
         if !nullish(submenu) {
             let items = self.items(submenu);
@@ -533,8 +533,8 @@ export type MenuItem =
        * `home`, `end`, `pageup`, `pagedown`, `f1`–`f24`: the keystrokes of
        * `nsh/keymap`. A role has its platform's by default. */
       shortcut?: string;
-      /** It can be chosen (default true). */
-      enabled?: boolean;
+      /** It cannot be chosen: shown dimmed (default false). */
+      disabled?: boolean;
       /** A check mark: set (true or false) for a checkable item. */
       checked?: boolean;
       /** Called when it is chosen (by a click or its shortcut). */
@@ -554,10 +554,11 @@ export interface MenuModule {
    * signals it reads); `null` restores the platform's default menu. */
   setApplicationMenu(items: readonly (MenuItem | null | undefined | false)[] | null): void;
   /** Shows a context menu with its top left corner at `at` (the window's
-   * coordinates, points), else at the pointer. The promise resolves once
+   * coordinates, points: `Menu.popup(items, e.pagePosition)` in an
+   * `onContextMenu`), else at the pointer. The promise resolves once
    * the menu closes, chosen or dismissed: a button that opened it can look
    * pressed until then. */
-  popup(items: readonly (MenuItem | null | undefined | false)[], at?: { x: number; y: number }): Promise<void>;
+  popup(items: readonly (MenuItem | null | undefined | false)[], at?: Point): Promise<void>;
 }
 "#;
 

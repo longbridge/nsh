@@ -501,8 +501,8 @@ pub struct DragBy {
 pub struct MenuEntry {
     /// Its label; a submenu's actions after the submenu's (`"Share > Mail"`).
     pub label: String,
-    /// It can be chosen.
-    pub enabled: bool,
+    /// It cannot be chosen (it, or a submenu around it, is disabled).
+    pub disabled: bool,
     /// Its check mark, when it is a checkable item.
     #[prop(skip_none)]
     pub checked: Option<bool>,
@@ -1241,7 +1241,7 @@ impl App {
                     .into_iter()
                     .map(|e| MenuEntry {
                         label: e.label,
-                        enabled: e.enabled,
+                        disabled: e.disabled,
                         checked: e.checked,
                     })
                     .collect()

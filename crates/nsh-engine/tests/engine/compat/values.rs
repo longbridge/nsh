@@ -95,10 +95,10 @@ impl Mounted {
             } => self.image = Some((source.clone(), *resize_mode, options.clone())),
             MountItem::ScrollConfig {
                 horizontal,
-                shows_indicator,
+                scrollbar_visible,
                 keyboard_dismiss,
                 ..
-            } => self.scroll = Some((*horizontal, *shows_indicator, *keyboard_dismiss)),
+            } => self.scroll = Some((*horizontal, *scrollbar_visible, *keyboard_dismiss)),
             MountItem::ScrollBehavior { behavior, .. } => self.behavior = Some(behavior.clone()),
             MountItem::Refreshing { refreshing, .. } => self.refreshing = *refreshing,
             MountItem::Input { config, .. } => self.input = Some(config.clone()),
@@ -272,7 +272,7 @@ impl Mounted {
                     self.scroll
                         .unwrap_or((false, true, KeyboardDismissMode::default()));
                 out.put("horizontal", horizontal.to_string());
-                out.put("showsIndicator", indicator.to_string());
+                out.put("scrollbar", indicator.to_string());
                 out.put("keyboardDismissMode", dismiss.js_name().into());
                 let b = self.behavior.as_deref().cloned().unwrap_or_default();
                 out.put("pagingEnabled", b.paging.to_string());
@@ -283,7 +283,7 @@ impl Mounted {
                 );
                 out.put("snapToAlignment", b.snap_alignment.js_name().into());
                 out.put("decelerationRate", num(b.deceleration));
-                out.put("scrollEnabled", b.enabled.to_string());
+                out.put("scrollable", b.enabled.to_string());
                 out.put("bounces", b.bounces.to_string());
                 out.put("contentInset", insets(&b.content_inset));
                 out.put(
@@ -299,7 +299,7 @@ impl Mounted {
                 out.put("minimumZoomScale", num(b.min_zoom));
                 out.put("maximumZoomScale", num(b.max_zoom));
                 out.put("bouncesZoom", b.bounces_zoom.to_string());
-                out.put("pinchGestureEnabled", b.pinch.to_string());
+                out.put("zoomable", b.pinch.to_string());
                 out.put("centerContent", b.center_content.to_string());
                 out.put("refreshing", self.refreshing.to_string());
             }
@@ -325,7 +325,7 @@ impl Mounted {
                 }
                 out.put("autoFocus", c.auto_focus.to_string());
                 out.put("autoComplete", auto_fill(c.auto_fill).into());
-                out.put("caretHidden", c.caret_hidden.to_string());
+                out.put("caret", (!c.caret_hidden).to_string());
                 if let Some(v) = &c.accessory_id {
                     out.put("inputAccessoryViewID", v.to_string());
                 }
@@ -340,7 +340,7 @@ impl Mounted {
                 if let Some(v) = &c.title {
                     out.put("title", v.to_string());
                 }
-                out.put("headerShown", c.header_shown.to_string());
+                out.put("headerVisible", c.header_visible.to_string());
                 out.put("headerLargeTitle", c.large_title.to_string());
                 out.put("headerTransparent", c.header_transparent.to_string());
                 let mut o = Object::default();
@@ -399,7 +399,7 @@ impl Mounted {
                 if let Some(v) = &w.user_agent {
                     out.put("userAgent", v.to_string());
                 }
-                out.put("scrollEnabled", w.scroll_enabled.to_string());
+                out.put("scrollable", w.scrollable.to_string());
                 out.put("javaScriptEnabled", w.javascript_enabled.to_string());
                 out.put(
                     "allowsBackForwardNavigationGestures",

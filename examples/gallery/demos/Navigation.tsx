@@ -268,13 +268,13 @@ function Instant() {
 
 function Headerless() {
   return (
-    <NavPage headerShown={false}>
+    <NavPage headerVisible={false}>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ flex: 1, padding: 16, gap: 16 }}>
           <Appear>
             <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 12 }}>
               <View style={{ flexDirection: "row" }}>
-                <Badge label="headerShown={false}" tone="accent" />
+                <Badge label="headerVisible={false}" tone="accent" />
               </View>
               <Text style={{ fontSize: 30, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>No header</Text>
               <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted }}>
@@ -405,7 +405,7 @@ export function Navigation() {
               <LinkRow first icon="text" title="Large title" note="headerLargeTitle" onPress={push(LargeTitle)} />
               <LinkRow icon="styles" title="Transparent header" note="headerTransparent" onPress={push(Transparent)} />
               <LinkRow icon="star" title="Custom header items" note="headerLeft / Title / Right" onPress={push(CustomHeader)} />
-              <LinkRow icon="mobile" title="No header" note="headerShown={false}" onPress={push(Headerless)} />
+              <LinkRow icon="mobile" title="No header" note="headerVisible={false}" onPress={push(Headerless)} />
               <LinkRow icon="spark" title="Fade in" note='animation="fade"' onPress={push(Faded)} />
               <LinkRow icon="play" title="No animation" note='animation="none"' onPress={push(Instant)} />
               <LinkRow icon="gestures" title="No swipe back" note="popOnSwipe={false}" onPress={push(Locked)} />

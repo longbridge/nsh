@@ -1167,31 +1167,38 @@ fn event_payload(
         // Both payloads are a position and the modifiers.
         EventKind::HoverMove | EventKind::ContextMenu => {
             let (left, top) = page_origin(views, id);
+            // The keys as handlers read them (`position.x`, `modifiers.shift`),
+            // or as scripts written before v0.1.2 name them (`locationX`,
+            // `shiftKey`): scripts never change.
+            let either = |key: &str, old: &str| num(key).or_else(|| num(old));
             let (location_x, location_y) = (
-                num("locationX").unwrap_or(0.0),
-                num("locationY").unwrap_or(0.0),
+                either("position.x", "locationX").unwrap_or(0.0),
+                either("position.y", "locationY").unwrap_or(0.0),
             );
-            let flag = |key: &str| matches!(get(key), Some(Field::Bool(true)));
+            let flag = |key: &str, old: &str| {
+                matches!(get(key), Some(Field::Bool(true)))
+                    || matches!(get(old), Some(Field::Bool(true)))
+            };
             let (page_x, page_y) = (
-                num("pageX").unwrap_or(left + location_x),
-                num("pageY").unwrap_or(top + location_y),
+                either("pagePosition.x", "pageX").unwrap_or(left + location_x),
+                either("pagePosition.y", "pageY").unwrap_or(top + location_y),
             );
             let modifiers = Modifiers {
-                ctrl: flag("ctrlKey"),
-                alt: flag("altKey"),
-                shift: flag("shiftKey"),
-                cmd: flag("metaKey"),
+                ctrl: flag("modifiers.control", "ctrlKey"),
+                alt: flag("modifiers.alt", "altKey"),
+                shift: flag("modifiers.shift", "shiftKey"),
+                cmd: flag("modifiers.platform", "metaKey"),
             };
             if kind == EventKind::HoverMove {
                 EventPayload::Hover(HoverEvent {
-                    location: point(px(location_x), px(location_y)),
-                    page: point(px(page_x), px(page_y)),
+                    position: point(px(location_x), px(location_y)),
+                    page_position: point(px(page_x), px(page_y)),
                     modifiers,
                 })
             } else {
                 EventPayload::ContextMenu(ContextMenuEvent {
-                    location: point(px(location_x), px(location_y)),
-                    page: point(px(page_x), px(page_y)),
+                    position: point(px(location_x), px(location_y)),
+                    page_position: point(px(page_x), px(page_y)),
                     modifiers,
                 })
             }
@@ -1230,10 +1237,10 @@ fn event_payload(
             value_y: num("valueY").map(px),
         },
         EventKind::ScrollEnd
-        | EventKind::ScrollBeginDrag
-        | EventKind::ScrollEndDrag
-        | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd
+        | EventKind::ScrollDragStart
+        | EventKind::ScrollDragEnd
+        | EventKind::MomentumStart
+        | EventKind::MomentumEnd
             if only(&["x", "y"]) =>
         {
             EventPayload::Scroll(point(

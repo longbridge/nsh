@@ -29,7 +29,7 @@ function App() {
     const out: string[] = [];
     for (const node of nodes) {
       const m = node ? await node.measure() : null;
-      out.push(m ? `${m.width}x${m.height}` : "missing");
+      out.push(m ? `${m.bounds.size.width}x${m.bounds.size.height}` : "missing");
     }
     sizes.set(out.join(" "));
   };

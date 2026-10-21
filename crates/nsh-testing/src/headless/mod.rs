@@ -1150,7 +1150,7 @@ impl Headless {
     /// it, else the first in it) by `distance` points along its axis
     /// (negative: back), 10 points per display frame, within its content.
     /// Fails if it cannot move that way at all, or the user cannot scroll it
-    /// (`scrollEnabled={false}`).
+    /// (`scrollable={false}`).
     pub fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("scroll({selector}, {distance})"));
@@ -1175,7 +1175,7 @@ impl Headless {
             let s = screen.scroll(id);
             EventPayload::Scroll(s.map_or(Point::default(), |s| point(s.x, s.y)))
         };
-        self.send(id, EventKind::ScrollBeginDrag, offset(&self.screen));
+        self.send(id, EventKind::ScrollDragStart, offset(&self.screen));
         // The core may shift the offset meanwhile (`ScrollBy`): each frame
         // moves on from where the view is.
         let mut frames = ((target - start).abs() / SCROLL_STEP).ceil() as usize * 2 + 10;
@@ -1203,7 +1203,7 @@ impl Headless {
             self.animator.scrolled(id, point(x, y));
             self.display_frame();
         }
-        self.send(id, EventKind::ScrollEndDrag, offset(&self.screen));
+        self.send(id, EventKind::ScrollDragEnd, offset(&self.screen));
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
         self.done()
     }

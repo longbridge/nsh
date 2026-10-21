@@ -38,7 +38,7 @@ test("shows its sections", () => {
     "No drags yet",
     "Scroll events at most every",
     "Scroll enabled",
-    "scrollEnabled",
+    "scrollable",
     "Bounces",
     "Content inset",
     "40 pt at the top and bottom",

@@ -1,5 +1,5 @@
 //! The runtime's `List` with the engine: rows render, scrolling rebinds
-//! recycled cells and `onEndReached` reaches JS.
+//! recycled cells and `onLoadMore` reaches JS.
 
 use std::{sync::mpsc, time::Duration};
 
@@ -21,7 +21,7 @@ const rows = signal(Array.from({ length: 100 }, (_, i) => i));
 function App() {
   return (
     <List each={rows()} estimatedItemSize={50} style={{ flex: 1 }}
-          onEndReached={() => rows.update((r) => [...r, ...Array.from({ length: 100 }, (_, i) => r.length + i)])}>
+          onLoadMore={() => rows.update((r) => [...r, ...Array.from({ length: 100 }, (_, i) => r.length + i)])}>
       {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}
     </List>
   );
@@ -158,7 +158,7 @@ fn scrolls_with_recycled_cells(app: &str) {
         cells_created(&batch)
     );
 
-    // Near the end: `onEndReached` appends rows; the content grows.
+    // Near the end: `onLoadMore` appends rows; the content grows.
     engine.control().scroll(
         list,
         nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(4600.0)),
@@ -173,7 +173,7 @@ fn scrolls_with_recycled_cells(app: &str) {
             break;
         }
     }
-    assert!(grew, "onEndReached did not extend the list");
+    assert!(grew, "onLoadMore did not extend the list");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -194,7 +194,7 @@ function App() {
       <Text>{`size ${size()}`}</Text>
       <List each={[1, 2, 3]} testID="feed" accessibilityLabel={label()} role="list"
             accessibilityHint="Posts" class="bg-red-500" pointerEvents="box-none" style={{ flex: 1 }}
-            onLayout={(e) => { size.set(`${e.width}x${e.height}`); label.set("Feed 2"); }}>
+            onLayout={(e) => { size.set(`${e.size.width}x${e.size.height}`); label.set("Feed 2"); }}>
         {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}
       </List>
     </View>

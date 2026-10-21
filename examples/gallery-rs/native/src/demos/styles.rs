@@ -867,7 +867,7 @@ fn right_to_left() -> Card {
             .child(
                 scroll()
                     .horizontal()
-                    .shows_indicator(false)
+                    .scrollbar(false)
                     .h(px(40.0))
                     .child(
                         view()
@@ -886,7 +886,7 @@ fn right_to_left() -> Card {
                 })
                 .horizontal()
                 .estimated_item_size(px(46.0))
-                .shows_indicator(false)
+                .scrollbar(false)
                 .h(px(40.0)),
             )
             .child(view().h(px(1.0)).bg(colors::LINE))

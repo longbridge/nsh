@@ -132,7 +132,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `onPressDown` | `.on_press_down(..)` | `() => void` | | 手指在视图上按下。 |
 | `onPressUp` | `.on_press_up(..)` | `() => void` | | 手指抬起或移出。 |
 | `delayLongPress` | `.long_press_delay(ms)` | `number` | `500` | 按压变为长按前的毫秒数。 |
-| `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| { top?, right?, bottom?, left? }` | | 把触摸区域扩展到边界之外，单位为点。 |
+| `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| Partial<Edges>` | | 把触摸区域扩展到边界之外，单位为点。 |
 | `pointerEvents` | `.pointer_events(PointerEvents::BoxNone)` | `"auto" \| "none" \| "box-none" \| "box-only"` | `"auto"` | 视图及其子元素接收哪些触摸：`"none"` 都不接收，`"box-none"` 只有子元素接收，`"box-only"` 只有视图本身接收。 |
 
 按压反馈由应用决定：视图被按下时，`activeStyle`（或 `active:` 类，Rust 中为 `.active(..)`）在原生侧生效，无需经过应用代码（见下文）。
@@ -183,7 +183,7 @@ view()
 
 与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知应用，触摸从不触发；按着按键移动属于触摸（`onTouchMove`、响应者系统）。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 和 Windows 上要等到鼠标下一次移动。
 
-`HoverEvent` 给出鼠标的位置：`locationX` / `locationY` 是在视图中的位置（单位为点，已去掉视图的变换），`pageX` / `pageY` 是在视图所在根视图中的位置（与触摸相同），以及按住的修饰键（`altKey`、`ctrlKey`、`metaKey`：Apple 平台上是 Command，其他平台是 Windows 键，`shiftKey`）；Rust 中为 `location`、`page` 和 `modifiers`。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onHoverOut` 之前到达，因此处理函数可以在每次移动时重绘：
+`HoverEvent` 像 GPUI 的 `MouseMoveEvent` 一样给出鼠标的位置：`position` 是在视图中的位置（一个 `Point`，单位为点，已去掉视图的变换），`pagePosition` 是在视图所在根视图中的位置（与触摸相同），以及按住的 `modifiers`（`control`、`alt`、`shift`、`platform`：Apple 平台上是 Command，其他平台是 Windows 键）；Rust 中为 `position`、`page_position` 和 `modifiers`。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onHoverOut` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```rust tabs
 // 图表上的十字线。
@@ -191,7 +191,7 @@ let at = signal(None::<Points>);
 
 view()
     .h(px(200.0))
-    .on_hover_move(move |e: &HoverEvent| at.set(Some(e.location.x)))
+    .on_hover_move(move |e: &HoverEvent| at.set(Some(e.position.x)))
     .on_hover_out(move || at.set(None))
     .child(when(move || at.get().is_some(), move || {
         view()
@@ -208,7 +208,7 @@ view()
 // 图表上的十字线。
 const at = signal<number | null>(null);
 
-<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+<View onHoverMove={(e) => at.set(e.position.x)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
   <If when={at() !== null}>
     <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
   </If>
@@ -246,21 +246,21 @@ view().on_press(save).tooltip("保存文档").child(text("💾"))
 let menu_at = signal(None::<Point<Points>>);
 
 view()
-    .on_context_menu(move |e: &ContextMenuEvent| menu_at.set(Some(e.page)))
+    .on_context_menu(move |e: &ContextMenuEvent| menu_at.set(Some(e.page_position)))
     .child(text(row.name.clone()))
 ```
 
 ```tsx tabs
 import { Menu } from "nsh/desktop";
 
-<View onContextMenu={(e) => Menu.popup(rowMenu(row), { x: e.pageX, y: e.pageY })}>…</View>
+<View onContextMenu={(e) => Menu.popup(rowMenu(row), e.pagePosition)}>…</View>
 ```
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | 辅助按钮在视图或其内部的视图上按下。 |
 
-`ContextMenuEvent` 包含视图中的 `locationX` / `locationY`、根视图中的 `pageX` / `pageY`（`Menu.popup` 放置菜单的位置）以及修饰键（`altKey`、`ctrlKey`、`metaKey`、`shiftKey`）；Rust 中为 `location`、`page` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
+`ContextMenuEvent` 包含视图中的 `position`、根视图中的 `pagePosition`（`Menu.popup` 放置菜单的位置：`Menu.popup(items, e.pagePosition)`）以及 `modifiers`；Rust 中为 `position`、`page_position` 和 `modifiers`。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。`disabled` 的视图把这次点击留给外层最近的、未停用的监听者。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
 ### 键盘焦点
 
@@ -295,7 +295,7 @@ view().absolute().inset_0().focusable(false).on_press(close)
 
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
-| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(e: LayoutEvent) => void` | 每次布局改变视图位置尺寸后，给出相对父视图的 frame `{ x, y, width, height }`。 |
+| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(bounds: Bounds) => void` | 每次布局改变视图位置尺寸后，给出相对父视图的 frame `{ origin, size }`。 |
 | `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | 原生节点（参见 [ref 方法](#ref-方法)）。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
 | `nativeID` | `.native_id(id)` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |

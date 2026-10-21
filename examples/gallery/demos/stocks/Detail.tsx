@@ -42,7 +42,7 @@ function DayRange(props: { stock: Stock }) {
       <Text style={{ fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>L {p(q().low)}</Text>
       <View
         onLayout={(e) => {
-          width = e.width;
+          width = e.size.width;
           place();
         }}
         accessibilityLabel={`Day range ${p(q().low)} to ${p(q().high)}`}

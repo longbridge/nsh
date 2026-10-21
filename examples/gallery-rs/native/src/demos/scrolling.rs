@@ -230,7 +230,7 @@ fn Pager() -> impl IntoElement {
             scroll()
                 .horizontal()
                 .paging(true)
-                .shows_indicator(false)
+                .scrollbar(false)
                 .scroll_value(&x)
                 .h(px(160.0))
                 .rounded(px(radius::CONTROL))
@@ -239,7 +239,7 @@ fn Pager() -> impl IntoElement {
                 .border_1()
                 .border_color(colors::LINE)
                 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
-                .on_momentum_scroll_end(settle)
+                .on_momentum_end(settle)
                 .on_scroll_end(settle)
                 .child(view().flex_row().children(pages)),
         )
@@ -347,7 +347,7 @@ fn Cards() -> impl IntoElement {
     // `decelerationRate="fast"`.
     .deceleration(0.99)
     .disable_interval_momentum(one_step)
-    .shows_indicator(false)
+    .scrollbar(false)
     .h(px(128.0))
     .column_gap(px(GAP))
     .content_padding_x(px(14.0));
@@ -412,7 +412,7 @@ fn event_log(log: Signal<Vec<(&'static str, f32, Tone)>>) -> impl IntoElement {
     }))
 }
 
-/// `onScroll` (throttled), drag and momentum events, `scrollEnabled`,
+/// `onScroll` (throttled), drag and momentum events, `scrollable`,
 /// bounces, content insets.
 #[component]
 fn Events() -> impl IntoElement {
@@ -499,7 +499,7 @@ fn Events() -> impl IntoElement {
                 .finish(Finish::Card)
                 .border_1()
                 .border_color(colors::LINE)
-                .scroll_enabled(enabled)
+                .scrollable(enabled)
                 .bounces(bounces)
                 .content_inset(move || {
                     if inset.get() {
@@ -514,10 +514,10 @@ fn Events() -> impl IntoElement {
                 })
                 .event_throttle(move || THROTTLES[throttle.get()] as f32)
                 .on_scroll(move |e: &ScrollEvent| offset.set(Some(*e)))
-                .on_scroll_begin_drag(note("begin drag", Tone::Accent))
-                .on_scroll_end_drag(note("end drag", Tone::Warn))
-                .on_momentum_scroll_begin(note("momentum begin", Tone::Info))
-                .on_momentum_scroll_end(note("momentum end", Tone::Up))
+                .on_scroll_drag_start(note("begin drag", Tone::Accent))
+                .on_scroll_drag_end(note("end drag", Tone::Warn))
+                .on_momentum_start(note("momentum begin", Tone::Info))
+                .on_momentum_end(note("momentum end", Tone::Up))
                 .child(view().py(px(6.0)).children(rows)),
         )
         .child(event_log(log))
@@ -533,7 +533,7 @@ fn Events() -> impl IntoElement {
             view()
                 .child(switch_row(
                     "Scroll enabled",
-                    Some("scrollEnabled"),
+                    Some("scrollable"),
                     None,
                     enabled,
                     move |on: &bool| enabled.set(*on),
@@ -891,7 +891,7 @@ pub(crate) fn Scrolling() -> impl IntoElement {
         })
         .card(|| {
             Section::new("Events and behavior")
-                .child(api("onScroll · onScrollBeginDrag · onMomentumScrollEnd"))
+                .child(api("onScroll · onScrollDragStart · onMomentumEnd"))
                 .child(events())
         })
         .card(|| Section::new("Prepending keeps the position").child(feed()))

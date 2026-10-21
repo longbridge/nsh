@@ -1,10 +1,10 @@
 // A case of the API's test suite (docs/dev/compatibility.md): what lists
-// report and where they start: `onEndReached` once the user scrolls within
-// `onEndReachedThreshold` viewports of the end (a fifth of one here, not
+// report and where they start: `onLoadMore` once the user scrolls within
+// `loadMoreThreshold` viewports of the end (a fifth of one here, not
 // the default whole one), a pull to refresh (`onRefresh`, the platform's
 // event) that the app answers with `refreshing`, a list that starts
 // scrolled to an item (`initialScrollIndex`), and the keys
-// `keyExtractor` gives the items `onViewableItemsChanged` reports. Its
+// `keyExtractor` gives the items `onViewableItemsChange` reports. Its
 // script checks each.
 import { Text, View, signal } from "nsh";
 import { List } from "nsh/list";
@@ -21,8 +21,8 @@ function App() {
       <List
         testID="feed"
         each={range(20)}
-        onEndReachedThreshold={0.2}
-        onEndReached={() => ends.set(ends() + 1)}
+        loadMoreThreshold={0.2}
+        onLoadMore={() => ends.set(ends() + 1)}
         refreshing={refreshing()}
         onRefresh={() => {
           refreshes.set(refreshes() + 1);
@@ -47,7 +47,7 @@ function App() {
         initialScrollIndex={5}
         estimatedItemSize={40}
         keyExtractor={(item) => `k${item}`}
-        onViewableItemsChanged={(info) => keys.set(info.viewableItems.map((t) => t.key).join(","))}
+        onViewableItemsChange={(info) => keys.set(info.viewableItems.map((t) => t.key).join(","))}
         style={{ height: 100 }}
       >
         {(item) => (

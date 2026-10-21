@@ -459,9 +459,9 @@ impl Input {
         self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
     }
 
-    /// No caret.
-    pub fn caret_hidden(self, hidden: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(hidden, |hidden: bool| Prop::CaretHidden(hidden))
+    /// The caret is drawn (default yes; TS: `caret`).
+    pub fn caret(self, caret: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(caret, |caret: bool| Prop::Caret(caret))
     }
 
     /// Shows the input accessory with this `nativeID` over the keyboard
@@ -552,8 +552,8 @@ impl Scroll {
     }
 
     /// Whether the scroll indicator shows (default yes).
-    pub fn shows_indicator(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::ShowsIndicator(shows))
+    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows))
     }
 
     /// Pinch zoom between `min` and `max`.
@@ -575,8 +575,8 @@ impl Scroll {
         })
     }
 
-    /// The user can pinch to zoom (default yes; TS: `pinchGestureEnabled`).
-    pub fn pinch_gesture_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+    /// The user can pinch to zoom (default yes; TS: `zoomable`).
+    pub fn zoomable(self, enabled: impl IntoReactive<bool>) -> Self {
         self.bind_prop(enabled, |enabled: bool| {
             Prop::Scroll(ScrollProp::Pinch(enabled))
         })
@@ -610,8 +610,8 @@ impl Screen {
     }
 
     /// Whether the header shows (default true).
-    pub fn header_shown(self, shown: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shown, |v| Prop::Screen(ScreenProp::HeaderShown(v)))
+    pub fn header_visible(self, shown: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shown, |v| Prop::Screen(ScreenProp::HeaderVisible(v)))
     }
 
     /// A large title (iOS); the content scrolls under the header.
@@ -1003,9 +1003,9 @@ impl WebView {
     }
 
     /// Scrolls (default yes).
-    pub fn scroll_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+    pub fn scrollable(self, enabled: impl IntoReactive<bool>) -> Self {
         self.bind_prop(enabled, |enabled: bool| {
-            Prop::Native(NativeProp::ScrollEnabled(enabled))
+            Prop::Native(NativeProp::Scrollable(enabled))
         })
     }
 

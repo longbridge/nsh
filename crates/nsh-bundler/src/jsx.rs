@@ -1814,8 +1814,8 @@ mod tests {
     fn imports_tags_use_stay_and_type_only_ones_go() {
         let code = flat(
             &compile(
-                r#"import { SafeAreaView, Edge, Insets } from "nsh/base";
-            let r: Insets | undefined;
+                r#"import { SafeAreaView, Edge, Edges } from "nsh/base";
+            let r: Edges | undefined;
             export const a = <SafeAreaView ref={r} />;"#,
             )
             .unwrap(),

@@ -21,10 +21,10 @@ function App() {
       <Scroll
         horizontal
         pagingEnabled
-        showsIndicator={false}
+        scrollbar={false}
         style={{ height: 140, flexGrow: 0 }}
-        onLayout={(e) => width.set(e.width)}
-        onMomentumScrollEnd={(e) => page.set(Math.round(e.x / width()))}
+        onLayout={(e) => width.set(e.size.width)}
+        onMomentumEnd={(e) => page.set(Math.round(e.x / width()))}
       >
         <Each of={colors()}>
           {(color, index) => (
@@ -47,7 +47,7 @@ function App() {
           <Text style={{ color: ui().text }}>scrollTo top</Text>
         </View>
       </View>
-      <Scroll ref={scroller} style={{ flex: 1 }} scrollEventThrottle={16} onScroll={(e) => y.set(e.y)}>
+      <Scroll ref={scroller} style={{ flex: 1 }} scrollEventThrottle={16} onScroll={(e) => y.set(e.offset.y)}>
         <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", paddingHorizontal: 20, paddingBottom: 20, gap: 8 }}>
           <Each of={Array.from({ length: 40 }, (_, i) => i + 1)}>
             {(n) => (

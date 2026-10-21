@@ -37,17 +37,17 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
   separator?: ListSlot;
   /** Scrolls to this item before the first frame. */
   initialScrollIndex?: number;
-  /** Key of an item in `onViewableItemsChanged` tokens (default: `item.key`, `item.id`, or the index). */
+  /** Key of an item in `onViewableItemsChange` tokens (default: `item.key`, `item.id`, or the index). */
   keyExtractor?: (item: T, index: number) => string;
-  onViewableItemsChanged?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
+  onViewableItemsChange?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;
   /** Padding and gaps of the content as classes (`p-*`, `gap-*`);
    * `contentStyle` wins over them. */
   contentClass?: string;
   /** The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). */
   testID?: string;
-  /** How close to the end (in viewports) `onEndReached` fires; default 1. */
-  onEndReachedThreshold?: number;
+  /** How close to the end (in viewports) `onLoadMore` fires; default 1. */
+  loadMoreThreshold?: number;
   ref?: YNode | ((node: YNode) => void);
   /** Renders one row. Called once per recycled cell; `item` and `index`
    * change when the cell is reused for another item. */
@@ -57,7 +57,7 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
 /** What an app passes to a Rust component that lays out a list of rows
  * (an `Items` prop): the data and the rows; the component decides the
  * layout. */
-export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onEndReached" | "onEndReachedThreshold" | "header" | "footer" | "empty">;
+export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChange" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onLoadMore" | "loadMoreThreshold" | "header" | "footer" | "empty">;
 
 /**
  * A virtualized, recycling list on a native scroll view. Only rows near the

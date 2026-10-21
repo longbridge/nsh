@@ -57,7 +57,7 @@ mount(Browser);
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自身的脚本之前运行。 |
 | `userAgent` | `string` | 平台默认 | 用户代理字符串。 |
-| `scrollEnabled` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
 | `ios` | `{ allowsBackForwardNavigationGestures?: boolean }` | | 仅 iOS：从边缘轻扫以后退和前进。 |
 | `desktop` | `{ allowsBackForwardNavigationGestures?: boolean }` | | macOS：双指在触控板上轻扫以后退和前进；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |

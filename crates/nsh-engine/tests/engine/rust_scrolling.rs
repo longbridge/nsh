@@ -34,7 +34,7 @@ fn Scrolling() -> impl IntoElement {
                 .snap_alignment(SnapAlignment::Center)
                 .deceleration(0.99)
                 .disable_interval_momentum(true)
-                .scroll_enabled(move || unlocked.get())
+                .scrollable(move || unlocked.get())
                 .child(view().w(px(2000.0)).h(px(100.0))),
         )
         .child(

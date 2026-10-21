@@ -2723,7 +2723,7 @@ fn screens_fill_their_stack_below_the_header() {
         &mut c,
         vec![Op::SetProp {
             id: 3,
-            prop: Prop::Screen(crate::ScreenProp::HeaderShown(false)),
+            prop: Prop::Screen(crate::ScreenProp::HeaderVisible(false)),
         }],
     );
     let batch = c.commit().unwrap();
@@ -11031,7 +11031,11 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
             .on_hover_move(move |e: &HoverEvent| {
                 at.set(format!(
                     "{} {} {} {} {}",
-                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0, e.modifiers.shift
+                    e.position.x.0,
+                    e.position.y.0,
+                    e.page_position.x.0,
+                    e.page_position.y.0,
+                    e.modifiers.shift
                 ))
             })
             .child(text(move || at.get()))
@@ -11048,8 +11052,8 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
         })
         .expect("the listening view mounts HoverMove in its event mask");
     let event = crate::HoverEvent {
-        location: point(px(4.0), px(5.0)),
-        page: point(px(14.0), px(25.0)),
+        position: point(px(4.0), px(5.0)),
+        page_position: point(px(14.0), px(25.0)),
         modifiers: crate::keymap::Modifiers {
             shift: true,
             ..Default::default()
@@ -11077,7 +11081,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
             .on_context_menu(move |e: &ContextMenuEvent| {
                 at.set(format!(
                     "{} {} {} {}",
-                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0
+                    e.position.x.0, e.position.y.0, e.page_position.x.0, e.page_position.y.0
                 ))
             })
             .child(text(move || at.get()))
@@ -11096,8 +11100,8 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         })
         .expect("the listening view mounts ContextMenu in its event mask");
     let event = crate::ContextMenuEvent {
-        location: point(px(4.0), px(5.0)),
-        page: point(px(14.0), px(25.0)),
+        position: point(px(4.0), px(5.0)),
+        page_position: point(px(14.0), px(25.0)),
         ..Default::default()
     };
     assert!(c.component_event(

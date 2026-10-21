@@ -188,7 +188,7 @@ use nsh_core::ui::prelude::*;
 
 fn photo_viewer() -> impl IntoElement {
     nav_page()
-        .header_shown(false)
+        .header_visible(false)
         .status_bar(StatusBarStyle::Light)
         .child(view().flex_1().bg(black()))
 }
@@ -200,7 +200,7 @@ import { NavPage } from "nsh/base";
 
 function PhotoViewer() {
   return (
-    <NavPage headerShown={false} statusBar={{ foreground: "light" }}>
+    <NavPage headerVisible={false} statusBar={{ foreground: "light" }}>
       <View style={{ flex: 1, backgroundColor: "#000000" }}>…</View>
     </NavPage>
   );

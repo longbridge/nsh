@@ -28,20 +28,20 @@ function App() {
         contentOffset={{ x: 0, y: 40 }}
         keyboardShouldPersistTaps="handled"
         disableIntervalMomentum
-        showsIndicator={false}
+        scrollbar={false}
         keyboardDismissMode="on-drag"
         refreshing={refreshing()}
       >
         <View style={{ height: 600 }} />
       </Scroll>
-      <Scroll testID="sideways" style={{ height: 60 }} horizontal scrollEnabled={false} decelerationRate={0.5}>
+      <Scroll testID="sideways" style={{ height: 60 }} horizontal scrollable={false} decelerationRate={0.5}>
         <View style={{ width: 900, height: 60 }} />
       </Scroll>
       <Scroll
         testID="throttled"
         style={{ height: 100 }}
         scrollEventThrottle={3000}
-        onScroll={(e) => scrolled.set(`${e.y}`)}
+        onScroll={(e) => scrolled.set(`${e.offset.y}`)}
       >
         <View style={{ height: 800 }} />
       </Scroll>

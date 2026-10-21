@@ -1288,7 +1288,10 @@ unsafe extern "C" fn canvas_layout(
             qjs::JS_FreeValue(cx, v);
             n
         };
-        let (w, h) = (field(e, c"width"), field(e, c"height"));
+        // `e` is the view's `Bounds`.
+        let bounds_size = qjs::JS_GetPropertyStr(cx, e, c"size".as_ptr());
+        let (w, h) = (field(bounds_size, c"width"), field(bounds_size, c"height"));
+        qjs::JS_FreeValue(cx, bounds_size);
         let current = reactive::peek(cx, size);
         let same = qjs::JS_IsObject(current)
             && field(current, c"width") == w

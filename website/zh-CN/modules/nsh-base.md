@@ -27,7 +27,7 @@ import {
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
+  CheckboxProps, DialogChangeReason, DialogProps, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
@@ -131,7 +131,7 @@ import type {
 
 ### safeArea 与 safeAreaInsets
 
-`safeArea()` 是界面的安全区；`safeAreaInsets()` 是组件渲染位置的边距。两者都是响应式的 `Insets`（`{ top, right, bottom, left }`，单位为点）。见 [safeArea 与 safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets)。
+`safeArea()` 是界面的安全区；`safeAreaInsets()` 是组件渲染位置的边距。两者都是响应式的 `Edges`（`{ top, right, bottom, left }`，单位为点）。见 [safeArea 与 safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets)。
 
 <a id="alert-dialogs"></a>
 
@@ -166,7 +166,7 @@ use nsh_base::nav_page;
 use nsh_core::ui::prelude::*;
 
 fn photo_viewer() -> Screen {
-    nav_page().header_shown(false).status_bar(
+    nav_page().header_visible(false).status_bar(
         StatusBarSetting::default()
             .foreground(StatusBarStyle::Light)
             .hidden(true)
@@ -180,7 +180,7 @@ import { NavPage } from "nsh/base";
 
 function PhotoViewer() {
   return (
-    <NavPage headerShown={false} statusBar={{ foreground: "light", hidden: true, animated: true }}>
+    <NavPage headerVisible={false} statusBar={{ foreground: "light", hidden: true, animated: true }}>
       …
     </NavPage>
   );

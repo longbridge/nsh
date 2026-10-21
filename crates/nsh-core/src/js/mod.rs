@@ -121,7 +121,7 @@ mod tests {
         for (interface, prop) in [
             ("HostProps", "  pointerEvents?: PointerEvents;"),
             ("HostProps", "  onPress?: () => void;"),
-            ("HostProps", "  onLayout?: (e: LayoutEvent) => void;"),
+            ("HostProps", "  onLayout?: (bounds: Bounds) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             ("InputHostProps", "  onChange?: (text: string) => void;"),
@@ -136,10 +136,7 @@ mod tests {
                 "IOSInputHostProps",
                 "  keyboardAppearance?: KeyboardAppearance;",
             ),
-            (
-                "ImageHostProps",
-                "  onLoad?: (e: { width: number; height: number }) => void;",
-            ),
+            ("ImageHostProps", "  onLoad?: (e: Size) => void;"),
             (
                 "VideoHostProps",
                 "  onLoad?: (e: { duration: number; width: number; height: number }) => void;",

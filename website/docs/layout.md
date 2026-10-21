@@ -222,12 +222,12 @@ view()
 ```tsx tabs
 const width = signal(0);
 
-<View onLayout={(e) => width.set(e.width)}>
+<View onLayout={(e) => width.set(e.size.width)}>
   <Text>{width()} points wide</Text>
 </View>
 ```
 
-The frame is in points: `Bounds<Points>` in Rust, `{ x, y, width, height }` in TSX. For the whole window, read `window()` in Rust or `windowSize()` from [`nsh/device`](../modules/nsh-device.md) in TSX; both follow rotation and window resizing, and a style that reads them changes with the window:
+The frame is in points: `Bounds<Points>` in Rust, `Bounds` (`{ origin: { x, y }, size: { width, height } }`) in TSX. For the whole window, read `window()` in Rust or `windowSize()` from [`nsh/device`](../modules/nsh-device.md) in TSX; both follow rotation and window resizing, and a style that reads them changes with the window:
 
 ```rust tabs
 view().style_when(|| window().width > px(600.0), |s| s.flex_row())

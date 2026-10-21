@@ -39,7 +39,7 @@ import {
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  CheckboxProps, DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
+  CheckboxProps, DialogChangeReason, DialogProps, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, StatusBar,
   RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
@@ -139,7 +139,7 @@ dialog's, or else the surface's safe area. See [SafeAreaView](../elements/safe-a
 ### safeArea and safeAreaInsets
 
 `safeArea()` is the surface's safe area; `safeAreaInsets()` the insets where a component renders. Both are reactive
-`Insets` (`{ top, right, bottom, left }` in points). See
+`Edges` (`{ top, right, bottom, left }` in points). See
 [safeArea and safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets).
 
 ## Alert dialogs
@@ -172,7 +172,7 @@ use nsh_base::nav_page;
 use nsh_core::ui::prelude::*;
 
 fn photo_viewer() -> Screen {
-    nav_page().header_shown(false).status_bar(
+    nav_page().header_visible(false).status_bar(
         StatusBarSetting::default()
             .foreground(StatusBarStyle::Light)
             .hidden(true)
@@ -186,7 +186,7 @@ import { NavPage } from "nsh/base";
 
 function PhotoViewer() {
   return (
-    <NavPage headerShown={false} statusBar={{ foreground: "light", hidden: true, animated: true }}>
+    <NavPage headerVisible={false} statusBar={{ foreground: "light", hidden: true, animated: true }}>
       …
     </NavPage>
   );

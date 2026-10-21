@@ -96,7 +96,7 @@ export function Physics() {
         </View>
       </Appear>
       <View
-        onLayout={(e) => stage.set({ width: e.width, height: e.height })}
+        onLayout={(e) => stage.set({ width: e.size.width, height: e.size.height })}
         style={{
           flex: short ? undefined : 1,
           height: short ? SHORT_STAGE : undefined,

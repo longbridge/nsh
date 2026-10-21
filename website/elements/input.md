@@ -96,7 +96,7 @@ view styles apply):
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `caretHidden` | `.caret_hidden(..)` | `boolean` | No caret is drawn. |
+| `caret` | `.caret(..)` | `boolean` | The caret is drawn (default `true`; `false` hides it). |
 | `selectedRange` | `.selected_range((start, end))` | `{ start: number; end?: number }` | The controlled selection, in UTF-16 units; `end` defaults to `start` (a caret). |
 
 ### Colors

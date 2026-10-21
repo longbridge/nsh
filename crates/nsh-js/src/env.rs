@@ -390,7 +390,7 @@ pub(crate) const REEXPORTS: &[Item] = &[
         Export::Value(|cx| accessor(cx, Part::SafeArea)),
         Ts::value(
             "Insets of the surface not covered by system UI (notch, home indicator,\ntitle bar), in points (reactive).",
-            "Accessor<Insets>",
+            "Accessor<Edges>",
         ),
     ),
     (
@@ -406,7 +406,7 @@ pub(crate) const REEXPORTS: &[Item] = &[
         Export::Function(safe_area_insets, 0),
         Ts::function(
             "Insets not covered by system UI or headers where this component renders:\nthe surface's safe area, a dialog's, or a page's (below its header).",
-            &["(): Accessor<Insets>"],
+            &["(): Accessor<Edges>"],
         ),
     ),
     (
@@ -686,7 +686,7 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         Export::Value(|cx| accessor(cx, Part::Window)),
         Ts::value(
             "Size of the surface in points (reactive).",
-            "Accessor<{ width: number; height: number }>",
+            "Accessor<Size>",
         ),
     ),
     (

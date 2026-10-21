@@ -42,7 +42,7 @@
 //!   page's URL and origin are the base URL's and relative URLs resolve
 //!   against it, as with `loadHTMLString:baseURL:`. Without a base URL the
 //!   HTML is loaded with `NavigateToString`.
-//! - `scrollEnabled={false}`: the wheel goes to the scroll views around the
+//! - `scrollable={false}`: the wheel goes to the scroll views around the
 //!   web view instead of the page, and a style keeps the page's viewport
 //!   from scrolling (`overflow: hidden` on its root element) while scripts
 //!   still may, as a `UIScrollView` with scrolling disabled.
@@ -615,8 +615,8 @@ impl WebItem {
                         .AddScriptToExecuteOnDocumentCreated(&HSTRING::from(script), &handler);
                 }
             }
-            if old.as_ref().is_none_or(|o| o.scroll_enabled) != p.scroll_enabled {
-                self.set_scrolls(&webview, p.scroll_enabled);
+            if old.as_ref().is_none_or(|o| o.scrollable) != p.scrollable {
+                self.set_scrolls(&webview, p.scrollable);
             }
             let navigate = scripts_changed || old.as_ref().is_none_or(|o| o.source != p.source);
             if navigate {
@@ -650,7 +650,7 @@ impl WebItem {
         }
     }
 
-    /// `scrollEnabled`: the page's viewport scrolls, or not (the style is
+    /// `scrollable`: the page's viewport scrolls, or not (the style is
     /// put in the page now and in every page loaded later).
     fn set_scrolls(&self, webview: &ICoreWebView2, enabled: bool) {
         let none = None::<&ICoreWebView2ExecuteScriptCompletedHandler>;
@@ -1150,12 +1150,7 @@ impl Hosted for WebItem {
     }
 
     fn wheel(&self, x: f32, y: f32, event: &WheelEvent) -> bool {
-        if !self
-            .applied
-            .borrow()
-            .as_ref()
-            .is_none_or(|p| p.scroll_enabled)
-        {
+        if !self.applied.borrow().as_ref().is_none_or(|p| p.scrollable) {
             // The scroll views around it scroll instead.
             return false;
         }

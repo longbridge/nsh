@@ -1078,25 +1078,19 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 obj.set(*key, payload_value(cx, value)?)?;
             }
         }
-        EventPayload::Hover(e) => {
-            obj.set("locationX", e.location.x.0)?;
-            obj.set("locationY", e.location.y.0)?;
-            obj.set("pageX", e.page.x.0)?;
-            obj.set("pageY", e.page.y.0)?;
-            obj.set("altKey", e.modifiers.alt)?;
-            obj.set("ctrlKey", e.modifiers.ctrl)?;
-            obj.set("metaKey", e.modifiers.cmd)?;
-            obj.set("shiftKey", e.modifiers.shift)?;
-        }
-        EventPayload::ContextMenu(e) => {
-            obj.set("locationX", e.location.x.0)?;
-            obj.set("locationY", e.location.y.0)?;
-            obj.set("pageX", e.page.x.0)?;
-            obj.set("pageY", e.page.y.0)?;
-            obj.set("altKey", e.modifiers.alt)?;
-            obj.set("ctrlKey", e.modifiers.ctrl)?;
-            obj.set("metaKey", e.modifiers.cmd)?;
-            obj.set("shiftKey", e.modifiers.shift)?;
+        EventPayload::Hover(nsh_core::HoverEvent {
+            position,
+            page_position,
+            modifiers,
+        })
+        | EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+            position,
+            page_position,
+            modifiers,
+        }) => {
+            obj.set("position", point_object(cx, *position)?)?;
+            obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
         }
         EventPayload::FileDrop(uris) => {
             let list = rquickjs::Array::new(cx.clone())?;
@@ -1114,10 +1108,11 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             for (i, l) in lines.iter().enumerate() {
                 let line = rquickjs::Object::new(cx.clone())?;
                 line.set("text", l.text.as_str())?;
-                line.set("x", l.x.0)?;
-                line.set("y", l.y.0)?;
-                line.set("width", l.width.0)?;
-                line.set("height", l.height.0)?;
+                let bounds = nsh_core::geometry::Bounds {
+                    origin: nsh_core::geometry::point(l.x, l.y),
+                    size: nsh_core::geometry::Size::new(l.width, l.height),
+                };
+                line.set("bounds", bounds_object(cx, bounds)?)?;
                 line.set("ascender", l.ascender.0)?;
                 line.set("descender", l.descender.0)?;
                 line.set("capHeight", l.cap_height.0)?;
@@ -1126,12 +1121,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("lines", list)?;
         }
-        EventPayload::Layout(frame) => {
-            obj.set("x", frame.origin.x.0)?;
-            obj.set("y", frame.origin.y.0)?;
-            obj.set("width", frame.size.width.0)?;
-            obj.set("height", frame.size.height.0)?;
-        }
+        EventPayload::Layout(frame) => return Ok(bounds_object(cx, *frame)?.into_value()),
         EventPayload::Pan {
             translation,
             velocity_x,
@@ -1232,12 +1222,61 @@ fn json_value<'js>(cx: &Ctx<'js>, value: &nsh_core::JsonValue) -> rquickjs::Resu
     })
 }
 
+/// A `Point` (`{ x, y }`).
+fn point_object<'js>(
+    cx: &Ctx<'js>,
+    p: nsh_core::geometry::Point<nsh_core::geometry::Points>,
+) -> rquickjs::Result<rquickjs::Object<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
+    obj.set("x", p.x.0)?;
+    obj.set("y", p.y.0)?;
+    Ok(obj)
+}
+
+/// A `Size` (`{ width, height }`).
+fn size_object<'js>(
+    cx: &Ctx<'js>,
+    s: nsh_core::geometry::Size<nsh_core::geometry::Points>,
+) -> rquickjs::Result<rquickjs::Object<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
+    obj.set("width", s.width.0)?;
+    obj.set("height", s.height.0)?;
+    Ok(obj)
+}
+
+/// A `Bounds` (`{ origin, size }`).
+fn bounds_object<'js>(
+    cx: &Ctx<'js>,
+    b: nsh_core::geometry::Bounds<nsh_core::geometry::Points>,
+) -> rquickjs::Result<rquickjs::Object<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
+    obj.set("origin", point_object(cx, b.origin)?)?;
+    obj.set("size", size_object(cx, b.size)?)?;
+    Ok(obj)
+}
+
+/// `Modifiers` (`{ control, alt, shift, platform }`, GPUI's names).
+fn modifiers_object<'js>(
+    cx: &Ctx<'js>,
+    m: &nsh_core::keymap::Modifiers,
+) -> rquickjs::Result<rquickjs::Object<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
+    obj.set("control", m.ctrl)?;
+    obj.set("alt", m.alt)?;
+    obj.set("shift", m.shift)?;
+    obj.set("platform", m.cmd)?;
+    Ok(obj)
+}
+
 fn payload_value<'js>(cx: &Ctx<'js>, value: &PayloadValue) -> rquickjs::Result<Value<'js>> {
     Ok(match value {
         PayloadValue::Number(n) => Value::new_float(cx.clone(), *n),
         PayloadValue::Bool(b) => Value::new_bool(cx.clone(), *b),
         PayloadValue::Str(s) => rquickjs::String::from_str(cx.clone(), s)?.into_value(),
         PayloadValue::Null => Value::new_null(cx.clone()),
+        PayloadValue::Point(p) => point_object(cx, *p)?.into_value(),
+        PayloadValue::Size(s) => size_object(cx, *s)?.into_value(),
+        PayloadValue::Bounds(b) => bounds_object(cx, *b)?.into_value(),
     })
 }
 
@@ -1864,8 +1903,8 @@ const report = (v) => text(String(v));
     fn hover_payload_has_both_positions_and_the_modifiers() {
         let host = Host::new().unwrap();
         let event = nsh_core::HoverEvent {
-            location: point(px(3.0), px(4.5)),
-            page: point(px(30.0), px(40.5)),
+            position: point(px(3.0), px(4.5)),
+            page_position: point(px(30.0), px(40.5)),
             modifiers: nsh_core::keymap::Modifiers {
                 shift: true,
                 cmd: true,
@@ -1875,19 +1914,25 @@ const report = (v) => text(String(v));
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::Hover(event)).unwrap();
             let obj = value.as_object().unwrap();
-            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
-            let flag = |k: &str| obj.get::<_, bool>(k).unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            let flag = |k: &str| {
+                let m: rquickjs::Object = obj.get("modifiers").unwrap();
+                m.get::<_, bool>(k).unwrap()
+            };
             assert_eq!(
                 (
-                    num("locationX"),
-                    num("locationY"),
-                    num("pageX"),
-                    num("pageY")
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
                 ),
                 (3.0, 4.5, 30.0, 40.5)
             );
-            assert!(flag("shiftKey") && flag("metaKey"));
-            assert!(!flag("altKey") && !flag("ctrlKey"));
+            assert!(flag("shift") && flag("platform"));
+            assert!(!flag("alt") && !flag("control"));
         });
     }
 
@@ -1895,8 +1940,8 @@ const report = (v) => text(String(v));
     fn context_menu_payload_has_both_positions() {
         let host = Host::new().unwrap();
         let event = nsh_core::ContextMenuEvent {
-            location: point(px(1.0), px(2.0)),
-            page: point(px(11.0), px(22.0)),
+            position: point(px(1.0), px(2.0)),
+            page_position: point(px(11.0), px(22.0)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: true,
                 ..Default::default()
@@ -1905,18 +1950,22 @@ const report = (v) => text(String(v));
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::ContextMenu(event)).unwrap();
             let obj = value.as_object().unwrap();
-            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
             assert_eq!(
                 (
-                    num("locationX"),
-                    num("locationY"),
-                    num("pageX"),
-                    num("pageY")
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
                 ),
                 (1.0, 2.0, 11.0, 22.0)
             );
-            assert!(obj.get::<_, bool>("ctrlKey").unwrap());
-            assert!(!obj.get::<_, bool>("metaKey").unwrap());
+            let m: rquickjs::Object = obj.get("modifiers").unwrap();
+            assert!(m.get::<_, bool>("control").unwrap());
+            assert!(!m.get::<_, bool>("platform").unwrap());
         });
     }
 

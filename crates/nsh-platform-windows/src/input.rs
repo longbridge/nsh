@@ -701,8 +701,8 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
         if listens {
             let (location_x, location_y) = local(&v, x, y);
             let event = nsh_core::ContextMenuEvent {
-                location: point(Points(location_x), Points(location_y)),
-                page: point(Points(x), Points(y)),
+                position: point(Points(location_x), Points(location_y)),
+                page_position: point(Points(x), Points(y)),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: modifiers.ctrl,
                     alt: modifiers.alt,
@@ -2017,8 +2017,8 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
         };
         let (location_x, location_y) = local(&v, x, y);
         let event = nsh_core::HoverEvent {
-            location: point(Points(location_x), Points(location_y)),
-            page: point(Points(x), Points(y)),
+            position: point(Points(location_x), Points(location_y)),
+            page_position: point(Points(x), Points(y)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: modifiers.ctrl,
                 alt: modifiers.alt,

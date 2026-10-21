@@ -856,10 +856,7 @@ impl<M: TextEngine> Core<M> {
                 self.events.push(crate::ui::JsEvent::Event(
                     id,
                     EventKind::PressOutside,
-                    EventPayload::Map(vec![
-                        ("pageX", PayloadValue::Number(point.page.x.0 as f64)),
-                        ("pageY", PayloadValue::Number(point.page.y.0 as f64)),
-                    ]),
+                    EventPayload::Map(vec![("pagePosition", PayloadValue::Point(point.page))]),
                 ));
             }
         }
@@ -965,7 +962,6 @@ impl<M: TextEngine> Core<M> {
         if state.placed != Some((placed, bounds)) {
             state.placed = Some((placed, bounds));
             if listens {
-                let n = |v: Points| PayloadValue::Number(v.0 as f64);
                 self.events.push(crate::ui::JsEvent::Event(
                     id,
                     EventKind::Position,
@@ -974,12 +970,8 @@ impl<M: TextEngine> Core<M> {
                             "placement",
                             PayloadValue::Str(placed.placement.name().into()),
                         ),
-                        ("x", n(bounds.origin.x)),
-                        ("y", n(bounds.origin.y)),
-                        ("width", n(bounds.size.width)),
-                        ("height", n(bounds.size.height)),
-                        ("availableWidth", n(placed.available.width)),
-                        ("availableHeight", n(placed.available.height)),
+                        ("bounds", PayloadValue::Bounds(bounds)),
+                        ("available", PayloadValue::Size(placed.available)),
                     ]),
                 ));
             }

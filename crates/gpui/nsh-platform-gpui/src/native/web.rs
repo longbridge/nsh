@@ -38,7 +38,7 @@
 //! it fails). `canGoBack` / `canGoForward` come from the page's Navigation
 //! API (false where the engine lacks it).
 //!
-//! Not supported: `source.baseUrl` for HTML, `scrollEnabled` and
+//! Not supported: `source.baseUrl` for HTML, `scrollable` and
 //! `allowsBackForwardNavigationGestures`; failed loads report no `onError`
 //! on macOS and Windows.
 

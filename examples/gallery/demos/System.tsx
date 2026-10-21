@@ -372,7 +372,7 @@ function ContextMenu() {
   const menu = () =>
     Menu.popup([
       { label: "Copy", onSelect: () => chosen.set("Copy") },
-      { label: "Paste", enabled: false },
+      { label: "Paste", disabled: true },
       { label: "Share", submenu: [{ label: "Mail", onSelect: () => chosen.set("Share > Mail") }] },
     ]);
   return (

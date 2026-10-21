@@ -746,8 +746,8 @@ pub(crate) fn Form() -> impl IntoElement {
             .child(auto_grow())
             .child(
                 field(&fx[f::CARET], "No caret")
-                    .api("caretHidden")
-                    .render(|i| i.caret_hidden(true).default_value("No caret here")),
+                    .api("caret")
+                    .render(|i| i.caret(false).default_value("No caret here")),
             )
     };
 

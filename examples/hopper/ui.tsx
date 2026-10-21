@@ -48,7 +48,7 @@ export function track(
       at = { x: e.pageX, y: e.pageY };
       measured = (node?.measure() ?? Promise.resolve(null)).then((m) => {
         if (id !== gesture || m === null) return;
-        origin = { x: m.pageX, y: m.pageY };
+        origin = m.pagePosition;
         send();
       });
       return true;
@@ -416,7 +416,7 @@ export function Slider(props: {
   const low = () => props.value < props.floor;
   return (
     <View
-      onLayout={(e) => width.set(e.width)}
+      onLayout={(e) => width.set(e.size.width)}
       {...track((x) => pick(x))}
       role="adjustable"
       accessibilityLabel={props.label}

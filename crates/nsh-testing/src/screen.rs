@@ -35,7 +35,7 @@ fn shows_text(v: &View, want: &TextMatch) -> bool {
 /// view the step looks for).
 pub(crate) fn disabled(what: &str) -> &'static str {
     if what == "scroll view" {
-        "does not scroll: the user cannot scroll it (`scrollEnabled` is false)"
+        "does not scroll: the user cannot scroll it (`scrollable` is false)"
     } else {
         "is disabled"
     }
@@ -212,7 +212,7 @@ pub(crate) struct Scroll {
     pub(crate) applied: u32,
     pub(crate) horizontal: bool,
     content: Option<Size<Points>>,
-    /// The user cannot scroll it (`scrollEnabled={false}`).
+    /// The user cannot scroll it (`scrollable={false}`).
     pub(crate) locked: bool,
 }
 

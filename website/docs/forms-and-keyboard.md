@@ -181,7 +181,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |
-| `caretHidden` | `boolean` | `false` | No caret is drawn. |
+| `caret` | `boolean` | `true` | The caret is drawn; `false` hides it. |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | The keyboard's look (iOS). |
 | `selectedRange` | `{ start: number; end?: number }` | | The controlled selection, in UTF-16 units. |
 | `allowFontScaling` | `boolean` | `true` | Follow the system text size. |

@@ -123,13 +123,6 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
  * tooltip, layout events and the ref (`ref.command(name, args)`). */
 export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
-export interface Insets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
 /** An operating system (`Platform.OS`). */
 export type OS = "ios" | "android" | "macos" | "windows" | "linux" | "web";
 
@@ -369,26 +362,51 @@ export interface ImageStyle extends ViewStyle {
   tintColor?: ColorValue;
 }
 
+/** A position, in points (`nsh_core::geometry::Point`). */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** An extent, in points (`nsh_core::geometry::Size`). */
+export interface Size {
+  width: number;
+  height: number;
+}
+
+/** A position and an extent, in points (`nsh_core::geometry::Bounds`). */
+export interface Bounds {
+  /** The top left corner. */
+  origin: Point;
+  size: Size;
+}
+
+/** A length on each side, in points (`nsh_core::geometry::Edges`): insets, a safe area. */
+export interface Edges {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** The modifier keys held (GPUI's `Modifiers`). */
+export interface Modifiers {
+  control: boolean;
+  /** Option on Apple platforms, Alt elsewhere. */
+  alt: boolean;
+  shift: boolean;
+  /** Command on Apple platforms, the Windows / Super key elsewhere. */
+  platform: boolean;
+}
+
 /** Where the core placed an overlay: the payload of `onPosition`. */
 export interface OverlayPosition {
   /** The side of the anchor it went on: the one asked for, or the other one when only that one has room. */
   placement: "top" | "bottom" | "left" | "right";
   /** Its frame in the root view (the surface, or the dialog it is in). */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  bounds: Bounds;
   /** The room on that side, inside the safe area less `margin`: what a menu may grow to. */
-  availableWidth: number;
-  availableHeight: number;
-}
-
-/** A frame relative to the parent: the payload of `onLayout`. */
-export interface LayoutEvent {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  available: Size;
 }
 
 /** A drag: translation since the start and velocity (points / second). */
@@ -403,45 +421,32 @@ export interface PanEvent {
   valueY?: number;
 }
 
-/** Where the mouse is over a hovered view: the payload of `onHoverMove`. */
+/** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
 export interface HoverEvent {
-  /** Position in the view (points, its transforms undone). */
-  locationX: number;
-  locationY: number;
-  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX`. */
-  pageX: number;
-  pageY: number;
-  altKey: boolean;
-  ctrlKey: boolean;
-  /** Command on Apple platforms, the Windows / Super key elsewhere. */
-  metaKey: boolean;
-  shiftKey: boolean;
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  modifiers: Modifiers;
 }
 
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
-  /** Position in the view (points, its transforms undone). */
-  locationX: number;
-  locationY: number;
-  /** Position in the root view the view is in: where `Menu.popup` opens a menu. */
-  pageX: number;
-  pageY: number;
-  altKey: boolean;
-  ctrlKey: boolean;
-  /** Command on Apple platforms, the Windows / Super key elsewhere. */
-  metaKey: boolean;
-  shiftKey: boolean;
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in: where `Menu.popup` opens a menu (`Menu.popup(items, e.pagePosition)`). */
+  pagePosition: Point;
+  modifiers: Modifiers;
 }
 
 /** Where a scroll view is: the payload of `onScroll`. */
 export interface ScrollEvent {
-  x: number;
-  y: number;
+  /** The content offset. */
+  offset: Point;
   /** The content's size (zoomed). */
-  contentWidth: number;
-  contentHeight: number;
-  width: number;
-  height: number;
+  contentSize: Size;
+  /** The scroll view's size. */
+  size: Size;
   /** The zoom scale (1 unless the scroll view zooms). */
   zoomScale: number;
 }
@@ -449,10 +454,7 @@ export interface ScrollEvent {
 /** A line of a laid-out text (in the text's content box). */
 export interface TextLayoutLine {
   text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  bounds: Bounds;
   ascender: number;
   descender: number;
   capHeight: number;
@@ -554,7 +556,7 @@ export interface HostProps {
   /** Touch handling of the view and its children (React Native semantics). */
   pointerEvents?: PointerEvents;
   /** Extends the touch area beyond the bounds. */
-  hitSlop?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  hitSlop?: number | Partial<Edges>;
   /** The view's touch responder waits for a pan that the platform activates past an offset on one axis (and fails past one on the other), deciding on the main thread so the scroll views around it keep the touches until then. */
   panActivation?: PanActivation;
   /** Tailwind CSS classes (`"flex-row gap-2 p-4 bg-white dark:bg-zinc-900"`), resolved natively. Later classes win over earlier ones; `style` wins over both. */
@@ -602,17 +604,18 @@ export interface HostProps {
   onHoverOut?: () => void;
   /** The mouse moved over the view (or a view inside it) with no button down, at most once per frame. */
   onHoverMove?: (e: HoverEvent) => void;
-  /** The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup({ x: e.pageX, y: e.pageY })`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead. */
+  /** The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup(items, e.pagePosition)`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead. */
   onContextMenu?: (e: ContextMenuEvent) => void;
   /** The mouse moved inside the view, including with a button down (desktops and web); `x`/`y` are local coordinates in points, delivered at most once per frame. */
-  onMouseMove?: (e: { x: number; y: number }) => void;
+  onMouseMove?: (e: Point) => void;
   /** A local file drag entered this desktop destination. */
   onFileDragEnter?: () => void;
   /** A local file drag left this desktop destination. */
   onFileDragLeave?: () => void;
   /** Local file URLs dropped on this desktop destination. */
   onFileDrop?: (e: { uris: string[] }) => void;
-  onLayout?: (e: LayoutEvent) => void;
+  /** The frame changed: its bounds in the parent. */
+  onLayout?: (bounds: Bounds) => void;
   onPanStart?: (e: PanEvent) => void;
   /** With the release velocity, e.g. to start a `decay`. */
   onPanEnd?: (e: PanEvent) => void;
@@ -675,7 +678,7 @@ export interface ImageHostProps {
   /** Download progress in bytes (`total` 0 when unknown); at most every 100 ms. */
   onProgress?: (e: { loaded: number; total: number }) => void;
   /** The source image's size in pixels (not the decoded, downsampled one). */
-  onLoad?: (e: { width: number; height: number }) => void;
+  onLoad?: (e: Size) => void;
   onError?: (e: { message: string }) => void;
   /** After `onLoad` or `onError`. */
   onLoadEnd?: () => void;
@@ -696,9 +699,9 @@ export interface ScrollingHostProps {
   /** Overscroll past the edges (default true). */
   bounces?: boolean;
   /** Room around the content. */
-  contentInset?: { top?: number; right?: number; bottom?: number; left?: number };
+  contentInset?: Partial<Edges>;
   /** Where it starts. */
-  contentOffset?: { x?: number; y?: number };
+  contentOffset?: Partial<Point>;
   /** Whether a tap dismisses the keyboard: `"never"` (default: the tap only dismisses it), `"always"` (never dismisses), `"handled"` (unless something handles the tap). */
   keyboardShouldPersistTaps?: "never" | "always" | "handled" | boolean;
   /** Minimum milliseconds between `onScroll` events (at most one per frame anyway). */
@@ -706,12 +709,12 @@ export interface ScrollingHostProps {
   /** A fling moves one snap point at most. */
   disableIntervalMomentum?: boolean;
   /** The user can scroll it (default true). */
-  scrollEnabled?: boolean;
+  scrollable?: boolean;
   onScroll?: (e: ScrollEvent) => void;
-  onScrollBeginDrag?: (e: { x: number; y: number }) => void;
-  onScrollEndDrag?: (e: { x: number; y: number }) => void;
-  onMomentumScrollBegin?: (e: { x: number; y: number }) => void;
-  onMomentumScrollEnd?: (e: { x: number; y: number }) => void;
+  onScrollDragStart?: (e: Point) => void;
+  onScrollDragEnd?: (e: Point) => void;
+  onMomentumStart?: (e: Point) => void;
+  onMomentumEnd?: (e: Point) => void;
 }
 
 /** The props of `<Scroll>`. */
@@ -727,18 +730,18 @@ export interface ScrollHostProps {
   /** Pinching may go past the limits and springs back (default true). */
   bouncesZoom?: boolean;
   /** The user can pinch to zoom (default true). */
-  pinchGestureEnabled?: boolean;
+  zoomable?: boolean;
   /** Content smaller than the viewport (zoomed out) is centered. */
   centerContent?: boolean;
   /** The scroll indicator shows (default true). On the desktop a horizontal view keeps it: it is the mouse's scroll bar. */
-  showsIndicator?: boolean;
+  scrollbar?: boolean;
   /** The pull-to-refresh spinner shows. */
   refreshing?: boolean;
   /** An animated value fed with the scroll offset (main axis), for scroll-linked effects. */
   scrollValue?: AnimatedValue;
   /** Whether dragging dismisses the keyboard. */
   keyboardDismissMode?: KeyboardDismissMode;
-  onScrollEnd?: (e: { x: number; y: number }) => void;
+  onScrollEnd?: (e: Point) => void;
   onRefresh?: () => void;
 }
 
@@ -747,7 +750,7 @@ export interface ListHostProps {
   /** Scrolls sideways. */
   horizontal?: boolean;
   /** The scroll indicator shows (default true). On the desktop a horizontal view keeps it: it is the mouse's scroll bar. */
-  showsIndicator?: boolean;
+  scrollbar?: boolean;
   /** The pull-to-refresh spinner shows. */
   refreshing?: boolean;
   /** The size of items not measured yet, in points (default 50). */
@@ -768,9 +771,9 @@ export interface ListHostProps {
   scrollValue?: AnimatedValue;
   /** Whether dragging dismisses the keyboard. */
   keyboardDismissMode?: KeyboardDismissMode;
-  onScrollEnd?: (e: { x: number; y: number }) => void;
+  onScrollEnd?: (e: Point) => void;
   onRefresh?: () => void;
-  onEndReached?: () => void;
+  onLoadMore?: () => void;
 }
 
 /** The props of `<Input>`. */
@@ -801,8 +804,8 @@ export interface InputHostProps {
   submitBehavior?: SubmitBehavior;
   /** Focused when it appears. */
   autoFocus?: boolean;
-  /** No caret is drawn. */
-  caretHidden?: boolean;
+  /** The caret is drawn (default true; `false` hides it). */
+  caret?: boolean;
   /** Also `textContentType`): what an input holds, for autofill (React Native's values, e.g. "username", "current-password", "new-password", "one-time-code", "email", "tel", "postal-code", "cc-number", "off"). */
   autoComplete?: AutoComplete | TextContentType;
   /** The controlled selection (UTF-16 units; `end` defaults to `start`, a caret). */
@@ -821,7 +824,7 @@ export interface InputHostProps {
   /** An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen), empty once it ends. The committed text reaches `onChange` before the composition's end; while composing, the platform holds the `value` the app sets and shows it once the composition ends. */
   onCompositionChange?: (e: { composing: boolean; text: string }) => void;
   /** The size of the text (at the input's width when `multiline`; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it. */
-  onContentSizeChange?: (e: { width: number; height: number }) => void;
+  onContentSizeChange?: (e: Size) => void;
 }
 
 /** The props of `<Input>` inside `ios={{…}}`. */
@@ -839,7 +842,7 @@ export interface NavPageHostProps {
   /** The header's title (iOS and Android: the system header; ignored on the desktops and the web, which show the app's `header`). */
   title?: string;
   /** The system header shows (default true; iOS and Android). */
-  headerShown?: boolean;
+  headerVisible?: boolean;
   /** The system header; ignored elsewhere): a large title; the content scrolls under the header. */
   headerLargeTitle?: boolean;
   /** The content extends under the system header (iOS and Android). */
@@ -895,7 +898,7 @@ export interface WebViewHostProps {
   /** The browser's user agent string. */
   userAgent?: string;
   /** The user can scroll it (default true). */
-  scrollEnabled?: boolean;
+  scrollable?: boolean;
   /** Pages run scripts (default true). */
   javaScriptEnabled?: boolean;
   onLoadStart?: (e: WebViewNavigation) => void;
@@ -949,7 +952,7 @@ export interface VideoHostProps {
 /** The props of `<Overlay>`. */
 export interface OverlayHostProps {
   /** The view (a ref) or the point (`{ x, y }` in the root view, as touches' `pageX` / `pageY`) it is placed against, following a view as it moves; without one it is laid out as a `position: fixed` box of its root view. */
-  anchor?: YNode | { x: number; y: number } | null;
+  anchor?: YNode | Point | null;
   /** The side of the anchor it goes on (default `"bottom"`); the other side when only that one has room. */
   placement?: Placement;
   /** How it lines up with the anchor along that side (default `"center"`; `"start"` / `"end"` follow the layout direction above and below). */
@@ -959,7 +962,7 @@ export interface OverlayHostProps {
   /** The distance it keeps from the edges of the root view's safe area (default 0). */
   margin?: number;
   /** A press went down outside the overlay, its anchor and the overlays inside it (where, in the root view). Closing is the app's: leave the overlay out. */
-  onPressOutside?: (e: { pageX: number; pageY: number }) => void;
+  onPressOutside?: (e: { pagePosition: Point }) => void;
   /** Escape or the Android back button, while this is the top overlay listening to it (it takes the key from the overlays below, the pages and `BackHandler`). Closing is the app's. */
   onCancel?: () => void;
   /** The core placed the overlay (again: the anchor moved, the overlay changed size, it went to the other side). */
@@ -1077,8 +1080,8 @@ export interface YNode {
   scrollToIndex(options: { index: number; animated?: boolean; viewPosition?: number; viewOffset?: number }): void;
   /** `List`: scrolls to the end of the content (the start of an inverted list). */
   scrollToEnd(options?: { animated?: boolean }): void;
-  /** Where the view is once this turn's changes are laid out: `x` / `y` / `width` / `height` its frame in its parent (as `onLayout`), `pageX` / `pageY` its top left corner in the root view it is in (the surface, or its modal), the coordinates of touches' `pageX` / `pageY`: `event.pageX - m.pageX` is a touch's position in the view. Scroll offsets and zoom scales of the scroll views and lists around it are applied, transforms (animations included) are not. `null` when the view is not in the tree. */
-  measure(): Promise<{ x: number; y: number; width: number; height: number; pageX: number; pageY: number } | null>;
+  /** Where the view is once this turn's changes are laid out: `bounds` its frame in its parent (as `onLayout`), `pagePosition` its top left corner in the root view it is in (the surface, or its modal), the coordinates of touches' `pageX` / `pageY`: `event.pageX - m.pagePosition.x` is a touch's position in the view. Scroll offsets and zoom scales of the scroll views and lists around it are applied, transforms (animations included) are not. `null` when the view is not in the tree. */
+  measure(): Promise<{ bounds: Bounds; pagePosition: Point } | null>;
   /** `WebView`: reloads the page. */
   reload(): void;
   /** `WebView`: goes back in its history. */

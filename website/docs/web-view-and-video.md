@@ -16,13 +16,13 @@ The web view and the video player embed the platform's own web engine and media 
 
 The frameworks behind them (WebKit, AVFoundation) are loaded the first time an app uses one, so apps that never show a web page or a video do not pay for them at launch.
 
-On [macOS](./macos.md) the web view has no scroll view of its own: with `scrollEnabled={false}` the mouse wheel and the
+On [macOS](./macos.md) the web view has no scroll view of its own: with `scrollable={false}` the mouse wheel and the
 trackpad scroll the app's scroll views around it instead of the page, which still scrolls with its keyboard and its
 own scripts.
 
 On [Linux](./linux.md) a web view is a WebKitGTK page drawn inside its view: NSH content over it (a dialog, a sheet)
 covers it, and its parents clip it. The `webview` capability also applies to the navigations of frames there (an
-`iframe` of a host that is not granted stays empty), and `scrollEnabled: false` stops the page itself from scrolling
+`iframe` of a host that is not granted stays empty), and `scrollable: false` stops the page itself from scrolling
 (elements inside it still scroll). Apps need WebKitGTK 6.0 installed; a runtime built without it shows a neutral
 placeholder. Videos play the formats the installed GStreamer plugins decode; `rate` is not supported (they
 play at 1×), and `onEnd` only comes for videos that do not loop.
@@ -30,7 +30,7 @@ play at 1×), and `onEnd` only comes for videos that do not loop.
 On [Windows](./windows.md) a web view is a WebView2 control in a child window that follows its view: it is clipped to
 its parents and rounded corners, but NSH content drawn over it (a dialog, a sheet) stays under it. It needs the
 WebView2 Runtime (part of Windows 11; installed with Edge on Windows 10), else it shows a placeholder;
-`source.baseUrl` for HTML, `scrollEnabled` and `allowsBackForwardNavigationGestures` are not supported. Videos are
+`source.baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported. Videos are
 ordinary content (clipped, transformed and covered like any view) and play the formats the installed Media Foundation
 codecs decode; `rate` works, there is no poster, and the control bar always shows while `controls` is on.
 
@@ -67,7 +67,7 @@ In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows 
 
 ### Props
 
-In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scroll_enabled`, `user_agent`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
+In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scrollable`, `user_agent`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -75,7 +75,7 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
-| `scrollEnabled` | `boolean` | `true` | The user can scroll the page. |
+| `scrollable` | `boolean` | `true` | The user can scroll the page. |
 | `userAgent` | `string` | | The browser's user agent string. |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS: swipe back and forward through the page history. |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS: swipe with two fingers on the trackpad to go back and forward; Windows: swipe on a touchscreen; Linux: swipe on the touchpad. |

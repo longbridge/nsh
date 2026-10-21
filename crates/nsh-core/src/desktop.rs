@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::{
     geometry::{Point, Points},
-    ui::{JsObject, PropEnum},
+    ui::{JsHost, JsIn, JsKind, JsOwned, JsValue, PropEnum, PropError, TsTypes},
 };
 
 /// How the window's title bar looks (`Window.setTitleBar`).
@@ -26,8 +26,10 @@ pub enum TitleBarStyle {
 }
 
 /// A window's frame (`Window.setFrame`): the part of it to move, in
-/// points, in screen coordinates; a field left out keeps its value.
-#[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
+/// points, in screen coordinates; a field left out keeps its value. TS
+/// gives `origin` (`x`, `y`) and `size` (`width`, `height`) as
+/// `Partial<Point>` and `Partial<Size>`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct WindowFrame {
     /// Its left edge (macOS's screen coordinates go up: `x` and `y` are the
     /// window's bottom left corner there).
@@ -45,6 +47,88 @@ pub struct WindowFrame {
     /// window's title area stays put). Elsewhere, where `y` already is the
     /// top edge, this is the default.
     pub anchor_top: Option<bool>,
+}
+
+/// TS: `{ origin?: Partial<Point>; size?: Partial<Size>; animated?; anchorTop? }`.
+impl JsValue for WindowFrame {
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.declare("WindowFrame", |_| {
+            "/** A window's frame (`Window.setFrame`): the part of it to move, in points, in screen coordinates; a field left out keeps its value. */\n\
+             export interface WindowFrame {\n  \
+             /** Its left edge and its bottom edge on macOS (whose screen coordinates go up: the window's bottom left corner), its top edge elsewhere. */\n  \
+             origin?: Partial<Point>;\n  \
+             /** Its outer size on macOS / Windows, GTK's default size on Linux. */\n  \
+             size?: Partial<Size>;\n  \
+             /** Animates the change on macOS (false by default). */\n  \
+             animated?: boolean;\n  \
+             /** The top edge keeps its place when the height changes without a `y`: the window grows and shrinks at its bottom edge (a content-sized window's title area stays put). Elsewhere, where `y` already is the top edge, this is the default. */\n  \
+             anchorTop?: boolean;\n}"
+                .into()
+        })
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("an object"));
+        }
+        // Field `key` of `object` as `T`, `None` when it is left out.
+        fn get<T: JsValue>(object: JsIn<'_>, key: &str) -> Result<Option<T>, PropError> {
+            let v = object.field(key)?;
+            let v = v.get();
+            if v.is_nullish() {
+                return Ok(None);
+            }
+            T::from_js(v)
+                .map(Some)
+                .map_err(|e| PropError(format!("`{key}`: {e}")))
+        }
+        let mut frame = WindowFrame {
+            animated: get(value, "animated")?,
+            anchor_top: get(value, "anchorTop")?,
+            ..WindowFrame::default()
+        };
+        let origin = value.field("origin")?;
+        if !origin.get().is_nullish() {
+            frame.x = get(origin.get(), "x")?;
+            frame.y = get(origin.get(), "y")?;
+        }
+        let size = value.field("size")?;
+        if !size.get().is_nullish() {
+            frame.width = get(size.get(), "width")?;
+            frame.height = get(size.get(), "height")?;
+        }
+        Ok(frame)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let owned = JsOwned::new(host, host.new_object()?);
+        let object = owned.get().raw();
+        let part = |fields: [(&str, Option<Points>); 2]| -> Result<Option<JsOwned<'a>>, PropError> {
+            if fields.iter().all(|(_, v)| v.is_none()) {
+                return Ok(None);
+            }
+            let part = JsOwned::new(host, host.new_object()?);
+            for (key, value) in fields {
+                if let Some(value) = value {
+                    host.set_field(part.get().raw(), key, value.to_js(host)?.into_raw())?;
+                }
+            }
+            Ok(Some(part))
+        };
+        if let Some(origin) = part([("x", self.x), ("y", self.y)])? {
+            host.set_field(object, "origin", origin.into_raw())?;
+        }
+        if let Some(size) = part([("width", self.width), ("height", self.height)])? {
+            host.set_field(object, "size", size.into_raw())?;
+        }
+        if let Some(v) = self.animated {
+            host.set_field(object, "animated", v.to_js(host)?.into_raw())?;
+        }
+        if let Some(v) = self.anchor_top {
+            host.set_field(object, "anchorTop", v.to_js(host)?.into_raw())?;
+        }
+        Ok(owned)
+    }
 }
 
 /// How high a window floats (`Window.setLevel`).

@@ -23,6 +23,6 @@ pub use self::{
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
     view::{
         CodeHighlighter, TextView, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
-        TextViewEvent, TextViewMath, TextViewProps, text_view,
+        TextViewEvent, TextViewLinkPressEvent, TextViewMath, TextViewProps, text_view,
     },
 };
