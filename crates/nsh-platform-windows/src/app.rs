@@ -80,10 +80,6 @@ pub struct AppOptions {
     pub title: String,
     /// The initial window size in points.
     pub size: (i32, i32),
-    /// Steps run once the window shows (`wait 500; shot a.png; tap 10 20;
-    /// quit`): for checking a backend change without touching the screen.
-    /// See [`crate::script`].
-    pub script: Option<String>,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
     pub components: crate::native::Components,
@@ -115,7 +111,6 @@ impl Default for AppOptions {
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
             size: (1200, 800),
-            script: None,
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
@@ -211,7 +206,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
-            network: Some(crate::net::network()),
+            network: Some(nsh_engine::net::network()),
             websocket: None,
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
@@ -352,9 +347,6 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::system::environment_applied(view.surface());
     install_shortcuts(&view);
     view.show();
-    if let Some(script) = &options.script {
-        crate::script::run(view.surface().clone(), script);
-    }
     let code = crate::window::run_loop();
     view.stop();
     drop(view);

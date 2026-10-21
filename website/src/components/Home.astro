@@ -17,8 +17,8 @@ const chatSrc = `${BASE}play/index.html?theme=dark#home-chat`;
 const copy = zh
   ? {
       eyebrow: '为 AI 生成界面而设计',
-      title: ['NSH：一份 TSX，', '每个平台都原生'],
-      lead: 'NSH 在 iOS、Android、macOS、Windows、Linux、GPUI 和 Web 上运行用 TSX 编写的模块——由模型或你的团队编写——可以嵌入你已经发布的应用，也可以独立发布成应用：经过签名校验，运行在宿主配置的沙箱里，用每个平台自己的界面技术绘制。',
+      title: ['NSH：一份代码，', '每个平台都原生'],
+      lead: 'NSH 在 iOS、Android、macOS、Windows、Linux、GPUI 和 Web 上运行用 Rust 或 TSX 编写的原生界面，用每个平台自己的界面技术绘制。用 Rust 编写的应用编译成原生代码，不带 JavaScript 虚拟机；TSX 模块——由模型或你的团队编写——可以嵌入你已经发布的应用：经过签名校验，运行在宿主配置的沙箱里。',
       start: '阅读简介',
       try: '在线试用',
       gallery: '打开示例应用',
@@ -40,6 +40,10 @@ const copy = zh
       capKicker: 'AI 友好',
       capTitle: '为模型编写、为宿主把关而设计',
       capLead: '生成的界面要是真正的原生界面、跑得流畅，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
+      langKicker: 'Rust 优先',
+      langTitle: '用 Rust 或 TSX 编写',
+      langLead: '两种语言运行在同一个引擎上，使用同样的基础元素、基础组件和 signal。Rust 应用拥有类型化的样式、编译期检查和 crates.io，不带 JavaScript 虚拟机；TSX 用于热更新和运行时下发的模块。两者也可以结合：TSX 页面导入你的 Rust 组件。',
+      langCta: '用 Rust 开发',
       usesKicker: '三种用法',
       usesTitle: '同一个模块，三种用法',
       usesLead: '首要用途是 AI 生成的界面；同一套机制也让原生应用可以扩展，或者直接组成一个独立应用。',
@@ -57,7 +61,7 @@ const copy = zh
   : {
       eyebrow: 'Built for AI-generated UI',
       title: ['NSH: one module,', 'native everywhere.'],
-      lead: 'NSH runs modules written in TSX — by a model or by your team — natively on iOS, Android, macOS, Windows, Linux, GPUI and the web: embedded in the apps you already ship, or published as apps of their own. Signature-checked, sandboxed by rules the host sets, and drawn with each platform’s own UI.',
+      lead: 'NSH runs native UI written in Rust or TSX on iOS, Android, macOS, Windows, Linux, GPUI and the web, drawn with each platform’s own UI. Apps written in Rust compile to native code with no JavaScript VM; TSX modules — by a model or by your team — load into the apps you already ship, signature-checked and sandboxed by rules the host sets.',
       start: 'Read the introduction',
       try: 'Try the playground',
       gallery: 'Open the gallery',
@@ -79,6 +83,10 @@ const copy = zh
       capKicker: 'AI friendly',
       capTitle: 'Designed for models to write and hosts to trust.',
       capLead: 'Generated UI has to be truly native and smooth, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
+      langKicker: 'Rust first',
+      langTitle: 'Write it in Rust or TSX.',
+      langLead: 'Both run on the same engine, with the same primitives, base components and signals. A Rust app gets typed styles, compile-time checks and crates.io, with no JavaScript VM; TSX brings hot updates and modules delivered at run time. Combine them, and TSX screens import your Rust components.',
+      langCta: 'Building with Rust',
       usesKicker: 'Three uses',
       usesTitle: 'One module, three ways to use it.',
       usesLead: 'AI-generated UI is what NSH is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
@@ -118,12 +126,12 @@ const uses = zh
   ? [
       { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 NSH', href: 'docs' },
       { tag: '', label: '原生应用插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）、AppView（macOS、Windows、Linux 与 GPUI 应用）或在网页里用 createPlayer，承载团队、合作方或用户之后编写的功能。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的原生组件', '更新随时下发'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
-      { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '同样的模块可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows、Linux 应用，用 GPUI 运行的桌面应用，或一个静态网站，适合试用和小工具。', code: 'app', checks: ['使用预编译的运行时', '一条命令打出安装包', '保存即热更新开发'], cta: '打包', href: 'docs/packaging' },
+      { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '用 Rust 或 TSX 编写的应用可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows、Linux 应用，用 GPUI 运行的桌面应用，或一个静态网站。', code: 'app', checks: ['Rust 应用不带 JavaScript 虚拟机', '一条命令打出安装包', 'Rust 改动自动重建，TSX 热更新'], cta: '打包', href: 'docs/packaging' },
     ]
   : [
       { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why NSH exists', href: 'docs' },
       { tag: '', label: 'Plugins for native apps', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android), AppView (macOS, Windows, Linux and GPUI apps) or createPlayer (a web page) on any screen and host features your team, partners or users write later.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates delivered whenever you choose'], cta: 'Embedding, per platform', href: 'docs/platforms' },
-      { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'The same modules can become an installable iOS, Android, macOS, Windows or Linux app, a desktop app running on GPUI, or a static website with nsh package — for trying nsh and for small tools.', code: 'app', checks: ['The prebuilt runtime', 'One command builds the app', 'Hot reload while you develop'], cta: 'Packaging', href: 'docs/packaging' },
+      { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'Apps written in Rust or TSX become an installable iOS, Android, macOS, Windows or Linux app, a desktop app running on GPUI, or a static website with nsh package.', code: 'app', checks: ['Rust apps with no JavaScript VM', 'One command builds the app', 'Rebuilds for Rust, hot updates for TSX'], cta: 'Packaging', href: 'docs/packaging' },
     ];
 
 // Platforms in the order the docs list them: phones, desktops, GPUI (all
@@ -173,14 +181,65 @@ const snippets: Record<string, string> = {
     `${cm('// NshView on Android, AppView elsewhere')}`,
   ].join('\n'),
   app: [
-    `${cm('$')} nsh init my-app`,
-    `${cm('$')} nsh run my-app --target macos`,
-    `${cm('$')} nsh package my-app --target windows`,
-    `${cm('# ios · android · macos · windows')}`,
-    `${cm('# linux · gpui · web')}`,
+    `${cm('$')} nsh init my-app ${k('--template')} ${st('rust')}`,
+    `${cm('$')} nsh run my-app ${k('--target')} macos`,
+    `${cm('$')} nsh package my-app ${k('--target')} windows`,
+    `${cm('# --template ts for TSX')}`,
+    `${cm('# ios · android · macos · windows · linux · gpui · web')}`,
   ].join('\n'),
 };
-const heroSnippet = `nsh run App.tsx ${k('--target')} ${st('&lt;platform&gt;')}`;
+const heroSnippet = `nsh init my-app ${k('--template')} ${st('rust')}`;
+
+// The same counter in both languages, Rust first.
+const langs = [
+  {
+    id: 'rust',
+    label: 'Rust',
+    file: 'src/lib.rs',
+    code: [
+      `${k('use')} nsh_core::ui::prelude::*;`,
+      ``,
+      `#[component]`,
+      `${k('pub fn')} ${fn('App')}() -&gt; ${k('impl')} ${ty('IntoElement')} {`,
+      `    ${k('let')} count = ${fn('signal')}(0);`,
+      `    ${fn('view')}()`,
+      `        .${fn('items_center')}()`,
+      `        .${fn('gap_4')}()`,
+      `        .${fn('child')}(${fn('text')}(${k('move')} || ${fn('format!')}(${st('"Count: {}"')}, count.${fn('get')}())))`,
+      `        .${fn('child')}(`,
+      `            ${fn('view')}()`,
+      `                .${fn('rounded_lg')}().${fn('bg')}(${fn('rgb')}(0x2563eb)).${fn('px_5')}().${fn('py_3')}()`,
+      `                .${fn('on_press')}(${k('move')} || count.${fn('update')}(|n| *n += 1))`,
+      `                .${fn('child')}(${fn('text')}(${st('"Tap"')}).${fn('text_color')}(${fn('white')}())),`,
+      `        )`,
+      `}`,
+    ].join('\n'),
+  },
+  {
+    id: 'tsx',
+    label: 'TSX',
+    file: 'App.tsx',
+    code: [
+      `${k('import')} { mount, signal, Text, View } ${k('from')} ${st('"nsh"')};`,
+      ``,
+      `${k('function')} ${fn('App')}() {`,
+      `  ${k('const')} count = ${fn('signal')}(0);`,
+      `  ${k('return')} (`,
+      `    &lt;${ty('View')} class=${st('"items-center gap-4"')}&gt;`,
+      `      &lt;${ty('Text')}&gt;Count: {${fn('count')}()}&lt;/${ty('Text')}&gt;`,
+      `      &lt;${ty('View')}`,
+      `        class=${st('"rounded-lg bg-blue-600 px-5 py-3"')}`,
+      `        onPress={() =&gt; count.${fn('update')}((n) =&gt; n + 1)}`,
+      `      &gt;`,
+      `        &lt;${ty('Text')} class=${st('"text-white"')}&gt;Tap&lt;/${ty('Text')}&gt;`,
+      `      &lt;/${ty('View')}&gt;`,
+      `    &lt;/${ty('View')}&gt;`,
+      `  );`,
+      `}`,
+      `${fn('mount')}(App);`,
+    ].join('\n'),
+  },
+];
 
 const icons: Record<string, string> = {
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9.5 13l-2 2 2 2M14.5 13l2 2-2 2"/>',
@@ -244,6 +303,29 @@ const icon = (name: string, size = 16) =>
           <button type="button" class="legend__replay" data-replay>{copy.replay}</button>
         </figcaption>
       </figure>
+    </div>
+  </section>
+
+  <!-- Rust or TSX ----------------------------------------------------- -->
+  <section class="band">
+    <div class="band__inner langs-band">
+      <header class="section-head section-head--side">
+        <span class="kicker">{copy.langKicker}</span>
+        <h2>{copy.langTitle}</h2>
+        <p>{copy.langLead}</p>
+        <a class="use__cta" href={link('docs/rust')}>{copy.langCta}<Fragment set:html={icon('arrow', 14)} /></a>
+      </header>
+      <div class="langs" data-langs>
+        <div class="langs__tabs" role="tablist">
+          {langs.map((l, i) => (
+            <button type="button" role="tab" id={`lang-tab-${l.id}`} aria-controls={`lang-panel-${l.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1}>{l.label}</button>
+          ))}
+          <span class="langs__file" data-lang-file>{langs[0].file}</span>
+        </div>
+        {langs.map((l, i) => (
+          <pre class="langs__code" role="tabpanel" id={`lang-panel-${l.id}`} aria-labelledby={`lang-tab-${l.id}`} data-file={l.file} hidden={i !== 0}><code set:html={l.code} /></pre>
+        ))}
+      </div>
     </div>
   </section>
 
@@ -413,6 +495,32 @@ const icon = (name: string, size = 16) =>
 </main>
 
 <script>
+  // The language panel: Rust first, TSX beside it, as the docs' code tabs.
+  for (const langs of document.querySelectorAll<HTMLElement>('[data-langs]')) {
+    const tabs = [...langs.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const file = langs.querySelector<HTMLElement>('[data-lang-file]');
+    const select = (tab: HTMLButtonElement) => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(t.getAttribute('aria-controls') ?? '');
+        if (panel) {
+          panel.hidden = !on;
+          if (on && file) file.textContent = panel.dataset.file ?? '';
+        }
+      }
+    };
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        const next = tabs[(tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        select(next);
+        next.focus();
+      });
+    }
+  }
   // The hero's chat follows the page's theme: the player's `?theme=` when
   // it loads, a message when the theme changes. Replay reloads it, which
   // plays the scenario again.
@@ -563,6 +671,15 @@ const icon = (name: string, size = 16) =>
   .mini-native p { margin: 0; font-size: 12.5px; color: var(--foreground); }
   .mini-native mark { background: color-mix(in srgb, var(--selection) 30%, transparent); color: inherit; border-radius: 2px; box-shadow: -1px 0 0 var(--selection), 1px 0 0 var(--selection); }
 
+  /* Rust or TSX: one panel, a tab per language. */
+  .langs-band { display: grid; grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); gap: 3rem; align-items: start; }
+  .langs-band .use__cta { padding-top: 1.25rem; }
+  .langs { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--code-bg); box-shadow: var(--finish-inset); overflow: hidden; }
+  .langs__tabs { display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+  .langs__tabs button { padding: 0.35rem 0.75rem; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted-foreground); font: 600 0.78rem/1 var(--font-mono); cursor: pointer; }
+  .langs__tabs button[aria-selected="true"] { border-color: var(--border); background: var(--finish-raised-bg); box-shadow: var(--finish-raised); color: var(--foreground); }
+  .langs__file { margin-left: auto; padding-right: 0.4rem; color: var(--faint); font: 0.72rem/1 var(--font-mono); }
+  .langs__code { margin: 0; padding: 1rem 1.1rem; font: 0.78rem/1.65 var(--font-mono); color: var(--code-fg); overflow-x: auto; white-space: pre; }
   /* Three uses */
   .uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
   .use { display: flex; flex-direction: column; padding: 1.75rem; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--finish-card-bg); box-shadow: var(--finish-card); }
@@ -632,7 +749,7 @@ const icon = (name: string, size = 16) =>
     .caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .uses { grid-template-columns: minmax(0, 1fr); }
     .use p { min-height: 0; }
-    .platforms-band, .principle__inner { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+    .platforms-band, .principle__inner, .langs-band { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
   }
   @media (max-width: 680px) {
     .home { --section-gap: 4rem; }

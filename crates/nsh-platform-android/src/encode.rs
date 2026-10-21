@@ -211,7 +211,13 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     e.int(l.events.bits() as u32 as i32);
                     e.int((l.events.bits() >> 32) as u32 as i32);
                 }
-                e.bool(text.is_selectable());
+                // `selectable`: 1 asked for, 0 refused (`false`: out of
+                // selection areas too), 2 unset.
+                e.int(match text.selectable {
+                    Some(true) => 1,
+                    Some(false) => 0,
+                    None => 2,
+                });
                 opt_color(&mut e, text.selection_color);
             }
             MountItem::Events { id, events } => {
@@ -1019,6 +1025,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         }
         None => e.int(0),
     }
+    e.bool(p.selection_area);
 }
 
 /// Index of `role` in `A11y.java`'s class name table.

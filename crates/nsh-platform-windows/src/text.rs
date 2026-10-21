@@ -1883,6 +1883,9 @@ pub(crate) struct DrawnText {
     pub(crate) content: Bounds<Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Rc<Selection>>,
+    /// The part of a selection area's selection in this text (UTF-16,
+    /// `start < end`), which [`crate::selection_area`] sets.
+    pub(crate) area_range: Cell<Option<(u32, u32)>>,
     /// The text shadow's effect, made on first draw (and again on a new
     /// device).
     shadow: RefCell<Option<(u64, ID2D1Effect)>>,
@@ -1897,6 +1900,8 @@ pub(crate) fn set(
 ) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
+    // The area clamps it to the new content at the batch's end.
+    let area_range = old.as_ref().and_then(|o| o.area_range.get());
     let selection = match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
         Some((s, old)) if text.is_selectable() => {
             // Offsets into other text mean nothing.
@@ -1917,6 +1922,7 @@ pub(crate) fn set(
         layout: layout.clone(),
         content,
         selection,
+        area_range: Cell::new(area_range),
         shadow: RefCell::new(None),
     });
     if was != text.is_selectable() {
@@ -2259,7 +2265,8 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
             unsafe { cx.dc.FillRoundedRectangle(&rr, cx.solid(color)) };
         });
     }
-    if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
+    let range = drawn.selection.as_ref().and_then(|s| s.range.get());
+    if let Some(range) = range.or_else(|| drawn.area_range.get()) {
         let brush = cx.solid(selection_tint(&drawn.text));
         layout.selection_rects(&drawn.text, range, |x, y, w, h| {
             // SAFETY: a COM call between BeginDraw and EndDraw.
@@ -2389,6 +2396,14 @@ pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     layout.char_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0)
 }
 
+/// The caret position (UTF-16 offset) nearest `(x, y)` (view
+/// coordinates) in a text view's layout (selection areas).
+pub(crate) fn caret_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<WinLayout>()?;
+    Some(layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0))
+}
+
 // --- Selection ----------------------------------------------------------------------
 
 /// How far (points) the mouse moves on selectable text before a drag
@@ -2458,6 +2473,10 @@ fn select(surface: u64, view: &NshView, range: Option<(u32, u32)>) {
         return;
     }
     view.changed();
+    if range.is_some() {
+        // One selection at a time, a selection area's too.
+        crate::selection_area::clear();
+    }
     let previous = SELECTED.with_borrow_mut(|selected| match range {
         Some(_) => selected.replace((surface, view.clone())),
         None => {
@@ -2474,6 +2493,15 @@ fn select(surface: u64, view: &NshView, range: Option<(u32, u32)>) {
         && s.range.take().is_some()
     {
         other.changed();
+    }
+}
+
+/// Clears the selection of a single text, if any (a selection area
+/// selects).
+pub(crate) fn clear_selected() {
+    let selected = SELECTED.with_borrow(|s| s.clone());
+    if let Some((key, view)) = selected {
+        select(key, &view, None);
     }
 }
 

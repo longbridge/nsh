@@ -8,7 +8,7 @@
 //! [`may_break_after`] finds, as the engine's text does
 //! ([`crate::text`]). Positions are UTF-16 offsets of the shown text (the
 //! text with the IME's composition, or bullets for a password), which is
-//! what [`super::model::Model`]'s display mapping speaks.
+//! what [`nsh_core::text_edit::Model`]'s display mapping speaks.
 //!
 //! Inputs shape on demand (a key moving the caret up a line needs the
 //! layout before the next frame is painted), so they share one

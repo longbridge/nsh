@@ -1,5 +1,4 @@
-import { effect, mount, signal, Text, View, type YNode } from "nsh";
-import { List } from "nsh/list";
+import { effect, List, mount, signal, Text, View, type YNode } from "nsh";
 import { tint, ui } from "./palette";
 
 // Grid tiles, tinted with the status and info colours.

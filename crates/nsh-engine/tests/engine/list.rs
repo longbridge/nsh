@@ -14,10 +14,9 @@ impl MountSink for Sink {
     }
 }
 
-/// `List` (`nsh/list`), made in place by the compiler.
+/// `List`, made in place by the compiler.
 const APP: &str = r#"
-import { mount, signal, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { List, mount, signal, Text, View } from "nsh";
 const rows = signal(Array.from({ length: 100 }, (_, i) => i));
 function App() {
   return (
@@ -71,8 +70,8 @@ fn list_as_a_value_scrolls_with_recycled_cells() {
         .replace("<List ", "<Rows ")
         .replace("</List>", "</Rows>")
         .replace(
-            "import { List } from \"nsh/list\";",
-            "import { List } from \"nsh/list\";\nconst Rows = List;",
+            "mount, signal, Text, View } from \"nsh\";",
+            "mount, signal, Text, View } from \"nsh\";\nconst Rows = List;",
         );
     assert!(app.contains("<Rows "));
     scrolls_with_recycled_cells(&app);
@@ -179,6 +178,7 @@ fn scrolls_with_recycled_cells(app: &str) {
 /// The props `List` does not use itself reach its scroll view, as they do
 /// a `<Scroll>`'s: the test id and accessibility (UI tests find the list),
 /// classes, touch props and layout events; and they follow their signals.
+/// (Imported from `nsh/list`, where `List` was first: it still is.)
 #[test]
 fn list_passes_host_props_to_its_scroll_view() {
     let app = r#"

@@ -5,7 +5,8 @@
 use std::hash::{BuildHasher, RandomState};
 
 use nsh_base::{
-    AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps,
+    AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView,
+    SafeAreaViewProps, dialog,
 };
 use nsh_core::ui::{
     AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
@@ -216,7 +217,7 @@ fn PressableSheet() -> impl IntoElement {
     let sheet = signal(false);
     let open = move |open: bool| move |_: &()| sheet.set(open);
     let modal_view = If::new(sheet, move || {
-        modal()
+        dialog()
             .presentation(ModalPresentation::PageSheet)
             .animation(ModalAnimation::Slide)
             .on_cancel(open(false))
@@ -525,7 +526,7 @@ fn ModalOptions() -> impl IntoElement {
     let translucent = signal(false);
     let show = move |shown: bool| move |_: &()| visible.set(shown);
     let modal_view = If::new(visible, move || {
-        modal()
+        dialog()
             .animation(ModalAnimation::Slide)
             .status_bar_translucent(translucent)
             .supported_orientations([Orientation::Portrait, Orientation::Landscape])

@@ -25,7 +25,7 @@ nsh-dev = { workspace = true, features = ["server"] }
 nsh-js.workspace = true
 nsh-base.workspace = true
 nsh-package.workspace = true
-nsh-testing = { workspace = true, features = ["bundle"] }
+nsh-testing = { workspace = true, features = ["agent", "bundle"] }
 crossbeam-channel.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }
@@ -34,6 +34,7 @@ log.workspace = true
 libc.workspace = true
 ureq.workspace = true
 serde.workspace = true
+tungstenite.workspace = true
 serde_json.workspace = true
 plist.workspace = true
 zip.workspace = true

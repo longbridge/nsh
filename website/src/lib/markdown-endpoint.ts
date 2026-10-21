@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { stripTabsMeta } from './remark-code-tabs.js';
 import type { Page } from './sections';
 import { BASE, REPO_URL, SITE_URL } from './site';
 
@@ -19,6 +20,8 @@ export function plainMarkdown(page: Page): string {
   const file = join(ROOT, page.filePath);
   let body = bodyWithoutFrontmatter(readFileSync(file, 'utf8'));
   body = body.replace(/^#\s+.+\r?\n+/, '');
+  // Tabbed code blocks are plain consecutive blocks here.
+  body = stripTabsMeta(body);
   // A diagram's light / dark pair (in its scroll wrapper) becomes one image
   // at an absolute URL.
   body = body.replace(

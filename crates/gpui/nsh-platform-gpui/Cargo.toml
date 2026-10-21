@@ -18,8 +18,9 @@ default = ["js", "webview"]
 js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
 dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
-# `shot` script steps on macOS and Windows: GPUI renders the window's
-# frame offscreen (its `test-support`; development hosts only).
+# Screenshots on macOS and Windows (`nsh test --target gpui`'s): GPUI
+# renders the window's frame offscreen (its `test-support`; development
+# hosts only).
 shot = ["gpui/test-support", "gpui_platform/test-support"]
 # Compile GPUI's Metal shaders at run time (macOS), so building needs no Metal
 # Toolchain (`xcodebuild -downloadComponent MetalToolchain`).
@@ -36,8 +37,8 @@ log.workspace = true
 # Empty off the desktop (like the other platform crates off their targets).
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 nsh-core.workspace = true
-nsh-engine.workspace = true
-nsh-base.workspace = true
+nsh-engine = { workspace = true, features = ["net"] }
+nsh-base = { workspace = true, features = ["highlight"] }
 gpui.workspace = true
 gpui_platform.workspace = true
 image = { workspace = true, features = ["gif", "webp", "jpeg", "bmp", "ico", "tiff"] }

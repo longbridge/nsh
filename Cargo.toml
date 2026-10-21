@@ -27,7 +27,8 @@ private_interfaces = "deny"
 [workspace.dependencies]
 nsh-core = { version = "0.1.1", path = "crates/nsh-core" }
 nsh-package = { version = "0.1.1", path = "crates/nsh-package" }
-nsh-base = { version = "0.1.1", path = "crates/nsh-base" }
+# Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
+nsh-base = { version = "0.1.1", path = "crates/nsh-base", default-features = false }
 nsh-macros = { version = "0.1.1", path = "crates/nsh-macros" }
 nsh-js = { version = "0.1.1", path = "crates/nsh-js" }
 nsh-engine = { version = "0.1.1", path = "crates/nsh-engine", default-features = false }
@@ -38,7 +39,7 @@ nsh-platform-linux = { version = "0.1.1", path = "crates/nsh-platform-linux", de
 nsh-platform-macos = { version = "0.1.1", path = "crates/nsh-platform-macos", default-features = false }
 nsh-platform-windows = { version = "0.1.1", path = "crates/nsh-platform-windows", default-features = false }
 nsh-dev = { version = "0.1.1", path = "crates/nsh-dev" }
-nsh-testing = { version = "0.1.1", path = "crates/nsh-testing" }
+nsh-testing = { version = "0.1.1", path = "crates/nsh-testing", default-features = false }
 
 anyhow = "1"
 thiserror = "2"
@@ -76,6 +77,13 @@ percent-encoding = "2.3"
 url = "2.5"
 ureq = "3.1"
 regex = "1"
+markdown = "1.0.0"
+html5ever = "0.27"
+markup5ever_rcdom = "0.3.0"
+# Syntax highlighting of TextView code blocks (`nsh-base` feature `highlight`): pure-Rust
+# regexes, so it builds for WebAssembly; two-face carries the syntaxes (bat's set).
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy"] }
+two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
 jni = "0.21"
 windows-sys = "0.61"
 dunce = "1"
@@ -420,6 +428,16 @@ codegen-units = 1
 [profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
+opt-level = 3
+# Syntax highlighting (TextView's code blocks): unoptimized, a block takes seconds.
+[profile.dev.package.syntect]
+opt-level = 3
+[profile.dev.package.fancy-regex]
+opt-level = 3
+# What fancy-regex runs its regexes with (also `regex`'s).
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
 opt-level = 3
 [profile.dev.package.objc2]
 opt-level = 3

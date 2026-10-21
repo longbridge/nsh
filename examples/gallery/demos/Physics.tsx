@@ -1,6 +1,5 @@
-import { computed, Scroll, signal, Text, View } from "nsh";
+import { Canvas, computed, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, type AnimatedValue } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
 import { windowSize } from "nsh/device";
 import { Icon } from "../icons";
 import { Appear, Badge, colors, finish, hint, IconTile, mono, radius, Segmented, Stat, tints } from "../ui";

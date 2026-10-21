@@ -1,6 +1,6 @@
 ---
 title: macOS
-description: Run NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
+description: Run Rust and TSX NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
 order: 13
 group: platforms
 ---
@@ -9,9 +9,10 @@ group: platforms
 
 NSH apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
 text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the native modules are the
-same as on iOS and Android, so one bundle runs everywhere. On macOS, `Platform.OS` is `"macos"` and the
-`desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
-[`nsh/desktop`](../modules/nsh-desktop.md).
+same as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`Platform.OS` is `"macos"`
+in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
+context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+[`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 The macOS backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, dialogs
 over the window and a menu bar.
@@ -19,14 +20,27 @@ over the window and a menu bar.
 ## Requirements
 
 - **macOS 14** or later, where the app runs.
-- Xcode's command line tools (`xcode-select --install`), to build NSH's macOS runtime from a checkout and to package
-  apps (`codesign`, `sips`). The distribution made with `cargo xtask dist` on a Mac ships the runtime in
-  `runtime/macos/`.
+- Xcode's command line tools (`xcode-select --install`), to build Rust apps' runners and NSH's macOS runtime from a
+  checkout, and to package apps (`codesign`, `sips`). The distribution made with `cargo xtask dist` on a Mac ships the
+  runtime of TSX apps in `runtime/macos/`.
 
 ## Running an app
 
+A Rust app runs from its directory:
+
 ```sh
-nsh run my-app --target macos
+nsh run --target macos         # the default on a Mac
+```
+
+`nsh` builds a debug runner with your crate and opens the app in a window, with its logs (`log::info!` and the rest)
+in the terminal; a change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts
+the same root from the crate's `src/main.rs`, which `nsh init --template rust` writes: [`run_app`](#embedding-in-a-mac-app)
+with `AppSource::Rust`.
+
+A TSX app names its entry:
+
+```sh
+nsh run App.tsx --target macos
 ```
 
 The app opens in an AppKit window (1200×800 by default), with hot reload, logs in the terminal and the error overlay as
@@ -40,12 +54,16 @@ nsh build my-app --release -o build
 dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # in a checkout: target/debug/nsh-macos-host
 ```
 
-`--window-size` is the window's initial size; the window can be resized.
+`--window-size` is the window's initial size (TSX apps); the window can be resized.
+
+`nsh test --target macos` runs a TSX app's tests in macOS windows: each app a test opens gets a window of its own, and
+the steps click, type and scroll with the system's input at the views their selectors name
+([Testing](./testing-and-trace.md#on-a-real-platform)).
 
 ### Performance monitor
 
-`--fps` (`nsh run my-app --target macos --fps`, the host's `--fps`, a packaged app's `open -a MyApp --args --fps`, or
-`AppOptions { fps: true, .. }` / `AppView::set_fps_monitor(true)` when embedding) shows a panel at the top right of the
+`--fps` (`AppOptions { fps: true, .. }` in a Rust app's `run_app`, `AppView::set_fps_monitor(true)` when embedding,
+`nsh run App.tsx --target macos --fps`, the host's `--fps`, or a packaged TSX app's `open -a MyApp --args --fps`) shows a panel at the top right of the
 app that updates twice a second:
 
 | Row | Measures |
@@ -64,17 +82,18 @@ mean/p50/p95/max). Measure release builds; the monitor costs nothing while it is
 ## Packaging
 
 ```sh
-nsh package my-app --target macos [--run]
+nsh package --target macos [--run]           # a Rust app, from its directory
+nsh package App.tsx --target macos [--run]   # a TSX app
 ```
 
 Writes an app bundle:
 
 ```text
-out/<Name>.app/Contents/
+.nsh/out/<Name>.app/Contents/
   Info.plist
-  MacOS/<Name>               the executable (nsh's release runner)
-  Resources/nsh/bundle.nshc  your app, compiled
-  Resources/nsh/assets/…     the assets it imports
+  MacOS/<Name>               the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
+  Resources/nsh/bundle.nshc  a TSX app, compiled
+  Resources/nsh/assets/…     the assets it imports (a Rust crate's `assets!()` too)
   Resources/nsh/app.json     the window title and the app's appearance
   Resources/AppIcon.icns     the icon, when nsh.json names one (converted with sips)
 ```
@@ -85,33 +104,45 @@ notarize it. `--run` opens the app after packaging it.
 ## Embedding in a Mac app
 
 The `nsh-platform-macos` crate (from the NSH repository) gives a Rust Mac app `AppView`: one NSH engine as an `NSView`.
-Each `AppView` is independent; several can run at once.
+Each `AppView` is independent; several can run at once. It runs a Rust root, the root component of your crate:
 
 ```rust
 use std::rc::Rc;
 use nsh_platform_macos::{
-    objc2::MainThreadMarker, objc2_app_kit::NSWindow, AppOptions, AppView, AssetBase, Bundle,
+    objc2::MainThreadMarker, objc2_app_kit::NSWindow, set_ui_sets, AppOptions, AppView, Root,
 };
 
 fn show(window: &NSWindow) -> Rc<AppView> {
+    // Once, before the first view: the UI sets the apps import (NSH's and your crate's).
+    set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
     let mtm = MainThreadMarker::new().expect("main thread");
-    let view = AppView::new(mtm, AppOptions {
-        asset_base: Some(AssetBase::Directory("app/assets".into())),
-        ..AppOptions::default()
-    });
+    let view = AppView::new(mtm, AppOptions::default());
     // register native components here, before loading
-    let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-    view.load(Bundle::source(code).into());
+    view.load(Root::of::<my_app::App>().into());
     window.setContentView(Some(&view.view()));
     // Keep the view while the window shows it; `stop` it when the window closes.
     view
 }
 ```
 
+`Root::tokens` gives the root its [theme](./rust.md#theme) (`nsh_base::Theme::from_json(json)?.into_tokens()`) and
+`Root::app_id` the id its data is kept under. A TSX bundle that `nsh build` wrote loads into the same view:
+
+```rust
+use nsh_platform_macos::{AppOptions, AppView, AssetBase, Bundle};
+
+let view = AppView::new(mtm, AppOptions {
+    asset_base: Some(AssetBase::Directory("app/assets".into())),
+    ..AppOptions::default()
+});
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(Bundle::source(code).into());
+```
+
 `AppView::load` replaces whatever ran; `stop` ends the app. `asset_base` tells it where `asset:/` URIs resolve
 (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`) load with
 `unsafe { Bundle::bytecode(bytes) }`: bytecode is trusted input, so only load it from your own app's files.
-For an app that is only an NSH app, `run_app(source, options)` opens one `AppView` in a window with a standard menu
+For an app that is only an NSH app, `run_app(source, options)` (`AppSource::Rust(root)` or `AppSource::Bundle(bundle)`) opens one `AppView` in a window with a standard menu
 (About, Hide, Quit, Edit, Minimize, Zoom, Enter Full Screen, Close), which the app can replace with
 `Menu.setApplicationMenu` ([`nsh/desktop`](../modules/nsh-desktop.md)), and runs until the window closes.
 By default, closing the window or choosing Quit stops the engine and returns from `run_app`;
@@ -130,12 +161,14 @@ text size in place of the system's (`None` follows the system's again): `locale(
 follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
 Native components are registered with `AppView::register_component`; see
-[Native components](./native-components.md#registering-on-macos-rust).
+[Native components](./native-components.md#registering-on-macos-rust). `set_ui_sets(sets)` sets the UI sets every
+engine serves: NSH's (`nsh_base::registry()`) and your crates' (`my_app::registry()`, which `#[native_module]`
+makes), so the TSX a view loads imports your Rust components and modules too.
 
 ## What differs on macOS
 
-The environment is a desktop's: the safe area and the keyboard height are 0, `Platform.constants.interfaceIdiom` is
-`"desktop"`, `Platform.Version` is the macOS version, and dark mode follows the system's appearance live. See
+The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
+(`Platform.constants.interfaceIdiom` is `"desktop"`), `os_version()` (`Platform.Version`) is the macOS version, and dark mode follows the system's appearance live. See
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.

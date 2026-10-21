@@ -596,15 +596,15 @@ impl Element_Impl {
         let s = t.view.state();
         let sc = s.scroll.as_ref().ok_or_else(not_supported)?;
         let viewport = (s.frame.size.width.0, s.frame.size.height.0);
-        let max = sc.max(viewport);
+        let max = sc.max(s.frame.size);
         let inset = sc.behavior.content_inset;
         Ok(Scroll {
-            offset: (sc.x, sc.y),
-            max,
+            offset: (sc.x.0, sc.y.0),
+            max: (max.x.0, max.y.0),
             viewport,
             extent: (
-                sc.content.0 + inset.left.0 + inset.right.0,
-                sc.content.1 + inset.top.0 + inset.bottom.0,
+                sc.content.width.0 + inset.left.0 + inset.right.0,
+                sc.content.height.0 + inset.top.0 + inset.bottom.0,
             ),
         })
     }

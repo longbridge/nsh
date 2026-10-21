@@ -3,7 +3,7 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
-use nsh_base::{SafeAreaView, SafeAreaViewProps};
+use nsh_base::{SafeAreaView, SafeAreaViewProps, dialog, nav_page};
 use nsh_core::{
     Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
     ui::{AnyElement, Os, Screen, prelude::*},
@@ -135,7 +135,7 @@ fn large_title() -> Screen {
 
 fn transparent() -> Screen {
     with_header(
-        screen()
+        nav_page()
             .title("Transparent")
             .header_transparent(true)
             .header_style(header_style(
@@ -231,7 +231,7 @@ fn custom_header() -> Screen {
             )
     };
     with_header(
-        screen()
+        nav_page()
             .title("Custom")
             .header_style(header_style(
                 colors::ACCENT_FILL,
@@ -354,7 +354,7 @@ fn unsaved() -> Screen {
     titled("Unsaved changes")
         .pop_on_back(move || draft.with(|d| d.0.is_empty()))
         .on_back_press(move |_: &()| {
-            let answer = dialog(Dialog {
+            let answer = nsh_core::ui::prelude::dialog(Dialog {
                 id: 0,
                 title: Some("Discard your changes?".into()),
                 message: None,
@@ -406,7 +406,7 @@ fn instant() -> Screen {
 }
 
 fn headerless() -> Screen {
-    screen().header_shown(false).child(
+    nav_page().header_shown(false).child(
         SafeAreaView::element(SafeAreaViewProps::default())
             .flex_1()
             .bg(colors::BACKGROUND)
@@ -796,7 +796,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     .into_iter()
                     .find(|m| m.0 == presented)
                     .expect("a modal");
-                modal()
+                dialog()
                     .presentation(presentation)
                     .animation(if presented == Presented::Fade {
                         ModalAnimation::Fade
@@ -820,7 +820,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     ))
                     .into_element()
             }
-            Presented::Dismissible => modal()
+            Presented::Dismissible => dialog()
                 .close_on_escape(true)
                 .close_on_backdrop_press(true)
                 .close_on_swipe(true)
@@ -838,7 +838,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     close,
                 ))
                 .into_element(),
-            Presented::Dialog => modal()
+            Presented::Dialog => dialog()
                 .animation(ModalAnimation::Fade)
                 .on_cancel(close)
                 .child(

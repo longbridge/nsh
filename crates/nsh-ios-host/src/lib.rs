@@ -9,6 +9,9 @@
 //!   an embedding app would (its trust state lives in the temporary
 //!   directory).
 //!
+//! - `--data-dir <dir>` keeps the apps' data there instead of the app's
+//!   data directory (`nsh test --target ios` gives each app a fresh one).
+//!
 //! Without arguments it connects to the dev server on this machine.
 //!
 //! A library so that an app with Rust components of its own (`nsh.json`
@@ -28,6 +31,7 @@ pub fn main() {
     let mut asset_base = None;
     let mut package = None;
     let mut roots = Vec::new();
+    let mut data_dir = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -52,6 +56,9 @@ pub fn main() {
             "--package" => package = args.next().map(PathBuf::from),
             "--root" => roots.extend(args.next().map(PathBuf::from)),
             "--trace" => trace = true,
+            // Where apps keep their data (`nsh test --target ios` gives each
+            // app a fresh one); the app's data directory otherwise.
+            "--data-dir" => data_dir = args.next().map(PathBuf::from),
             // Foundation reads `-Key value` pairs as user defaults.
             other if other.starts_with('-') && !other.starts_with("--") => {
                 args.next();
@@ -74,7 +81,14 @@ pub fn main() {
         use nsh_dev::protocol::{DEFAULT_PORT, WS_PATH};
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
-    run_app(source, AppOptions { trace, asset_base });
+    run_app(
+        source,
+        AppOptions {
+            trace,
+            asset_base,
+            data_dir,
+        },
+    );
 }
 
 /// Verifies and unpacks the package at `path`, trusting `roots`.

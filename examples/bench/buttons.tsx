@@ -1,7 +1,6 @@
 // The two benchmark screens, parameterized by the Button under test, so a
 // Rust component and a TSX composition (`TsButton.tsx`) run the same app.
-import { type Component, Scroll, signal, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { type Component, List, Scroll, signal, Text, View } from "nsh";
 
 /** The props both Buttons take. */
 export interface BenchButtonProps {

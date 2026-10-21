@@ -4,8 +4,8 @@
 its workspace), on macOS, Windows and Linux alike. Its purpose is embedding: an `AppView` is a GPUI view, so GPUI and
 GPUI Kit apps (`gpui_component`) show NSH modules anywhere in their element tree. Standalone apps run and are packaged
 with each OS's own backend (AppKit, Win32, GTK 4). `crates/gpui/nsh-gpui-host` is the development host (`nsh run
---target gpui`): it shows a TSX app in a GPUI window as the apps that embed it show it, with hot reload, `--script`
-steps and screenshots for checking the backend. The crate started as a port of the Windows backend (`windows.md`): one
+--target gpui`): it shows a TSX app in a GPUI window as the apps that embed it show it, with hot reload, and takes
+the steps of `nsh test --target gpui` for checking the backend. The crate started as a port of the Windows backend (`windows.md`): one
 retained view per node, NSH draws every view itself, and the input, scrolling, transition, keymap and editing logic is
 the Windows backend's, platform-free. Only drawing, text, the main-thread queue, events and the window are GPUI's.
 User-facing page: `website/docs/gpui.md`.
@@ -74,7 +74,7 @@ Features:
 | `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes |
 | `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux |
 | `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes |
-| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows |
+| `shot` | screenshots on macOS and Windows (`nsh test --target gpui`'s) through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows |
 | `runtime-shaders` | GPUI's Metal shaders compiled when the app starts, not by the build (`gpui_platform/runtime_shaders`): builds on a Mac without the Metal Toolchain; nothing elsewhere | the CLI's, where `xcrun metal` fails; never the distribution's |
 
 `shot` turns on GPUI's test support, for the host and the tests; apps that embed the crate leave it off. With it, the
@@ -84,27 +84,25 @@ component; CI runs them on Linux.
 
 ### Looking at a change on Linux
 
-Run the host on a rootful Xwayland display of its own, so nothing touches the desktop, and take screenshots with
-`--script` (`shot`) or ImageMagick:
+Run the tests on a rootful Xwayland display of its own, so nothing touches the desktop, and take screenshots with
+`app.screenshot` or ImageMagick:
 
 ```sh
 Xwayland :170 -noreset -shm -geometry 1400x1000 & sleep 1.5
-nsh build examples/gallery -o build
-DISPLAY=:170 WAYLAND_DISPLAY= WEBKIT_DISABLE_DMABUF_RENDERER=1 target/debug/nsh-gpui-host --bundle build/bundle.nshc \
-  --window-size 700x500 --script "wait 800; shot a.png; tap 100 200; shot b.png; quit"
-import -window root -display :170 whole.png        # the display, if the window's own shot is not enough
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' \
+  | DISPLAY=:170 WEBKIT_DISABLE_DMABUF_RENDERER=1 nsh test examples/gallery/App.tsx --target gpui
+import -window root -display :170 whole.png        # the display, if the window's own screenshot is not enough
 ```
 
-- `WAYLAND_DISPLAY=` empty makes GPUI use X11: `shot` reads the window back from the X server (`GetImage`), and web
-  views only embed in X11 windows.
-- `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a shot waits for the blanks the last frame
+- With `DISPLAY` set, `nsh test` starts the host without `WAYLAND_DISPLAY`, which makes GPUI use X11: screenshots
+  read the window back from the X server (`GetImage`), and web views only embed in X11 windows.
+- `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a screenshot waits for the blanks the last frame
   waits for (about 3 s each); with `-shm` frames are copied in as GPUI presents them.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: where WebKit cannot allocate GBM buffers ("Failed to create GBM buffer" in the
   log, common under Xwayland), pages stay black without it.
 - A tiling window manager tiles the rootful Xwayland window and its root shrinks with it: make it float at its full
   size (Hyprland: `hyprctl dispatch` float, resize and move it to a special workspace).
-- GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take
-  (`shot a.png 2` keeps them).
+- GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
 
 ## Architecture
 
@@ -138,9 +136,9 @@ import -window root -display :170 whole.png        # the display, if the window'
   orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
   and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
   glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
-- **Frames**: native animations, JS frame requests, transitions, scroll glides and navigation transitions tick on the
-  window's frames (`Surface::tick`, called while drawing; `window.request_animation_frame()` while something
-  animates), and nothing is drawn otherwise.
+- **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
+  over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
+  called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
@@ -171,10 +169,10 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). React Native's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
 | Images | `image.rs` | Loaded and decoded (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation) on worker threads into `RenderImage`s (straight BGRA, a frame per animation frame), cached per location by bytes, drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
-| Scroll views | `scroll.rs` | The Windows backend's: offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view and kept on horizontal views with `showsIndicator={false}` (as on Linux); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
-| Input | `input.rs`, `events.rs` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onHoverIn` / `onHoverOut` / `onHoverMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`) |
-| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`text_input/model.rs`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer; Cmd on macOS where Ctrl is used elsewhere |
-| Navigation, dialogs | `navigation.rs` | As on Windows: pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
+| Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view and kept on horizontal views with `showsIndicator={false}` (as on Linux); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
+| Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onHoverIn` / `onHoverOut` / `onHoverMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer; Cmd on macOS where Ctrl is used elsewhere |
+| Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
 | Alerts (`AlertDialog`), toasts | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
 | Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws NSH's own bar |
 | Web views | `native/web.rs` | Feature `webview`: wry. Linux: WebKitGTK 4.1 on GTK 3 (X11 only: GPUI must run on X11 or Xwayland) in a GPUI Fast native composition surface (an X11 child window) sized to the visible part of its view, GTK's loop pumped from GPUI's; macOS / Windows: wry's `WKWebView` / WebView2 child at the view's box |
@@ -183,7 +181,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Environment | `system.rs` | Color scheme from the app or the window's appearance (`observe_window_appearance`); locale, font scale, reduce motion, right to left, screen reader and OS version read as each native backend reads them (the settings portal and AT-SPI over D-Bus on Linux, `zbus`); pixel ratio the window's scale factor; safe area and keyboard height 0 |
 | Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere; context menus are popups drawn over the window with keyboard access |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`): text, `ClipboardEntry::Image` (a format other than PNG, JPEG, GIF, BMP or WebP, such as TIFF, is made PNG on a worker thread) and `ExternalPaths` (files). GPUI reads one kind per item, preferring files, then text, then images, so an item with text and an image (a browser's copied image with its address) gives the text |
-| Networking | `net.rs` | ureq, as on Windows and Linux |
+| Networking | `nsh_engine::net` | ureq, the stack Windows and Linux use |
 | Dev | `dev.rs` | `AppView::connect_dev_server` (also what `AppSource::DevServer` runs): the dev client on its own thread (reconnecting with a backoff); its events, runtime errors and the reload key drained by a foreground task of the view, which ends when the view connects again; the status line and the error overlay are GPUI elements over the surface; the surface reports errors to the overlay and to the embedding app's `on_error` alike |
 
 ## Frame statistics: `--fps`
@@ -197,32 +195,23 @@ viewport-sized MSAA pass for GPUI), the animation frames requested and the notif
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
 real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
 
-## Tests in GPUI windows: `nsh test --target gpui`
+## Checking a change: `nsh test --target gpui`
 
 The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
 implements `nsh_testing::agent::Native`. Each call goes to the main thread (`rt::invoke`, then `rt::on_app` for the
 app), finds the window whose `AppView` shows the surface, and acts through the handlers real input goes through
-(`synth.rs`, which `--script` steps use too): a press is a mouse down and up at the view's middle (the window's view
-focused first), a scroll precise touchpad events a frame apart, typing `text_input::char_input`, select all the
-platform's command key with A, back the mouse's back button (it goes back from wherever the focus is), a dialog's
-answer a click at its button's laid-out middle (`system::dialog_point`), a screenshot `synth::frame` (what `shot`
-takes) as a PNG. A view's bounds are its frame's corners through `NshView::to_root`. `dev.rs` hands the test
-session's model to the surface through the session's own messages, so it comes before the first bundle.
+(`synth.rs`): a press is a mouse down and up at the view's middle (the window's view focused first), a scroll precise
+touchpad events a frame apart, typing `text_input::char_input`, select all the platform's command key with A, back
+the mouse's back button (it goes back from wherever the focus is), a dialog's answer a click at its button's laid-out
+middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
+`NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
+comes before the first bundle.
 
-## Checking a change: `--script`
-
-`nsh-gpui-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or
-new lines: `wait`, `shot <file.png> [scale]`, `tap`, `rightclick`, `drag`, `touch`, `wheel`, `pad`, `hover`, `type`, `mark`, `key`,
-`selectall`, `dark` / `light`, `resize`, `quit`, as on Windows (`windows.md`; the reference is `script.rs`). The whole
-script is parsed first; a step that fails, an app that shows nothing or an error the app reports makes the host exit
-with a failure. Input and shots first wait for the app to settle (no batch for 100 ms, at most 2 s), so a shot after
-a tap shows the response; timers, animations and network images still need a `wait`.
-
-Shots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen again,
-whatever covers it (not yet tried on those systems). On Linux GPUI cannot read a frame back, so the window is read
-from the X server: scripts run under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a
-window covering this one shows in the shot. Under Wayland proper there are no shots. Web views are not in the offscreen
-shots of macOS and Windows.
+Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
+again, whatever covers it. On Linux GPUI cannot read a frame back, so the window is read from the X server: the host
+runs under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a window covering this one
+shows in the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
+and Windows.
 
 ## Not implemented, or different
 
@@ -242,7 +231,7 @@ shots of macOS and Windows.
 - **Video** needs feature `video`, which is built on Linux only (GStreamer); on macOS and Windows a video is a neutral
   placeholder reporting `onError`. Rounded clips do not cut the picture; audio-only sources show nothing.
 - **Web views** sit above everything GPUI draws at their place (NSH content drawn over one is under it) and are
-  missing from the offscreen shots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
+  missing from the offscreen screenshots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `source.baseUrl` for HTML, `scrollEnabled` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
@@ -252,8 +241,8 @@ shots of macOS and Windows.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
 - **No desktop equivalent**: the status bar; the safe area and the keyboard height are 0.
 - **Not yet tried** on macOS and Windows: the backend was built and checked on Linux (X11 / Xwayland); CI builds
-  and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but `shot`'s
-  offscreen rendering, wry's macOS / Windows web views and the chrome's macOS / Windows title bars have not run there.
+  and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but the offscreen
+  screenshots, wry's macOS / Windows web views and the chrome's macOS / Windows title bars have not run there.
   Windows CI machines list no fonts through DirectWrite, so font weights and registered fonts are untested on Windows
   (the tests that check them skip where no fonts are listed); the text threads initialize COM, which DirectWrite
   wants off the main thread.

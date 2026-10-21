@@ -383,6 +383,8 @@ pub(crate) struct Mounter {
     sticky: rustc_hash::FxHashMap<NodeId, Vec<StickyCell>>,
     /// The native components the app registered.
     components: crate::component::Components,
+    /// Selection areas (`ViewProps::selection_area`) and their selections.
+    areas: Vec<(NodeId, Retained<crate::selection_area::AreaResponder>)>,
     mtm: MainThreadMarker,
 }
 
@@ -445,6 +447,7 @@ impl Mounter {
             blocked_scrolls: Vec::new(),
             rtl: false,
             components,
+            areas: Vec::new(),
             mtm,
         }
     }
@@ -464,6 +467,30 @@ impl Mounter {
         }
         self.report_finished();
         self.start_image_loads();
+        for (_, area) in &self.areas {
+            area.batch_applied();
+        }
+    }
+
+    /// Node `id`'s view (`nsh test --target ios`).
+    #[cfg(feature = "dev")]
+    pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
+        Some(self.slot(id)?.native.view().retain())
+    }
+
+    /// The text input `id` holds (`None`: it is no input).
+    #[cfg(feature = "dev")]
+    pub(crate) fn input_text(&self, id: NodeId) -> Option<String> {
+        match &self.slot(id)?.native {
+            Native::Input(input) => Some(input.text()),
+            _ => None,
+        }
+    }
+
+    /// Whether a native animation runs.
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.animator.animating()
     }
 
     #[inline]
@@ -610,6 +637,9 @@ impl Mounter {
                 // must not find the id, which a new view may take.
                 self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
+                if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
+                    self.areas.remove(i).1.detach();
+                }
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
                     // A modal deleted while presented (its subtree released
                     // without a remove) goes away too, as on Android.
@@ -2607,6 +2637,11 @@ impl Mounter {
         if let Some(press) = &s.gestures.press {
             press.set_long_press_delay(props.long_press_delay);
         }
+        // Only views that keep their props (which texts below look up).
+        let area =
+            (props.selection_area && s.native.nsh().is_some()).then(|| s.native.view().retain());
+        let was_area = self.areas.iter().any(|(a, _)| *a == id);
+        let Some(s) = self.slot_mut(id) else { return };
         match s.native.nsh() {
             Some(view) => view.set_props(props, &control),
             None => {
@@ -2626,6 +2661,18 @@ impl Mounter {
                 view.setAccessibilityLabel(label.as_deref(), mtm);
                 view.setAccessibilityElementsHidden(props.accessibility.hidden, mtm);
             }
+        }
+        // After the props: the texts below read whether they are in an area.
+        match (area, was_area) {
+            (Some(view), false) => self
+                .areas
+                .push((id, crate::selection_area::AreaResponder::attach(&view, mtm))),
+            (None, true) => {
+                if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
+                    self.areas.remove(i).1.detach();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2982,6 +3029,9 @@ impl Mounter {
 
     pub(crate) fn scrolled(&mut self, id: NodeId, offset: CGPoint) {
         self.pin_sticky(id);
+        for (_, area) in &self.areas {
+            area.scrolled();
+        }
         let Some(s) = self.slot(id) else { return };
         if let Some(node) = s.scroll_value {
             let value = if s.horizontal { offset.x } else { offset.y };

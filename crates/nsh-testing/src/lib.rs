@@ -31,6 +31,9 @@
 pub mod agent;
 #[cfg(feature = "js")]
 mod driver;
+// An engine on a thread of its own: not in WebAssembly, where only the
+// agent's model runs (the web's page).
+#[cfg(not(target_arch = "wasm32"))]
 mod headless;
 #[cfg(feature = "js")]
 mod module;
@@ -38,6 +41,8 @@ mod module;
 mod run;
 #[cfg(feature = "js")]
 mod runner;
+mod screen;
+mod selector;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};
@@ -49,12 +54,14 @@ use nsh_core::ui::description::SetDescription;
 #[cfg(feature = "bundle")]
 use nsh_engine::{Bundle, EngineConfig};
 
-#[cfg(feature = "live")]
+#[cfg(all(feature = "live", not(target_arch = "wasm32")))]
 pub use self::headless::UreqNetwork;
+#[cfg(not(target_arch = "wasm32"))]
 pub use self::headless::{
-    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, Screen, StubHandler,
+    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubHandler,
     StubNetwork, StubReply, StubResponse, StubRoute, WAIT, default_answer, print_batch, start,
 };
+pub use self::screen::{Pick, Screen};
 #[cfg(feature = "js")]
 pub use self::{
     driver::Host,

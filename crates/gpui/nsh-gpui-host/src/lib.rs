@@ -5,9 +5,6 @@
 //!   bundles pushed by `nsh dev` / `nsh run` and reloads on every rebuild.
 //! - `nsh-gpui-host --bundle <path> [--trace]` runs a built bundle (`.nshc`
 //!   is QuickJS bytecode, anything else JS source).
-//! - `--script "wait 800; shot a.png; tap 100 200; quit"` runs steps once
-//!   the window shows: screenshots and simulated input (on Linux under
-//!   X11, which shots need).
 //! - `--window-size 1200x800` sets the window size.
 //! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
@@ -63,7 +60,6 @@ pub fn main() -> std::process::ExitCode {
                 }
             }
             "--fps" => options.fps = true,
-            "--script" => options.script = args.next(),
             // Where apps keep their data (`nsh test --target` gives each app
             // a fresh one); the system's data directory otherwise.
             "--data-dir" => options.data_dir = args.next().map(PathBuf::from),
@@ -80,13 +76,6 @@ pub fn main() -> std::process::ExitCode {
         AppSource::DevServer(format!("ws://127.0.0.1:{DEFAULT_PORT}{WS_PATH}"))
     });
     options.title = "nsh".to_owned();
-    // Script shots read the window from the X server on Linux: run under
-    // X11 (Xwayland on a Wayland desktop).
-    #[cfg(target_os = "linux")]
-    if options.script.is_some() && env::var_os("DISPLAY").is_some() {
-        // SAFETY: no other thread runs yet.
-        unsafe { env::remove_var("WAYLAND_DISPLAY") };
-    }
     run_app(source, options)
 }
 

@@ -22,71 +22,14 @@
 use std::cell::{Ref, RefCell, RefMut};
 
 use gtk4::{self as gtk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+// The scroll position, extent and motion of a `ViewKind::Scroll` view.
+pub(crate) use nsh_core::scroll::ScrollState;
 use nsh_core::{
-    Bounds, EventMask, MAX_TRANSFORMS, NodeId, PointerEvents, Points, TransformKind, ViewKind,
-    ViewProps, ViewStyle,
+    Bounds, EventMask, NodeId, PointerEvents, Points, TransformKind, ViewKind, ViewProps,
+    ViewStyle,
+    animation::AnimValues,
     geometry::{AbsoluteLength, DefiniteLength, REM_SIZE},
 };
-
-/// Values native animations set on a view; they win over the style's.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub(crate) struct AnimValues {
-    /// Animated opacity.
-    pub(crate) opacity: Option<f32>,
-    /// Animated background color.
-    pub(crate) background: Option<nsh_core::Color>,
-    /// Animated entries of the transform list (by position).
-    pub(crate) transform: [Option<f32>; MAX_TRANSFORMS],
-    /// Animated border color (every side).
-    pub(crate) border_color: Option<nsh_core::Color>,
-    /// Animated text color (a text view's runs, an input's text).
-    pub(crate) color: Option<nsh_core::Color>,
-    /// Animated shadow color.
-    pub(crate) shadow_color: Option<nsh_core::Color>,
-    /// Animated shadow opacity.
-    pub(crate) shadow_opacity: Option<f32>,
-    /// Animated shadow blur radius.
-    pub(crate) shadow_radius: Option<f32>,
-}
-
-/// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct ScrollState {
-    /// Current offset (points; content coordinates of the viewport's top
-    /// left).
-    pub(crate) x: f32,
-    /// Vertical offset.
-    pub(crate) y: f32,
-    /// Size of the scrollable content.
-    pub(crate) content: (f32, f32),
-    /// Scrolls horizontally.
-    pub(crate) horizontal: bool,
-    /// Shows the scroll indicator.
-    pub(crate) indicator: bool,
-    /// How it scrolls (paging, snapping, insets...).
-    pub(crate) behavior: nsh_core::ScrollBehavior,
-    /// Scrolls the core asked for (`ScrollBy`, `scrollTo`) that were
-    /// applied: reported with each offset.
-    pub(crate) applied: u32,
-    /// The sticky cells: (cell, start, end).
-    pub(crate) sticky: Vec<nsh_core::StickyCell>,
-    /// A horizontal list laid out right to left: children are placed
-    /// mirrored (offsets stay left to right).
-    pub(crate) mirrored: bool,
-    /// Gestures, glides and the indicator ([`crate::scroll`]).
-    pub(crate) live: crate::scroll::Live,
-}
-
-impl ScrollState {
-    /// The largest offsets.
-    pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset.map(|v| v.0);
-        (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
-        )
-    }
-}
 
 /// A native GTK widget a view hosts at `rect` (view coordinates).
 #[derive(Debug, Clone)]
@@ -125,6 +68,9 @@ pub(crate) struct ViewState {
     pub(crate) scroll: Option<ScrollState>,
     /// Text content (text views).
     pub(crate) text: Option<crate::text::DrawnText>,
+    /// The part of its selection area's selection its text draws (UTF-16,
+    /// `start < end`; [`crate::selection_area`]).
+    pub(crate) area_selection: Option<(u32, u32)>,
     /// Image content (image views).
     pub(crate) image: Option<crate::image::ImageState>,
     /// Canvas content.
@@ -158,6 +104,7 @@ impl ViewState {
             fade: 1.0,
             scroll: matches!(kind, ViewKind::Scroll).then(ScrollState::default),
             text: None,
+            area_selection: None,
             image: None,
             canvas: None,
             input: None,
@@ -170,7 +117,7 @@ impl ViewState {
 
     /// The opacity it is drawn with.
     pub(crate) fn opacity(&self) -> f32 {
-        let live = self.live.as_ref().map_or(1.0, |l| l.opacity);
+        let live = self.live.as_ref().map_or(1.0, |l| l.opacity());
         self.anim.opacity.unwrap_or(self.style.opacity) * self.fade * live
     }
 
@@ -180,7 +127,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.map_or(s.radius, Points);
+        s.radius = a.shadow_radius.unwrap_or(s.radius);
         s
     }
 
@@ -305,7 +252,7 @@ impl ViewState {
             };
         }
         if let Some(extra) = extra {
-            m = extra.apply(m, h);
+            m = crate::transition::apply_extra(extra, m, h);
         }
         if oz != 0.0 {
             m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, -oz));
@@ -435,7 +382,7 @@ mod imp {
             let (sx, sy) = match &state.scroll {
                 Some(s) => {
                     let inset = s.behavior.content_inset.map(|v| v.0);
-                    (s.x - inset.left, s.y - inset.top)
+                    (s.x.0 - inset.left, s.y.0 - inset.top)
                 }
                 None => (0.0, 0.0),
             };

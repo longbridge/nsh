@@ -1,5 +1,4 @@
 import type { Tone } from "../../ui";
-import { type Block, parse } from "./markdown";
 
 /** Fictional models: the picker changes the voice and whether the reply thinks first. */
 export type Model = "Swift" | "Deep" | "Vision";
@@ -26,7 +25,6 @@ export type Msg =
       reasoning?: Reasoning;
       tools: Tool[];
       md: string;
-      blocks: Block[];
       status: Status;
       error?: string;
       rating?: "up" | "down";
@@ -277,7 +275,7 @@ export function history(nextId: () => string): Msg[] {
     for (let i = 0; i < 20; i++) {
       const [q, a] = pastPrompts[(day * 20 + i) % pastPrompts.length];
       out.push({ kind: "user", id: nextId(), text: q });
-      out.push({ kind: "assistant", id: nextId(), model: "Swift", script: "history", tools: [], md: a, blocks: parse(a), status: "done" });
+      out.push({ kind: "assistant", id: nextId(), model: "Swift", script: "history", tools: [], md: a, status: "done" });
     }
   });
   return out;

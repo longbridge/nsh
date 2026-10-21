@@ -70,10 +70,6 @@ pub struct AppOptions {
     pub title: String,
     /// The initial window size in points.
     pub size: (i32, i32),
-    /// Steps run once the window shows (`wait 500; shot a.png; tap 10 20;
-    /// quit`): for checking a backend change without touching the screen.
-    /// See [`crate::script`].
-    pub script: Option<String>,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
     pub components: crate::native::Components,
@@ -105,7 +101,6 @@ impl Default for AppOptions {
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
             size: (390, 844),
-            script: None,
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
@@ -213,7 +208,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
-            network: Some(crate::net::network()),
+            network: Some(nsh_engine::net::network()),
             websocket: None,
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
@@ -276,6 +271,7 @@ impl AppView {
         self.surface.stop();
     }
 
+    #[cfg(feature = "dev")]
     pub(crate) fn surface(&self) -> &Rc<Surface> {
         &self.surface
     }
@@ -328,9 +324,6 @@ pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
             AppSource::DevServer(url) => crate::dev::start(&view, url),
         }
         install_shortcuts(app, &window);
-        if let Some(script) = &options.script {
-            crate::script::run(&window, view.surface().clone(), script);
-        }
         // The window keeps the view (and its engine) alive.
         unsafe_keep(&window, view);
         window.present();

@@ -1,12 +1,11 @@
-import { batch, computed, effect, Input, Scroll, signal, Text, View, type YNode } from "nsh";
+import { batch, computed, effect, Input, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
-import { List } from "nsh/list";
+import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, SelectionArea } from "nsh/base";
 import { Icon, type IconName } from "./icons";
 import { alpha, Appear, Badge, colors, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "./ui";
 import { Glyph } from "./chat/glyphs";
-import { type Block, Markdown, parse } from "./chat/markdown";
+import { Markdown } from "./chat/markdown";
 import { ActionButton, Avatar, Caret, DateSeparator, ErrorRow, FileChip, Photo, Spinner, ToolCard } from "./chat/parts";
 import { type FileRef, freeform, history, type Model, type Msg, photo, retried, type Scenario, scenarios, type Status, type Tool } from "./chat/scripts";
 
@@ -60,7 +59,7 @@ export function Chat(props: { autoplay?: string } = {}) {
   const liveReason = signal("");
   const liveThinking = signal<{ start: number; seconds: number | null } | null>(null);
   const liveTools = signal<Tool[]>([]);
-  const liveBlocks = signal<Block[]>([]);
+  const liveMd = signal("");
   const now = signal(0);
 
   /** Whether the user is at the bottom (the list then follows the stream
@@ -95,7 +94,7 @@ export function Chat(props: { autoplay?: string } = {}) {
       if (pendingText) {
         r.md += pendingText;
         pendingText = "";
-        liveBlocks.set(parse(r.md, liveBlocks(), true));
+        liveMd.set(r.md);
       }
     });
   };
@@ -142,7 +141,6 @@ export function Chat(props: { autoplay?: string } = {}) {
       reasoning: r.reason ? { text: r.reason, seconds, open: false } : undefined,
       tools: liveTools().map((t) => (t.state === "done" ? t : ({ ...t, state: "cancelled" } as Tool))),
       md: r.md,
-      blocks: parse(r.md),
       status,
       error,
     };
@@ -161,13 +159,13 @@ export function Chat(props: { autoplay?: string } = {}) {
   const reply = async (s: Scenario, at?: string) => {
     const r: Run = { id: nextId(), model: s.model, script: s.id, cancelled: false, md: "", reason: "", thinkStart: performance.now(), thinkSeconds: null };
     run = r;
-    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: s.id, tools: [], md: "", blocks: [], status: "done" };
+    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: s.id, tools: [], md: "", status: "done" };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
       liveReason.set("");
       liveThinking.set(null);
       liveTools.set([]);
-      liveBlocks.set([]);
+      liveMd.set("");
       liveId.set(r.id);
       messages.set(at ? messages().map((m) => (m.id === at ? placeholder : m)) : [...messages(), placeholder]);
     });
@@ -352,8 +350,8 @@ export function Chat(props: { autoplay?: string } = {}) {
       return `Thought for ${m().reasoning?.seconds ?? 1} s`;
     };
     const tools = () => (live() ? liveTools() : m().tools);
-    const blocks = () => (live() ? liveBlocks() : m().blocks);
-    const waitingForWords = () => live() && !liveBlocks().length && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
+    const md = () => (live() ? liveMd() : m().md);
+    const waitingForWords = () => live() && !liveMd() && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
     return (
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 26 }}>
@@ -408,7 +406,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             <Caret />
           </View>
         </If>
-        <Markdown blocks={blocks()} id={m().id} caret={live() ? Caret : undefined} copied={copied()} onCopy={(key, text) => copy(key, text)} />
+        <Markdown md={md()} id={m().id} streaming={live()} caret={live() ? <Caret /> : undefined} />
         <If when={!live() && m().status === "error"}>
           <ErrorRow message={m().error ?? "Something went wrong."} onRetry={() => retry(m())} />
         </If>
@@ -505,42 +503,45 @@ export function Chat(props: { autoplay?: string } = {}) {
       <KeyboardAvoidingView style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
           <If when={messages().length} else={empty}>
-            <List
-              ref={list}
-              each={messages()}
-              keyExtractor={(m) => m.id}
-              estimatedItemSize={140}
-              initialScrollIndex={Math.max(0, messages().length - 1)}
-              style={{ flex: 1 }}
-              contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
-              keyboardDismissMode="interactive"
-              maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
-              scrollEventThrottle={100}
-              onScrollBeginDrag={() => (dragging = true)}
-              onScroll={(e) => {
-                if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
-              }}
-              onMomentumScrollEnd={() => (dragging = false)}
-              onScrollEnd={() => (dragging = false)}
-            >
-              {(item) => {
-                const kind = computed(() => item().kind);
-                return (
-                  <View>
-                    {(() => {
-                      switch (kind()) {
-                        case "date":
-                          return <DateSeparator label={(item() as Extract<Msg, { kind: "date" }>).label} />;
-                        case "user":
-                          return userRow(item as () => User);
-                        case "assistant":
-                          return assistantRow(item as () => Assistant);
-                      }
-                    })()}
-                  </View>
-                );
-              }}
-            </List>
+            {/* One selection across messages: in the List, over the rows that are mounted. */}
+            <SelectionArea style={{ flex: 1 }}>
+              <List
+                ref={list}
+                each={messages()}
+                keyExtractor={(m) => m.id}
+                estimatedItemSize={140}
+                initialScrollIndex={Math.max(0, messages().length - 1)}
+                style={{ flex: 1 }}
+                contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
+                keyboardDismissMode="interactive"
+                maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
+                scrollEventThrottle={100}
+                onScrollBeginDrag={() => (dragging = true)}
+                onScroll={(e) => {
+                  if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
+                }}
+                onMomentumScrollEnd={() => (dragging = false)}
+                onScrollEnd={() => (dragging = false)}
+              >
+                {(item) => {
+                  const kind = computed(() => item().kind);
+                  return (
+                    <View>
+                      {(() => {
+                        switch (kind()) {
+                          case "date":
+                            return <DateSeparator label={(item() as Extract<Msg, { kind: "date" }>).label} />;
+                          case "user":
+                            return userRow(item as () => User);
+                          case "assistant":
+                            return assistantRow(item as () => Assistant);
+                        }
+                      })()}
+                    </View>
+                  );
+                }}
+              </List>
+            </SelectionArea>
           </If>
 
           {/* Jump to the latest message: shown while scrolled up. */}

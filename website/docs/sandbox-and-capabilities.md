@@ -7,9 +7,12 @@ group: delivery
 
 # Sandbox and Capabilities
 
-Every NSH app runs in its own QuickJS VM, and everything an app can do outside that VM goes through NSH's native
-runtime. That makes it possible to run code you did not write, such as third-party mini apps or downloaded updates,
-under rules the host app controls:
+An app written in Rust is native code compiled into the app that ships it, as the rest of that app is, and runs with
+its trust; its calls into NSH's services (`fetch`, images, web views, the status bar) go through the same native
+checks as TSX's, under what a host grants. The TSX and JavaScript an app runs, its own or a [signed
+package](./signed-packages.md) it downloads, run in a QuickJS VM per view, and everything they can do outside that VM
+goes through NSH's native runtime. That makes it possible to run code you did not write, such as third-party mini apps
+or downloaded updates, under rules the host app controls:
 
 - **Limits** bound the memory, time and native resources one app can use.
 - **Hardening** removes the ways to turn strings into code in release builds.
@@ -22,7 +25,7 @@ around them.
 
 ## Limits
 
-An app embedded in another app runs within limits its host app decides. An app on its own (packaged with
+Limits bound a VM: they apply to TSX and JavaScript. An app embedded in another app runs within limits its host app decides. An app on its own (packaged with
 `nsh package`, the web included, or run with `nsh run`) is your own code, as a native app is: it uses the memory and
 time the device gives it, and its interpreter stack of 4096 KB turns deep recursion into a `RangeError` the app can
 catch.
@@ -67,8 +70,8 @@ Host apps set the limits per view: `NshAppView.limits` on [iOS](./embedding-ios.
 `NshView.setLimits` on [Android](./embedding-android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
 [GPUI app](./gpui.md#embedding-in-a-gpui-app). They apply from the next load.
 
-To see in development what an app does within a host app's limits, run it with
-[`--limits`](./cli.md#nsh-run): `nsh run --limits` uses the defaults above, and
+To see in development what a TSX app does within a host app's limits, run it with
+[`--limits`](./cli.md#nsh-run): `nsh run App.tsx --limits` uses the defaults above, and
 `nsh run --limits memory=128MB,call=500ms` sets those two as a host app would, the rest keeping their defaults.
 
 ## Hardening
@@ -207,6 +210,14 @@ The declaration goes with the app wherever it goes:
 ## Grants: what a host app allows
 
 A host app that embeds NSH can grant **at most** some capabilities, in the same JSON form:
+
+```rust
+// iOS, in Rust (nsh_platform_ios::AppView)
+let grant = nsh_engine::Capabilities::from_json(&serde_json::json!({
+    "network": { "hosts": ["api.example.com"] }
+}))?;
+app.set_granted_capabilities(Some(grant));
+```
 
 ```swift
 // iOS

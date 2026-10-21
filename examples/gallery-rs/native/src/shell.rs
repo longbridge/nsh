@@ -8,6 +8,7 @@
 
 use std::{cell::Cell, ptr};
 
+use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
     storage::Storage,
     ui::{AccessibilityRole, AccessibilityState, AnyElement, prelude::*},
@@ -126,7 +127,7 @@ pub(crate) fn phone() -> AnyElement {
         let Selected(demo) = global::<Selected>().get_untracked();
         nav::reset(vec![demo.route()]);
     }
-    stack()
+    nav_stack()
         .flex_1()
         .child(demos::index())
         .child(pushed())
@@ -151,9 +152,14 @@ pub(crate) fn desktop_layout() -> AnyElement {
         .bg(colors::BACKGROUND)
         .child(sidebar())
         .child(
-            stack()
+            nav_stack()
                 .flex_1()
-                .child(screen().key("pane").header_shown(false).child(demo_pane()))
+                .child(
+                    nav_page()
+                        .key("pane")
+                        .header_shown(false)
+                        .child(demo_pane()),
+                )
                 .child(pushed()),
         )
         .into_element()

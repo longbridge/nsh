@@ -54,7 +54,6 @@
 //! keyboard and have no meaning on the desktop: they are never shown.
 
 mod layout;
-mod model;
 
 use std::{
     cell::{Cell, RefCell},
@@ -66,14 +65,13 @@ use std::{
 use gpui::{Font, FontFeatures, FontStyle, FontWeight, SharedString, TextSystem, px};
 use nsh_core::{
     AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points,
-    ReturnKeyType, SubmitBehavior, TextAlign, tailwind::state,
+    ReturnKeyType, SubmitBehavior, TextAlign,
+    tailwind::state,
+    text_edit::{self as model, Composition, Model, Unit, key_of, pasted, utf16_to_byte},
 };
 use rustc_hash::FxHashMap;
 
-use self::{
-    layout::{Layout, Style},
-    model::{Composition, Model, Unit, key_of, pasted, utf16_to_byte},
-};
+use self::layout::{Layout, Style};
 use crate::{
     input::{KeyEvent, Modifiers, PointerKind},
     keys::{
@@ -102,8 +100,6 @@ enum Drag {
     Line(usize, usize),
 }
 
-/// The native side of an input view ([`crate::view::ViewState::input`]),
-/// and the editor it hosts.
 /// The text input `view` holds now (`None`: it is no input).
 #[cfg(feature = "dev")]
 pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
@@ -112,6 +108,8 @@ pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
     Some(text)
 }
 
+/// The native side of an input view ([`crate::view::ViewState::input`]),
+/// and the editor it hosts.
 pub(crate) struct InputState {
     /// The surface's key ([`Surface::by_key`]): `focus()` and `blur()`
     /// come with the view only.
@@ -1027,11 +1025,7 @@ fn composition(text: &str, selected: Option<Range<usize>>) -> Option<Composition
         }
         None => (text.len(), None),
     };
-    Some(Composition {
-        text: text.to_owned(),
-        cursor,
-        target,
-    })
+    Some(Composition::new(text.to_owned(), cursor, target))
 }
 
 /// What a field's config asks of input methods and on-screen keyboards.
@@ -1425,17 +1419,16 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
     view.changed();
 }
 
-/// Characters typed into the focused field (the script's `type`), as the
+/// Characters typed into the focused field (the test agent's), as the
 /// input handler's `replace_text_in_range` brings them.
-#[allow(dead_code)] // For `crate::script`'s `type`.
+#[cfg(any(feature = "dev", all(test, feature = "shot")))]
 pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
     ime::replace_text_in_range(surface, None, text);
 }
 
-/// An input method's composition in the focused field (the script's
-/// `mark`), as `replace_and_mark_text_in_range` makes it; empty text ends
-/// it.
-#[allow(dead_code)] // For `crate::script`'s `mark`.
+/// An input method's composition in the focused field, as
+/// `replace_and_mark_text_in_range` makes it; empty text ends it.
+#[cfg(all(test, feature = "shot"))]
 pub(crate) fn mark(surface: &Rc<Surface>, text: &str) {
     ime::replace_and_mark_text_in_range(surface, None, text, None);
 }

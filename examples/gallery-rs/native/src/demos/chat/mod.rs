@@ -8,7 +8,7 @@
 //! The conversation is a signal of messages; its rows are a virtualized
 //! list whose cells bind to the message they show. The reply being written
 //! is [`Live`], signals only its row reads: a frame of tokens updates that
-//! row's last Markdown block, and in it the span the tokens lengthened.
+//! row's Markdown, whose view makes again only the last block.
 
 mod glyphs;
 mod markdown;
@@ -17,7 +17,9 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
+use nsh_base::{
+    KeyboardAvoidingView, KeyboardAvoidingViewProps, SelectionArea, SelectionAreaProps,
+};
 use nsh_core::{
     LayoutAnimation, Points, Size,
     time::Instant,
@@ -26,7 +28,7 @@ use nsh_core::{
 
 use self::{
     glyphs::{GlyphName, glyph},
-    markdown::{Block, markdown, parse},
+    markdown::markdown,
     parts::{
         action_button, avatar, caret, date_separator, error_row, file_chip, photo, spinner,
         tool_card,
@@ -59,8 +61,8 @@ struct Live {
     thinking: Signal<Option<(Instant, Option<u64>)>>,
     /// Its tool calls so far.
     tools: Signal<Vec<Tool>>,
-    /// Its text so far, parsed (the last block completed).
-    blocks: Signal<Vec<Block>>,
+    /// Its Markdown so far.
+    md: Signal<String>,
     /// Ticks once a second while thinking.
     now: Signal<Option<Instant>>,
 }
@@ -312,7 +314,7 @@ impl ChatState {
                 live.reason.set(reason);
             }
             if let Some(md) = md {
-                live.blocks.set(parse(&md, true));
+                live.md.set(md);
             }
         });
     }
@@ -370,7 +372,6 @@ impl ChatState {
                 }
             })
             .collect();
-        let blocks = parse(&run.md, false);
         let reply = Assistant {
             id: run.id.clone(),
             model: run.model,
@@ -382,7 +383,6 @@ impl ChatState {
             }),
             tools,
             md: run.md.clone(),
-            blocks,
             status,
             error,
             rating: None,
@@ -423,7 +423,6 @@ impl ChatState {
             reasoning: None,
             tools: Vec::new(),
             md: String::new(),
-            blocks: Vec::new(),
             status: Status::Done,
             error: None,
             rating: None,
@@ -434,7 +433,7 @@ impl ChatState {
             live.reason.set(String::new());
             live.thinking.set(None);
             live.tools.set(Vec::new());
-            live.blocks.set(Vec::new());
+            live.md.set(String::new());
             live.now.set(None);
             live.id.set(Some(id.clone()));
             self.messages.update(|messages| match at {
@@ -810,7 +809,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             reason: signal(String::new()),
             thinking: signal(None),
             tools: signal(Vec::new()),
-            blocks: signal(Vec::new()),
+            md: signal(String::new()),
             now: signal(None),
         },
         offline: stored(None),
@@ -841,9 +840,15 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .collect();
     let conversations = chips.clone();
 
+    // One selection across messages: in the list, over the rows that are
+    // mounted.
     let content = If::new(
         move || !messages.with(Vec::is_empty),
-        move || chat.list_view(list, wide),
+        move || {
+            SelectionArea::element(SelectionAreaProps::default())
+                .flex_1()
+                .child(chat.list_view(list, wide))
+        },
     )
     .otherwise(move || chat.empty());
 
@@ -1569,7 +1574,7 @@ impl ChatState {
         };
         let waiting = computed(move || {
             is_live.get()
-                && live.blocks.with(Vec::is_empty)
+                && live.md.with(String::is_empty)
                 && live.tools.with(Vec::is_empty)
                 && !thinking_now.get()
         });
@@ -1624,15 +1629,12 @@ impl ChatState {
             .child(markdown(
                 move || {
                     if is_live.get() {
-                        live.blocks.get()
+                        live.md.get()
                     } else {
-                        with_reply(item, |a| a.blocks.clone()).unwrap_or_default()
+                        with_reply(item, |a| a.md.clone()).unwrap_or_default()
                     }
                 },
-                move || id.get(),
                 move || is_live.get(),
-                copied,
-                Rc::new(move |key, text| self.act(Action::Copy(key, text))),
             ))
             .child(If::new(done(|s| s == Status::Error), move || {
                 error_row(

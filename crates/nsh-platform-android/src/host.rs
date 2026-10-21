@@ -67,9 +67,25 @@ pub(crate) struct Host {
     access: Mutex<Arc<nsh_engine::Access>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
+    /// A test session's model of the app (`nsh test --target android`):
+    /// every batch and error goes to it.
+    #[cfg(feature = "dev")]
+    pub(crate) test_model: Mutex<Option<Arc<nsh_testing::agent::Model>>>,
 }
 
 impl Host {
+    /// The display's density: pixels per point.
+    #[cfg(feature = "dev")]
+    pub(crate) fn density(&self) -> f32 {
+        self.density
+    }
+
+    /// Whether the native animation graph animates.
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.ui.lock().is_ok_and(|ui| ui.animating())
+    }
+
     fn control(&self) -> Option<EngineControl> {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
     }
@@ -249,6 +265,10 @@ struct Sink(Arc<Host>);
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
         let host = &self.0;
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*host.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+            model.apply(&batch);
+        }
         answer_clipboard_reads(host, &batch);
         let encoded = encode::encode(batch);
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
@@ -317,6 +337,10 @@ impl MountSink for Sink {
     }
 
     fn report_error(&self, message: &str) {
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.0.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+            model.error(message);
+        }
         #[cfg(feature = "dev")]
         if let Some(dev) = self.0.dev.lock().ok().as_ref().and_then(|d| d.as_ref()) {
             dev.show_error(&self.0, "Uncaught error", message);
@@ -398,6 +422,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         access: Mutex::new(Arc::default()),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
+        #[cfg(feature = "dev")]
+        test_model: Mutex::new(None),
     });
     Box::into_raw(Box::new(host)) as jlong
 }

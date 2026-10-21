@@ -4,7 +4,8 @@
 //! (`DevServer::test_session`) serving that build, and starts the host on
 //! it; the host's test agent (`nsh_testing::agent`) takes the test's steps
 //! at the views the selectors name, with the platform's own input. The
-//! host goes when the test closes the app.
+//! host goes when the test closes the app. The web's host is a page in a
+//! headless browser, whose agent runs in this process (`test_web.rs`).
 
 use std::{
     path::Path,
@@ -24,12 +25,27 @@ use crate::{build, run::Target, ui};
 /// How long a host may take to start and connect.
 const CONNECT: Duration = Duration::from_secs(60);
 
-/// Starts the apps tests open on `target`'s host.
-pub(crate) fn starter(target: Target) -> anyhow::Result<StartHost> {
-    if !matches!(target, Target::Macos | Target::Gpui) {
-        anyhow::bail!(
-            "nsh test --target runs on macos and gpui for now (the other platforms' test agents follow)"
-        );
+/// Starts the apps tests open on `target`'s host; `browser` is the one
+/// `--target web` runs them in (else the one found on this machine).
+pub(crate) fn starter(
+    target: Target,
+    browser: Option<&Path>,
+    work: &Path,
+) -> anyhow::Result<StartHost> {
+    if browser.is_some() && target != Target::Web {
+        anyhow::bail!("--browser goes with --target web");
+    }
+    match target {
+        Target::Web => return crate::test_web::starter(browser),
+        Target::Ios => return crate::test_ios::starter(work),
+        Target::Android => return crate::test_android::starter(work),
+        _ => {}
+    }
+    if !matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
+        anyhow::bail!("nsh test --target takes macos, linux, windows, gpui, web, ios or android");
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::file(target.platform(), false)?;
@@ -79,6 +95,66 @@ fn start(
     entry: &Path,
     options: &HostOptions,
 ) -> Result<TestHost, String> {
+    let server = serve(entry)?;
+    let dir = entry.parent().unwrap_or(Path::new("."));
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    // A fresh data directory: what the app keeps (its storage) starts empty
+    // in every test, as headless runs' does.
+    let data = fresh_data_dir()?;
+    let mut command = Command::new(host);
+    command
+        .env("NSH_DEV_APP_DIR", dir)
+        .args(["--dev-server", &url])
+        .arg("--data-dir")
+        .arg(&data)
+        .stdin(Stdio::null());
+    if target == Target::Macos {
+        // A window AppKit restored from an earlier run would not be this one.
+        command.args(["-ApplePersistenceIgnoreState", "YES"]);
+    }
+    if target == Target::Gpui && cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some()
+    {
+        // Screenshots read the window from the X server: under X11
+        // (Xwayland on a Wayland desktop).
+        command.env_remove("WAYLAND_DISPLAY");
+    }
+    if let Some(size) = options.size {
+        command.args([
+            "--window-size",
+            &format!("{}x{}", size.width.0, size.height.0),
+        ]);
+    }
+    let (mut child, output) =
+        ui::quiet(&mut command).map_err(|e| format!("cannot start {}: {e}", host.display()))?;
+    let deadline = Instant::now() + CONNECT;
+    while !server.has_tester() {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!(
+                "the host exited with {status} before it connected{}",
+                indented(&output.text())
+            ));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            return Err(format!(
+                "the host did not connect in {} s{}",
+                CONNECT.as_secs(),
+                indented(&output.text())
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(TestHost {
+        server,
+        child,
+        data,
+    })
+}
+
+/// A dev server in a test session serving `entry`'s build, as `nsh run`
+/// serves it (the app's assets, its log lines shown as `nsh run` shows
+/// them).
+pub(crate) fn serve(entry: &Path) -> Result<DevServer, String> {
     let built = build::compile(entry, false).map_err(|e| e.plain)?;
     let dir = entry.parent().unwrap_or(Path::new("."));
     let server = DevServer::start(
@@ -115,64 +191,26 @@ fn start(
         None,
         built.ui_sets,
     );
-    let url = format!("ws://{}{WS_PATH}", server.local_addr());
-    // A fresh data directory: what the app keeps (its storage) starts empty
-    // in every test, as headless runs' does.
+    Ok(server)
+}
+
+/// A data directory of its own for an app a test opens: what the app
+/// keeps (its storage) starts empty in every test, as headless runs' does.
+pub(crate) fn fresh_data_dir() -> Result<std::path::PathBuf, String> {
     let data = std::env::temp_dir().join(format!(
         "nsh-test-{}-{}",
         std::process::id(),
         NEXT_APP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&data).map_err(|e| format!("cannot make {}: {e}", data.display()))?;
-    let mut command = Command::new(host);
-    command
-        .env("NSH_DEV_APP_DIR", dir)
-        .args(["--dev-server", &url])
-        .arg("--data-dir")
-        .arg(&data)
-        .stdin(Stdio::null());
-    if target == Target::Macos {
-        // A window AppKit restored from an earlier run would not be this one.
-        command.args(["-ApplePersistenceIgnoreState", "YES"]);
-    }
-    if let Some(size) = options.size {
-        command.args([
-            "--window-size",
-            &format!("{}x{}", size.width.0, size.height.0),
-        ]);
-    }
-    let (mut child, output) =
-        ui::quiet(&mut command).map_err(|e| format!("cannot start {}: {e}", host.display()))?;
-    let deadline = Instant::now() + CONNECT;
-    while !server.has_tester() {
-        if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!(
-                "the host exited with {status} before it connected{}",
-                indented(&output.text())
-            ));
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            return Err(format!(
-                "the host did not connect in {} s{}",
-                CONNECT.as_secs(),
-                indented(&output.text())
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok(TestHost {
-        server,
-        child,
-        data,
-    })
+    Ok(data)
 }
 
 /// The apps started so far: each gets a data directory of its own.
 static NEXT_APP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// `text` (the host's output) on lines of its own, if there is any.
-fn indented(text: &str) -> String {
+pub(crate) fn indented(text: &str) -> String {
     if text.trim().is_empty() {
         String::new()
     } else {

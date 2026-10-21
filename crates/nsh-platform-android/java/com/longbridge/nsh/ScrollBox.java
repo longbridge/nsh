@@ -895,12 +895,21 @@ final class ScrollBox extends FrameLayout implements Node {
         return keyboardTaps == 1 ? -1 : keyboardTaps;
     }
 
-    /** Whether an input is under ({@code x}, {@code y}) of {@code group}. */
+    /**
+     * Whether an input is under ({@code x}, {@code y}) of {@code group}: in
+     * any child there, topmost first, as a touch a child does not take goes
+     * on to the one below (a decoration over a field does not hide it).
+     */
     private static boolean inputAt(ViewGroup group, float x, float y) {
-        View v = childAt(group, x, y);
-        if (v == null) return false;
-        if (v instanceof InputBox) return true;
-        return v instanceof ViewGroup && inputAt((ViewGroup) v, localX(group, v, x), localY(group, v, y));
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            View c = group.getChildAt(i);
+            if (c.getVisibility() != VISIBLE) continue;
+            float lx = localX(group, c, x), ly = localY(group, c, y);
+            if (lx < 0 || ly < 0 || lx >= c.getWidth() || ly >= c.getHeight()) continue;
+            if (c instanceof InputBox) return true;
+            if (c instanceof ViewGroup && inputAt((ViewGroup) c, lx, ly)) return true;
+        }
+        return false;
     }
 
     /** Whether something under ({@code x}, {@code y}) of {@code group} handles taps. */

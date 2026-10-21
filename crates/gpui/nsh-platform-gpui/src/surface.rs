@@ -184,7 +184,7 @@ pub(crate) struct Surface {
     /// Keys the window takes before anything focused sees them (the
     /// standalone app's full screen, the dev host's reload).
     pub(crate) shortcuts: RefCell<Vec<ShortcutHandler>>,
-    /// How many batches were applied (scripts wait for the app to settle).
+    /// How many batches were applied.
     pub(crate) batches: Cell<u64>,
     /// The embedding app's theme ([`crate::AppView::set_theme`]): sent to
     /// every engine the surface starts, before its first frame.
@@ -476,7 +476,6 @@ impl Surface {
                 }
                 Message::Error(error) => {
                     log::error!("{error}");
-                    crate::script::app_error();
                     #[cfg(feature = "dev")]
                     if let Some(model) = &*self.test_model.borrow() {
                         model.error(error.to_string());
@@ -527,6 +526,7 @@ impl Surface {
             model.apply(batch);
         }
         crate::access::batch_applied(self);
+        crate::selection_area::batch_applied(self);
     }
 
     /// Writes the animated values to the views and reports finished

@@ -34,6 +34,10 @@ use std::{f32::consts::PI, rc::Rc};
 use nsh_core::{
     Command, EventKind, EventPayload, Points, ScrollBehavior, Size, StickyCell, ViewKind,
     geometry::point,
+    scroll::{
+        dragged, ease_out, indicator_alpha, indicator_span, projected, rate, reveal_delta,
+        snap_duration, sticky_shift, thumb_scroll,
+    },
 };
 use objc2::{MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{NSResponder, NSView};
@@ -52,10 +56,6 @@ const WHEEL_IDLE: f64 = 150.0;
 /// After a trackpad gesture ends, the system's momentum begins within this
 /// long (ms), or there is none.
 const MOMENTUM_WAIT: f64 = 100.0;
-/// The indicator stays this long (ms) after the last scroll...
-const INDICATOR_HOLD: f64 = 700.0;
-/// ...then fades out in this long.
-const INDICATOR_FADE: f64 = 300.0;
 /// How far past the top a release must be to trigger a refresh.
 const REFRESH_PULL: f32 = 64.0;
 /// Space kept above the content while refreshing (the spinner's).
@@ -205,116 +205,6 @@ impl Resampled {
             1.0
         };
         (p0 + (p1 - p0) * k as f32, false)
-    }
-}
-
-// Pure logic.
-
-/// The rubber band of iOS: how far content dragged `over` points past an
-/// edge of a `dim`-point viewport moves.
-fn rubber(over: f32, dim: f32) -> f32 {
-    let dim = dim.max(1.0);
-    (1.0 - 1.0 / (over * 0.55 / dim + 1.0)) * dim
-}
-
-/// Position on a drag that went to `raw`, with `[min, max]` the limits.
-fn dragged(raw: f32, min: f32, max: f32, dim: f32, bounces: bool) -> f32 {
-    if raw < min {
-        if bounces {
-            min - rubber(min - raw, dim)
-        } else {
-            min
-        }
-    } else if raw > max {
-        if bounces {
-            max + rubber(raw - max, dim)
-        } else {
-            max
-        }
-    } else {
-        raw
-    }
-}
-
-/// The deceleration rate: velocity kept per ms.
-fn rate(behavior: &ScrollBehavior) -> f32 {
-    if behavior.deceleration > 0.0 && behavior.deceleration < 1.0 {
-        behavior.deceleration
-    } else if behavior.snaps() || behavior.paging {
-        0.99
-    } else {
-        0.998
-    }
-}
-
-/// Where a glide at `v` from `offset` comes to rest.
-fn projected(offset: f32, v: f32, rate: f32) -> f32 {
-    offset - v / rate.ln()
-}
-
-/// How far a sticky cell moves at `offset`.
-fn sticky_shift(offset: f32, start: f32, end: f32) -> f32 {
-    (offset - start).clamp(0.0, (end - start).max(0.0))
-}
-
-/// Cubic ease out.
-fn ease_out(t: f64) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    (1.0 - (1.0 - t).powi(3)) as f32
-}
-
-/// How long an eased move of `distance` that starts at speed `v` (points
-/// per ms, in its direction) takes: ease out starts at 3 × distance /
-/// duration, which then matches the release.
-fn snap_duration(distance: f32, v: f32) -> f64 {
-    if distance.abs() < 0.5 {
-        return 0.0;
-    }
-    if v * distance > 0.0 {
-        (3.0 * distance.abs() / v.abs()).clamp(180.0, 600.0) as f64
-    } else {
-        ANIMATION
-    }
-}
-
-/// The indicator's opacity `since` ms after it was shown.
-fn indicator_alpha(since: f64) -> f32 {
-    if since < INDICATOR_HOLD {
-        1.0
-    } else {
-        (1.0 - (since - INDICATOR_HOLD) / INDICATOR_FADE).max(0.0) as f32
-    }
-}
-
-/// The indicator along the main axis: `(start, length)` in a viewport of
-/// `viewport` points showing `total` points at `offset`, or `None` when
-/// everything fits.
-fn indicator_span(viewport: f32, total: f32, offset: f32) -> Option<(f32, f32)> {
-    /// Short enough to see where it is in long lists, long enough to see.
-    const MIN_LENGTH: f32 = 32.0;
-    if total <= viewport + 0.5 || viewport <= 4.0 * INDICATOR_MARGIN {
-        return None;
-    }
-    let track = viewport - 2.0 * INDICATOR_MARGIN;
-    let max = total - viewport;
-    // Overscrolling shrinks it, as macOS's overlay scrollers do.
-    let over = if offset < 0.0 {
-        -offset
-    } else {
-        (offset - max).max(0.0)
-    };
-    let len = (track * viewport / total - over).max(MIN_LENGTH).min(track);
-    let t = (offset / max).clamp(0.0, 1.0);
-    Some((INDICATOR_MARGIN + (track - len) * t, len))
-}
-
-/// How far the offset moves when the thumb moves by `d` points: the
-/// thumb's travel (`track - length`) spans the whole scroll range.
-fn thumb_scroll(d: f32, range: f32, travel: f32) -> f32 {
-    if travel > 0.0 {
-        d * range / travel
-    } else {
-        0.0
     }
 }
 
@@ -642,7 +532,7 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
             .behavior
             .snap_target(
                 Points(pos - lead),
-                Points(projected(pos, v, rate(&s.behavior)) - lead),
+                projected(Points(pos), v, rate(&s.behavior)) - Points(lead),
                 snap_velocity,
                 Points(dim),
                 Points(max + dim - lead),
@@ -660,7 +550,7 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
             true,
         );
     } else if let Some(target) = target {
-        let duration = snap_duration(target - pos, v);
+        let duration = snap_duration(Points(target - pos), v);
         if duration > 0.0 {
             emit(surface, view, EventKind::MomentumScrollBegin);
         }
@@ -895,7 +785,8 @@ fn thumb(s: &ScrollState, w: f32, h: f32) -> Option<(CGRect, f32)> {
     } else {
         (h, s.content.1 + inset.top + inset.bottom, s.y)
     };
-    let (start, len) = indicator_span(dim, total, offset)?;
+    let (start, len) = indicator_span(Points(dim), Points(total), Points(offset))?;
+    let (start, len) = (start.0, len.0);
     let frame = if s.horizontal {
         let x = if s.mirrored { w - start - len } else { start };
         rect(x, h - INDICATOR_THICK - EDGE, len, INDICATOR_THICK)
@@ -1052,7 +943,7 @@ fn pin_sticky(surface: &Surface, view: &NshView) {
         (s.sticky.clone(), main(s) - lead, s.horizontal)
     };
     for c in &cells {
-        let t = sticky_shift(offset, c.start.0, c.end.0);
+        let t = sticky_shift(Points(offset), c.start, c.end).0;
         let shift = if horizontal { (t, 0.0) } else { (0.0, t) };
         with_cell(surface, view, c.cell, |cell| {
             let changed = {
@@ -1207,6 +1098,34 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
         moved_to(surface, view, pos + d);
     }
     report(surface, view);
+}
+
+/// Scrolls `view` at rest by `(dx, dy)` along its axis, within its rest
+/// limits: a selection dragged past its edge. False if it did not move.
+pub(crate) fn autoscroll(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) -> bool {
+    let (from, to) = {
+        let state = view.state();
+        let Some(s) = &state.scroll else {
+            return false;
+        };
+        if !matches!(s.live.phase, Phase::Idle) {
+            return false;
+        }
+        let (min, max) = limits(&state);
+        let from = main(s);
+        // Mirrored lists keep left-to-right offsets.
+        let d = match (s.horizontal, s.mirrored) {
+            (true, true) => -dx,
+            (true, false) => dx,
+            _ => dy,
+        };
+        (from, (from + d).clamp(min, max.max(min)))
+    };
+    if to == from {
+        return false;
+    }
+    moved_to(surface, view, to);
+    true
 }
 
 /// `StickyCells`.
@@ -1447,7 +1366,7 @@ pub(crate) fn thumb_move(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32
         } else {
             dx
         };
-        (start + thumb_scroll(d, max, travel)).clamp(min, max.max(min))
+        (start + thumb_scroll(Points(d), Points(max), Points(travel)).0).clamp(min, max.max(min))
     };
     moved_to(surface, view, pos);
 }
@@ -1532,12 +1451,13 @@ pub(crate) fn wheel(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32, tim
             // Trackpads stretch past the edges, as macOS does.
             let raw = raw + d;
             let to = dragged(
-                raw,
-                min,
-                max.max(min),
-                viewport(&state, s.horizontal),
+                Points(raw),
+                Points(min),
+                Points(max.max(min)),
+                Points(viewport(&state, s.horizontal)),
                 s.behavior.bounces,
-            );
+            )
+            .0;
             (to, total + d, raw)
         } else {
             // Past an edge (the refresh space) wheels only move back.
@@ -1765,23 +1685,6 @@ fn key_scroll_view(view: &NshView, horizontal: bool, dx: f32, dy: f32) -> Option
     chain.into_iter().nth(first)
 }
 
-/// Room kept around a view scrolled into view.
-const REVEAL_MARGIN: f32 = 16.0;
-
-/// How far a scroll view must move along an axis so that the span
-/// `[start, end)` (viewport coordinates) shows in `[0, viewport)`, with
-/// a margin; the start wins when the span does not fit.
-fn reveal_delta(start: f32, end: f32, viewport: f32) -> f32 {
-    let margin = REVEAL_MARGIN.min(viewport / 4.0);
-    if start < margin {
-        start - margin
-    } else if end > viewport - margin {
-        (end - (viewport - margin)).min(start - margin)
-    } else {
-        0.0
-    }
-}
-
 /// Scrolls the scroll views around `target` (animated) so that it shows,
 /// as iOS and Android do for the focused field. For the text fields: call
 /// it when one gets the keyboard focus.
@@ -1822,7 +1725,7 @@ pub(crate) fn reveal(surface: &Rc<Surface>, target: &NshView) {
         };
         // Pending animations count from where they are headed.
         let start = start - (base - pos);
-        let delta = reveal_delta(start, start + len, dim);
+        let delta = reveal_delta(Points(start), Points(start + len), Points(dim)).0;
         let to = (base + delta).clamp(min, max.max(min));
         if (to - base).abs() < 0.5 {
             continue;
@@ -1865,50 +1768,6 @@ mod tests {
     }
 
     #[test]
-    fn rubber_band_resists() {
-        assert_eq!(dragged(50.0, 0.0, 100.0, 400.0, true), 50.0);
-        let over = dragged(-100.0, 0.0, 100.0, 400.0, true);
-        assert!(over < 0.0 && over > -100.0, "{over}");
-        let more = dragged(-400.0, 0.0, 100.0, 400.0, true);
-        assert!(more < over && more > -400.0 * 0.55);
-        assert_eq!(dragged(-100.0, 0.0, 100.0, 400.0, false), 0.0);
-        assert_eq!(dragged(300.0, 0.0, 100.0, 400.0, false), 100.0);
-        assert!(dragged(150.0, 0.0, 100.0, 400.0, true) > 100.0);
-    }
-
-    #[test]
-    fn sticky_shift_clamps() {
-        assert_eq!(sticky_shift(0.0, 100.0, 300.0), 0.0);
-        assert_eq!(sticky_shift(150.0, 100.0, 300.0), 50.0);
-        assert_eq!(sticky_shift(500.0, 100.0, f32::INFINITY), 400.0);
-    }
-
-    #[test]
-    fn indicator_geometry() {
-        assert_eq!(indicator_span(400.0, 400.0, 0.0), None);
-        let (s0, l0) = indicator_span(400.0, 1600.0, 0.0).unwrap();
-        assert_eq!(s0, 2.0);
-        assert!((l0 - 99.0).abs() < 0.01);
-        let (_, l2) = indicator_span(400.0, 1600.0, -50.0).unwrap();
-        assert!(l2 < l0);
-        assert_eq!(indicator_alpha(INDICATOR_HOLD + INDICATOR_FADE), 0.0);
-    }
-
-    #[test]
-    fn thumb_follows_the_pointer() {
-        // The thumb's travel spans the scroll range: moving it by its
-        // whole travel scrolls to the end, and it ends that far along.
-        let (s0, l0) = indicator_span(400.0, 1600.0, 0.0).unwrap();
-        let travel = 400.0 - 2.0 * INDICATOR_MARGIN - l0;
-        let end = thumb_scroll(travel, 1200.0, travel);
-        assert!((end - 1200.0).abs() < 0.01);
-        let (s1, _) = indicator_span(400.0, 1600.0, end).unwrap();
-        assert!((s1 - s0 - travel).abs() < 0.01);
-        assert!(thumb_scroll(-10.0, 1200.0, travel) < 0.0);
-        assert_eq!(thumb_scroll(10.0, 1200.0, 0.0), 0.0);
-    }
-
-    #[test]
     fn scroll_keys() {
         assert_eq!(
             key_move(keys::DOWN, false, false),
@@ -1925,12 +1784,5 @@ mod tests {
             350.0
         );
         assert_eq!(key_target(KeyMove::End, 0.0, 400.0, 0.0, 1000.0), 1000.0);
-    }
-
-    #[test]
-    fn reveal_deltas() {
-        assert_eq!(reveal_delta(100.0, 140.0, 400.0), 0.0);
-        assert_eq!(reveal_delta(-30.0, 10.0, 400.0), -46.0);
-        assert_eq!(reveal_delta(200.0, 900.0, 400.0), 184.0);
     }
 }

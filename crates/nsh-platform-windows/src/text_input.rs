@@ -42,8 +42,6 @@
 //! Input accessory views (`inputAccessoryViewID`) belong over a software
 //! keyboard and have no meaning on the desktop: they are never shown.
 
-mod model;
-
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -54,6 +52,7 @@ use nsh_core::{
     TextAlign,
     geometry::{Point, Size},
     tailwind::state,
+    text_edit::{self as model, Composition, Model, Unit, key_of, pasted, utf16_to_byte},
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -100,7 +99,6 @@ use windows::{
 };
 use windows_numerics::Vector2;
 
-use self::model::{Composition, Model, Unit, key_of, pasted, utf16_to_byte};
 use crate::{
     input::{KeyEvent, Modifiers, PointerKind},
     render::{DrawCx, rect_f},
@@ -117,6 +115,14 @@ enum Drag {
     Word(usize, usize),
     /// Whole lines, from the line triple-clicked.
     Line(usize, usize),
+}
+
+/// The text input `view` holds now (`None`: it is no input).
+#[cfg(feature = "dev")]
+pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
+    let input = view.state().input.clone()?;
+    let text = input.model.borrow().text().to_owned();
+    Some(text)
 }
 
 /// The native side of an input view ([`crate::view::ViewState::input`]),
@@ -999,11 +1005,7 @@ fn read_composition(himc: HIMC) -> Composition {
     let attrs = composition_attributes(himc);
     let target =
         target_clause(&attrs).map(|(s, e)| (utf16_to_byte(&text, s), utf16_to_byte(&text, e)));
-    Composition {
-        text,
-        cursor,
-        target,
-    }
+    Composition::new(text, cursor, target)
 }
 
 /// The clause being converted (UTF-16 range) from composition attributes.
@@ -1467,37 +1469,6 @@ pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
         return;
     }
     insert(surface, &view, &input, &text, true);
-}
-
-/// An input method's composition in the focused field (the script's
-/// `mark`), as `WM_IME_STARTCOMPOSITION` and `WM_IME_COMPOSITION` make it;
-/// empty text ends it.
-pub(crate) fn mark(surface: &Rc<Surface>, text: &str) {
-    let Some(view) = focused(surface) else { return };
-    let Some(input) = input_of(&view) else {
-        return;
-    };
-    if !input.config.borrow().editable {
-        return;
-    }
-    let starts = input.model.borrow().composition.is_none();
-    if text.is_empty() {
-        input.model.borrow_mut().composition = None;
-    } else {
-        if starts && input.model.borrow().has_selection() {
-            let deleted = input.model.borrow_mut().delete(Unit::Char, false);
-            after_edit(surface, &view, &input, deleted);
-        }
-        input.model.borrow_mut().composition = Some(Composition {
-            text: text.to_owned(),
-            cursor: text.len(),
-            target: None,
-        });
-    }
-    input.relayout();
-    input.reveal();
-    view.changed();
-    report_composition(surface, &view, &input);
 }
 
 /// The window got (or lost) the keyboard focus: the focused field keeps

@@ -66,6 +66,8 @@ export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExt
  *
  * Rows are recycled: keep per-item state in your data (keyed by id), not in
  * signals created inside the row.
+ *
+ * @deprecated Import from "nsh".
  */
 export declare function List<T>(props: ListProps<T>): YNode;
 

@@ -6,7 +6,7 @@ order: 16
 
 # 样式参考
 
-本页列出 `style` 属性可用的每一个键。键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查它们。布局是默认纵向排列的 flexbox，数字的单位是点，同时支持这些 CSS 能力：网格、渐变、盒阴影、滤镜、混合模式、轮廓线、过渡和关键帧动画。
+本页列出 `style` 属性可用的每一个键，以及在 Rust 中设置它的 `Styled` 方法。Rust 组件用以 Tailwind 工具类命名的类型化方法为元素设置样式（`.p_4()`、`.rounded(px(12.0))`、`.bg(color)`，来自 `nsh_core::ui::prelude`），它们会落到同样的键上；TSX 传入 `style` 对象（以及 class）。Rust 列给出对应的方法；大多数方法接受一个值、一个 signal 或一个闭包，`.style_when(…)` / `.style_with(…)` 可以让任意样式按条件生效。键名和类型来自生成的声明文件 `.nsh/types/nsh/types.d.ts`，编辑器会在你输入时检查它们。布局是默认纵向排列的 flexbox，数字的单位是点，同时支持这些 CSS 能力：网格、渐变、盒阴影、滤镜、混合模式、轮廓线、过渡和关键帧动画。
 
 样式怎么写、怎样与 class 组合、文字样式如何继承，见 [样式](../docs/styling.md)。class 的语法见 [Tailwind 参考](./tailwind-reference.md)。
 
@@ -21,7 +21,26 @@ order: 16
 | `TextStyle` | `ViewStyle` | `<Text>` 和 `<Input>`（以及视图：视图上的文字样式会传给其中的文字） |
 | `ImageStyle` | `ViewStyle` | `<Image>` |
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+fn card() -> View {
+    view().p_4().rounded(px(12.0)).bg(white()).shadow([BoxShadow {
+        offset_y: px(4.0),
+        blur: px(12.0),
+        color: rgba(0x00000014).into(),
+        ..BoxShadow::default()
+    }])
+}
+
+fn title(label: &str) -> Text {
+    text(label.to_string()).text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(0x111111))
+}
+
+card().child(title("Hello"))
+```
+
+```tsx tabs
 import type { ViewStyle, TextStyle } from "nsh";
 import { Text, View } from "nsh";
 
@@ -39,9 +58,13 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 </View>;
 ```
 
-`style` 也接受数组：各项从左到右合并，假值会被跳过，因此条件样式无需展开运算：
+`style` 也接受数组：各项从左到右合并，假值会被跳过，因此条件样式无需展开运算。在 Rust 中，`.style_when(condition, …)` 在条件成立时加上样式：
 
-```tsx
+```rust tabs
+card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
+```
+
+```tsx tabs
 <View style={[card, selected() && { borderColor: "#2563eb", borderWidth: 2 }]} />
 ```
 
@@ -50,13 +73,13 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ## 值类型
 
-| 类型 | 接受 |
-|---|---|
-| `number` | 点（与密度无关）。`1` 在 iOS 上是一个 point，在 Android 上是一个 dp。 |
-| `DimensionValue` | `number`（点）、`` `${number}%` ``（相对父元素）或 `"auto"`。 |
-| `LengthValue` | `number`（点）或 `` `${number}%` ``，不接受 `"auto"`。 |
-| `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 |
-| `AnimatedNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 |
+| 类型 | 接受 | Rust |
+|---|---|---|
+| `number` | 点（与密度无关）。`1` 在 iOS 上是一个 point，在 Android 上是一个 dp。 | `Points`：`px(16.0)` |
+| `DimensionValue` | `number`（点）、`` `${number}%` ``（相对父元素）或 `"auto"`。 | `Length`：`px(…)`、`relative(0.5)`、`auto()` |
+| `LengthValue` | `number`（点）或 `` `${number}%` ``，不接受 `"auto"`。 | `DefiniteLength`：`px(…)`、`relative(0.5)` |
+| `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 | `Hsla` / `AdaptiveColor`：`rgb(0x2563eb)`、`hsla(…)`, 主题颜色（`theme().primary()`） |
+| `AnimatedNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 | `AnimatedValue` / `AnimatedNode`，用 `.bind_opacity(&v)`、`.bind_background(&v)`、`.bind_translate_x(&v)` 等绑定 |
 
 采用 CSS 语法的字符串（`boxShadow`、`backgroundImage`、`filter`、`gridTemplateColumns` 等）中，长度可写 `px` 或裸数字（都是点）、`pt`，或 `rem`（16 点）。
 
@@ -66,58 +89,67 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 显示与定位
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `display` | `"flex" \| "grid" \| "block" \| "none"` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
-| `position` | `"relative" \| "absolute"` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对父元素定位。默认 `"relative"`。 |
-| `top` | `DimensionValue` | 距父元素上边（绝对定位），或相对自身位置的偏移（相对定位）。 |
-| `right` | `DimensionValue` | 距右边的偏移。从右到左布局中表示结束边。 |
-| `bottom` | `DimensionValue` | 距下边的偏移。 |
-| `left` | `DimensionValue` | 距左边的偏移。从右到左布局中表示起始边。 |
-| `start` | `DimensionValue` | 从左到右布局中为左，从右到左布局中为右。 |
-| `end` | `DimensionValue` | 从左到右布局中为右，从右到左布局中为左。 |
-| `zIndex` | `number` | 在兄弟元素间的次序（值相同时保持原顺序），也是原生视图的叠放次序。 |
-| `direction` | `"inherit" \| "ltr" \| "rtl"` | 布局方向，默认继承。从右到左时，`left` 和 `right` 属性表示起始和结束。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `display` | `"flex" \| "grid" \| "block" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
+| `position` | `"relative" \| "absolute"` | `.relative()`、`.absolute()` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对父元素定位。默认 `"relative"`。 |
+| `top` | `DimensionValue` | `.top(…)`、`.inset(…)` | 距父元素上边（绝对定位），或相对自身位置的偏移（相对定位）。 |
+| `right` | `DimensionValue` | `.right(…)` | 距右边的偏移。从右到左布局中表示结束边。 |
+| `bottom` | `DimensionValue` | `.bottom(…)` | 距下边的偏移。 |
+| `left` | `DimensionValue` | `.left(…)` | 距左边的偏移。从右到左布局中表示起始边。 |
+| `start` | `DimensionValue` | | 从左到右布局中为左，从右到左布局中为右。 |
+| `end` | `DimensionValue` | | 从左到右布局中为右，从右到左布局中为左。 |
+| `zIndex` | `number` | `.z_index(z)` | 在兄弟元素间的次序（值相同时保持原顺序），也是原生视图的叠放次序。 |
+| `direction` | `"inherit" \| "ltr" \| "rtl"` | | 布局方向，默认继承。从右到左时，`left` 和 `right` 属性表示起始和结束。 |
 
 ### Flexbox
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `flexDirection` | `"row" \| "column" \| "row-reverse" \| "column-reverse"` | 主轴方向。默认 `"column"`。 |
-| `flexWrap` | `"wrap" \| "nowrap" \| "wrap-reverse"` | 子元素是否换行。默认 `"nowrap"`。 |
-| `flex` | `number` | 单个数字，不是 CSS 简写：正数会把 `flexGrow` 设为该值，同时 `flexShrink: 1`、`flexBasis: 0`；`0` 让元素不伸缩；负数让元素可以收缩到最小尺寸。 |
-| `flexGrow` | `number` | 占用剩余空间的比例。默认 `0`。 |
-| `flexShrink` | `number` | 空间不足时的收缩比例。默认 `0`，而不是 CSS 的 `1`。 |
-| `flexBasis` | `DimensionValue` | 分配剩余空间之前的主轴尺寸。 |
-| `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | 子元素沿主轴的分布。默认 `"normal"`：在 flex 容器中即 `"flex-start"`；在网格中，尺寸为 `auto` 的轨道会拉伸。 |
-| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
-| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 为当前元素覆盖父元素的 `alignItems`。 |
-| `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | 多行（及网格轨道）在交叉轴上的分布。flex 容器中默认 `"flex-start"`，网格中默认 `"normal"`，尺寸为 `auto` 的轨道会拉伸。`"start"` / `"end"` 跟随书写方向。 |
-| `gap` | `LengthValue` | 子元素行与列之间的间距。 |
-| `rowGap` | `LengthValue` | 行间距。 |
-| `columnGap` | `LengthValue` | 列间距。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `flexDirection` | `"row" \| "column" \| "row-reverse" \| "column-reverse"` | `.flex_row()`、`.flex_col()`、`.flex_row_reverse()`、`.flex_col_reverse()` | 主轴方向。默认 `"column"`。 |
+| `flexWrap` | `"wrap" \| "nowrap" \| "wrap-reverse"` | `.flex_wrap()` | 子元素是否换行。默认 `"nowrap"`。 |
+| `flex` | `number` | `.flex_1()`、`.flex_auto()`、`.flex_none()` | 单个数字，不是 CSS 简写：正数会把 `flexGrow` 设为该值，同时 `flexShrink: 1`、`flexBasis: 0`；`0` 让元素不伸缩；负数让元素可以收缩到最小尺寸。 |
+| `flexGrow` | `number` | `.flex_grow(f)` | 占用剩余空间的比例。默认 `0`。 |
+| `flexShrink` | `number` | `.flex_shrink(f)`、`.flex_shrink_0()` | 空间不足时的收缩比例。默认 `0`，而不是 CSS 的 `1`。 |
+| `flexBasis` | `DimensionValue` | `.basis(…)` | 分配剩余空间之前的主轴尺寸。 |
+| `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | `.justify_start()`、`.justify_center()`、`.justify_end()`、`.justify_between()`、`.justify_around()`、`.justify_evenly()` | 子元素沿主轴的分布。默认 `"normal"`：在 flex 容器中即 `"flex-start"`；在网格中，尺寸为 `auto` 的轨道会拉伸。 |
+| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | `.items_start()`、`.items_center()`、`.items_end()`、`.items_stretch()`、`.items_baseline()` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
+| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | `.self_start()`、`.self_center()`、`.self_end()`、`.self_stretch()` | 为当前元素覆盖父元素的 `alignItems`。 |
+| `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | | 多行（及网格轨道）在交叉轴上的分布。flex 容器中默认 `"flex-start"`，网格中默认 `"normal"`，尺寸为 `auto` 的轨道会拉伸。`"start"` / `"end"` 跟随书写方向。 |
+| `gap` | `LengthValue` | `.gap(…)`、`.gap_4()` | 子元素行与列之间的间距。 |
+| `rowGap` | `LengthValue` | `.gap_y(…)` | 行间距。 |
+| `columnGap` | `LengthValue` | `.gap_x(…)` | 列间距。 |
 
 ### 网格
 
 设置 `display: "grid"` 后，子元素按 CSS 网格排列。轨道列表使用 CSS 语法。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `gridTemplateColumns` | `string` | 列轨道：`"repeat(3, 1fr)"`、`"200px 1fr"`、`minmax()`、`auto-fill` / `auto-fit`、网格线名称（`"[a] 40px [b c] 1fr [d]"`）。 |
-| `gridTemplateRows` | `string` | 行轨道，语法同上。 |
-| `gridAutoColumns` | `string` | 隐式创建的列的尺寸。 |
-| `gridAutoRows` | `string` | 隐式创建的行的尺寸。 |
-| `gridAutoFlow` | `"row" \| "column" \| "dense" \| "row dense" \| "column dense"` | 未指定位置的项目如何填入网格。 |
-| `gridColumn` | `number \| string` | 列位置：`"1 / 3"`、`"span 2"`、网格线编号或名称（`"content-start / content-end"`、`"2 col"`、`"span col"`）。 |
-| `gridColumnStart` | `number \| string` | 起始列线。 |
-| `gridColumnEnd` | `number \| string` | 结束列线。 |
-| `gridRow` | `number \| string` | 行位置，语法同 `gridColumn`。 |
-| `gridRowStart` | `number \| string` | 起始行线。 |
-| `gridRowEnd` | `number \| string` | 结束行线。 |
-| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 网格项在其区域内沿行方向的位置。 |
-| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 为当前项覆盖 `justifyItems`。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `gridTemplateColumns` | `string` | `.grid_template_columns(…)`、`.grid_cols(n)` | 列轨道：`"repeat(3, 1fr)"`、`"200px 1fr"`、`minmax()`、`auto-fill` / `auto-fit`、网格线名称（`"[a] 40px [b c] 1fr [d]"`）。 |
+| `gridTemplateRows` | `string` | `.grid_template_rows(…)`、`.grid_rows(n)` | 行轨道，语法同上。 |
+| `gridAutoColumns` | `string` | | 隐式创建的列的尺寸。 |
+| `gridAutoRows` | `string` | | 隐式创建的行的尺寸。 |
+| `gridAutoFlow` | `"row" \| "column" \| "dense" \| "row dense" \| "column dense"` | `.grid_flow_col()`、`.grid_flow_dense()` | 未指定位置的项目如何填入网格。 |
+| `gridColumn` | `number \| string` | `.col_span(n)`、`.col_span_full()` | 列位置：`"1 / 3"`、`"span 2"`、网格线编号或名称（`"content-start / content-end"`、`"2 col"`、`"span col"`）。 |
+| `gridColumnStart` | `number \| string` | `.col_start(…)` | 起始列线。 |
+| `gridColumnEnd` | `number \| string` | `.col_end(…)` | 结束列线。 |
+| `gridRow` | `number \| string` | `.row_span(n)`、`.row_span_full()` | 行位置，语法同 `gridColumn`。 |
+| `gridRowStart` | `number \| string` | `.row_start(…)` | 起始行线。 |
+| `gridRowEnd` | `number \| string` | `.row_end(…)` | 结束行线。 |
+| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | 网格项在其区域内沿行方向的位置。 |
+| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | 为当前项覆盖 `justifyItems`。 |
 
-```tsx
+```rust tabs
+view()
+    .grid()
+    .grid_template_columns("repeat(3, 1fr)")
+    .gap_2()
+    .child(view().col_span(2).h(px(60.0)).bg(rgb(0xc7d2fe)))
+    .child(view().h(px(60.0)).bg(rgb(0xa5b4fc)))
+```
+
+```tsx tabs
 <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
   <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
   <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
@@ -126,45 +158,45 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 尺寸
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `width` | `DimensionValue` | 宽度。 |
-| `height` | `DimensionValue` | 高度。 |
-| `minWidth` | `LengthValue` | 最小宽度。 |
-| `minHeight` | `LengthValue` | 最小高度。 |
-| `maxWidth` | `LengthValue` | 最大宽度。 |
-| `maxHeight` | `LengthValue` | 最大高度。 |
-| `aspectRatio` | `number` | 宽高比（宽 ÷ 高），缺少的一边由另一边算出。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `width` | `DimensionValue` | `.w(…)`、`.w_full()`、`.size(…)` | 宽度。 |
+| `height` | `DimensionValue` | `.h(…)`、`.h_full()` | 高度。 |
+| `minWidth` | `LengthValue` | `.min_w(…)` | 最小宽度。 |
+| `minHeight` | `LengthValue` | `.min_h(…)` | 最小高度。 |
+| `maxWidth` | `LengthValue` | `.max_w(…)` | 最大宽度。 |
+| `maxHeight` | `LengthValue` | `.max_h(…)` | 最大高度。 |
+| `aspectRatio` | `number` | `.aspect_ratio(r)`、`.aspect_square()` | 宽高比（宽 ÷ 高），缺少的一边由另一边算出。 |
 
 ### 外边距
 
 外边距接受 `"auto"`（与 flexbox 中一样吸收剩余空间）和负值。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `margin` | `DimensionValue` | 四边。 |
-| `marginHorizontal` | `DimensionValue` | 左右。 |
-| `marginVertical` | `DimensionValue` | 上下。 |
-| `marginTop` | `DimensionValue` | 上。 |
-| `marginRight` | `DimensionValue` | 右。 |
-| `marginBottom` | `DimensionValue` | 下。 |
-| `marginLeft` | `DimensionValue` | 左。 |
-| `marginStart` | `DimensionValue` | 从左到右布局中为左，从右到左布局中为右。 |
-| `marginEnd` | `DimensionValue` | 与 `marginStart` 相对的一边。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `margin` | `DimensionValue` | `.m(…)`、`.m_4()` | 四边。 |
+| `marginHorizontal` | `DimensionValue` | `.mx(…)` | 左右。 |
+| `marginVertical` | `DimensionValue` | `.my(…)` | 上下。 |
+| `marginTop` | `DimensionValue` | `.mt(…)` | 上。 |
+| `marginRight` | `DimensionValue` | `.mr(…)` | 右。 |
+| `marginBottom` | `DimensionValue` | `.mb(…)` | 下。 |
+| `marginLeft` | `DimensionValue` | `.ml(…)` | 左。 |
+| `marginStart` | `DimensionValue` | `.ms(…)` | 从左到右布局中为左，从右到左布局中为右。 |
+| `marginEnd` | `DimensionValue` | `.me(…)` | 与 `marginStart` 相对的一边。 |
 
 ### 内边距
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `padding` | `LengthValue` | 四边。 |
-| `paddingHorizontal` | `LengthValue` | 左右。 |
-| `paddingVertical` | `LengthValue` | 上下。 |
-| `paddingTop` | `LengthValue` | 上。 |
-| `paddingRight` | `LengthValue` | 右。 |
-| `paddingBottom` | `LengthValue` | 下。 |
-| `paddingLeft` | `LengthValue` | 左。 |
-| `paddingStart` | `LengthValue` | 从左到右布局中为左，从右到左布局中为右。 |
-| `paddingEnd` | `LengthValue` | 与 `paddingStart` 相对的一边。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `padding` | `LengthValue` | `.p(…)`、`.p_4()` | 四边。 |
+| `paddingHorizontal` | `LengthValue` | `.px(…)` | 左右。 |
+| `paddingVertical` | `LengthValue` | `.py(…)` | 上下。 |
+| `paddingTop` | `LengthValue` | `.pt(…)` | 上。 |
+| `paddingRight` | `LengthValue` | `.pr(…)` | 右。 |
+| `paddingBottom` | `LengthValue` | `.pb(…)` | 下。 |
+| `paddingLeft` | `LengthValue` | `.pl(…)` | 左。 |
+| `paddingStart` | `LengthValue` | `.ps(…)` | 从左到右布局中为左，从右到左布局中为右。 |
+| `paddingEnd` | `LengthValue` | `.pe(…)` | 与 `paddingStart` 相对的一边。 |
 
 ## ViewStyle
 
@@ -172,75 +204,86 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 背景
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `backgroundColor` | `ColorValue \| AnimatedNode` | 填充色。接受原生动画颜色。 |
-| `backgroundImage` | `string` | 画在背景色之上的 CSS 渐变：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`，多个用逗号分隔。 |
-| `experimental_backgroundImage` | `string` | `backgroundImage` 的别名。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`、`.bind_background(&node)` | 填充色。接受原生动画颜色。 |
+| `backgroundImage` | `string` | `.bg_linear(angle)`、`.bg_radial()`、`.bg_conic()` 配合 `.gradient_from` / `_via` / `_to` | 画在背景色之上的 CSS 渐变：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`，多个用逗号分隔。 |
+| `experimental_backgroundImage` | `string` | | `backgroundImage` 的别名。 |
 
-```tsx
+```rust tabs
+view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
+```
+
+```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #6366f1, #ec4899)" }} />
 ```
 
 ### 边框
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `borderWidth` | `number` | 四边宽度。 |
-| `borderTopWidth` | `number` | 上边。 |
-| `borderRightWidth` | `number` | 右边。 |
-| `borderBottomWidth` | `number` | 下边。 |
-| `borderLeftWidth` | `number` | 左边。 |
-| `borderStartWidth` | `number` | 起始边（从左到右布局中为左）。 |
-| `borderEndWidth` | `number` | 结束边。 |
-| `borderColor` | `ColorValue` | 四边颜色。 |
-| `borderTopColor` | `ColorValue` | 上边。 |
-| `borderRightColor` | `ColorValue` | 右边。 |
-| `borderBottomColor` | `ColorValue` | 下边。 |
-| `borderLeftColor` | `ColorValue` | 左边。 |
-| `borderStartColor` | `ColorValue` | 起始边。 |
-| `borderEndColor` | `ColorValue` | 结束边。 |
-| `borderStyle` | `"solid" \| "dashed" \| "dotted"` | 线型。默认 `"solid"`。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `borderWidth` | `number` | `.border(w)`、`.border_1()`、`.border_2()` | 四边宽度。 |
+| `borderTopWidth` | `number` | `.border_t(w)` | 上边。 |
+| `borderRightWidth` | `number` | `.border_r(w)` | 右边。 |
+| `borderBottomWidth` | `number` | `.border_b(w)` | 下边。 |
+| `borderLeftWidth` | `number` | `.border_l(w)` | 左边。 |
+| `borderStartWidth` | `number` | `.border_s(w)` | 起始边（从左到右布局中为左）。 |
+| `borderEndWidth` | `number` | `.border_e(w)` | 结束边。 |
+| `borderColor` | `ColorValue` | `.border_color(c)` | 四边颜色。 |
+| `borderTopColor` | `ColorValue` | `.border_t_color(c)` | 上边。 |
+| `borderRightColor` | `ColorValue` | `.border_r_color(c)` | 右边。 |
+| `borderBottomColor` | `ColorValue` | `.border_b_color(c)` | 下边。 |
+| `borderLeftColor` | `ColorValue` | `.border_l_color(c)` | 左边。 |
+| `borderStartColor` | `ColorValue` | `.border_s_color(c)` | 起始边。 |
+| `borderEndColor` | `ColorValue` | `.border_e_color(c)` | 结束边。 |
+| `borderStyle` | `"solid" \| "dashed" \| "dotted"` | `.border_solid()`、`.border_dashed()`、`.border_dotted()` | 线型。默认 `"solid"`。 |
 
 ### 圆角
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `borderRadius` | `number` | 四个角的半径。 |
-| `borderTopLeftRadius` | `number` | 左上角。 |
-| `borderTopRightRadius` | `number` | 右上角。 |
-| `borderBottomRightRadius` | `number` | 右下角。 |
-| `borderBottomLeftRadius` | `number` | 左下角。 |
-| `borderTopStartRadius` | `number` | 起始侧的上角。 |
-| `borderTopEndRadius` | `number` | 结束侧的上角。 |
-| `borderBottomStartRadius` | `number` | 起始侧的下角。 |
-| `borderBottomEndRadius` | `number` | 结束侧的下角。 |
-| `borderCurve` | `"circular" \| "continuous"` | `"continuous"`：曲率平滑过渡到直边的圆角，类似 iOS 应用图标。盒子太小时退回普通圆角，所以胶囊形依然是胶囊形。两个平台都支持。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `borderRadius` | `number` | `.rounded(r)`、`.rounded_lg()` | 四个角的半径。 |
+| `borderTopLeftRadius` | `number` | `.rounded_tl(r)` | 左上角。 |
+| `borderTopRightRadius` | `number` | `.rounded_tr(r)` | 右上角。 |
+| `borderBottomRightRadius` | `number` | `.rounded_br(r)` | 右下角。 |
+| `borderBottomLeftRadius` | `number` | `.rounded_bl(r)` | 左下角。 |
+| `borderTopStartRadius` | `number` | `.rounded_ss(r)` | 起始侧的上角。 |
+| `borderTopEndRadius` | `number` | `.rounded_se(r)` | 结束侧的上角。 |
+| `borderBottomStartRadius` | `number` | `.rounded_es(r)` | 起始侧的下角。 |
+| `borderBottomEndRadius` | `number` | `.rounded_ee(r)` | 结束侧的下角。 |
+| `borderCurve` | `"circular" \| "continuous"` | `.border_curve(curve)` | `"continuous"`：曲率平滑过渡到直边的圆角，类似 iOS 应用图标。盒子太小时退回普通圆角，所以胶囊形依然是胶囊形。两个平台都支持。 |
 
 ### 轮廓线
 
 轮廓线画在边框之外，不占布局空间。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `outlineWidth` | `number` | 线宽。 |
-| `outlineColor` | `ColorValue` | 颜色。 |
-| `outlineStyle` | `"solid" \| "double" \| "dashed" \| "dotted" \| "none" \| "hidden"` | 线型。 |
-| `outlineOffset` | `number` | 与边框外缘的距离；负值向内。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `outlineWidth` | `number` | `.outline(w)` | 线宽。 |
+| `outlineColor` | `ColorValue` | `.outline_color(c)` | 颜色。 |
+| `outlineStyle` | `"solid" \| "double" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.outline_dashed()`、`.outline_dotted()`、`.outline_none()` | 线型。 |
+| `outlineOffset` | `number` | `.outline_offset(o)` | 与边框外缘的距离；负值向内。 |
 
 ### 阴影
 
 两种方式投射阴影：CSS 的 `boxShadow`（多层、扩展、内阴影），或四个 `shadow*` 键。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `boxShadow` | `string` | CSS `box-shadow`：偏移、模糊、扩展和颜色，多层用逗号分隔，`inset` 表示内阴影。 |
-| `shadowColor` | `ColorValue` | 阴影颜色。 |
-| `shadowOffset` | `{ width: number; height: number }` | 偏移。默认 `{ width: 0, height: -3 }`。 |
-| `shadowOpacity` | `number` | 不透明度，0 到 1。默认 `0`（无阴影）。 |
-| `shadowRadius` | `number` | 模糊半径。默认 `3`。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `boxShadow` | `string` | `.shadow([BoxShadow { … }])`、`.shadow_md()` | CSS `box-shadow`：偏移、模糊、扩展和颜色，多层用逗号分隔，`inset` 表示内阴影。 |
+| `shadowColor` | `ColorValue` | `.shadow_color(c)` | 阴影颜色。 |
+| `shadowOffset` | `{ width: number; height: number }` | `.shadow_offset(point)` | 偏移。默认 `{ width: 0, height: -3 }`。 |
+| `shadowOpacity` | `number` | `.shadow_opacity(o)` | 不透明度，0 到 1。默认 `0`（无阴影）。 |
+| `shadowRadius` | `number` | `.shadow_radius(r)` | 模糊半径。默认 `3`。 |
 
-```tsx
+```rust tabs
+view().p_4().rounded(px(12.0)).bg(white()).shadow([
+    BoxShadow { offset_y: px(1.0), blur: px(2.0), color: rgba(0x0000000f).into(), ..BoxShadow::default() },
+    BoxShadow { offset_y: px(8.0), blur: px(24.0), spread: px(-4.0), color: rgba(0x0000001f).into(), ..BoxShadow::default() },
+])
+```
+
+```tsx tabs
 <View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
   boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
 ```
@@ -250,31 +293,35 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 不透明度、可见性与裁剪
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `opacity` | `number \| AnimatedNode` | 0（不可见）到 1。接受原生动画值。 |
-| `visibility` | `"visible" \| "hidden" \| "collapse"` | 隐藏的视图仍占据布局空间（与 `display: "none"` 不同）。 |
-| `overflow` | `"visible" \| "hidden"` | `"hidden"` 将子元素裁剪到视图边界（含圆角）。 |
-| `backfaceVisibility` | `"visible" \| "hidden"` | `"hidden"`：3D 旋转转到背面时不可见。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `opacity` | `number \| AnimatedNode` | `.opacity(o)`、`.bind_opacity(&value)` | 0（不可见）到 1。接受原生动画值。 |
+| `visibility` | `"visible" \| "hidden" \| "collapse"` | | 隐藏的视图仍占据布局空间（与 `display: "none"` 不同）。 |
+| `overflow` | `"visible" \| "hidden"` | `.overflow_hidden()` | `"hidden"` 将子元素裁剪到视图边界（含圆角）。 |
+| `backfaceVisibility` | `"visible" \| "hidden"` | `.backface_hidden()`、`.backface_visible()` | `"hidden"`：3D 旋转转到背面时不可见。 |
 
 ### 变换
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `transform` | `TransformStep[]` | 步骤列表，与 CSS 一样从右向左应用。 |
-| `transformOrigin` | `string \| (number \| string)[]` | `transform` 的作用中心：关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`）。默认为中心。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `transform` | `TransformStep[]` | `.translate_x(…)`、`.scale(…)`、`.rotate(…)`……（见下文） | 步骤列表，与 CSS 一样从右向左应用。 |
+| `transformOrigin` | `string \| (number \| string)[]` | `.transform_origin(…)`、`.origin_top_left()` 等 | `transform` 的作用中心：关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`）。默认为中心。 |
 
 `TransformStep` 是只有一个键的对象：
 
-| 步骤 | 值 | 原生动画 |
-|---|---|---|
-| `translateX`、`translateY` | `number`（点） | 支持 |
-| `scale`、`scaleX`、`scaleY` | `number`（倍数） | 支持 |
-| `rotate`、`rotateZ`、`rotateX`、`rotateY` | `number`（度）或 `string`（`"45deg"`、`"0.5rad"`） | 支持 |
-| `skewX`、`skewY` | `number`（度）或 `string` | 不支持 |
-| `perspective` | `number` | 不支持 |
+| 步骤 | 值 | Rust | 原生动画 |
+|---|---|---|---|
+| `translateX`、`translateY` | `number`（点） | `.translate_x(…)`、`.translate_y(…)`；`.bind_translate_x(&v)` | 支持 |
+| `scale`、`scaleX`、`scaleY` | `number`（倍数） | `.scale(f)`、`.scale_x(f)`、`.scale_y(f)`；`.bind_scale(&v)` | 支持 |
+| `rotate`、`rotateZ`、`rotateX`、`rotateY` | `number`（度）或 `string`（`"45deg"`、`"0.5rad"`） | `.rotate(deg(…))`、`.rotate_x(…)`、`.rotate_y(…)`；`.bind_rotate(&v)` | 支持 |
+| `skewX`、`skewY` | `number`（度）或 `string` | `.skew_x(…)`、`.skew_y(…)` | 不支持 |
+| `perspective` | `number` | `.perspective(d)` | 不支持 |
 
-```tsx
+```rust tabs
+view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
+```
+
+```tsx tabs
 <View style={{ transform: [{ perspective: 600 }, { rotateY: "20deg" }, { scale: 0.95 }] }} />
 ```
 
@@ -283,11 +330,11 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 滤镜与混合
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `filter` | `string` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
-| `backdropFilter` | `string` | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
-| `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | 视图与背后内容的混合方式。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
+| `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
+| `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
 > [!WARNING]
 > 平台限制：
@@ -299,14 +346,23 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 当参与过渡的属性改变时（来自新样式、class，或 `active:` 等变体），平台以原生方式执行动画，期间不运行任何 JS。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `transitionProperty` | `string` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`（`color`、`backgroundColor`、`borderColor` 等）、`"opacity"`、`"transform"`、`"boxShadow"`、`"borderRadius"`、`"borderWidth"`，或 `"none"`。 |
-| `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | 数字表示毫秒，也可写 `"150ms"` / `"0.2s"`。 |
-| `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | 过渡开始前的延迟。 |
-| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | 缓动曲线。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `transitionProperty` | `string` | `.transition()`、`.transition_all()`、`.transition_colors()`、`.transition_opacity()`、`.transition_shadow()`、`.transition_transform()`、`.transition_none()` | 参与动画的属性，用逗号分隔：`"all"`、`"colors"`（`color`、`backgroundColor`、`borderColor` 等）、`"opacity"`、`"transform"`、`"boxShadow"`、`"borderRadius"`、`"borderWidth"`，或 `"none"`。 |
+| `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | `.duration(ms)` | 数字表示毫秒，也可写 `"150ms"` / `"0.2s"`。 |
+| `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | `.delay(ms)` | 过渡开始前的延迟。 |
+| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.ease_linear()`、`.ease_in()`、`.ease_out()`、`.ease_in_out()`、`.ease_bezier(…)` | 缓动曲线。 |
 
-```tsx
+```rust tabs
+view()
+    .on_press(move || open.update(|o| *o = !*o))
+    .h(move || px(if open.get() { 160.0 } else { 56.0 }))
+    .opacity(move || if open.get() { 1.0 } else { 0.8 })
+    .transition()
+    .duration(200.0)
+```
+
+```tsx tabs
 <View
   onPress={() => open.set(!open())}
   style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
@@ -318,21 +374,21 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 内置的关键帧动画，以原生方式运行（对应 Tailwind 的 `animate-*`）。
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `animationName` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | 动画名称。 |
-| `animationDuration` | `number \| "${number}ms" \| "${number}s"` | 单次时长。 |
-| `animationDelay` | `number \| "${number}ms" \| "${number}s"` | 首次开始前的延迟。 |
-| `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | 缓动曲线。 |
-| `animationIterationCount` | `number \| "infinite"` | 重复次数。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `animationName` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | `.animate_spin()`、`.animate_ping()`、`.animate_pulse()`、`.animate_bounce()`、`.animate_none()` | 动画名称。 |
+| `animationDuration` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | 单次时长。 |
+| `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | 首次开始前的延迟。 |
+| `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | 缓动曲线。 |
+| `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | 重复次数。 |
 
 由数值、手势或弹簧驱动的动画请使用 [nsh/animated](./nsh-animated.md)。
 
 ### 指针
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...`（所有 CSS 光标关键字及 `"none"`） | `.cursor(Cursor)`、`.cursor_pointer()` | 指针悬停在视图上时的形状，适用于指针设备（iPad 触控板、Mac Catalyst、桌面）。 |
 
 ## TextStyle
 
@@ -340,53 +396,53 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ### 字体
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `color` | `ColorValue` | 文字颜色。 |
-| `fontSize` | `number` | 字号，单位为点。 |
-| `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `"normal"`（400）、`"bold"`（700）或 100–900。 |
-| `fontFamily` | `string` | 系统字体族，或导入字体得到的名字（`import Inter from "./Inter.ttf"`）。见 [字体](../docs/fonts.md)。 |
-| `fontStyle` | `"normal" \| "italic"` | 斜体。 |
-| `fontVariant` | `("small-caps" \| "oldstyle-nums" \| "lining-nums" \| "tabular-nums" \| "proportional-nums")[]` | OpenType 数字与字母形式。`tabular-nums` 让数字等宽，适合计数器和计时器。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `color` | `ColorValue` | `.text_color(c)` | 文字颜色。 |
+| `fontSize` | `number` | `.text_size(s)`、`.text_sm()`、`.text_lg()` 等 | 字号，单位为点。 |
+| `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `.font_weight(FontWeight::SEMIBOLD)` | `"normal"`（400）、`"bold"`（700）或 100–900。 |
+| `fontFamily` | `string` | `.font_family(name)` | 系统字体族，或导入字体得到的名字（`import Inter from "./Inter.ttf"`）。见 [字体](../docs/fonts.md)。 |
+| `fontStyle` | `"normal" \| "italic"` | `.italic()` | 斜体。 |
+| `fontVariant` | `("small-caps" \| "oldstyle-nums" \| "lining-nums" \| "tabular-nums" \| "proportional-nums")[]` | `.small_caps()`、`.oldstyle_nums()`、`.lining_nums()`、`.tabular_nums()`、`.proportional_nums()` | OpenType 数字与字母形式。`tabular-nums` 让数字等宽，适合计数器和计时器。 |
 
 ### 间距与对齐
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `lineHeight` | `number` | 行高，单位为点。 |
-| `letterSpacing` | `number` | 字符间的额外间距，单位为点。 |
-| `textAlign` | `"auto" \| "left" \| "center" \| "right" \| "justify"` | 水平对齐。 |
-| `textAlignVertical` | `"auto" \| "top" \| "center" \| "bottom"` | 文字比盒子矮时的位置（设置了高度的 `<Text>`）。 |
-| `writingDirection` | `"auto" \| "ltr" \| "rtl"` | 文字的基础方向；`"auto"` 由内容决定。 |
-| `textTransform` | `"none" \| "uppercase" \| "lowercase" \| "capitalize"` | 大小写转换。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `lineHeight` | `number` | `.line_height(h)` | 行高，单位为点。 |
+| `letterSpacing` | `number` | `.letter_spacing(s)` | 字符间的额外间距，单位为点。 |
+| `textAlign` | `"auto" \| "left" \| "center" \| "right" \| "justify"` | `.text_left()`、`.text_center()`、`.text_right()`、`.text_justify()` | 水平对齐。 |
+| `textAlignVertical` | `"auto" \| "top" \| "center" \| "bottom"` | | 文字比盒子矮时的位置（设置了高度的 `<Text>`）。 |
+| `writingDirection` | `"auto" \| "ltr" \| "rtl"` | `.writing_direction(d)` | 文字的基础方向；`"auto"` 由内容决定。 |
+| `textTransform` | `"none" \| "uppercase" \| "lowercase" \| "capitalize"` | `.uppercase()`、`.lowercase()`、`.capitalize()`、`.normal_case()` | 大小写转换。 |
 
 > [!TIP]
 > Tailwind 的 `leading-*` 和 `tracking-*` 把行高设为字号的倍数、把字间距设为 `em`，因此会随 `text-*` 字号缩放。
 
 ### 装饰线
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `textDecorationLine` | `"none" \| "underline" \| "line-through" \| "underline line-through"` | 与文字一起绘制的线。 |
-| `textDecorationColor` | `ColorValue` | 线的颜色（默认为文字颜色）。 |
-| `textDecorationStyle` | `"solid" \| "double" \| "dotted" \| "dashed" \| "wavy"` | 线型。 |
-| `textDecorationThickness` | `number \| "auto" \| "from-font"` | 线的粗细。 |
-| `textUnderlineOffset` | `number \| "auto"` | 下划线与基线的距离。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `textDecorationLine` | `"none" \| "underline" \| "line-through" \| "underline line-through"` | `.underline()`、`.line_through()`、`.no_underline()` | 与文字一起绘制的线。 |
+| `textDecorationColor` | `ColorValue` | `.text_decoration_color(c)` | 线的颜色（默认为文字颜色）。 |
+| `textDecorationStyle` | `"solid" \| "double" \| "dotted" \| "dashed" \| "wavy"` | `.text_decoration_solid()`、`_double()`、`_dotted()`、`_dashed()`、`_wavy()` | 线型。 |
+| `textDecorationThickness` | `number \| "auto" \| "from-font"` | `.text_decoration_thickness(t)` | 线的粗细。 |
+| `textUnderlineOffset` | `number \| "auto"` | `.underline_offset(o)` | 下划线与基线的距离。 |
 
 ### 占位符与选区
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `placeholderColor` | `ColorValue` | `<Input>` 占位文字的颜色（`placeholder:text-*`）。 |
-| `selectionColor` | `ColorValue` | `<Input>` 的光标和选区、可选 `<Text>` 的选区高亮和选择柄（`selection:text-*`）；默认为平台的强调色。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `placeholderColor` | `ColorValue` | 输入框的 `.placeholder_color(c)` | `<Input>` 占位文字的颜色（`placeholder:text-*`）。 |
+| `selectionColor` | `ColorValue` | 输入框或文本的 `.selection_color(c)` | `<Input>` 的光标和选区、可选 `<Text>` 的选区高亮和选择柄（`selection:text-*`）；默认为平台的强调色。 |
 
 ### 文字阴影
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `textShadowColor` | `ColorValue` | 阴影颜色。 |
-| `textShadowOffset` | `{ width: number; height: number }` | 阴影偏移。 |
-| `textShadowRadius` | `number` | 模糊半径。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `textShadowColor` | `ColorValue` | `.text_shadow_color(c)` | 阴影颜色。 |
+| `textShadowOffset` | `{ width: number; height: number }` | `.text_shadow_offset(point)` | 阴影偏移。 |
+| `textShadowRadius` | `number` | `.text_shadow_radius(r)` | 模糊半径。 |
 
 > [!NOTE]
 > iOS 不会在 `<Text>` 上绘制渐变（`backgroundImage`）或内阴影。
@@ -395,9 +451,9 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 包含 `ViewStyle` 的全部键，另加：
 
-| 键 | 类型 | 说明 |
-|---|---|---|
-| `tintColor` | `ColorValue` | 为模板图片重新着色（所有不透明像素都变成这个颜色），用于单色图标。 |
+| 键 | 类型 | Rust | 说明 |
+|---|---|---|---|
+| `tintColor` | `ColorValue` | 图片的 `.tint_color(c)` | 为模板图片重新着色（所有不透明像素都变成这个颜色），用于单色图标。 |
 
 图片如何填充盒子由 `<Image>` 的 `resizeMode` 属性决定，不是样式；见 [image](../elements/image.md)。
 
@@ -405,14 +461,14 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 有些设置在 NSH 中是属性而不是样式键。它们有对应的 Tailwind class，但显式设置的属性优先于 class：
 
-| 设置 | 属性 | Class |
-|---|---|---|
-| 行数限制 | `<Text>` 的 `numberOfLines` | `line-clamp-*`、`truncate` |
-| 省略位置 | `<Text>` 的 `ellipsizeMode` | `text-ellipsis`、`text-clip` |
-| 触摸穿透 | `pointerEvents` | `pointer-events-none`、`pointer-events-auto` |
-| 图片填充 | `<Image>` 的 `resizeMode` | `object-cover`、`object-contain` 等 |
-| 文字可选 | `<Text>` 的 `selectable` | `select-text`、`select-none` |
-| Material 阴影（Android） | `android={{ elevation }}` | |
+| 设置 | 属性 | Rust | Class |
+|---|---|---|---|
+| 行数限制 | `<Text>` 的 `numberOfLines` | `.number_of_lines(n)` | `line-clamp-*`、`truncate` |
+| 省略位置 | `<Text>` 的 `ellipsizeMode` | `.ellipsize_mode(mode)` | `text-ellipsis`、`text-clip` |
+| 触摸穿透 | `pointerEvents` | `.pointer_events(…)` | `pointer-events-none`、`pointer-events-auto` |
+| 图片填充 | `<Image>` 的 `resizeMode` | `.resize_mode(mode)` | `object-cover`、`object-contain` 等 |
+| 文字可选 | `<Text>` 的 `selectable` | `.selectable(true)` | `select-text`、`select-none` |
+| Material 阴影（Android） | `android={{ elevation }}` | `.elevation(e)` | |
 
 ## 相关
 

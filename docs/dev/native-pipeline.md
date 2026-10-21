@@ -72,10 +72,12 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - **Tags** are PascalCase and name bindings by normal scoping: every tag is imported or local, except `<If when else>`
   and `<Each of key>`, globals (`dom.rs` `install_globals`) a binding of the same name shadows. A tag naming one of
   `jsx::PRIMITIVES` imported from its module (alias-aware: `import { View as V } from "nsh"`) compiles to what it is,
-  with no component call: `View`, `Text`, `Scroll`, `Input` (`nsh`), `Image` (`nsh/image`), `WebView`, `Video` to
+  with no component call: `View`, `Text`, `Scroll`, `Input`, `Image`, `WebView`, `Video` (`nsh`) to
   their host elements made in place, `List` to `nsh:rt`'s `list`, `If` / `Each` to `cond` / `each`; `Canvas`,
   `Dialog` (`nsh/base`) and `InputAccessoryView` are native components that do more than make their element (the
-  drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. The exports are callable components too (`dom.rs`
+  drawing, `open`, the popup and backdrop parts and the insets, iOS only) and are called. Imported from the modules
+  they were first exported from (`nsh/image`, `nsh/list`, `nsh/canvas`, `nsh/webview`, `nsh/video`, deprecated), they
+  compile alike; hints name `nsh`. The exports are callable components too (`dom.rs`
   `host_component`; `If` and `Each` are real globals), so `const C = cond ? View : Text; <C />` works through the
   component path. Lowercase tags are errors with the import to write (`<view>`: write `<View>` and `import { View }
   from "nsh"`; for another, the closest binding, primitive or registry component). Why: TypeScript checks a lowercase
@@ -145,7 +147,7 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 
 ## Lists and node methods
 
-- `List` (`nsh/list`) is the renderer's (`list.rs`; its tags compile to a component call of `nsh:rt`'s `list`, the
+- `List` (`nsh`) is the renderer's (`list.rs`; its tags compile to a component call of `nsh:rt`'s `list`, the
   same function). The core asks for rows (`Host::bind_list`), bound natively (`list::bind`); a recycled cell gets a
   new index and its item accessor follows; header, footer, empty and separator cells, viewability tokens (with
   `minimumViewTime`), `initialScrollIndex`. Rust components with rows (an `Items` prop) get a list of the app's data as

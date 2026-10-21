@@ -26,7 +26,7 @@ log.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-core.workspace = true
 nsh-engine.workspace = true
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
 block2.workspace = true
 crossbeam-channel.workspace = true
 dispatch2.workspace = true
@@ -43,4 +43,4 @@ rustc-hash.workspace = true
 serde_json.workspace = true
 libc.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
-nsh-testing = { workspace = true, default-features = false, features = ["agent"], optional = true }
+nsh-testing = { workspace = true, features = ["agent"], optional = true }

@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import pagefind from 'astro-pagefind';
 import { rehypeHeadingIds, unified } from '@astrojs/markdown-remark';
 import { remarkCallouts } from './src/lib/remark-callouts.js';
+import { remarkCodeTabs } from './src/lib/remark-code-tabs.js';
 import { remarkDemo } from './src/lib/remark-demo.js';
 import { remarkDocLinks } from './src/lib/remark-doc-links.js';
 import { remarkStripTitle } from './src/lib/remark-strip-title.js';
@@ -27,6 +28,7 @@ export default defineConfig({
       remarkPlugins: [
         remarkStripTitle,
         remarkCallouts,
+        remarkCodeTabs,
         [remarkDocLinks, { base: BASE }],
         [remarkDemo, { base: BASE, state: demoState() }],
       ],

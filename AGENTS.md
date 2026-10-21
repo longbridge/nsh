@@ -28,8 +28,13 @@ crates/
   nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
-                       resources both faces share (`resource.rs`); the native animation graph (`animation/`: value / interpolate /
-                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame);
+                       resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it); the native animation graph (`animation/`: value / interpolate /
+                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame; `Animator`: its
+                       bindings to views, gestures and scroll views); what the desktop backends share, free of any toolkit:
+                       pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching),
+                       navigation decisions (`navigation.rs`: stacks' screens, transitions' timing and motion, what going back
+                       acts on), one view's transitions, layout animations and keyframes (`transition.rs`: curves,
+                       interpolation, timing), scroll views' state and physics (`scroll.rs`);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
@@ -39,7 +44,7 @@ crates/
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
                        app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, safe areas, the keyboard, the status
-                       bar, written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
+                       bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
                        the theme (`theme.rs`, as `gpui-base`'s: gpui-kit's theme files, semantic tokens and their defaults, which
                        the core keeps as design tokens and no component of `nsh-base` draws with)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
@@ -83,26 +88,27 @@ crates/
   nsh-platform-web/    WebAssembly backend (published web apps, `nsh run --target web`, the website's live demos): the engine on
                        the page's main thread (`LocalEngine`), text laid out with browser font metrics, batches as JSON + CSS
                        for the DOM runtime in `web/nsh.js`, the animator on requestAnimationFrame, fetch over the browser's
-                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), default
-                       features: the development host's (`nsh-dev.wasm`, source and hot updates); `web/index.html` is the demo
+                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), feature
+                       `dev`: the development host's (`nsh-dev.wasm`, source and hot updates, the model `nsh test --target web`
+                       asks about); `web/index.html` is the demo
                        player (`cargo xtask web`); feature `compiler`: the playground's TSX compiler (`nsh-playground.wasm`)
                        (docs/dev/web.md)
   nsh-platform-linux/  GTK 4 backend (Linux): one `NshView` widget per node drawn with GSK, Pango text engine (typeset on the engine
                        thread, glyph runs drawn on the main thread), input, scroll views, navigation, video, native
-                       components, AppView, standalone app; feature `dev`: dev server client, log forwarding, error overlay;
-                       `--script` steps (screenshots, simulated input) for checking changes (docs/dev/linux.md)
+                       components, AppView, standalone app; feature `dev`: dev server client, log forwarding, error overlay,
+                       the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
-                       native components, AppView, standalone app; feature `dev` as above; `--script` steps (docs/dev/macos.md)
+                       native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
   nsh-macos-host/      Development host on macOS (`nsh run --target macos`): connects to a dev server or runs a bundle
   nsh-macos-app/       Release runner on macOS: the executable of apps built by `nsh package --target macos`
   nsh-platform-windows/ Win32 backend (Windows): one retained `NshView` per node, the tree drawn with Direct2D into a swap chain,
                        DirectWrite text engine (typeset on the engine thread, glyph runs drawn on the main thread), input
                        (mouse, touch, pen, wheel, precision touchpads), scroll views, NSH's own text editor (IMM32 IME),
                        navigation, video (Media Foundation), web views (WebView2), native components, UI Automation,
-                       AppView, standalone app; feature `dev` as above; `--script` steps (docs/dev/windows.md)
+                       AppView, standalone app; feature `dev` as above (docs/dev/windows.md)
   nsh-windows-host/    Development host on Windows (`nsh run --target windows`): connects to a dev server or runs a bundle
   nsh-windows-app/     Release runner on Windows: the executable of apps built by `nsh package --target windows`
   gpui/                The GPUI backend: a workspace of its own (`crates/gpui/Cargo.toml`, its own `Cargo.lock` and GPUI's dependencies),
@@ -112,7 +118,7 @@ crates/
                        `DrawCx` with the transform and opacity GPUI lacks), text shaped by GPUI's text system on the engine
                        thread, the main-thread queue (`rt.rs`), GPUI events (`events.rs`, keys as Windows VK codes);
                        `AppView` is a GPUI view for GPUI / GPUI Kit apps; features `webview` (wry), `video` (GStreamer),
-                       `dev` as above, `shot` (`--script` shots on macOS / Windows: GPUI's test support); it is the
+                       `dev` as above, `shot` (screenshots on macOS / Windows: GPUI's test support); it is the
                        backend for embedding, standalone apps run on each OS's own backend (docs/dev/gpui.md)
   gpui/nsh-gpui-host/  Development host on GPUI (`nsh run --target gpui`): shows a TSX app as GPUI apps that embed it
                        show it; connects to a dev server or runs a bundle
@@ -124,7 +130,8 @@ crates/
                        with a `describe` program, which prints the sets as data for the CLI to bundle, compile and declare with, the
                        hosts and runners, and the headless runner of `nsh test`; it takes nsh's crates where the app's crates do:
                        crates.io at the CLI's version, or the checkout they depend on by path; docs/dev/tooling.md); web packages and the
-                       browser host's pages (`web.rs`, `web/`); what it prints (`ui.rs`:
+                       browser host's pages (`web.rs`, `web/`); `nsh test --target web`'s headless browser (`cdp.rs`, `test_web.rs`);
+                       what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
                        `web` (the WebAssembly runtime and the website's demos), `api` (records `api/`; `--keep <app>`: a fixture app)
@@ -137,8 +144,8 @@ docs/                 Documentation; `docs/dev/`: for developers of nsh (archite
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
 examples/             Example apps (gallery: a demo index, one module per demo, `tests/` the reference for `nsh test` (storage,
-                      inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`, a
-                      TypeScript test of its root; rust-exports: a TSX app using one of each export of its crate, the reference
+                      inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
+                      TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
                       with a test), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
@@ -178,6 +185,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::ui::de
 | a hot path | `docs/dev/performance.md` (baselines) |
 | anything platform-specific | `docs/dev/pitfalls.md` (verified constraints, by area) |
 | Rust components (`nsh-base`'s, apps' UI sets) | `docs/dev/components.md` |
+| `TextView`: Markdown / HTML documents, their parsers, parts and extensions | `docs/dev/text-view.md` |
 | Rust classes TS uses (`#[class]`), module functions' kinds, callbacks, how calls and Rust components' props cross (typed) | `docs/dev/rust-classes.md`, `docs/dev/components.md` |
 
 Keep them current: a change that alters documented behavior updates its page (or the module doc) in the same commit,
@@ -206,14 +214,17 @@ echo 'await app.scroll("id:photos", 3000)' | ./target/release/nsh test examples/
 echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh test examples/hopper/App.tsx --trace   # steps from stdin (`app`: nsh/test's App)
 ./target/debug/nsh test examples/gallery                                   # the app's tests (`*.test.tsx`, `nsh/test`), headless; --trace prints batches
 ./target/debug/nsh test examples/gallery --target macos                    # the same tests in macOS windows: native input at the views (`nsh_testing::agent`)
+./target/debug/nsh test examples/gallery --target web                      # in a headless Chrome / Edge / Chromium (found, or --browser <PATH>): trusted input over CDP
+xvfb-run -a ./target/debug/nsh test examples/gallery --target linux        # in GTK windows (a virtual display here); also windows, gpui
+./target/debug/nsh test examples/gallery --target ios                      # in an iOS simulator: a finger's touches and the keyboard's typing, as UIKit gets them
+./target/debug/nsh test examples/gallery --target android                  # on the first device adb lists: MotionEvents and KeyEvents at the window's views
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # check a platform change: steps from stdin in its window
 ./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
 ./target/debug/nsh run examples/counter --trace                            # dev server + Catalyst host (390×844), hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)
 ./target/debug/nsh run examples/gallery --target android                   # on an emulator / device (needs `cargo xtask android --dev`)
 ./target/debug/nsh run examples/gallery --target linux                     # in a GTK window (the default on Linux)
-./target/debug/nsh-linux-host --script "wait 800; shot a.png; quit"        # Linux host, scripted: screenshots and simulated input
 ./target/debug/nsh run examples/gallery --target windows                   # in a Win32 window, 1200×800 (the default on Windows)
-./target/debug/nsh-windows-host --bundle build/bundle.nshc --script "wait 800; shot a.png; quit"   # Windows host, scripted (connects to `nsh dev` without --bundle)
 ./target/debug/nsh run examples/gallery --target gpui                      # in a GPUI window (macOS, Windows, Linux), as GPUI apps embed it
 ./target/debug/nsh run examples/gallery --target web                       # in the browser (the dev server serves the page)
 ./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served on this machine
@@ -273,7 +284,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `CARGO_TARGET_DIR` behavior; do not add Cargo configuration or change that environment variable just to organize
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
-  `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`).
+  `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
+  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
   button, safe areas, system alerts and the keyboard today, with the status bar a prop of pages and dialogs; controls
@@ -300,7 +312,10 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   --keep`); fixtures and their steps never change, and while they pass, old apps keep working
   (`docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
-  in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
+  in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are; the one
+  exception is `TextView`'s default reading typography, its colors the theme's tokens, every part overridable by the
+  app's `classes` / `styles` / `TextViewParts`, and its built-in syntax highlighting colors, Allsum's code palette, which an app's
+  `CodeHighlighter` or `renderCodeBlock` replaces); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
   slot), no dialog card, scrim or shadow, no native press fade (press feedback is the app's `activeStyle` /
@@ -351,10 +366,12 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   in public API that the crate's `unitless.txt` (unitless quantities, with reasons) or its shrinking `untyped.txt`
   (legacy, to migrate) does not list (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
-  `<Each>` are globals that need no import. The primitives have one home each: `View`, `Text`, `Scroll`, `Input` from
-  `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from `nsh/webview`,
-  `Video` from `nsh/video`, `Dialog` from `nsh/base`, `InputAccessoryView` from `nsh/ios`; the compiler makes
-  their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
+  `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
+  (`View`, `Text`, `Scroll`, `Input`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`), as
+  `nsh_core::ui::prelude` holds them, every base component from `nsh/base` (`Dialog`, `Button`, `NavStack`, ...), and
+  `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
+  `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same
+  values, deprecated): new code imports them from `nsh`. Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
   They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.
@@ -441,10 +458,10 @@ release. Files a crate reads from outside its directory (`include_bytes!`, test 
    Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
    screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
    Android: `adb exec-out screencap -p`, `adb shell input tap|swipe|text|keyevent` (all work with the screen locked).
-   Linux: `nsh-linux-host --script "wait 800; shot a.png; tap 100 200; …; quit"` renders screenshots offscreen and
-   simulates input (taps, drags, wheels, typing, keys, dark / light), without touching the screen (`docs/dev/linux.md`).
-   Windows: `nsh-windows-host --script "…"` does the same (also `touch` drags, precision touchpad `pad` scrolls,
-   `resize`); web views are child windows and missing from its screenshots (`docs/dev/windows.md`).
-   GPUI on Linux: `nsh-gpui-host --bundle … --script "…"` (the same steps) on a rootful Xwayland display of its own
-   started with `-shm` (`DISPLAY=:N WAYLAND_DISPLAY=`, `WEBKIT_DISABLE_DMABUF_RENDERER=1` for web views); shots are read
-   from the X server (`docs/dev/gpui.md`).
+   The desktops: `nsh test <entry> --target macos|linux|windows|gpui` with steps on standard input
+   (`await app.screenshot("a.png"); await app.press("label:Plan")`) opens the app in the platform's window, acts with
+   its input at the views the selectors name and takes screenshots, without touching the screen; the app's tests run
+   there the same way (`docs/dev/tooling.md` "On a real platform"). Linux: under Xvfb (`xvfb-run -a`) on a machine
+   without a display (`docs/dev/linux.md`). GPUI on Linux: on a rootful Xwayland display of its own started with
+   `-shm` (`DISPLAY=:N`, `WEBKIT_DISABLE_DMABUF_RENDERER=1` for web views); screenshots are read from the X server
+   (`docs/dev/gpui.md`).

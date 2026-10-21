@@ -148,7 +148,7 @@
         return;
       }
       // No bytecode version: this host runs JS source.
-      send({ type: "hello", protocol: PROTOCOL, bytecode_version: "", device: device(), platform: "web", ui_sets: UI_SETS });
+      send({ type: "hello", protocol: PROTOCOL, bytecode_version: "", device: device(), platform: "web", ui_sets: UI_SETS, tests: player.takesTests });
     };
     socket.onmessage = (event) => {
       if (typeof event.data !== "string") {
@@ -165,11 +165,17 @@
       switch (message.type) {
         case "hello":
           session = message.session ?? 0;
+          // A test session (`nsh test --target web`): the model of the app
+          // starts before its first bundle.
+          if (message.test) player.testStart();
           showStatus("");
           if (RUST && !running) {
             running = { session, version: 0 };
             player.runRust();
           }
+          break;
+        case "step":
+          send({ type: "step_done", id: message.id, outcome: player.testStep(message.step) });
           break;
         case "building":
           showStatus("Building…");

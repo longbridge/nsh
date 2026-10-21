@@ -6,6 +6,10 @@ export interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps 
   source: string | { uri: string };
 }
 
-/** A video player (AVPlayer / MediaPlayer); its `ref` has `seek(seconds)`. */
+/**
+ * A video player (AVPlayer / MediaPlayer); its `ref` has `seek(seconds)`.
+ *
+ * @deprecated Import from "nsh".
+ */
 export declare const Video: (props: VideoProps) => YNode;
 

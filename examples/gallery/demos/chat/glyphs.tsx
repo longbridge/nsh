@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D } from "nsh";
 
 /** The chat's own line glyphs, drawn like `Icon`'s in a 20 × 20 box. */
 export type GlyphName =

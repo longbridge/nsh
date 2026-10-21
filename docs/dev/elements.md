@@ -1,9 +1,9 @@
 # Elements and interaction
 
-Every tag is a component in scope, imported from its one home (`native-pipeline.md`): `View`, `Text`, `Scroll`,
-`Input` from `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from
-`nsh/webview`, `Video` from `nsh/video`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`, `InputAccessoryView` from
-`nsh/ios`; only `If` and `Each` are globals.
+Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Image`,
+`List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
+`InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals. (`nsh/image`, `nsh/list`, `nsh/canvas`,
+`nsh/webview` and `nsh/video`, where some primitives were first, still export them, deprecated.)
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|
@@ -87,8 +87,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
   `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
-- **`disabled`** on any element applies `disabled:` classes and removes its press listeners from what is mounted (no press,
-  no feedback).
+- **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
+  is mounted (no press, no feedback; a secondary click goes on to the nearest enabled listener around it).
 - **`onHoverIn` / `onHoverOut` / `onHoverMove`** (any element) tell JS, after the fact, that the mouse came over a view,
   left it, or moved over it with no button down. On the desktops they follow the same hover tracking as `hover:`
   classes: the views along the chain under the mouse (innermost first) whose classes read `HOVERED` or that listen to

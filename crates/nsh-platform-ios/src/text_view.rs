@@ -177,6 +177,9 @@ pub(crate) struct TextViewIvars {
     pub(crate) selection: Selection,
     /// An animated `color` (`0xRRGGBBAA`): the whole text is drawn in it.
     color: std::cell::Cell<Option<u32>>,
+    /// The part a selection area selected (UTF-16 offsets) and its
+    /// highlight (`selection_area.rs`).
+    area_highlight: std::cell::Cell<Option<((usize, usize), nsh_core::Color)>>,
 }
 
 define_class!(
@@ -214,6 +217,14 @@ define_class!(
         #[unsafe(method(canBecomeFirstResponder))]
         fn can_become_first_responder(&self) -> bool {
             self.selectable()
+        }
+
+        #[unsafe(method(didMoveToWindow))]
+        fn did_move_to_window(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), didMoveToWindow] };
+            // Into or out of a selection area, which selects instead.
+            self.update_own_selection();
         }
 
         #[unsafe(method(canPerformAction:withSender:))]
@@ -283,6 +294,12 @@ define_class!(
             CGContext::save_g_state(c);
             if let Some(t) = self.ivars().text.borrow().as_ref().filter(|t| t.has_backgrounds()) {
                 crate::text::draw_backgrounds(&cx, t, text, *content);
+            }
+            if let Some(((a, b), color)) = self.ivars().area_highlight.get() {
+                CGContext::set_fill_color_with_color(c, crate::decor::cg_color(color).as_deref());
+                for (rect, ..) in self.range_rects(a, b) {
+                    CGContext::fill_rect(c, rect);
+                }
             }
             // CoreText draws in a y-up space with the origin at the bottom of
             // the box.
@@ -537,7 +554,10 @@ impl TextView {
         layout: TextLayout,
         content: Bounds<Points>,
     ) {
-        let (selectable, color) = (text.is_selectable(), text.selection_color);
+        let (selectable, color) = (
+            text.is_selectable() && !self.in_selection_area(),
+            text.selection_color,
+        );
         let changed = self
             .ivars()
             .text
@@ -558,6 +578,56 @@ impl TextView {
             .borrow()
             .as_ref()
             .is_some_and(|t| t.is_selectable())
+            && !self.in_selection_area()
+    }
+
+    /// Whether a view above is a selection area: the area selects this
+    /// text with the others, so the text has no selection of its own.
+    pub(crate) fn in_selection_area(&self) -> bool {
+        let mut view = self.superview();
+        while let Some(v) = view {
+            if v.downcast_ref::<NshView>()
+                .is_some_and(NshView::is_selection_area)
+            {
+                return true;
+            }
+            view = v.superview();
+        }
+        false
+    }
+
+    /// Turns the text's own selection on or off after it moved into or
+    /// out of a selection area (or one appeared or went above it).
+    pub(crate) fn update_own_selection(&self) {
+        let Some((selectable, color)) = self
+            .ivars()
+            .text
+            .borrow()
+            .as_ref()
+            .map(|t| (t.is_selectable(), t.selection_color))
+        else {
+            return;
+        };
+        if !selectable && !self.ivars().selection.is_on() {
+            return;
+        }
+        let on = selectable && !self.in_selection_area();
+        if on != self.ivars().selection.is_on() {
+            self.set_selectable(on, color, false);
+        }
+    }
+
+    /// Highlights a UTF-16 range in a color (the text's part of a
+    /// selection area's selection), or nothing.
+    pub(crate) fn set_area_highlight(&self, highlight: Option<((usize, usize), nsh_core::Color)>) {
+        if self.ivars().area_highlight.replace(highlight) != highlight {
+            self.setNeedsDisplay();
+        }
+    }
+
+    /// The text's content.
+    pub(crate) fn attributed(&self) -> Option<Arc<AttributedText>> {
+        self.ivars().text.borrow().clone()
     }
 
     /// Whether the text has pressable spans.
