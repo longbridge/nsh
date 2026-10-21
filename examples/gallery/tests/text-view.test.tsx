@@ -19,7 +19,7 @@ test("the Text View demo shows Markdown, HTML and extensions, and streams", asyn
   const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Text View");
   await app.waitFor("Release notes");
-  expect(app.shows("Lantern 3.0: notes that sync offline")).toBe(true);
+  expect(app.shows("NSH 0.1.0: native UI from TSX")).toBe(true);
   expect(app.shows("@huacnlee")).toBe(true);
   expect(app.shows("HEADS UP")).toBe(true);
   await app.press("Stream it");

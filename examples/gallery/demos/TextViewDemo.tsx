@@ -61,106 +61,112 @@ Benchmarks ran on a mid-range phone.[^1]
 
 const HTML = `<article>
   <header>
-    <h1 id="lantern-3">Lantern 3.0: notes that sync offline</h1>
-    <p><small>Posted by the Lantern team &middot; 14 min read &middot; <a href="https://example.com/blog/lantern-3" title="Permalink">permalink</a></small></p>
+    <h1 id="nsh-0-1-0">NSH 0.1.0: native UI from TSX</h1>
+    <p><small>Posted by the NSH team &middot; 6 min read &middot; <a href="https://github.com/longbridge/nsh" title="Repository">GitHub</a></small></p>
   </header>
 
   <section>
     <h2 id="highlights">Highlights</h2>
     <p>
-      Lantern    3.0 is our <b>largest</b> release so far:   notes now sync
-      <i>without a connection</i>, the editor gained <u>inline comments</u>, and the
-      <s>experimental</s> <mark>stable</mark> plugin API ships today. Search is
-      <mark color="yellow">twice as fast</mark>, and errors stand out in
-      <mark style="background-color: #fecaca">red</mark>.
+      NSH    0.1.0 is our <b>first</b> release:   apps written in TSX load
+      <i>at run time</i> into native apps, render with <u>each platform's own views</u>, and the
+      <s>Node.js</s> <mark>pure Rust</mark> toolchain needs nothing else. Hot reload is
+      <mark color="yellow">about 120 ms</mark>, and every bundle is checked before it
+      <mark style="background-color: #fecaca">runs</mark>.
     </p>
     <p>
-      Formulas in notes render too: H<sub>2</sub>O, e<sup>i&pi;</sup> + 1 = 0, and
-      2<sup>10</sup> = 1&#8239;024. Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to open the
-      command bar, or run <code>lantern sync --dry-run</code> first. Our designer put it best:
-      <q>a note app should feel like paper that remembers</q>. The <abbr title="Conflict-free replicated data type">CRDT</abbr>
-      engine behind it is open source.
+      Styles mean what they mean in a browser: <code>w-1/2</code> or <code>bg-sky-500/15</code>, spacing in
+      steps of 2<sup>2</sup> pt, and text sets H<sub>2</sub>O as you would expect. Press <kbd>Ctrl</kbd> + <kbd>B</kbd>
+      to fold the gallery's sidebar, or run <code>nsh run examples/gallery</code> to try it. Our first rule says it
+      best: <q>QuickJS is the slowest link: JS does as little as possible</q>. The <abbr title="Just-in-time">JIT</abbr>-free
+      runtime behind it is open source.
     </p>
     <figure>
       <a href="https://picsum.photos/id/1015/600/300"><img src="https://picsum.photos/id/1015/320/160" alt="A river valley under clouds" width="320" height="160"></a>
-      <figcaption>The new welcome screen, photographed on a slow train. <em>Tap to open it full size.</em></figcaption>
+      <figcaption>The gallery on a phone, a desktop and the web, one app. <em>Tap to open it full size.</em></figcaption>
     </figure>
     <figure>
       <img src="https://picsum.photos/id/1036/1200/750" alt="A tent in the snow below mountains" width="320" height="200">
-      <figcaption>Base camp, where the team wrote the sync engine. <em>Press it to zoom in.</em></figcaption>
+      <figcaption>Where the renderer was written. <em>Press it to zoom in.</em></figcaption>
     </figure>
   </section>
 
   <section>
-    <h2 id="upgrading">Upgrading</h2>
+    <h2 id="getting-started">Getting started</h2>
     <h3>Step by step</h3>
     <ol start="3">
-      <li>Back up your vault (steps 1 and 2 were installing and signing in)</li>
-      <li>Open <b>Settings &rarr; Sync</b> and choose a mode:
+      <li>Create an app (steps 1 and 2 were installing Rust and building the CLI)</li>
+      <li>Run <b>nsh run</b> and choose a target:
         <ul>
-          <li><i>Live</i>: every change, right away</li>
-          <li><i>Batched</i>: every few minutes
+          <li><i>Desktop</i>: AppKit, Win32 or GTK 4, the default</li>
+          <li><i>Mobile</i>: a simulator or a device
             <ol>
-              <li>on Wi-Fi only</li>
-              <li>or on any network</li>
+              <li>iOS with UIKit views</li>
+              <li>or Android with Android views</li>
             </ol>
           </li>
         </ul>
       </li>
-      <li>Restart the app</li>
+      <li>Edit, save, and watch it reload</li>
     </ol>
 
     <h3>Checklist</h3>
     <ul>
-      <li><input type="checkbox" checked> Export a backup</li>
-      <li><input type="checkbox" checked> Update every device</li>
-      <li><input type="checkbox"> Turn on end-to-end encryption</li>
+      <li><input type="checkbox" checked> Write the app in TSX</li>
+      <li><input type="checkbox" checked> Test it headless with nsh test</li>
+      <li><input type="checkbox"> Sign and publish the package</li>
     </ul>
 
     <h4>Terms</h4>
     <dl>
-      <dt>Vault</dt>
-      <dd>A folder of notes that syncs as one.</dd>
-      <dt>Replica</dt>
-      <dd>A device's copy of a vault, merged with the others when they meet.</dd>
+      <dt>Host</dt>
+      <dd>The native app that embeds NSH and loads modules.</dd>
+      <dt>Package</dt>
+      <dd>A signed <code>.nshpkg</code>: an app's bundle, checked before it runs.</dd>
     </dl>
   </section>
 
   <section>
-    <h2 id="plugins">Plugins</h2>
+    <h2 id="components">Components</h2>
     <blockquote>
-      <p>We rewrote our tag manager against the new API in an afternoon, and it got faster.</p>
-      <p>&mdash; <cite>Mara Okafor, maintainer of Tagline</cite></p>
+      <p>Nothing NSH ships has a look of its own: the app's classes and styles draw everything.</p>
+      <p>&mdash; <cite>NSH's design rules</cite></p>
     </blockquote>
-    <p>A plugin is a module that exports <code>activate</code>:</p>
-    <pre><code class="language-ts">export function activate(app: App) {
-  app.commands.add("word-count", () =&gt; {
-    const words = app.editor.text().split(/\\s+/).length;
-    app.toast(\`\${words} words\`);
-  });
-}</code></pre>
+    <p>An app is a module that mounts a component:</p>
+    <pre><code class="language-tsx">import { mount, signal, Text, View } from "nsh";
+
+function Counter() {
+  const count = signal(0);
+  return (
+    &lt;View class="p-4" onPress={() =&gt; count.set(count() + 1)}&gt;
+      &lt;Text&gt;{\`Pressed \${count()} times\`}&lt;/Text&gt;
+    &lt;/View&gt;
+  );
+}
+
+mount(Counter);</code></pre>
   </section>
 
   <section>
     <h2 id="performance">Performance</h2>
     <table>
       <thead>
-        <tr><th align="left">Operation</th><th align="right">2.9</th><th align="right">3.0</th><th style="text-align: center">Change</th></tr>
+        <tr><th align="left">Operation</th><th align="right">Platform</th><th align="right">Time</th><th style="text-align: center">Items</th></tr>
       </thead>
       <tbody>
-        <tr><td>Cold start</td><td align="right">820 ms</td><td align="right">410 ms</td><td align="center">&minus;50%</td></tr>
-        <tr><td>Search 10k notes</td><td align="right">96 ms</td><td align="right">44 ms</td><td align="center">&minus;54%</td></tr>
-        <tr><td>Full sync</td><td align="right">3.1 s</td><td align="right">1.2 s</td><td align="center">&minus;61%</td></tr>
+        <tr><td>Counter, first frame</td><td align="right">headless</td><td align="right">0.6 ms</td><td align="center">49</td></tr>
+        <tr><td>Counter, one tap</td><td align="right">headless</td><td align="right">0.15 ms</td><td align="center">8</td></tr>
+        <tr><td>List row while scrolling</td><td align="right">Android</td><td align="right">0.35 ms</td><td align="center">4</td></tr>
       </tbody>
       <tfoot>
-        <tr><td colspan="3">Median of 20 runs on a 2021 laptop</td><td align="center">&#10003;</td></tr>
+        <tr><td colspan="3">Baselines from docs/dev/performance.md</td><td align="center">&#10003;</td></tr>
       </tfoot>
     </table>
   </section>
 
   <details>
     <summary>Known issues</summary>
-    <p>Very large attachments (over 200&nbsp;MB) still upload in one piece. Resumable uploads arrive in 3.1.</p>
+    <p>Zooming scroll views run on iOS and Android only for now. The desktops follow in a later release.</p>
   </details>
   <details open>
     <summary>Thanks</summary>
