@@ -88,6 +88,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **Pressed-style observers must leave ancestor clicks working**: a view with only `activeStyle` / `active:`
+  has a `PressRecognizer` to report its pressed state, but yields the click to the nearest ancestor with press
+  handlers. `handled_deeper` counts handlers and pressable text spans; a style-only recognizer ends as failed
+  after reporting its state, so it does not compete with the ancestor's recognizer.
+
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
 - **Catalyst's Mac idiom does not support `UIRefreshControl`** (attaching one throws `_UICatalystUnsupportedMacIdiomBehavior`): in the Mac
