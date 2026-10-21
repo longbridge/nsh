@@ -3,6 +3,7 @@ title: Image
 description: The element that shows a bundled or remote image, with placeholders, blur, fades, tinting and load events.
 order: 4
 group: primitives
+demo: el-image
 ---
 
 # Image

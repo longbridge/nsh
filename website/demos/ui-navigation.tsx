@@ -36,11 +36,20 @@ function Header(props: { title: string; right?: JSX.Element }) {
   );
 }
 
+// A page's content: a column as wide as a phone, centered in a wider window.
+function Body(props: { children: JSX.Element }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: ui().page, padding: 16, paddingTop: 24 }}>
+      <View style={{ width: "100%", maxWidth: 480, alignSelf: "center", gap: 12 }}>{props.children}</View>
+    </View>
+  );
+}
+
 function Home() {
   const opened = signal(0);
   return (
     <NavPage title="Inbox" header={<Header title="Inbox" />}>
-      <View style={{ flex: 1, backgroundColor: ui().page, padding: 16, paddingTop: 24, gap: 12 }}>
+      <Body>
         <Text style={{ color: ui().muted }}>{`Opened ${opened()} messages`}</Text>
         <Button
           title="Open message 1"
@@ -50,7 +59,7 @@ function Home() {
           }}
         />
         <Button title="Open message 2" variant="secondary" onPress={() => nav.push({ name: "detail", id: 2 })} />
-      </View>
+      </Body>
     </NavPage>
   );
 }
@@ -64,11 +73,11 @@ function Detail(props: { id: number }) {
   );
   return (
     <NavPage title={`Message ${props.id}`} headerRight={star()} header={<Header title={`Message ${props.id}`} right={star()} />}>
-      <View style={{ flex: 1, backgroundColor: ui().page, padding: 16, gap: 12 }}>
+      <Body>
         <Text style={{ color: ui().text }}>{`The body of message ${props.id}.`}</Text>
         <Button title="Next message" onPress={() => nav.push({ name: "detail", id: props.id + 1 })} />
         <Button title="Back to the inbox" variant="secondary" onPress={() => nav.popToRoot()} />
-      </View>
+      </Body>
     </NavPage>
   );
 }

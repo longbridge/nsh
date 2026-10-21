@@ -73,6 +73,15 @@ test('every English page has a Chinese counterpart with the same order, group an
   expect(problems).toEqual([]);
 });
 
+test('every element page names a demo (README "Demos")', () => {
+  const missing: string[] = [];
+  for (const [name, front] of english.elements) {
+    if (name === 'index.md' || front instanceof Error) continue;
+    if (typeof front.demo !== 'string') missing.push(`elements/${name}`);
+  }
+  expect(missing).toEqual([]);
+});
+
 test('every demo named in frontmatter exists in demos/', () => {
   const missing: string[] = [];
   for (const [locale, sections] of [['', english], ['zh-CN/', chinese]] as const) {

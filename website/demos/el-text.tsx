@@ -9,66 +9,68 @@ function App() {
   const lines = signal(2);
   const link = () => ({ color: ui().accent, textDecorationLine: "underline" }) as const;
   return (
-    <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>text</Text>
+    <View style={{ flex: 1, backgroundColor: ui().page }}>
+      <View style={{ flex: 1, width: "100%", maxWidth: 560, alignSelf: "center", padding: 20, paddingTop: 24, gap: 14 }}>
+        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>text</Text>
 
-      <Text style={{ fontSize: 16, lineHeight: 24, color: ui().text }}>
-        {"Nested text elements are spans: "}
-        <Text style={{ fontWeight: "700" }}>bold</Text>
-        {", "}
-        <Text style={{ fontStyle: "italic", color: ui().violet }}>italic</Text>
-        {", and "}
-        <Text style={link()} onPress={() => tapped.set("the first link")}>
-          links
+        <Text style={{ fontSize: 16, lineHeight: 24, color: ui().text }}>
+          {"Nested text elements are spans: "}
+          <Text style={{ fontWeight: "700" }}>bold</Text>
+          {", "}
+          <Text style={{ fontStyle: "italic", color: ui().violet }}>italic</Text>
+          {", and "}
+          <Text style={link()} onPress={() => tapped.set("the first link")}>
+            links
+          </Text>
+          {" that take presses of "}
+          <Text style={link()} onPress={() => tapped.set("the second link")}>
+            their own
+          </Text>
+          .
         </Text>
-        {" that take presses of "}
-        <Text style={link()} onPress={() => tapped.set("the second link")}>
-          their own
+        <Text style={{ fontSize: 13, color: ui().muted }}>Pressed: {tapped()}</Text>
+
+        <View style={{ height: 1, backgroundColor: ui().line }} />
+
+        <Text numberOfLines={lines()} style={{ fontSize: 15, color: ui().text }}>
+          {LONG}
         </Text>
-        .
-      </Text>
-      <Text style={{ fontSize: 13, color: ui().muted }}>Pressed: {tapped()}</Text>
-
-      <View style={{ height: 1, backgroundColor: ui().line }} />
-
-      <Text numberOfLines={lines()} style={{ fontSize: 15, color: ui().text }}>
-        {LONG}
-      </Text>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <View
-          onPress={() => lines.set(lines() === 2 ? 0 : 2)}
-          activeStyle={{ opacity: 0.6 }}
-          style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
-        >
-          <Text style={{ color: ui().text }}>{lines() === 2 ? "Show all" : "numberOfLines 2"}</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View
+            onPress={() => lines.set(lines() === 2 ? 0 : 2)}
+            activeStyle={{ opacity: 0.6 }}
+            style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
+          >
+            <Text style={{ color: ui().text }}>{lines() === 2 ? "Show all" : "numberOfLines 2"}</Text>
+          </View>
         </View>
+
+        <Text numberOfLines={1} ellipsizeMode="middle" style={{ fontSize: 15, color: ui().muted }}>
+          {LONG}
+        </Text>
+
+        <Text style={{ fontSize: 17, color: ui().text }}>
+          <Text style={{ textDecorationLine: "line-through", textDecorationColor: ui().down }}>struck</Text>{" "}
+          <Text style={{ textTransform: "uppercase", letterSpacing: 2 }}>spaced</Text>{" "}
+          <Text style={{ fontVariant: ["tabular-nums"] }}>0123456789</Text>
+        </Text>
+
+        <Text
+          style={{
+            fontSize: 28,
+            fontWeight: "800",
+            color: ui().onAccent,
+            backgroundColor: "#c8f26d",
+            paddingHorizontal: 10,
+            borderRadius: 8,
+            textShadowColor: "rgba(255,255,255,0.55)",
+            textShadowOffset: { width: 2, height: 2 },
+            textShadowRadius: 4,
+          }}
+        >
+          Text shadow
+        </Text>
       </View>
-
-      <Text numberOfLines={1} ellipsizeMode="middle" style={{ fontSize: 15, color: ui().muted }}>
-        {LONG}
-      </Text>
-
-      <Text style={{ fontSize: 17, color: ui().text }}>
-        <Text style={{ textDecorationLine: "line-through", textDecorationColor: ui().down }}>struck</Text>{" "}
-        <Text style={{ textTransform: "uppercase", letterSpacing: 2 }}>spaced</Text>{" "}
-        <Text style={{ fontVariant: ["tabular-nums"] }}>0123456789</Text>
-      </Text>
-
-      <Text
-        style={{
-          fontSize: 28,
-          fontWeight: "800",
-          color: ui().onAccent,
-          backgroundColor: "#c8f26d",
-          paddingHorizontal: 10,
-          borderRadius: 8,
-          textShadowColor: "rgba(255,255,255,0.55)",
-          textShadowOffset: { width: 2, height: 2 },
-          textShadowRadius: 4,
-        }}
-      >
-        Text shadow
-      </Text>
     </View>
   );
 }

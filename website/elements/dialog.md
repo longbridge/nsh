@@ -3,6 +3,7 @@ title: Dialog
 description: "The Dialog component: a modal surface over everything else, for full-screen flows, sheets and dialogs the app styles."
 order: 21
 group: base
+demo: el-dialog
 ---
 
 # Dialog

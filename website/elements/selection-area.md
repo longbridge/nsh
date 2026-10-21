@@ -3,6 +3,7 @@ title: SelectionArea
 description: "The SelectionArea component: one selection across the texts inside it, across views, Text elements and TextViews, as a web page's texts select."
 order: 27
 group: base
+demo: el-selection-area
 ---
 
 # SelectionArea

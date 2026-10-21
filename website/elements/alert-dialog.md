@@ -3,6 +3,7 @@ title: AlertDialog
 description: "AlertDialog: the platform's own alert or action sheet, shown natively and answered with the action the user chose."
 order: 25
 group: base
+demo: el-alert-dialog
 ---
 
 # AlertDialog

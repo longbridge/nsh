@@ -16,6 +16,16 @@ const PLAYER = join(ROOT, 'public', 'play', 'index.html');
 /** The app's logical size: an iPhone's 390×844 points. */
 export const SCREEN = { width: 390, height: 844 };
 
+/**
+ * The layouts a demo panel switches between: a phone (touch, the phone
+ * idiom) and a desktop window (a pointer, the desktop idiom). Every demo
+ * works in both (README "Demos").
+ */
+export const LAYOUTS = {
+  mobile: { ...SCREEN, idiom: 'phone' },
+  desktop: { width: 1024, height: 640, idiom: 'desktop' },
+};
+
 export function demoFile(name) {
   return join(DEMOS, `${name}.tsx`);
 }
@@ -77,6 +87,9 @@ const COPY = {
     missing: (name) => `Demo “${name}” was not found in website/demos.`,
     label: 'Demo',
     live: 'Live',
+    layout: 'Layout',
+    mobile: 'Mobile',
+    desktop: 'Desktop',
   },
   'zh-CN': {
     preview: '预览',
@@ -89,11 +102,14 @@ const COPY = {
     missing: (name) => `website/demos 中没有名为“${name}”的示例。`,
     label: '示例',
     live: '运行中',
+    layout: '布局',
+    mobile: '手机',
+    desktop: '桌面',
   },
 };
 
-export function playerHref(name, base = '/') {
-  return `${base}play/index.html?theme=dark#${encodeURIComponent(name)}`;
+export function playerHref(name, base = '/', layout = 'mobile') {
+  return `${base}play/index.html?theme=dark&idiom=${LAYOUTS[layout].idiom}#${encodeURIComponent(name)}`;
 }
 
 /**
@@ -110,10 +126,11 @@ export function frameBar(title, badge) {
  * (`--phone-scale`), with the demo running inside, or a placeholder screen
  * when there is no player.
  */
-export function phoneHtml(name, { base = '/', lang = 'en', eager = false } = {}) {
+export function phoneHtml(name, { base = '/', lang = 'en', eager = false, layout = 'mobile' } = {}) {
   const t = COPY[lang] ?? COPY.en;
+  const size = LAYOUTS[layout];
   const screen = hasPlayer()
-    ? `<iframe allow="clipboard-write" data-player-src="${escape(playerHref(name, base))}" title="${escape(t.frame(name))}" loading="${eager ? 'eager' : 'lazy'}" width="${SCREEN.width}" height="${SCREEN.height}"></iframe>`
+    ? `<iframe allow="clipboard-write" data-player-src="${escape(playerHref(name, base, layout))}" title="${escape(t.frame(name))}" loading="${eager ? 'eager' : 'lazy'}" width="${size.width}" height="${size.height}"></iframe>`
     : `<div class="phone__placeholder">
         <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
         <p class="phone__placeholder-title">${escape(t.pending)}</p>
@@ -121,7 +138,7 @@ export function phoneHtml(name, { base = '/', lang = 'en', eager = false } = {})
         <code>nsh run website/demos/${escape(name)}.tsx</code>
       </div>`;
   const bar = frameBar(`${name}.tsx`, hasPlayer() ? t.live : '');
-  return `<div class="phone" style="--phone-w:${SCREEN.width};--phone-h:${SCREEN.height}">${bar}<div class="phone__screen">${screen}</div></div>`;
+  return `<div class="phone" data-layout="${layout}" style="--phone-w:${size.width};--phone-h:${size.height}">${bar}<div class="phone__screen">${screen}</div></div>`;
 }
 
 /** The demo block of a documentation page: phone and source behind a segmented control. */
@@ -145,15 +162,21 @@ export async function demoPanelHtml(name, { base = '/', lang = 'en' } = {}) {
     </figure>`;
   }
 
-  return `<figure class="demo" data-demo="${escape(name)}" data-view="preview" data-pagefind-ignore>
+  return `<figure class="demo" data-demo="${escape(name)}" data-view="preview" data-layout="mobile" data-pagefind-ignore>
     <figcaption class="demo__bar">
-      <div class="segmented" role="tablist" aria-label="${escape(t.label)}">
+      <div class="segmented demo__views" role="tablist" aria-label="${escape(t.label)}">
         <button type="button" role="tab" id="${id}-tab-preview" aria-controls="${id}-preview" aria-selected="true" data-demo-view="preview">${escape(t.preview)}</button>
         <button type="button" role="tab" id="${id}-tab-source" aria-controls="${id}-source" aria-selected="false" tabindex="-1" data-demo-view="source">${escape(t.source)}</button>
       </div>
+      <div class="segmented demo__layouts" role="radiogroup" aria-label="${escape(t.layout)}">
+        <button type="button" role="radio" aria-checked="true" data-demo-layout="mobile">${escape(t.mobile)}</button>
+        <button type="button" role="radio" aria-checked="false" tabindex="-1" data-demo-layout="desktop">${escape(t.desktop)}</button>
+      </div>
       <span class="demo__file">${escape(file)}</span>
-      <a class="demo__open" href="${escape(`${base}${lang === 'zh-CN' ? 'zh-CN/' : ''}playground#demo=${encodeURIComponent(name)}`)}">${escape(t.edit)}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></a>
-      <a class="demo__open" href="${escape(playerHref(name, base))}" target="_blank" rel="noopener">${escape(t.open)}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+      <div class="demo__actions" role="group">
+        <a class="demo__action" href="${escape(`${base}${lang === 'zh-CN' ? 'zh-CN/' : ''}playground#demo=${encodeURIComponent(name)}`)}" title="${escape(t.edit)}" aria-label="${escape(t.edit)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></a>
+        <a class="demo__action" href="${escape(playerHref(name, base))}" target="_blank" rel="noopener" title="${escape(t.open)}" aria-label="${escape(t.open)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+      </div>
     </figcaption>
     <div class="demo__body">
     <div class="demo__stage" id="${id}-preview" role="tabpanel" aria-labelledby="${id}-tab-preview" data-active>${phoneHtml(name, { base, lang })}</div>

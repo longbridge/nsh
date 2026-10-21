@@ -3,6 +3,7 @@ title: SafeAreaView
 description: "The SafeAreaView component and the safeArea and safeAreaInsets accessors: content kept clear of the notch, the status bar, the home indicator and headers."
 order: 23
 group: base
+demo: el-safe-area-view
 ---
 
 # SafeAreaView
@@ -107,9 +108,8 @@ import { Text, View } from "nsh";
 import { safeArea } from "nsh/base";
 
 function BottomBar() {
-  const insets = safeArea();
   return (
-    <View style={{ flexDirection: "row", padding: 8, paddingBottom: 8 + insets().bottom }}>
+    <View style={{ flexDirection: "row", padding: 8, paddingBottom: 8 + safeArea().bottom }}>
       <Text>Bottom bar</Text>
     </View>
   );

@@ -3,6 +3,7 @@ title: KeyboardAvoidingView
 description: "The KeyboardAvoidingView component, Keyboard.dismiss and the keyboard's height: content kept above the software keyboard, moving with it."
 order: 24
 group: base
+demo: el-keyboard-avoiding-view
 ---
 
 # KeyboardAvoidingView
