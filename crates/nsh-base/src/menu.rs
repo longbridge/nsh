@@ -18,7 +18,7 @@ use nsh_core::{
     ui::{Style, prelude::*},
 };
 
-use crate::popup::{OpenChangeReason, OpenState};
+use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};
 
 /// How long a finger stays on a context menu's trigger before it opens
 /// (less than the platforms' long press, so it opens while the finger is
@@ -79,6 +79,7 @@ enum At {
 fn surface(
     open: OpenState,
     change: Rc<dyn Fn(bool, OpenChangeReason)>,
+    emit: Rc<dyn Fn(MenuEvent)>,
     at: At,
     parts: Surface,
     children: Prop<Children>,
@@ -100,33 +101,58 @@ fn surface(
         popup_class: parts.popup_class,
         popup_style: parts.popup_style,
     });
+    // An attempt to close it: reported, then it closes.
+    let dismiss = {
+        let (change, emit) = (change.clone(), emit.clone());
+        Rc::new(move |reason: OpenChangeReason| {
+            emit(MenuEvent::Cancel);
+            change(false, reason);
+        })
+    };
     // Escape and back leave the innermost submenu of a sheet first.
     let cancel = {
-        let change = change.clone();
+        let dismiss = dismiss.clone();
         move || {
             if !path.with_untracked(|p| p.is_empty()) {
                 path.update(|p| {
                     p.pop();
                 });
             } else {
-                change(false, OpenChangeReason::Cancel);
+                dismiss(OpenChangeReason::Cancel);
             }
         }
     };
+    // A sheet comes in and goes with its motion; a popup at once.
+    let motion = SheetMotion::new(move || sheet && open.get(), || Placement::Bottom);
+    {
+        let (opened, closed) = (emit.clone(), emit.clone());
+        lifecycle(
+            move || if sheet { motion.there() } else { open.get() },
+            move || opened(MenuEvent::Open),
+            move || closed(MenuEvent::Close),
+        );
+    }
     when(
-        move || open.get(),
+        move || {
+            if sheet {
+                motion.shown.get()
+            } else {
+                open.get()
+            }
+        },
         move || {
             // Each opening starts at the top.
             path.set(Vec::new());
             open_sub.set(None);
             if sheet {
-                let change = change.clone();
+                let dismiss = dismiss.clone();
                 let backdrop = overlay()
                     .inset_0()
+                    .bind_opacity(&motion.fade)
                     .focusable(false)
                     .app_class(parts.backdrop_class)
                     .inline_style(parts.backdrop_style)
-                    .on_press(move || change(false, OpenChangeReason::BackdropPress));
+                    .on_press(move || dismiss(OpenChangeReason::BackdropPress));
                 let panel = overlay()
                     .left_0()
                     .right_0()
@@ -134,6 +160,8 @@ fn surface(
                     .role(AccessibilityRole::Menu)
                     .app_class(parts.popup_class)
                     .inline_style(parts.popup_style)
+                    .bind_translate_y(&motion.y)
+                    .on_layout(move |frame: &Bounds<Points>| motion.laid_out(frame.size))
                     .on_cancel(cancel.clone())
                     .child(children);
                 return vec![backdrop.into_element(), panel.into_element()];
@@ -145,7 +173,7 @@ fn surface(
                     overlay().anchor_point(move || point.get())
                 }
             };
-            let change = change.clone();
+            let dismiss = dismiss.clone();
             let popup = popup
                 .placement(parts.placement)
                 .align(parts.align)
@@ -154,9 +182,7 @@ fn surface(
                 .role(AccessibilityRole::Menu)
                 .app_class(parts.popup_class)
                 .inline_style(parts.popup_style)
-                .on_press_outside(move |_: &Point<Points>| {
-                    change(false, OpenChangeReason::PressOutside)
-                })
+                .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
                 .on_cancel(cancel.clone())
                 .child(children);
             vec![popup.into_element()]
@@ -215,6 +241,13 @@ pub enum MenuEvent {
     /// follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
+    /// It is shown (a sheet once it came in).
+    Open,
+    /// It is gone (a sheet once it went; also when the app closed it).
+    Close,
+    /// The user tried to close it without choosing (Escape or back, a press
+    /// outside or on the backdrop).
+    Cancel,
 }
 
 /// A menu its trigger opens: a popup at the trigger on the desktops, a
@@ -259,6 +292,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
         .child(surface(
             open,
             change,
+            Rc::new(move |e| cx.emit(e)),
             At::Trigger(anchor),
             parts,
             props.children,
@@ -379,6 +413,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
         .child(surface(
             open,
             change,
+            Rc::new(move |e| cx.emit(e)),
             At::Pointer(point),
             parts,
             props.children,

@@ -3,6 +3,7 @@ title: Sheet
 description: Sheet 组件：位于屏幕一侧边缘、覆盖在背景层之上的面板，点击背景层、Escape 和返回键会关闭它，样式由应用决定。
 order: 29
 group: base
+demo: el-sheet
 ---
 
 # Sheet
@@ -58,6 +59,18 @@ function Filters() {
 
 `Sheet` 来自 [`nsh/base`](../modules/nsh-base.md)。它的内容在每次打开时创建。`side` 把它放在屏幕的 `"bottom"`（默认）或 `"top"`，宽度与屏幕相同；或放在 `"left"` 或 `"right"`，高度与屏幕相同；它另一个方向的尺寸由面板决定，来自其内容或 `popupClass`。
 
+<a id="open-state"></a>
+
+## 打开状态
+
+没有 `open` 时，sheet 自己保存状态，初始值为 `defaultOpen`。有 `open` 时，状态由应用持有：在 `onOpenChange(open, reason)` 中修改它，每次关闭的请求都会带着原因（`"backdropPress"`、`"cancel"`）报告给它。无论是谁打开或关闭了它，`onOpen` 和 `onClose` 都会在它进入和离开后触发。
+
+`closeOnEscape={false}` 让它在 Escape 和返回键时保持打开，`closeOnBackdropPress={false}` 让它在按下背景层时保持打开；`onCancel` 仍会收到这些操作，可以先询问用户。
+
+<a id="native-sheets"></a>
+
+## 原生 sheet
+
 Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平台自己呈现的 sheet（iOS 上的 page sheet），请使用 `presentation="pageSheet"` 的 [Dialog](./dialog.md)。
 
 <a id="props"></a>
@@ -81,5 +94,7 @@ Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它关闭了：`"backdropPress"` 或 `"cancel"`。 |
-| `onCancel` | `.on_cancel(\|\| ..)` | 打开时按下 Escape 或 Android 返回键，无论它是否关闭。 |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它关闭了，附带原因：`"backdropPress"` 或 `"cancel"`。 |
+| `onOpen` | `.on_open(\|\| ..)` | 它已进入：完全显示出来。 |
+| `onClose` | `.on_close(\|\| ..)` | 它已离开：完全消失。应用关闭它时也会触发。 |
+| `onCancel` | `.on_cancel(\|\| ..)` | 用户尝试关闭它（Escape 或返回键、按下背景层），无论它是否关闭。 |

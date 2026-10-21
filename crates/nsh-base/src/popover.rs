@@ -2,7 +2,7 @@
 
 use nsh_core::ui::{Style, prelude::*};
 
-use crate::popup::{OpenChangeReason, OpenState};
+use crate::popup::{OpenChangeReason, OpenState, lifecycle};
 
 /// The props of [`Popover`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -57,8 +57,12 @@ pub enum PopoverEvent {
     /// back), with why: set `open` to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
-    /// Escape or the Android back button while it is open, whether or not
-    /// `closeOnEscape` closed it.
+    /// It is shown.
+    Open,
+    /// It is gone (also when the app closed it).
+    Close,
+    /// The user tried to close it (Escape or back, a press outside),
+    /// whether or not `closeOnEscape` / `closeOnPressOutside` let it close.
     Cancel,
 }
 
@@ -77,6 +81,18 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
             cx.emit(PopoverEvent::OpenChange(next, reason));
         }
     };
+    // A press outside or Escape: an attempt, which closes it when allowed.
+    let cancel = move |reason: OpenChangeReason, allowed: bool| {
+        cx.emit(PopoverEvent::Cancel);
+        if allowed {
+            change(false, reason);
+        }
+    };
+    lifecycle(
+        move || open.get(),
+        move || cx.emit(PopoverEvent::Open),
+        move || cx.emit(PopoverEvent::Close),
+    );
     let anchor = element_ref();
     let desktop = is_desktop();
     view()
@@ -101,7 +117,7 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
                         overlay()
                             .inset_0()
                             .focusable(false)
-                            .on_press(move || change(false, OpenChangeReason::PressOutside))
+                            .on_press(move || cancel(OpenChangeReason::PressOutside, true))
                     },
                 );
                 let popup = overlay()
@@ -113,15 +129,17 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
                     .app_class(props.popup_class)
                     .inline_style(props.popup_style)
                     .on_press_outside(move |_: &Point<Points>| {
-                        if desktop && props.close_on_press_outside.get_untracked() {
-                            change(false, OpenChangeReason::PressOutside);
+                        // Touch screens: the backdrop took it.
+                        if desktop {
+                            let allowed = props.close_on_press_outside.get_untracked();
+                            cancel(OpenChangeReason::PressOutside, allowed);
                         }
                     })
                     .on_cancel(move || {
-                        cx.emit(PopoverEvent::Cancel);
-                        if props.close_on_escape.get_untracked() {
-                            change(false, OpenChangeReason::Cancel);
-                        }
+                        cancel(
+                            OpenChangeReason::Cancel,
+                            props.close_on_escape.get_untracked(),
+                        )
                     })
                     .child(props.children);
                 vec![backdrop.into_element(), popup.into_element()]

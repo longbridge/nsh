@@ -3,6 +3,7 @@ title: Sheet
 description: "The Sheet component: a panel at an edge of the screen over a backdrop, closed by the backdrop, Escape and back, styled by the app."
 order: 29
 group: base
+demo: el-sheet
 ---
 
 # Sheet
@@ -62,6 +63,17 @@ function Filters() {
 the `"bottom"` (the default) or `"top"` of the screen, as wide as the screen, or at the `"left"` or `"right"`, as tall
 as the screen; its size across is the panel's, from its content or `popupClass`.
 
+## Open state
+
+Without `open`, the sheet keeps its own state, starting from `defaultOpen`. With `open`, the app owns it: change it in
+`onOpenChange(open, reason)`, which reports each request to close with its reason (`"backdropPress"`, `"cancel"`).
+`onOpen` and `onClose` follow it in and out, whoever opened or closed it.
+
+`closeOnEscape={false}` keeps it open on Escape and back, `closeOnBackdropPress={false}` on presses on the backdrop;
+`onCancel` still hears them, to ask first.
+
+## Native sheets
+
 A sheet is drawn by NSH in the app's window, styled by the app. For the platform's own presented sheet (a page sheet
 on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 
@@ -82,5 +94,7 @@ on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `.on_open_change(\|e\| ..)` | It closed: `"backdropPress"` or `"cancel"`. |
-| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button while it is open, whether or not it closed. |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | It closed, with why: `"backdropPress"` or `"cancel"`. |
+| `onOpen` | `.on_open(\|\| ..)` | It came in: it is all there. |
+| `onClose` | `.on_close(\|\| ..)` | It went: it is all gone. Also when the app closed it. |
+| `onCancel` | `.on_cancel(\|\| ..)` | The user tried to close it (Escape or back, a press on the backdrop), whether or not it closed. |

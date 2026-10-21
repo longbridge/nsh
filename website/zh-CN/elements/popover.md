@@ -3,6 +3,7 @@ title: Popover
 description: Popover 组件：锚定在触发元素上、显示在一切之上的内容，触发元素、外部按压、Escape 和返回键都会关闭它，样式由应用决定。
 order: 26
 group: base
+demo: el-popover
 ---
 
 # Popover
@@ -113,8 +114,10 @@ const open = signal(false);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
-| `onCancel` | `.on_cancel(\|\| ..)` | 打开时按下 Escape 或 Android 返回键，无论它是否关闭。 |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因：`"triggerPress"`、`"pressOutside"` 或 `"cancel"`。 |
+| `onOpen` | `.on_open(\|\| ..)` | 它已显示。 |
+| `onClose` | `.on_close(\|\| ..)` | 它已消失，应用关闭它时也会触发。 |
+| `onCancel` | `.on_cancel(\|\| ..)` | 用户尝试关闭它（Escape 或返回键、外部按压），无论它是否关闭。 |
 
 <a id="accessibility"></a>
 

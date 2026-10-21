@@ -3,6 +3,7 @@ title: Menu
 description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops, a sheet with submenus in place on phones, styled by the app."
 order: 27
 group: base
+demo: el-menu
 ---
 
 # Menu
@@ -163,6 +164,9 @@ it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside
 | Event | Rust | Description |
 |---|---|---|
 | `onOpenChange` (`Menu`, `ContextMenu`) | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
+| `onOpen` (`Menu`, `ContextMenu`) | `.on_open(\|\| ..)` | It is shown; as a sheet, once it came in. |
+| `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone; as a sheet, once it went. Also when the app closed it. |
+| `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
 | `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen. |
 
 ## Accessibility

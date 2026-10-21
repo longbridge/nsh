@@ -3,6 +3,7 @@ title: Popover
 description: "The Popover component: content anchored to a trigger, on top of everything, that the trigger, a press outside, Escape and back close, styled by the app."
 order: 26
 group: base
+demo: el-popover
 ---
 
 # Popover
@@ -114,8 +115,10 @@ For a list of actions use a [Menu](./menu.md), which becomes a sheet on phones; 
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
-| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button while it is open, whether or not it closed. |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | It opened or closed, with why: `"triggerPress"`, `"pressOutside"` or `"cancel"`. |
+| `onOpen` | `.on_open(\|\| ..)` | It is shown. |
+| `onClose` | `.on_close(\|\| ..)` | It is gone, also when the app closed it. |
+| `onCancel` | `.on_cancel(\|\| ..)` | The user tried to close it (Escape or back, a press outside), whether or not it closed. |
 
 ## Accessibility
 

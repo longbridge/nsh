@@ -3,6 +3,7 @@ title: Menu
 description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定。
 order: 27
 group: base
+demo: el-menu
 ---
 
 # Menu
@@ -162,6 +163,9 @@ import { ContextMenu, MenuItem } from "nsh/base";
 | 事件 | Rust | 说明 |
 |---|---|---|
 | `onOpenChange`（`Menu`、`ContextMenu`） | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
+| `onOpen`（`Menu`、`ContextMenu`） | `.on_open(\|\| ..)` | 它已显示；以 sheet 呈现时，在它进入之后。 |
+| `onClose`（`Menu`、`ContextMenu`） | `.on_close(\|\| ..)` | 它已消失；以 sheet 呈现时，在它离开之后。应用关闭它时也会触发。 |
+| `onCancel`（`Menu`、`ContextMenu`） | `.on_cancel(\|\| ..)` | 用户没有选择条目就尝试关闭它（Escape 或返回键、外部按压或按下背景层）。 |
 | `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择。 |
 
 <a id="accessibility"></a>

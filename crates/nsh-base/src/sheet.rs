@@ -3,7 +3,7 @@
 
 use nsh_core::ui::{Style, prelude::*};
 
-use crate::popup::{OpenChangeReason, OpenState};
+use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};
 
 /// The props of [`Sheet`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -48,14 +48,22 @@ pub enum SheetEvent {
     /// `open` to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
-    /// Escape or the Android back button while it is open, whether or not
-    /// `closeOnEscape` closed it.
+    /// It came in: it is all there.
+    Open,
+    /// It went: it is all gone (also when the app closed it).
+    Close,
+    /// The user tried to close it (Escape or back, a press on the
+    /// backdrop), whether or not `closeOnEscape` / `closeOnBackdropPress`
+    /// let it close.
     Cancel,
 }
 
 /// A panel at an edge of the screen (`side`) over a backdrop that covers
 /// the rest and takes its presses, on top of everything in its root view;
-/// the same on every device. A press on the backdrop, Escape and the
+/// the same on every device. It slides in from its edge as its backdrop
+/// fades in, and back out as it closes (at once when the user asked for
+/// less motion): the backdrop's opacity and the panel's translation are
+/// the sheet's, so color the backdrop with its background. A press on the backdrop, Escape and the
 /// Android back button close it. It looks like nothing: style the panel
 /// with `popupClass` / `popupStyle` and the backdrop with `backdropClass`
 /// / `backdropStyle` (a translucent color).
@@ -67,36 +75,44 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             cx.emit(SheetEvent::OpenChange(next, reason));
         }
     };
-    when(
-        move || open.get(),
-        move || {
-            let backdrop = overlay()
-                .inset_0()
-                .focusable(false)
-                .app_class(props.backdrop_class)
-                .inline_style(props.backdrop_style)
-                .on_press(move || {
-                    if props.close_on_backdrop_press.get_untracked() {
-                        change(false, OpenChangeReason::BackdropPress);
-                    }
-                });
-            let panel = overlay()
-                .style_with(move |s| match props.side.get() {
-                    Placement::Bottom => s.left_0().right_0().bottom_0(),
-                    Placement::Top => s.left_0().right_0().top_0(),
-                    Placement::Left => s.top_0().bottom_0().left_0(),
-                    Placement::Right => s.top_0().bottom_0().right_0(),
-                })
-                .app_class(props.popup_class)
-                .inline_style(props.popup_style)
-                .on_cancel(move || {
-                    cx.emit(SheetEvent::Cancel);
-                    if props.close_on_escape.get_untracked() {
-                        change(false, OpenChangeReason::Cancel);
-                    }
-                })
-                .child(props.children);
-            vec![backdrop.into_element(), panel.into_element()]
-        },
-    )
+    let motion = SheetMotion::new(move || open.get(), move || props.side.get());
+    lifecycle(
+        move || motion.there(),
+        move || cx.emit(SheetEvent::Open),
+        move || cx.emit(SheetEvent::Close),
+    );
+    when(motion.shown, move || {
+        let backdrop = overlay()
+            .inset_0()
+            .bind_opacity(&motion.fade)
+            .focusable(false)
+            .app_class(props.backdrop_class)
+            .inline_style(props.backdrop_style)
+            .on_press(move || {
+                cx.emit(SheetEvent::Cancel);
+                if props.close_on_backdrop_press.get_untracked() {
+                    change(false, OpenChangeReason::BackdropPress);
+                }
+            });
+        let panel = overlay()
+            .style_with(move |s| match props.side.get() {
+                Placement::Bottom => s.left_0().right_0().bottom_0(),
+                Placement::Top => s.left_0().right_0().top_0(),
+                Placement::Left => s.top_0().bottom_0().left_0(),
+                Placement::Right => s.top_0().bottom_0().right_0(),
+            })
+            .app_class(props.popup_class)
+            .inline_style(props.popup_style)
+            .bind_translate_x(&motion.x)
+            .bind_translate_y(&motion.y)
+            .on_layout(move |frame: &Bounds<Points>| motion.laid_out(frame.size))
+            .on_cancel(move || {
+                cx.emit(SheetEvent::Cancel);
+                if props.close_on_escape.get_untracked() {
+                    change(false, OpenChangeReason::Cancel);
+                }
+            })
+            .child(props.children);
+        vec![backdrop.into_element(), panel.into_element()]
+    })
 }
