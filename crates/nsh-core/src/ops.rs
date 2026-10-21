@@ -1135,6 +1135,13 @@ pub struct StatusBarSetting {
     pub animated: Option<bool>,
 }
 
+/// The setting of the content's color alone (`.status_bar(StatusBarStyle::Light)`).
+impl From<StatusBarStyle> for StatusBarSetting {
+    fn from(style: StatusBarStyle) -> Self {
+        Self::default().foreground(style)
+    }
+}
+
 impl StatusBarSetting {
     /// Sets the content's color.
     pub const fn foreground(mut self, style: StatusBarStyle) -> Self {

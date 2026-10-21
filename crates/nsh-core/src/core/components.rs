@@ -1776,8 +1776,7 @@ impl<M: TextEngine> Core<M> {
                             // Between rows: after each but the last (before
                             // it, inverted), while it is not.
                             let separator = separator.map(|s| {
-                                crate::ui::If::new(move || !at.is_last(), move || s())
-                                    .into_element()
+                                crate::ui::when(move || !at.is_last(), move || s()).into_element()
                             });
                             match separator {
                                 Some(s) if inverted => view().child(s).child(row),
@@ -2565,7 +2564,7 @@ impl<M: TextEngine> Core<M> {
                     // position follows it.
                     let place = place.clone();
                     let count = crate::ui::computed(move || children.with(Vec::len));
-                    let region = crate::ui::Each::new(
+                    let region = crate::ui::each(
                         children,
                         |&child: &NodeId| child,
                         move |child, index| {
@@ -3497,7 +3496,7 @@ impl<M: TextEngine> Core<M> {
                 content = slots;
                 if !kids.is_empty() {
                     let wanted = self.children_wanted_signal(id);
-                    let shown = crate::ui::If::new(wanted, move || {
+                    let shown = crate::ui::when(wanted, move || {
                         kids.iter()
                             .cloned()
                             .map(crate::ui::AnyElement)

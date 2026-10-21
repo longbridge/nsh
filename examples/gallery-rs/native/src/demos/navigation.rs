@@ -3,9 +3,9 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
-use nsh_base::{dialog, nav_page, safe_area_view};
+use nsh_base::{alert_dialog, dialog, nav_page, safe_area_view};
 use nsh_core::{
-    Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
+    ModalPresentation,
     ui::{AnyElement, Os, Screen, prelude::*},
 };
 
@@ -195,7 +195,7 @@ fn custom_header() -> Screen {
             .text_size(px(17.0))
             .font_weight(FontWeight::MEDIUM)
             .hit_slop(EdgeInsets::all(px(10.0)))
-            .on_press(|_: &()| nav::pop())
+            .on_press(nav::pop)
     };
     let title = || {
         view()
@@ -216,7 +216,7 @@ fn custom_header() -> Screen {
             .items_center()
             .gap(px(5.0))
             .hit_slop(EdgeInsets::all(px(10.0)))
-            .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
+            .on_press(move || likes.update(|likes| likes.0 += 1))
             .child(
                 icon()
                     .name(IconName::Star)
@@ -330,8 +330,8 @@ fn DraftCard() -> impl IntoElement {
                 })
                 .rounded(px(radius::CONTROL))
                 .finish(Finish::Inset)
-                .on_focus(move |_: &()| focused.set(true))
-                .on_blur(move |_: &()| focused.set(false))
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
                 .on_change(move |text: &str| {
                     let text = text.to_owned();
                     draft.update(|draft| draft.0 = text);
@@ -354,26 +354,16 @@ fn unsaved() -> Screen {
     let draft = global::<Draft>();
     titled("Unsaved changes")
         .pop_on_back(move || draft.with(|d| d.0.is_empty()))
-        .on_back_press(move |_: &()| {
-            let answer = nsh_core::ui::prelude::dialog(Dialog {
-                id: 0,
-                title: Some("Discard your changes?".into()),
-                message: None,
-                buttons: vec![
-                    DialogButton {
-                        text: "Keep editing".into(),
-                        style: DialogButtonStyle::Cancel,
-                    },
-                    DialogButton {
-                        text: "Discard".into(),
-                        style: DialogButtonStyle::Destructive,
-                    },
-                ],
-                cancelable: true,
-                sheet: false,
-            });
+        .on_back_press(move || {
+            let answer = alert_dialog()
+                .title("Discard your changes?")
+                .cancel("Keep editing")
+                .destructive("Discard")
+                .close_on_escape(true)
+                .close_on_backdrop_press(true)
+                .show();
             spawn(async move {
-                if answer.await == 1 {
+                if answer.await == Ok(Some("Discard".into())) {
                     // TS's draft is the screen's own and goes with it.
                     draft.update(|draft| draft.0.clear());
                     nav::pop();
@@ -733,7 +723,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
         modals().map(|(presented, _, title, note, icon_name)| {
             press()
                 .label(title)
-                .on_press(move |_: &()| {
+                .on_press(move || {
                     if presented == Presented::Dialog {
                         // The dialog springs up from a little smaller each
                         // time it opens.

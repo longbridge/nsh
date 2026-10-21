@@ -292,12 +292,12 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     // A bottom sheet on phones, a card in the window on desktops (Escape or
     // a click outside closes it).
     let ticket_shown = if wide {
-        If::new(ticket, move || {
+        when(ticket, move || {
             dialog()
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)
                 })
-                .on_cancel(move |_: &()| ticket.set(false))
+                .on_cancel(move || ticket.set(false))
                 .child(
                     view()
                         .flex_1()
@@ -514,7 +514,7 @@ fn DayRange(props: StockProps) -> impl IntoElement {
     let width = stored(0.0_f32);
     let placed = stored(false);
     let place = move |q: Quote| {
-        let width = width.with(|w| *w);
+        let width = width.get();
         if width <= 0.0 {
             return;
         }

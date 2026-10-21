@@ -11,7 +11,7 @@
 //! like any view, with no round trip. What changes is bound: a text, prop
 //! or style given a signal, a memo, a [`Prop`] or a closure is a render
 //! effect whose runs patch that part alone, and a region ([`dynamic`],
-//! [`If`], [`Each`], [`catch_error`]) makes its own elements again. State
+//! [`when`], [`each`], [`catch_error`]) makes its own elements again. State
 //! is signals the view makes (under the component's owner: they go with
 //! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
 //! component's listeners hear its elements' events first and decide what
@@ -138,7 +138,7 @@ pub use self::{
         Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, PanEvent,
         ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
-    flow::{Each, If, IntoElements, Reset, catch_error, dynamic},
+    flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, Modal, NativeView,
         Orientation, Painter, Screen, Scroll, Stack, Video, WebView, canvas, input,
@@ -393,21 +393,22 @@ pub mod prelude {
         ambient::{
             Delay, KeyOptions, Spawned, allow_rtl, animate_layout, animated_value,
             announce_for_accessibility, clipboard_files, clipboard_has_image, clipboard_has_string,
-            clipboard_image, clipboard_string, color, component_ref, dark, dialog,
-            dismiss_keyboard, element_ref, fetch, font_scale, force_rtl, global, idiom, image_size,
-            is_desktop, key_label, keyboard_duration, keyboard_height, locale, measure_text,
-            next_frame, on_back_press, on_key, on_key_with, os, os_version, pixel_ratio,
-            prefetch_image, reduce_motion, request_animation_frame, round_to_nearest_pixel, rtl,
-            safe_area, screen_reader, set_clipboard, set_clipboard_image, set_color_scheme,
-            set_interval, set_timeout, spawn, timer, timer_until, toast, tokens, window,
+            clipboard_image, clipboard_string, color, component_ref, dark, dismiss_keyboard,
+            element_ref, fetch, font_scale, force_rtl, global, idiom, image_size, is_desktop,
+            key_label, keyboard_duration, keyboard_height, locale, measure_text, next_frame,
+            on_back_press, on_key, on_key_with, os, os_version, pixel_ratio, prefetch_image,
+            reduce_motion, request_animation_frame, round_to_nearest_pixel, rtl, safe_area,
+            screen_reader, set_clipboard, set_clipboard_image, set_color_scheme, set_interval,
+            set_timeout, spawn, timer, timer_until, toast, tokens, window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context,
+        batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
+        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
     };
-    // Kept for apps written before `nsh_base` presented dialogs and
-    // navigation (`nsh_base::{dialog, nav_stack, nav_page}`).
+    // Kept for apps written before `nsh_base` presented dialogs,
+    // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,
+    // alert_dialog}`).
     #[allow(deprecated)]
-    pub use super::{modal, screen, stack};
+    pub use super::{ambient::dialog, modal, screen, stack};
 }
 
 /// What the macros' code and nsh's generated workspace name.

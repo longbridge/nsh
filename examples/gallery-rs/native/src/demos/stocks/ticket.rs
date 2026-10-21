@@ -162,7 +162,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
             press()
                 .label(format!("{q} shares"))
                 .selected(selected)
-                .on_press(move |_: &()| quantity.set(q))
+                .on_press(move || quantity.set(q))
                 .child(
                     view()
                         .h(px(44.0))
@@ -329,7 +329,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 .child(
                     caption("Limit price").child(
                         text(move || format!("use last {}", p(props.last.get())))
-                            .on_press(move |_: &()| limit.set(props.last.get_untracked()))
+                            .on_press(move || limit.set(props.last.get_untracked()))
                             .role(AccessibilityRole::Button)
                             .hit_slop(EdgeInsets::all(px(10.0)))
                             .text_size(px(13.0))
@@ -427,7 +427,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 ),
         )
         // Reviewing expands the ticket (its layout springs).
-        .child(If::new(review, reviewing).otherwise(move || {
+        .child(when(review, reviewing).otherwise(move || {
             Button::new(
                 move || format!("Review {}", verb().to_lowercase()),
                 move |_: &()| expand(true),

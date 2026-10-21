@@ -45,8 +45,8 @@ fn field(focused: Signal<bool>) -> Input {
         })
         .rounded(px(radius::CONTROL))
         .finish(Finish::Inset)
-        .on_focus(move |_: &()| focused.set(true))
-        .on_blur(move |_: &()| focused.set(false))
+        .on_focus(move || focused.set(true))
+        .on_blur(move || focused.set(false))
 }
 
 /// A cell of a row of equal widths.
@@ -214,7 +214,7 @@ fn PressFeedback() -> impl IntoElement {
 fn PressableSheet() -> impl IntoElement {
     let sheet = signal(false);
     let open = move |open: bool| move |_: &()| sheet.set(open);
-    let modal_view = If::new(sheet, move || {
+    let modal_view = when(sheet, move || {
         dialog()
             .presentation(ModalPresentation::PageSheet)
             .animation(ModalAnimation::Slide)
@@ -308,7 +308,7 @@ fn LayoutAnimations() -> impl IntoElement {
         }
     };
     let white = 0xffffff;
-    let boxes = Each::new(
+    let boxes = each(
         items,
         |n: &u32| *n,
         move |n, _| {
@@ -369,7 +369,7 @@ fn LayoutAnimations() -> impl IntoElement {
                     ui::Button::new(
                         "Add",
                         animate(|items, next| {
-                            items.insert(0, next.with(|n| *n));
+                            items.insert(0, next.get());
                             next.with(|n| *n += 1);
                         }),
                     )
@@ -513,7 +513,7 @@ fn ModalOptions() -> impl IntoElement {
     let visible = signal(false);
     let translucent = signal(false);
     let show = move |shown: bool| move |_: &()| visible.set(shown);
-    let modal_view = If::new(visible, move || {
+    let modal_view = when(visible, move || {
         dialog()
             .animation(ModalAnimation::Slide)
             .status_bar_translucent(translucent)

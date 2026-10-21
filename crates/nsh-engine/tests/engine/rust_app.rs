@@ -144,7 +144,7 @@ fn a_rust_app_starts_in_its_appearance() {
 #[component]
 fn Navigation() -> impl IntoElement {
     let routes = signal(vec![0_u32, 1]);
-    nav_stack().flex_1().child(Each::new(
+    nav_stack().flex_1().child(each(
         move || routes.get(),
         |&route: &u32| route,
         move |route, _| {

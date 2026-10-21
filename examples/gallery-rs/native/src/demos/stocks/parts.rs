@@ -48,7 +48,7 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
     let placed = stored(false);
     let from_right = props.from_right;
     let place = move |share: f32| {
-        let width = width.with(|w| *w);
+        let width = width.get();
         if width <= 0.0 {
             return;
         }
@@ -175,7 +175,7 @@ pub(crate) fn MarketButton() -> impl IntoElement {
                     .into(),
                 )
             })
-            .on_press(move |_: &()| running.update(|r| *r = !*r))
+            .on_press(move || running.update(|r| *r = !*r))
             .child(
                 view()
                     .size(px(32.0))

@@ -199,7 +199,7 @@ pub(crate) fn OrderBook(props: StockProps) -> impl IntoElement {
         decimals,
     };
     let side = move |bid: bool| {
-        Each::new(
+        each(
             move || (0..depth.get()).collect::<Vec<usize>>(),
             |slot: &usize| *slot,
             move |slot, _| level_row(bid, slot.get_untracked(), ladder),

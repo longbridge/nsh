@@ -97,15 +97,15 @@ pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElemen
         .when_some(props.hit_slop, |v, slop| {
             v.hit_slop(EdgeInsets::all(px(slop)))
         })
-        .on_press_down(move |_: &()| {
+        .on_press_down(move || {
             scale.spring(props.scale.get_untracked(), motion::PRESS);
         })
-        .on_press_up(move |_: &()| {
+        .on_press_up(move || {
             scale.spring(1.0, motion::PRESS);
         })
-        .on_press(move |_: &()| cx.emit(PressEvent::Press))
+        .on_press(move || cx.emit(PressEvent::Press))
         .when(props.long_press, |v| {
-            v.on_long_press(move |_: &()| cx.emit(PressEvent::LongPress))
+            v.on_long_press(move || cx.emit(PressEvent::LongPress))
         })
         .child(props.children)
 }

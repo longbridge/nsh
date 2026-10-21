@@ -4787,7 +4787,7 @@ mod components {
                     .footer
                     .place(move |f| f.on_press(move |_: &()| shown.update(|s| *s = !*s))),
             )
-            .child(If::new(shown, || view().h(px(10.0))))
+            .child(when(shown, || view().h(px(10.0))))
     }
 
     /// What a view gives a slot's node (its handlers) stays while the node
@@ -5107,6 +5107,87 @@ mod components {
         c.set_states(2, crate::tailwind::state::PRESSED);
         let batch = c.commit().unwrap();
         assert_eq!(background(&batch), Some(Color(0xff0000ff)));
+    }
+
+    /// A selected state whose style is the app's (as `nsh_base::Button`'s).
+    #[derive(Clone, PartialEq, Props)]
+    struct PillProps {
+        #[prop(default)]
+        selected: crate::ui::Prop<bool>,
+        #[prop(default)]
+        selected_style: crate::ui::Prop<crate::ui::Style>,
+    }
+
+    #[component]
+    fn Pill(props: PillProps) -> impl IntoElement {
+        view()
+            .size_10()
+            .accessibility_state(move || crate::AccessibilityState {
+                selected: props.selected.get(),
+                ..crate::AccessibilityState::default()
+            })
+            .selected_style(props.selected_style)
+    }
+
+    /// A selected pill styled with a theme color and an opacity a press
+    /// changes, through its style prop's closure.
+    #[component]
+    fn Pills() -> impl IntoElement {
+        let dim = signal(false);
+        view()
+            .on_press(move || dim.set(true))
+            .child(pill().selected(true).selected_style(move |s| {
+                s.bg(move || tokens().color("primary.background").unwrap())
+                    .opacity(move || if dim.get() { 0.5_f32 } else { 1.0 })
+            }))
+    }
+
+    #[test]
+    fn a_style_prop_set_with_a_closure_follows_the_theme_and_its_signals() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Pills>().tokens_from(test_tokens);
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Pills>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let styled = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id != 2 => {
+                    Some((style.background_color, style.opacity))
+                }
+                _ => None,
+            })
+        };
+        let primary = token("primary.background");
+        let batch = c.commit().unwrap();
+        assert_eq!(styled(&batch), Some((Color::from(primary.light), 1.0)));
+        // Dark appearance: the theme color switches natively.
+        c.set_class_environment(crate::tailwind::ClassEnvironment {
+            dark: true,
+            ..Default::default()
+        });
+        let batch = c.commit().unwrap();
+        assert_eq!(styled(&batch), Some((Color::from(primary.dark), 1.0)));
+        // What the closure's bindings read changes it.
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(styled(&batch), Some((Color::from(primary.dark), 0.5)));
     }
 
     #[test]
@@ -5695,7 +5776,7 @@ mod components {
                 let len = name.with(String::len) as f32;
                 Painter::new().fill_rect(0.0, 0.0, len, 4.0)
             }))
-            .child(If::new(
+            .child(when(
                 move || name.with(String::len) > 2,
                 // `nsh_base::dialog` is this, and nsh-base depends on the core.
                 #[allow(deprecated)]
@@ -6374,7 +6455,7 @@ mod components {
     #[component]
     fn SelfClosing() -> impl IntoElement {
         let open = signal(true);
-        view().child(If::new(open, move || {
+        view().child(when(open, move || {
             view().on_press(move |_: &()| {
                 Owner::current().dispose();
                 let _ = (signal(5), animated_value(1.0), element_ref());
@@ -6589,9 +6670,7 @@ mod components {
 
     #[component]
     fn Drawer(props: DrawerProps) -> impl IntoElement {
-        view().child(If::new(props.open, move || {
-            view().p_2().child(props.children)
-        }))
+        view().child(when(props.open, move || view().p_2().child(props.children)))
     }
 
     /// Content with state of its own: the how-manieth it was made.
@@ -6936,7 +7015,7 @@ mod components {
                 }))
                 .child(", ")
                 .child(text("bold").font_weight(FontWeight::BOLD))
-                .child(If::new(long, || " and more"))
+                .child(when(long, || " and more"))
                 .child(view().size(px(10.0)).bg(rgb(0xff0000))),
         )
     }
@@ -7728,7 +7807,7 @@ mod views {
     use super::*;
     use crate::{
         Prop,
-        ui::{Component, Each, If, Props, Registry, Root, Scope, prelude::*},
+        ui::{Component, Props, Registry, Root, Scope, prelude::*},
     };
 
     fn texts(batch: &MountBatch) -> Vec<String> {
@@ -8007,7 +8086,7 @@ mod views {
                 .on_press(move |_: &()| on.update(|v| *v = !*v))
                 .child(text("before"))
                 .child(
-                    If::new(on, || {
+                    when(on, || {
                         cleanup(|| CLEANED.with(|c| c.set(c.get() + 1)));
                         text("on")
                     })
@@ -8069,12 +8148,13 @@ mod views {
                     on.set(false);
                 })
                 .child(
-                    If::new(on, || Counter::element(CounterProps { label: "On".into() }))
-                        .otherwise(|| {
+                    when(on, || Counter::element(CounterProps { label: "On".into() })).otherwise(
+                        || {
                             Counter::element(CounterProps {
                                 label: "Off".into(),
                             })
-                        }),
+                        },
+                    ),
                 )
         }
     }
@@ -8112,7 +8192,7 @@ mod views {
         fn view(_: RowsProps, _: Scope<NoEvent>) -> impl IntoElement {
             let items = signal(vec![1, 2, 3]);
             ITEMS.with(|i| i.set(Some(items)));
-            view().child(Each::new(
+            view().child(each(
                 items,
                 |n| *n,
                 |item, index| {
@@ -8678,7 +8758,7 @@ mod views {
 
         fn view(props: PocketProps, _: Scope<NoEvent>) -> impl IntoElement {
             let children = props.children;
-            view().child(If::new(props.open, move || view().p_2().child(children)))
+            view().child(when(props.open, move || view().p_2().child(children)))
         }
     }
 
@@ -8715,7 +8795,7 @@ mod views {
             Holder::element(HolderProps {
                 children: Children::default(),
             })
-            .child(If::new(open, || {
+            .child(when(open, || {
                 vec![
                     label().into_element(),
                     text("plain").into_element(),
@@ -8769,7 +8849,7 @@ mod views {
             let children = props.children;
             view()
                 .on_press(move || shown.update(|s| *s = !*s))
-                .child(If::new(shown, move || {
+                .child(when(shown, move || {
                     Holder::element(HolderProps {
                         children: Children::default(),
                     })
@@ -8798,7 +8878,7 @@ mod views {
                     children: Children::default(),
                 })
                 .child(text("a"))
-                .child(If::new(middle, || text("b")))
+                .child(when(middle, || text("b")))
                 .child(text("c")),
             )
         }
@@ -9050,9 +9130,7 @@ mod views {
             view()
                 .on_press(move || shown.update(|s| *s = !*s))
                 .child(text(move || format!("empty {}", children.get().is_empty())))
-                .child(If::new(shown, move || {
-                    view().child(children.get_untracked())
-                }))
+                .child(when(shown, move || view().child(children.get_untracked())))
         }
     }
 
@@ -9073,7 +9151,7 @@ mod views {
         let on = signal(true);
         view()
             .on_press(move || on.update(|o| *o = !*o))
-            .child(pass_on().child(If::new(on, || text("given"))))
+            .child(pass_on().child(when(on, || text("given"))))
     }
 
     #[test]
@@ -9968,7 +10046,7 @@ mod views {
                         children: Children::default(),
                     })
                     .child(text("before"))
-                    .child(If::new(open, || text("open")))
+                    .child(when(open, || text("open")))
                     .child(text("after")),
                 )
         }
@@ -10331,7 +10409,7 @@ mod views {
         view()
             .on_press(move |_: &()| shown.set(false))
             .child(text(move || format!("k {}", count.get())))
-            .child(If::new(shown, move || {
+            .child(when(shown, move || {
                 on_key("mod+k", move |_| count.update(|c| *c += 1));
                 view()
             }))
@@ -10418,7 +10496,7 @@ mod views {
         let shown = signal(true);
         view()
             .on_press(move |_: &()| shown.set(false))
-            .child(If::new(shown, leafy))
+            .child(when(shown, leafy))
     }
 
     #[test]
@@ -11087,6 +11165,87 @@ mod builders {
         assert_eq!(run::<ChildrenTogether>(|| (), &[]), one_by_one);
         assert!(one_by_one[0].contains("\"row 1\""));
         assert!(one_by_one[0].contains("\"right\""));
+    }
+
+    /// The setters of host elements' own options, each given a closure
+    /// of `flipped`.
+    #[component]
+    fn BoundOptions() -> impl IntoElement {
+        let flipped = signal(false);
+        let pick =
+            move |a: &'static str, b: &'static str| move || if flipped.get() { b } else { a };
+        view()
+            .child(text("flip").on_press(move || flipped.set(true)))
+            .child(
+                text("lines")
+                    .number_of_lines(move || if flipped.get() { 2_u32 } else { 1 })
+                    .selectable(flipped)
+                    .max_font_size_multiplier(move || if flipped.get() { 3.0_f32 } else { 1.5 }),
+            )
+            .child(
+                image("a.png")
+                    .resize_mode(move || {
+                        if flipped.get() {
+                            crate::ResizeMode::Contain
+                        } else {
+                            crate::ResizeMode::Cover
+                        }
+                    })
+                    .placeholder(pick("before.png", "after.png"))
+                    .fade_duration(move || if flipped.get() { 300.0_f32 } else { 100.0 }),
+            )
+            .child(web_view(pick(
+                "https://before.test/",
+                "https://after.test/",
+            )))
+            .child(video(pick(
+                "https://before.test/v.mp4",
+                "https://after.test/v.mp4",
+            )))
+            .child(native("map").prop("zoom", move || {
+                serde_json::json!(if flipped.get() { 9 } else { 4 })
+            }))
+    }
+
+    #[test]
+    fn host_options_take_signals_and_closures() {
+        let frames = run::<BoundOptions>(|| (), &["flip"]);
+        for before in [
+            "before.png",
+            "https://before.test/",
+            "https://before.test/v.mp4",
+            "Number(4)",
+            "Cover",
+            "fade_ms: Some(100.0)",
+            "max_lines: 1",
+            "selectable: Some(false)",
+        ] {
+            assert!(frames[0].contains(before), "{before} in {}", frames[0]);
+        }
+        for after in [
+            "after.png",
+            "https://after.test/",
+            "https://after.test/v.mp4",
+            "Number(9)",
+            "resize_mode: Contain",
+            "fade_ms: Some(300.0)",
+            "max_lines: 2",
+            "selectable: Some(true)",
+        ] {
+            assert!(frames[1].contains(after), "{after} in {}", frames[1]);
+        }
+        for gone in ["before.png", "before.test"] {
+            assert!(!frames[1].contains(gone), "{gone} in {}", frames[1]);
+        }
+    }
+
+    #[test]
+    fn a_status_bar_style_is_a_setting() {
+        let setting = crate::StatusBarStyle::Light.into_reactive();
+        assert_eq!(
+            setting.get(),
+            StatusBarSetting::default().foreground(crate::StatusBarStyle::Light)
+        );
     }
 }
 

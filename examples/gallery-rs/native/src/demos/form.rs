@@ -144,10 +144,10 @@ impl Field {
             .return_key_type(ReturnKeyType::Done)
             .multiline(self.multiline)
             .readonly(!self.editable)
-            .on_focus(move |_: &()| {
+            .on_focus(move || {
                 focus.timing(1.0, 160.0, Easing::EaseInOut);
             })
-            .on_blur(move |_: &()| {
+            .on_blur(move || {
                 focus.timing(0.0, 220.0, Easing::EaseInOut);
                 if let Some(on_blur) = &on_blur {
                     on_blur();
@@ -259,7 +259,7 @@ impl Field {
             // The error's row comes and goes; while it shows, its text
             // follows the error.
             .children(error.map(|error| {
-                If::new(
+                when(
                     move || error.with(Option::is_some),
                     move || {
                         view()
@@ -873,7 +873,7 @@ pub(crate) fn Form() -> impl IntoElement {
         .card(texts)
         .card(submit_card)
         .card(more)
-        .child(If::new(sheet, move || sheet_view(sheet, &fx[f::SHEET..])))
+        .child(when(sheet, move || sheet_view(sheet, &fx[f::SHEET..])))
 }
 
 /// The sheet of inputs (`open` while it shows), its fields animated by
@@ -983,7 +983,7 @@ fn SelectionDemo() -> impl IntoElement {
         .items_center()
         .gap(px(6.0))
         .min_h(px(28.0))
-        .child(If::new(
+        .child(when(
             move || keys.with(Vec::is_empty),
             || {
                 text("Keys you press show here")
@@ -991,7 +991,7 @@ fn SelectionDemo() -> impl IntoElement {
                     .text_color(colors::FAINT)
             },
         ))
-        .child(Each::new(
+        .child(each(
             move || keys.with(|k| k.iter().cloned().enumerate().collect::<Vec<_>>()),
             |(i, _): &(usize, String)| *i,
             |key, _| {
@@ -1107,7 +1107,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         });
     };
     // Messages are only added: a bubble is known by its place.
-    let bubbles = Each::new(
+    let bubbles = each(
         move || messages.with(|m| m.iter().cloned().enumerate().collect::<Vec<_>>()),
         |(i, _): &(usize, Message)| *i,
         |m, _| {

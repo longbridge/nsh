@@ -189,9 +189,9 @@ impl Variant {
     /// While disabled.
     pub(crate) const DISABLED: Self = Self::states(state::DISABLED);
     /// While selected (set by the core from the accessibility state).
-    const SELECTED: Self = Self::states(state::SELECTED);
+    pub(crate) const SELECTED: Self = Self::states(state::SELECTED);
     /// While checked (set by the core from the accessibility state).
-    const CHECKED: Self = Self::states(state::CHECKED);
+    pub(crate) const CHECKED: Self = Self::states(state::CHECKED);
     /// In dark appearance.
     const DARK: Self = Self {
         states: 0,

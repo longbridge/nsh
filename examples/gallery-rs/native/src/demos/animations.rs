@@ -1176,7 +1176,7 @@ fn Layout() -> impl IntoElement {
                 .style_when(column, |s| s.flex_col())
                 .flex_wrap()
                 .gap_2()
-                .child(Each::new(items, |id| *id, tile)),
+                .child(each(items, |id| *id, tile)),
         )
         .child(
             view()

@@ -27,7 +27,7 @@ use nsh_core::ui::{ComponentSpec, Registry};
 pub use crate::{
     alert_dialog::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
-        AlertDialogRole,
+        AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     keyboard::{

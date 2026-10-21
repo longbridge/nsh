@@ -251,7 +251,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
     let shown = signal(0_usize);
     let stocks = {
         let live = live.clone();
-        Each::new(
+        each(
             move || rows.get(),
             |i: &usize| *i,
             move |i, at| {
@@ -299,7 +299,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
         .child(
             scroll()
                 .flex_1()
-                .child(view().child(stocks).child(If::new(
+                .child(view().child(stocks).child(when(
                     move || rows.with(Vec::is_empty),
                     || {
                         text("Nothing here right now")
@@ -424,7 +424,7 @@ fn MarketStrip() -> impl IntoElement {
                 )
                 .child(market_button()),
         )
-        .child(If::new(opened, move || breadth(&live)))
+        .child(when(opened, move || breadth(&live)))
 }
 
 /// Advancers vs decliners across the composite and the sectors' moves:
@@ -770,7 +770,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .items_center()
         .gap_3()
         .px_4()
-        .on_press(move |_: &()| cx.emit(StockRowEvent::Press))
+        .on_press(move || cx.emit(StockRowEvent::Press))
         // Pressed, the row shows the surface under its content.
         .active(|s| s.bg(colors::SURFACE))
         .role(AccessibilityRole::Button)
@@ -784,7 +784,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
                 .style_when(active, |s| s.bg(fill))
                 .hover(|s| s.bg(move || if active.get() { fill } else { colors::SURFACE }))
         })
-        .child(If::new(active, || {
+        .child(when(active, || {
             view()
                 .absolute()
                 .top(px(14.0))

@@ -356,7 +356,7 @@ fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
     let person = move || row.get().person();
     view()
         // A tap lights the row up and does nothing else.
-        .on_press(|_: &()| {})
+        .on_press(|| {})
         .active(|s| s.bg(colors::RAISED))
         .flex_row()
         .items_center()
@@ -426,7 +426,7 @@ fn Contacts() -> impl IntoElement {
             let rows = rows.clone();
             let row = computed(move || rows[at.index()]);
             let header = computed(move || matches!(row.get(), ContactRow::Header { .. }));
-            If::new(header, move || contact_header(row)).otherwise(move || contact_person(row))
+            when(header, move || contact_header(row)).otherwise(move || contact_person(row))
         })
         .sticky_header_indices(headers)
         .estimated_item_size(px(60.0))
@@ -738,7 +738,7 @@ fn ranges(range: Signal<&'static str>) -> Section {
             .role(PressRole::Tab)
             .selected(selected)
             .label(label)
-            .on_press(move |_: &()| range.set(label))
+            .on_press(move || range.set(label))
             .child(
                 view()
                     .h(px(36.0))

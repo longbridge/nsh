@@ -198,3 +198,25 @@ fn a_listener_of_a_disposed_owner_does_not_run() {
     listener.call(&());
     assert_eq!(*runs.borrow(), 1, "its view is gone");
 }
+
+#[test]
+fn a_stored_value_reads_without_subscribing() {
+    let runs = Rc::new(RefCell::new(0));
+    let r = runs.clone();
+    run(
+        move || {
+            let cache = stored(1);
+            effect(move || {
+                let _ = cache.get();
+                *r.borrow_mut() += 1;
+            });
+            cache
+        },
+        |cache| {
+            assert_eq!(cache.get(), 1);
+            cache.replace(2);
+            assert_eq!(cache.get(), 2);
+            assert_eq!(*runs.borrow(), 1, "nothing subscribed to it");
+        },
+    );
+}

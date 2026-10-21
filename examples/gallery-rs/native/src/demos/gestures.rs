@@ -252,7 +252,7 @@ fn Ball() -> impl IntoElement {
             })
             .on_responder_move(move |e: &ResponderEvent| {
                 let g = e.gesture;
-                let (x, y) = start.with(|s| *s);
+                let (x, y) = start.get();
                 pos.set((x + g.delta.x.0, y + g.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
@@ -399,7 +399,7 @@ fn TouchPad() -> impl IntoElement {
                 .justify_center()
                 .on_touch(on_touch)
                 .child(dots())
-                .child(If::new(
+                .child(when(
                     move || down.get() == 0,
                     || {
                         text(hint(
@@ -410,7 +410,7 @@ fn TouchPad() -> impl IntoElement {
                         .text_color(colors::MUTED)
                     },
                 ))
-                .child(Each::new(
+                .child(each(
                     move || {
                         fingers_down.with(|f| f.iter().copied().enumerate().collect::<Vec<_>>())
                     },
@@ -422,7 +422,7 @@ fn TouchPad() -> impl IntoElement {
             view()
                 .gap_1()
                 .min_h(px(TOUCH_LOG as f32 * 18.0))
-                .child(If::new(
+                .child(when(
                     move || log.with(Vec::is_empty),
                     || {
                         text("No touches yet")
@@ -432,7 +432,7 @@ fn TouchPad() -> impl IntoElement {
                 ))
                 .children(
                     (0..TOUCH_LOG)
-                        .map(|i| If::new(move || log.with(|log| log.len() > i), move || line(i))),
+                        .map(|i| when(move || log.with(|log| log.len() > i), move || line(i))),
                 ),
         )
 }
@@ -649,7 +649,7 @@ fn HitSlop() -> impl IntoElement {
                         .hit_slop(30.0)
                         .scale(0.8)
                         .label("Tiny dot")
-                        .on_press(move |_: &()| taps.update(|n| *n += 1))
+                        .on_press(move || taps.update(|n| *n += 1))
                         .child(
                             view()
                                 .size(px(12.0))
@@ -724,7 +724,7 @@ fn pointer_events() -> impl IntoElement {
                 .child(
                     press()
                         .scale(0.98)
-                        .on_press(move |_: &()| through.update(|n| *n += 1))
+                        .on_press(move || through.update(|n| *n += 1))
                         .flex_1()
                         .child(
                             view()
@@ -782,7 +782,7 @@ fn accessibility() -> impl IntoElement {
                         .role(AccessibilityRole::Button)
                         .label(label)
                         .hint(hint)
-                        .on_press(move |_: &()| last.set(Some(label)))
+                        .on_press(move || last.set(Some(label)))
                         .child(
                             Row::new(i == 0)
                                 // The tile's tint follows the press.

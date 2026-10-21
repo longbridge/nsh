@@ -261,7 +261,7 @@ fn Player() -> impl IntoElement {
                     });
                 }),
         ))
-        .child(If::new(move || !system_controls.get(), controls))
+        .child(when(move || !system_controls.get(), controls))
         .child(
             segmented()
                 .options([

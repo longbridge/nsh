@@ -61,9 +61,12 @@ crate::static_reactive!(ModalPresentation: ModalPresentation);
 crate::static_reactive!(ResizeMode: ResizeMode);
 crate::static_reactive!(ReturnKeyType: ReturnKeyType);
 crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
+crate::static_reactive!(JsonValue: JsonValue);
+crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
 
 /// Sets `prop` among `props`, replacing one of its kind.
-fn set_in(props: &mut Vec<Prop>, prop: Prop) {
+pub(crate) fn set_in(props: &mut Vec<Prop>, prop: Prop) {
     match props.iter_mut().find(|p| same_kind(p, &prop)) {
         Some(p) => *p = prop,
         None => props.push(prop),
@@ -301,10 +304,11 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 
 crate::static_reactive!(Painter: Painter, Drawing);
 
-/// A web view loading `url`.
-pub fn web_view(url: &str) -> WebView {
-    WebView(ElNode::new(Tag::WebView))
-        .set(Prop::Native(NativeProp::Source(WebSource::Uri(url.into()))))
+/// A web view loading `url` (a bound one loads again when it changes).
+pub fn web_view(url: impl IntoReactive<String>) -> WebView {
+    WebView(ElNode::new(Tag::WebView)).bind_prop(url, |url: String| {
+        Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
+    })
 }
 
 /// A web view showing the page `html`, its relative links resolved against
@@ -313,9 +317,12 @@ pub fn web_view_html(html: impl IntoReactive<String>, base_url: Option<&str>) ->
     WebView(ElNode::new(Tag::WebView)).html(html, base_url)
 }
 
-/// A video playing the file or stream at `url`.
-pub fn video(url: &str) -> Video {
-    Video(ElNode::new(Tag::Video)).set(Prop::Native(NativeProp::Source(WebSource::Uri(url.into()))))
+/// A video playing the file or stream at `url` (a bound one plays the new
+/// one when it changes).
+pub fn video(url: impl IntoReactive<String>) -> Video {
+    Video(ElNode::new(Tag::Video)).bind_prop(url, |url: String| {
+        Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
+    })
 }
 
 /// The embedder's native component registered as `name`.
@@ -589,9 +596,25 @@ impl Screen {
 
     /// The header's colors: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons'), as [`super::Style::from_decls`] makes
-    /// them (TS: `headerStyle`).
-    pub fn header_style(self, style: impl IntoReactive<super::Style>) -> Self {
-        self.bind_prop(style, |s: super::Style| Prop::HeaderStyle(s.0))
+    /// them (TS: `headerStyle`); a style of typed styles applies as
+    /// [`Self::header_style_with`]'s do.
+    pub fn header_style(mut self, style: impl IntoReactive<super::Style>) -> Self {
+        let style = match style.into_reactive() {
+            // Its bound parts are read in the binding, which follows them.
+            super::Reactive::Static(s) if s.1.is_bound() => {
+                super::Reactive::Bound(std::rc::Rc::new(move || s.clone()))
+            }
+            style => style,
+        };
+        self.0.bind_attr(style, |a, s: super::Style| {
+            set_in(&mut a.props, Prop::HeaderStyle(s.0));
+            if !s.1.is_empty() {
+                let typed = s.1.resolved();
+                let list = (!typed.is_empty()).then(|| Arc::new(typed.lower()));
+                set_in(&mut a.props, Prop::HeaderClassList(list));
+            }
+        });
+        self
     }
 
     /// The header's colors as typed styles: the background
@@ -984,9 +1007,13 @@ impl Video {
 }
 
 impl NativeView {
-    /// Its prop `name` (any JSON value), as JS's `nativeComponent` passes it.
-    pub fn prop(self, name: &str, value: JsonValue) -> Self {
-        self.set(Prop::ComponentProp(name.into(), Some(value)))
+    /// Its prop `name` (any JSON value), as JS's `nativeComponent` passes it;
+    /// a bound one is passed again when it changes.
+    pub fn prop(self, name: &str, value: impl IntoReactive<JsonValue>) -> Self {
+        let name: Arc<str> = name.into();
+        self.bind_prop(value, move |value| {
+            Prop::ComponentProp(name.clone(), Some(value))
+        })
     }
 
     /// It emitted an event.

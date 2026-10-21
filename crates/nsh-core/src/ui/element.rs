@@ -776,7 +776,9 @@ pub trait Element: IntoElement + Sized {
     /// An inline style the app passed (a prop of type `Style`, React
     /// Native's names), over the element's styles.
     fn inline_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        self.node().bind_attr(style, |a, style| a.inline = style.0);
+        Style::apply(self.node(), style, Variant::default(), |a, patch| {
+            a.inline = patch
+        });
         self
     }
 
@@ -803,13 +805,22 @@ pub trait Element: IntoElement + Sized {
 /// object, an array of them, or nothing), decoded when JS sets it as a host
 /// element's `style` is (transforms, shadow offsets, native animated
 /// values included), and applied with [`Element::inline_style`]. Rust
-/// makes one from declarations ([`Style::from_decls`], [`Style::with`]).
+/// makes one with the typed styles (`From<StyleRefinement>`: what a style
+/// prop's setter does with its closure, `.selected_style(|s| s.bg(..))`),
+/// theme colors following the appearance and bound parts their signals,
+/// as in `.active(|s| ..)`; or from declarations ([`Style::from_decls`],
+/// [`Style::with`]).
 /// Its native animated values are node ids, valid while the style is the
 /// prop's current value (JS keeps the values alive with it, as a host
 /// element's `style` does); a component that keeps an older `Style`
 /// beyond that may hold ids of values JS has collected.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Style(pub(crate) Option<Arc<crate::StylePatch>>);
+pub struct Style(
+    pub(crate) Option<Arc<crate::StylePatch>>,
+    /// The typed styles it was made of (Rust's), applied as the element's
+    /// own are.
+    pub(crate) StyleRefinement,
+);
 
 impl Style {
     /// A style of `decls`, applied in order; one that does not apply (a
@@ -829,25 +840,65 @@ impl Style {
                 log::warn!("invalid value for style `{}`", key.name());
             }
         }
-        Self(Some(Arc::new(patch)))
+        Self(Some(Arc::new(patch)), StyleRefinement::default())
     }
 
     /// This style with property `key` set to `value` after the rest
     /// (`Style::default().with(StyleKey::Flex, PatchValue::Number(1.0))`).
     pub fn with(self, key: crate::StyleKey, value: crate::PatchValue) -> Self {
         let decls = self.0.iter().flat_map(|p| p.decls().iter().cloned());
-        Self::from_decls(decls.chain([crate::StyleDecl::Set(key, value)]))
+        let mut style = Self::from_decls(decls.chain([crate::StyleDecl::Set(key, value)]));
+        style.1 = self.1;
+        style
     }
 
-    /// Its declarations, in order.
+    /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
+    }
+
+    /// Applies it to `node` in `variant`: the declarations with `attr`, the
+    /// typed styles as part of the node's own. A bound style adds its
+    /// typed styles as a bound part only when it has some as the element
+    /// is made (they are set with the element; JS's styles have none), so
+    /// a style prop left unset costs what a style of declarations does.
+    pub(crate) fn apply(
+        node: &mut ElNode,
+        style: impl IntoReactive<Style>,
+        variant: Variant,
+        attr: impl Fn(&mut Attrs, Option<Arc<crate::StylePatch>>) + 'static,
+    ) {
+        match style.into_reactive() {
+            Reactive::Static(Style(patch, typed)) => {
+                attr(&mut node.attrs, patch);
+                if !typed.is_empty() {
+                    node.style.extend_as(variant, typed);
+                }
+            }
+            Reactive::Bound(f) => {
+                let typed = super::untracked(|| !f().1.is_empty());
+                let patch = f.clone();
+                node.bind_attr(move || patch().0, attr);
+                if typed {
+                    // Resolved here: the bound parts of what it adds would
+                    // not run in this resolution.
+                    node.style
+                        .bind(move |s| s.extend_as(variant, f().1.resolved()));
+                }
+            }
+        }
     }
 }
 
 impl From<crate::StylePatch> for Style {
     fn from(patch: crate::StylePatch) -> Self {
-        Self(Some(Arc::new(patch)))
+        Self(Some(Arc::new(patch)), StyleRefinement::default())
+    }
+}
+
+impl From<StyleRefinement> for Style {
+    fn from(style: StyleRefinement) -> Self {
+        Self(None, style)
     }
 }
 
@@ -860,9 +911,9 @@ impl JsValue for Style {
     /// what it does not take is logged, as there.
     fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
         if value.is_nullish() {
-            return Ok(Self(None));
+            return Ok(Self::default());
         }
-        Ok(Self(Some(Arc::new(value.host().style(value.raw())?))))
+        Ok(Self::from(value.host().style(value.raw())?))
     }
 
     /// A style is JS's to give, not to get back.
@@ -1398,7 +1449,9 @@ pub trait Interactive: Element {
     /// An app's style while selected (`accessibility_state` `selected`;
     /// TS: a `Button`'s `selectedStyle`), as `selected:` classes apply.
     fn selected_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        super::host::bind_prop(self.node(), style, |s: Style| Prop::SelectedStyle(s.0));
+        Style::apply(self.node(), style, Variant::SELECTED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::SelectedStyle(patch))
+        });
         self
     }
 
@@ -1406,7 +1459,9 @@ pub trait Interactive: Element {
     /// mixed: a checkbox's, a switch's, a radio's), as `checked:` classes
     /// apply.
     fn checked_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        super::host::bind_prop(self.node(), style, |s: Style| Prop::CheckedStyle(s.0));
+        Style::apply(self.node(), style, Variant::CHECKED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::CheckedStyle(patch))
+        });
         self
     }
 }
@@ -1506,80 +1561,76 @@ fn span(mut el: ElNode) -> ElNode {
 
 impl Text {
     /// At most `lines` lines (0: no limit), the last one truncated.
-    pub fn number_of_lines(mut self, lines: u32) -> Self {
-        self.0.attrs.number_of_lines = lines;
+    pub fn number_of_lines(mut self, lines: impl IntoReactive<u32>) -> Self {
+        self.0
+            .bind_attr(lines, |a, lines| a.number_of_lines = lines);
         self
     }
 
     /// Where a truncated line is cut.
-    pub fn ellipsize_mode(mut self, mode: crate::EllipsizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::EllipsizeMode(mode));
+    pub fn ellipsize_mode(mut self, mode: impl IntoReactive<crate::EllipsizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::EllipsizeMode);
         self
     }
 
     /// The user can select and copy it.
-    pub fn selectable(mut self, selectable: bool) -> Self {
-        super::host::set(&mut self.0, Prop::Selectable(Some(selectable)));
+    pub fn selectable(mut self, selectable: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, selectable, |s| Prop::Selectable(Some(s)));
         self
     }
 
     /// The highlight of its selection, when it is selectable.
-    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::SelectionColor(Some(Color::from(color.into()))),
-        );
+    pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(&mut self.0, color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
         self
     }
 
     /// Shrinks the font, down to `min_scale` of it, to fit its lines.
-    pub fn shrink_to_fit(mut self, min_scale: f32) -> Self {
+    pub fn shrink_to_fit(mut self, min_scale: impl IntoReactive<f32>) -> Self {
         super::host::set(&mut self.0, Prop::AdjustsFontSizeToFit(true));
-        super::host::set(&mut self.0, Prop::MinimumFontScale(min_scale));
+        super::host::bind_prop(&mut self.0, min_scale, Prop::MinimumFontScale);
         self
     }
 
     /// Whether its fonts follow the system's text size (true by default;
     /// TS: `allowFontScaling`).
-    pub fn allow_font_scaling(mut self, allow: bool) -> Self {
-        super::host::set(&mut self.0, Prop::AllowFontScaling(allow));
+    pub fn allow_font_scaling(mut self, allow: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, allow, Prop::AllowFontScaling);
         self
     }
 
     /// At most this multiple of its fonts' sizes with the system's text
     /// size (TS: `maxFontSizeMultiplier`; 0: no limit).
-    pub fn max_font_size_multiplier(mut self, multiplier: f32) -> Self {
-        super::host::set(&mut self.0, Prop::MaxFontSizeMultiplier(multiplier));
+    pub fn max_font_size_multiplier(mut self, multiplier: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, multiplier, Prop::MaxFontSizeMultiplier);
         self
     }
 }
 
 impl Image {
     /// How it fits its box (default: cover).
-    pub fn resize_mode(mut self, mode: crate::ResizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::ResizeMode(mode));
+    pub fn resize_mode(mut self, mode: impl IntoReactive<crate::ResizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::ResizeMode);
         self
     }
 
     /// Shown until it loads (a URL, an `asset:/` URI or an
     /// [`super::ImageAsset`]).
-    pub fn placeholder(mut self, src: impl Into<super::ImageSrc>) -> Self {
-        let src = src.into();
-        super::host::set(
-            &mut self.0,
+    pub fn placeholder(mut self, src: impl IntoReactive<super::ImageSrc>) -> Self {
+        super::host::bind_prop(&mut self.0, src, |src: super::ImageSrc| {
             Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
-            }))),
-        );
+            })))
+        });
         self
     }
 
     /// Draws its opaque pixels in `color` (a template image, an icon).
-    pub fn tint_color(mut self, color: impl Into<super::AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[crate::StyleKey::TintColor], color.into());
-        self
+    pub fn tint_color(self, color: impl IntoReactive<super::AdaptiveColor>) -> Self {
+        Styled::tint_color(self, color)
     }
 
     /// Blurs it.
@@ -1592,11 +1643,10 @@ impl Image {
     }
 
     /// Fades it in over `ms` milliseconds once loaded.
-    pub fn fade_duration(mut self, ms: f32) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::Image(crate::ImageProp::FadeDuration(Some(ms))),
-        );
+    pub fn fade_duration(mut self, ms: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, ms, |ms| {
+            Prop::Image(crate::ImageProp::FadeDuration(Some(ms)))
+        });
         self
     }
 

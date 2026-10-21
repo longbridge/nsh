@@ -17,8 +17,9 @@ come from two places:
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{SafeAreaView, …}`, and make navigation and
   dialogs with `nsh_base::{nav_stack, nav_page, dialog}` (builders of the core's `Stack`, `Screen` and `Modal` host
-  elements; the core's `stack()`, `screen()` and `modal()` are their deprecated old names; import `nsh_base::dialog`
-  by name, as the prelude's `dialog(Dialog)` shows a system alert). What goes in is behavior:
+  elements; the core's `stack()`, `screen()` and `modal()` are their deprecated old names), and show system
+  alerts with `nsh_base::alert_dialog()` (the prelude's `dialog(Dialog)` is its deprecated old form; import
+  `nsh_base::dialog` by name, as that glob still brings the old one). What goes in is behavior:
   - it owns behavior, state, focus, keyboard handling and accessibility (roles, states, actions), or tells the
     platform (insets, the keyboard's height, the status bar's setting, a system dialog);
   - it has no look: no colors, paddings, radii, fonts or variants of its own; it takes the app's `class` / `style`
@@ -65,8 +66,8 @@ come from two places:
   not literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
-  variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `If::new(cond, ||
-  el).otherwise(|| el)`, `dynamic(move || ..)`, `Each::new(items, key, |item, index| row)`.
+  variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `when(cond, ||
+  el).otherwise(|| el)`, `dynamic(move || ..)`, `each(items, key, |item, index| row)`.
 - **The app's content is props, placed by closures**: `header: Prop<Option<Slot>>`, `children: Children`,
   `items: Items` for virtualized rows (in JS `each` and a row renderer, like `List`); `#[prop(lazy)]` on `children`
   has JS make them only while the view places them (below).
@@ -78,8 +79,10 @@ come from two places:
 - **Modules are functions without a component**: `#[module] impl AlertDialog { pub async fn show(options:
   AlertDialogOptions) -> Result<Option<SharedString>, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
-- **System UI**: `dialog(..)` (await the index chosen, -1 when closed without one), `dismiss_keyboard()`, a screen's
-  or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`), `ModuleCx::set_status_bar(patch)`
+- **System UI**: `nsh_base::alert_dialog().title(..).cancel(..).destructive(..).show()` (TSX's `AlertDialog.show({ … })`:
+  await the label of the action chosen, `None` when closed without one), `dismiss_keyboard()`, a screen's
+  or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`; a `StatusBarStyle` alone, a
+  `StatusBarSetting` or a closure of one), `ModuleCx::set_status_bar(patch)`
   for the default under them; `.inset_padding(..)` / `.inset_margin(..)` on an element (`SafeAreaView`, `KeyboardAvoidingView`).
 - **Platform-only props** are an `android` / `ios` / `web` prop of a `JsObject` struct (an app's `ChartWeb { … }`).
 - Changing an app's component rebuilds the app's hosts and runners (`rust_app.rs`; `nsh run` does it on save), a
@@ -208,6 +211,8 @@ reasons: `reactive-components.md`.
   `hit_slop`, and the typed events every element has: `on_press`, `on_long_press`, `on_layout(Bounds<Points>)`,
   `on_touch(TouchEvent)`, `on_pan_start`, ..., the touch responder: below), `ParentElement`, `FluentBuilder` (`when`,
   `when_some`, `map`: decided once, when the view is made). Each host element has its own props and typed events
+  (every option takes a value, a signal or a closure, `impl IntoReactive<T>`, as TSX's props take a value or an
+  accessor; an image's `blur_radius` alone takes a value)
   (`input().value(move || name.get()).on_change_text(move |text: &str| ..)`, `scroll().on_scroll(..)`,
   `dialog().on_cancel(..)`; how scroll views and lists scroll is `Scrollable`, shared by `scroll()`,
   `virtual_list(..)` and a placed `ListElement`: snapping, `scroll_enabled`, `keyboard_dismiss_mode`,
@@ -227,14 +232,14 @@ reasons: `reactive-components.md`.
   signal), effects never run, cleanups run at once (a task spawned there is cancelled), animated values and refs do
   nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
   (`Graph::enter_owner` / `leave_owner` keep its generation).
-- **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
-  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
+- **What comes and goes is a region** (`ui/flow.rs`): `when(cond, || el).otherwise(|| el)` (TSX `<If when={..} else={..}>`; `If::new`, deprecated, is
+  the same) makes a branch when the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
-  `Each::new(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
+  `each(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
   `index` signals updated, while the key stays; `catch_error(|| view, |error,
   reset| fallback)` shows the fallback once something under it panicked (a binding, a listener, an effect, a
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,
-  `js` target). A modal is presented while it is in the view (an `If` of it), a screen pushed while it is in its
+  `js` target). A modal is presented while it is in the view (a `when` of it), a screen pushed while it is in its
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.
@@ -255,7 +260,7 @@ reasons: `reactive-components.md`.
   | TS | Rust component |
   |---|---|
   | the component's body (runs once) | the function's body |
-  | `signal(v)`, `memo(f)`, `effect(f)`, `untracked`, `batch` | `signal(v)` (`PartialEq`: equal writes are skipped; `signal_with(v, SignalEquals::Never)` without), `computed(f)`, `effect(f)`, `untracked(f)`, `batch(f)`; `stored(v)` for state nothing displays; all `Copy` handles owned by the current owner |
+  | `signal(v)`, `memo(f)`, `effect(f)`, `untracked`, `batch` | `signal(v)` (`PartialEq`: equal writes are skipped; `signal_with(v, SignalEquals::Never)` without), `computed(f)`, `effect(f)`, `untracked(f)`, `batch(f)`; `stored(v)` for state nothing displays (`.get()`, `.with(\|v\| ..)`, `.replace(v)`, none subscribing); all `Copy` handles owned by the current owner |
   | event handlers | closures (`move \|e: &E\| ..`) that write signals; `cx.emit(..)` |
   | `setTimeout` / `setInterval`, `clear*` | `set_timeout(d, f)` / `set_interval(d, f)` return a `Spawned`; `.cancel()` clears it; it ends with the component either way |
   | async work | `spawn(async move { timer(d).await; value.set(..) })` on the engine thread, tokio inside; `background(fut)` / `blocking(f)` for `Send` work on the runtime's threads (not in WebAssembly) |
@@ -307,7 +312,9 @@ reasons: `reactive-components.md`.
     is of the field's type (`.index(1)`); an `Option<T>` field also takes a `T` (`From<T> for Option<T>`) and a text
     one a string (`.label("Save")`); a field that is not a `Prop` takes `Into<T>` (a number exactly its type); a
     slot's setter takes the content to fill it with (`.header(text(..))`), an `Items` field's a `VirtualList`
-    (`.items(virtual_list(..))`); the children are the element's `.child(..)`ren;
+    (`.items(virtual_list(..))`); a style field's (`Prop<Style>` or `Style`: `Button`'s `selected_style`) the
+    typed styles' closure, as the state styles take (`.selected_style(|s| s.bg(..).text_color(..))`), made into
+    the field's `Style` (`From<StyleRefinement>`); the children are the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is
     `.on_press_down(..)`): a unit variant's takes `move || ..` (or `move |_: &()| ..`), a one-field variant's
     `move |value: &T| ..` (a `Listener<T>` too: `IntoListener`), a named-field variant's the event itself
@@ -331,9 +338,9 @@ reasons: `reactive-components.md`.
   `Component::element(props)` (the props struct whole) and `ComponentElement::on_event` (every event, typed) remain
   for components implemented by hand (`impl Component for X`, which get no constructor) and code generic over
   components; Rust views use the constructors.
-- **Platform services** are free functions (`ui/ambient.rs`): `dialog(Dialog)` shows an alert or action sheet and
-  returns a future of the index chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core
-  resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
+- **Platform services** are free functions (`ui/ambient.rs`): `dialog(Dialog)` (deprecated for apps in favor of
+  `nsh_base::alert_dialog()`, which calls it) shows an alert or action sheet and returns a future of the index
+  chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
   `toast(..)`, `force_rtl` / `allow_rtl`, `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
   `clipboard_has_string`), the image information (`image_size`, `prefetch_image`), display frames
   (`request_animation_frame`, `next_frame`: the core keeps the waiting tasks' answers, the engine asks the platform
@@ -372,6 +379,12 @@ reasons: `reactive-components.md`.
 - **Element attributes for system UI**: `.inset_padding(insets)` / `.inset_margin(insets)` add to the padding /
   margin the styles resolve to (what `SafeAreaView` and `KeyboardAvoidingView` use, so the app's own padding stays),
   `.inline_style(props.style)` applies a `ui::Style` prop (a value or a binding).
+- **A `ui::Style` holds JS's declarations, Rust's typed styles or both**: JS decodes a style object into declarations
+  (`StylePatch`, applied as the prop it goes to: `selectedStyle`, the inline style); a Rust caller's closure gives typed
+  styles, which the element that takes the style (`.selected_style(..)`, `.checked_style(..)`, `.inline_style(..)`) adds
+  to its own in the state's variant, as `.selected(|s| ..)` would (theme colors follow the appearance natively, bound
+  parts their signals; a bound `Style` adds them as a bound part when it has typed styles as the element is made, so a
+  style prop left unset or set from JS costs nothing more), and a page's `.header_style(..)` as `header_style_with`'s.
 - **What a view gives a nested component's element** (`chip()`) goes on the component's root, after
   the root's own, as its styles do: an inline style (`.inline_style(..)`), animated values (`.bind_opacity(&v)`,
   `.bind_translate_y(&v)`), insets (bound ones are a binding, applied again when they change), on a rooted
@@ -416,7 +429,7 @@ parameters at the end may be left out). The signature decides how a call runs (`
   reply (a conversion error throws); returning `Result<(), E>`, `Promise<void>`; returning a value, `Promise<T>`,
   settled like a method's (a conversion error rejects it).
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
-  views use (`AlertDialog.show` awaits `dialog(..)`), sent as the op above; it gives a Promise of its value
+  views use (`AlertDialog.show` awaits `alert_dialog()`'s `show()`), sent as the op above; it gives a Promise of its value
   (`Promise<void>` for `()`), rejected with an `Err`'s message or a panic's.
 
 Parameters are `Arg`s: the `JsValue` types, instances (`Instance<T>`) and `Callback`s; results are `Ret`s. In an op
