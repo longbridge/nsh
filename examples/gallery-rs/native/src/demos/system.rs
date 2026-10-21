@@ -148,7 +148,7 @@ fn environment() -> AnyElement {
                             view()
                                 .flex_row()
                                 .child(
-                                    If::new(
+                                    when(
                                         || keyboard_height() > px(0.0),
                                         move || keyboard_stat().tone(Tone::Warn),
                                     )
@@ -205,7 +205,7 @@ fn StatusBarCard() -> impl IntoElement {
     // Until one is picked, the style follows the appearance (light text
     // on the dark page).
     let index = computed(move || picked.get().unwrap_or(if dark() { 0 } else { 1 }));
-    let preview = If::new(open, move || {
+    let preview = when(open, move || {
         // The background its content is for.
         let backdrop = move || match index.get() {
             0 => AdaptiveColor::from(rgb(0x101113)),
@@ -414,7 +414,7 @@ fn Dialogs() -> impl IntoElement {
             text: label.unwrap_or("Cancel").to_owned(),
         });
     };
-    let shown = If::new(
+    let shown = when(
         move || answer.with(Option::is_some),
         move || {
             view().bind_scale(&pop).child(
@@ -718,7 +718,7 @@ fn Network() -> impl IntoElement {
             asked.set(true);
         }
     };
-    let list = If::new(
+    let list = when(
         move || posts.with(Vec::is_empty),
         || {
             caption(

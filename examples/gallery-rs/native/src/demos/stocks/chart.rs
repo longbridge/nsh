@@ -642,7 +642,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
         }
     });
     let change = computed(move || (focus.get().c - prev_close) / prev_close * 100.0);
-    let readout = If::new(
+    let readout = when(
         move || cursor.get().is_some(),
         move || {
             view()
@@ -681,7 +681,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         ),
                 )
                 .child(
-                    If::new(intraday, move || {
+                    when(intraday, move || {
                         text(move || {
                             let c = focus.get();
                             format!("avg {} · vol {}", p_of(c.a), compact(c.v))

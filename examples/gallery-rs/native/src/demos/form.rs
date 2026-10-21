@@ -259,7 +259,7 @@ impl Field {
             // The error's row comes and goes; while it shows, its text
             // follows the error.
             .children(error.map(|error| {
-                If::new(
+                when(
                     move || error.with(Option::is_some),
                     move || {
                         view()
@@ -873,7 +873,7 @@ pub(crate) fn Form() -> impl IntoElement {
         .card(texts)
         .card(submit_card)
         .card(more)
-        .child(If::new(sheet, move || sheet_view(sheet, &fx[f::SHEET..])))
+        .child(when(sheet, move || sheet_view(sheet, &fx[f::SHEET..])))
 }
 
 /// The sheet of inputs (`open` while it shows), its fields animated by
@@ -983,7 +983,7 @@ fn SelectionDemo() -> impl IntoElement {
         .items_center()
         .gap(px(6.0))
         .min_h(px(28.0))
-        .child(If::new(
+        .child(when(
             move || keys.with(Vec::is_empty),
             || {
                 text("Keys you press show here")

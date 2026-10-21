@@ -4,8 +4,8 @@
 //!
 //! Handles ([`Signal`], [`Memo`], [`ReadSignal`]) are `Copy` indices into
 //! the graph, so closures and async blocks capture them as they are. What is
-//! made under an owner (a component, an effect, a branch of `If`, a row of
-//! `Each`) is disposed with it; a handle of a disposed node reads as gone
+//! made under an owner (a component, an effect, a branch of `when`, a row of
+//! `each`) is disposed with it; a handle of a disposed node reads as gone
 //! ([`Signal::try_get`]) and panics when read as live. The UI's other
 //! handles (animated values, element refs) are kept the same way
 //! (`Kept`), but find their value gone rather than panic.

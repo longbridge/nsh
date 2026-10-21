@@ -76,7 +76,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
         }
     });
     let children = props.children;
-    view().child(If::new(props.open, move || {
+    view().child(when(props.open, move || {
         let height = untracked(window).height;
         dialog()
             .animation(ModalAnimation::None)

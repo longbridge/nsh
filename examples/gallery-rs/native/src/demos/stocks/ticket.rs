@@ -427,7 +427,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 ),
         )
         // Reviewing expands the ticket (its layout springs).
-        .child(If::new(review, reviewing).otherwise(move || {
+        .child(when(review, reviewing).otherwise(move || {
             Button::new(
                 move || format!("Review {}", verb().to_lowercase()),
                 move |_: &()| expand(true),

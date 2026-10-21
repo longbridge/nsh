@@ -439,7 +439,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
         text_root()
             .selectable(true)
             .child(inline(source))
-            .child(If::new(last, caret))
+            .child(when(last, caret))
     };
     let text_of = move || -> Box<dyn Fn() -> SharedString> {
         Box::new(move || block.with(|b| b.text.clone()))
@@ -495,7 +495,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                                 .child(inline(move || {
                                     block.with(|b| b.items.get(i).cloned().unwrap_or_default())
                                 }))
-                                .child(If::new(at_end, caret)),
+                                .child(when(at_end, caret)),
                         )
                         .flex_1(),
                     )
@@ -600,7 +600,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                                 .text_size(px(13.0))
                                 .line_height(px(19.0))
                                 .text_color(colors::CODE)
-                                .child(If::new(last, caret)),
+                                .child(when(last, caret)),
                         ),
                     ),
                 )

@@ -399,7 +399,7 @@ fn TouchPad() -> impl IntoElement {
                 .justify_center()
                 .on_touch(on_touch)
                 .child(dots())
-                .child(If::new(
+                .child(when(
                     move || down.get() == 0,
                     || {
                         text(hint(
@@ -422,7 +422,7 @@ fn TouchPad() -> impl IntoElement {
             view()
                 .gap_1()
                 .min_h(px(TOUCH_LOG as f32 * 18.0))
-                .child(If::new(
+                .child(when(
                     move || log.with(Vec::is_empty),
                     || {
                         text("No touches yet")
@@ -432,7 +432,7 @@ fn TouchPad() -> impl IntoElement {
                 ))
                 .children(
                     (0..TOUCH_LOG)
-                        .map(|i| If::new(move || log.with(|log| log.len() > i), move || line(i))),
+                        .map(|i| when(move || log.with(|log| log.len() > i), move || line(i))),
                 ),
         )
 }

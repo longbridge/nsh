@@ -292,7 +292,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     // A bottom sheet on phones, a card in the window on desktops (Escape or
     // a click outside closes it).
     let ticket_shown = if wide {
-        If::new(ticket, move || {
+        when(ticket, move || {
             dialog()
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)

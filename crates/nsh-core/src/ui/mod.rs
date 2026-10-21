@@ -11,7 +11,7 @@
 //! like any view, with no round trip. What changes is bound: a text, prop
 //! or style given a signal, a memo, a [`Prop`] or a closure is a render
 //! effect whose runs patch that part alone, and a region ([`dynamic`],
-//! [`If`], [`each`], [`catch_error`]) makes its own elements again. State
+//! [`when`], [`each`], [`catch_error`]) makes its own elements again. State
 //! is signals the view makes (under the component's owner: they go with
 //! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
 //! component's listeners hear its elements' events first and decide what
@@ -137,7 +137,7 @@ pub use self::{
         Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, PanEvent,
         ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
-    flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each},
+    flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, Modal, NativeView,
         Orientation, Painter, Screen, Scroll, Stack, Video, WebView, canvas, input,
@@ -398,7 +398,7 @@ pub mod prelude {
             set_timeout, spawn, timer, timer_until, toast, tokens, window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context,
+        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
     };
     // Kept for apps written before `nsh_base` presented dialogs,
     // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,

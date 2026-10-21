@@ -426,7 +426,7 @@ fn Contacts() -> impl IntoElement {
             let rows = rows.clone();
             let row = computed(move || rows[at.index()]);
             let header = computed(move || matches!(row.get(), ContactRow::Header { .. }));
-            If::new(header, move || contact_header(row)).otherwise(move || contact_person(row))
+            when(header, move || contact_header(row)).otherwise(move || contact_person(row))
         })
         .sticky_header_indices(headers)
         .estimated_item_size(px(60.0))

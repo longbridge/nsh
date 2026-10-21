@@ -276,7 +276,7 @@ fn info() -> AnyElement {
         }
     };
     let toggle = move |_: &()| show.update(|s| *s = !*s);
-    let shown = If::new(show, move || {
+    let shown = when(show, move || {
         appear().index(0).child(
             frame(image(big()))
                 .h(px(170.0))

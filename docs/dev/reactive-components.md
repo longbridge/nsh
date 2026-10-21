@@ -48,7 +48,7 @@ An update costs what it changes, not what was rendered.
   progress bar or a live feed in a big component costs the same as in a small one.
 - It is the model TSX apps already have (`docs/dev/architecture.md`: "Components run once. Only bindings re-run"). The
   rule "what TSX can write, Rust can write" becomes the same way of writing, not just the same capabilities: a
-  component body that runs once, `signal`, `computed`, `effect`, `cleanup`, `If`, `Each`.
+  component body that runs once, `signal`, `computed`, `effect`, `cleanup`, `when`, `each`.
 
 What does not change: the first render costs about the same; structural changes (rows added, removed, reordered)
 are still reconciled by key, as `Each` does in JS; layout, text and the core's frame and style diffs are the core's in
@@ -142,7 +142,7 @@ untracked(|| count.get());
   for today).
 - Equality: `signal(v)` requires `T: PartialEq` and skips writes of an equal value, as TSX's default `===` does.
   `signal_with(v, Equals::Never)` notifies on every write and needs no `PartialEq`. `computed` requires `PartialEq`.
-- Owners are Solid's: a component's body, an effect, a branch of `If`, a row of `Each` and a list cell each own what
+- Owners are Solid's: a component's body, an effect, a branch of `when`, a row of `each` and a list cell each own what
   they create, and dispose it (signals, effects, timers, tasks, subscriptions) when they go.
 
 ### Components
@@ -248,17 +248,17 @@ view().w(move || px(width.get()))
 The TSX primitives, with the same semantics and the same keyed reconciliation:
 
 ```rust
-If::new(open, move || sheet_body())                 // <If when={open()}>…</If>
+when(open, move || sheet_body())                 // <If when={open()}>…</If>
     .otherwise(move || text("Closed"))
 each(move || rows.get(), |row| row.id, move |row, index| row_view(row, index))
                                                     // <Each of={rows()} key="id">{(row, i) => …}</Each>
 dynamic(move || if wide.get() { two_columns() } else { one_column() })
 ```
 
-- A branch of `If` and a row of `Each` own what they create, and dispose it when they go.
-- `Each`'s row gets its item and its index as signals: a moved row keeps its nodes and updates its index binding.
+- A branch of `when` and a row of `each` own what they create, and dispose it when they go.
+- `each`'s row gets its item and its index as signals: a moved row keeps its nodes and updates its index binding.
 - `.when(bool, ..)` and `.children(Option)` stay, with a plain `bool` / `Option`, for choices made once when the view
-  is built. A choice that changes is an `If` (structure) or a `.style_when` (style).
+  is built. A choice that changes is a `when` (structure) or a `.style_when` (style).
 - Lists: `virtual_list(count, move |index| row(index))` makes each cell's content once; when the cell shows another
   row, its `index: ReadSignal<usize>` changes and only the bindings that read it run. This is how JS's list cells work
   (`list::bind` writes the cell's item and index signals). Today every live cell renders again whenever the owner does.
@@ -266,7 +266,7 @@ dynamic(move || if wide.get() { two_columns() } else { one_column() })
 ### Children, slots, items
 
 - `props.children` and `props.header` (a `Slot`) are placed once where the body puts them. Lazy children (`#[prop(lazy)]`)
-  are made while the place that holds them is mounted: `If::new(open, move || props.children)` makes them only while
+  are made while the place that holds them is mounted: `when(open, move || props.children)` makes them only while
   open, as `Sheet` needs. The event that tells JS stays (`JsEvent::Children`).
 - `children_each(children, |child, at| ..)` and `list(items, ..)` become `Each`-like: one wrapper per JS child, made
   once, with `at` as a signal.

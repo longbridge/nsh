@@ -115,7 +115,7 @@ fn note_card(
                 .items_center()
                 .gap(px(6.0))
                 .min_h(px(16.0))
-                .child(If::new(
+                .child(when(
                     move || saved.get() == NoteState::Saved,
                     || icon().name(IconName::Check).size(14.0).tint(colors::UP),
                 ))
@@ -172,7 +172,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
         .title("Stored keys")
         .subtitle("get_all_keys() and each value's length")
         .child(view().child(rows))
-        .child(If::new(
+        .child(when(
             move || count() == 0,
             || caption("Nothing stored", None::<&str>),
         ))

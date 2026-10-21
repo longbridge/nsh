@@ -1,9 +1,9 @@
-//! Elements that change: [`dynamic`], [`If`] and [`each`] (TS:
+//! Elements that change: [`dynamic`], [`when`] and [`each`] (TS:
 //! `{() => …}`, `<If>`, `<Each>`).
 //!
 //! Each is a region of its parent's children and a binding: when what it
-//! reads changes, its elements are made again (an `If` only when its
-//! condition flips; an `Each` only for the rows that came, keeping the
+//! reads changes, its elements are made again (a [`when`]'s only when its
+//! condition flips; an [`each`]'s only for the rows that came, keeping the
 //! others) and the core reconciles the region's nodes alone.
 
 use std::{
@@ -203,7 +203,7 @@ fn region(region: Region) -> AnyElement {
 }
 
 /// Elements made again whenever what `f` reads changes (TS: a child that is
-/// a function, `{() => …}`). Prefer [`If`] for a choice and [`each`] for a
+/// a function, `{() => …}`). Prefer [`when`] for a choice and [`each`] for a
 /// list: they keep what did not change.
 pub fn dynamic<E: IntoElements>(f: impl Fn() -> E + 'static) -> AnyElement {
     region(Region::Dynamic(Rc::new(move || f().into_elements())))
@@ -235,9 +235,9 @@ impl Reset {
     }
 }
 
-/// `then`'s elements while `when` holds, else `otherwise`'s (TS: `<If
-/// when={…}>`). A branch is made when the condition flips to it, and what it
-/// made goes when it flips away.
+/// `then`'s elements while a condition holds, else `otherwise`'s (TS: `<If
+/// when={…} else={…}>`), made by [`when`]. A branch is made when the
+/// condition flips to it, and what it made goes when it flips away.
 pub struct If {
     when: Reactive<bool>,
     then: Rc<dyn Fn() -> Vec<AnyElement>>,
@@ -245,22 +245,34 @@ pub struct If {
 }
 
 impl If {
-    /// `then` while `when` holds.
+    /// `then` while `when` holds, as [`when`] makes it.
+    #[deprecated(note = "use `when(condition, then)`, as `view()` makes a view")]
     pub fn new<E: IntoElements>(
         when: impl IntoReactive<bool>,
         then: impl Fn() -> E + 'static,
     ) -> Self {
-        Self {
-            when: when.into_reactive(),
-            then: Rc::new(move || then().into_elements()),
-            otherwise: None,
-        }
+        self::when(when, then)
     }
 
-    /// `otherwise` while `when` does not hold.
+    /// `otherwise` while the condition does not hold (TS: `else={…}`).
     pub fn otherwise<E: IntoElements>(mut self, otherwise: impl Fn() -> E + 'static) -> Self {
         self.otherwise = Some(Rc::new(move || otherwise().into_elements()));
         self
+    }
+}
+
+/// `then`'s elements while `condition` (a value, a signal or a closure)
+/// holds (TS: `<If when={…}>`); [`If::otherwise`] adds what shows while it
+/// does not (TS: `else={…}`). A branch is made when the condition flips to
+/// it, and what it made goes when it flips away.
+pub fn when<E: IntoElements>(
+    condition: impl IntoReactive<bool>,
+    then: impl Fn() -> E + 'static,
+) -> If {
+    If {
+        when: condition.into_reactive(),
+        then: Rc::new(move || then().into_elements()),
+        otherwise: None,
     }
 }
 

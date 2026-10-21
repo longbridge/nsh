@@ -64,7 +64,7 @@ come from two places:
   not literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
-  variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `If::new(cond, ||
+  variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `when(cond, ||
   el).otherwise(|| el)`, `dynamic(move || ..)`, `each(items, key, |item, index| row)`.
 - **The app's content is props, placed by closures**: `header: Prop<Option<Slot>>`, `children: Children`,
   `items: Items` for virtualized rows (in JS `each` and a row renderer, like `List`); `#[prop(lazy)]` on `children`
@@ -214,14 +214,14 @@ reasons: `reactive-components.md`.
   signal), effects never run, cleanups run at once (a task spawned there is cancelled), animated values and refs do
   nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
   (`Graph::enter_owner` / `leave_owner` keep its generation).
-- **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
-  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
+- **What comes and goes is a region** (`ui/flow.rs`): `when(cond, || el).otherwise(|| el)` (TSX `<If when={..} else={..}>`; `If::new`, deprecated, is
+  the same) makes a branch when the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
   `each(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
   `index` signals updated, while the key stays; `catch_error(|| view, |error,
   reset| fallback)` shows the fallback once something under it panicked (a binding, a listener, an effect, a
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,
-  `js` target). A modal is presented while it is in the view (an `If` of it), a screen pushed while it is in its
+  `js` target). A modal is presented while it is in the view (a `when` of it), a screen pushed while it is in its
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
   can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
   the host itself (no view of its own); a region as the root goes in the host view.

@@ -753,7 +753,7 @@ fn Feed() -> impl IntoElement {
                                 }),
                         )
                         .child(
-                            If::new(new, || Badge::new("new").tone(Tone::Accent)).otherwise(
+                            when(new, || Badge::new("new").tone(Tone::Accent)).otherwise(
                                 move || {
                                     text(move || format!("#{}", posts.with(|p| p[at.index()].id)))
                                         .text_size(px(13.0))

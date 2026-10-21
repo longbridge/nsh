@@ -840,7 +840,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .collect();
     let conversations = chips.clone();
 
-    let content = If::new(
+    let content = when(
         move || !messages.with(Vec::is_empty),
         move || chat.list_view(list, wide),
     )
@@ -869,7 +869,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             )
             .secondary(),
         )
-        .child(If::new(streaming, || {
+        .child(when(streaming, || {
             view()
                 .absolute()
                 .top(px(2.0))
@@ -973,7 +973,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     let menu_view = chat.menu_view(pointer, &menu_value, &chips);
 
     // Suggestions while the conversation is empty.
-    let suggestions = If::new(
+    let suggestions = when(
         move || messages.with(Vec::is_empty),
         move || {
             scroll()
@@ -1043,7 +1043,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 })
         })
         .gap_2()
-        .child(If::new(attachment, move || {
+        .child(when(attachment, move || {
             appear().index(0).child(
                 view()
                     .flex_row()
@@ -1140,7 +1140,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                             ),
                         )
                         .child(
-                            If::new(streaming, move || {
+                            when(streaming, move || {
                                 press()
                                     .scale(0.9)
                                     .label("Stop generating")
@@ -1563,7 +1563,7 @@ impl ChatState {
             .pb_1()
             .gap_3()
             .child(reply_header(model, stopped))
-            .child(If::new(reasoned, move || {
+            .child(when(reasoned, move || {
                 view()
                     .gap_2()
                     .child(
@@ -1578,7 +1578,7 @@ impl ChatState {
                             })
                             .child(reasoning_toggle(label, thinking_now, open)),
                     )
-                    .child(If::new(open, move || reasoning_text(reason)))
+                    .child(when(open, move || reasoning_text(reason)))
             }))
             .child(each(
                 move || {
@@ -1591,7 +1591,7 @@ impl ChatState {
                 |t: &Tool| t.id,
                 |tool, _| tool_card(tool),
             ))
-            .child(If::new(waiting, || {
+            .child(when(waiting, || {
                 view().flex_row().h(px(22.0)).items_center().child(caret())
             }))
             .child(markdown(
@@ -1607,7 +1607,7 @@ impl ChatState {
                 copied,
                 Rc::new(move |key, text| self.act(Action::Copy(key, text))),
             ))
-            .child(If::new(done(|s| s == Status::Error), move || {
+            .child(when(done(|s| s == Status::Error), move || {
                 error_row(
                     move || {
                         with_reply(item, |a| a.error)
@@ -1617,7 +1617,7 @@ impl ChatState {
                     act(Action::Retry),
                 )
             }))
-            .child(If::new(stopped, || {
+            .child(when(stopped, || {
                 view()
                     .flex_row()
                     .items_center()
@@ -1629,7 +1629,7 @@ impl ChatState {
                             .text_color(colors::FAINT),
                     )
             }))
-            .child(If::new(done(|s| s != Status::Error), move || {
+            .child(when(done(|s| s != Status::Error), move || {
                 view()
                     .flex_row()
                     .items_center()
@@ -1703,7 +1703,7 @@ fn user_row(item: Item) -> View {
         .child(dynamic(move || {
             file.with(|f| f.as_ref().map(|f| file_chip(f, None)))
         }))
-        .child(If::new(
+        .child(when(
             move || !body.with(String::is_empty),
             move || {
                 view()
@@ -1726,7 +1726,7 @@ fn user_row(item: Item) -> View {
                     )
             },
         ))
-        .child(If::new(
+        .child(when(
             move || user.with(|u| u.3),
             || {
                 view()
@@ -1758,7 +1758,7 @@ fn reply_header(model: Memo<Model>, stopped: Memo<bool>) -> View {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors::MUTED),
         )
-        .child(If::new(stopped, || Badge::new("Stopped").tone(Tone::Warn)))
+        .child(when(stopped, || Badge::new("Stopped").tone(Tone::Warn)))
 }
 
 /// The reasoning's toggle: a glyph (a spinner while thinking), its label
@@ -1775,7 +1775,7 @@ fn reasoning_toggle(
         .h(px(32.0))
         .self_start()
         .child(
-            If::new(thinking, || spinner(14.0, colors::MUTED)).otherwise(|| {
+            when(thinking, || spinner(14.0, colors::MUTED)).otherwise(|| {
                 glyph()
                     .name(GlyphName::Brain)
                     .size(16.0)

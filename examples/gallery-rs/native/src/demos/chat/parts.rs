@@ -261,7 +261,7 @@ pub(crate) fn tool_card(tool: ReadSignal<Tool>) -> View {
                         ),
                 )
                 .child(
-                    If::new(busy, move || {
+                    when(busy, move || {
                         view()
                             .flex_row()
                             .items_center()
