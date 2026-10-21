@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Radio, RadioGroup } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 const plans = [
@@ -19,7 +19,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>radio</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Click an option, or Tab to one and press Space" : "Tap an option: its label checks it too"}
+        {platform.idiom === "desktop" ? "Click an option, or Tab to one and press Space" : "Tap an option: its label checks it too"}
       </Text>
 
       <View style={{ maxWidth: 390, gap: 14 }}>

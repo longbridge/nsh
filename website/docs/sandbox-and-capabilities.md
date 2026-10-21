@@ -187,7 +187,7 @@ Every app may keep its own data on the device with [`nsh/storage`](../modules/ns
 | `fetch` | The promise rejects; the request never reaches the network. |
 | Remote image | The image fails with `onError`. |
 | Video source, web view source, status bar change | Nothing is shown or changed. |
-| Clipboard | `setString` does nothing; `getString` resolves `""` and `hasString` `false`. |
+| Clipboard | `writeText` and `writeImage` do nothing; `readText` resolves `""`, `readImage` `null`, `readFiles` `[]`, and `hasText` and `hasImage` `false`. |
 
 Each refusal is logged once, saying which key to add:
 

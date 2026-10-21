@@ -142,7 +142,7 @@ final class SystemUi {
         Toast.makeText(context, text, longer ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
     }
 
-    /** {@code Clipboard.setString}: a plain text clip. */
+    /** {@code Clipboard.writeText}: a plain text clip. */
     static void setClipboard(Context context, String text) {
         android.content.ClipboardManager clipboard =
                 (android.content.ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
@@ -150,7 +150,7 @@ final class SystemUi {
     }
 
     /**
-     * {@code Clipboard.getString} / {@code hasString}: the clip's text, null when it holds none;
+     * {@code Clipboard.readText} / {@code hasText}: the clip's text, null when it holds none;
      * with {@code hasOnly} "" for text, without reading the clip (its description says).
      * Android 10+ only lets the focused app read it: null otherwise.
      */

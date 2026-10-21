@@ -6,12 +6,12 @@
 // menus with `Menu.popup` (the shortcuts work everywhere).
 
 import { effect, Input, mount, signal, Text, View } from "nsh";
-import { colorScheme, Platform } from "nsh/device";
+import { colorScheme, platform } from "nsh/device";
 import { Menu, type MenuItem, titleBar, Window } from "nsh/desktop";
 
 Window.setTitle("nsh desktop");
 
-const mac = Platform.OS === "macos";
+const mac = platform.os === "macos";
 
 function App() {
   const log = signal<string[]>([]);

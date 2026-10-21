@@ -155,7 +155,7 @@ describe("the cart", () => {
 | `colorScheme` | `"light"` | 系统外观：`"light"` 或 `"dark"`（`colorScheme()`、`dark:` 类）。 |
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
-| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`Platform.OS`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。在真实平台上就是该平台。 |
+| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。在真实平台上就是该平台。 |
 | `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
 
 ### 模拟网络

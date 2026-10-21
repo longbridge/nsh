@@ -231,55 +231,39 @@ fn tasks_wait_for_display_frames() {
     assert_eq!(frames.load(Ordering::SeqCst), 3);
 }
 
-/// Flips the surface's direction on presses.
+/// A Rust app's root, laid out in the surface's direction.
 #[component]
 fn Direction() -> impl IntoElement {
-    let presses = stored(0_u32);
-    view()
-        .flex_1()
-        .on_press(move |_: &()| {
-            let n = presses.with(|p| {
-                *p += 1;
-                *p
-            });
-            match n {
-                1 => force_rtl(true),
-                2 => force_rtl(false),
-                _ => allow_rtl(false),
-            }
-        })
-        .child(text(|| if rtl() { "rtl" } else { "ltr" }))
+    view().flex_1().child(text("direction"))
 }
 
 #[test]
-fn components_set_the_layout_direction() {
+fn the_layout_direction_follows_the_language() {
     let (engine, rx, _) = start::<Direction>(Environment::default());
-    // A Rust app's surface takes the platform's direction.
-    let (_, directions, host) = until(&rx, "ltr");
+    // A Rust app's surface takes the platform's direction...
+    let (_, directions, _) = until(&rx, "direction");
     assert_eq!(directions, [false]);
-    let host = host.expect("the root component");
-    let press = || {
-        engine
-            .control()
-            .dispatch_event(host, EventKind::Press, EventPayload::None)
+    // ...and a right-to-left language lays it out right to left, at once.
+    let directions_after = |environment: Environment| {
+        engine.control().set_environment(environment);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while let Ok(batch) = rx.recv_deadline(deadline) {
+            let found = batch.items.iter().find_map(|item| match item {
+                MountItem::LayoutDirection { rtl } => Some(*rtl),
+                _ => None,
+            });
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
     };
-    press();
-    let (_, directions, _) = until(&rx, "rtl");
-    assert_eq!(directions, [true]);
-    press();
-    let (_, directions, _) = until(&rx, "ltr");
-    assert_eq!(directions, [false]);
-    // A right-to-left language lays out right to left...
-    engine.control().set_environment(Environment {
+    let rtl = Environment {
         rtl: true,
         ..Environment::default()
-    });
-    let (_, directions, _) = until(&rx, "rtl");
-    assert_eq!(directions, [true]);
-    // ...unless the app does not allow it.
-    press();
-    let (_, directions, _) = until(&rx, "ltr");
-    assert_eq!(directions, [false]);
+    };
+    assert_eq!(directions_after(rtl), Some(true));
+    assert_eq!(directions_after(Environment::default()), Some(false));
 }
 
 /// Shows the pixel ratio, the device and the locale.

@@ -1,4 +1,4 @@
-//! The OS the platform reports decides `Platform` and which platform-only
+//! The OS the platform reports decides `platform` and which platform-only
 //! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
 //! apply; on the web, the idiom decides between mobile and desktop.
 
@@ -10,7 +10,7 @@ use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Idiom, Os};
 use crate::ChannelSink;
 
 const APP: &str = r#"import { mount, Text, View } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 
 mount(
   () => (
@@ -20,7 +20,7 @@ mount(
       desktop={{ accessibilityLabel: "desktop" }}
       web={{ accessibilityHint: "web" }}
     >
-      <Text>{`${Platform.OS} ${Platform.isDesktop} ${Platform.select({ ios: "i", mobile: "m", desktop: "d" })} ${Platform.select({ native: "n", default: "-" })}`}</Text>
+      <Text>{`${platform.os} ${platform.idiom === "desktop"} ${platform.select({ ios: "i", mobile: "m", desktop: "d" })} ${platform.select({ native: "n", default: "-" })}`}</Text>
     </View>
   ),
 );

@@ -227,7 +227,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), safe areas (`SafeAreaView`, `safeArea`, `safeAreaInsets`), the system's alert dialog (`AlertDialog`), the software keyboard (`Keyboard`, `keyboardFrame`, `KeyboardAvoidingView`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
 | `nsh/animated` | Native animations |
 | `nsh/gesture` | `PanResponder` |
-| `nsh/device` | `Platform`, `windowSize`, `colorScheme`, `fontScale`, `PixelRatio`, `I18nManager` |
+| `nsh/device` | `platform`, `windowSize`, `colorScheme`, `fontScale`, `pixelRatio`, `locale` |
 | `nsh/accessibility` | Screen reader and reduce motion state, announcements |
 | `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |

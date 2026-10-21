@@ -31,7 +31,7 @@
 //! by before the layout at its new size arrives.
 //!
 //! The status bar has no desktop equivalent. The clipboard is the general
-//! pasteboard; `hasString` only looks at the types on offer.
+//! pasteboard; `hasText` only looks at the types on offer.
 
 use std::{
     cell::{Cell, RefCell},
@@ -809,16 +809,16 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
     ("image/tiff", "public.tiff"),
 ];
 
-/// `Clipboard.setImage`: the image of a `data:` URI on the pasteboard,
+/// `Clipboard.writeImage`: the image of a `data:` URI on the pasteboard,
 /// under its own type (and TIFF too, which every AppKit app reads, unless
 /// it is TIFF already).
 fn set_clipboard_image(uri: &str) {
     let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        log::warn!("Clipboard.writeImage: not a base64 data: URI");
         return;
     };
     let Some((_, kind)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
-        log::warn!("Clipboard.setImage: unsupported image type {mime}");
+        log::warn!("Clipboard.writeImage: unsupported image type {mime}");
         return;
     };
     let pasteboard = NSPasteboard::generalPasteboard();
@@ -833,7 +833,7 @@ fn set_clipboard_image(uri: &str) {
     }
 }
 
-/// `Clipboard.getImage` / `hasImage`: answers read `id` with the
+/// `Clipboard.readImage` / `hasImage`: answers read `id` with the
 /// pasteboard's first image of [`IMAGE_TYPES`]; a TIFF becomes PNG (an
 /// image source of any platform), off the main thread.
 fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
@@ -885,7 +885,7 @@ fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(png.to_vec())
 }
 
-/// `Clipboard.getFiles`: the local files' `file:` URLs on the pasteboard
+/// `Clipboard.readFiles`: the local files' `file:` URLs on the pasteboard
 /// (one item each, as Finder copies them).
 fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
     let pasteboard = NSPasteboard::generalPasteboard();
@@ -908,7 +908,7 @@ fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
     );
 }
 
-/// `Clipboard.getString` / `hasString`: answers read `id` with whether the
+/// `Clipboard.readText` / `hasText`: answers read `id` with whether the
 /// clipboard holds text and, unless `has_only`, the text.
 fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let pasteboard = NSPasteboard::generalPasteboard();

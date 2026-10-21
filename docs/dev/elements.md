@@ -83,11 +83,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   states win, `disabled` over all (`docs/dev/styles.md`). Press feedback is the app's: the platforms add no fade or
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).
-- **Platform modules**: `Platform` (`OS`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
-  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `isDesktop`,
-  `Version`, `isPad`, `isTV`, `isMacCatalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); `isDesktop`, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `PixelRatio`, `AccessibilityInfo` (`isScreenReaderEnabled`,
-  `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
-  `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
+- **Platform modules**: `platform` (`nsh/device`, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
+  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
+  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`), `catalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); the `desktop` idiom, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh/accessibility`'s
+  `announce(message)` and `setAccessibilityFocus(ref)` (Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
   is mounted (no press, no feedback; a secondary click goes on to the nearest enabled listener around it).
@@ -195,7 +194,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`.
 - **Frames**: `requestAnimationFrame` / `cancelAnimationFrame` follow the display (CADisplayLink / Choreographer).
-- **Back button** (`nsh/android`): `BackHandler.addEventListener("hardwareBackPress", ...)`, after modals, the top
+- **Back button** (`nsh/android`): `BackHandler.onBackPress(listener)` (returns the function that removes it; a
+  listener added while a component renders goes with it, as `keymap.bind`'s bindings do), after modals, the top
   overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
   the button while either side listens (`docs/dev/components.md`).
 - **Keyboard shortcuts** (`nsh/keymap`): the root's `Prop::Keymap` mounts the surface's whole table
@@ -214,10 +214,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
   own, and an iPad / Mac action sheet gets an untitled cancel action), `Toast` (`nsh/android`). Answers come back as the
   root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
-- **Right to left**: `I18nManager` (`isRTL`, reactive; `allowRTL`, `forceRTL`, applied at once) sets the root's direction;
+- **Right to left**: the user's language sets the root's direction (again at once when it changes);
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
   subtrees built detached), sets taffy's `direction` (rows run from the right) and, right to left, swaps the left and right
-  properties (margins, paddings, insets, borders, corners — React Native's default `doLeftAndRightSwapInRTL`) and places the
+  properties (margins, paddings, insets, borders, corners — always) and places the
   start / end ones (`marginStart`, `start`, `borderTopEndRadius`, ...). A direction change swaps the current taffy style in place
   (an involution), so authored styles need not be kept. Text: `auto` alignment is the right side right to left, left / right
   swap, `writingDirection` sets the base direction (else the content's). Native widgets mirror (`MountItem::LayoutDirection`:

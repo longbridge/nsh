@@ -1,5 +1,5 @@
 import { cleanup, signal, Text } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Buffer } from "buffer";
 import console from "console";
 import { createHash, randomUUID } from "crypto";
@@ -56,7 +56,7 @@ export function StandardActions() {
   function Environment() {
     return <Action name="Environment" detail="os · process.nextTick · console · import.meta.url" action={async () => {
       await new Promise<void>((resolve) => process.nextTick(resolve));
-      return `${os.platform() || Platform.OS} / ${os.arch()}\nProcess: ${process.platform || Platform.OS} / ${process.arch}\nHome: ${Platform.OS === "web" ? "Browser context" : os.homedir()}\nData: ${process.dataDir}\nEOL: ${JSON.stringify(os.EOL)}\nEnv: ${JSON.stringify(process.env)}\nModule: ${import.meta.url}`;
+      return `${os.platform() || platform.os} / ${os.arch()}\nProcess: ${process.platform || platform.os} / ${process.arch}\nHome: ${platform.os === "web" ? "Browser context" : os.homedir()}\nData: ${process.dataDir}\nEOL: ${JSON.stringify(os.EOL)}\nEnv: ${JSON.stringify(process.env)}\nModule: ${import.meta.url}`;
     }} />;
   }
   function Files() {
@@ -90,7 +90,7 @@ export function StandardActions() {
     }} />;
   }
   function Processes() {
-    return <Action name="Processes" detail={Platform.OS === "web" ? "process.run · spawn · browser hosts return an unsupported-operation error" : "process.run · spawn · stdout/stderr/exit · stdin · kill"} action={async () => {
+    return <Action name="Processes" detail={platform.os === "web" ? "process.run · spawn · browser hosts return an unsupported-operation error" : "process.run · spawn · stdout/stderr/exit · stdin · kill"} action={async () => {
       const windows = os.platform() === "windows";
       const command = windows ? "cmd.exe" : "cat";
       const args = windows ? ["/d", "/c", "more"] : [];
@@ -121,7 +121,7 @@ export function StandardActions() {
     }} />;
   }
   function Tcp() {
-    return <Action name="TCP" detail={Platform.OS === "web" ? "net.connect · browser hosts return an unsupported-operation error" : "net.connect · Socket.write/read/close · local echo on 127.0.0.1:9876"} action={async () => {
+    return <Action name="TCP" detail={platform.os === "web" ? "net.connect · browser hosts return an unsupported-operation error" : "net.connect · Socket.write/read/close · local echo on 127.0.0.1:9876"} action={async () => {
       const socket = await net.connect("127.0.0.1", 9876);
       const close = () => socket.close();
       if (disposed) { close(); return "Closed"; }

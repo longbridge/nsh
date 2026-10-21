@@ -173,7 +173,7 @@ pub(crate) fn text_changed(view: &NshView) {
     }
 }
 
-/// Has assistive technologies read `text` (`announceForAccessibility`).
+/// Has assistive technologies read `text` (`announce`).
 pub(crate) fn announce(widget: &impl IsA<gtk::Accessible>, text: &str) {
     widget.announce(text, gtk::AccessibleAnnouncementPriority::Medium);
 }

@@ -1,6 +1,6 @@
 import { Overlay, signal, Text, View, type YNode } from "nsh";
 import { Popover, Sheet, Tooltip } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius } from "../ui";
 
 /** The popups' look: the gallery's, as `nsh/base` draws none. */
@@ -100,7 +100,7 @@ export function Overlays() {
     const hovered = signal(false);
     const pinned = signal(false);
     return (
-      <Card icon="text" title="Tooltip" subtitle={Platform.isDesktop ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
+      <Card icon="text" title="Tooltip" subtitle={platform.idiom === "desktop" ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {/* A text: the core's bubble, drawn with the theme's popover tokens. */}
           <View tooltip="Saves the document">

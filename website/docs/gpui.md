@@ -14,7 +14,7 @@ in its own element tree. Standalone apps
 run and are packaged with each desktop's own backend: [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32)
 and [Linux](./linux.md) (GTK). The core, the reactive graph, the renderer,
 Taffy layout and the native modules are the same as on every other platform, so one app runs
-everywhere. `os()` (`Platform.OS` in TSX) is the OS it runs on (macOS, Windows or Linux) and TSX's `desktop={{…}}`
+everywhere. `os()` (`platform.os` in TSX) is the OS it runs on (macOS, Windows or Linux) and TSX's `desktop={{…}}`
 props apply.
 
 Every element and module of the [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32) and

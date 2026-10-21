@@ -163,7 +163,7 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`Platform.OS`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 
 ### Stubbing the network

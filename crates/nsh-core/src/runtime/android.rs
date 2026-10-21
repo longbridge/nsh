@@ -17,7 +17,8 @@ impl Toast {
     }
 }
 
-/// The back button, after modals and stacks had their turn.
+/// The Android back button: its listeners run after modals and before
+/// stacks.
 #[module]
 pub(crate) struct BackHandler;
 

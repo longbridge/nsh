@@ -78,7 +78,7 @@ impl Storage {
         crate::ui::ambient::with_storage(|s| s.remove(key));
     }
 
-    /// Every key, in order (TS: `getAllKeys`).
+    /// Every key, in order (TS: `keys`).
     pub fn get_all_keys() -> Vec<String> {
         crate::ui::ambient::with_storage(|s| s.keys())
     }

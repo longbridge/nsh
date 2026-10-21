@@ -208,7 +208,6 @@ Everything drawn by a view. All keys of `LayoutStyle` apply too.
 |---|---|---|---|
 | `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`, `.bind_background(&node)` | The fill color. Takes a native animated color. |
 | `backgroundImage` | `string` | `.bg_linear(angle)`, `.bg_radial()`, `.bg_conic()` with `.gradient_from` / `_via` / `_to` | CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas. |
-| `experimental_backgroundImage` | `string` | | Alias of `backgroundImage`. |
 
 ```rust tabs
 view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))

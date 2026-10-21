@@ -141,7 +141,7 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
  * tooltip, layout events and the ref (`ref.command(name, args)`). */
 export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
-/** An operating system (`Platform.OS`). */
+/** An operating system (`platform.os`). */
 export type OS = "ios" | "android" | "macos" | "windows" | "linux" | "web";
 
 export declare namespace JSX {

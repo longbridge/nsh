@@ -9,7 +9,7 @@ group: platforms
 
 NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets and lays out text with Pango; the core,
 the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and Android,
-so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`Platform.OS` is `"linux"` in TSX) and TSX's
+so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`platform.os` is `"linux"` in TSX) and TSX's
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come
 from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
@@ -142,7 +142,7 @@ modules too.
 ## What differs on Linux
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
-(`Platform.constants.interfaceIdiom` is `"desktop"`), `os_version()` (`Platform.Version`) is the kernel's major and minor version, and dark mode follows the desktop's setting
+(`platform.idiom` is `"desktop"`), `os_version()` (`platform.version`) is the kernel's major and minor version, and dark mode follows the desktop's setting
 (through the XDG settings portal) live. See [Device and environment](./device-and-environment.md).
 
 ### Keyboard

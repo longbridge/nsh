@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`
 和 `x86_64`。现有应用在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们，这是主要用途。也可以运行和打包完整应用，方式与其他平台相同，Rust 和 TSX 编写的应用都可以。在
-Android 上，`os()` 是 `Os::Android`（TSX 中 `Platform.OS` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
+Android 上，`os()` 是 `Os::Android`（TSX 中 `platform.os` 是 `"android"`），TSX 的 `android={{…}}` 属性生效。
 
 ## 环境要求
 

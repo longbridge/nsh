@@ -85,7 +85,7 @@ function FileMenu() {
 
 All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their menu on their own, so you arrange them
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup on desktops and the
-sheet on phones; a style that differs between them can read `Platform.isDesktop` (`nsh/device`).
+sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh/device`) with `"desktop"`.
 
 ## Context menus
 

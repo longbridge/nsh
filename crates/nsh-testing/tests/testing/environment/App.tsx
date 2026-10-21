@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { reduceMotion } from "nsh/accessibility";
-import { colorScheme, locale, Platform, windowSize } from "nsh/device";
+import { colorScheme, locale, platform, windowSize } from "nsh/device";
 
 function App() {
   const result = signal("none");
@@ -22,7 +22,7 @@ function App() {
       <Text>{`Scheme: ${colorScheme()}`}</Text>
       <Text>{`Locale: ${locale()}`}</Text>
       <Text>{`Motion: ${reduceMotion() ? "reduced" : "full"}`}</Text>
-      <Text>{`OS: ${Platform.OS}`}</Text>
+      <Text>{`OS: ${platform.os}`}</Text>
       <Text>{`Size: ${windowSize().width}x${windowSize().height}`}</Text>
       {button("Echo", "echo")}
       {button("Item", "items/7")}

@@ -95,7 +95,7 @@ Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate �
 | `min-[600px]:`、`max-[600px]:` | 任意断点 | 同上 |
 | `portrait:`、`landscape:` | 窗口方向 | `window().width > window().height` |
 | `ios:`、`android:`、`web:` | 平台 | `.when(os() == Os::Ios, \|v\| ..)` |
-| `rtl:`、`ltr:` | [布局方向](./layout.md#从右到左) | `rtl()` |
+| `rtl:`、`ltr:` | [布局方向](./layout.md#从右到左) | 视图的 `.direction(LayoutDirection::..)` |
 | `motion-safe:`、`motion-reduce:` | 用户的“减弱动态效果”设置 | `reduce_motion()` |
 
 变体可以组合：`dark:active:bg-zinc-700`、`md:landscape:flex-row`。在 Rust 中，`.active(..)` 样式里的 `AdaptiveColor` 就相当于 `dark:active:`。

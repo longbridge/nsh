@@ -2314,7 +2314,8 @@ impl<M: TextEngine> Core<M> {
                 return Ok(());
             }
             Prop::LayoutDirection(rtl) => {
-                // The surface's direction (the root's): JS's `I18nManager`.
+                // The surface's direction (the root's): the user's language, as
+                // JS or the policy sets it.
                 if key == self.root && node.direction != Some(rtl) {
                     node.direction = Some(rtl);
                     self.mount.push(MountItem::LayoutDirection { rtl });

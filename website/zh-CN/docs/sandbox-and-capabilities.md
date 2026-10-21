@@ -173,7 +173,7 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | `fetch` | Promise 被 reject；请求根本不会发到网络。 |
 | 远程图片 | 图片加载失败，触发 `onError`。 |
 | 视频源、web view 源、状态栏修改 | 不显示也不修改任何东西。 |
-| 剪贴板 | `setString` 不做任何事；`getString` 返回 `""`，`hasString` 返回 `false`。 |
+| 剪贴板 | `writeText` 和 `writeImage` 不做任何事；`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`。 |
 
 每种拒绝只记录一次日志，并说明需要添加哪个键：
 

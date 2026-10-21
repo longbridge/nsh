@@ -211,7 +211,7 @@ fn unbind(cx: Ctx, ids: std::ops::Range<u32>) -> R<()> {
 /// The function undoing a binding runs when the current owner (a
 /// component, an effect) goes, or, at a module's top level, when hot
 /// module replacement runs the module again.
-fn undo_with_owner(cx: Ctx, unbind: &V) {
+pub(crate) fn undo_with_owner(cx: Ctx, unbind: &V) {
     if crate::reactive::has_owner(cx) {
         let mut f = unbind.raw();
         // SAFETY: one borrowed argument; the result is a new reference.

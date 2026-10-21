@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Windows 上，
-`os()` 为 `Os::Windows`（TSX 中 `Platform.OS` 为 `"windows"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+`os()` 为 `Os::Windows`（TSX 中 `platform.os` 为 `"windows"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -126,7 +126,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 
 ## Windows 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为 `"10.0"`
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 `"10.0"`
 （Windows 11 上也是：Windows 沿用了这个版本号）。深色模式实时跟随“设置 > 个性化 > 颜色”，`fontScale()` 跟随“文本大小”设置，
 减少动态效果跟随“动画效果”设置，区域设置跟随用户的区域格式。见[设备与环境](./device-and-environment.md)。
 

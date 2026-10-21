@@ -1,6 +1,6 @@
 ---
 title: Platform-specific code
-description: Writing one app for phones, desktops and browsers - platform-only props in ios={{}} / android={{}} / desktop={{}} / web={{}}, the nsh/ios and nsh/android modules, Platform.OS and Platform.select, and platform Tailwind variants.
+description: Writing one app for phones, desktops and browsers - platform-only props in ios={{}} / android={{}} / desktop={{}} / web={{}}, the nsh/ios and nsh/android modules, platform.os and platform.select, and platform Tailwind variants.
 order: 17
 group: platforms
 ---
@@ -13,7 +13,7 @@ One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Cataly
 |---|---|---|
 | [Builder methods (`.ripple(..)`, `.input_accessory(..)`)](#platform-only-props) | [`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`](#platform-only-props) | Props only one platform has. |
 | [`toast`, `on_back_press`, `nsh_core::ui::desktop`](#platform-modules) | [`nsh/ios`, `nsh/android`, `nsh/desktop`](#platform-modules) | APIs only one platform has. |
-| [`os()`, `idiom()`, `is_desktop()`](#platformos-and-platformselect) | [`Platform.OS`, `Platform.select`](#platformos-and-platformselect) | Choosing values or code per platform. |
+| [`os()`, `idiom()`, `is_desktop()`](#platformos-and-platformselect) | [`platform.os`, `platform.select`](#platformos-and-platformselect) | Choosing values or code per platform. |
 | [`.when(os() == Os::Ios, ..)`](#platform-variants-in-tailwind) | [`ios:` / `android:` / `web:` classes](#platform-variants-in-tailwind) | Styles per platform. |
 
 ## Platform-only props
@@ -100,7 +100,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::ui::prelude`
 | Rust | TSX | Description |
 |---|---|---|
 | `toast(message, ToastDuration::Short)` | `Toast.show(message, duration?)` | A toast at the bottom of the screen; `"short"` (default) or `"long"`. |
-| `on_back_press(listener)` | `BackHandler.addEventListener("hardwareBackPress", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. In Rust the listener goes with the component; in TSX the call returns `{ remove() }`. |
+| `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
 | | `BackHandler.exitApp()` | Leaves the app. |
 | `os() == Os::Android` | `isAvailable` | `true` on Android. |
 
@@ -132,24 +132,23 @@ fn player() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup } from "nsh";
 import { BackHandler, Toast } from "nsh/android";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { AlertDialog } from "nsh/base";
 
 function saved() {
-  if (Platform.OS === "android") Toast.show("Saved");
+  if (platform.os === "android") Toast.show("Saved");
   else AlertDialog.show({ title: "Saved", actions: [{ label: "OK" }] });
 }
 
 function Player() {
-  // Back leaves full screen before it leaves the page.
-  const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+  // Back leaves full screen before it leaves the page. The listener goes
+  // with the component.
+  BackHandler.onBackPress(() => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
     return true;
   });
-  cleanup(() => sub.remove());
   // …
 }
 ```
@@ -209,9 +208,9 @@ function PhotoViewer() {
 
 In an app embedded in a native one, the host app's view controller decides the status bar on iOS. An app that declares `"capabilities"` in `nsh.json` needs `"statusBar": true` to change it.
 
-## Platform.OS and Platform.select
+## platform.os and platform.select
 
-`os()` in Rust and `Platform` from `nsh/device` in TSX tell you where the app runs: `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web`, and `Platform.OS` `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `Platform.isMacCatalyst`; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when the idiom is `"desktop"`). See [Device and environment](./device-and-environment.md#the-platform) for the version, the idiom and the rest.
+`os()` in Rust and the `platform` constant from `nsh/device` in TSX tell you where the app runs: `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web`, and `platform.os` `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `platform.catalyst`; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when the idiom is `"desktop"`). See [Device and environment](./device-and-environment.md#the-platform) for the version, the idiom and the rest.
 
 ```rust tabs
 use nsh_core::ui::{Os, prelude::*};
@@ -222,16 +221,16 @@ if os() == Os::Android {
 ```
 
 ```tsx tabs
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 
-if (Platform.OS === "android") {
+if (platform.os === "android") {
   // …
 }
 ```
 
-### Platform.select
+### platform.select
 
-In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops. In TSX, `Platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `mobile` (iOS, Android, phone and tablet browsers) or `desktop` (macOS, Windows, Linux, desktop browsers), then `native` (every platform but the web, as in React Native), then `default`:
+In Rust a `match os()` chooses the value, with `is_desktop()` for the desktops. In TSX, `platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `mobile` (iOS, Android, phone and tablet browsers) or `desktop` (macOS, Windows, Linux, desktop browsers), then `native` (every platform but the web), then `default`:
 
 ```rust tabs
 use nsh_core::ui::{Os, prelude::*};
@@ -257,14 +256,14 @@ const styles = {
   card: {
     borderRadius: 12,
     backgroundColor: "#ffffff",
-    ...Platform.select({
+    ...platform.select({
       ios: { shadowColor: "#000000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
       android: { borderWidth: 1, borderColor: "#e5e7eb" },
     }),
   },
 };
 
-const hint = Platform.select({ ios: "Swipe down to close", android: "Press back to close", default: "Close" });
+const hint = platform.select({ ios: "Swipe down to close", android: "Press back to close", default: "Close" });
 ```
 
 It returns `undefined` when nothing matches and there is no `default`.
@@ -284,7 +283,7 @@ fn spinner() -> AnyElement {
 ```
 
 ```tsx tabs
-const Spinner = Platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
+const Spinner = platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
 ```
 
 or inline with [`when` / `<If>`](../elements/control-flow.md):
@@ -295,7 +294,7 @@ when(os() == Os::Ios, || input_accessory_view("bar").child(…))
 ```
 
 ```tsx tabs
-<If when={Platform.OS === "ios"} else={<Text>Android has no input accessories.</Text>}>
+<If when={platform.os === "ios"} else={<Text>Android has no input accessories.</Text>}>
   <InputAccessoryView nativeID="bar">…</InputAccessoryView>
 </If>
 ```
@@ -325,6 +324,6 @@ Before reaching for a platform check, consider whether the difference matters to
 ## Related
 
 - [`nsh/ios`](../modules/nsh-ios.md) and [`nsh/android`](../modules/nsh-android.md): the references.
-- [`nsh/device`](../modules/nsh-device.md): `Platform`.
+- [`nsh/device`](../modules/nsh-device.md): `platform`.
 - [Native components](./native-components.md): using views your host app provides on each platform.
 - [Tailwind](./tailwind.md): every variant.

@@ -359,7 +359,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows
   of other apps (e.g. a Slack huddle bar at window level 1001) silently swallow clicks over a band of the app. When a tap does
   nothing, list the windows at the point (`CGWindowListCopyWindowInfo`) before suspecting hit testing.
-- **Not supported / not verifiable here**: `I18nManager.swapLeftAndRightInRTL(false)` (left / right always swap right to left);
+- **Not supported / not verifiable here**: keeping left and right unswapped right to left (left / right always swap right to left);
   after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms (as in React Native); the iOS simulator cannot
   inject edge swipes (interactive back is untested there); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.

@@ -1,5 +1,5 @@
 import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { ui } from "./palette";
 
 // The page: a button that posts to the app, and a line that shows what the
@@ -62,7 +62,7 @@ function App() {
         />
         <View style={{ gap: 12, width: wide() ? 320 : undefined }}>
           <Text style={{ color: ui().muted }}>
-            {Platform.isDesktop ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
+            {platform.idiom === "desktop" ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Button

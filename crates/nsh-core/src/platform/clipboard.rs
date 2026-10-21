@@ -63,7 +63,7 @@ pub fn image_answer(id: u32, has: bool, image: Option<Image<'_>>) -> EventPayloa
         if !fits {
             log::warn!(
                 target: "js",
-                "Clipboard.getImage: the clipboard's {}x{} image is {} MB, over the {} MB an app reads",
+                "Clipboard.readImage: the clipboard's {}x{} image is {} MB, over the {} MB an app reads",
                 image.width,
                 image.height,
                 image.bytes.len() >> 20,
@@ -113,7 +113,7 @@ pub fn data_uri(mime: &str, bytes: &[u8]) -> String {
     out
 }
 
-/// The type and bytes of a base64 `data:` URI (`Clipboard.setImage`'s
+/// The type and bytes of a base64 `data:` URI (`Clipboard.writeImage`'s
 /// argument); `None` when it is not one.
 pub fn decode_data_uri(uri: &str) -> Option<(&str, Vec<u8>)> {
     let rest = uri.strip_prefix("data:")?;

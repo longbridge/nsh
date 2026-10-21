@@ -111,7 +111,7 @@ setTimeout(async () => {
     Storage.setItem("launches", String(launches));
     Storage.setItem("scratch", "x");
     Storage.removeItem("scratch");
-    const keys = await Storage.getAllKeys();
+    const keys = await Storage.keys();
     let full = "fits";
     await Storage.setItem("big", "x".repeat(6 * 1024 * 1024)).catch(() => (full = "full"));
     shown.set(`done ${launches} ${keys.join(",")} ${full} ${await Storage.getItem("missing")}`);
@@ -211,7 +211,7 @@ setTimeout(async () => {
   const clearing = Storage.clear();
   outcomes.push(removing instanceof Promise && clearing instanceof Promise ? "promises" : "plain");
   await clearing;
-  const cleared = (await Storage.getAllKeys()).length;
+  const cleared = (await Storage.keys()).length;
   await Storage.setItem("ключ", "值😀");
   shown.set(`done ${outcomes.join(" ")} ${cleared} ${await Storage.getItem("ключ")}`);
 }, 0);

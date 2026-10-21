@@ -141,7 +141,7 @@ describe.skipIf(!!missing)('nsh/storage in the browser', () => {
     expect(result.error).toBeUndefined();
     expect(result.started.keys).toEqual(['nsh:/elsewhere/:opened', 'nsh:/play/:lastOpened', 'nsh:/play/:opened', 'other']);
     expect(result.started.other).toBe('x');
-    // getAllKeys sees the app's own keys, without their prefix.
+    // keys() sees the app's own keys, without their prefix.
     expect(result.started.text).toContain('Keys: lastOpened, opened');
     expect(result.reset.keys).toEqual(['nsh:/elsewhere/:opened', 'other']);
     expect(result.reset.other).toBe('x');

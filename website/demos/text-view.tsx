@@ -1,6 +1,6 @@
 import { cleanup, mount, signal, Scroll, Text, View } from "nsh";
 import { TextView } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 const REPLY = `## Moving to offline sync
@@ -21,7 +21,7 @@ nsh export --out backup.json
 \`\`\`
 
 > [!TIP]
-> ${Platform.isDesktop ? "Drag across the paragraphs to select them, then copy." : "Long-press a paragraph to copy it."}`;
+> ${platform.idiom === "desktop" ? "Drag across the paragraphs to select them, then copy." : "Long-press a paragraph to copy it."}`;
 
 function App() {
   const text = signal(REPLY);

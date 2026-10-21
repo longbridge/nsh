@@ -38,13 +38,13 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
 | `nsh/base` | `Button`; `TextView`, `SelectionArea`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
-| `nsh/device` | `windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager` | [nsh/device](./nsh-device.md) |
+| `nsh/device` | `windowSize`, `colorScheme`, `setColorScheme`, `fontScale`, `pixelRatio`, `locale`, `platform` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
-| `nsh/clipboard` | `Clipboard.setString`, `Clipboard.getString`, `Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
-| `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.getAllKeys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/clipboard` | `Clipboard.writeText`, `Clipboard.readText`, `Clipboard.writeImage`, `Clipboard.readImage`, `Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.keys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/keymap` | `keymap.bind` (keyboard shortcuts: `mod+k`, `ctrl+shift+p`, ...) | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`, `nativeModule` (components and functions the embedding app registers) | [nsh/native](./nsh-native.md) |
-| `nsh/accessibility` | `AccessibilityInfo`, `screenReaderEnabled`, `reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
+| `nsh/accessibility` | `announce`, `setAccessibilityFocus`, `screenReaderEnabled`, `reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
 | `nsh/ios` | `isAvailable`, `InputAccessoryView` | [nsh/ios](./nsh-ios.md) |
 | `nsh/android` | `isAvailable`, `Toast`, `BackHandler` | [nsh/android](./nsh-android.md) |
 | `nsh/desktop` | `isAvailable`, `Window` (title, title bar, maximize, full screen), `titleBar`, `Menu` (application menu, context menus) | [nsh/desktop](./nsh-desktop.md) |

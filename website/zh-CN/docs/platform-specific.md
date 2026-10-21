@@ -1,6 +1,6 @@
 ---
 title: 平台特定代码
-description: 为手机、桌面和浏览器编写同一个应用：ios={{}} / android={{}} / desktop={{}} / web={{}} 中的平台专属属性，nsh/ios 与 nsh/android 模块，Platform.OS 与 Platform.select，以及平台相关的 Tailwind 变体。
+description: 为手机、桌面和浏览器编写同一个应用：ios={{}} / android={{}} / desktop={{}} / web={{}} 中的平台专属属性，nsh/ios 与 nsh/android 模块，platform.os 与 platform.select，以及平台相关的 Tailwind 变体。
 order: 17
 group: platforms
 ---
@@ -13,7 +13,7 @@ group: platforms
 |---|---|---|
 | [构建方法（`.ripple(..)`、`.input_accessory(..)`）](#平台专属属性) | [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`、`web={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
 | [`toast`、`on_back_press`、`nsh_core::ui::desktop`](#平台模块) | [`nsh/ios`、`nsh/android`、`nsh/desktop`](#平台模块) | 只有一个平台才有的 API。 |
-| [`os()`、`idiom()`、`is_desktop()`](#platformos-与-platformselect) | [`Platform.OS`、`Platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
+| [`os()`、`idiom()`、`is_desktop()`](#platformos-与-platformselect) | [`platform.os`、`platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
 | [`.when(os() == Os::Ios, ..)`](#tailwind-中的平台变体) | [`ios:` / `android:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
 
 ## 平台专属属性
@@ -100,7 +100,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 | Rust | TSX | 说明 |
 |---|---|---|
 | `toast(message, ToastDuration::Short)` | `Toast.show(message, duration?)` | 在屏幕底部显示 toast；`"short"`（默认）或 `"long"`。 |
-| `on_back_press(listener)` | `BackHandler.addEventListener("hardwareBackPress", listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。Rust 中监听器随组件一起结束；TSX 中调用返回 `{ remove() }`。 |
+| `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
 | `os() == Os::Android` | `isAvailable` | Android 上为 `true`。 |
 
@@ -131,24 +131,22 @@ fn player() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup } from "nsh";
 import { BackHandler, Toast } from "nsh/android";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { AlertDialog } from "nsh/base";
 
 function saved() {
-  if (Platform.OS === "android") Toast.show("Saved");
+  if (platform.os === "android") Toast.show("Saved");
   else AlertDialog.show({ title: "Saved", actions: [{ label: "OK" }] });
 }
 
 function Player() {
-  // 返回键先退出全屏，再离开页面。
-  const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+  // 返回键先退出全屏，再离开页面。监听器随组件一起结束。
+  BackHandler.onBackPress(() => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
     return true;
   });
-  cleanup(() => sub.remove());
   // …
 }
 ```
@@ -208,9 +206,9 @@ function PhotoViewer() {
 
 在嵌入原生应用的场景下，iOS 上由宿主应用的视图控制器决定状态栏。在 `nsh.json` 中声明了 `"capabilities"` 的应用，需要 `"statusBar": true` 才能修改它。
 
-## Platform.OS 与 Platform.select
+## platform.os 与 platform.select
 
-Rust 中的 `os()` 和 TSX 中 `nsh/device` 的 `Platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`Platform.OS` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `Platform.isMacCatalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
+Rust 中的 `os()` 和 TSX 中 `nsh/device` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `platform.catalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
 
 ```rust tabs
 use nsh_core::ui::{Os, prelude::*};
@@ -221,16 +219,16 @@ if os() == Os::Android {
 ```
 
 ```tsx tabs
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 
-if (Platform.OS === "android") {
+if (platform.os === "android") {
   // …
 }
 ```
 
-### Platform.select
+### platform.select
 
-在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`。在 TSX 中，`Platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后是 `mobile`（iOS、Android、手机和平板浏览器）或 `desktop`（macOS、Windows、Linux、桌面浏览器），再是 `native`（除 Web 外的所有平台，与 React Native 相同），最后是 `default`：
+在 Rust 中用 `match os()` 选择值，桌面用 `is_desktop()`。在 TSX 中，`platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后是 `mobile`（iOS、Android、手机和平板浏览器）或 `desktop`（macOS、Windows、Linux、桌面浏览器），再是 `native`（除 Web 外的所有平台），最后是 `default`：
 
 ```rust tabs
 use nsh_core::ui::{Os, prelude::*};
@@ -256,14 +254,14 @@ const styles = {
   card: {
     borderRadius: 12,
     backgroundColor: "#ffffff",
-    ...Platform.select({
+    ...platform.select({
       ios: { shadowColor: "#000000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
       android: { borderWidth: 1, borderColor: "#e5e7eb" },
     }),
   },
 };
 
-const hint = Platform.select({ ios: "Swipe down to close", android: "Press back to close", default: "Close" });
+const hint = platform.select({ ios: "Swipe down to close", android: "Press back to close", default: "Close" });
 ```
 
 没有匹配项且没有 `default` 时返回 `undefined`。
@@ -283,7 +281,7 @@ fn spinner() -> AnyElement {
 ```
 
 ```tsx tabs
-const Spinner = Platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
+const Spinner = platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
 ```
 
 或者用 [`when` / `<If>`](../elements/control-flow.md) 内联：
@@ -294,7 +292,7 @@ when(os() == Os::Ios, || input_accessory_view("bar").child(…))
 ```
 
 ```tsx tabs
-<If when={Platform.OS === "ios"} else={<Text>Android has no input accessories.</Text>}>
+<If when={platform.os === "ios"} else={<Text>Android has no input accessories.</Text>}>
   <InputAccessoryView nativeID="bar">…</InputAccessoryView>
 </If>
 ```
@@ -324,6 +322,6 @@ view()
 ## 相关内容
 
 - [`nsh/ios`](../modules/nsh-ios.md) 与 [`nsh/android`](../modules/nsh-android.md)：参考。
-- [`nsh/device`](../modules/nsh-device.md)：`Platform`。
+- [`nsh/device`](../modules/nsh-device.md)：`platform`。
 - [原生组件](./native-components.md)：使用宿主应用在各平台上提供的视图。
 - [Tailwind](./tailwind.md)：所有变体。

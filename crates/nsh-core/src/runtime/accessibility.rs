@@ -5,14 +5,14 @@ use crate::{
     ui::{ModuleCx, NodeRef, module, task::Action},
 };
 
-/// Screen reader and motion settings.
+/// The screen reader's commands.
 #[module]
-pub(crate) struct AccessibilityInfo;
+pub(crate) struct Accessibility;
 
-#[module]
-impl AccessibilityInfo {
+#[module(flat)]
+impl Accessibility {
     /// The screen reader reads `message` (a VoiceOver announcement, TalkBack).
-    pub(crate) fn announce_for_accessibility(message: String, cx: &mut ModuleCx) {
+    pub(crate) fn announce(message: String, cx: &mut ModuleCx) {
         cx.announce_for_accessibility(message);
     }
 

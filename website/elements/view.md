@@ -217,7 +217,7 @@ received files.
 ## Ref methods
 
 A plain view has no commands of its own. `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to
-`AccessibilityInfo.setAccessibilityFocus` ([`nsh/accessibility`](../modules/nsh-accessibility.md)), or to measure it
+`setAccessibilityFocus` ([`nsh/accessibility`](../modules/nsh-accessibility.md)), or to measure it
 (`handle.measure()` in Rust).
 
 ## Views inside text

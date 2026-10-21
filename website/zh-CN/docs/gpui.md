@@ -11,7 +11,7 @@ GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GP
 Windows 和 Linux 上表现一致。它是嵌入 GPUI 和 GPUI Kit 应用的后端：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在
 自己元素树的任意位置显示 NSH 应用：它自己的 Rust 根组件，或它加载的 TSX。独立应用用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
 [Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个应用可以在所有
-平台上运行。`os()`（TSX 中的 `Platform.OS`）是它所运行的操作系统（macOS、Windows 或 Linux），并会应用 TSX 的 `desktop={{…}}` 属性。
+平台上运行。`os()`（TSX 中的 `platform.os`）是它所运行的操作系统（macOS、Windows 或 Linux），并会应用 TSX 的 `desktop={{…}}` 属性。
 
 [macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
 GPUI 用自己方式绘制的地方，见[差异](#差异)。

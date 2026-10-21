@@ -3419,7 +3419,7 @@ class Player {
 
 
   /**
-   * `Clipboard.setString`. The async Clipboard API needs a secure context
+   * `Clipboard.writeText`. The async Clipboard API needs a secure context
    * (and, in some browsers, a user gesture); a copy command is the fallback.
    */
   writeClipboard(text) {
@@ -3441,9 +3441,9 @@ class Player {
   }
 
   /**
-   * `Clipboard.getString` / `hasString`: browsers only tell by reading,
+   * `Clipboard.readText` / `hasText`: browsers only tell by reading,
    * which may ask the user (Chromium asks once per site; Safari and Firefox
-   * show a paste button), and fails in an insecure context. `hasString`
+   * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
   async readClipboard(request, hasOnly) {
@@ -3458,7 +3458,7 @@ class Player {
     this.event(ROOT_ID, "onClipboard", payload);
   }
 
-  /** `Clipboard.setImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
+  /** `Clipboard.writeImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
   async writeClipboardImage(uri) {
     try {
       const blob = await (await fetch(uri)).blob();
@@ -3468,7 +3468,7 @@ class Player {
     }
   }
 
-  /** `Clipboard.getImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
+  /** `Clipboard.readImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
   async readClipboardImage(request, hasOnly) {
     const app = this.app;
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });

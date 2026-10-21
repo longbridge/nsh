@@ -660,7 +660,7 @@ function Note() {
 }
 ```
 
-工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图（`nsh/ios` 的 `isAvailable` 为 `false`），所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `Platform.OS === "android"`）。
+工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图（`nsh/ios` 的 `isAvailable` 为 `false`），所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `platform.os === "android"`）。
 
 ## 相关内容
 

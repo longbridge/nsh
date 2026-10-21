@@ -209,7 +209,7 @@ view()
 
 `accessibilityElementsHidden`（iOS 的叫法）和 `importantForAccessibility="no-hide-descendants"`（Android 的叫法）在两个平台上都会隐藏子树；两者同时设置也没有坏处。
 
-## AccessibilityInfo
+## 屏幕阅读器与用户的设置
 
 在 Rust 中，prelude 报告用户的设置并与屏幕阅读器交互：`screen_reader()` 和 `reduce_motion()` 是响应式的，`announce_for_accessibility(message)` 让屏幕阅读器朗读一条消息，元素的 `element_ref()` 用 `set_accessibility_focus()` 把屏幕阅读器的焦点移到它上面。在 TSX 中，`nsh/accessibility` 报告用户的设置，并让你与屏幕阅读器交互。
 
@@ -217,13 +217,10 @@ view()
 |---|---|
 | `screenReaderEnabled()` | VoiceOver 或 TalkBack 是否在运行（响应式）。 |
 | `reduceMotion()` | 用户是否要求减少动态效果（响应式）。 |
-| `AccessibilityInfo.isScreenReaderEnabled()` | 同上，以 promise 形式返回。 |
-| `AccessibilityInfo.isReduceMotionEnabled()` | 同上，以 promise 形式返回。 |
-| `AccessibilityInfo.addEventListener(event, listener)` | `"screenReaderChanged"` 或 `"reduceMotionChanged"`；返回 `{ remove() }`。 |
-| `AccessibilityInfo.announceForAccessibility(message)` | 屏幕阅读器朗读 `message`。 |
-| `AccessibilityInfo.setAccessibilityFocus(ref)` | 把屏幕阅读器的焦点移到某个视图。 |
+| `announce(message)` | 屏幕阅读器朗读 `message`。 |
+| `setAccessibilityFocus(ref)` | 把屏幕阅读器的焦点移到某个视图。 |
 
-在组件中优先使用响应式访问器：它们会更新读取它们的地方，而且不需要清理。
+这些设置是访问器：在绑定或 effect 中读取它们，用户更改设置时读取它们的地方随之更新，而且不需要清理。
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -249,15 +246,15 @@ fn upload() -> impl IntoElement {
 
 ```tsx tabs
 import { signal, Text, View, type YNode } from "nsh";
-import { AccessibilityInfo, screenReaderEnabled } from "nsh/accessibility";
+import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 
 function Upload() {
   const done = signal(false);
   let result!: YNode;
   const finish = () => {
     done.set(true);
-    AccessibilityInfo.announceForAccessibility("Upload complete");
-    AccessibilityInfo.setAccessibilityFocus(result);
+    announce("Upload complete");
+    setAccessibilityFocus(result);
   };
   return (
     <View style={{ gap: 12 }}>

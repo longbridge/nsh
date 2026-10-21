@@ -201,7 +201,7 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
 | `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
-| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it; translations, when NSH has them, come from rust-i18n |
+| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations, when NSH has them, come from rust-i18n |
 | `OS` (type) | unchanged | | `platform.os`'s type |
 | **`nsh/accessibility`** | | | |
 | `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |

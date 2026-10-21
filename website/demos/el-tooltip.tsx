@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { type OpenChangeReason, Tooltip } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 /** An icon button with a hint of the app's look, above or below it. */
@@ -56,7 +56,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>tooltip</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop
+        {platform.idiom === "desktop"
           ? "Rest the pointer on a button; a press still presses it"
           : "Tooltips follow a pointer: pin them to see them here"}
       </Text>

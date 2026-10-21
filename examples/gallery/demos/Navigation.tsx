@@ -1,7 +1,7 @@
-import { cleanup, effect, Input, type JSX, Scroll, signal, Text, View } from "nsh";
+import { effect, Input, type JSX, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { BackHandler } from "nsh/android";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { AlertDialog, Dialog, NavPage, SafeAreaView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
@@ -375,11 +375,11 @@ export function Navigation() {
   // while intercepting keeps Android's back gesture previewing the pop.
   effect(() => {
     if (!intercept()) return;
-    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+    // Removed with the effect when it runs again.
+    BackHandler.onBackPress(() => {
       backs.set(backs() + 1);
       return true;
     });
-    cleanup(() => back.remove());
   });
   const push = (page: () => JSX.Element) => () => nav.push({ name: "page", page });
   // The dialog springs up from a little smaller each time it opens.
@@ -395,7 +395,7 @@ export function Navigation() {
     <DemoPage
       cards={[
         () => (
-          <Card icon="nav" title="Native stack" subtitle="Headers, transitions, the safe area" right={<Badge label={hint("UIKit / View", Platform.OS === "linux" ? "GTK 4" : "Native views")} />}>
+          <Card icon="nav" title="Native stack" subtitle="Headers, transitions, the safe area" right={<Badge label={hint("UIKit / View", platform.os === "linux" ? "GTK 4" : "Native views")} />}>
             <Insets />
           </Card>
         ),

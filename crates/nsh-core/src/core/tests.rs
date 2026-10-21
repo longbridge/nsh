@@ -7107,7 +7107,7 @@ mod components {
                     let has = has.await;
                     let image = image
                         .await
-                        .map(|i| format!("{}x{} {}", i.width.0, i.height.0, i.uri));
+                        .map(|i| format!("{}x{} {}", i.size.width.0, i.size.height.0, i.url));
                     let files = files.await.join(",");
                     pasted.set(format!("{has} {image:?} {files}"));
                 });

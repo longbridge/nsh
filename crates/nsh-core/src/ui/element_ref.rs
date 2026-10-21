@@ -127,7 +127,7 @@ impl ElementRef {
     }
 
     /// Moves the screen reader's focus to the element (TS:
-    /// `AccessibilityInfo.setAccessibilityFocus(ref)`).
+    /// `setAccessibilityFocus(ref)`).
     pub fn set_accessibility_focus(&self) {
         self.send(Command::AccessibilityFocus);
     }

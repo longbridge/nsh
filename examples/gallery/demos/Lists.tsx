@@ -1,6 +1,6 @@
 import { computed, Input, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { LayoutAnimation } from "nsh/animated";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, type Tone, toneColor, toneTint } from "../ui";
@@ -376,7 +376,7 @@ function More() {
             </View>
           </View>
           {/* The mouse does not pull scroll views down: desktops refresh here. */}
-          <If when={Platform.isDesktop}>
+          <If when={platform.idiom === "desktop"}>
             <Button label="Refresh" variant="secondary" disabled={refreshing()} onPress={refresh} />
           </If>
         </Section>

@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局以及
 原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Linux 上，`os()` 为 `Os::Linux`（TSX 中
-`Platform.OS` 为 `"linux"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+`platform.os` 为 `"linux"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -132,7 +132,7 @@ view.load(Bundle::source(code).into());
 
 ## Linux 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为内核的主、次版本号，
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为内核的主、次版本号，
 深色模式实时跟随桌面的设置（通过 XDG 设置门户）。见[设备与环境](./device-and-environment.md)。
 
 ### 键盘

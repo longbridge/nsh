@@ -40,13 +40,13 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`；原语 `View`、`Text`、`Scroll`、`Input`、[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)（以及 `Image.getSize`、`Image.prefetch`）、[`Canvas`](./nsh-canvas.md)（以及 `Path2D`、`CanvasRenderingContext2D`、`CanvasGradient`）、[`WebView`](./nsh-webview.md)、[`Video`](./nsh-video.md)；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
 | `nsh/base` | `Button`；`TextView`、`SelectionArea`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`SafeAreaView`、`safeArea`、`safeAreaInsets`；`AlertDialog`；`Keyboard`、`keyboardFrame`、`KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`、`AnimatedValue`、`AnimatedNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
-| `nsh/device` | `windowSize`、`colorScheme`、`fontScale`、`Platform`、`PixelRatio`、`I18nManager` | [nsh/device](./nsh-device.md) |
+| `nsh/device` | `windowSize`、`colorScheme`、`setColorScheme`、`fontScale`、`pixelRatio`、`locale`、`platform` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
-| `nsh/clipboard` | `Clipboard.setString`、`Clipboard.getString`、`Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
-| `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.getAllKeys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/clipboard` | `Clipboard.writeText`、`Clipboard.readText`、`Clipboard.writeImage`、`Clipboard.readImage`、`Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.keys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`、`nativeModule`（宿主应用注册的原生组件和函数） | [nsh/native](./nsh-native.md) |
-| `nsh/accessibility` | `AccessibilityInfo`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
+| `nsh/accessibility` | `announce`、`setAccessibilityFocus`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
 | `nsh/ios` | `isAvailable`、`InputAccessoryView` | [nsh/ios](./nsh-ios.md) |
 | `nsh/android` | `isAvailable`、`Toast`、`BackHandler` | [nsh/android](./nsh-android.md) |
 | `nsh/desktop` | `isAvailable`、`Window`（标题、标题栏、最大化、全屏）、`titleBar`、`Menu`（应用菜单、右键菜单） | [nsh/desktop](./nsh-desktop.md) |

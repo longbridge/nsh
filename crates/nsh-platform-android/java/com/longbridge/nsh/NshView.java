@@ -451,7 +451,7 @@ public class NshView extends FrameLayout {
         return (android.view.accessibility.AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
     }
 
-    /** TalkBack turning on or off: `AccessibilityInfo` and its events. */
+    /** TalkBack turning on or off: `screenReaderEnabled()`. */
     private final android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener screenReader =
             enabled -> publishEnvironment(getRootWindowInsets());
 

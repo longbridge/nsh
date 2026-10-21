@@ -38,9 +38,9 @@
 //! moves keyboard focus when the view can take it, is the mounter's.)
 //!
 //! The clipboard is the display's (`GdkClipboard`, the "CLIPBOARD"
-//! selection): `Clipboard.setString` sets its text, reads are answered as
+//! selection): `Clipboard.writeText` sets its text, reads are answered as
 //! [`EventKind::Clipboard`] once GDK has the text (reading another app's
-//! clipboard is asynchronous); `hasString` only looks at the formats on
+//! clipboard is asynchronous); `hasText` only looks at the formats on
 //! offer.
 
 use std::{
@@ -1040,7 +1040,7 @@ fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
     glib::timeout_add_local_once(duration, move || remove_overlay(&widget));
 }
 
-/// `Clipboard.getString` / `hasString`: answers read `id` with whether the
+/// `Clipboard.readText` / `hasText`: answers read `id` with whether the
 /// clipboard holds text and, unless `has_only`, the text.
 fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let answer = move |surface: &Surface, has: bool, text: Option<String>| {
@@ -1080,11 +1080,11 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
-/// `Clipboard.setImage`: the image of a `data:` URI as a GDK texture,
+/// `Clipboard.writeImage`: the image of a `data:` URI as a GDK texture,
 /// which GDK offers in the formats it encodes (PNG, TIFF, ...).
 fn set_clipboard_image(uri: &str) {
     let Some((_, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        log::warn!("Clipboard.writeImage: not a base64 data: URI");
         return;
     };
     match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
@@ -1093,11 +1093,11 @@ fn set_clipboard_image(uri: &str) {
                 display.clipboard().set_texture(&texture);
             }
         }
-        Err(err) => log::warn!("Clipboard.setImage: {err}"),
+        Err(err) => log::warn!("Clipboard.writeImage: {err}"),
     }
 }
 
-/// `Clipboard.getImage` / `hasImage`: the clipboard's image as a GDK
+/// `Clipboard.readImage` / `hasImage`: the clipboard's image as a GDK
 /// texture (whatever format the app offering it put), answered as PNG.
 fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let answer = move |surface: &Surface, payload| {
@@ -1130,7 +1130,7 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
-/// `Clipboard.getFiles`: the `file:` URIs of a file list on the clipboard
+/// `Clipboard.readFiles`: the `file:` URIs of a file list on the clipboard
 /// (files copied in a file manager).
 fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
     let answer = move |surface: &Surface, files: &[String]| {

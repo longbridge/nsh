@@ -1139,7 +1139,6 @@ style_keys! {
     ZIndex = "zIndex": Layout "number" "Order among siblings (stable); also the native stacking order.",
     BoxShadow = "boxShadow": View "string" "CSS `box-shadow`: offsets, blur, spread and color, several separated by commas, `inset` for inner shadows.",
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
-    ExperimentalBackgroundImage = "experimental_backgroundImage": View "string" "React Native's name of `backgroundImage`.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
@@ -2243,7 +2242,7 @@ impl Style {
                 };
                 self.edit_effects(|e| e.box_shadows = list);
             }
-            StyleKey::BackgroundImage | StyleKey::ExperimentalBackgroundImage => {
+            StyleKey::BackgroundImage => {
                 let list = match keyword(value)? {
                     None => Vec::new(),
                     Some(s) => css::gradients(s).ok_or(StyleError::InvalidValue)?,

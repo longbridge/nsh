@@ -1,5 +1,5 @@
 //! The Android back button for views ([`super::on_back_press`]; TS:
-//! `BackHandler.addEventListener("hardwareBackPress", ...)`).
+//! `BackHandler.onBackPress(...)`).
 //!
 //! The newest modal takes the button first, natively. Without one, the
 //! root's `BackPress` event comes when the app listens: the views'

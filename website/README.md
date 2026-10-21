@@ -171,7 +171,7 @@ The rules every demo follows, now and for the ones to come:
   content room with `maxWidth` or columns read from `windowSize()`. Where the
   element behaves differently by device (menus, tooltips, context menus,
   hover), the demo shows both behaviors and says on screen what to do
-  (`Platform.isDesktop ? "Right click a row" : "Hold a row"`).
+  (`platform.idiom === "desktop" ? "Right click a row" : "Hold a row"`).
 - **It shows the element, not the gallery.** A short screen of what the page
   explains: the element's main props and events, its state printed on screen,
   colours from `demos/palette.ts` (light and dark).
