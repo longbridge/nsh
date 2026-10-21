@@ -28,9 +28,8 @@ log.workspace = true
 # Empty off Linux (like the other platform crates off their targets).
 [target.'cfg(target_os = "linux")'.dependencies]
 nsh-core.workspace = true
-nsh-animation.workspace = true
 nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 gtk4.workspace = true
 # GIF and WebP (first frame), which GDK cannot decode without gdk-pixbuf loaders.
 image = { workspace = true, features = ["gif", "webp"] }

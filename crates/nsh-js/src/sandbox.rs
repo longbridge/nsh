@@ -190,7 +190,10 @@ pub(crate) enum Phase {
 /// The clock of the call in progress, shared with the interrupt handler.
 pub(crate) struct Budget {
     limits: Limits,
-    /// When the running call must have returned.
+    /// Whether a call is running (nested calls share its budget).
+    running: Cell<bool>,
+    /// When the running call must have returned (`None`: no budget, as an
+    /// app on its own has none).
     deadline: Rc<Cell<Option<Instant>>>,
     /// The call that overran, until its error is reported.
     tripped: Rc<Cell<Option<Phase>>>,
@@ -214,6 +217,7 @@ impl Budget {
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
             limits,
+            running: Cell::new(false),
             deadline: Rc::default(),
             tripped: Rc::default(),
             phase: Rc::new(Cell::new(Phase::Call)),
@@ -235,7 +239,7 @@ impl Budget {
     }
 
     fn begin(&self, phase: Phase) -> bool {
-        if self.deadline.get().is_some() {
+        if self.running.replace(true) {
             return false;
         }
         let budget = match phase {
@@ -244,12 +248,14 @@ impl Budget {
         };
         self.phase.set(phase);
         self.tripped.set(None);
+        // `Duration::MAX` (no limit) is past any instant: no deadline.
         self.deadline.set(Instant::now().checked_add(budget));
         true
     }
 
     fn end(&self, started: bool) {
         if started {
+            self.running.set(false);
             self.deadline.set(None);
         }
     }
@@ -360,8 +366,8 @@ const HARDEN: &str = r#"
 
 /// Installs the hardening. Runs after the host's own globals and before the
 /// bundle.
-pub(crate) fn harden(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
-    ctx.eval::<(), _>(HARDEN)
+pub(crate) fn harden(cx: &Ctx<'_>) -> rquickjs::Result<()> {
+    cx.eval::<(), _>(HARDEN)
 }
 
 /// The hardening compiled to bytecode ([`harden_from`]), for runtimes
@@ -370,14 +376,14 @@ pub(crate) fn harden(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
 /// QuickJS the app's bytecode is for ([`crate::BYTECODE_VERSION`]).
 pub fn compile_harden() -> Result<Vec<u8>, crate::JsError> {
     let rt = rquickjs::Runtime::new()?;
-    let ctx = rquickjs::Context::full(&rt)?;
-    ctx.with(|ctx| {
-        let raw = ctx.as_raw().as_ptr();
+    let cx = rquickjs::Context::full(&rt)?;
+    cx.with(|cx| {
+        let raw = cx.as_raw().as_ptr();
         let source = std::ffi::CString::new(HARDEN).expect("no NUL in the hardening");
         // SAFETY: a live context; the source is NUL-terminated; the
         // function value is freed and the written buffer copied and freed.
         unsafe {
-            // As `ctx.eval` runs it: a strict global script.
+            // As `cx.eval` runs it: a strict global script.
             let function = qjs::JS_Eval(
                 raw,
                 source.as_ptr(),
@@ -388,10 +394,7 @@ pub fn compile_harden() -> Result<Vec<u8>, crate::JsError> {
                     | qjs::JS_EVAL_FLAG_COMPILE_ONLY) as c_int,
             );
             if qjs::JS_IsException(function) {
-                return Err(crate::JsError::from_engine(
-                    &ctx,
-                    rquickjs::Error::Exception,
-                ));
+                return Err(crate::JsError::from_engine(&cx, rquickjs::Error::Exception));
             }
             let mut len = 0;
             let flags = qjs::JS_WRITE_OBJ_BYTECODE
@@ -400,10 +403,7 @@ pub fn compile_harden() -> Result<Vec<u8>, crate::JsError> {
             let buf = qjs::JS_WriteObject(raw, &mut len, function, flags as c_int);
             qjs::JS_FreeValue(raw, function);
             if buf.is_null() {
-                return Err(crate::JsError::from_engine(
-                    &ctx,
-                    rquickjs::Error::Exception,
-                ));
+                return Err(crate::JsError::from_engine(&cx, rquickjs::Error::Exception));
             }
             let bytes = std::slice::from_raw_parts(buf, len as usize).to_vec();
             qjs::js_free(raw, buf.cast());
@@ -418,8 +418,8 @@ pub fn compile_harden() -> Result<Vec<u8>, crate::JsError> {
 ///
 /// `bytecode` comes from [`compile_harden`] of the same QuickJS build:
 /// QuickJS does not validate it.
-pub(crate) unsafe fn harden_from(ctx: &Ctx<'_>, bytecode: &[u8]) -> rquickjs::Result<()> {
-    let raw = ctx.as_raw().as_ptr();
+pub(crate) unsafe fn harden_from(cx: &Ctx<'_>, bytecode: &[u8]) -> rquickjs::Result<()> {
+    let raw = cx.as_raw().as_ptr();
     // SAFETY: a live context; trusted bytecode per the contract; the
     // function value is consumed by `JS_EvalFunction`, its result freed.
     unsafe {
@@ -455,5 +455,20 @@ mod tests {
         assert!(unwound.is_err());
         // No clock left running: the next call starts its own.
         assert!(budget.run(Phase::Call).started);
+    }
+
+    #[test]
+    fn calls_without_a_budget_are_never_interrupted() {
+        let budget = Budget::new(Limits::standalone());
+        let mut interrupt = budget.interrupt_handler(None);
+        let outer = budget.run(Phase::Load);
+        assert!(outer.started);
+        assert!(budget.deadline.get().is_none());
+        // Nested calls still share the outer one's (absent) budget.
+        assert!(!budget.run(Phase::Call).started);
+        assert!(!interrupt());
+        drop(outer);
+        assert!(budget.run(Phase::Call).started);
+        assert!(budget.take_trip().is_none());
     }
 }

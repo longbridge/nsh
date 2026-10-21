@@ -45,7 +45,7 @@ pub(crate) type Graph = r::Graph<Js>;
 
 /// What the JS host keeps in the graph.
 pub(crate) struct JsData {
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     classes: Classes,
     /// The first exception of a round, thrown when the round ends.
     error: Option<JsValue>,
@@ -55,7 +55,7 @@ pub(crate) struct JsData {
 pub(crate) struct JsFrame {
     key: JsValue,
     value: JsValue,
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
 }
 
 impl Drop for JsFrame {
@@ -63,8 +63,8 @@ impl Drop for JsFrame {
         // SAFETY: frames only live in a graph, which is torn down before
         // its context.
         unsafe {
-            qjs::JS_FreeValue(self.ctx, self.key);
-            qjs::JS_FreeValue(self.ctx, self.value);
+            qjs::JS_FreeValue(self.cx, self.key);
+            qjs::JS_FreeValue(self.cx, self.value);
         }
     }
 }
@@ -190,18 +190,19 @@ struct Classes {
     signal: qjs::JSClassID,
     setter: qjs::JSClassID,
     memo: qjs::JSClassID,
+    resource: qjs::JSClassID,
 }
 
-/// The graph of `ctx`.
+/// The graph of `cx`.
 ///
 /// # Safety
 ///
-/// `ctx` has a state ([`crate::state::install`]), and the caller holds no
+/// `cx` has a state ([`crate::state::install`]), and the caller holds no
 /// other reference to the graph.
 #[inline]
-pub(crate) unsafe fn graph<'a>(ctx: *mut JsContext) -> &'a mut Graph {
+pub(crate) unsafe fn graph<'a>(cx: *mut JsContext) -> &'a mut Graph {
     // SAFETY: as the caller promises.
-    unsafe { r::Host::graph(Js(ctx)) }
+    unsafe { r::Host::graph(Js(cx)) }
 }
 
 /// The graph of runtime `rt` (finalizers, GC marks), unless it is being
@@ -248,28 +249,28 @@ fn unpack(p: *mut c_void) -> (u32, u32) {
 }
 
 /// An exception of a JS call: kept as the round's error (the first wins).
-fn take_exception(ctx: *mut JsContext) {
+fn take_exception(cx: *mut JsContext) {
     // SAFETY: an exception is pending.
-    let exception = unsafe { qjs::JS_GetException(ctx) };
+    let exception = unsafe { qjs::JS_GetException(cx) };
     // SAFETY: no other reference to the graph is live here.
-    let g = unsafe { graph(ctx) };
+    let g = unsafe { graph(cx) };
     if g.data.error.is_none() {
         g.data.error = Some(exception);
     } else {
         // SAFETY: ours.
-        unsafe { qjs::JS_FreeValue(ctx, exception) };
+        unsafe { qjs::JS_FreeValue(cx, exception) };
     }
 }
 
 /// Calls `f` with `args`, keeping an exception as the round's error.
 /// `Err` when it threw.
-fn call(ctx: *mut JsContext, f: JsValue, args: &mut [JsValue]) -> Result<JsValue, ()> {
+fn call(cx: *mut JsContext, f: JsValue, args: &mut [JsValue]) -> Result<JsValue, ()> {
     // SAFETY: `f` and `args` are live values; the call may re-enter the
     // graph, which holds no reference here.
-    let r = unsafe { qjs::JS_Call(ctx, f, UNDEFINED, args.len() as c_int, args.as_mut_ptr()) };
+    let r = unsafe { qjs::JS_Call(cx, f, UNDEFINED, args.len() as c_int, args.as_mut_ptr()) };
     // SAFETY: inline tag check.
     if unsafe { qjs::JS_IsException(r) } {
-        take_exception(ctx);
+        take_exception(cx);
         Err(())
     } else {
         Ok(r)
@@ -279,78 +280,78 @@ fn call(ctx: *mut JsContext, f: JsValue, args: &mut [JsValue]) -> Result<JsValue
 // --- The JS objects -------------------------------------------------------
 
 /// The node a signal / setter / memo object names, if it is still live.
-unsafe fn node_of(ctx: *mut JsContext, obj: JsValue, class: qjs::JSClassID) -> Option<u32> {
+unsafe fn node_of(cx: *mut JsContext, obj: JsValue, class: qjs::JSClassID) -> Option<u32> {
     // SAFETY: an object of `class` holds a packed handle.
     let p = unsafe { qjs::JS_GetOpaque(obj, class) };
     if p.is_null() {
         return None;
     }
     let (id, generation) = unpack(p);
-    unsafe { graph(ctx) }
+    unsafe { graph(cx) }
         .live(id, generation, GENERATION_MASK)
         .then_some(id)
 }
 
 unsafe extern "C" fn signal_call(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     func: JsValue,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
     _flags: c_int,
 ) -> JsValue {
-    let classes = unsafe { graph(ctx) }.data.classes;
+    let classes = unsafe { graph(cx) }.data.classes;
     let id =
-        unsafe { node_of(ctx, func, classes.signal).or_else(|| node_of(ctx, func, classes.memo)) };
+        unsafe { node_of(cx, func, classes.signal).or_else(|| node_of(cx, func, classes.memo)) };
     match id {
         Some(id) => {
-            let value = r::read(Js(ctx), id);
-            finish(ctx, value)
+            let value = r::read(Js(cx), id);
+            finish(cx, value)
         }
         None => UNDEFINED,
     }
 }
 
 unsafe extern "C" fn setter_call(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     func: JsValue,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
     _flags: c_int,
 ) -> JsValue {
-    let class = unsafe { graph(ctx) }.data.classes.setter;
-    let Some(id) = (unsafe { node_of(ctx, func, class) }) else {
+    let class = unsafe { graph(cx) }.data.classes.setter;
+    let Some(id) = (unsafe { node_of(cx, func, class) }) else {
         return UNDEFINED;
     };
     let mut value = if argc > 0 {
-        unsafe { qjs::JS_DupValue(ctx, *argv) }
+        unsafe { qjs::JS_DupValue(cx, *argv) }
     } else {
         UNDEFINED
     };
     // An updater gets the previous value.
-    if unsafe { qjs::JS_IsFunction(ctx, value) } {
-        let prev = unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) };
+    if unsafe { qjs::JS_IsFunction(cx, value) } {
+        let prev = unsafe { qjs::JS_DupValue(cx, *graph(cx).value(id)) };
         let mut args = [prev];
-        let r = unsafe { qjs::JS_Call(ctx, value, UNDEFINED, 1, args.as_mut_ptr()) };
+        let r = unsafe { qjs::JS_Call(cx, value, UNDEFINED, 1, args.as_mut_ptr()) };
         unsafe {
-            qjs::JS_FreeValue(ctx, args[0]);
-            qjs::JS_FreeValue(ctx, value);
+            qjs::JS_FreeValue(cx, args[0]);
+            qjs::JS_FreeValue(cx, value);
         }
         if unsafe { qjs::JS_IsException(r) } {
             return r;
         }
         value = r;
     }
-    let returned = unsafe { qjs::JS_DupValue(ctx, value) };
-    r::write(Js(ctx), id, value);
-    finish(ctx, returned)
+    let returned = unsafe { qjs::JS_DupValue(cx, value) };
+    r::write(Js(cx), id, value);
+    finish(cx, returned)
 }
 
 /// Returns `value`, or throws the error a round kept.
-fn finish(ctx: *mut JsContext, value: JsValue) -> JsValue {
+fn finish(cx: *mut JsContext, value: JsValue) -> JsValue {
     // SAFETY: short borrow.
-    let g = unsafe { graph(ctx) };
+    let g = unsafe { graph(cx) };
     if g.in_round() {
         // Still in a round: its end throws.
         return value;
@@ -358,8 +359,8 @@ fn finish(ctx: *mut JsContext, value: JsValue) -> JsValue {
     g.reset_runs();
     match g.data.error.take() {
         Some(error) => unsafe {
-            qjs::JS_FreeValue(ctx, value);
-            qjs::JS_Throw(ctx, error)
+            qjs::JS_FreeValue(cx, value);
+            qjs::JS_Throw(cx, error)
         },
         None => value,
     }
@@ -381,10 +382,10 @@ unsafe extern "C" fn finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
     if !g.live(id, generation, GENERATION_MASK) {
         return;
     }
-    let ctx = g.data.ctx;
+    let cx = g.data.cx;
     // Freed now, as QuickJS's cycle collection expects of finalizers.
     if let Some(held) = g.drop_handle(id) {
-        held.free(Js(ctx));
+        held.free(Js(cx));
     }
 }
 
@@ -407,11 +408,11 @@ unsafe extern "C" fn gc_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs::J
 }
 
 /// A new object of `class` naming node `id`.
-fn object(ctx: *mut JsContext, class: qjs::JSClassID, id: u32) -> JsValue {
+fn object(cx: *mut JsContext, class: qjs::JSClassID, id: u32) -> JsValue {
     // SAFETY: a registered class; the opaque is a packed handle.
     unsafe {
-        let generation = graph(ctx).generation(id);
-        let obj = qjs::JS_NewObjectClass(ctx, class);
+        let generation = graph(cx).generation(id);
+        let obj = qjs::JS_NewObjectClass(cx, class);
         qjs::JS_SetOpaque(obj, pack(id, generation));
         obj
     }
@@ -429,18 +430,18 @@ pub(crate) fn arg(argc: c_int, argv: *mut JsValue, i: usize) -> JsValue {
 }
 
 /// `equals` of an options object.
-fn equals_option(ctx: *mut JsContext, options: JsValue) -> Equals<JsValue> {
+fn equals_option(cx: *mut JsContext, options: JsValue) -> Equals<JsValue> {
     // SAFETY: reading a property of a live value.
     unsafe {
         if !qjs::JS_IsObject(options) {
             return Equals::Default;
         }
-        let e = qjs::JS_GetPropertyStr(ctx, options, c"equals".as_ptr());
-        if qjs::JS_IsFunction(ctx, e) {
+        let e = qjs::JS_GetPropertyStr(cx, options, c"equals".as_ptr());
+        if qjs::JS_IsFunction(cx, e) {
             Equals::Custom(e)
         } else {
             let never = qjs::JS_IsBool(e) && !qjs::JS_VALUE_GET_BOOL(e);
-            qjs::JS_FreeValue(ctx, e);
+            qjs::JS_FreeValue(cx, e);
             if never {
                 Equals::Never
             } else {
@@ -454,96 +455,96 @@ pub(crate) type Native =
     unsafe extern "C" fn(*mut JsContext, JsValue, c_int, *mut JsValue) -> JsValue;
 
 /// A new signal node holding `value` (borrowed), with `options`' equality.
-fn new_signal_node(ctx: *mut JsContext, value: JsValue, options: JsValue) -> u32 {
-    let value = unsafe { qjs::JS_DupValue(ctx, value) };
-    let equals = equals_option(ctx, options);
-    unsafe { graph(ctx) }.signal(value, equals)
+fn new_signal_node(cx: *mut JsContext, value: JsValue, options: JsValue) -> u32 {
+    let value = unsafe { qjs::JS_DupValue(cx, value) };
+    let equals = equals_option(cx, options);
+    unsafe { graph(cx) }.signal(value, equals)
 }
 
 /// `createSignal(value, options)`: `[read, write]`.
 #[cfg(test)]
 unsafe extern "C" fn create_signal(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let id = new_signal_node(ctx, arg(argc, argv, 0), arg(argc, argv, 1));
-    let classes = unsafe { graph(ctx) }.data.classes;
+    let id = new_signal_node(cx, arg(argc, argv, 0), arg(argc, argv, 1));
+    let classes = unsafe { graph(cx) }.data.classes;
     let mut pair = [
-        object(ctx, classes.signal, id),
-        object(ctx, classes.setter, id),
+        object(cx, classes.signal, id),
+        object(cx, classes.setter, id),
     ];
-    unsafe { qjs::JS_NewArrayFrom(ctx, 2, pair.as_mut_ptr()) }
+    unsafe { qjs::JS_NewArrayFrom(cx, 2, pair.as_mut_ptr()) }
 }
 
 /// `createMemo(fn, value, options)`.
 unsafe extern "C" fn create_memo(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let (func, value) = unsafe {
         (
-            qjs::JS_DupValue(ctx, arg(argc, argv, 0)),
-            qjs::JS_DupValue(ctx, arg(argc, argv, 1)),
+            qjs::JS_DupValue(cx, arg(argc, argv, 0)),
+            qjs::JS_DupValue(cx, arg(argc, argv, 1)),
         )
     };
-    let equals = equals_option(ctx, arg(argc, argv, 2));
-    let id = r::memo(Js(ctx), func, value, equals, true);
-    let class = unsafe { graph(ctx) }.data.classes.memo;
-    let obj = object(ctx, class, id);
-    finish(ctx, obj)
+    let equals = equals_option(cx, arg(argc, argv, 2));
+    let id = r::memo(Js(cx), func, value, equals, true);
+    let class = unsafe { graph(cx) }.data.classes.memo;
+    let obj = object(cx, class, id);
+    finish(cx, obj)
 }
 
-fn create_effect(ctx: *mut JsContext, argc: c_int, argv: *mut JsValue, kind: Kind) -> JsValue {
+fn create_effect(cx: *mut JsContext, argc: c_int, argv: *mut JsValue, kind: Kind) -> JsValue {
     let (func, value) = unsafe {
         (
-            qjs::JS_DupValue(ctx, arg(argc, argv, 0)),
-            qjs::JS_DupValue(ctx, arg(argc, argv, 1)),
+            qjs::JS_DupValue(cx, arg(argc, argv, 0)),
+            qjs::JS_DupValue(cx, arg(argc, argv, 1)),
         )
     };
-    r::effect(Js(ctx), kind, func, value);
-    finish(ctx, UNDEFINED)
+    r::effect(Js(cx), kind, func, value);
+    finish(cx, UNDEFINED)
 }
 
 /// `createRenderEffect(fn, value)`.
 #[cfg(test)]
 unsafe extern "C" fn create_render_effect(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    create_effect(ctx, argc, argv, Kind::Effect)
+    create_effect(cx, argc, argv, Kind::Effect)
 }
 
 /// `createEffect(fn, value)`.
 unsafe extern "C" fn create_user_effect(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    create_effect(ctx, argc, argv, Kind::UserEffect)
+    create_effect(cx, argc, argv, Kind::UserEffect)
 }
 
 /// The owner a handle names (`getOwner()`'s value), `UNOWNED` for others.
 #[cfg(test)]
-fn owner_of(ctx: *mut JsContext, handle: JsValue) -> Option<u32> {
+fn owner_of(cx: *mut JsContext, handle: JsValue) -> Option<u32> {
     // SAFETY: inline tag checks.
     unsafe {
         if qjs::JS_IsUndefined(handle) {
             return None;
         }
         let mut v = 0f64;
-        if !qjs::JS_IsNumber(handle) || qjs::JS_ToFloat64(ctx, &mut v, handle) != 0 {
+        if !qjs::JS_IsNumber(handle) || qjs::JS_ToFloat64(cx, &mut v, handle) != 0 {
             return Some(UNOWNED);
         }
         let bits = v as u64;
         let (id, generation) = (bits as u32, (bits >> 32) as u32);
-        let g = graph(ctx);
+        let g = graph(cx);
         Some(if g.live(id, generation, u32::MAX) && !g.disposed(id) {
             id
         } else {
@@ -554,7 +555,7 @@ fn owner_of(ctx: *mut JsContext, handle: JsValue) -> Option<u32> {
 
 #[cfg(test)]
 unsafe extern "C" fn dispose_root(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
@@ -562,115 +563,114 @@ unsafe extern "C" fn dispose_root(
     data: *mut JsValue,
 ) -> JsValue {
     let handle = unsafe { *data };
-    if let Some(id) = owner_of(ctx, handle).filter(|&id| id != UNOWNED) {
+    if let Some(id) = owner_of(cx, handle).filter(|&id| id != UNOWNED) {
         // Untracked: disposing reads nothing.
-        r::dispose_owner(Js(ctx), id);
+        r::dispose_owner(Js(cx), id);
     }
-    finish(ctx, UNDEFINED)
+    finish(cx, UNDEFINED)
 }
 
 /// `createRoot(fn, owner)`: `fn(dispose)` (a root without the parameter
 /// is never disposed and owns nothing).
 #[cfg(test)]
 unsafe extern "C" fn create_root(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let func = arg(argc, argv, 0);
-    let detached = owner_of(ctx, arg(argc, argv, 1));
+    let detached = owner_of(cx, arg(argc, argv, 1));
     let mut length = 0i32;
     unsafe {
-        let l = qjs::JS_GetPropertyStr(ctx, func, c"length".as_ptr());
-        qjs::JS_ToInt32(ctx, &mut length, l);
-        qjs::JS_FreeValue(ctx, l);
+        let l = qjs::JS_GetPropertyStr(cx, func, c"length".as_ptr());
+        qjs::JS_ToInt32(cx, &mut length, l);
+        qjs::JS_FreeValue(cx, l);
     }
     let (root, args) = if length == 0 {
         (UNOWNED, Vec::new())
     } else {
-        let g = unsafe { graph(ctx) };
+        let g = unsafe { graph(cx) };
         let previous = detached.map(|owner| g.set_owner(owner));
         let id = g.root();
         if let Some(previous) = previous {
             g.set_owner(previous);
         }
-        let mut data = [handle_value(ctx, id)];
-        let dispose = unsafe {
-            qjs::JS_NewCFunctionData(ctx, Some(dispose_root), 0, 0, 1, data.as_mut_ptr())
-        };
+        let mut data = [handle_value(cx, id)];
+        let dispose =
+            unsafe { qjs::JS_NewCFunctionData(cx, Some(dispose_root), 0, 0, 1, data.as_mut_ptr()) };
         (id, vec![dispose])
     };
     let mut args = args;
-    let func = unsafe { qjs::JS_DupValue(ctx, func) };
-    let result = r::with_owner(Js(ctx), root, || call(ctx, func, &mut args));
+    let func = unsafe { qjs::JS_DupValue(cx, func) };
+    let result = r::with_owner(Js(cx), root, || call(cx, func, &mut args));
     unsafe {
-        qjs::JS_FreeValue(ctx, func);
+        qjs::JS_FreeValue(cx, func);
         for a in args {
-            qjs::JS_FreeValue(ctx, a);
+            qjs::JS_FreeValue(cx, a);
         }
     }
-    finish(ctx, result.unwrap_or(UNDEFINED))
+    finish(cx, result.unwrap_or(UNDEFINED))
 }
 
 /// An owner handle: a number packing the node and its generation.
 #[cfg(test)]
-fn handle_value(ctx: *mut JsContext, id: u32) -> JsValue {
-    let generation = unsafe { graph(ctx) }.generation(id);
+fn handle_value(cx: *mut JsContext, id: u32) -> JsValue {
+    let generation = unsafe { graph(cx) }.generation(id);
     qjs::JS_NewFloat64((((generation as u64) << 32) | id as u64) as f64)
 }
 
 /// `untrack(fn)`.
 pub(crate) unsafe extern "C" fn untrack(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    r::untracked(Js(ctx), || unsafe {
-        qjs::JS_Call(ctx, arg(argc, argv, 0), UNDEFINED, 0, ptr::null_mut())
+    r::untracked(Js(cx), || unsafe {
+        qjs::JS_Call(cx, arg(argc, argv, 0), UNDEFINED, 0, ptr::null_mut())
     })
 }
 
 /// `batch(fn)`.
 pub(crate) unsafe extern "C" fn batch(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let func = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    let r = r::batch(Js(ctx), || call(ctx, func, &mut []));
-    unsafe { qjs::JS_FreeValue(ctx, func) };
-    finish(ctx, r.unwrap_or(UNDEFINED))
+    let func = unsafe { qjs::JS_DupValue(cx, arg(argc, argv, 0)) };
+    let r = r::batch(Js(cx), || call(cx, func, &mut []));
+    unsafe { qjs::JS_FreeValue(cx, func) };
+    finish(cx, r.unwrap_or(UNDEFINED))
 }
 
 /// `onCleanup(fn)`: runs before the owner runs again or is disposed.
 pub(crate) unsafe extern "C" fn on_cleanup(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let f = arg(argc, argv, 0);
-    let owned = unsafe { qjs::JS_DupValue(ctx, f) };
-    if let Err(owned) = unsafe { graph(ctx) }.on_cleanup(owned) {
-        unsafe { qjs::JS_FreeValue(ctx, owned) };
+    let owned = unsafe { qjs::JS_DupValue(cx, f) };
+    if let Err(owned) = unsafe { graph(cx) }.on_cleanup(owned) {
+        unsafe { qjs::JS_FreeValue(cx, owned) };
     }
-    unsafe { qjs::JS_DupValue(ctx, f) }
+    unsafe { qjs::JS_DupValue(cx, f) }
 }
 
 /// `getOwner()`: a handle, or `undefined`.
 #[cfg(test)]
 unsafe extern "C" fn get_owner(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let g = unsafe { graph(ctx) };
+    let g = unsafe { graph(cx) };
     if g.has_owner() {
-        handle_value(ctx, g.owner())
+        handle_value(cx, g.owner())
     } else {
         UNDEFINED
     }
@@ -679,46 +679,46 @@ unsafe extern "C" fn get_owner(
 /// `runWithOwner(owner, fn)`.
 #[cfg(test)]
 unsafe extern "C" fn run_with_owner(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let owner = owner_of(ctx, arg(argc, argv, 0)).unwrap_or(UNOWNED);
-    let func = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 1)) };
-    let r = r::with_owner(Js(ctx), owner, || call(ctx, func, &mut []));
-    unsafe { qjs::JS_FreeValue(ctx, func) };
-    finish(ctx, r.unwrap_or(UNDEFINED))
+    let owner = owner_of(cx, arg(argc, argv, 0)).unwrap_or(UNOWNED);
+    let func = unsafe { qjs::JS_DupValue(cx, arg(argc, argv, 1)) };
+    let r = r::with_owner(Js(cx), owner, || call(cx, func, &mut []));
+    unsafe { qjs::JS_FreeValue(cx, func) };
+    finish(cx, r.unwrap_or(UNDEFINED))
 }
 
 /// `setContext(key, value)`: the current owner and what is made under it
 /// from now on see `value` for `key`.
 unsafe extern "C" fn set_context(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let frame = unsafe {
         JsFrame {
-            key: qjs::JS_DupValue(ctx, arg(argc, argv, 0)),
-            value: qjs::JS_DupValue(ctx, arg(argc, argv, 1)),
-            ctx,
+            key: qjs::JS_DupValue(cx, arg(argc, argv, 0)),
+            value: qjs::JS_DupValue(cx, arg(argc, argv, 1)),
+            cx,
         }
     };
     // The frame replaced (or the new one, without an owner) is dropped
     // once the graph is no longer borrowed.
-    let replaced = unsafe { graph(ctx) }.provide(frame);
+    let replaced = unsafe { graph(cx) }.provide(frame);
     drop(replaced);
     UNDEFINED
 }
 
 /// The value of `key` in the current owner's context (owned), if set.
-pub(crate) fn lookup(ctx: *mut JsContext, key: JsValue) -> Option<JsValue> {
-    let mut frame = unsafe { graph(ctx) }.context();
+pub(crate) fn lookup(cx: *mut JsContext, key: JsValue) -> Option<JsValue> {
+    let mut frame = unsafe { graph(cx) }.context();
     while let Some(f) = frame {
-        if unsafe { qjs::JS_IsStrictEqual(ctx, f.data.key, key) } {
-            return Some(unsafe { qjs::JS_DupValue(ctx, f.data.value) });
+        if unsafe { qjs::JS_IsStrictEqual(cx, f.data.key, key) } {
+            return Some(unsafe { qjs::JS_DupValue(cx, f.data.value) });
         }
         frame = f.parent.clone();
     }
@@ -728,12 +728,12 @@ pub(crate) fn lookup(ctx: *mut JsContext, key: JsValue) -> Option<JsValue> {
 /// `useContext(key)`: the nearest value set for `key`, or `undefined`.
 #[cfg(test)]
 unsafe extern "C" fn use_context(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    lookup(ctx, arg(argc, argv, 0)).unwrap_or(UNDEFINED)
+    lookup(cx, arg(argc, argv, 0)).unwrap_or(UNDEFINED)
 }
 
 /// A graph for context `raw`, with its classes registered.
@@ -781,10 +781,11 @@ pub(crate) fn new_graph(raw: *mut JsContext) -> Graph {
                 true,
                 qjs::JS_DupValue(raw, function_proto),
             ),
+            resource: crate::resource::register(raw),
         };
         qjs::JS_FreeValue(raw, function_proto);
         Graph::new(JsData {
-            ctx: raw,
+            cx: raw,
             classes,
             error: None,
         })
@@ -802,11 +803,11 @@ pub(crate) fn free_all(graph: &mut Graph, raw: *mut JsContext) {
 }
 
 /// A native function named `name`.
-pub(crate) fn new_function(ctx: *mut JsContext, name: &CStr, f: Native, length: c_int) -> JsValue {
+pub(crate) fn new_function(cx: *mut JsContext, name: &CStr, f: Native, length: c_int) -> JsValue {
     // SAFETY: a plain C function.
     unsafe {
         qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(f),
             name.as_ptr(),
             length,
@@ -819,8 +820,8 @@ pub(crate) fn new_function(ctx: *mut JsContext, name: &CStr, f: Native, length: 
 /// The graph's primitives as `globalThis.__nsh_reactive`, for tests that
 /// drive owners and roots directly.
 #[cfg(test)]
-pub(crate) fn install_globals(ctx: &Ctx<'_>) {
-    let raw = ctx.as_raw().as_ptr();
+pub(crate) fn install_globals(cx: &Ctx<'_>) {
+    let raw = cx.as_raw().as_ptr();
     // SAFETY: natives on the global object.
     unsafe {
         let obj = qjs::JS_NewObject(raw);
@@ -852,13 +853,13 @@ pub(crate) fn install_globals(ctx: &Ctx<'_>) {
 /// `isAccessor(value)`: whether `value` is a signal or memo object.
 #[cfg(test)]
 unsafe extern "C" fn is_accessor(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let v = arg(argc, argv, 0);
-    let classes = unsafe { graph(ctx) }.data.classes;
+    let classes = unsafe { graph(cx) }.data.classes;
     let class = unsafe { qjs::JS_GetClassID(v) };
     let yes = class == classes.signal || class == classes.memo;
     if yes { qjs::JS_TRUE } else { qjs::JS_FALSE }
@@ -868,212 +869,268 @@ unsafe extern "C" fn is_accessor(
 
 /// `signal(value, options)`: a signal object, read by calling it.
 pub(crate) unsafe extern "C" fn signal(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let id = new_signal_node(ctx, arg(argc, argv, 0), arg(argc, argv, 1));
-    let class = unsafe { graph(ctx) }.data.classes.signal;
-    object(ctx, class, id)
+    let id = new_signal_node(cx, arg(argc, argv, 0), arg(argc, argv, 1));
+    let class = unsafe { graph(cx) }.data.classes.signal;
+    object(cx, class, id)
+}
+
+/// Whether `v` (borrowed) is a signal object (`signal()`), and whether
+/// it is a memo's (`memo()`, read-only).
+pub(crate) fn signal_kind(cx: *mut JsContext, v: JsValue) -> (bool, bool) {
+    let classes = unsafe { graph(cx) }.data.classes;
+    // SAFETY: reads the class of a live value.
+    let class = unsafe { qjs::JS_GetClassID(v) };
+    (class == classes.signal, class == classes.memo)
 }
 
 /// The signal `this` names, or a thrown `TypeError`.
-fn this_signal(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
-    let class = unsafe { graph(ctx) }.data.classes.signal;
-    match unsafe { node_of(ctx, this, class) } {
+fn this_signal(cx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
+    let class = unsafe { graph(cx) }.data.classes.signal;
+    match unsafe { node_of(cx, this, class) } {
         Some(id) => Ok(id),
         // SAFETY: throwing on a live context.
-        None => Err(unsafe { qjs::JS_ThrowTypeError(ctx, c"not a live signal".as_ptr()) }),
+        None => Err(unsafe { qjs::JS_ThrowTypeError(cx, c"not a live signal".as_ptr()) }),
     }
 }
 
 /// `signal.set(value)`.
 unsafe extern "C" fn signal_set(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let id = match this_signal(ctx, this) {
+    let id = match this_signal(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
-    let value = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    r::write(Js(ctx), id, value);
-    finish(ctx, UNDEFINED)
+    let value = unsafe { qjs::JS_DupValue(cx, arg(argc, argv, 0)) };
+    r::write(Js(cx), id, value);
+    finish(cx, UNDEFINED)
 }
 
 /// `signal.update(fn)`: sets `fn(current value)`.
 unsafe extern "C" fn signal_update(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let id = match this_signal(ctx, this) {
+    let id = match this_signal(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
     let f = arg(argc, argv, 0);
-    let prev = unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) };
+    let prev = unsafe { qjs::JS_DupValue(cx, *graph(cx).value(id)) };
     let mut args = [prev];
     // SAFETY: a live value; the graph is not borrowed across the call.
-    let next = unsafe { qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr()) };
-    unsafe { qjs::JS_FreeValue(ctx, args[0]) };
+    let next = unsafe { qjs::JS_Call(cx, f, UNDEFINED, 1, args.as_mut_ptr()) };
+    unsafe { qjs::JS_FreeValue(cx, args[0]) };
     if unsafe { qjs::JS_IsException(next) } {
         return next;
     }
-    r::write(Js(ctx), id, next);
-    finish(ctx, UNDEFINED)
+    r::write(Js(cx), id, next);
+    finish(cx, UNDEFINED)
 }
 
 /// `computed(fn, options)`: a memo object, read by calling it.
 pub(crate) unsafe extern "C" fn computed(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let mut args = [arg(argc, argv, 0), UNDEFINED, arg(argc, argv, 1)];
     // SAFETY: borrowed arguments, as `createMemo` takes them.
-    unsafe { create_memo(ctx, UNDEFINED, 3, args.as_mut_ptr()) }
+    unsafe { create_memo(cx, UNDEFINED, 3, args.as_mut_ptr()) }
 }
 
 /// `effect(fn)`: runs `fn` after rendering, and again when what it read
 /// changes.
 pub(crate) unsafe extern "C" fn effect(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let mut args = [arg(argc, argv, 0)];
-    // SAFETY: as above.
-    unsafe { create_user_effect(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+    let mut data = [arg(argc, argv, 0)];
+    // SAFETY: the function keeps a dup of `fn`; the effect a dup of it.
+    unsafe {
+        let run = qjs::JS_NewCFunctionData(cx, Some(effect_run), 0, 0, 1, data.as_mut_ptr());
+        let mut args = [run];
+        let r = create_user_effect(cx, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(cx, run);
+        r
+    }
+}
+
+/// A run of an `effect(fn)`: a function `fn` returns is its cleanup, as
+/// `cleanup(f)` in it would be (React's habit): it runs before the effect
+/// runs again or goes away. Anything else returned (an async effect's
+/// promise) is dropped.
+unsafe extern "C" fn effect_run(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`effect`); the result is owned.
+    unsafe {
+        let r = qjs::JS_Call(cx, *data, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(r) {
+            return r;
+        }
+        if qjs::JS_IsFunction(cx, r) {
+            // The effect is the running owner.
+            add_cleanup(cx, r);
+        } else {
+            qjs::JS_FreeValue(cx, r);
+        }
+    }
+    UNDEFINED
 }
 
 // --- For the renderer -------------------------------------------------------
 
 /// Makes a render effect running `func` (owned) under the current owner,
 /// runs it, and returns the value of that first run (owned).
-pub(crate) fn render_effect(ctx: *mut JsContext, func: JsValue) -> JsValue {
-    let id = r::effect(Js(ctx), Kind::Effect, func, UNDEFINED);
+pub(crate) fn render_effect(cx: *mut JsContext, func: JsValue) -> JsValue {
+    let id = r::effect(Js(cx), Kind::Effect, func, UNDEFINED);
     // SAFETY: a dup of the node's value (a disposed node holds undefined).
-    unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) }
+    unsafe { qjs::JS_DupValue(cx, *graph(cx).value(id)) }
 }
 
 /// A new signal object holding `value` (borrowed).
-pub(crate) fn new_signal(ctx: *mut JsContext, value: JsValue) -> JsValue {
+pub(crate) fn new_signal(cx: *mut JsContext, value: JsValue) -> JsValue {
     let mut args = [value];
     // SAFETY: borrowed arguments, as `signal` takes them.
-    unsafe { signal(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+    unsafe { signal(cx, UNDEFINED, 1, args.as_mut_ptr()) }
+}
+
+/// The class of resource objects (`crate::resource`).
+pub(crate) fn resource_class(cx: *mut JsContext) -> qjs::JSClassID {
+    unsafe { graph(cx) }.data.classes.resource
+}
+
+/// Registers `f` (owned) to run before the current owner runs again or is
+/// disposed (freed at once with no owner).
+pub(crate) fn add_cleanup(cx: *mut JsContext, f: JsValue) {
+    if let Err(f) = unsafe { graph(cx) }.on_cleanup(f) {
+        unsafe { qjs::JS_FreeValue(cx, f) };
+    }
 }
 
 /// Writes `value` (owned) to signal object `obj` (does nothing for a dead
 /// one).
-pub(crate) fn set_signal(ctx: *mut JsContext, obj: JsValue, value: JsValue) {
-    match this_signal(ctx, obj) {
-        Ok(id) => r::write(Js(ctx), id, value),
+pub(crate) fn set_signal(cx: *mut JsContext, obj: JsValue, value: JsValue) {
+    match this_signal(cx, obj) {
+        Ok(id) => r::write(Js(cx), id, value),
         Err(e) => unsafe {
             // Not reachable for the renderer's own signals; drop the error.
-            qjs::JS_FreeValue(ctx, e);
-            qjs::JS_FreeValue(ctx, qjs::JS_GetException(ctx));
-            qjs::JS_FreeValue(ctx, value);
+            qjs::JS_FreeValue(cx, e);
+            qjs::JS_FreeValue(cx, qjs::JS_GetException(cx));
+            qjs::JS_FreeValue(cx, value);
         },
     }
 }
 
 /// The number signal object `obj` holds (untracked), if it holds one.
-pub(crate) fn peek_number(ctx: *mut JsContext, obj: JsValue) -> Option<f64> {
-    let v = peek(ctx, obj);
+pub(crate) fn peek_number(cx: *mut JsContext, obj: JsValue) -> Option<f64> {
+    let v = peek(cx, obj);
     // SAFETY: an inline check and a conversion of a live value.
     unsafe {
         if !qjs::JS_IsNumber(v) {
             return None;
         }
         let mut n = 0f64;
-        qjs::JS_ToFloat64(ctx, &mut n, v);
+        qjs::JS_ToFloat64(cx, &mut n, v);
         Some(n)
     }
 }
 
 /// The current value of signal object `obj` (borrowed; untracked), if live.
-pub(crate) fn peek(ctx: *mut JsContext, obj: JsValue) -> JsValue {
-    let class = unsafe { graph(ctx) }.data.classes.signal;
-    match unsafe { node_of(ctx, obj, class) } {
-        Some(id) => *unsafe { graph(ctx) }.value(id),
+pub(crate) fn peek(cx: *mut JsContext, obj: JsValue) -> JsValue {
+    let class = unsafe { graph(cx) }.data.classes.signal;
+    match unsafe { node_of(cx, obj, class) } {
+        Some(id) => *unsafe { graph(cx) }.value(id),
         None => UNDEFINED,
     }
 }
 
 /// Makes a memo of `func` (owned) under the current owner and returns its
 /// object.
-pub(crate) fn memo(ctx: *mut JsContext, func: JsValue, equals_truthy: bool) -> JsValue {
+pub(crate) fn memo(cx: *mut JsContext, func: JsValue, equals_truthy: bool) -> JsValue {
     let equals = if equals_truthy {
         Equals::Truthiness
     } else {
         Equals::Default
     };
-    let id = r::memo(Js(ctx), func, UNDEFINED, equals, true);
-    let class = unsafe { graph(ctx) }.data.classes.memo;
-    object(ctx, class, id)
+    let id = r::memo(Js(cx), func, UNDEFINED, equals, true);
+    let class = unsafe { graph(cx) }.data.classes.memo;
+    object(cx, class, id)
 }
 
 /// Runs `f` as one batch: its writes apply together at the end.
-pub(crate) fn batch_with<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> R {
-    r::batch(Js(ctx), f)
+pub(crate) fn batch_with<R>(cx: *mut JsContext, f: impl FnOnce() -> R) -> R {
+    r::batch(Js(cx), f)
 }
 
 /// Runs `f` with no listener (untracked).
-pub(crate) fn untracked_with<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> R {
-    r::untracked(Js(ctx), f)
+pub(crate) fn untracked_with<R>(cx: *mut JsContext, f: impl FnOnce() -> R) -> R {
+    r::untracked(Js(cx), f)
 }
 
 /// Runs `f` in a new root owner, under the current one (context passes
 /// through it); returns the root and `f`'s result. The root is disposed
 /// with [`dispose_owner`].
-pub(crate) fn with_root<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> (u32, R) {
-    r::with_root(Js(ctx), f)
+pub(crate) fn with_root<R>(cx: *mut JsContext, f: impl FnOnce() -> R) -> (u32, R) {
+    r::with_root(Js(cx), f)
 }
 
 /// Whether something owns what runs now (a component, an effect, a
 /// root): its cleanups run when it goes.
-pub(crate) fn has_owner(ctx: *mut JsContext) -> bool {
-    unsafe { graph(ctx) }.has_owner()
+pub(crate) fn has_owner(cx: *mut JsContext) -> bool {
+    unsafe { graph(cx) }.has_owner()
 }
 
 /// The current owner (for [`with_root_under`] later).
-pub(crate) fn current_owner(ctx: *mut JsContext) -> u32 {
-    unsafe { graph(ctx) }.owner()
+pub(crate) fn current_owner(cx: *mut JsContext) -> u32 {
+    unsafe { graph(cx) }.owner()
 }
 
 /// [`with_root`] as if run under `owner` (from [`current_owner`]): rows a
 /// list makes later see the list's context.
 pub(crate) fn with_root_under<R>(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     owner: u32,
     f: impl FnOnce() -> R,
 ) -> (u32, R) {
-    r::with_root_under(Js(ctx), owner, f)
+    r::with_root_under(Js(cx), owner, f)
 }
 
 /// Disposes owner `id` (a root from [`with_root`]), untracked.
-pub(crate) fn dispose_owner(ctx: *mut JsContext, id: u32) {
-    r::dispose_owner(Js(ctx), id);
+pub(crate) fn dispose_owner(cx: *mut JsContext, id: u32) {
+    r::dispose_owner(Js(cx), id);
 }
 
 /// Sets `key` to `value` (both borrowed) in the current owner's context.
-pub(crate) fn provide(ctx: *mut JsContext, key: JsValue, value: JsValue) {
+pub(crate) fn provide(cx: *mut JsContext, key: JsValue, value: JsValue) {
     let mut args = [key, value];
     // SAFETY: borrowed arguments.
-    unsafe { set_context(ctx, UNDEFINED, 2, args.as_mut_ptr()) };
+    unsafe { set_context(cx, UNDEFINED, 2, args.as_mut_ptr()) };
 }
 
 /// Throws the error the last round kept, if any (natives that ran JS
 /// through the graph end with this).
-pub(crate) fn finish_value(ctx: *mut JsContext, value: JsValue) -> JsValue {
-    finish(ctx, value)
+pub(crate) fn finish_value(cx: *mut JsContext, value: JsValue) -> JsValue {
+    finish(cx, value)
 }
 
 #[cfg(test)]
@@ -1083,19 +1140,19 @@ mod tests {
     /// Runs `code` with the natives as `R` and returns its value as JSON.
     fn run(code: &str) -> String {
         let rt = Runtime::new().unwrap();
-        let ctx = Context::full(&rt).unwrap();
-        ctx.with(|ctx| {
-            crate::state::install(&ctx, std::rc::Rc::default(), &[], Default::default());
-            super::install_globals(&ctx);
-            let out: String = ctx
+        let cx = Context::full(&rt).unwrap();
+        cx.with(|cx| {
+            crate::state::install(&cx, std::rc::Rc::default(), &[], Default::default());
+            super::install_globals(&cx);
+            let out: String = cx
                 .eval(format!(
                     "(() => {{ const R = globalThis.__nsh_reactive; const out = (() => {{ {code} }})(); return JSON.stringify(out); }})()"
                 ))
                 .unwrap_or_else(|e| match e {
-                    rquickjs::Error::Exception => format!("threw {:?}", ctx.catch()),
+                    rquickjs::Error::Exception => format!("threw {:?}", cx.catch()),
                     e => format!("error {e}"),
                 });
-            crate::state::uninstall(&ctx);
+            crate::state::uninstall(&cx);
             out
         })
     }
@@ -1235,26 +1292,26 @@ mod tests {
         assert_eq!(out, "true");
         // Collected (also during the loop): slots are reused, none is left.
         let rt = rquickjs::Runtime::new().unwrap();
-        let ctx = rquickjs::Context::full(&rt).unwrap();
+        let cx = rquickjs::Context::full(&rt).unwrap();
         // The nodes the state itself keeps (the environment's).
         let live = |raw| {
             // SAFETY: the graph `install` made; no JS runs meanwhile.
             let g = unsafe { super::graph(raw) };
             g.slots()
         };
-        let before = ctx.with(|ctx| {
-            crate::state::install(&ctx, std::rc::Rc::default(), &[], Default::default());
-            super::install_globals(&ctx);
-            let before = live(ctx.as_raw().as_ptr()).0;
-            let _: () = ctx
+        let before = cx.with(|cx| {
+            crate::state::install(&cx, std::rc::Rc::default(), &[], Default::default());
+            super::install_globals(&cx);
+            let before = live(cx.as_raw().as_ptr()).0;
+            let _: () = cx
                 .eval("const R = globalThis.__nsh_reactive; for (let i = 0; i < 5000; i++) { const [g, w] = R.createSignal(0); w({ g }); }")
                 .unwrap();
             before
         });
         rt.run_gc();
-        let (after, slots) = ctx.with(|ctx| {
-            let counts = live(ctx.as_raw().as_ptr());
-            crate::state::uninstall(&ctx);
+        let (after, slots) = cx.with(|cx| {
+            let counts = live(cx.as_raw().as_ptr());
+            crate::state::uninstall(&cx);
             counts
         });
         assert!(slots < 5000, "{slots} nodes for 5000 signals");

@@ -8,7 +8,7 @@ order: 17
 
 每个元素都可以在 `class` 属性中写 Tailwind CSS 类（条件类写在 `classList` 中）。NSH 在 Rust 中按 Tailwind 4 的默认主题解析它们：JS 只传递字符串，每个不同的字符串只解析一次并缓存；当外观、窗口尺寸或按压状态变化时，`dark:`、`active:` 等变体在原生侧重新求值，不运行任何 JS。
 
-本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
+每个工具类设置的值都与 Tailwind CSS 4 为它生成的完全相同，含义与浏览器中一致。本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
 
 ```tsx
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">
@@ -20,7 +20,7 @@ order: 17
 ## 类如何组合
 
 - **后写的生效。** 同一变体层级的工具类中，字符串里靠后的那个生效：`"p-4 p-2"` 等于 `p-2`。组件可以接收 `class` 属性并直接拼接到自己的类后面，不需要 `tailwind-merge`。
-- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：位置（`first:` 等）、`group-*:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
+- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：位置（`first:` 等）、`group-*:`、`checked:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
 - **`style` 优先于类。** 内联 `style` 叠加在解析后的类之上。重要标记的工具类（`!p-4` 或 `p-4!`）连内联样式也能覆盖。
 - **文字样式会继承。** 写在视图上的文字类（`text-white`、`font-bold`、`text-center` 等）会像 CSS 一样传给其中的 `<Text>` 和 `<Input>`。
 - **display 遵循 CSS。** `flex` 和 `inline-flex` 是横向排列，除非有方向类另行指定，且与其在字符串中的位置无关（`flex-col flex` 是纵向）。没有 `flex` 的视图保持 NSH 默认的纵向排列。
@@ -240,7 +240,8 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 
 | Class | 设置 |
 |---|---|
-| `placeholder:text-<color>` | `placeholderTextColor` |
+| `placeholder:text-<color>` | `placeholderColor` |
+| `selection:text-<color>` | `selectionColor`（输入框的光标和选区、可选文本的选区高亮） |
 | `caret-<color>` | 光标颜色 |
 
 ## 背景
@@ -425,6 +426,10 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `focus-within:` | 元素自身或其后代获得焦点 |
 | `disabled:` | 元素设置了 `disabled` 属性 |
 | `enabled:` | 元素没有设置 `disabled` 属性 |
+| `selected:` | 元素处于选中状态：`Button` 的 `selected`，或 `accessibilityState.selected` |
+| `checked:` | 元素处于勾选状态：`accessibilityState.checked` 为 `true`（`"mixed"` 不算） |
+
+这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` 和 `checkedStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
 
 `disabled` 适用于任何元素：它会让 `disabled:` 生效，并移除元素的按压处理器，因此也不会显示按压反馈。
 
@@ -449,6 +454,8 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `group-focus:`、`group-focus-visible:` | 获得焦点 |
 | `group-focus-within:` | 自身或内部获得焦点 |
 | `group-disabled:` | 禁用 |
+| `group-selected:` | 选中 |
+| `group-checked:` | 勾选 |
 
 ```tsx
 <View onPress={open} class="group/row flex-row items-center gap-3 p-3 active:bg-zinc-100">
@@ -471,9 +478,9 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 <Each of={items()}>{(item) => <Text class="border-b border-zinc-200 py-3 last:border-b-0">{item().name}</Text>}</Each>
 ```
 
-### 占位符
+### 占位符与选区
 
-`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`。
+`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 的选区（包括光标）或可选 `<Text>` 的选区，同样只接受文字颜色：`selection:text-violet-500`（样式键 `selectionColor`）。
 
 ### 重要标记
 
@@ -534,7 +541,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> Tailwind 主题只影响应用自己的类。`nsh/ui/mobile` 的组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见 [组件](../components/index.md)。
+> Tailwind 主题只影响应用自己的类。Rust 组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见[用 Rust 开发](../docs/rust.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
 
 ## 相关
 

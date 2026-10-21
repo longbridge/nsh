@@ -38,7 +38,7 @@ function App() {
 mount(App);
 ```
 
-上面的子视图也可以交给滚动视图自己：`contentContainerStyle`（或 `contentContainerClass`）把子元素包进一个带该样式、随内容一起滚动的视图。`flexGrow: 1` 让它至少和视口一样高，内容较短时可以居中，较长时照常滚动。横向滚动视图使用 `horizontal`，并以一个横排视图作为子元素：
+上面的子视图也可以交给滚动视图自己：`contentStyle`（或 `contentClass`）把子元素包进一个带该样式、随内容一起滚动的视图。`flexGrow: 1` 让它至少和视口一样高，内容较短时可以居中，较长时照常滚动。横向滚动视图使用 `horizontal`，并以一个横排视图作为子元素：
 
 ```tsx
 <Scroll horizontal showsIndicator={false}>
@@ -325,7 +325,7 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 - `"handled"`：点在会处理它的东西（按钮）上时，点击照常传递，键盘保持；点在空白处则收起键盘。表单通常应选它。
 - `"always"`：点击从不收起键盘。
 
-两者都在点击或拖动发生时由原生决定，不等待 JS。要从代码收起键盘，调用 `nsh/ui/mobile` 中的 `Keyboard.dismiss()`。
+两者都在点击或拖动发生时由原生决定，不等待 JS。要从代码收起键盘，调用 [`nsh/base`](../modules/nsh-base.md#keyboard) 中的 `Keyboard.dismiss()`。
 
 ## 嵌套滚动视图
 

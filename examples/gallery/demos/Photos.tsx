@@ -213,16 +213,17 @@ export function Photos() {
         when={wide}
         else={
           <List
+            testID="photos"
             each={photos()}
             estimatedItemSize={76}
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 24 }}
+            contentStyle={{ paddingBottom: 24 }}
             scrollValue={scrollY}
             refreshing={refreshing()}
             onRefresh={refresh}
             onEndReached={loadMore}
-            ListHeaderComponent={phoneHero}
-            ListFooterComponent={footer()}
+            header={phoneHero}
+            footer={footer()}
           >
             {(photo) => <PhotoRow photo={photo()} />}
           </List>
@@ -234,17 +235,18 @@ export function Photos() {
           const tile = untracked(() => ((paneWidth() - 48) / n) * 0.75 + 60);
           return (
             <List
+              testID="photos"
               each={photos()}
               numColumns={n}
               estimatedItemSize={tile}
               style={{ flex: 1 }}
-              contentContainerStyle={{ padding: 24, gap: 16 }}
+              contentStyle={{ padding: 24, gap: 16 }}
               scrollValue={scrollY}
               refreshing={refreshing()}
               onRefresh={refresh}
               onEndReached={loadMore}
-              ListHeaderComponent={hero()}
-              ListFooterComponent={footer()}
+              header={hero()}
+              footer={footer()}
             >
               {(photo) => <PhotoTile photo={photo()} />}
             </List>

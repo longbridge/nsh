@@ -22,7 +22,7 @@ Every tag is PascalCase and names something in scope. The **host elements**, eac
 | `<Scroll>` | `nsh` | `UIScrollView` / `ScrollView` | [Scroll](../elements/scroll.md) |
 | `<Input>` | `nsh` | `UITextField` / `UITextView` / `EditText` | [Input](../elements/input.md) |
 | `<List>` | `nsh/list` | A virtualized, recycling list | [List](../elements/list.md) |
-| `<Canvas>`, `<WebView>`, `<Video>`, `<Modal>` | `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/ui/mobile` | A drawing, a web page, a video player, a presented layer | [Elements](../elements/index.md) |
+| `<Canvas>`, `<WebView>`, `<Video>`, `<Dialog>` | `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/base` | A drawing, a web page, a video player, a presented layer | [Elements](../elements/index.md) |
 | `<If>`, `<Each>` | nothing: globals | Control flow, no view of its own | [Control flow](../elements/control-flow.md) |
 
 ```tsx
@@ -49,6 +49,8 @@ x lowercase tag <view>: tags are PascalCase components: write <View> and
 > Text is only displayed inside `<Text>`. A string directly in a `<View>` creates no native view and is not shown.
 
 ## Components
+
+The look of an app is the app's own. NSH provides two layers: the primitives (the elements above, styles, Tailwind classes) and the unstyled base components of [`nsh/base`](../modules/nsh-base.md), which own behavior such as navigation, dialogs, the keyboard, the status bar and safe areas. The third layer, the component library, is yours: buttons, cards and every other piece of your UI are components you write on those two layers, Rust components your app ships in its own crate ([Building with Rust](./rust.md)), or a library from the community ([Three layers](./architecture.md#three-layers)).
 
 A component is a function that takes a props object and returns JSX:
 
@@ -113,6 +115,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+A component that takes its props apart in its parameter, `function Title({ text }: …)`, reads them the same once, and the build warns of it with the props to read instead:
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+A prop the component wants only once, such as an id it starts with, is read in the body (`const { id } = props;`), which says so.
+
 The same applies to default values: write `props.color ?? "#ddf4ff"` in the JSX rather than destructuring with a default. To compute something from props, use a function or [`computed`](./reactivity.md#computed):
 
 ```tsx
@@ -141,7 +151,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Children can also be a function, a render callback the component calls with arguments:
+Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Among several children, one that changes (an `<If>`, an `<Each>`, `{cond() ? a : b}`) arrives as a function, and `{props.children}` updates that one alone: its siblings keep their views, an input its text and focus. Children can also be a function, a render callback the component calls with arguments:
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {
@@ -159,7 +169,7 @@ Fragments (`<>…</>`) group elements without a view.
 
 ```tsx
 <If when={user()} else={<Text>Signed out</Text>}>
-  <Text>Hello, {user()!.name}</Text>
+  {(u) => <Text>Hello, {u().name}</Text>}
 </If>
 
 <Each of={todos()} key={(t) => t.id}>
@@ -171,7 +181,7 @@ Fragments (`<>…</>`) group elements without a view.
 </Each>
 ```
 
-- **`<If when else>`** renders its children while `when` is truthy, else the `else` element. It renders a branch again only when the condition's truthiness changes, not every time `when` is re-evaluated.
+- **`<If when else>`** renders its children while `when` is truthy, else the `else` element. It renders a branch again only when the condition's truthiness changes, not every time `when` is re-evaluated. A function child gets an accessor of `when`'s value, typed without `null` and `undefined`: `u()` is the user while the branch shows, and follows it when it changes.
 - **`<Each of key>`** renders its only child, a function, once per item. Rows are kept by `key(item)` (default: the item itself; objects by identity, primitives by value): when the array changes, kept rows are moved rather than rebuilt, and new rows are made only for new keys. The function receives **accessors**, `todo()` and `index()`, because a kept row's item and position can change. `key="index"` (or `key={(item, i) => i}`; the key function gets the index too) keeps rows by position instead: a list of strings that changes in place, such as text streamed in, keeps its rows and only their `item()` changes.
 
 A ternary or `&&` in JSX also works (`{busy() ? <Spinner /> : <Content />}`), but it builds its branch again every time anything it reads changes. Prefer `<If>` when a branch is more than a few elements.
@@ -180,7 +190,12 @@ For long or infinite lists, use [`List`](./lists.md): it creates views only for 
 
 ## Refs
 
-`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... A variable is assigned, a function is called:
+`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... What `ref={…}` names receives the node:
+
+- a variable declared with `let` is assigned it;
+- a field (`ref={refs.input}`, `ref={refs[name]}`) is assigned it;
+- a [signal](./reactivity.md) is set to it, so what reads the signal follows it;
+- a function is called with it.
 
 ```tsx
 import type { YNode } from "nsh";
@@ -201,7 +216,9 @@ function Search() {
 <Scroll ref={(node) => (scroller = node)} />
 ```
 
-The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. Components from `nsh/ui/mobile` accept `ref` too.
+A `const` or an import holds a signal or a function, as in `const input = signal<YNode>()` with `<Input ref={input} />` and `input()?.focus()`; one holding anything else is reported when the element is made, with what to write.
+
+The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. `SafeAreaView`, `KeyboardAvoidingView` and the Rust components of your own crate accept `ref` too.
 
 ## Spreading props
 
@@ -220,7 +237,7 @@ function Field(props: InputProps & { label: string }) {
   );
 }
 
-<Field label="Email" value={email()} onChangeText={(t) => email.set(t)} keyboardType="email-address" />
+<Field label="Email" value={email()} onChange={(t) => email.set(t)} keyboardType="email-address" />
 ```
 
 `split(props, keys)` returns `[picked, rest]`, both still reading through to the original props (destructuring `{ label, ...rest } = props` would read every prop once). Element props that come later in the JSX win over earlier ones.
@@ -229,10 +246,18 @@ function Field(props: InputProps & { label: string }) {
 
 ## Tags and names
 
-A tag names a binding in scope, as usual: `<Badge />`, `<Theme.Provider>`, an imported `<Button>`. A tag that names nothing in scope is a build error, except `<If>` and `<Each>`, which are globals.
+A tag names a binding in scope, as usual: `<Badge />`, `<Theme.Provider>`, a `<Button>` of your own. A tag that names nothing in scope is a build error, except `<If>` and `<Each>`, which are globals.
 
 ```tsx
-import { Button } from "nsh/ui/mobile";
+import { Text, View } from "nsh";
+
+function Button(props: { title: string; onPress: () => void }) {
+  return (
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} role="button" class="rounded-lg bg-blue-600 px-5 py-3">
+      <Text class="text-base font-semibold text-white">{props.title}</Text>
+    </View>
+  );
+}
 
 <Button title="Save" onPress={save} />
 ```
@@ -257,4 +282,5 @@ mount(() => (
 
 - [Reactivity](./reactivity.md): signals, effects, context.
 - [Elements](../elements/index.md): every host element and its props.
-- [Components](../components/index.md): the ready-made components of `nsh/ui/mobile`.
+- [Styling](./styling.md) and [Tailwind](./tailwind.md): the look of your components.
+- [Building with Rust](./rust.md): components written in Rust, in your app's own crate.

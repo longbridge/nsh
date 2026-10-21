@@ -1,0 +1,78 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+platform macos
+# desktop-props
+tap id:case-desktop-props
+expect Title bar
+prop id:bar desktop.windowDrag true
+prop id:body windowDrag false
+covers [props] desktop
+covers [props] desktop.windowDrag
+# mod-standard-system
+tap id:case-mod-standard-system
+expect console.identity=true
+expect console.results=true
+expect os.identity=true
+expect os.metadata=true
+expect os.home=true
+expect process.identity=true
+expect process.environment=true
+expect process.dataDir=true
+expect process.runDenied=true
+expect process.spawnDenied=true
+expect process.exitDenied=true
+expect process.nextTickInvalid=true
+expect process.nextTick=true
+log standard-system log
+log standard-system info
+log standard-system debug
+log standard-system warn
+log standard-system error
+covers [console] default
+covers [os] default
+covers [os] EOL
+covers [os] arch
+covers [os] homedir
+covers [os] platform
+covers [process] default
+covers [process] arch
+covers [process] platform
+covers [process] run
+covers [process] spawn
+covers [process] exit
+covers [process] nextTick
+covers [globals] process
+expect process.childConstructor=true
+covers [process] ChildProcess
+# mod-standard-files
+tap id:case-mod-standard-files
+# Files need a desktop; the app declares fs read and write in ${dataDir}.
+expect Data dir: true
+expect Made: true
+expect Read: hello files
+expect Bytes: true 11
+expect Stat: file true dir false size 11
+expect Lstat: dir true link false
+expect Listed: a.txt,drafts
+expect Entries: a.txt:file,drafts:dir
+expect Renamed: false true
+expect Removed: 0
+expect Missing: ENOENT
+# Outside the granted root, and what the app did not declare: refused.
+expect Outside: refused
+expect Escape: refused
+expect Socket: refused
+expect Process: refused
+covers [fs/promises] default
+covers [fs/promises] readFile
+covers [fs/promises] writeFile
+covers [fs/promises] readdir
+covers [fs/promises] exists
+covers [fs/promises] unlink
+covers [fs/promises] rmdir
+covers [fs/promises] mkdir
+covers [fs/promises] stat
+covers [fs/promises] lstat
+covers [fs/promises] rename
+covers [net] connect
+covers [process] run
+covers [process] default

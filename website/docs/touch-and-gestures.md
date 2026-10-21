@@ -26,8 +26,8 @@ function App() {
       <View
         onPress={() => count.update((n) => n + 1)}
         onLongPress={() => count.set(0)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "#ffffff", fontWeight: "600" }}>Pressed {count()} times</Text>
@@ -43,47 +43,50 @@ mount(App);
 |---|---|---|---|
 | `onPress` | `() => void` | | The finger lifted inside the view (after a press, not a long press). |
 | `onLongPress` | `() => void` | | The finger stayed down for `delayLongPress`. `onPress` does not follow. |
-| `onPressIn` | `() => void` | | The press started. |
-| `onPressOut` | `() => void` | | The press ended: lifted, slid off, or taken over by a scroll view. |
+| `onPressDown` | `() => void` | | The press started. |
+| `onPressUp` | `() => void` | | The press ended: lifted, slid off, or taken over by a scroll view. |
 | `delayLongPress` | `number` | `500` | Milliseconds before a press becomes a long press. |
-| `disabled` | `boolean` | `false` | Takes no presses and shows no feedback; applies `disabled:` classes. |
+| `disabled` | `boolean` | `false` | Takes no presses and shows no feedback; applies `disabled:` classes; screen readers say it is disabled. |
 
 How presses behave:
 
 - **Only the innermost pressable view responds.** A pressable row containing a pressable button gets no press when the button is pressed.
 - **Inside a scroll view, the press waits about 130 ms** before it starts (and shows feedback), so a drag that begins on a button scrolls instead of pressing it.
-- **Sliding off cancels.** Moving the finger out of the view ends the press with `onPressOut` and no `onPress`.
+- **Sliding off cancels.** Moving the finger out of the view ends the press with `onPressUp` and no `onPress`.
 - **`disabled` removes the press listeners** from what is mounted, so the view shows no feedback at all, and `disabled:` classes apply (`class="disabled:opacity-40"`).
 - **Nested `<Text>` spans with `onPress` are links.** The paragraph is one native view; the press goes to the span under the finger. See [Text](./text.md).
 
 ## Press feedback
 
-Press feedback is drawn by the platform the moment the finger touches down, with no round trip to JS. Choose one per view:
+Press feedback is the app's: styles the view takes while it is pressed, hovered, focused or disabled. They are applied natively the moment the state changes, with no round trip to JS. Each state has a style prop and a [Tailwind variant](./tailwind.md):
 
-| Prop | Type | Default | Description |
+| Prop | Class | Type | Description |
 |---|---|---|---|
-| `activeOpacity` | `number` | | The view's opacity while pressed. |
-| `underlayColor` | `ColorValue` | | The background while pressed; the children fade to `underlayOpacity`. |
-| `underlayOpacity` | `number` | `0.85` | The children's opacity while `underlayColor` shows. |
-| `android={{ ripple }}` | `{ color?, borderless?, radius?, foreground? }` | | Android's material ripple. Ignored on iOS. |
+| `activeStyle` | `active:` | `ViewStyle` | While pressed. |
+| `hoverStyle` | `hover:` | `ViewStyle` | While a pointer is over it (desktops, iPad pointers, browsers). |
+| `focusStyle` | `focus:` | `ViewStyle` | While it has focus. |
+| `disabledStyle` | `disabled:` | `ViewStyle` | While `disabled`. |
+| `android={{ ripple }}` | | `{ color?, borderless?, radius?, foreground? }` | Android's material ripple, in addition to the styles. |
+
+The state styles go over the view's own `style` and classes. Later states win (hover, focus, active), `disabledStyle` wins over all, and the others do not apply while the view is disabled.
 
 ```tsx
-<View onPress={open} activeOpacity={0.5}>…</View>
+<View onPress={open} activeStyle={{ opacity: 0.5 }}>…</View>
 
-<View onPress={open} underlayColor="#ddf4ff" style={{ padding: 16 }}>…</View>
+<View onPress={open} activeStyle={{ backgroundColor: "#ddf4ff" }} style={{ padding: 16 }}>…</View>
 
 <View
   onPress={open}
-  activeOpacity={0.6}
+  activeStyle={{ opacity: 0.6 }}
   android={{ ripple: { color: "rgba(9,105,218,0.3)" } }}
 >
   …
 </View>
 ```
 
-A borderless ripple spreads outside the view, which suits icon buttons: `android={{ ripple: { borderless: true, radius: 24 } }}`. Combining `activeOpacity` with a ripple is common: iOS uses the opacity, Android the ripple. See [Platform-specific code](./platform-specific.md).
+A borderless ripple spreads outside the view, which suits icon buttons: `android={{ ripple: { borderless: true, radius: 24 } }}`. See [Platform-specific code](./platform-specific.md).
 
-The `active:` Tailwind variant is the third option. It applies classes while the view is pressed, and with a `transition` class the change animates:
+The same states as classes apply while the view is pressed, and with a `transition` class the change animates. `group-active:` styles the children of a pressed `group` view:
 
 ```tsx
 <View
@@ -307,12 +310,12 @@ function Sketch() {
         const all = strokes();
         strokes.set([...all.slice(0, -1), [...all[all.length - 1], point(e)]]);
       }}
-      draw={(ctx) => {
-        ctx.lineWidth = 3;
+      draw={(cx) => {
+        cx.lineWidth = 3;
         for (const s of strokes()) {
-          ctx.beginPath();
-          s.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-          ctx.stroke();
+          cx.beginPath();
+          s.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+          cx.stroke();
         }
       }}
     />

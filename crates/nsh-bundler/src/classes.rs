@@ -49,7 +49,7 @@ impl Checker<'_> {
         for unknown in list.unknown() {
             // The class's own position within the string, if found.
             let at = classes.find(&**unknown).unwrap_or(0) as u32;
-            let (line, column) = position(self.source, offset + at);
+            let (line, column) = crate::compile::position(self.source, offset + at);
             self.found.push(UnknownClass {
                 line,
                 column,
@@ -136,14 +136,6 @@ impl<'a> Visit<'a> for Checker<'_> {
     }
 }
 
-/// 1-based line and column (in characters) of byte `offset`.
-fn position(source: &str, offset: u32) -> (usize, usize) {
-    let before = &source[..(offset as usize).min(source.len())];
-    let line = before.matches('\n').count() + 1;
-    let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
-    (line, column)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +157,28 @@ export function A(p: { on: boolean }) {
         let names: Vec<&str> = found.iter().map(|u| u.class.as_str()).collect();
         assert_eq!(names, ["bg-blu-500", "txt-black", "nope", "wat"]);
         assert_eq!((found[0].line, found[0].column), (5, 22));
+    }
+
+    #[test]
+    fn theme_tokens_are_classes() {
+        let source = r#"<View class="bg-primary text-muted-foreground bg-chart-up rounded-(--radius-card)" />"#;
+        let themed = |theme: nsh_base::Theme| {
+            let mut tailwind = Theme::default();
+            tailwind.set_tokens(theme.tokens());
+            tailwind
+        };
+        let found = check(
+            source,
+            SourceType::tsx(),
+            &themed(nsh_base::Theme::default()),
+        );
+        let names: Vec<&str> = found.iter().map(|u| u.class.as_str()).collect();
+        assert_eq!(names, ["bg-chart-up", "rounded-(--radius-card)"]);
+        // The app's own theme (`nsh.json` `"theme"`) adds its keys.
+        let theme = nsh_base::Theme::from_json(
+            r##"{ "themes": [{ "radius.card": 10, "colors": { "chart.up": "#00ff00" } }] }"##,
+        )
+        .unwrap();
+        assert!(check(source, SourceType::tsx(), &themed(theme)).is_empty());
     }
 }

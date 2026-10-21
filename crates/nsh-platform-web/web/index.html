@@ -78,7 +78,9 @@
     if (playground && data.type === "run" && typeof data.source === "string") {
       const p = await player();
       status.style.display = "none";
-      post({ type: "compiled", error: p.runSource(data.source, data.name ?? "App.tsx") });
+      // The page runs code its visitors write, on its main thread: with the
+      // limits of an embedded app, a loop that never ends is cut off.
+      post({ type: "compiled", error: p.runSource(data.source, data.name ?? "App.tsx", { limits: "" }) });
     }
   });
 

@@ -155,13 +155,15 @@ again replaces the running app. The complete sample is
 | `setErrorListener(ErrorListener listener)` | Receives fatal app errors (load failures, uncaught JS exceptions, a VM stopped by a limit) on the UI thread. They are always logged. |
 | `setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes)` | VM limits of the apps loaded next; 0 keeps a default. |
 | `setGrantedCapabilities(String json)` | The most the apps loaded next may do, as JSON in the form of `nsh.json`'s `capabilities`; `null` grants what each app declares. Returns `false` (and is ignored) for an invalid grant. |
+| `setLocale(Locale locale)` | The app's language and region in place of the user's: `Intl`, `locale()` and the components follow it at once, and the apps loaded later start in it. `null` follows the system's. |
+| `setFontScale(float scale)` | The text size in place of the system's font size (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `0` follows the system's. |
 | `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the app's own id. |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
-| `handleBack()` | Lets the app handle a back press (closes modals, pops screens, runs `BackHandler` listeners); returns whether it did. |
+| `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
 | `destroy()` | Stops the app. The view can no longer be used. |
 
 > [!IMPORTANT]
@@ -253,7 +255,7 @@ config of the app may override it). The release `nsh.aar` does not.
 ## Activity setup
 
 - **Back button.** On Android 13 and newer, `NshView` registers its own back callback while the app wants back presses
-  (an open modal, a pushed screen, a `BackHandler` listener). On Android 12 and older, forward the press:
+  (an open dialog, a pushed page, a `BackHandler` listener). On Android 12 and older, forward the press:
 
   ```java
   @Override
@@ -268,7 +270,7 @@ config of the app may override it). The release `nsh.aar` does not.
   or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
-  `SafeAreaView` / `useSafeAreaInsets()`.
+  `SafeAreaView` / `safeAreaInsets()`.
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
   again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
 

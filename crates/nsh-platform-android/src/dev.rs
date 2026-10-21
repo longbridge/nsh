@@ -10,7 +10,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{BYTECODE_VERSION, Bundle, Policy};
+use nsh_engine::{BYTECODE_VERSION, Bundle, Limits, Policy};
 
 use crate::host::Host;
 
@@ -61,6 +61,7 @@ impl DevSession {
                 .iter()
                 .filter_map(|set| set.specifier().map(str::to_owned))
                 .collect(),
+            tests: false,
         };
         let started = DevClient::start(url, host_info, move |event| {
             match event {
@@ -113,6 +114,8 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
     match event {
         DevEvent::Connected => host.dev_status(None),
         DevEvent::Disconnected => host.dev_status(Some("Dev server disconnected — reconnecting…")),
+        // No test agent here (`HostInfo::tests` is false): no steps come.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => host.dev_error(Some(("Build failed", &message)), false),
         DevEvent::CannotRun { message, .. } => {
@@ -127,6 +130,7 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             let mut bundle = match format {
                 // SAFETY: compiled for this runtime's bytecode version (the
@@ -152,6 +156,10 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
                 Ok(bundle) => bundle,
                 Err(err) => return host.dev_error(Some(("Invalid capabilities", &err)), true),
             };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return host.dev_error(Some(("Invalid limits", &err)), true),
+            };
             host.dev_status(None);
             let running = {
                 let mut state = state.lock().expect("dev state");
@@ -164,6 +172,7 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             }
             log::info!("loading build {version}");
             host.dev_error(None, false);
+            host.set_limits(limits);
             host.load(bundle);
         }
         DevEvent::Patch {

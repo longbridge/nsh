@@ -3,8 +3,10 @@
 //! bound view properties go to the DOM as `["a", view, prop, value]`
 //! items (the Android animator's design, `nsh-platform-android/src/animation.rs`).
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
-use nsh_core::{Color, GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform};
+use nsh_core::{
+    Color, GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform,
+    animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
+};
 use rustc_hash::FxHashMap;
 
 use crate::encode::{Out, css_color, css_transform};
@@ -193,7 +195,7 @@ impl UiAnimation {
                     }
                     AnimationProp::ShadowRadius => {
                         shadow.get_or_insert(static_shadow).radius =
-                            self.graph.eval(node).number().max(0.0);
+                            nsh_core::Points(self.graph.eval(node).number().max(0.0));
                     }
                     AnimationProp::Opacity => {
                         out.animation(view, "opacity", &self.graph.eval(node).number().to_string());

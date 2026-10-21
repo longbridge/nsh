@@ -34,7 +34,11 @@ impl Shown {
                 } = item
                 {
                     self.images.retain(|i| i.0 != *id);
-                    self.images.push((*id, source.uri.to_string(), source.size));
+                    self.images.push((
+                        *id,
+                        source.uri.to_string(),
+                        source.size.map(|s| (s.width.0, s.height.0)),
+                    ));
                 }
                 if let MountItem::Command {
                     id: ROOT_ID,
@@ -212,10 +216,10 @@ fn images_report_their_events() {
         &rx,
         loads,
         EventKind::Load,
-        EventPayload::Image {
-            width: 300.0,
-            height: 200.0,
-        },
+        EventPayload::Image(nsh_core::geometry::size(
+            nsh_core::geometry::DevicePixels(300),
+            nsh_core::geometry::DevicePixels(200),
+        )),
     );
     shown.send(&engine, &rx, loads, EventKind::LoadEnd, EventPayload::None);
     assert!(
@@ -251,10 +255,10 @@ fn show_and_reload_change_what_loads() {
         &rx,
         big,
         EventKind::Load,
-        EventPayload::Image {
-            width: 2400.0,
-            height: 1600.0,
-        },
+        EventPayload::Image(nsh_core::geometry::size(
+            nsh_core::geometry::DevicePixels(2400),
+            nsh_core::geometry::DevicePixels(1600),
+        )),
     );
     assert!(shown.shows("100% · loaded"), "{:?}", shown.screen.texts);
 

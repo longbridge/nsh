@@ -27,8 +27,9 @@ use std::{rc::Rc, sync::Arc};
 
 use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
-    BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Rect, Transform, TransitionProps, ViewKind, ViewStyle,
+    Bounds, BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
+    LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind, ViewStyle,
+    geometry::{Corners, Edges, Point, Size},
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -260,8 +261,8 @@ fn progress(curve: Curve, delay: f32, duration: f32, elapsed: f32) -> Option<(f3
 }
 
 struct FrameTrack {
-    from: Rect,
-    to: Rect,
+    from: Bounds<Points>,
+    to: Bounds<Points>,
     timing: Timing,
 }
 
@@ -386,10 +387,10 @@ fn lerp_transform(a: &Transform, b: &Transform, t: f32) -> Option<Transform> {
 /// A shadow that draws nothing, to interpolate against `s`.
 fn none_like(s: &BoxShadow) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: 0.0,
-        blur: 0.0,
-        spread: 0.0,
+        offset_x: Points::ZERO,
+        offset_y: Points::ZERO,
+        blur: Points::ZERO,
+        spread: Points::ZERO,
         color: Color::TRANSPARENT,
         inset: s.inset,
     }
@@ -410,11 +411,12 @@ fn lerp_box_shadows(a: &[BoxShadow], b: &[BoxShadow], t: f32) -> Option<Vec<BoxS
         if sa.inset != sb.inset {
             return None;
         }
+        let l = |a: Points, b: Points| Points(lerp(a.0, b.0, t));
         out.push(BoxShadow {
-            offset_x: lerp(sa.offset_x, sb.offset_x, t),
-            offset_y: lerp(sa.offset_y, sb.offset_y, t),
-            blur: lerp(sa.blur, sb.blur, t).max(0.0),
-            spread: lerp(sa.spread, sb.spread, t),
+            offset_x: l(sa.offset_x, sb.offset_x),
+            offset_y: l(sa.offset_y, sb.offset_y),
+            blur: l(sa.blur, sb.blur).max(Points::ZERO),
+            spread: l(sa.spread, sb.spread),
             color: lerp_color(sa.color, sb.color, t),
             inset: sa.inset,
         });
@@ -473,10 +475,10 @@ fn lerp_style(
     if props.has(TransitionProps::SHADOW) {
         let (a, b) = (&from.shadow, &to.shadow);
         out.shadow.color = lerp_color(a.color, b.color, t);
-        out.shadow.offset_x = lerp(a.offset_x, b.offset_x, t);
-        out.shadow.offset_y = lerp(a.offset_y, b.offset_y, t);
+        out.shadow.offset_x = Points(lerp(a.offset_x.0, b.offset_x.0, t));
+        out.shadow.offset_y = Points(lerp(a.offset_y.0, b.offset_y.0, t));
         out.shadow.opacity = lerp(a.opacity, b.opacity, t).clamp(0.0, 1.0);
-        out.shadow.radius = lerp(a.radius, b.radius, t).max(0.0);
+        out.shadow.radius = Points(lerp(a.radius.0, b.radius.0, t).max(0.0));
         let (sa, sb) = (box_shadows(from), box_shadows(to));
         if sa != sb
             && let Some(shadows) = lerp_box_shadows(sa, sb, t)
@@ -487,31 +489,35 @@ fn lerp_style(
         }
     }
     if props.has(TransitionProps::SHAPE) {
-        out.border_radius = lerp(from.border_radius, to.border_radius, t).max(0.0);
-        out.corner_radius =
-            std::array::from_fn(|i| match (from.corner_radius[i], to.corner_radius[i]) {
-                (None, None) => None,
-                (a, b) => Some(
-                    lerp(
-                        a.unwrap_or(from.border_radius),
-                        b.unwrap_or(to.border_radius),
-                        t,
-                    )
-                    .max(0.0),
-                ),
-            });
-        out.borders.widths =
-            std::array::from_fn(|i| lerp(from.borders.widths[i], to.borders.widths[i], t).max(0.0));
-        out.outline.width = lerp(from.outline.width, to.outline.width, t).max(0.0);
+        out.border_radius = Points(lerp(from.border_radius.0, to.border_radius.0, t).max(0.0));
+        let (fc, tc) = (from.corner_radius.to_array(), to.corner_radius.to_array());
+        out.corner_radius = Corners::from(std::array::from_fn(|i| match (fc[i], tc[i]) {
+            (None, None) => None,
+            (a, b) => Some(Points(
+                lerp(
+                    a.unwrap_or(from.border_radius).0,
+                    b.unwrap_or(to.border_radius).0,
+                    t,
+                )
+                .max(0.0),
+            )),
+        }));
+        let (fw, tw) = (from.borders.widths.to_array(), to.borders.widths.to_array());
+        out.borders.widths = Edges::from(std::array::from_fn(|i| {
+            Points(lerp(fw[i].0, tw[i].0, t).max(0.0))
+        }));
+        out.outline.width = Points(lerp(from.outline.width.0, to.outline.width.0, t).max(0.0));
     }
 }
 
-fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
-    Rect {
-        x: lerp(a.x, b.x, t),
-        y: lerp(a.y, b.y, t),
-        width: lerp(a.width, b.width, t).max(0.0),
-        height: lerp(a.height, b.height, t).max(0.0),
+fn lerp_rect(a: Bounds<Points>, b: Bounds<Points>, t: f32) -> Bounds<Points> {
+    let l = |a: Points, b: Points| Points(lerp(a.0, b.0, t));
+    Bounds {
+        origin: Point::new(l(a.origin.x, b.origin.x), l(a.origin.y, b.origin.y)),
+        size: Size::new(
+            l(a.size.width, b.size.width).max(Points::ZERO),
+            l(a.size.height, b.size.height).max(Points::ZERO),
+        ),
     }
 }
 
@@ -568,7 +574,7 @@ pub(crate) fn inserted(surface: &Rc<Surface>, view: &NshView, animation: Option<
         return;
     };
     // Views moved to another place were laid out before; new ones were not.
-    if view.state().frame != Rect::default() || reduce_motion(surface) || navigated(view) {
+    if view.state().frame != Bounds::default() || reduce_motion(surface) || navigated(view) {
         return;
     }
     animate(view, |live| {
@@ -622,7 +628,7 @@ pub(crate) fn removing(
 }
 
 /// The frame a running layout animation of `view` is heading to, if any.
-pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
+pub(crate) fn frame_target(view: &NshView) -> Option<Bounds<Points>> {
     view.state().live.as_ref()?.frame.as_ref().map(|t| t.to)
 }
 
@@ -630,13 +636,13 @@ pub(crate) fn frame_target(view: &NshView) -> Option<Rect> {
 pub(crate) fn frame_changed(
     surface: &Rc<Surface>,
     view: &NshView,
-    old: Rect,
+    old: Bounds<Points>,
     animation: Option<&LayoutAnimation>,
 ) {
     // A view's first frame (from the zero rect) does not animate.
     let update = animation
         .and_then(|a| a.update)
-        .filter(|_| old != Rect::default() && !reduce_motion(surface) && !navigated(view));
+        .filter(|_| old != Bounds::default() && !reduce_motion(surface) && !navigated(view));
     let Some(t) = update else {
         // The new frame applies at once, stopping a running animation.
         if let Some(live) = view.state_mut().live.as_deref_mut() {
@@ -767,7 +773,8 @@ fn tick(view: &NshView, clock: &gdk::FrameClock) -> glib::ControlFlow {
         } else {
             lerp_rect(track.from, track.to, p)
         };
-        resized = frame.width != s.frame.width || frame.height != s.frame.height;
+        resized = frame.size.width.0 != s.frame.size.width.0
+            || frame.size.height.0 != s.frame.size.height.0;
         s.frame = frame;
         if done {
             live.frame = None;
@@ -962,7 +969,7 @@ mod tests {
         let to = ViewStyle {
             opacity: 1.0,
             background_color: Color::rgba(255, 255, 255, 255),
-            border_radius: 10.0,
+            border_radius: Points(10.0),
             ..ViewStyle::default()
         };
         let mut out = to.clone();
@@ -975,7 +982,7 @@ mod tests {
         );
         assert_eq!(out.opacity, 0.5);
         assert_eq!(out.background_color, to.background_color);
-        assert_eq!(out.border_radius, 10.0);
+        assert_eq!(out.border_radius, Points(10.0));
         assert!(differs(
             &from,
             &to,
@@ -987,16 +994,16 @@ mod tests {
     #[test]
     fn box_shadows_pad_with_none() {
         let s = BoxShadow {
-            offset_x: 0.0,
-            offset_y: 10.0,
-            blur: 20.0,
-            spread: 0.0,
+            offset_x: Points(0.0),
+            offset_y: Points(10.0),
+            blur: Points(20.0),
+            spread: Points(0.0),
             color: Color::rgba(0, 0, 0, 100),
             inset: false,
         };
         let out = lerp_box_shadows(&[], &[s], 0.5).unwrap();
-        assert_eq!(out[0].offset_y, 5.0);
-        assert_eq!(out[0].blur, 10.0);
+        assert_eq!(out[0].offset_y, Points(5.0));
+        assert_eq!(out[0].blur, Points(10.0));
         assert_eq!(out[0].color, Color::rgba(0, 0, 0, 50));
         let inset = BoxShadow { inset: true, ..s };
         assert!(lerp_box_shadows(&[inset], &[s], 0.5).is_none());

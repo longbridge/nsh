@@ -24,28 +24,28 @@ function seeded(seed: number) {
 }
 
 /** Diagonal hatching over the current clip (call inside save / clip / restore). */
-function hatch(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, gap = 6) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
+function hatch(cx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, gap = 6) {
+  cx.strokeStyle = color;
+  cx.lineWidth = 1;
+  cx.beginPath();
   for (let i = -h; i < w; i += gap) {
-    ctx.moveTo(x + i, y + h);
-    ctx.lineTo(x + i + h, y);
+    cx.moveTo(x + i, y + h);
+    cx.lineTo(x + i + h, y);
   }
-  ctx.stroke();
+  cx.stroke();
 }
 
 /** A dashed horizontal or vertical reference line. */
-function dashed(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string = colors.border) {
-  ctx.save();
-  ctx.setLineDash([3, 4]);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
-  ctx.stroke();
-  ctx.restore();
+function dashed(cx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string = colors.border) {
+  cx.save();
+  cx.setLineDash([3, 4]);
+  cx.strokeStyle = color;
+  cx.lineWidth = 1;
+  cx.beginPath();
+  cx.moveTo(x0, y0);
+  cx.lineTo(x1, y1);
+  cx.stroke();
+  cx.restore();
 }
 
 /** A value that sweeps 0 → 1 once mounted (and again on `replay`): canvases clip to it. */
@@ -87,92 +87,92 @@ function Dial() {
     <Card icon="spark" title="Turbine 3 load" subtitle="Needle and sweep on one animated value">
       <Canvas
         style={{ height: 230 }}
-        draw={(ctx, { width, height }) => {
-          const cx = width / 2;
+        draw={(cx, { width, height }) => {
+          const centerX = width / 2;
           const cy = height * 0.54;
           const r = Math.min(width / 2 - 8, height * 0.5) - 6;
           const at = (v: number) => a0 + (v / 100) * (a1 - a0);
           // The red zone: an annular sector, hatched.
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(cx, cy, r + 2, at(85), a1);
-          ctx.arc(cx, cy, r - 20, a1, at(85), true);
-          ctx.closePath();
-          ctx.clip();
-          ctx.fillStyle = alpha(colors.danger, 0.08);
+          cx.save();
+          cx.beginPath();
+          cx.arc(centerX, cy, r + 2, at(85), a1);
+          cx.arc(centerX, cy, r - 20, a1, at(85), true);
+          cx.closePath();
+          cx.clip();
+          cx.fillStyle = alpha(colors.danger, 0.08);
           // The zone sits right of the hub, from just above it to 45° below.
-          const zx = cx + 0.6 * r, zy = cy - 0.2 * r, zw = 0.4 * r + 4, zh = r;
-          ctx.fillRect(zx, zy, zw, zh);
-          hatch(ctx, zx, zy, zw, zh, alpha(colors.danger, 0.55), 5);
-          ctx.restore();
+          const zx = centerX + 0.6 * r, zy = cy - 0.2 * r, zw = 0.4 * r + 4, zh = r;
+          cx.fillRect(zx, zy, zw, zh);
+          hatch(cx, zx, zy, zw, zh, alpha(colors.danger, 0.55), 5);
+          cx.restore();
           // The tick ring.
           for (let i = 0; i <= 50; i++) {
             const a = at(i * 2);
             const major = i % 10 === 0;
             const inner = r - (major ? 14 : 8);
-            ctx.strokeStyle = i * 2 >= 85 ? colors.danger : major ? colors.muted : colors.faint;
-            ctx.lineWidth = major ? 2 : 1;
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
-            ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-            ctx.stroke();
+            cx.strokeStyle = i * 2 >= 85 ? colors.danger : major ? colors.muted : colors.faint;
+            cx.lineWidth = major ? 2 : 1;
+            cx.lineCap = "round";
+            cx.beginPath();
+            cx.moveTo(centerX + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+            cx.lineTo(centerX + Math.cos(a) * r, cy + Math.sin(a) * r);
+            cx.stroke();
             if (major) {
               const label = String(i * 2);
-              ctx.font = SANS(11);
-              ctx.fillStyle = colors.faint;
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillText(label, cx + Math.cos(a) * (r - 28), cy + Math.sin(a) * (r - 28));
+              cx.font = SANS(11);
+              cx.fillStyle = colors.faint;
+              cx.textAlign = "center";
+              cx.textBaseline = "middle";
+              cx.fillText(label, centerX + Math.cos(a) * (r - 28), cy + Math.sin(a) * (r - 28));
             }
           }
           // The sweep: a track, then a conic gradient arc ending at the needle.
           const sr = r + 12;
-          ctx.lineWidth = 5;
-          ctx.lineCap = "round";
-          ctx.strokeStyle = colors.raised;
-          ctx.beginPath();
-          ctx.arc(cx, cy, sr, a0, a1);
-          ctx.stroke();
-          const g = ctx.createConicGradient(a0 - 0.2, cx, cy);
+          cx.lineWidth = 5;
+          cx.lineCap = "round";
+          cx.strokeStyle = colors.raised;
+          cx.beginPath();
+          cx.arc(centerX, cy, sr, a0, a1);
+          cx.stroke();
+          const g = cx.createConicGradient(a0 - 0.2, centerX, cy);
           g.addColorStop(0, colors.info);
           g.addColorStop(0.45, colors.accent);
           g.addColorStop(0.75, colors.warn);
           g.addColorStop(0.8, colors.danger);
-          ctx.strokeStyle = g;
-          ctx.beginPath();
-          ctx.arc(cx, cy, sr, a0, angle);
-          ctx.stroke();
+          cx.strokeStyle = g;
+          cx.beginPath();
+          cx.arc(centerX, cy, sr, a0, angle);
+          cx.stroke();
           // The readout (redrawn only when the preset changes).
-          ctx.textAlign = "center";
-          ctx.textBaseline = "alphabetic";
-          ctx.font = SANS(40, "600");
-          ctx.fillStyle = colors.text;
-          ctx.fillText(String(load()), cx, cy + r * 0.62);
-          ctx.font = SANS(11);
-          ctx.fillStyle = colors.faint;
-          ctx.fillText("% load", cx, cy + r * 0.62 + 18);
+          cx.textAlign = "center";
+          cx.textBaseline = "alphabetic";
+          cx.font = SANS(40, "600");
+          cx.fillStyle = colors.text;
+          cx.fillText(String(load()), centerX, cy + r * 0.62);
+          cx.font = SANS(11);
+          cx.fillStyle = colors.faint;
+          cx.fillText("% load", centerX, cy + r * 0.62 + 18);
           // The needle, rotated natively.
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.rotate(angle);
-          ctx.shadowColor = isDark() ? "rgba(0,0,0,0.6)" : "rgba(20,20,10,0.3)";
-          ctx.shadowBlur = 6;
-          ctx.fillStyle = colors.text;
-          ctx.beginPath();
-          ctx.moveTo(-14, -3);
-          ctx.lineTo(r - 18, 0);
-          ctx.lineTo(-14, 3);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-          ctx.fillStyle = colors.raised;
-          ctx.strokeStyle = colors.text;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(cx, cy, 7, 0, TAU);
-          ctx.fill();
-          ctx.stroke();
+          cx.save();
+          cx.translate(centerX, cy);
+          cx.rotate(angle);
+          cx.shadowColor = isDark() ? "rgba(0,0,0,0.6)" : "rgba(20,20,10,0.3)";
+          cx.shadowBlur = 6;
+          cx.fillStyle = colors.text;
+          cx.beginPath();
+          cx.moveTo(-14, -3);
+          cx.lineTo(r - 18, 0);
+          cx.lineTo(-14, 3);
+          cx.closePath();
+          cx.fill();
+          cx.restore();
+          cx.fillStyle = colors.raised;
+          cx.strokeStyle = colors.text;
+          cx.lineWidth = 2;
+          cx.beginPath();
+          cx.arc(centerX, cy, 7, 0, TAU);
+          cx.fill();
+          cx.stroke();
         }}
       />
       <Segmented options={presets} value={preset()} onChange={choose} />
@@ -211,85 +211,85 @@ function AreaChart() {
       />
       <Canvas
         style={{ height: 180 }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const values = data();
-          ctx.font = SANS(11);
-          const labelW = ctx.measureText("100").width;
+          cx.font = SANS(11);
+          const labelW = cx.measureText("100").width;
           const pad = { left: labelW + 8, right: 4, top: 16, bottom: 20 };
           const w = width - pad.left - pad.right;
           const h = height - pad.top - pad.bottom;
           const x = (i: number) => pad.left + (i / (values.length - 1)) * w;
           const y = (v: number) => pad.top + h - (v / 100) * h;
           // Grid and labels.
-          ctx.textBaseline = "middle";
+          cx.textBaseline = "middle";
           for (const v of [0, 50, 100]) {
-            dashed(ctx, pad.left, y(v), width - pad.right, y(v), colors.line);
+            dashed(cx, pad.left, y(v), width - pad.right, y(v), colors.line);
             const label = String(v);
-            ctx.fillStyle = colors.faint;
-            ctx.fillText(label, pad.left - 8 - ctx.measureText(label).width, y(v));
+            cx.fillStyle = colors.faint;
+            cx.fillText(label, pad.left - 8 - cx.measureText(label).width, y(v));
           }
           // The deploy window: hatched.
           const wx = x(9), ww = x(11) - x(9);
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(wx, pad.top, ww, h);
-          ctx.clip();
-          hatch(ctx, wx, pad.top, ww, h, alpha(colors.warn, 0.28), 6);
-          ctx.restore();
-          ctx.fillStyle = colors.warn;
-          ctx.textBaseline = "alphabetic";
-          ctx.fillText("deploy", wx + 2, pad.top - 4);
+          cx.save();
+          cx.beginPath();
+          cx.rect(wx, pad.top, ww, h);
+          cx.clip();
+          hatch(cx, wx, pad.top, ww, h, alpha(colors.warn, 0.28), 6);
+          cx.restore();
+          cx.fillStyle = colors.warn;
+          cx.textBaseline = "alphabetic";
+          cx.fillText("deploy", wx + 2, pad.top - 4);
           // Day labels.
-          ctx.fillStyle = colors.faint;
+          cx.fillStyle = colors.faint;
           for (const i of [0, 7, 13]) {
             const label = i === 13 ? "now" : `d-${13 - i}`;
-            const lw = ctx.measureText(label).width;
-            ctx.fillText(label, Math.min(width - pad.right - lw, Math.max(pad.left, x(i) - lw / 2)), height - 4);
+            const lw = cx.measureText(label).width;
+            cx.fillText(label, Math.min(width - pad.right - lw, Math.max(pad.left, x(i) - lw / 2)), height - 4);
           }
           // Everything data-driven sweeps in left to right (a native clip).
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(pad.left - 6, 0, sweep.t.mul(w + 12), height);
-          ctx.clip();
-          const area = ctx.createLinearGradient(0, pad.top, 0, pad.top + h);
+          cx.save();
+          cx.beginPath();
+          cx.rect(pad.left - 6, 0, sweep.t.mul(w + 12), height);
+          cx.clip();
+          const area = cx.createLinearGradient(0, pad.top, 0, pad.top + h);
           area.addColorStop(0, accentA(0.26));
           area.addColorStop(1, accentA(0));
-          ctx.beginPath();
-          ctx.moveTo(x(0), y(values[0]));
-          values.forEach((v, i) => i > 0 && ctx.lineTo(x(i), y(v)));
-          ctx.lineTo(x(values.length - 1), pad.top + h);
-          ctx.lineTo(x(0), pad.top + h);
-          ctx.closePath();
-          ctx.fillStyle = area;
-          ctx.fill();
-          ctx.beginPath();
-          values.forEach((v, i) => (i === 0 ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v))));
-          ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 2;
-          ctx.lineJoin = "round";
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(x(0), y(values[0]));
+          values.forEach((v, i) => i > 0 && cx.lineTo(x(i), y(v)));
+          cx.lineTo(x(values.length - 1), pad.top + h);
+          cx.lineTo(x(0), pad.top + h);
+          cx.closePath();
+          cx.fillStyle = area;
+          cx.fill();
+          cx.beginPath();
+          values.forEach((v, i) => (i === 0 ? cx.moveTo(x(i), y(v)) : cx.lineTo(x(i), y(v))));
+          cx.strokeStyle = colors.accent;
+          cx.lineWidth = 2;
+          cx.lineJoin = "round";
+          cx.stroke();
           values.forEach((v, i) => {
-            ctx.beginPath();
-            ctx.arc(x(i), y(v), i === values.length - 1 ? 4.5 : 2.5, 0, TAU);
-            ctx.fillStyle = colors.inset;
-            ctx.fill();
-            ctx.strokeStyle = colors.accent;
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            cx.beginPath();
+            cx.arc(x(i), y(v), i === values.length - 1 ? 4.5 : 2.5, 0, TAU);
+            cx.fillStyle = colors.inset;
+            cx.fill();
+            cx.strokeStyle = colors.accent;
+            cx.lineWidth = 1.5;
+            cx.stroke();
           });
-          ctx.restore();
+          cx.restore();
           // The average, with a pill label measured to fit.
           const mean = avg();
-          dashed(ctx, pad.left, y(mean), width - pad.right, y(mean), colors.muted);
+          dashed(cx, pad.left, y(mean), width - pad.right, y(mean), colors.muted);
           const label = `avg ${mean}`;
-          const lw = ctx.measureText(label).width + 12;
-          ctx.fillStyle = colors.raised;
-          ctx.beginPath();
-          ctx.roundRect(width - pad.right - lw, y(mean) - 9, lw, 18, 9);
-          ctx.fill();
-          ctx.fillStyle = colors.text;
-          ctx.textBaseline = "middle";
-          ctx.fillText(label, width - pad.right - lw + 6, y(mean));
+          const lw = cx.measureText(label).width + 12;
+          cx.fillStyle = colors.raised;
+          cx.beginPath();
+          cx.roundRect(width - pad.right - lw, y(mean) - 9, lw, 18, 9);
+          cx.fill();
+          cx.fillStyle = colors.text;
+          cx.textBaseline = "middle";
+          cx.fillText(label, width - pad.right - lw + 6, y(mean));
         }}
       />
       <View style={{ flexDirection: "row", gap: 16 }}>
@@ -324,53 +324,53 @@ function Ridgeline() {
       <Caption label="Gate B, last week" note="Peak 12:00–14:00" />
       <Canvas
         style={{ height: 210 }}
-        draw={(ctx, { width, height }) => {
-          ctx.font = SANS(11);
-          const left = ctx.measureText("Mon").width + 10;
+        draw={(cx, { width, height }) => {
+          cx.font = SANS(11);
+          const left = cx.measureText("Mon").width + 10;
           const bottom = 18;
           const step = (height - bottom - 30) / (days.length - 1);
           const x = (h: number) => left + (h / 24) * (width - left);
           // Peak window and hour labels.
-          dashed(ctx, x(12), 0, x(12), height - bottom, colors.border);
-          dashed(ctx, x(14), 0, x(14), height - bottom, colors.border);
-          ctx.fillStyle = colors.faint;
-          ctx.textBaseline = "alphabetic";
+          dashed(cx, x(12), 0, x(12), height - bottom, colors.border);
+          dashed(cx, x(14), 0, x(14), height - bottom, colors.border);
+          cx.fillStyle = colors.faint;
+          cx.textBaseline = "alphabetic";
           for (const h of [0, 6, 12, 18, 24]) {
             const label = String(h).padStart(2, "0");
-            const lw = ctx.measureText(label).width;
-            ctx.fillText(label, Math.min(width - lw, Math.max(left, x(h) - lw / 2)), height - 3);
+            const lw = cx.measureText(label).width;
+            cx.fillText(label, Math.min(width - lw, Math.max(left, x(h) - lw / 2)), height - 3);
           }
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, sweep.t.mul(width), height);
-          ctx.clip();
+          cx.save();
+          cx.beginPath();
+          cx.rect(0, 0, sweep.t.mul(width), height);
+          cx.clip();
           ridges.forEach((series, d) => {
             const base = 30 + d * step;
             const amp = 46;
             const y = (v: number) => base - v * amp;
-            ctx.beginPath();
-            ctx.moveTo(x(0), base);
-            ctx.lineTo(x(0), y(series[0]));
+            cx.beginPath();
+            cx.moveTo(x(0), base);
+            cx.lineTo(x(0), y(series[0]));
             for (let h = 1; h < series.length; h++) {
               const mx = (x(h - 1) + x(h)) / 2;
-              ctx.quadraticCurveTo(x(h - 1), y(series[h - 1]), mx, (y(series[h - 1]) + y(series[h])) / 2);
+              cx.quadraticCurveTo(x(h - 1), y(series[h - 1]), mx, (y(series[h - 1]) + y(series[h])) / 2);
             }
-            ctx.lineTo(x(24), y(series[24]));
-            ctx.lineTo(x(24), base);
-            ctx.closePath();
+            cx.lineTo(x(24), y(series[24]));
+            cx.lineTo(x(24), base);
+            cx.closePath();
             // Occlude the ridge behind, then a low-alpha fill and the line.
-            ctx.fillStyle = colors.inset;
-            ctx.fill();
+            cx.fillStyle = colors.inset;
+            cx.fill();
             const weekend = d >= 5;
-            ctx.fillStyle = weekend ? infoA(0.18) : accentA(0.1 + d * 0.025);
-            ctx.fill();
-            ctx.strokeStyle = weekend ? colors.info : colors.accent;
-            ctx.lineWidth = 1.25;
-            ctx.stroke();
+            cx.fillStyle = weekend ? infoA(0.18) : accentA(0.1 + d * 0.025);
+            cx.fill();
+            cx.strokeStyle = weekend ? colors.info : colors.accent;
+            cx.lineWidth = 1.25;
+            cx.stroke();
           });
-          ctx.restore();
-          ctx.fillStyle = colors.muted;
-          days.forEach((day, d) => ctx.fillText(day, 0, 30 + d * step - 2));
+          cx.restore();
+          cx.fillStyle = colors.muted;
+          days.forEach((day, d) => cx.fillText(day, 0, 30 + d * step - 2));
         }}
       />
       <View style={{ flexDirection: "row", gap: 16 }}>
@@ -395,7 +395,7 @@ function DotMatrix() {
       <Figure value="99.94" unit="%" note="3 incidents" tone="danger" />
       <Canvas
         style={{ height: 96 }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const rows = 7;
           const gap = 12.5;
           const cols = Math.floor(width / gap);
@@ -407,23 +407,23 @@ function DotMatrix() {
             for (let r = 0; r < rows; r++) {
               const n = rand();
               const incident = (c === 6 && r === 2) || (c === 17 && r === 5) || (c === cols - 4 && r === 3);
-              ctx.fillStyle = incident ? colors.danger : levels()[Math.min(4, Math.floor(n * n * 5 + (c / cols) * 1.6))];
-              ctx.beginPath();
-              ctx.arc(ox + c * gap, oy + r * gap, 3.6, 0, TAU);
-              ctx.fill();
+              cx.fillStyle = incident ? colors.danger : levels()[Math.min(4, Math.floor(n * n * 5 + (c / cols) * 1.6))];
+              cx.beginPath();
+              cx.arc(ox + c * gap, oy + r * gap, 3.6, 0, TAU);
+              cx.fill();
               lastX = ox + c * gap;
               lastY = oy + r * gap;
             }
           }
           // The pulse: radius and alpha follow a native loop.
-          ctx.save();
-          ctx.globalAlpha = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] });
-          ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(lastX, lastY, pulse.interpolate({ inputRange: [0, 1], outputRange: [4, 11] }), 0, TAU);
-          ctx.stroke();
-          ctx.restore();
+          cx.save();
+          cx.globalAlpha = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] });
+          cx.strokeStyle = colors.accent;
+          cx.lineWidth = 1.5;
+          cx.beginPath();
+          cx.arc(lastX, lastY, pulse.interpolate({ inputRange: [0, 1], outputRange: [4, 11] }), 0, TAU);
+          cx.stroke();
+          cx.restore();
         }}
       />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -465,19 +465,19 @@ function Dumbbell() {
     >
       <Canvas
         style={{ height: 30 * routes.length + 24 }}
-        draw={(ctx, { width, height }) => {
-          ctx.font = SANS(13);
-          const left = Math.max(...routes.map((r) => ctx.measureText(r.name).width)) + 12;
-          ctx.font = SANS(11);
-          const right = ctx.measureText("+00%").width + 10;
+        draw={(cx, { width, height }) => {
+          cx.font = SANS(13);
+          const left = Math.max(...routes.map((r) => cx.measureText(r.name).width)) + 12;
+          cx.font = SANS(11);
+          const right = cx.measureText("+00%").width + 10;
           const max = 250;
           const x = (ms: number) => left + (ms / max) * (width - left - right);
-          ctx.textBaseline = "alphabetic";
+          cx.textBaseline = "alphabetic";
           for (const ms of [0, 100, 200]) {
-            dashed(ctx, x(ms), 0, x(ms), height - 18, colors.line);
-            ctx.fillStyle = colors.faint;
+            dashed(cx, x(ms), 0, x(ms), height - 18, colors.line);
+            cx.fillStyle = colors.faint;
             const label = `${ms}`;
-            ctx.fillText(label, x(ms) - ctx.measureText(label).width / 2, height - 3);
+            cx.fillText(label, x(ms) - cx.measureText(label).width / 2, height - 3);
           }
           routes.forEach((r, i) => {
             const cy = 15 + i * 30;
@@ -485,33 +485,33 @@ function Dumbbell() {
             const after = t.interpolate({ inputRange: [start, start + 0.6], outputRange: [x(r.before), x(r.after)] });
             const worse = r.after > r.before;
             const tone = worse ? colors.danger : colors.accent;
-            ctx.font = SANS(13);
-            ctx.fillStyle = colors.muted;
-            ctx.textBaseline = "middle";
-            ctx.fillText(r.name, 0, cy);
-            ctx.strokeStyle = worse ? alpha(colors.danger, 0.5) : accentA(0.45);
-            ctx.lineWidth = 3;
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(x(r.before), cy);
-            ctx.lineTo(after, cy);
-            ctx.stroke();
-            ctx.fillStyle = colors.inset;
-            ctx.strokeStyle = colors.muted;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(x(r.before), cy, 4.5, 0, TAU);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = tone;
-            ctx.beginPath();
-            ctx.arc(after, cy, 5.5, 0, TAU);
-            ctx.fill();
+            cx.font = SANS(13);
+            cx.fillStyle = colors.muted;
+            cx.textBaseline = "middle";
+            cx.fillText(r.name, 0, cy);
+            cx.strokeStyle = worse ? alpha(colors.danger, 0.5) : accentA(0.45);
+            cx.lineWidth = 3;
+            cx.lineCap = "round";
+            cx.beginPath();
+            cx.moveTo(x(r.before), cy);
+            cx.lineTo(after, cy);
+            cx.stroke();
+            cx.fillStyle = colors.inset;
+            cx.strokeStyle = colors.muted;
+            cx.lineWidth = 1.5;
+            cx.beginPath();
+            cx.arc(x(r.before), cy, 4.5, 0, TAU);
+            cx.fill();
+            cx.stroke();
+            cx.fillStyle = tone;
+            cx.beginPath();
+            cx.arc(after, cy, 5.5, 0, TAU);
+            cx.fill();
             const pct = Math.round(((r.after - r.before) / r.before) * 100);
             const label = `${pct > 0 ? "+" : ""}${pct}%`;
-            ctx.font = SANS(11);
-            ctx.fillStyle = tone;
-            ctx.fillText(label, width - ctx.measureText(label).width, cy);
+            cx.font = SANS(11);
+            cx.fillStyle = tone;
+            cx.fillText(label, width - cx.measureText(label).width, cy);
           });
         }}
       />
@@ -535,55 +535,55 @@ function Clock() {
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
         <Canvas
           style={{ width: 150, height: 150 }}
-          draw={(ctx, { width }) => {
+          draw={(cx, { width }) => {
             const r = width / 2;
-            ctx.translate(r, r);
-            ctx.fillStyle = colors.surface;
-            ctx.strokeStyle = colors.border;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(0, 0, r - 2, 0, TAU);
-            ctx.fill();
-            ctx.stroke();
+            cx.translate(r, r);
+            cx.fillStyle = colors.surface;
+            cx.strokeStyle = colors.border;
+            cx.lineWidth = 1.5;
+            cx.beginPath();
+            cx.arc(0, 0, r - 2, 0, TAU);
+            cx.fill();
+            cx.stroke();
             for (let i = 0; i < 60; i++) {
-              ctx.save();
-              ctx.rotate((i / 60) * TAU);
-              ctx.strokeStyle = i % 5 === 0 ? colors.muted : colors.faint;
-              ctx.lineWidth = i % 5 === 0 ? 2 : 1;
-              ctx.beginPath();
-              ctx.moveTo(r - 8, 0);
-              ctx.lineTo(r - (i % 5 === 0 ? 17 : 12), 0);
-              ctx.stroke();
-              ctx.restore();
+              cx.save();
+              cx.rotate((i / 60) * TAU);
+              cx.strokeStyle = i % 5 === 0 ? colors.muted : colors.faint;
+              cx.lineWidth = i % 5 === 0 ? 2 : 1;
+              cx.beginPath();
+              cx.moveTo(r - 8, 0);
+              cx.lineTo(r - (i % 5 === 0 ? 17 : 12), 0);
+              cx.stroke();
+              cx.restore();
             }
             const hand = (angle: number, length: number, w: number) => {
-              ctx.save();
-              ctx.rotate(angle - Math.PI / 2);
-              ctx.strokeStyle = colors.text;
-              ctx.lineWidth = w;
-              ctx.lineCap = "round";
-              ctx.beginPath();
-              ctx.moveTo(-8, 0);
-              ctx.lineTo(length, 0);
-              ctx.stroke();
-              ctx.restore();
+              cx.save();
+              cx.rotate(angle - Math.PI / 2);
+              cx.strokeStyle = colors.text;
+              cx.lineWidth = w;
+              cx.lineCap = "round";
+              cx.beginPath();
+              cx.moveTo(-8, 0);
+              cx.lineTo(length, 0);
+              cx.stroke();
+              cx.restore();
             };
             hand((10 / 12) * TAU, r * 0.48, 4.5);
             hand((10 / 60) * TAU, r * 0.7, 3);
-            ctx.save();
-            ctx.rotate(seconds.mul(TAU / 60));
-            ctx.rotate(-Math.PI / 2);
-            ctx.strokeStyle = colors.accent;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(-14, 0);
-            ctx.lineTo(r * 0.8, 0);
-            ctx.stroke();
-            ctx.restore();
-            ctx.fillStyle = colors.accent;
-            ctx.beginPath();
-            ctx.arc(0, 0, 4, 0, TAU);
-            ctx.fill();
+            cx.save();
+            cx.rotate(seconds.mul(TAU / 60));
+            cx.rotate(-Math.PI / 2);
+            cx.strokeStyle = colors.accent;
+            cx.lineWidth = 1.5;
+            cx.beginPath();
+            cx.moveTo(-14, 0);
+            cx.lineTo(r * 0.8, 0);
+            cx.stroke();
+            cx.restore();
+            cx.fillStyle = colors.accent;
+            cx.beginPath();
+            cx.arc(0, 0, 4, 0, TAU);
+            cx.fill();
           }}
         />
         <View style={{ flex: 1, gap: 8 }}>
@@ -631,17 +631,17 @@ function Glyphs() {
                 >
                   <Canvas
                     style={{ width: 30, height: 30 }}
-                    draw={(ctx) => {
-                      ctx.scale(30 / 24, 30 / 24);
+                    draw={(cx) => {
+                      cx.scale(30 / 24, 30 / 24);
                       if (glyph().stroke) {
-                        ctx.strokeStyle = colors[glyph().color];
-                        ctx.lineWidth = 2.5;
-                        ctx.lineCap = "round";
-                        ctx.lineJoin = "round";
-                        ctx.stroke(path);
+                        cx.strokeStyle = colors[glyph().color];
+                        cx.lineWidth = 2.5;
+                        cx.lineCap = "round";
+                        cx.lineJoin = "round";
+                        cx.stroke(path);
                       } else {
-                        ctx.fillStyle = colors[glyph().color];
-                        ctx.fill(path);
+                        cx.fillStyle = colors[glyph().color];
+                        cx.fill(path);
                       }
                     }}
                   />
@@ -664,57 +664,57 @@ function Compositing() {
     <Card icon="image" title="Compositing" subtitle="Clip, shadow, destination-out, dashes">
       <Canvas
         style={{ height: 120 }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const cy = height / 2;
           // An image clipped to a circle, with a ring.
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(46, cy, 42, 0, TAU);
-          ctx.clip();
-          ctx.fillStyle = colors.raised;
-          ctx.fillRect(0, 0, 92, height);
-          ctx.drawImage(logo, 10, cy - 36, 72, 72);
-          ctx.restore();
-          ctx.strokeStyle = colors.border;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(46, cy, 42, 0, TAU);
-          ctx.stroke();
+          cx.save();
+          cx.beginPath();
+          cx.arc(46, cy, 42, 0, TAU);
+          cx.clip();
+          cx.fillStyle = colors.raised;
+          cx.fillRect(0, 0, 92, height);
+          cx.drawImage(logo, 10, cy - 36, 72, 72);
+          cx.restore();
+          cx.strokeStyle = colors.border;
+          cx.lineWidth = 1.5;
+          cx.beginPath();
+          cx.arc(46, cy, 42, 0, TAU);
+          cx.stroke();
           // A shadowed card with a hole punched through (destination-out).
-          const cx = width / 2;
-          ctx.save();
-          ctx.shadowColor = isDark() ? "rgba(0,0,0,0.7)" : "rgba(20,20,10,0.25)";
-          ctx.shadowBlur = 14;
-          ctx.shadowOffsetY = 6;
-          const g = ctx.createLinearGradient(cx - 46, 0, cx + 46, height);
+          const centerX = width / 2;
+          cx.save();
+          cx.shadowColor = isDark() ? "rgba(0,0,0,0.7)" : "rgba(20,20,10,0.25)";
+          cx.shadowBlur = 14;
+          cx.shadowOffsetY = 6;
+          const g = cx.createLinearGradient(centerX - 46, 0, centerX + 46, height);
           g.addColorStop(0, colors.accentFill);
           g.addColorStop(1, "#7fbf3a");
-          ctx.fillStyle = g;
-          ctx.beginPath();
-          ctx.roundRect(cx - 46, cy - 40, 92, 80, 16);
-          ctx.fill();
-          ctx.restore();
-          ctx.globalCompositeOperation = "destination-out";
-          ctx.beginPath();
-          ctx.arc(cx, cy, 18, 0, TAU);
-          ctx.fill();
-          ctx.globalCompositeOperation = "source-over";
+          cx.fillStyle = g;
+          cx.beginPath();
+          cx.roundRect(centerX - 46, cy - 40, 92, 80, 16);
+          cx.fill();
+          cx.restore();
+          cx.globalCompositeOperation = "destination-out";
+          cx.beginPath();
+          cx.arc(centerX, cy, 18, 0, TAU);
+          cx.fill();
+          cx.globalCompositeOperation = "source-over";
           // A radial gradient with a dashed outline.
           const rx = width - 46;
-          const rg = ctx.createRadialGradient(rx - 10, cy - 12, 4, rx, cy, 40);
+          const rg = cx.createRadialGradient(rx - 10, cy - 12, 4, rx, cy, 40);
           rg.addColorStop(0, "#ffe2a8");
           rg.addColorStop(0.55, colors.warn);
           rg.addColorStop(1, alpha(colors.danger, 0.2));
-          ctx.fillStyle = rg;
-          ctx.beginPath();
-          ctx.arc(rx, cy, 38, 0, TAU);
-          ctx.fill();
-          ctx.setLineDash([5, 5]);
-          ctx.strokeStyle = colors.warn;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(rx, cy, 43, 0, TAU);
-          ctx.stroke();
+          cx.fillStyle = rg;
+          cx.beginPath();
+          cx.arc(rx, cy, 38, 0, TAU);
+          cx.fill();
+          cx.setLineDash([5, 5]);
+          cx.strokeStyle = colors.warn;
+          cx.lineWidth = 1.5;
+          cx.beginPath();
+          cx.arc(rx, cy, 43, 0, TAU);
+          cx.stroke();
         }}
       />
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -753,27 +753,27 @@ function Sketch() {
           const last = all[all.length - 1];
           strokes.set([...all.slice(0, -1), [...last, point(e)]]);
         }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           // A dot grid to draw on.
-          ctx.fillStyle = colors.border;
+          cx.fillStyle = colors.border;
           for (let x = 8; x < width; x += 16) {
-            for (let y = 8; y < height; y += 16) ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
+            for (let y = 8; y < height; y += 16) cx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
           }
           if (strokes().length === 0) {
-            ctx.font = SANS(14);
-            ctx.fillStyle = colors.faint;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText("Draw here", width / 2, height / 2);
+            cx.font = SANS(14);
+            cx.fillStyle = colors.faint;
+            cx.textAlign = "center";
+            cx.textBaseline = "middle";
+            cx.fillText("Draw here", width / 2, height / 2);
           }
-          ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 3;
-          ctx.lineCap = "round";
-          ctx.lineJoin = "round";
+          cx.strokeStyle = colors.accent;
+          cx.lineWidth = 3;
+          cx.lineCap = "round";
+          cx.lineJoin = "round";
           for (const s of strokes()) {
-            ctx.beginPath();
-            s.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-            ctx.stroke();
+            cx.beginPath();
+            s.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+            cx.stroke();
           }
         }}
       />

@@ -18,7 +18,7 @@
 
 use std::{mem::ManuallyDrop, rc::Rc};
 
-use nsh_core::{Checked, Command, NodeId, ROOT_ID, ViewKind};
+use nsh_core::{Checked, Command, NodeId, Points, ROOT_ID, ViewKind};
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, VARIANT_FALSE, VARIANT_TRUE, WPARAM},
@@ -213,7 +213,7 @@ fn placement(view: &NshView) -> Option<(Area, bool)> {
     let root = chain.first()?;
     let (w, h) = {
         let s = root.try_state()?;
-        (s.frame.width, s.frame.height)
+        (s.frame.size.width.0, s.frame.size.height.0)
     };
     let mut clip = (0.0, 0.0, w, h);
     let mut m = Mat4::new();
@@ -221,12 +221,12 @@ fn placement(view: &NshView) -> Option<(Area, bool)> {
         m = Mat4::mul(&local(&pair[0], &pair[1])?, &m);
         let s = pair[1].try_state()?;
         if pair[1] != *view && s.clips() {
-            let b = m.bounds(0.0, 0.0, s.frame.width, s.frame.height)?;
+            let b = m.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)?;
             clip = intersect(clip, b);
         }
     }
     let s = view.try_state()?;
-    let bounds = m.bounds(0.0, 0.0, s.frame.width, s.frame.height)?;
+    let bounds = m.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)?;
     let shown = intersect(bounds, clip);
     Some((bounds, shown.2 > 0.0 && shown.3 > 0.0 && s.opacity() > 0.0))
 }
@@ -246,7 +246,7 @@ fn hit(view: &NshView, m: &Mat4, x: f32, y: f32) -> Option<NshView> {
         if s.concealed || s.props.accessibility.hidden {
             return None;
         }
-        (s.frame.width, s.frame.height, s.clips())
+        (s.frame.size.width.0, s.frame.size.height.0, s.clips())
     };
     let inside = m
         .unproject(x, y)
@@ -595,7 +595,7 @@ impl Element_Impl {
         let t = self.target()?;
         let s = t.view.state();
         let sc = s.scroll.as_ref().ok_or_else(not_supported)?;
-        let viewport = (s.frame.width, s.frame.height);
+        let viewport = (s.frame.size.width.0, s.frame.size.height.0);
         let max = sc.max(viewport);
         let inset = sc.behavior.content_inset;
         Ok(Scroll {
@@ -603,8 +603,8 @@ impl Element_Impl {
             max,
             viewport,
             extent: (
-                sc.content.0 + inset.left + inset.right,
-                sc.content.1 + inset.top + inset.bottom,
+                sc.content.0 + inset.left.0 + inset.right.0,
+                sc.content.1 + inset.top.0 + inset.bottom.0,
             ),
         })
     }
@@ -612,8 +612,8 @@ impl Element_Impl {
     fn scroll_to(&self, x: f32, y: f32) -> Result<()> {
         let t = self.target()?;
         let command = Command::ScrollTo {
-            x,
-            y,
+            x: Points(x),
+            y: Points(y),
             animated: false,
         };
         crate::scroll::command(&t.surface, &t.view, &command);

@@ -81,7 +81,7 @@ fn scrolling_sections_react() {
     let snap = |screen: &crate::common::Screen| {
         let b = &screen.behaviors[&cards];
         (
-            b.snap_interval,
+            b.snap_interval.0,
             b.snap_alignment,
             b.deceleration,
             b.one_step,
@@ -101,13 +101,20 @@ fn scrolling_sections_react() {
     engine.control().dispatch_event(
         scroll,
         EventKind::ScrollBeginDrag,
-        EventPayload::Scroll { x: 0.0, y: 12.0 },
+        EventPayload::Scroll(nsh_core::geometry::point(
+            nsh_core::geometry::px(0.0),
+            nsh_core::geometry::px(12.0),
+        )),
     );
     crate::common::drain(&rx, &mut screen);
     assert!(shows(&screen, "begin drag"), "{:?}", screen.texts);
     assert!(shows(&screen, "at 12 pt"), "{:?}", screen.texts);
     // Its offset, as `on_scroll` reports it.
-    engine.control().scroll(scroll, 0.0, 40.0, u32::MAX);
+    engine.control().scroll(
+        scroll,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(40.0)),
+        u32::MAX,
+    );
     crate::common::drain(&rx, &mut screen);
     assert!(
         screen.texts.iter().any(|t| t.1.starts_with("40 pt / ")),
@@ -124,7 +131,11 @@ fn scrolling_sections_react() {
     press(&engine, &rx, &mut screen, "2×");
     // The platform reports the zoom, then the offset it moved to.
     engine.control().zoom(zoom, 2.0);
-    engine.control().scroll(zoom, 40.0, 30.0, u32::MAX);
+    engine.control().scroll(
+        zoom,
+        nsh_core::geometry::point(nsh_core::geometry::px(40.0), nsh_core::geometry::px(30.0)),
+        u32::MAX,
+    );
     crate::common::drain(&rx, &mut screen);
     assert!(shows(&screen, "2.00 × zoomed in"), "{:?}", screen.texts);
     assert!(screen.behaviors[&zoom].bounces_zoom);

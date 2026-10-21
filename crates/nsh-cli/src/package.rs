@@ -2,9 +2,9 @@
 //! app bundle and its assets. Needs no Rust; iOS packaging uses Xcode's
 //! command line tools (`codesign`, and `actool` for icons), macOS packaging
 //! `codesign` and `sips`, Linux packaging `tar`; Windows packaging needs
-//! nothing (`windows.rs`), nor does the web's (`web.rs`). GPUI packages are
-//! made as the native backend's of the machine they are made on, with the
-//! GPUI release runner.
+//! nothing (`windows.rs`), nor does the web's (`web.rs`). Each desktop OS
+//! packages with its native backend's runner; GPUI is the backend for
+//! embedding in GPUI apps and has no package of its own.
 
 use std::{
     fs,
@@ -40,15 +40,17 @@ pub(crate) enum PackageTarget {
     /// The web: a static site (`index.html` and files named by their
     /// content) for any web server or CDN.
     Web,
-    /// GPUI, for this machine's OS: packaged as `linux`, `macos` or
-    /// `windows` are, with the GPUI release runner.
+    /// Packages made with the GPUI runner, which is gone: GPUI is the
+    /// backend for embedding in GPUI apps. Refused with the OS's own target
+    /// to use instead ([`PackageTarget::desktop`]).
+    #[value(hide = true)]
     Gpui,
 }
 
 impl PackageTarget {
-    /// The desktop package `nsh package --target gpui` makes on this
-    /// machine, by its OS (`None` off macOS, Windows and Linux).
-    fn gpui_layout() -> Option<PackageTarget> {
+    /// This machine's desktop target (`None` off macOS, Windows and
+    /// Linux): where `--target gpui` points.
+    fn desktop() -> Option<PackageTarget> {
         if cfg!(target_os = "macos") {
             Some(PackageTarget::Macos)
         } else if cfg!(windows) {
@@ -75,6 +77,8 @@ pub(crate) struct AppConfig {
     pub(crate) build: Option<u32>,
     /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`.
     pub(crate) icon: Option<PathBuf>,
+    /// The lowest runtime that runs a signed package (`nsh publish`).
+    pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde::de::IgnoredAny>,
@@ -85,6 +89,10 @@ pub(crate) struct AppConfig {
     /// the bundler, which hands it to the runtime); packages also start in
     /// it (the launch screen, the window's theme).
     pub(crate) appearance: Option<String>,
+    /// `"statusBar"`: the status bar's default (checked by the bundler,
+    /// which hands it to the runtime); iOS packages also show it from the
+    /// launch screen on (Info.plist).
+    pub(crate) status_bar: Option<serde_json::Value>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde::de::IgnoredAny>,
@@ -181,6 +189,17 @@ pub(crate) fn release_name_and_id(
 }
 
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
+    if options.target == PackageTarget::Gpui {
+        let instead = PackageTarget::desktop()
+            .and_then(|t| clap::ValueEnum::to_possible_value(&t))
+            .map_or("macos, windows or linux".to_owned(), |v| {
+                v.get_name().to_owned()
+            });
+        bail!(
+            "GPUI is the backend for embedding in GPUI and GPUI Kit apps (`AppView`), not for packages: \
+             package this app with --target {instead}"
+        );
+    }
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
     let (name, id) = release_name_and_id(&entry, config)?;
@@ -205,19 +224,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
         built
     };
-    // GPUI apps are packaged as this OS's native ones, with another runner.
-    let (target, runner) = match options.target {
-        PackageTarget::Gpui => (
-            PackageTarget::gpui_layout()
-                .context("GPUI apps are packaged on macOS, Windows or Linux")?,
-            Platform::Gpui,
-        ),
-        PackageTarget::Linux => (PackageTarget::Linux, Platform::Linux),
-        PackageTarget::Macos => (PackageTarget::Macos, Platform::MacOs),
-        PackageTarget::Windows => (PackageTarget::Windows, Platform::Windows),
-        other => (other, Platform::IphoneOs),
-    };
-    let platform = match target {
+    let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
         PackageTarget::Android => {
@@ -228,7 +235,6 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 name: &name,
                 id: &id,
                 executable: &executable,
-                runner,
             };
             return package_linux(&options, config, &app, &built);
         }
@@ -237,17 +243,16 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
                 name: &name,
                 id: &id,
                 executable: &executable,
-                runner,
             };
             return package_macos(&options, config, &app, &built);
         }
         PackageTarget::Windows => {
-            return crate::windows::package(&options, config, &name, &id, runner, &built);
+            return crate::windows::package(&options, config, &name, &id, &built);
         }
         PackageTarget::Web => {
             return crate::web::package(&options, config, &name, &id, &built);
         }
-        PackageTarget::Gpui => unreachable!("packaged as this OS's apps are"),
+        PackageTarget::Gpui => unreachable!("refused above"),
     };
     let runner = runtime::file(platform, true)?;
 
@@ -344,14 +349,12 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A desktop app to package: its name, id, executable file name and
-/// release runner (the native backend's or GPUI's).
+/// A desktop app to package: its name, id and executable file name.
 #[derive(Clone, Copy)]
 struct App<'a> {
     name: &'a str,
     id: &'a str,
     executable: &'a str,
-    runner: Platform,
 }
 
 /// An APK with the release runtime: `AppActivity` runs `assets/nsh/bundle.nshc`.
@@ -456,9 +459,8 @@ fn package_linux(
         name,
         id,
         executable,
-        runner,
     } = *app;
-    let runner = runtime::file(runner, true)?;
+    let runner = runtime::file(Platform::Linux, true)?;
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {
@@ -547,9 +549,8 @@ fn package_macos(
         name,
         id,
         executable,
-        runner,
     } = *app;
-    let runner = runtime::file(runner, true)?;
+    let runner = runtime::file(Platform::MacOs, true)?;
     let app = options.out.join(format!("{name}.app"));
     let step = ui::Step::start(format!("packaging {}", ui::path(&app)));
     if app.exists() {
@@ -770,6 +771,25 @@ fn info_plist(
         Some("dark") => d.insert("UIUserInterfaceStyle".into(), s("Dark")),
         _ => None,
     };
+    // The status bar's default, for the launch screen (pages and dialogs
+    // decide it afterwards, as view controllers).
+    if let Some(setting) = config
+        .status_bar
+        .as_ref()
+        .and_then(|v| nsh_core::StatusBarSetting::from_json(v).ok())
+    {
+        if let Some(style) = setting.style {
+            let style = match style {
+                nsh_core::StatusBarStyle::Default => "UIStatusBarStyleDefault",
+                nsh_core::StatusBarStyle::Light => "UIStatusBarStyleLightContent",
+                nsh_core::StatusBarStyle::Dark => "UIStatusBarStyleDarkContent",
+            };
+            d.insert("UIStatusBarStyle".into(), s(style));
+        }
+        if let Some(hidden) = setting.hidden {
+            d.insert("UIStatusBarHidden".into(), hidden.into());
+        }
+    }
     d.insert(
         "UISupportedInterfaceOrientations".into(),
         Value::Array(vec![
@@ -1002,13 +1022,20 @@ mod tests {
     }
 
     #[test]
-    fn gpui_packages_are_laid_out_as_this_oss_apps() {
+    fn gpui_points_to_this_oss_target() {
         use clap::ValueEnum as _;
 
         use super::PackageTarget;
+        // Still parsed, so the refusal can say what to use instead.
         assert_eq!(
             PackageTarget::from_str("gpui", false).unwrap(),
             PackageTarget::Gpui
+        );
+        assert!(
+            PackageTarget::Gpui
+                .to_possible_value()
+                .unwrap()
+                .is_hide_set()
         );
         let expected = if cfg!(target_os = "macos") {
             Some(PackageTarget::Macos)
@@ -1019,7 +1046,7 @@ mod tests {
         } else {
             None
         };
-        assert_eq!(PackageTarget::gpui_layout(), expected);
+        assert_eq!(PackageTarget::desktop(), expected);
     }
 
     #[test]

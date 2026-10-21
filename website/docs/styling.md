@@ -10,6 +10,8 @@ demo: guide-styling
 
 Every element takes a `style` prop: an object of camelCase properties, including CSS features such as box shadows, gradients, filters, outlines, transitions and grid. Styles are decoded in Rust and only the properties that changed are sent to the native view. You can also style with [Tailwind classes](./tailwind.md); both resolve to the same native styles.
 
+CSS values (colors, lengths, gradients, filters, shadows, transforms, alignment keywords) mean exactly what they mean in a browser, and each Tailwind utility and variant sets exactly what Tailwind CSS 4 generates for it, so what you know from the web carries over as is. Keys you leave out of a `style` object take the defaults listed below.
+
 ```tsx
 <View
   style={{
@@ -51,6 +53,8 @@ A style expression that reads signals is rebuilt when they change, and NSH sends
 
 When an element has both, `style` wins over `class`: classes are applied first, then the inline style on top. A key set to `undefined` sets nothing (`backgroundColor: active ? accent : undefined` keeps the class color when inactive); `null` sets the default.
 
+Within one style (an object, or an array merged into one), the order of the keys makes no difference. As in React Native, a more specific property wins over its shorthand: `borderTopWidth` over `borderWidth`, `borderLeftColor` over `borderColor`, `marginTop` over `marginVertical` over `margin` (padding alike), `rowGap` over `gap`, `flexGrow` over `flex`, `gridColumnStart` over `gridColumn`. A specific property set to `null` there shows the shorthand's value.
+
 ## Units and values
 
 - **Numbers are points** (density-independent pixels): `width: 100` is 100pt, which is 200 or 300 physical pixels on a 2× or 3× screen.
@@ -66,7 +70,7 @@ NSH's defaults differ from the web's:
 |---|---|
 | `flexDirection` | `"column"` |
 | `flexShrink` | `0` (children do not shrink unless asked) |
-| `alignContent` | `"flex-start"` |
+| `alignContent` | `"flex-start"` (in grids, CSS's `"normal"`) |
 | `position` | `"relative"` |
 | `minWidth` / `minHeight` | `0` |
 | `backgroundColor` | transparent |
@@ -157,7 +161,10 @@ Three ways to cast a shadow:
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
 <View style={{ backgroundImage: "radial-gradient(circle at top left, #fff8c5, #fd8c73)" }} />
 <View style={{ backgroundImage: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }} />
+<View style={{ backgroundImage: "linear-gradient(90deg, #8250df 0 12px, #54aeff 12px)" }} />
 ```
+
+Color stops are placed by percentages or lengths (`px`, `pt`, `rem`; plain numbers are points) along a linear or radial gradient, and by percentages or angles (`deg`, `turn`, `rad`, `grad`) around a conic one. A stop with two positions (`#8250df 0 12px`) is a band of one color. Lengths are measured along the gradient line at the view's current size, so a 12px band stays 12px wide as the view resizes.
 
 `experimental_backgroundImage` is accepted too, as an alias of `backgroundImage`. Text elements do not draw gradients on iOS.
 
@@ -185,7 +192,7 @@ Platform support differs:
 
 ## Outlines, opacity and visibility
 
-- `outlineWidth`, `outlineColor`, `outlineStyle`, `outlineOffset`: a line outside the border that takes no space (negative offsets draw inside).
+- `outlineWidth`, `outlineColor`, `outlineStyle`, `outlineOffset`: a line outside the border that takes no space (negative offsets draw inside). `outlineStyle: "none"` (or `"hidden"`) hides the outline whatever its width, as in CSS.
 - `opacity`: 0 to 1, applied to the view and its children.
 - `visibility: "hidden"`: the view is not drawn but keeps its space. `display: "none"` removes it from layout.
 - `zIndex`: the order among siblings, also the native stacking order (stable for equal values).
@@ -236,7 +243,7 @@ Sizes and positions are layout, not style, and do not transition; animate layout
 
 ### Keyframe animations
 
-`animationName` runs one of Tailwind's built-in keyframe animations natively: `"spin"`, `"ping"`, `"pulse"` or `"bounce"`, with `animationDuration`, `animationDelay`, `animationTimingFunction` and `animationIterationCount` (a number or `"infinite"`):
+`animationName` runs one of Tailwind's built-in keyframe animations natively: `"spin"`, `"ping"`, `"pulse"` or `"bounce"`, with `animationDuration`, `animationDelay`, `animationTimingFunction` and `animationIterationCount` (a number or `"infinite"`), in any order:
 
 ```tsx
 <View style={{ width: 24, height: 24, borderRadius: 4, backgroundColor: "#0969da", animationName: "spin", animationDuration: 1000, animationIterationCount: "infinite", animationTimingFunction: "linear" }} />
@@ -244,12 +251,12 @@ Sizes and positions are layout, not style, and do not transition; animate layout
 
 ## Press feedback
 
-Pressed states are handled natively, without a round trip to JavaScript:
+Press feedback is the app's styles for the pressed state, applied natively without a round trip to JavaScript; `hoverStyle`, `focusStyle` and `disabledStyle` (`hover:`, `focus:`, `disabled:`) style the other states:
 
 | Prop | Effect while pressed |
 |---|---|
-| `activeOpacity={0.6}` | The view fades to this opacity |
-| `underlayColor="#eaeef2"` | The background becomes this color and the children fade to `underlayOpacity` (default 0.85) |
+| `activeStyle={{ opacity: 0.6 }}` | The view fades to this opacity |
+| `activeStyle={{ backgroundColor: "#eaeef2" }}` | The background becomes this color |
 | `android={{ ripple: { color: "#0002" } }}` | Android's material ripple |
 | `class="active:bg-zinc-100 active:scale-95"` | Any style, through Tailwind's `active:` variant |
 

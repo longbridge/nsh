@@ -1,6 +1,6 @@
 ---
 title: Performance
-description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh trace.
+description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh test --trace.
 order: 62
 group: tools
 ---
@@ -17,7 +17,7 @@ rules NSH follows, what they mean for the code you write, and how to measure.
 
 QuickJS is an interpreter: small, quick to start, and much slower than native code for heavy work. So in NSH, **only
 your app's code is JS**. The reactive graph (signals, computed values, effects), the renderer your compiled JSX calls,
-the layout engine, the components of `nsh/ui/mobile`, list virtualization, animation and every module you import are
+the layout engine, list virtualization, animation and every module you import are
 Rust. Parsing, diffing, layout and string processing happen natively.
 
 The effect is measurable. The same counter app on NSH's earlier JS runtime and on the native runtime (release builds):
@@ -30,9 +30,9 @@ The effect is measurable. The same counter app on NSH's earlier JS runtime and o
 | Commit of one tap | ~22 µs | ~15 µs |
 | Scrolling a 1000-row list, JS per rebinding frame | ~150 µs | ~77 µs |
 
-The same holds for components: a `Button` from `nsh/ui/mobile` (Rust) against an equivalent TSX button, 200 of them:
+The same holds for components: a button written as a Rust component against an equivalent TSX button, 200 of them:
 
-| | Rust `Button`: JS / core | TSX button: JS / core |
+| | Rust button: JS / core | TSX button: JS / core |
 |---|---|---|
 | First frame (ops) | 1.32 ms / 0.77 ms (1015) | 2.32 ms / 0.70 ms (2415) |
 | Updating all 200 titles (ops) | 0.42 ms / 0.42 ms (200) | 0.77 ms / 0.36 ms (600) |
@@ -83,7 +83,7 @@ function Price(props: { quote: Accessor<Quote> }) {
   again on each change.
 - Derive values with `computed` when several bindings use them, so they are computed once per change.
 
-Appending a fourth item to a three-item list, as `nsh trace` shows it:
+Appending a fourth item to a three-item list, as `nsh test --trace` shows it:
 
 ```tsx
 {items().map((n) => <Text>{`row ${n}`}</Text>)}                   // 22 mount items: 3 views removed, 4 created
@@ -96,7 +96,7 @@ See [Reactivity](./reactivity.md).
 
 The core sends only what changed: new views get no default style and no empty event mask, unchanged styles and frames
 are not sent, a change of text color does not lay the text out again. A tap that changes one number sends one text
-item. You can see this in `nsh trace` output (below).
+item. You can see this in `nsh test --trace` output (below).
 
 ### 5. Animate natively
 
@@ -145,11 +145,11 @@ frame that binds one new row of the gallery's photo list is 4 operations and 4 m
 
 ## Measuring
 
-### Headless: `nsh trace`
+### Headless: `nsh test --trace`
 
 ```sh
-nsh trace App.tsx                                   # first frame + 2 taps
-nsh trace App.tsx --scroll 3000 --taps 0            # scrolling, 10 pt per frame
+echo 'await app.press("Add")' | nsh test App.tsx --trace                 # first frame + a press
+echo 'await app.scroll("id:feed", 3000)' | nsh test App.tsx --trace       # scrolling, 10 pt per frame
 ```
 
 ```text
@@ -167,7 +167,7 @@ What to look at:
 - **commit**: the core's cost of rendering components, layout and diffing.
 - **list js**: JS spent binding list rows during that commit.
 
-Full guide: [Testing with nsh trace](./testing-and-trace.md).
+Full guide: [Testing](./testing-and-trace.md).
 
 ### On a device: `--trace`
 
@@ -213,11 +213,11 @@ From NSH's own baselines (Apple silicon unless noted):
 - Animations: animated values, not signals written every frame.
 - Scroll effects: `scrollValue`, not `onScroll`.
 - Handlers: no heavy work per keystroke or per scroll event; cache in `computed`.
-- Components: prefer the Rust components of `nsh/ui/mobile` where they fit; they cost less JS than equivalents written
-  in TSX.
+- Components: write the components an app uses most in Rust, in the app's own crate ([Building with Rust](./rust.md)); they cost
+  less JS than equivalents written in TSX.
 
 ## See also
 
 - [Architecture](./architecture.md)
-- [Testing with nsh trace](./testing-and-trace.md)
+- [Testing](./testing-and-trace.md)
 - [Lists](./lists.md), [Animation](./animation.md), [Reactivity](./reactivity.md)

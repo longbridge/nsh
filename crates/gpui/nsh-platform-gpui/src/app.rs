@@ -1,6 +1,6 @@
 //! `AppView` (one surface as a GPUI view, for embedding in any GPUI or
-//! GPUI Kit app) and the standalone app ([`run_app`]: one `AppView`
-//! filling a window).
+//! GPUI Kit app) and the development host's window ([`run_app`]: one
+//! `AppView` filling a window).
 
 use std::{
     cell::RefCell,
@@ -13,9 +13,10 @@ use gpui::{
     App as GpuiApp, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, Styled, Window,
 };
-use nsh_core::{platform::Appearance, ui::ThemeError};
+use nsh_base::{Theme, ThemeError};
+use nsh_core::platform::{Appearance, Locale};
 use nsh_engine::{
-    App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root, Theme,
+    App, AppError, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root,
 };
 
 use crate::{
@@ -60,7 +61,7 @@ fn bind_keys(cx: &mut GpuiApp) {
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/ui/mobile`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -72,10 +73,12 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+        .unwrap_or_else(|| vec![nsh_base::registry()])
 }
 
 /// What [`run_app`] runs.
+// Made once per app and moved into it: the size of a bundle is no cost.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum AppSource {
     /// A Rust app: its root component.
@@ -114,9 +117,8 @@ pub struct AppOptions {
     /// [`AppView::set_fps_monitor`].
     pub fps: bool,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
-    /// embedded in a host app) unless set; the development host and the
-    /// release runner run apps on their own, with
-    /// [`Limits::standalone_desktop`]. See [`AppView::set_limits`].
+    /// embedded in a host app) unless set; the development host runs
+    /// apps on their own, with none ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
     /// Where the apps it runs keep their data, each in `<dir>/<app id>`
     /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the
@@ -164,7 +166,8 @@ impl Default for AppOptions {
 ///   [`AppView::set_appearance`] its light or dark mode.
 /// - What the app tells the embedding app goes through the native
 ///   components the latter registers ([`AppView::register_component`]):
-///   their events and commands. [`AppView::on_error`] hears fatal errors.
+///   their events and commands. [`AppView::on_app_error`] hears the app's
+///   errors.
 /// - The view draws only inside its bounds: the host's overlays (GPUI
 ///   Kit's dialogs, popovers, notifications) draw above it.
 /// - Open the host window with `inactive_frame_interval: None` in its
@@ -264,23 +267,40 @@ impl AppView {
         let options = self.options.borrow();
         let config = EngineConfig {
             app,
-            viewport: nsh_core::Size::new(0.0, 0.0),
+            viewport: nsh_core::Size::default(),
             trace: options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
-            header_heights: crate::navigation::HEADER_HEIGHTS,
+            // NSH draws no header: a page's `header` sits at its top.
+            header_heights: nsh_core::NO_NATIVE_HEADER,
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
+            clock: Default::default(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
         self.surface.start(config);
+    }
+
+    /// Runs a verified signed package ([`crate::verify_package`] or
+    /// [`crate::load_package`], off the main thread: they hash the package
+    /// and write its assets), its assets from where they were unpacked,
+    /// replacing what ran. A package from [`crate::verify_package`] is
+    /// accepted with [`crate::accept_package`] once the embedding app
+    /// decided it is healthy; until then the build it ran before still
+    /// verifies, to go back to.
+    #[cfg(feature = "js")]
+    pub fn run_package(&self, package: &nsh_engine::LoadedPackage) {
+        self.set_asset_base(Some(AssetBase::Directory(package.assets.clone())));
+        self.load(App::Js(package.bundle.clone()));
     }
 
     /// Where `asset:/` URIs resolve: at once for the images, videos and
@@ -328,14 +348,15 @@ impl AppView {
     }
 
     /// Gives the app the embedding app's theme: the components of the UI
-    /// sets (`nsh/ui/mobile`) render with it instead of the app's own
+    /// sets (`nsh/base`, an app's own) render with it instead of the app's own
     /// (`nsh.json` `"theme"`), and the surface is drawn on its
     /// `background`. `None` gives the app its own theme back. It applies
     /// at once to what runs and to every app loaded later, from its first
     /// frame on.
     pub fn set_theme(&self, theme: Option<Theme>, cx: &mut GpuiApp) {
         *self.surface.host_theme.borrow_mut() = theme.clone();
-        self.surface.control(|c| c.set_theme(theme));
+        self.surface
+            .control(|c| c.set_tokens(theme.map(Theme::into_tokens)));
         self.surface.invalidate();
         crate::rt::flush(cx);
     }
@@ -343,7 +364,7 @@ impl AppView {
     /// [`AppView::set_theme`] with a theme in gpui-kit's JSON format
     /// (`{ "themes": [{ "mode": "light", "colors": { … } }, …] }`: a
     /// gpui-kit theme file, or `ThemeConfig`s serialized; null colors are
-    /// left as they are), over nsh's default theme.
+    /// left as they are), over `nsh/base`'s default theme.
     pub fn set_theme_json(&self, json: &str, cx: &mut GpuiApp) -> Result<(), ThemeError> {
         let theme = Theme::from_json(json)?;
         self.set_theme(Some(theme), cx);
@@ -366,6 +387,33 @@ impl AppView {
         crate::rt::flush(cx);
     }
 
+    /// The embedding app's locale, which stands in for the user's: what
+    /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
+    /// Rust components' `locale()` read, at once and for every app loaded
+    /// later. `None` follows the system's again.
+    pub fn set_locale(&self, locale: Option<Locale>, cx: &mut GpuiApp) {
+        let mut host = self.surface.host_environment.get();
+        host.locale = locale;
+        self.surface.host_environment.set(host);
+        crate::system::host_appearance_changed(&self.surface);
+        crate::rt::flush(cx);
+    }
+
+    /// The embedding app's text size relative to the default (1.0), which
+    /// stands in for the user's: every text that allows font scaling (texts,
+    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// at it, and `fontScale()` reads it, at once and for every app loaded
+    /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
+    /// boxes sized by their text grow with it. `None` follows the system's
+    /// again.
+    pub fn set_font_scale(&self, scale: Option<f32>, cx: &mut GpuiApp) {
+        let mut host = self.surface.host_environment.get();
+        host.font_scale = scale;
+        self.surface.host_environment.set(host);
+        crate::system::host_appearance_changed(&self.surface);
+        crate::rt::flush(cx);
+    }
+
     /// Logs the surface's frame statistics once a second (`nsh::perf fps
     /// …`: frames drawn, their gaps, the main thread's tick and paint, what
     /// made GPUI draw), or stops.
@@ -373,11 +421,21 @@ impl AppView {
         *self.surface.stats.borrow_mut() = on.then(Default::default);
     }
 
-    /// Calls `f` with the message of every fatal error of the app (an
-    /// uncaught exception at the start, a VM limit reached), which is also
-    /// logged; replaces the previous handler. A dev session
-    /// ([`AppView::connect_dev_server`]) shows them too.
+    /// Calls `f` with the text (the message and the stack) of every error
+    /// of the app, which is also logged: [`AppView::on_app_error`] with
+    /// [`AppError`]'s text, replacing the handler either set. A dev
+    /// session ([`AppView::connect_dev_server`]) shows them too.
     pub fn on_error(&self, f: impl Fn(&str) + 'static) {
+        self.on_app_error(move |error| f(&error.to_string()));
+    }
+
+    /// Calls `f` with every error of the app, which is also logged: what
+    /// went wrong ([`AppError::kind`]; [`AppError::is_fatal`] when the app
+    /// did not start or its VM stopped, so that no JS of it runs again),
+    /// the message, the stack mapped to the app's sources, and the signed
+    /// package it came from ([`AppError::package`]: its id and build).
+    /// Replaces the handler [`AppView::on_error`] or this set.
+    pub fn on_app_error(&self, f: impl Fn(&AppError) + 'static) {
         self.surface.set_error_handler(Box::new(f));
     }
 
@@ -628,7 +686,7 @@ impl Render for AppView {
 
 fn initial_environment() -> Environment {
     Environment {
-        window: (0.0, 0.0),
+        window: nsh_core::Size::default(),
         color_scheme: ColorScheme::Light,
         os: if cfg!(target_os = "macos") {
             Os::MacOs

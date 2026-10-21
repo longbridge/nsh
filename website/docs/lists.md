@@ -99,11 +99,12 @@ Pass a new array to change the items: `posts.set([...posts(), ...more])`. The li
 | `inverted` | `boolean` | `false` | Item 0 at the bottom (chat); starts at the end and keeps its distance from the end. |
 | `maintainVisibleContentPosition` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content grows (see below). |
 | `stickyHeaderIndices` | `number[]` | | Items that stick to the top while scrolled past (one column, not inverted). |
-| `contentContainerStyle` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
-| `ListHeaderComponent` | component or element | | Before the items. |
-| `ListFooterComponent` | component or element | | After the items. |
-| `ListEmptyComponent` | component or element | | Shown instead of the items while `each` is empty. |
-| `ItemSeparatorComponent` | component or element | | Between items (one column). |
+| `contentStyle` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
+| `contentClass` | `string` | | The same as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
+| `header` | component or element | | Before the items. |
+| `footer` | component or element | | After the items. |
+| `empty` | component or element | | Shown instead of the items while `each` is empty. |
+| `separator` | component or element | | Between items (one column). |
 | `initialScrollIndex` | `number` | | Scrolls to this item before the first frame. |
 | `onEndReached` | `() => void` | | The end is near (see below). |
 | `onEndReachedThreshold` | `number` | `1` | How close to the end, in viewports, `onEndReached` fires. |
@@ -114,11 +115,11 @@ Pass a new array to change the items: `posts.set([...posts(), ...more])`. The li
 | `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `ref` | `YNode` | | `scrollToIndex`, `scrollToOffset`, `scrollToEnd`, `scrollTo`. |
 
-The header, footer and empty slots take a component (`ListHeaderComponent={Header}`) or an element (`ListHeaderComponent={<Header />}`). They are cells of their own, never recycled, and they are reactive like any other JSX.
+The header, footer and empty slots take a component (`header={Header}`) or an element (`header={<Header />}`). They are cells of their own, never recycled, and they are reactive like any other JSX.
 
 ## Columns and grids
 
-`numColumns` lays items out in rows of that many columns; `contentContainerStyle` adds padding around the content and gaps between rows (`rowGap`) and columns (`columnGap`), or both (`gap`). Rows of a grid may have different heights: each row is as tall as its tallest item.
+`numColumns` lays items out in rows of that many columns; `contentStyle` adds padding around the content and gaps between rows (`rowGap`) and columns (`columnGap`), or both (`gap`). Rows of a grid may have different heights: each row is as tall as its tallest item.
 
 ```tsx
 <List
@@ -126,7 +127,7 @@ The header, footer and empty slots take a component (`ListHeaderComponent={Heade
   numColumns={3}
   estimatedItemSize={120}
   style={{ flex: 1 }}
-  contentContainerStyle={{ padding: 12, gap: 8 }}
+  contentStyle={{ padding: 12, gap: 8 }}
 >
   {(photo) => <Image src={photo().thumb} style={{ aspectRatio: 1, borderRadius: 8 }} />}
 </List>
@@ -168,7 +169,7 @@ Because a cell may show a header now and a name later, the row decides what to r
 ```tsx
 import { Input, mount, signal, Text, View } from "nsh";
 import { List } from "nsh/list";
-import { KeyboardAvoidingView } from "nsh/ui/mobile";
+import { KeyboardAvoidingView } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 
@@ -190,7 +191,7 @@ function Chat() {
         inverted
         estimatedItemSize={44}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 12, gap: 6 }}
+        contentStyle={{ padding: 12, gap: 6 }}
         keyboardDismissMode="interactive"
         onEndReached={loadOlder}
         onEndReachedThreshold={0.5}
@@ -213,8 +214,8 @@ function Chat() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8 }}>
         <Input
           value={draft()}
-          onChangeText={(t) => draft.set(t)}
-          onSubmitEditing={send}
+          onChange={(t) => draft.set(t)}
+          onSubmit={send}
           multiline
           submitBehavior="submit"
           returnKeyType="send"
@@ -254,7 +255,7 @@ A list in reading order (oldest first) can follow its end too: with `maintainVis
   decelerationRate="fast"
   showsIndicator={false}
   style={{ height: 140 }}
-  contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+  contentStyle={{ paddingHorizontal: 16, gap: 12 }}
 >
   {(card) => <View style={{ width: 220, height: 140, borderRadius: 14, backgroundColor: card().color }} />}
 </List>
@@ -289,7 +290,7 @@ loadMore();
   style={{ flex: 1 }}
   onEndReached={loadMore}
   onEndReachedThreshold={0.5}
-  ListFooterComponent={<Text style={{ padding: 16, textAlign: "center", color: "#8c959f" }}>Loading…</Text>}
+  footer={<Text style={{ padding: 16, textAlign: "center", color: "#8c959f" }}>Loading…</Text>}
 >
   {(post) => <PostRow post={post()} />}
 </List>
@@ -346,24 +347,51 @@ list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 
 `scrollToIndex` (and `scrollToEnd`) is resolved natively with the sizes known at that moment: measured rows where they have been measured, `estimatedItemSize` elsewhere. The list then follows its target while the rows around it are measured, so it lands exactly, until the user scrolls or the items change. To open a list at an item, use `initialScrollIndex` rather than scrolling after the first frame.
 
-## ListView from nsh/ui/mobile
+## A settings-style list
 
-`ListView` from `nsh/ui/mobile` is a ready-made list built on the same machinery: you pass `each` and render a row, and it adds the padding, dividers and an `inset` grouped look. Use it for settings-style and plain lists that should look like the rest of the mobile UI set; use `List` when you control the whole look. See [ListView](../components/list-view.md).
+The look of a list is the app's own: `List` places and recycles the rows, and the rows, dividers and surfaces are your views. A grouped, settings-style list is a `List` with padding, a separator and rounded first and last rows. Make it a component of your own and use it wherever the app lists settings:
 
 ```tsx
-import { Text } from "nsh";
-import { ListView } from "nsh/ui/mobile";
+import { Text, View } from "nsh";
+import { List } from "nsh/list";
 
-<ListView variant="inset" dividers each={settings} keyExtractor={(s) => s.id}>
-  {(s) => <Text>{s().label}</Text>}
-</ListView>
+type Setting = { id: string; label: string };
+
+function SettingsList(props: { each: Setting[]; onSelect: (s: Setting) => void }) {
+  return (
+    <View class="flex-1 bg-neutral-100 dark:bg-neutral-950">
+      <List
+        each={props.each}
+        estimatedItemSize={48}
+        style={{ flex: 1 }}
+        contentStyle={{ padding: 16 }}
+        separator={() => (
+          <View class="bg-white dark:bg-neutral-900">
+            <View class="ml-4 h-px bg-neutral-200 dark:bg-neutral-800" />
+          </View>
+        )}
+      >
+        {(s, i) => (
+          <View
+            onPress={() => props.onSelect(s())}
+            role="button"
+            class="h-12 justify-center bg-white px-4 active:bg-neutral-200 dark:bg-neutral-900"
+            classList={{ "rounded-t-xl": i() === 0, "rounded-b-xl": i() === props.each.length - 1 }}
+          >
+            <Text>{s().label}</Text>
+          </View>
+        )}
+      </List>
+    </View>
+  );
+}
 ```
 
 ## Performance notes
 
 - Each cell is laid out on its own, so scrolling only lays out the cells that changed. Keep rows shallow and avoid reading signals in rows that change on every frame.
 - The native side asks for cells in batches, up to several rounds per frame, merged into one update; a fast fling binds many cells in one frame without a JS call per cell.
-- Use [`nsh trace --scroll`](./testing-and-trace.md) to measure the per-frame cost of your rows.
+- Use [`nsh test --trace` with a `scroll` step](./testing-and-trace.md#scrolling) to measure the per-frame cost of your rows.
 
 ## Related
 

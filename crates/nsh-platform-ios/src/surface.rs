@@ -7,9 +7,9 @@ use std::{
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
-use nsh_core::{MountBatch, Size};
+use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{
-    App, ColorScheme, Engine, EngineConfig, Environment, Idiom, Insets, MountSink, Policy,
+    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, MountSink, Policy,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -108,6 +108,9 @@ pub(crate) struct RootViewIvars {
     keyboard: Cell<(f32, f32)>,
     /// Last environment sent to the engine.
     environment: Cell<Option<Environment>>,
+    /// The embedding app's locale and text size over the system's
+    /// ([`Surface::set_host_environment`]).
+    host: Cell<nsh_engine::HostEnvironment>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
 }
@@ -130,7 +133,7 @@ define_class!(
                 return;
             }
             self.ivars().size.set(size);
-            let viewport = Size::new(size.width as f32, size.height as f32);
+            let viewport = Size::new(Points(size.width as f32), Points(size.height as f32));
             if let Some(running) = self.ivars().running.borrow().as_ref() {
                 running.engine.control().resize(viewport);
                 self.publish_environment();
@@ -174,6 +177,7 @@ impl RootView {
             on_hot_failed: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             keyboard: Cell::new((0.0, 0.25)),
             environment: Cell::new(None),
+            host: Cell::default(),
             observers: RefCell::new(Vec::new()),
         });
         // SAFETY: UIView's designated initializer.
@@ -194,17 +198,17 @@ impl RootView {
                 traits.displayScale(),
             )
         };
-        Environment {
-            window: (size.width as f32, size.height as f32),
-            safe_area: Insets {
-                top: insets.top as f32,
-                right: insets.right as f32,
-                bottom: insets.bottom as f32,
-                left: insets.left as f32,
+        let mut env = Environment {
+            window: Size::new(Points(size.width as f32), Points(size.height as f32)),
+            safe_area: Edges {
+                top: Points(insets.top as f32),
+                right: Points(insets.right as f32),
+                bottom: Points(insets.bottom as f32),
+                left: Points(insets.left as f32),
             },
             // UIKit draws no title bar an app could hide.
-            title_bar: Insets::default(),
-            keyboard_height,
+            title_bar: Edges::default(),
+            keyboard_height: Points(keyboard_height),
             keyboard_duration,
             color_scheme: if style == UIUserInterfaceStyle::Dark {
                 ColorScheme::Dark
@@ -228,7 +232,10 @@ impl RootView {
             locale: current_locale(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
-        }
+        };
+        // The embedding app's settings over the system's.
+        self.ivars().host.get().apply(&mut env);
+        env
     }
 
     /// Sends the environment to the engine if it changed.
@@ -370,7 +377,7 @@ impl RootView {
         }
     }
 
-    fn start(&self, mut app: App, viewport: Size) {
+    fn start(&self, mut app: App, viewport: Size<Points>) {
         let mtm = self.mtm();
         let access = Arc::new(match &mut app {
             App::Js(bundle) => {
@@ -388,6 +395,8 @@ impl RootView {
             viewport,
             trace: self.ivars().options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(crate::image::AssetReader(
                 self.ivars().options.asset_base.clone(),
             ))),
@@ -400,6 +409,7 @@ impl RootView {
             storage: self.ivars().options.storage.as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
+            clock: Default::default(),
         };
         let sink = MainThreadSink {
             mounter: mounter.clone(),
@@ -443,13 +453,13 @@ impl RootView {
 
 /// Height of a navigation bar (status bar excluded), normal and with a
 /// large title, as UIKit lays them out on this device.
-fn header_heights(mtm: MainThreadMarker) -> (f32, f32) {
+fn header_heights(mtm: MainThreadMarker) -> (Points, Points) {
     let bar = objc2_ui_kit::UINavigationBar::new(mtm);
     crate::navigation::keep_in_window(&bar);
     let normal = bar.sizeThatFits(CGSize::new(390.0, 0.0)).height as f32;
     let normal = if normal > 0.0 { normal } else { 44.0 };
     // Large titles add a 52pt row below the bar.
-    (normal, normal + 52.0)
+    (Points(normal), Points(normal + 52.0))
 }
 
 /// Options of a [`Surface`].
@@ -562,14 +572,24 @@ impl Surface {
             .borrow_mut() = Some(Box::new(handler));
     }
 
+    /// The embedding app's locale and text size, standing in for the
+    /// system's: sent to the running app at once, and to every app started
+    /// later.
+    pub fn set_host_environment(&self, host: nsh_engine::HostEnvironment) {
+        self.view.ivars().host.set(host);
+        self.view.publish_environment();
+    }
+
     /// Replaces the running app with `app` (state is reset).
     pub fn reload(&self, app: impl Into<App>) {
         let app = app.into();
         self.view.stop();
         let size = self.view.ivars().size.get();
         if size.width > 0.0 && size.height > 0.0 {
-            self.view
-                .start(app, Size::new(size.width as f32, size.height as f32));
+            self.view.start(
+                app,
+                Size::new(Points(size.width as f32), Points(size.height as f32)),
+            );
         } else {
             *self.view.ivars().pending.borrow_mut() = Some(app);
         }

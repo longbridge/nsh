@@ -18,7 +18,7 @@ the app with the host and rebuilds it when a file under `app/` changes. Everythi
 name when it runs the app.
 
 - **The host's functions.** `src/trading.rs` is the host's paper-trading desk (sample prices; no order leaves the
-  process), registered as the UI set `host/trading` with `set_ui_sets`, next to NSH's `nsh/ui/mobile`. The app
+  process), registered as the UI set `host/trading` with `set_ui_sets`, next to NSH's `nsh/base`. The app
   declares its type and reaches it with `nativeModule<{ Trading: TradingApi }>("host/trading")`: `Trading.quote`,
   `Trading.select` and `Trading.placeOrder` run in Rust in the call (a wrong order throws, and the ticket shows the
   message), `Trading.subscribe` is `async`.

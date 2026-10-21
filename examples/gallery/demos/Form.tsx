@@ -1,9 +1,9 @@
 import { effect, Input, type InputProps, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh/animated";
-import { Keyboard, keyboard, KeyboardAvoidingView, Modal, SafeAreaView, Screen, useSafeAreaInsets } from "nsh/ui/mobile";
+import { Keyboard, keyboardFrame, Dialog, KeyboardAvoidingView, NavPage, SafeAreaView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, Press, radius, RoundButton, Section, Segmented, tints, type Tone, toneColor } from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, tints, type Tone, toneColor } from "../ui";
 
 /**
  * A labelled input (`api` names the prop it shows, `hint` is a plain note):
@@ -44,20 +44,18 @@ function Field(
           borderRadius: radius.control,
           borderCurve: "continuous",
           borderWidth: 1,
-          borderColor: own.error ? colors.danger : props.editable === false ? colors.line : colors.border,
+          borderColor: own.error ? colors.danger : props.readonly ? colors.line : colors.border,
           backgroundColor: colors.inset,
           // Recessed while editable; a read-only field lies flat.
-          ...(props.editable === false ? {} : finish.inset),
+          ...(props.readonly ? {} : finish.inset),
         }}
       >
         <If when={own.prefix}>
           <Text style={{ paddingLeft: 14, fontSize: 15, color: colors.muted }}>{own.prefix}</Text>
         </If>
         <Input
-          placeholderTextColor={colors.faint}
-          selectionColor={colors.accent}
           returnKeyType={own.next ? "next" : "done"}
-          onSubmitEditing={() => own.next?.()?.focus()}
+          onSubmit={() => own.next?.()?.focus()}
           onFocus={() => {
             focus.timing(1, { duration: 160 });
             own.onFocus?.();
@@ -67,7 +65,7 @@ function Field(
             own.onBlur?.();
           }}
           {...input}
-          style={[{ flex: 1, paddingHorizontal: 14, fontSize: 15, color: props.editable === false ? colors.muted : colors.text, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
+          style={[{ flex: 1, paddingHorizontal: 14, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
         />
         <View
           pointerEvents="none"
@@ -200,7 +198,7 @@ export function Form() {
             icon="form"
             title="Keyboard"
             subtitle="keyboardDismissMode while dragging"
-            right={<Badge label={`${Math.round(keyboard().height)} pt`} tone={keyboard().height > 0 ? "accent" : "neutral"} />}
+            right={<Badge label={`${Math.round(keyboardFrame().height)} pt`} tone={keyboardFrame().height > 0 ? "accent" : "neutral"} />}
           >
             <Segmented options={modes} value={mode()} onChange={(m) => mode.set(m)} />
             <Caption label={hint("Drag the form with the keyboard up", "Desktops have no on-screen keyboard to dismiss")} note={mode()} />
@@ -213,7 +211,7 @@ export function Form() {
               next={next(0)}
               label="Name"
               value={name()}
-              onChangeText={(v) => name.set(v)}
+              onChange={(v) => name.set(v)}
               onBlur={touch("name")}
               error={nameError()}
               autoCapitalize="words"
@@ -226,7 +224,7 @@ export function Form() {
               label="E-mail"
               api="email-address"
               value={email()}
-              onChangeText={(v) => email.set(v)}
+              onChange={(v) => email.set(v)}
               onBlur={touch("email")}
               error={emailError()}
               keyboardType="email-address"
@@ -240,15 +238,15 @@ export function Form() {
                 ref={ref(2)}
                 next={next(2)}
                 label="Password"
-                api="secureTextEntry"
+                api="masked"
                 value={password()}
-                onChangeText={(v) => {
+                onChange={(v) => {
                   if (strength(v) !== score()) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                   password.set(v);
                 }}
                 onBlur={touch("password")}
                 error={passwordError()}
-                secureTextEntry
+                masked
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
               />
@@ -292,9 +290,10 @@ export function Form() {
               ref={ref(7)}
               next={next(7)}
               label="Verification code"
+              testID="code"
               hint={`${code().length}/6`}
               value={code()}
-              onChangeText={(v) => code.set(v)}
+              onChange={(v) => code.set(v)}
               keyboardType="number-pad"
               maxLength={6}
               placeholder="······"
@@ -323,20 +322,20 @@ export function Form() {
               ref={ref(12)}
               next={next(12)}
               label="Controlled"
+              testID="shout"
               hint="Uppercased as you type"
               value={shout()}
-              onChangeText={(t) => shout.set(t.toUpperCase())}
+              onChange={(t) => shout.set(t.toUpperCase())}
               placeholder="TYPE IN LOWER CASE"
             />
-            <Field label="Read only" api="editable={false}" value="Not editable" editable={false} />
+            <Field label="Read only" api="readonly" value="Not editable" readonly />
             <Field
               ref={ref(13)}
               next={next(13)}
               label="Custom colors"
-              api="selectionColor"
+              api="placeholderColor, selectionColor"
               placeholder="A blue placeholder, an amber selection"
-              placeholderTextColor={colors.info}
-              selectionColor={colors.warn}
+              style={{ placeholderColor: colors.info, selectionColor: colors.warn }}
             />
             <View style={{ gap: 8 }}>
               <Field
@@ -346,7 +345,7 @@ export function Form() {
                 multiline
                 maxLength={280}
                 value={notes()}
-                onChangeText={(v) => notes.set(v)}
+                onChange={(v) => notes.set(v)}
                 placeholder="Return adds a line"
                 style={{ minHeight: 100 }}
               />
@@ -387,19 +386,14 @@ export function Form() {
         () => (
           <Card title="More keyboards" subtitle="Sheets and bars that ride on the keyboard" flush>
             <Inset padding={0} gap={0}>
-              <LinkRow first icon="components" title="Inputs in a sheet" note='presentationStyle="pageSheet"' onPress={() => sheet.set(true)} />
+              <LinkRow first icon="components" title="Inputs in a sheet" note='presentation="pageSheet"' onPress={() => sheet.set(true)} />
               <LinkRow icon="text" title="A message bar at the bottom" note="KeyboardAvoidingView" onPress={() => nav.push({ name: "page", page: MessageBar })} />
             </Inset>
           </Card>
         ),
       ]}
     >
-      <Modal
-        visible={sheet()}
-        ios={{ presentationStyle: "pageSheet" }}
-        desktop={{ presentationStyle: "pageSheet" }}
-        onRequestClose={() => sheet.set(false)}
-      >
+      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
             <View style={{ padding: 16, paddingBottom: 40, gap: 16 }}>
@@ -418,7 +412,7 @@ export function Form() {
             </View>
           </Scroll>
         </SafeAreaView>
-      </Modal>
+      </Dialog>
     </DemoPage>
   );
 }
@@ -446,7 +440,7 @@ type Message = { mine: boolean; text: string };
 
 /** An input pinned to the bottom (outside any scroll view): it rides on the keyboard. */
 function MessageBar() {
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   const messages = signal<Message[]>([
     { mine: false, text: "The bar below sits outside the scroll view." },
     { mine: false, text: "KeyboardAvoidingView lifts it with the keyboard. Say something." },
@@ -458,7 +452,7 @@ function MessageBar() {
     draft.set("");
   };
   return (
-    <Screen title="Message bar" {...header}>
+    <NavPage title="Message bar" {...header} header={<PageHeader title="Message bar" />}>
       <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }}>
         <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
           <View style={{ padding: 16, gap: 8 }}>
@@ -495,7 +489,7 @@ function MessageBar() {
             paddingHorizontal: 16,
             paddingTop: 8,
             // Above the home indicator, unless the keyboard covers it.
-            paddingBottom: 8 + (keyboard().height > 0 ? 0 : insets().bottom),
+            paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom),
             backgroundColor: colors.surface,
             borderTopWidth: 1,
             borderTopColor: colors.border,
@@ -503,14 +497,14 @@ function MessageBar() {
         >
           <Input
             value={draft()}
-            onChangeText={(v) => draft.set(v)}
-            onSubmitEditing={send}
-            blurOnSubmit={false}
+            onChange={(v) => draft.set(v)}
+            onSubmit={send}
+            submitBehavior="submit"
             placeholder="Message"
-            placeholderTextColor={colors.faint}
-            selectionColor={colors.accent}
             returnKeyType="send"
             style={{
+              placeholderColor: colors.faint,
+              selectionColor: colors.accent,
               flex: 1,
               height: 44,
               paddingHorizontal: 16,
@@ -526,11 +520,11 @@ function MessageBar() {
           <RoundButton icon="arrow-up" label="Send" onPress={send} />
         </View>
       </KeyboardAvoidingView>
-    </Screen>
+    </NavPage>
   );
 }
 
-/** `onSelectionChange`, `onKeyPress`, `selection` and `(v) => selection.set(v)`. */
+/** `onSelectionChange`, `onKeyPress`, `selectedRange` and `(v) => selection.set(v)`. */
 function SelectionDemo() {
   const text = signal("Select part of this text");
   const range = signal({ start: 0, end: 0 });
@@ -544,8 +538,8 @@ function SelectionDemo() {
         label="Text"
         hint={`${range().start}–${range().end}`}
         value={text()}
-        onChangeText={(v) => text.set(v)}
-        selection={selection()}
+        onChange={(v) => text.set(v)}
+        selectedRange={selection()}
         onSelectionChange={(v) => range.set(v)}
         onKeyPress={(e) => keys.update((k) => [...k, e.key].slice(-8))}
         autoComplete="off"

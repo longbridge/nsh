@@ -10,6 +10,8 @@ demo: guide-styling
 
 每个元素都接受 `style` 属性：一个由 camelCase 属性组成的对象，包括盒阴影、渐变、滤镜、轮廓线、过渡和 grid 等 CSS 能力。样式在 Rust 中解析，只有变化了的属性才会发送给原生视图。你也可以用 [Tailwind 类名](./tailwind.md)设置样式，两者最终得到的是相同的原生样式。
 
+CSS 值（颜色、长度、渐变、滤镜、阴影、变换、对齐关键字）的含义与浏览器中完全相同，每个 Tailwind 工具类和变体设置的值也与 Tailwind CSS 4 生成的完全相同，因此你在 Web 上的经验可以直接沿用。`style` 对象中未写出的属性取下文列出的默认值。
+
 ```tsx
 <View
   style={{
@@ -51,6 +53,8 @@ const styles = {
 
 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）；`null` 则设为默认值。
 
+在同一个样式中（一个对象，或合并成一个对象的数组），键的顺序不影响结果。与 React Native 一样，更具体的属性优先于它的简写：`borderTopWidth` 优先于 `borderWidth`，`borderLeftColor` 优先于 `borderColor`，`marginTop` 优先于 `marginVertical`、再优先于 `margin`（padding 同理），`rowGap` 优先于 `gap`，`flexGrow` 优先于 `flex`，`gridColumnStart` 优先于 `gridColumn`。在其中把具体属性设为 `null` 时，显示简写的值。
+
 ## 单位与取值
 
 - **数字的单位是点**（与密度无关的像素）：`width: 100` 是 100pt，在 2× 或 3× 屏幕上分别是 200 或 300 个物理像素。
@@ -66,7 +70,7 @@ NSH 的默认值与 Web 不同：
 |---|---|
 | `flexDirection` | `"column"` |
 | `flexShrink` | `0`（子视图不会收缩，除非显式要求） |
-| `alignContent` | `"flex-start"` |
+| `alignContent` | `"flex-start"`（网格中为 CSS 的 `"normal"`） |
 | `position` | `"relative"` |
 | `minWidth` / `minHeight` | `0` |
 | `backgroundColor` | 透明 |
@@ -157,7 +161,10 @@ const palette = () =>
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
 <View style={{ backgroundImage: "radial-gradient(circle at top left, #fff8c5, #fd8c73)" }} />
 <View style={{ backgroundImage: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }} />
+<View style={{ backgroundImage: "linear-gradient(90deg, #8250df 0 12px, #54aeff 12px)" }} />
 ```
+
+线性和径向渐变的色标位置可以是百分比或长度（`px`、`pt`、`rem`；纯数字表示点），锥形渐变的色标位置可以是百分比或角度（`deg`、`turn`、`rad`、`grad`）。带两个位置的色标（`#8250df 0 12px`）是一段纯色。长度沿视图当前尺寸下的渐变线计算，因此视图尺寸变化时，12px 的色带始终是 12px 宽。
 
 也接受 `experimental_backgroundImage`，它是 `backgroundImage` 的别名。在 iOS 上，文本元素不绘制渐变。
 
@@ -185,7 +192,7 @@ const palette = () =>
 
 ## 轮廓线、不透明度与可见性
 
-- `outlineWidth`、`outlineColor`、`outlineStyle`、`outlineOffset`：边框之外、不占空间的一条线（负偏移会画在内侧）。
+- `outlineWidth`、`outlineColor`、`outlineStyle`、`outlineOffset`：边框之外、不占空间的一条线（负偏移会画在内侧）。与 CSS 一样，`outlineStyle: "none"`（或 `"hidden"`）会隐藏轮廓，无论宽度是多少。
 - `opacity`：0 到 1，作用于视图及其子视图。
 - `visibility: "hidden"`：视图不绘制，但保留所占空间。`display: "none"` 则将它移出布局。
 - `zIndex`：在兄弟视图中的顺序，也是原生的层叠顺序（值相同时保持稳定）。
@@ -236,7 +243,7 @@ Android 不支持斜切（skew）变换。
 
 ### 关键帧动画
 
-`animationName` 以原生方式运行 Tailwind 内置的关键帧动画之一：`"spin"`、`"ping"`、`"pulse"` 或 `"bounce"`，配合 `animationDuration`、`animationDelay`、`animationTimingFunction` 和 `animationIterationCount`（数字或 `"infinite"`）：
+`animationName` 以原生方式运行 Tailwind 内置的关键帧动画之一：`"spin"`、`"ping"`、`"pulse"` 或 `"bounce"`，配合 `animationDuration`、`animationDelay`、`animationTimingFunction` 和 `animationIterationCount`（数字或 `"infinite"`），顺序不限：
 
 ```tsx
 <View style={{ width: 24, height: 24, borderRadius: 4, backgroundColor: "#0969da", animationName: "spin", animationDuration: 1000, animationIterationCount: "infinite", animationTimingFunction: "linear" }} />
@@ -244,12 +251,12 @@ Android 不支持斜切（skew）变换。
 
 ## 按压反馈
 
-按下状态由原生处理，无需与 JavaScript 往返：
+按压反馈是应用为按下状态设置的样式，由原生应用，无需与 JavaScript 往返；`hoverStyle`、`focusStyle` 和 `disabledStyle`（`hover:`、`focus:`、`disabled:`）设置其他状态的样式：
 
 | 属性 | 按下时的效果 |
 |---|---|
-| `activeOpacity={0.6}` | 视图淡化到该不透明度 |
-| `underlayColor="#eaeef2"` | 背景变为该颜色，子视图淡化到 `underlayOpacity`（默认 0.85） |
+| `activeStyle={{ opacity: 0.6 }}` | 视图淡化到该不透明度 |
+| `activeStyle={{ backgroundColor: "#eaeef2" }}` | 背景变为该颜色 |
 | `android={{ ripple: { color: "#0002" } }}` | Android 的 Material 水波纹 |
 | `class="active:bg-zinc-100 active:scale-95"` | 通过 Tailwind 的 `active:` 变体设置任意样式 |
 

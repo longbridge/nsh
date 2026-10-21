@@ -17,10 +17,13 @@ default = ["js", "webview"]
 # Rust app and links no QuickJS.
 js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
-dev = ["js", "dep:nsh-dev"]
+dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
 # `shot` script steps on macOS and Windows: GPUI renders the window's
 # frame offscreen (its `test-support`; development hosts only).
 shot = ["gpui/test-support", "gpui_platform/test-support"]
+# Compile GPUI's Metal shaders at run time (macOS), so building needs no Metal
+# Toolchain (`xcodebuild -downloadComponent MetalToolchain`).
+runtime-shaders = ["gpui_platform/runtime_shaders"]
 # Web views (wry; on Linux GTK 3 and WebKitGTK 4.1, on an X11 window).
 webview = ["dep:wry", "dep:gtk", "dep:webkit2gtk"]
 # Videos (GStreamer 1.20+ with its base and good plug-ins; libav for most
@@ -33,9 +36,8 @@ log.workspace = true
 # Empty off the desktop (like the other platform crates off their targets).
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 nsh-core.workspace = true
-nsh-animation.workspace = true
 nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 image = { workspace = true, features = ["gif", "webp", "jpeg", "bmp", "ico", "tiff"] }
@@ -53,6 +55,7 @@ crossbeam-channel.workspace = true
 futures-channel.workspace = true
 futures-util.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
+nsh-testing = { workspace = true, features = ["agent"], optional = true }
 wry = { workspace = true, optional = true }
 gstreamer = { workspace = true, optional = true }
 gstreamer-app = { workspace = true, optional = true }

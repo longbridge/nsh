@@ -19,8 +19,8 @@ function App() {
       <View style={{ flexDirection: "row", gap: 12 }}>
         <View
           onPress={() => change(-1)}
-          activeOpacity={0.6}
-          accessibilityRole="button"
+          activeStyle={{ opacity: 0.6 }}
+          role="button"
           style={{
             paddingHorizontal: 20,
             paddingVertical: 12,
@@ -32,8 +32,8 @@ function App() {
         </View>
         <View
           onPress={() => change(1)}
-          activeOpacity={0.6}
-          accessibilityRole="button"
+          activeStyle={{ opacity: 0.6 }}
+          role="button"
           style={{
             paddingHorizontal: 20,
             paddingVertical: 12,

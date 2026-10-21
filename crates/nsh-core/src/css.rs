@@ -74,11 +74,11 @@ pub(crate) fn length(s: &str) -> Option<f32> {
     number(s)
 }
 
-/// A length or a percentage: `Ok(points)` or `Err(fraction)`.
-pub(crate) fn length_or_percent(s: &str) -> Option<Result<f32, f32>> {
+/// A length (in points) or a percentage (a fraction).
+pub(crate) fn length_or_percent(s: &str) -> Option<DefiniteLength> {
     match s.trim().strip_suffix('%') {
-        Some(p) => number(p).map(|p| Err(p / 100.0)),
-        None => length(s).map(Ok),
+        Some(p) => number(p).map(|p| percentage(p / 100.0).into()),
+        None => length(s).map(|l| px(l).into()),
     }
 }
 
@@ -219,10 +219,8 @@ fn hsl(args: &str) -> Option<Color> {
         number(s.strip_suffix('%').unwrap_or(s)).map(|v| (v / 100.0).clamp(0.0, 1.0))
     };
     let (s, l) = (pct(c[1])?, pct(c[2])?);
-    let k = |n: f32| (n + h / 30.0) % 12.0;
-    let q = s * l.min(1.0 - l);
-    let f = |n: f32| l - q * (k(n) - 3.0).min(9.0 - k(n)).clamp(-1.0, 1.0);
-    Some(from_unit(f(0.0), f(8.0), f(4.0), a))
+    let (r, g, b) = crate::color::hsl_to_rgb(h, s, l);
+    Some(from_unit(r, g, b, a))
 }
 
 /// `oklch(L C H)` (`polar`) or `oklab(L a b)`, to sRGB with clamped
@@ -257,26 +255,12 @@ fn oklab(args: &str, polar: bool) -> Option<Color> {
 
 /// OKLab to sRGB (Björn Ottosson's matrices).
 pub(crate) fn oklab_to_color(l: f32, a: f32, b: f32, alpha: f32) -> Color {
-    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
-    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
-    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
-    let (l3, m3, s3) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
-    let r = 4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3;
-    let g = -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3;
-    let bl = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
-    let gamma = |x: f32| {
-        let x = x.clamp(0.0, 1.0);
-        if x <= 0.003_130_8 {
-            12.92 * x
-        } else {
-            1.055 * x.powf(1.0 / 2.4) - 0.055
-        }
-    };
-    from_unit(gamma(r), gamma(g), gamma(bl), alpha)
+    let (r, g, b) = crate::color::oklab_to_rgb(l, a, b);
+    from_unit(r, g, b, alpha)
 }
 
 fn from_unit(r: f32, g: f32, b: f32, a: f32) -> Color {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    use crate::color::byte;
     Color::rgba(byte(r), byte(g), byte(b), byte(a))
 }
 
@@ -290,7 +274,10 @@ impl Color {
 
 // --- Shadows, gradients, filters --------------------------------------------
 
-use crate::effects::{BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize};
+use crate::{
+    effects::{BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize},
+    geometry::{DefiniteLength, Percentage, deg, percentage, px},
+};
 
 /// A `box-shadow` list (`none` is empty).
 pub(crate) fn box_shadows(s: &str) -> Option<Vec<BoxShadow>> {
@@ -323,11 +310,13 @@ pub(crate) fn box_shadow(s: &str) -> Option<BoxShadow> {
         }
     }
     match lengths.as_slice() {
-        [x, y] => (shadow.offset_x, shadow.offset_y) = (*x, *y),
-        [x, y, blur] => (shadow.offset_x, shadow.offset_y, shadow.blur) = (*x, *y, blur.max(0.0)),
+        [x, y] => (shadow.offset_x, shadow.offset_y) = (px(*x), px(*y)),
+        [x, y, blur] => {
+            (shadow.offset_x, shadow.offset_y, shadow.blur) = (px(*x), px(*y), px(blur.max(0.0)))
+        }
         [x, y, blur, spread] => {
             (shadow.offset_x, shadow.offset_y, shadow.blur, shadow.spread) =
-                (*x, *y, blur.max(0.0), *spread)
+                (px(*x), px(*y), px(blur.max(0.0)), px(*spread))
         }
         _ => return None,
     }
@@ -357,17 +346,17 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     let parts = split_top(args, ',');
     let mut parts = parts.as_slice();
     let mut kind = match base {
-        "linear-gradient" => GradientKind::Linear { angle: 180.0 },
+        "linear-gradient" => GradientKind::Linear { angle: deg(180.0) },
         "radial-gradient" => GradientKind::Radial {
             circle: false,
             size: GradientSize::FarthestCorner,
-            x: 0.5,
-            y: 0.5,
+            x: percentage(0.5),
+            y: percentage(0.5),
         },
         "conic-gradient" => GradientKind::Conic {
-            from: 0.0,
-            x: 0.5,
-            y: 0.5,
+            from: deg(0.0),
+            x: percentage(0.5),
+            y: percentage(0.5),
         },
         _ => return None,
     };
@@ -377,31 +366,28 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     {
         parts = &parts[1..];
     }
+    let conic = matches!(kind, GradientKind::Conic { .. });
     let mut stops = Vec::with_capacity(parts.len());
     for part in parts {
         let w = words(part);
         let (c, positions) = w.split_first()?;
-        let c = color(c)?;
-        let mut pos = positions.iter().map(|p| amount_or_length(p));
-        match (pos.next(), pos.next()) {
-            (None, _) => stops.push(ColorStop {
-                color: c,
+        let color = color(c)?;
+        // A stop takes up to two positions (`red 0 10px`: a band of one
+        // color).
+        if positions.len() > 2 {
+            return None;
+        }
+        if positions.is_empty() {
+            stops.push(ColorStop {
+                color,
                 position: None,
-            }),
-            (Some(p), None) => stops.push(ColorStop {
-                color: c,
-                position: Some(p?),
-            }),
-            (Some(a), Some(b)) => {
-                stops.push(ColorStop {
-                    color: c,
-                    position: Some(a?),
-                });
-                stops.push(ColorStop {
-                    color: c,
-                    position: Some(b?),
-                });
-            }
+            });
+        }
+        for p in positions {
+            stops.push(ColorStop {
+                color,
+                position: Some(stop_position(p, conic)?),
+            });
         }
     }
     if stops.is_empty() {
@@ -418,12 +404,27 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     })
 }
 
-/// A stop position as a fraction (`50%`); lengths are not supported along
-/// a gradient line, so `0` is the only length taken.
-fn amount_or_length(s: &str) -> Option<f32> {
-    match s.trim().strip_suffix('%') {
-        Some(p) => number(p).map(|p| p / 100.0),
-        None => number(s).filter(|&n| n == 0.0),
+/// A stop's position: a percentage, or a length along a linear or radial
+/// gradient's line (`10px`, `1rem`; resolved against the box when it is
+/// drawn), or an angle around a conic one (`90deg`, `0.25turn`, as a
+/// fraction of a turn).
+fn stop_position(s: &str, conic: bool) -> Option<DefiniteLength> {
+    let s = s.trim();
+    if let Some(p) = s.strip_suffix('%') {
+        return number(p).map(|p| percentage(p / 100.0).into());
+    }
+    if conic {
+        angle(s).map(|a| percentage(a / 360.0).into())
+    } else {
+        // A zero length is the line's start whatever its length, as
+        // before lengths were taken.
+        length(s).map(|l| {
+            if l == 0.0 {
+                percentage(0.0).into()
+            } else {
+                px(l).into()
+            }
+        })
     }
 }
 
@@ -459,10 +460,10 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                     }
                 }
                 *kind = match (h as i8, v as i8) {
-                    (0, -1) => GradientKind::Linear { angle: 0.0 },
-                    (1, 0) => GradientKind::Linear { angle: 90.0 },
-                    (0, 1) => GradientKind::Linear { angle: 180.0 },
-                    (-1, 0) => GradientKind::Linear { angle: 270.0 },
+                    (0, -1) => GradientKind::Linear { angle: deg(0.0) },
+                    (1, 0) => GradientKind::Linear { angle: deg(90.0) },
+                    (0, 1) => GradientKind::Linear { angle: deg(180.0) },
+                    (-1, 0) => GradientKind::Linear { angle: deg(270.0) },
                     (0, 0) => return false,
                     // A corner: the angle depends on the box's shape.
                     (h, v) => GradientKind::LinearCorner {
@@ -471,8 +472,8 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                     },
                 };
                 true
-            } else if let Some(deg) = angle(w[0]) {
-                *kind = GradientKind::Linear { angle: deg };
+            } else if let Some(a) = angle(w[0]) {
+                *kind = GradientKind::Linear { angle: deg(a) };
                 true
             } else {
                 false
@@ -493,7 +494,7 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                         let Some((px, py)) = position(&w[i + 1..]) else {
                             return false;
                         };
-                        (*x, *y) = (px, py);
+                        (*x, *y) = (Percentage(px), Percentage(py));
                         return true;
                     }
                     _ => return any,
@@ -512,14 +513,14 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                         let Some(a) = w.get(i + 1).and_then(|s| angle(s)) else {
                             return false;
                         };
-                        *from = a;
+                        *from = deg(a);
                         i += 2;
                     }
                     "at" => {
                         let Some((px, py)) = position(&w[i + 1..]) else {
                             return false;
                         };
-                        (*x, *y) = (px, py);
+                        (*x, *y) = (Percentage(px), Percentage(py));
                         return true;
                     }
                     _ => return any,
@@ -575,11 +576,11 @@ fn filter(s: &str) -> Option<Filter> {
         }
     };
     Some(match name {
-        "blur" => Filter::Blur(if arg.is_empty() { 0.0 } else { length(arg)? }),
+        "blur" => Filter::Blur(px(if arg.is_empty() { 0.0 } else { length(arg)? })),
         "brightness" => Filter::Brightness(factor(1.0)?),
         "contrast" => Filter::Contrast(factor(1.0)?),
         "grayscale" => Filter::Grayscale(factor(1.0)?.clamp(0.0, 1.0)),
-        "hue-rotate" => Filter::HueRotate(if arg.is_empty() { 0.0 } else { angle(arg)? }),
+        "hue-rotate" => Filter::HueRotate(deg(if arg.is_empty() { 0.0 } else { angle(arg)? })),
         "invert" => Filter::Invert(factor(1.0)?.clamp(0.0, 1.0)),
         "opacity" => Filter::Opacity(factor(1.0)?.clamp(0.0, 1.0)),
         "saturate" => Filter::Saturate(factor(1.0)?),
@@ -600,6 +601,53 @@ fn filter(s: &str) -> Option<Filter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The packed values CSS colors had before the Rust API took `Hsla`
+    /// (`crate::color`): TSX apps render as they did.
+    #[test]
+    fn css_colors_keep_their_packed_values() {
+        for (css, packed) in [
+            ("#fff", 0xffffffff),
+            ("#0000", 0x00000000),
+            ("#1a2b3c", 0x1a2b3cff),
+            ("#1a2b3c80", 0x1a2b3c80),
+            ("rgb(255, 0, 10)", 0xff000aff),
+            ("rgb(0 0 0 / 0.1)", 0x0000001a),
+            ("rgba(0,0,0,0.5)", 0x00000080),
+            ("rgb(50% 25% 12.5%)", 0x804020ff),
+            ("rgb(12.7 200.4 99.5)", 0x0dc864ff),
+            ("hsl(0 100% 50%)", 0xff0000ff),
+            ("hsl(120, 100%, 25%)", 0x008000ff),
+            ("hsl(240 100% 50%)", 0x0000ffff),
+            ("hsl(200 50% 50%)", 0x4095bfff),
+            ("hsl(30 80% 60% / 0.4)", 0xeb994766),
+            ("hsl(-30 80% 60%)", 0xeb4799ff),
+            ("hsl(390 80% 60%)", 0xeb9947ff),
+            ("hsl(0.5turn 33% 77%)", 0xb1d8d8ff),
+            ("hsl(1rad 20% 30%)", 0x5c5a3dff),
+            ("hsla(210, 40%, 96%, 0.85)", 0xf1f5f9d9),
+            ("hsl(359.9 100% 50%)", 0xff0000ff),
+            ("hsl(17 3% 97%)", 0xf8f7f7ff),
+            ("hsl(222.2 84% 4.9%)", 0x020817ff),
+            ("hsl(217.2 91.2% 59.8%)", 0x3b82f6ff),
+            ("hsl(0 0% 50%)", 0x808080ff),
+            ("hsl(60 100% 100%)", 0xffffffff),
+            ("hsl(300 76% 72%)", 0xee81eeff),
+            ("hsl(45deg 93% 47%)", 0xe7b008ff),
+            ("hsl(160 84% 39% / 50%)", 0x10b77f80),
+            ("oklch(62.3% 0.214 259.815)", 0x2b7fffff),
+            ("oklab(1 0 0)", 0xffffffff),
+            ("oklch(0.7 0.1 30 / 0.5)", 0xd5867980),
+            ("RebeccaPurple", 0x663399ff),
+            ("transparent", 0x00000000),
+            ("teal", 0x008080ff),
+        ] {
+            assert_eq!(color(css), Some(Color(packed)), "{css}");
+            // And through the Rust API's colors.
+            let hsla: crate::Hsla = css.parse().unwrap();
+            assert_eq!(Color::from(hsla), Color(packed), "{css}");
+        }
+    }
 
     #[test]
     fn colors() {
@@ -624,10 +672,13 @@ mod tests {
     fn shadows() {
         let s = box_shadows("0 1px 3px 0 rgb(0 0 0 / 0.1), inset 0 1px 2px -1px #f00").unwrap();
         assert_eq!(s.len(), 2);
-        assert_eq!((s[0].offset_y, s[0].blur, s[0].spread), (1.0, 3.0, 0.0));
+        assert_eq!(
+            (s[0].offset_y, s[0].blur, s[0].spread),
+            (px(1.0), px(3.0), px(0.0))
+        );
         assert_eq!(s[0].color, Color(0x0000_001a));
         assert!(s[1].inset);
-        assert_eq!(s[1].spread, -1.0);
+        assert_eq!(s[1].spread, px(-1.0));
         assert_eq!(s[1].color, Color(0xff00_00ff));
         assert!(box_shadows("none").unwrap().is_empty());
         assert!(box_shadows("1px").is_none());
@@ -636,18 +687,18 @@ mod tests {
     #[test]
     fn gradient_syntax() {
         let g = gradient("linear-gradient(to right, #f00, rgb(0 0 255) 80%)").unwrap();
-        assert_eq!(g.kind, GradientKind::Linear { angle: 90.0 });
-        assert_eq!(g.stops[1].position, Some(0.8));
+        assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) });
+        assert_eq!(g.stops[1].position, Some(percentage(0.8).into()));
         let g = gradient("linear-gradient(45deg in oklab, red, blue)").unwrap();
-        assert_eq!(g.kind, GradientKind::Linear { angle: 45.0 });
+        assert_eq!(g.kind, GradientKind::Linear { angle: deg(45.0) });
         let g = gradient("radial-gradient(circle at 25% 75%, red, blue)").unwrap();
         assert_eq!(
             g.kind,
             GradientKind::Radial {
                 circle: true,
                 size: GradientSize::FarthestCorner,
-                x: 0.25,
-                y: 0.75
+                x: percentage(0.25),
+                y: percentage(0.75)
             }
         );
         let g = gradient("conic-gradient(from 90deg, red, blue, red)").unwrap();
@@ -656,13 +707,57 @@ mod tests {
     }
 
     #[test]
+    fn gradient_stop_positions() {
+        let at = |g: &Gradient| g.stops.iter().map(|s| s.position).collect::<Vec<_>>();
+        let fraction = |f: f32| DefiniteLength::from(percentage(f));
+        let points = |p: f32| DefiniteLength::from(px(p));
+        let g = gradient("repeating-linear-gradient(90deg, red 0px, blue 10px)").unwrap();
+        assert!(g.repeating);
+        assert_eq!(at(&g), [Some(fraction(0.0)), Some(points(10.0))]);
+        // Lengths in every unit, mixed with percentages; two positions
+        // make a band.
+        let g = gradient("linear-gradient(red 0 1rem, blue 50%, green 2pt)").unwrap();
+        assert_eq!(
+            at(&g),
+            [
+                Some(fraction(0.0)),
+                Some(points(16.0)),
+                Some(fraction(0.5)),
+                Some(points(2.0))
+            ]
+        );
+        let g = gradient("radial-gradient(circle, red 4px, blue 20px)").unwrap();
+        assert_eq!(at(&g), [Some(points(4.0)), Some(points(20.0))]);
+        // Conic stops are angles (as fractions of a turn) or percentages.
+        let g = gradient("conic-gradient(red 0deg 90deg, blue 0.5turn, green 75%)").unwrap();
+        assert_eq!(
+            at(&g),
+            [
+                Some(fraction(0.0)),
+                Some(fraction(0.25)),
+                Some(fraction(0.5)),
+                Some(fraction(0.75))
+            ]
+        );
+        assert!(gradient("conic-gradient(red 10px, blue)").is_none());
+        assert!(gradient("linear-gradient(red 90deg, blue)").is_none());
+        assert!(gradient("linear-gradient(red 0 10px 20px, blue)").is_none());
+    }
+
+    #[test]
     fn filter_lists() {
         let f = filters("blur(4px) brightness(120%) hue-rotate(90deg) drop-shadow(0 1px 2px #000)")
             .unwrap();
-        assert_eq!(f[0], Filter::Blur(4.0));
+        assert_eq!(f[0], Filter::Blur(px(4.0)));
         assert_eq!(f[1], Filter::Brightness(1.2));
-        assert_eq!(f[2], Filter::HueRotate(90.0));
-        assert!(matches!(f[3], Filter::DropShadow { blur: 2.0, .. }));
+        assert_eq!(f[2], Filter::HueRotate(deg(90.0)));
+        assert!(matches!(
+            f[3],
+            Filter::DropShadow {
+                blur: crate::geometry::Points(2.0),
+                ..
+            }
+        ));
     }
 
     #[test]

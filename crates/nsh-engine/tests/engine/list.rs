@@ -3,7 +3,7 @@
 
 use std::{sync::mpsc, time::Duration};
 
-use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, ViewKind};
+use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size, ViewKind, geometry::px};
 use nsh_engine::{Bundle, Engine, EngineConfig, MountSink};
 
 struct Sink(mpsc::Sender<MountBatch>);
@@ -78,7 +78,9 @@ fn list_as_a_value_scrolls_with_recycled_cells() {
     scrolls_with_recycled_cells(&app);
 }
 
-fn scrolls_with_recycled_cells(app: &str) {
+/// Bundles `app` and starts it on a 320 x 500 viewport: the engine, its
+/// batches and the app's directory (the caller removes it).
+fn start(app: &str) -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-list-{}-{}",
@@ -92,7 +94,7 @@ fn scrolls_with_recycled_cells(app: &str) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
@@ -101,19 +103,27 @@ fn scrolls_with_recycled_cells(app: &str) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(320.0, 500.0),
+        viewport: Size::new(px(320.0), px(500.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
+    (engine, rx, dir)
+}
+
+fn scrolls_with_recycled_cells(app: &str) {
+    let (engine, rx, dir) = start(app);
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
     // 500 pt viewport + 500 pt overscan at 50 pt per row = 21 rows.
     let first_texts = texts(&first);
@@ -133,7 +143,11 @@ fn scrolls_with_recycled_cells(app: &str) {
 
     // Scroll to row 40: rows 30..=60 are needed; cells are recycled, so the
     // update re-renders text in existing views instead of creating them.
-    engine.control().scroll(list, 0.0, 2000.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(2000.0)),
+        u32::MAX,
+    );
     let batch = rx.recv_timeout(Duration::from_secs(5)).unwrap();
     let shown = texts(&batch);
     assert!(shown.contains(&"row 40".to_owned()), "{shown:?}");
@@ -144,17 +158,98 @@ fn scrolls_with_recycled_cells(app: &str) {
     );
 
     // Near the end: `onEndReached` appends rows; the content grows.
-    engine.control().scroll(list, 0.0, 4600.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(4600.0)),
+        u32::MAX,
+    );
     let mut grew = false;
     while let Ok(batch) = rx.recv_timeout(Duration::from_secs(2)) {
-        grew |= batch
-            .items
-            .iter()
-            .any(|i| matches!(i, MountItem::ScrollContent { size, .. } if size.height >= 10_000.0));
+        grew |= batch.items.iter().any(
+            |i| matches!(i, MountItem::ScrollContent { size, .. } if size.height >= px(10_000.0)),
+        );
         if grew {
             break;
         }
     }
     assert!(grew, "onEndReached did not extend the list");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The props `List` does not use itself reach its scroll view, as they do
+/// a `<Scroll>`'s: the test id and accessibility (UI tests find the list),
+/// classes, touch props and layout events; and they follow their signals.
+#[test]
+fn list_passes_host_props_to_its_scroll_view() {
+    let app = r#"
+import { mount, signal, Text, View } from "nsh";
+import { List } from "nsh/list";
+const label = signal("Feed");
+const size = signal("none");
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text>{`size ${size()}`}</Text>
+      <List each={[1, 2, 3]} testID="feed" accessibilityLabel={label()} role="list"
+            accessibilityHint="Posts" class="bg-red-500" pointerEvents="box-none" style={{ flex: 1 }}
+            onLayout={(e) => { size.set(`${e.width}x${e.height}`); label.set("Feed 2"); }}>
+        {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let (_engine, rx, dir) = start(app);
+    let mut items = Vec::new();
+    let mut shown = Vec::new();
+    while let Ok(batch) = rx.recv_timeout(Duration::from_secs(2)) {
+        shown.extend(texts(&batch));
+        items.extend(batch.items);
+        if shown.iter().any(|t| t.starts_with("size 320")) {
+            break;
+        }
+    }
+    let list = items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: ViewKind::Scroll,
+            } => Some(*id),
+            _ => None,
+        })
+        .expect("a scroll view");
+    let props = items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == list => Some(props),
+            _ => None,
+        })
+        .next_back()
+        .expect("the list's view props");
+    assert_eq!(props.test_id.as_deref(), Some("feed"));
+    assert_eq!(props.accessibility.hint.as_deref(), Some("Posts"));
+    assert_eq!(props.accessibility.role, nsh_core::AccessibilityRole::List);
+    assert_eq!(props.pointer_events, nsh_core::PointerEvents::BoxNone);
+    // The label follows its signal (set by `onLayout`).
+    let labels: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == list => props.accessibility.label.clone(),
+            MountItem::AccessibilityLabel { id, label } if *id == list => label.clone(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(labels.first().map(|l| &**l), Some("Feed"), "{labels:?}");
+    assert_eq!(labels.last().map(|l| &**l), Some("Feed 2"), "{labels:?}");
+    // The class styles the scroll view.
+    let red = items.iter().any(|i| {
+        matches!(i, MountItem::ViewStyle { id, style }
+            if *id == list && style.background_color != nsh_core::Color::TRANSPARENT)
+    });
+    assert!(red, "the class did not style the list");
+    // `onLayout` reached JS with the list's size (under a 17 pt text).
+    assert!(shown.iter().any(|t| t == "size 320x483"), "{shown:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

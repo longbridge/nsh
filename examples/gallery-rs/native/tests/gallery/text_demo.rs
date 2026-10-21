@@ -71,7 +71,7 @@ fn text_renders_its_samples() {
         .unwrap()
         .shadow
         .expect("a shadow");
-    assert_eq!((shadow.radius, shadow.offset_x), (3.0, 2.0));
+    assert_eq!((shadow.radius.0, shadow.offset_x.0), (3.0, 2.0));
 }
 
 #[test]

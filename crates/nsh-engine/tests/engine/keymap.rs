@@ -7,6 +7,7 @@ use std::{sync::Arc, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size,
+    geometry::px,
     keymap::{KeyMatch, Keymap, Keystroke},
     platform::Os,
 };
@@ -36,20 +37,23 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(800.0, 600.0),
+        viewport: Size::new(px(800.0), px(600.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os: Os::MacOs,
             ..Environment::default()
         },
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

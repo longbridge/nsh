@@ -27,6 +27,22 @@ demo: el-text
 </Text>
 ```
 
+### 片段背景
+
+设置了 `backgroundColor` 的片段会在字符后面填充它们的方框：高度就是字体的高度（基线以上的 ascent 加基线以下的 descent，与行高无关）；片段换到几行，每行各画一个方框，圆角取片段的 `borderRadius`。片段内部的片段沿用它的背景，除非自己另设。背景只影响绘制：文本排版与不设背景时相同，可选中的文本复制时连同片段的字符一起复制。行内代码就是一个片段：
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 22 }} selectable>
+  {"提交前先运行 "}
+  <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
+    {" cargo test "}
+  </Text>
+  {"。"}
+</Text>
+```
+
+Tailwind 类同样适用：`<Text class="bg-gray-100 rounded">`。内边距和边框是方框样式，片段上不起作用；在片段内两侧加空格，方框两边就会留出空间。
+
 ### 链接
 
 带按压处理函数的片段就是链接：按在它的字符上由该片段处理，按在其他位置则由段落处理。
@@ -75,10 +91,9 @@ JSX 文本遵循 React 的规则：除文本首尾外，每行都会去掉首尾
 | `adjustsFontSizeToFit` | `boolean` | `false` | 缩小字号，直到文本能放进其行数（`numberOfLines`）和盒子。 |
 | `minimumFontScale` | `number` | | `adjustsFontSizeToFit` 最多缩小到的比例（0..1；至少 0.1）。 |
 | `selectable` | `boolean` | | 用户可以选择文本的任意范围：长按选中一个词，拖动选择柄扩展，编辑菜单复制。不设置时文字不可选择，但桌面浏览器除外：在那里文字默认可选，交互元素里的除外；设为 `false` 在那里也不可选择。 |
-| `selectionColor` | `ColorValue` | | 可选文本的选区高亮（及选择柄）颜色；默认为平台的强调色。 |
 | `onTextLayout` | `(e: { lines: TextLayoutLine[] }) => void` | | 每次布局后给出排好的各行。 |
 
-Tailwind 类 `select-text` 等同于 `selectable`。
+Tailwind 类 `select-text` 等同于 `selectable`。选区高亮和选择柄的颜色由样式键 `selectionColor`（`selection:text-*`）设置，默认为平台的强调色。
 
 ## 文本样式
 

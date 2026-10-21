@@ -98,7 +98,7 @@ final class EmbedController: UIViewController {
         }
     }
 
-    // Let the embedded app's `StatusBar` set the status bar.
+    // Let the embedded app's pages and dialogs (`statusBar`) set the status bar.
     override var preferredStatusBarStyle: UIStatusBarStyle { NshAppView.preferredStatusBarStyle }
     override var prefersStatusBarHidden: Bool { NshAppView.prefersStatusBarHidden }
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {

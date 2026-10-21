@@ -29,8 +29,7 @@ function Field(props: InputProps & { label: string }) {
     <View style={{ gap: 4 }}>
       <Text style={{ fontSize: 13, color: ui().muted }}>{own.label}</Text>
       <Input
-        style={{ ...ui().inset, fontSize: 16, color: ui().text, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 }}
-        placeholderTextColor={ui().faint}
+        style={{ ...ui().inset, fontSize: 16, color: ui().text, placeholderColor: ui().faint, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 }}
         {...input}
       />
     </View>
@@ -47,19 +46,19 @@ function App() {
       <View style={{ padding: 20, paddingTop: 24, gap: 16 }}>
         <Card title="Props are live">
           <Badge label={`Tapped ${taps()} times`} color={taps() % 2 ? tint(ui().warn, 0.16) : tint(ui().accent, 0.14)} />
-          <View onPress={() => taps.update((n) => n + 1)} activeOpacity={0.6} style={{ ...ui().primary, borderRadius: 10, padding: 10 }}>
+          <View onPress={() => taps.update((n) => n + 1)} activeStyle={{ opacity: 0.6 }} style={{ ...ui().primary, borderRadius: 10, padding: 10 }}>
             <Text style={{ color: ui().onPrimary, textAlign: "center", fontWeight: "600" }}>Tap</Text>
           </View>
         </Card>
 
         <Card title="split, spread and ref">
-          <Field label="Your name" placeholder="Type here" value={name()} onChangeText={(t) => name.set(t)} ref={(node) => (field = node)} />
+          <Field label="Your name" placeholder="Type here" value={name()} onChange={(t) => name.set(t)} ref={(node) => (field = node)} />
           <Text style={{ color: ui().text }}>{name() ? `Hello, ${name()}!` : "Nobody yet."}</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <View onPress={() => field?.focus()} activeOpacity={0.6} style={{ ...ui().accentFill, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
+            <View onPress={() => field?.focus()} activeStyle={{ opacity: 0.6 }} style={{ ...ui().accentFill, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
               <Text style={{ color: ui().onAccent, fontWeight: "600" }}>Focus</Text>
             </View>
-            <View onPress={() => (name.set(""), field?.blur())} activeOpacity={0.6} style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
+            <View onPress={() => (name.set(""), field?.blur())} activeStyle={{ opacity: 0.6 }} style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
               <Text style={{ color: ui().text }}>Clear</Text>
             </View>
           </View>

@@ -665,7 +665,8 @@ impl Hosted for VideoItem {
         let Some(surface) = self.surface() else {
             return false;
         };
-        let Some(width) = super::view_of(&surface, self.id).map(|v| v.state().frame.width) else {
+        let Some(width) = super::view_of(&surface, self.id).map(|v| v.state().frame.size.width.0)
+        else {
             return false;
         };
         match event.kind {

@@ -21,7 +21,7 @@ NSH renders with native views, so the platforms' assistive technologies (VoiceOv
 ```tsx
 <View
   onPress={play}
-  accessibilityRole="button"
+  role="button"
   accessibilityLabel="Play"
   accessibilityHint="Starts the song"
   style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
@@ -35,8 +35,8 @@ NSH renders with native views, so the platforms' assistive technologies (VoiceOv
 | `accessible` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `string` | What screen readers read, instead of the texts inside. |
 | `accessibilityHint` | `string` | What activating the element does, read after a pause. |
-| `accessibilityRole` (or `role`) | `AccessibilityRole` | What the element is. |
-| `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. |
+| `role` | `AccessibilityRole` | What the element is. |
+| `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. `selected` also applies `selected:` classes, `checked` (when `true`) `checked:` classes and `checkedStyle`. |
 | `accessibilityValue` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
 | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed. |
@@ -49,7 +49,7 @@ Give every icon-only control a label: a screen reader cannot read a glyph or an 
 
 ### Roles
 
-`accessibilityRole` tells the user what kind of element this is and how to operate it. The values are `"none"`, `"button"`, `"link"`, `"search"`, `"image"`, `"imagebutton"`, `"keyboardkey"`, `"text"`, `"adjustable"`, `"header"`, `"summary"`, `"alert"`, `"checkbox"`, `"combobox"`, `"menu"`, `"menubar"`, `"menuitem"`, `"progressbar"`, `"radio"`, `"radiogroup"`, `"scrollbar"`, `"spinbutton"`, `"switch"`, `"tab"`, `"tablist"`, `"timer"`, `"toolbar"`, `"list"` and `"grid"`.
+`role` tells the user what kind of element this is and how to operate it. The values are `"none"`, `"button"`, `"link"`, `"search"`, `"image"`, `"imagebutton"`, `"keyboardkey"`, `"text"`, `"adjustable"`, `"header"`, `"summary"`, `"alert"`, `"checkbox"`, `"combobox"`, `"menu"`, `"menubar"`, `"menuitem"`, `"progressbar"`, `"radio"`, `"radiogroup"`, `"scrollbar"`, `"spinbutton"`, `"switch"`, `"tab"`, `"tablist"`, `"timer"`, `"toolbar"`, `"list"` and `"grid"`.
 
 The most useful ones:
 
@@ -60,7 +60,7 @@ The most useful ones:
 - `"image"` for meaningful images, with a label; decorative images should be hidden instead.
 
 ```tsx
-<Text accessibilityRole="header" style={{ fontSize: 22, fontWeight: "700" }}>Settings</Text>
+<Text role="header" style={{ fontSize: 22, fontWeight: "700" }}>Settings</Text>
 ```
 
 ### States and values
@@ -69,7 +69,7 @@ The most useful ones:
 // A toggle drawn with views.
 <View
   onPress={() => on.set(!on())}
-  accessibilityRole="switch"
+  role="switch"
   accessibilityLabel="Wi-Fi"
   accessibilityState={{ checked: on() }}
   hitSlop={8}
@@ -92,7 +92,7 @@ function Quantity() {
   return (
     <View
       accessible
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel="Quantity"
       accessibilityValue={{ text: String(n()) }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
@@ -137,7 +137,7 @@ Any other name becomes a custom action, listed in VoiceOver's actions rotor and 
 `accessible` makes a view one element: a card with a title, a subtitle and a price is read in one go, instead of the user swiping through three texts.
 
 ```tsx
-<View accessible onPress={open} accessibilityRole="button" style={{ padding: 16 }}>
+<View accessible onPress={open} role="button" style={{ padding: 16 }}>
   <Text>Blue jacket</Text>
   <Text>Size M</Text>
   <Text>$120</Text>

@@ -3,32 +3,36 @@
 //! hit-test ([`MountItem::Overflow`]).
 
 use super::{Core, Key, Kind, NO_KEY};
-use crate::{JsonValue, geometry::Rect, mount::MountItem, ops::NodeId, text::TextEngine};
+use crate::{
+    JsonValue,
+    geometry::{Bounds, Point, Points, point, rect},
+    mount::MountItem,
+    ops::NodeId,
+    text::TextEngine,
+};
 
 /// Where a view is, from the last layout (`ref.measure()`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Measurement {
     /// The frame relative to the parent view, as `onLayout` reports it.
-    pub frame: Rect,
+    pub frame: Bounds<Points>,
     /// The top left corner in the coordinates of the root view the view is
     /// in (the surface, or the modal it is shown in): those of touches'
     /// `pageX` / `pageY`. Scroll offsets and zoom scales of the scroll
     /// views and lists around it are applied; transforms are not.
-    pub page_x: f32,
-    /// See [`Measurement::page_x`].
-    pub page_y: f32,
+    pub page: Point<Points>,
 }
 
 impl Measurement {
     /// The JS object `ref.measure()` resolves to.
     pub(crate) fn to_json(self) -> JsonValue {
         serde_json::json!({
-            "x": self.frame.x,
-            "y": self.frame.y,
-            "width": self.frame.width,
-            "height": self.frame.height,
-            "pageX": self.page_x,
-            "pageY": self.page_y,
+            "x": self.frame.origin.x.0,
+            "y": self.frame.origin.y.0,
+            "width": self.frame.size.width.0,
+            "height": self.frame.size.height.0,
+            "pageX": self.page.x.0,
+            "pageY": self.page.y.0,
         })
     }
 }
@@ -37,8 +41,11 @@ impl Measurement {
 /// (rounding).
 const OVERFLOW_EPSILON: f32 = 0.5;
 
-fn valid(r: &Rect) -> bool {
-    !(r.x.is_nan() || r.y.is_nan() || r.width.is_nan() || r.height.is_nan())
+fn valid(r: &Bounds<Points>) -> bool {
+    !(r.origin.x.0.is_nan()
+        || r.origin.y.0.is_nan()
+        || r.size.width.0.is_nan()
+        || r.size.height.0.is_nan())
 }
 
 impl<M: TextEngine> Core<M> {
@@ -69,8 +76,8 @@ impl<M: TextEngine> Core<M> {
             // Spans and raw text have no view; text attachments are placed
             // in their text block.
             if n.layout.is_some() && valid(&n.frame) {
-                x += n.frame.x;
-                y += n.frame.y;
+                x += n.frame.origin.x.0;
+                y += n.frame.origin.y.0;
             }
             let parent = n.parent;
             if parent == NO_KEY {
@@ -85,8 +92,7 @@ impl<M: TextEngine> Core<M> {
         }
         Some(Measurement {
             frame: node.frame,
-            page_x: x,
-            page_y: y,
+            page: point(Points(x), Points(y)),
         })
     }
 
@@ -124,7 +130,7 @@ impl<M: TextEngine> Core<M> {
         let extent = if clips || !valid(&node.frame) || node.children.is_empty() {
             None
         } else {
-            let (w, h) = (node.frame.width, node.frame.height);
+            let (w, h) = (node.frame.size.width.0, node.frame.size.height.0);
             let (mut x0, mut y0, mut x1, mut y1) = (0.0f32, 0.0f32, w, h);
             for &child in &node.children {
                 let c = &self.nodes[child as usize];
@@ -132,29 +138,24 @@ impl<M: TextEngine> Core<M> {
                     continue;
                 }
                 let f = c.frame;
-                if f.width > 0.0 && f.height > 0.0 {
-                    x0 = x0.min(f.x);
-                    y0 = y0.min(f.y);
-                    x1 = x1.max(f.x + f.width);
-                    y1 = y1.max(f.y + f.height);
+                if f.size.width.0 > 0.0 && f.size.height.0 > 0.0 {
+                    x0 = x0.min(f.origin.x.0);
+                    y0 = y0.min(f.origin.y.0);
+                    x1 = x1.max(f.origin.x.0 + f.size.width.0);
+                    y1 = y1.max(f.origin.y.0 + f.size.height.0);
                 }
                 if let Some(e) = c.overflow {
-                    x0 = x0.min(f.x + e.x);
-                    y0 = y0.min(f.y + e.y);
-                    x1 = x1.max(f.x + e.x + e.width);
-                    y1 = y1.max(f.y + e.y + e.height);
+                    x0 = x0.min(f.origin.x.0 + e.origin.x.0);
+                    y0 = y0.min(f.origin.y.0 + e.origin.y.0);
+                    x1 = x1.max(f.origin.x.0 + e.origin.x.0 + e.size.width.0);
+                    y1 = y1.max(f.origin.y.0 + e.origin.y.0 + e.size.height.0);
                 }
             }
             let out = x0 < -OVERFLOW_EPSILON
                 || y0 < -OVERFLOW_EPSILON
                 || x1 > w + OVERFLOW_EPSILON
                 || y1 > h + OVERFLOW_EPSILON;
-            out.then_some(Rect {
-                x: x0,
-                y: y0,
-                width: x1 - x0,
-                height: y1 - y0,
-            })
+            out.then_some(rect(x0, y0, x1 - x0, y1 - y0))
         };
         let node = &mut self.nodes[key as usize];
         if node.overflow != extent {

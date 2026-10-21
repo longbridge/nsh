@@ -1,5 +1,5 @@
 import { type JSX, mount, Scroll, signal, Text, View } from "nsh";
-import { createNavigator, Screen, Stack, StatusBar, useSafeAreaInsets } from "nsh/ui/mobile";
+import { createNavStack, NavPage, NavStack, safeAreaInsets } from "nsh/base";
 import { FlightPlan } from "./cards/FlightPlan";
 import { HopLog } from "./cards/HopLog";
 import { Mass } from "./cards/Mass";
@@ -10,7 +10,7 @@ import { Icon, type IconName } from "./icons";
 import { color } from "./theme";
 
 type Route = { name: "lab" } | { name: "log" };
-const nav = createNavigator<Route>({ name: "lab" });
+const nav = createNavStack<Route>([{ name: "lab" }]);
 
 /** The lab's sections: what flew, what flies next, the vehicle. */
 const tabs: { name: string; title: string; icon: IconName }[] = [
@@ -19,12 +19,46 @@ const tabs: { name: string; title: string; icon: IconName }[] = [
   { name: "vehicle", title: "Vehicle", icon: "mass" },
 ];
 
-/** Screen props of the dark header. */
+/** Page props of the dark system header (iOS, Android). */
 const header = {
-  headerBackgroundColor: color.page,
-  headerTintColor: color.accent,
-  headerTitleColor: color.text,
+  headerStyle: { backgroundColor: color.page, tintColor: color.accent, color: color.text },
 } as const;
+
+/** The header the app draws where NSH draws none (desktops, the web): the
+ * title, after a back button on pushed pages. */
+function Header(props: { title: string; back?: boolean }) {
+  return (
+    <View
+      style={{
+        height: 52,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        backgroundColor: color.page,
+        borderBottomWidth: 1,
+        borderBottomColor: color.line,
+      }}
+    >
+      <If when={props.back}>
+        <View
+          onPress={() => nav.pop()}
+          role="button"
+          accessibilityLabel="Back"
+          hitSlop={8}
+          activeStyle={{ opacity: 0.5 }}
+          style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingRight: 6, cursor: "pointer" }}
+        >
+          <Icon name="back" size={18} tint={color.accent} />
+          <Text style={{ fontSize: 15, color: color.accent }}>Back</Text>
+        </View>
+      </If>
+      <Text numberOfLines={1} style={{ flex: 1, fontSize: 17, fontWeight: "600", color: color.text }}>
+        {props.title}
+      </Text>
+    </View>
+  );
+}
 
 /** A scrolling column of panels. Hidden sections stay mounted (their
  * sliders and selections keep their state). */
@@ -42,10 +76,10 @@ function Section(props: { visible: boolean; children: JSX.Element }) {
 
 /** The bottom bar switching sections. */
 function TabBar(props: { value: string; onChange: (name: string) => void }) {
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   return (
     <View
-      accessibilityRole="tablist"
+      role="tablist"
       style={{
         flexDirection: "row",
         paddingTop: 8,
@@ -61,7 +95,7 @@ function TabBar(props: { value: string; onChange: (name: string) => void }) {
           return (
             <View
               onPress={() => props.onChange(tab().name)}
-              accessibilityRole="tab"
+              role="tab"
               accessibilityLabel={tab().title}
               accessibilityState={{ selected: on() }}
               style={{ flex: 1, alignItems: "center", gap: 4 }}
@@ -93,8 +127,9 @@ function TabBar(props: { value: string; onChange: (name: string) => void }) {
  * the next hop (flying it adds to the log), and the vehicle. */
 function Lab() {
   const tab = signal("flights");
+  const title = () => tabs.find((t) => t.name === tab())?.title ?? "";
   return (
-    <Screen title={tabs.find((t) => t.name === tab())?.title ?? ""} {...header}>
+    <NavPage title={title()} {...header} header={<Header title={title()} />}>
       <View style={{ flex: 1, backgroundColor: color.page }}>
         <Section visible={tab() === "flights"}>
           <HopLog onOpen={() => nav.push({ name: "log" })} />
@@ -110,30 +145,29 @@ function Lab() {
         </Section>
         <TabBar value={tab()} onChange={(name) => tab.set(name)} />
       </View>
-    </Screen>
+    </NavPage>
   );
 }
 
 /** Every hop, on its own screen. */
 function Log() {
   return (
-    <Screen title="Hop log" {...header}>
+    <NavPage title="Hop log" {...header} header={<Header title="Hop log" back />}>
       <Scroll style={{ flex: 1, backgroundColor: color.page }}>
         <View style={{ padding: 16, paddingBottom: 32 }}>
           <HopLog rows={12} />
         </View>
       </Scroll>
-    </Screen>
+    </NavPage>
   );
 }
 
 function App() {
   return (
     <View style={{ flex: 1, backgroundColor: color.page }}>
-      <StatusBar barStyle="light-content" />
-      <Stack navigator={nav} style={{ flex: 1 }}>
+      <NavStack state={nav} style={{ flex: 1 }}>
         {(route) => (route.name === "lab" ? <Lab /> : <Log />)}
-      </Stack>
+      </NavStack>
     </View>
   );
 }

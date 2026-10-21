@@ -3,8 +3,11 @@
 //! written into the views' [`crate::view::AnimValues`] (the Android
 //! animator's design, `nsh-platform-android/src/anim.rs`).
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
-use nsh_core::{Color, GestureValues, MountItem, canvas::Damage};
+use nsh_core::{
+    Color, GestureValues, MountItem,
+    animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
+    canvas::Damage,
+};
 use rustc_hash::FxHashMap;
 
 use crate::{mount::Mounter, view::AnimValues};

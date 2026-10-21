@@ -27,7 +27,7 @@ function Coordinate(props: { axis: Axis; label: string; signed?: boolean }) {
       >
         <Input
           value={plan.target()[props.axis]}
-          onChangeText={(text) => {
+          onChange={(text) => {
             const minus = props.signed && text.startsWith("-") ? "-" : "";
             const digits = text.replace(/[^0-9]/g, "").slice(0, 3);
             plan.target.set({ ...plan.target(), [props.axis]: minus + digits });
@@ -40,9 +40,8 @@ function Coordinate(props: { axis: Axis; label: string; signed?: boolean }) {
           }}
           keyboardType={props.signed ? "numbers-and-punctuation" : "number-pad"}
           returnKeyType="done"
-          selectionColor={color.accent}
           accessibilityLabel={`${props.label}, meters`}
-          style={{ flex: 1, fontFamily: mono, fontSize: 15, color: color.text, paddingVertical: 6 }}
+          style={{ selectionColor: color.accent, flex: 1, fontFamily: mono, fontSize: 15, color: color.text, paddingVertical: 6 }}
         />
         <Text style={{ fontFamily: mono, fontSize: 13, color: color.faint }}>m</Text>
       </View>

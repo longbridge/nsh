@@ -7,7 +7,7 @@ group: platforms
 
 # Platform-specific code
 
-One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst), and in browsers through the [web runtime](./web.md). Most of an app needs no platform checks at all: elements, styles, layout, components and modules behave the same everywhere, and the components of `nsh/ui/mobile` are drawn by NSH rather than borrowed from each platform, so they look the same everywhere. When something really is specific to one platform, NSH gives it a clear place, so platform code stays visible and contained:
+One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst), and in browsers through the [web runtime](./web.md). Most of an app needs no platform checks at all: elements, styles, layout and modules behave the same everywhere, and the components you draw from them look the same everywhere. When something really is specific to one platform, NSH gives it a clear place, so platform code stays visible and contained:
 
 | Where | For |
 |---|---|
@@ -23,7 +23,7 @@ Props that exist on one platform only are grouped in an object named after it. E
 ```tsx
 <View
   onPress={open}
-  activeOpacity={0.6}
+  activeStyle={{ opacity: 0.6 }}
   android={{ ripple: { color: "rgba(0,0,0,0.12)" }, elevation: 4 }}
   style={{ padding: 16, borderRadius: 12, backgroundColor: "#ffffff" }}
 >
@@ -35,9 +35,9 @@ Props that exist on one platform only are grouped in an object named after it. E
   ios={{ textContentType: "oneTimeCode" }}
 />
 
-<Modal visible={open()} ios={{ presentationStyle: "pageSheet" }} android={{ statusBarTranslucent: true }}>
+<Dialog open={open()} ios={{ supportedOrientations: ["portrait"] }} android={{ statusBarTranslucent: true }}>
   …
-</Modal>
+</Dialog>
 ```
 
 The objects are reactive like any prop; a key removed from the object is cleared.
@@ -49,22 +49,17 @@ What exists today:
 | `android={{ ripple }}` | every element | The material ripple while pressed: `{ color?, borderless?, radius?, foreground? }`. |
 | `android={{ elevation }}` | every element | The material shadow, in points, from the view's shape. |
 | `android={{ accessibilityLiveRegion }}` | every element | `"none"`, `"polite"` or `"assertive"`: TalkBack announces the view's changes. |
-| `android={{ statusBarTranslucent }}` | `Modal` | The modal's content reaches under the status bar. |
-| `android={{ backgroundColor }}` | `StatusBar` | The status bar's color (before Android 15's edge-to-edge). |
+| `android={{ statusBarTranslucent }}` | `Dialog` | The dialog's content reaches under the status bar. |
 | `ios={{ inputAccessoryViewID }}` | `<Input>` | The `InputAccessoryView` shown over the keyboard. |
 | `ios={{ textContentType }}` | `<Input>` | iOS's names for autofill types. |
-| `ios={{ headerLargeTitle }}`, `ios={{ headerBackTitle }}` | `Screen` | A large title; the back button's label. |
-| `ios={{ presentationStyle }}`, `ios={{ supportedOrientations }}` | `Modal` | `"pageSheet"` / `"formSheet"` sheets; allowed orientations. |
+| `ios={{ supportedOrientations }}` | `Dialog` | The orientations it allows. |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | Swipe back and forward in the page history. |
-| `desktop={{ headerLargeTitle }}`, `desktop={{ headerBackTitle }}` | `Screen` | A large title; the back button's label. |
-| `desktop={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"`: a card centered in the window. |
-| `web={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"` in every browser: a centered card in desktop and tablet browsers, a sheet from just below the top in phone browsers. |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
 
-`desktop={{…}}` is accepted everywhere; the props above are the desktop-only ones so far. `web={{…}}` is accepted everywhere too; `Modal`'s `presentationStyle` is its only element prop so far ([`StatusBar`](../components/status-bar.md) takes `web={{ themeColor }}`). The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
+`desktop={{…}}` and `web={{…}}` are accepted everywhere. The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
 
-Cross-platform props whose effect differs slightly are not grouped: `Alert.alert`'s `cancelable` option exists on both (iOS alerts are simply never dismissed by a tap outside), and `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform.
+Something two or more platforms do is a top-level prop, applied where it means something: `NavPage`'s `title`, `headerStyle`, `headerLargeTitle` and `headerBackTitle` set up the system header of iOS and Android, its `header` slot is the header of the desktops and the web, and `Dialog`'s `presentation` picks iOS's sheets. `AlertDialog.show`'s `closeOnBackdropPress`, `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform.
 
 ## Platform modules
 
@@ -75,24 +70,23 @@ Cross-platform props whose effect differs slightly are not grouped: `Alert.alert
 | Export | Description |
 |---|---|
 | `Toast.show(message, duration?)` | A toast at the bottom of the screen; `"short"` (default) or `"long"`. |
-| `BackHandler.addEventListener("hardwareBackPress", listener)` | Listens to the back button after modals, before stacks; return `true` when handled. Returns `{ remove() }`. |
+| `BackHandler.addEventListener("hardwareBackPress", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. Returns `{ remove() }`. |
 | `BackHandler.exitApp()` | Leaves the app. |
-| `setStatusBarBackgroundColor(color, animated?)` | The status bar's color under what `StatusBar` components set (before edge-to-edge, API 35). |
 | `isAvailable` | `true` on Android. |
 
 ```tsx
 import { cleanup } from "nsh";
 import { BackHandler, Toast } from "nsh/android";
 import { Platform } from "nsh/device";
-import { Alert } from "nsh/ui/mobile";
+import { AlertDialog } from "nsh/base";
 
 function saved() {
   if (Platform.OS === "android") Toast.show("Saved");
-  else Alert.alert("Saved");
+  else AlertDialog.show({ title: "Saved", actions: [{ label: "OK" }] });
 }
 
 function Player() {
-  // Back leaves full screen before it leaves the screen.
+  // Back leaves full screen before it leaves the page.
   const sub = BackHandler.addEventListener("hardwareBackPress", () => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
@@ -103,7 +97,7 @@ function Player() {
 }
 ```
 
-The back button is handled by the top modal first, then `BackHandler` listeners (most recent first), then the top navigation stack, and the app exits when nothing handled it. See [Navigation](./navigation.md#the-android-back-button).
+The back button is handled by the top dialog first, then `BackHandler` listeners (most recent first), then the top navigation stack, and the app exits when nothing handled it. See [Navigation](./navigation.md#the-android-back-button).
 
 ### nsh/ios
 
@@ -127,18 +121,17 @@ See [nsh/desktop](../modules/nsh-desktop.md).
 
 ### The status bar
 
-The status bar is set with [`StatusBar`](../components/status-bar.md) from `nsh/ui/mobile`, on both platforms: `barStyle` (`"default"`, `"light-content"`, `"dark-content"`), `hidden` and `animated`, with Android's color in `android={{ backgroundColor }}`. The most recently mounted `StatusBar` wins, prop by prop, so a screen can render one for itself and the previous settings come back when it goes away. `StatusBar.setBarStyle()` and `StatusBar.setHidden()` set the base values imperatively.
+On both platforms the status bar belongs to the page or dialog on top, as in UIKit, where the topmost view controller decides it: [`NavPage` and `Dialog` take `statusBar`](../modules/nsh-base.md#status-bar) with `foreground` (`"auto"`, `"light"` for dark backgrounds, `"dark"` for light ones), `hidden` and `animated`. The page or dialog shown most recently wins, field by field, and the one below it applies again when it goes away. `nsh.json`'s `"statusBar"` is the app's default under them.
 
 ```tsx
 import { View } from "nsh";
-import { StatusBar } from "nsh/ui/mobile";
+import { NavPage } from "nsh/base";
 
 function PhotoViewer() {
   return (
-    <View style={{ flex: 1, backgroundColor: "#000000" }}>
-      <StatusBar barStyle="light-content" animated />
-      …
-    </View>
+    <NavPage headerShown={false} statusBar={{ foreground: "light", animated: true }}>
+      <View style={{ flex: 1, backgroundColor: "#000000" }}>…</View>
+    </NavPage>
   );
 }
 ```
@@ -205,7 +198,7 @@ The `ios:`, `android:` and `web:` variants apply classes on one platform:
 
 ## Prefer shared behavior
 
-Before reaching for a platform check, consider whether the difference matters to your users. Elements and styles already map to each platform's native behavior where it should differ (scroll physics, text rendering, keyboards, accessibility), while staying the same where users expect consistency (your app's own look). Platform checks are best kept for platform conventions users rely on: Android's back button and toasts, iOS's sheets and large titles, autofill names, ripple versus opacity feedback.
+Before reaching for a platform check, consider whether the difference matters to your users. Elements and styles already map to each platform's native behavior where it should differ (scroll physics, text rendering, keyboards, accessibility), while staying the same where users expect consistency (your app's own look). Platform checks are best kept for platform conventions users rely on: Android's back button and toasts, iOS's sheets and large titles, autofill names, Android's ripple.
 
 ## Related
 

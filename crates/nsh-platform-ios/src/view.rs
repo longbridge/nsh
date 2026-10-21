@@ -35,6 +35,8 @@ type ErrorHandler = Rc<dyn Fn(&str)>;
 struct State {
     surface: Option<Surface>,
     options: SurfaceOptions,
+    /// The embedding app's locale and text size.
+    host: nsh_engine::HostEnvironment,
     on_error: Option<ErrorHandler>,
     #[cfg(feature = "dev")]
     dev: Option<crate::dev::DevSession>,
@@ -53,6 +55,7 @@ impl AppView {
                 state: RefCell::new(State {
                     surface: None,
                     options,
+                    host: nsh_engine::HostEnvironment::default(),
                     on_error: None,
                     #[cfg(feature = "dev")]
                     dev: None,
@@ -117,7 +120,7 @@ impl AppView {
     /// The VM limits of the apps this view loads. Applies from the next
     /// [`AppView::load`].
     pub fn set_limits(&self, limits: nsh_engine::Limits) {
-        self.reconfigure(|options| options.limits = limits);
+        self.inner.set_limits(limits);
     }
 
     /// The directory the storage (`nsh/storage`) of the apps this view loads
@@ -130,13 +133,34 @@ impl AppView {
         }
     }
 
-    fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
+    /// The embedding app's locale, which stands in for the user's: what
+    /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
+    /// Rust components' `locale()` read, at once and for every app loaded
+    /// later. `None` follows the system's again.
+    pub fn set_locale(&self, locale: Option<nsh_engine::Locale>) {
+        self.set_host(|host| host.locale = locale);
+    }
+
+    /// The embedding app's text size relative to the default (1.0), which
+    /// stands in for Dynamic Type's: every text that allows font scaling is
+    /// laid out again at it, and `fontScale()` reads it, at once and for
+    /// every app loaded later. Lengths stay as they are (spacing, sizes,
+    /// radii): boxes sized by their text grow with it. `None` follows the
+    /// system's again.
+    pub fn set_font_scale(&self, scale: Option<f32>) {
+        self.set_host(|host| host.font_scale = scale);
+    }
+
+    fn set_host(&self, change: impl FnOnce(&mut nsh_engine::HostEnvironment)) {
         let mut state = self.inner.state.borrow_mut();
-        change(&mut state.options);
-        // The next load starts a surface with the new options.
-        if let Some(old) = state.surface.take() {
-            old.view().removeFromSuperview();
+        change(&mut state.host);
+        if let Some(surface) = &state.surface {
+            surface.set_host_environment(state.host);
         }
+    }
+
+    fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
+        self.inner.reconfigure(change);
     }
 
     /// Receives fatal app errors (bundle failed to load, uncaught JS
@@ -163,6 +187,23 @@ impl AppView {
 }
 
 impl Inner {
+    fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
+        let mut state = self.state.borrow_mut();
+        change(&mut state.options);
+        // The next load starts a surface with the new options.
+        if let Some(old) = state.surface.take() {
+            old.view().removeFromSuperview();
+        }
+    }
+
+    /// The VM limits of the apps loaded from now on (a change starts the
+    /// next load on a surface of its own).
+    pub(crate) fn set_limits(&self, limits: nsh_engine::Limits) {
+        if self.state.borrow().options.limits != limits {
+            self.reconfigure(|options| options.limits = limits);
+        }
+    }
+
     pub(crate) fn load(this: &Rc<Inner>, app: App) {
         let mut state = this.state.borrow_mut();
         if let Some(surface) = &state.surface {
@@ -177,6 +218,7 @@ impl Inner {
         surface.view().setAutoresizingMask(
             UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
         );
+        surface.set_host_environment(state.host);
         let weak: Weak<Inner> = Rc::downgrade(this);
         surface.set_error_handler(move |message| {
             if let Some(inner) = weak.upgrade() {

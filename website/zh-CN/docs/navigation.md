@@ -1,51 +1,65 @@
 ---
 title: 导航
-description: 用 createNavigator、Stack 和 Screen 构建原生导航栈，标题栏选项，用 preventBack 把用户留在当前页面，模态视图，以及 Android 返回键。
+description: 用 createNavStack、NavStack 和 NavPage 构建原生导航栈，各平台的标题栏，用 popOnBack 把用户留在当前页面，对话框，以及 Android 返回键。
 order: 41
 group: ui
 ---
 
 # 导航
 
-`nsh/ui/mobile` 提供原生的导航栈和原生的模态视图。`Stack` 在 iOS 上是 UINavigationController，带有它的标题栏、侧滑返回和大标题；在 Android 上是带工具栏、支持预测性返回的页面栈。路由列表保存在 navigator 中；栈把每个路由渲染为一个页面，只要路由还在栈里，页面就保持挂载，状态也随之保留。
+`nsh/base` 提供原生的导航栈和原生的对话框。`NavStack` 在 iOS 上是 UINavigationController，带有它的标题栏、侧滑返回和大标题；在 Android 上是带工具栏、支持预测性返回的页面栈；在桌面和 Web 上，每个页面显示应用自己绘制的标题栏。路由保存在栈的状态中；栈把每个路由渲染为一个页面，只要路由还在栈里，页面就保持挂载，状态也随之保留。
 
 ```tsx
 import { mount, Scroll, Text, View } from "nsh";
-import { createNavigator, Screen, Stack } from "nsh/ui/mobile";
+import { createNavStack, NavPage, NavStack } from "nsh/base";
 
 type Route = { name: "inbox" } | { name: "message"; id: number };
 
-const nav = createNavigator<Route>({ name: "inbox" });
+const nav = createNavStack<Route>([{ name: "inbox" }]);
+
+// 桌面和 Web 上页面的标题栏；iOS 和 Android 显示系统标题栏，取自 `title`。
+function Header(props: { title: string }) {
+  return (
+    <View class="h-12 flex-row items-center gap-3 border-b border-gray-200 px-4">
+      <If when={nav.routes().length > 1}>
+        <Text role="button" onPress={() => nav.pop()} class="text-blue-600 active:opacity-60">
+          Back
+        </Text>
+      </If>
+      <Text style={{ fontSize: 17, fontWeight: "600" }}>{props.title}</Text>
+    </View>
+  );
+}
 
 function Inbox() {
   return (
-    <Screen title="Inbox">
+    <NavPage title="Inbox" header={<Header title="Inbox" />}>
       <Scroll style={{ flex: 1 }}>
         <Each of={[1, 2, 3, 4, 5]}>
           {(id) => (
-            <View onPress={() => nav.push({ name: "message", id: id() })} underlayColor="#eaeef2" style={{ padding: 16 }}>
+            <View onPress={() => nav.push({ name: "message", id: id() })} class="p-4 active:bg-gray-100">
               <Text>Message {id()}</Text>
             </View>
           )}
         </Each>
       </Scroll>
-    </Screen>
+    </NavPage>
   );
 }
 
 function Message(props: { id: number }) {
   return (
-    <Screen title={`Message ${props.id}`}>
+    <NavPage title={`Message ${props.id}`} header={<Header title={`Message ${props.id}`} />}>
       <View style={{ flex: 1, padding: 16 }}>
         <Text>The body of message {props.id}.</Text>
       </View>
-    </Screen>
+    </NavPage>
   );
 }
 
 function App() {
   return (
-    <Stack navigator={nav} style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
       {(route) => {
         switch (route.name) {
           case "inbox":
@@ -54,222 +68,225 @@ function App() {
             return <Message id={route.id} />;
         }
       }}
-    </Stack>
+    </NavStack>
   );
 }
 
 mount(App);
 ```
 
-## Navigator
+<a id="the-stacks-state"></a>
 
-`createNavigator(initial)` 创建路由栈。路由可以是任何值（字符串、对象，或者像上面那样的可辨识联合类型）；路由按标识比较，所以每个页面都应该 push 一个新对象。navigator 只创建一次，放在模块顶层或根组件中，在需要导航的页面里导入它。
+## 栈的状态
+
+`createNavStack(routes)` 用一个从底到顶的路由数组创建栈的状态。路由可以是任何值（字符串、对象，或者像上面那样的可辨识联合类型），每次 push 都是一个独立的页面，同一个路由 push 两次也一样。状态只创建一次，放在模块顶层或根组件中，在需要导航的页面里导入它。
 
 | 成员 | 说明 |
 |---|---|
 | `routes()` | 从底到顶的路由（响应式）。 |
 | `push(route)` | 压入一个页面。 |
 | `pop(count?)` | 弹出 `count` 个页面（默认 1）；至少保留一个。 |
-| `popToTop()` | 回到第一个页面。 |
+| `popToRoot()` | 回到第一个页面。 |
 | `replace(route)` | 替换栈顶页面。 |
-| `reset(routes)` | 替换所有页面，例如登录之后。 |
-| `remove(route)` | 无论路由在哪个位置都将其移除。 |
+| `setRoutes(routes)` | 替换页面，例如登录之后；保留下来的路由（同一个值）保留它的页面和状态。 |
+| `remove(route)` | 移除 `route` 最上面的那个页面，无论它在哪个位置。 |
 
-`createNavigator` 也接受数组，用来一开始就处在多层深处：`createNavigator<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`。
+要一开始就处在多层深处，多传几个路由：`createNavStack<Route>([{ name: "inbox" }, { name: "message", id: 3 }])`。
 
-当用户以原生方式离开页面时（标题栏的返回按钮、iOS 侧滑返回、Android 返回键或返回手势），栈会自动从 navigator 中移除对应路由，所以 `routes()` 总是与屏幕上的内容一致。
+当用户以原生方式离开页面时（标题栏的返回按钮、iOS 侧滑返回、Android 返回键或返回手势、桌面的返回键和鼠标返回键、浏览器的返回按钮），栈会自动从状态中移除对应路由，所以 `routes()` 总是与屏幕上的内容一致。
 
 路由携带页面需要的数据。gallery 示例应用推送的路由直接保存页面组件，页面很多时路由类型依然很小：
 
 ```ts
 import { type JSX } from "nsh";
-import { createNavigator } from "nsh/ui/mobile";
+import { createNavStack } from "nsh/base";
 
 export type Route = { name: "home" } | { name: "page"; page: () => JSX.Element };
-export const nav = createNavigator<Route>({ name: "home" });
+export const nav = createNavStack<Route>([{ name: "home" }]);
 
-// 在别处：nav.push({ name: "page", page: Settings });
+// 在别处： nav.push({ name: "page", page: Settings });
 ```
 
-## Stack
+## NavStack
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `navigator` | `Navigator<R>` | 要显示的路由。 |
-| `children` | `(route: R, index: Accessor<number>) => JSX.Element` | 渲染一个路由；返回 `<Screen>` 以设置标题栏选项。 |
-| `style` | `StyleProp<ViewStyle>` | 栈自身的样式（通常是 `flex: 1`）。 |
+| `state` | `NavStackState<R>` | 要显示的路由。 |
+| `children` | `(route: R, index: Accessor<number>) => JSX.Element` | 渲染一个路由；返回 `<NavPage>` 以设置它的标题栏。 |
+| `style`、`class` | | 栈自身的样式（通常是 `flex: 1`）。 |
 
-渲染函数在每个路由被压入时运行一次；`route` 是原始值，`index()` 是它当前的位置。返回值成为页面内容。返回 `<Screen>` 可以设置标题栏；返回其他内容时会自动包在一个使用默认选项的页面里。
+渲染函数在每个路由被压入时运行一次；`route` 是原始值，`index()` 是它当前的位置。返回值成为页面内容。返回 `<NavPage>` 可以设置标题栏；返回其他内容时会自动包在一个使用默认选项的页面里。
 
 只要路由还在栈中，页面就保持挂载：返回时，上一个页面与离开时完全相同，包括滚动位置、输入框和 signal。路由离开栈时，页面的 [`cleanup`](./reactivity.md) 处理函数会运行。
 
-## Screen 与标题栏
+<a id="navpage-and-the-header"></a>
 
-`Screen` 包裹页面内容并携带标题栏选项。所有选项都是响应式的：改变 signal，标题栏随之更新。
+## NavPage 与标题栏
+
+`NavPage` 包裹页面内容并携带它的标题栏。iOS 和 Android 显示系统标题栏，由 `title` 和 `header*` 属性设置。桌面和 Web 显示页面的 `header` 插槽，即应用自己的 JSX，放在页面顶部：与页面同宽，高度由它自己的布局决定，内容位于它下方。像上面的例子那样两者都给，页面在每个平台上都显得自然。所有属性都是响应式的：改变 signal，标题栏随之更新。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `title` | `string` | | 标题栏的标题。 |
-| `headerShown` | `boolean` | `true` | 显示标题栏。 |
-| `headerTransparent` | `boolean` | `false` | 内容延伸到标题栏下方。 |
-| `headerTintColor` | `ColorValue` | | 返回按钮和栏按钮的颜色。 |
-| `headerBackgroundColor` | `ColorValue` | | 标题栏背景色。 |
-| `headerTitleColor` | `ColorValue` | | 标题颜色。 |
-| `headerBackVisible` | `boolean` | `true` | 显示返回按钮。 |
-| `headerLeft` | `JSX.Element` | | 标题栏开头的视图（替换返回按钮）。 |
-| `headerRight` | `JSX.Element` | | 标题栏末尾的视图。 |
-| `headerTitle` | `JSX.Element` | | 替换标题的视图。 |
-| `animation` | `"default" \| "fade" \| "none"` | `"default"` | 页面进入和离开的方式。 |
-| `gestureEnabled` | `boolean` | `true` | 交互式返回手势（iOS 侧滑返回、Android 预测性返回）。返回按钮无论如何都会返回。 |
-| `preventBack` | `boolean` | `false` | 用户不能离开；返回操作改为调用 `onBackRequest`。 |
-| `onBackRequest` | `() => void` | | 用户试图离开设置了 `preventBack` 的页面。 |
-| `onDismiss` | `() => void` | | 用户以原生方式离开了页面；路由已被移除。 |
-| `ios={{ headerLargeTitle }}` | `boolean` | | iOS：大标题，内容滚动时缩进标题栏。 |
-| `ios={{ headerBackTitle }}` | `string` | | iOS：返回到本页面的返回按钮上的文字。 |
-| `style` | `StyleProp<ViewStyle>` | | 页面的内容视图。 |
+| `header` | `JSX.Element` | | 桌面和 Web：页面的标题栏，由应用绘制（标题、返回按钮、工具栏按钮）。 |
+| `title` | `string` | | iOS 和 Android：系统标题栏的标题。 |
+| `headerShown` | `boolean` | `true` | iOS 和 Android：显示系统标题栏。 |
+| `headerTransparent` | `boolean` | `false` | iOS 和 Android：内容延伸到标题栏下方。 |
+| `headerStyle` | `{ backgroundColor?, color?, tintColor? }` | | iOS 和 Android：标题栏背景色、标题颜色（`color`）和按钮颜色（`tintColor`）。 |
+| `headerClass` | `string` | | 用类名设置同样的颜色：`bg-*`、标题用 `text-*`、按钮用 `tint-*`；`headerStyle` 优先。 |
+| `headerBackVisible` | `boolean` | `true` | iOS 和 Android：显示返回按钮。 |
+| `headerLeft` | `JSX.Element` | | iOS 和 Android：标题栏开头的视图（替换返回按钮）。 |
+| `headerRight` | `JSX.Element` | | iOS 和 Android：标题栏末尾的视图。 |
+| `headerTitle` | `JSX.Element` | | iOS 和 Android：替换标题的视图。 |
+| `headerLargeTitle` | `boolean` | `false` | iOS：大标题，内容滚动时缩进标题栏。 |
+| `headerBackTitle` | `string` | | 返回到本页面的返回按钮上的文字（iOS；Android 的向上箭头把它读给屏幕阅读器）。 |
+| `animation` | `"default" \| "slide" \| "fade" \| "none"` | `"default"` | 页面进入和离开的方式。 |
+| `statusBar` | `{ foreground?, hidden?, animated? }` | | iOS 和 Android：页面在最上层时的状态栏（[状态栏](../modules/nsh-base.md#status-bar)）。 |
+| `popOnSwipe` | `boolean` | `true` | 交互式返回手势（iOS 侧滑返回、Android 预测性返回）会返回。返回按钮无论如何都会返回。 |
+| `popOnBack` | `boolean` | `true` | 每一种返回方式都会弹出页面：返回按钮、Android 返回键、桌面的返回键、浏览器的返回按钮和侧滑。 |
+| `onBackPress` | `() => void` | | 用户在页面上按了返回，无论 `popOnBack` 是否让它弹出。 |
+| `onDismiss` | `() => void` | | 用户弹出了页面；路由已被移除。 |
+| `style`、`class` | | | 页面的内容视图。 |
 
 标题栏中的项目就是普通视图，所以可以按压，也是响应式的：
 
 ```tsx
 function Compose() {
   const text = signal("");
+  const cancel = () => (
+    <Text onPress={() => nav.pop()} style={{ fontSize: 17, color: "#0969da" }}>
+      Cancel
+    </Text>
+  );
+  const sendButton = () => (
+    <Text
+      onPress={() => send(text())}
+      style={{ fontSize: 17, fontWeight: "600", color: text() ? "#0969da" : "#8c959f" }}
+    >
+      Send
+    </Text>
+  );
   return (
-    <Screen
+    <NavPage
       title="New message"
-      headerLeft={<Text onPress={() => nav.pop()} style={{ fontSize: 17, color: "#0969da" }}>Cancel</Text>}
-      headerRight={
-        <Text
-          onPress={() => send(text())}
-          style={{ fontSize: 17, fontWeight: "600", color: text() ? "#0969da" : "#8c959f" }}
-        >
-          Send
-        </Text>
+      headerLeft={cancel()}
+      headerRight={sendButton()}
+      header={
+        <View class="h-12 flex-row items-center justify-between px-4">
+          {cancel()}
+          <Text style={{ fontSize: 17, fontWeight: "600" }}>New message</Text>
+          {sendButton()}
+        </View>
       }
     >
-      <Input multiline value={text()} onChangeText={(t) => text.set(t)} style={{ flex: 1, padding: 16, fontSize: 17 }} />
-    </Screen>
+      <Input multiline value={text()} onChange={(t) => text.set(t)} style={{ flex: 1, padding: 16, fontSize: 17 }} />
+    </NavPage>
   );
 }
 ```
 
-彩色标题栏：
+彩色系统标题栏：
 
 ```tsx
-<Screen title="Profile" headerBackgroundColor="#1a7f37" headerTintColor="#ffffff" headerTitleColor="#ffffff">
+<NavPage title="Profile" headerStyle={{ backgroundColor: "#1a7f37", color: "#ffffff", tintColor: "#ffffff" }}>
   …
-</Screen>
+</NavPage>
 ```
 
-没有标题栏的页面四周仍有系统栏；用 [`SafeAreaView`](../components/safe-area-view.md) 给内容留出边距：
+不显示标题栏的页面四周仍有系统栏；用 [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 给内容留出边距：
 
 ```tsx
-<Screen headerShown={false}>
+<NavPage headerShown={false}>
   <SafeAreaView style={{ flex: 1, padding: 16 }}>…</SafeAreaView>
-</Screen>
+</NavPage>
 ```
 
 ### 标题栏下的安全区域
 
-在页面内部，`useSafeAreaInsets()` 和 `SafeAreaView` 报告的是标题栏下方的 inset，而不是整个 surface 的。使用 `headerTransparent` 时，内容从页面顶部开始，顶部 inset 等于标题栏高度，因此 `SafeAreaView` 能让文字避开标题栏，同时背景图铺满整个页面。使用 `ios={{ headerLargeTitle: true }}` 时，把滚动视图直接放在页面里，标题才能随滚动收起。
+在页面内部，`safeAreaInsets()` 和 `SafeAreaView` 报告的是系统标题栏下方的 inset，而不是整个 surface 的。使用 `headerTransparent` 时，内容从页面顶部开始，顶部 inset 等于标题栏高度，因此 `SafeAreaView` 能让文字避开标题栏，同时背景图铺满整个页面。使用 `headerLargeTitle` 时，把滚动视图直接放在页面里，标题才能随滚动收起。在桌面和 Web 上，内容从页面的 `header` 下方开始。
 
-## 把用户留在当前页面：preventBack
+<a id="keeping-the-user-on-a-page-poponback"></a>
 
-要在丢弃未保存的修改前先询问用户，就在有内容可能丢失时设置 `preventBack`，并处理 `onBackRequest`：
+## 把用户留在当前页面：popOnBack
+
+要在丢弃未保存的修改前先询问用户，就在有内容可能丢失时把 `popOnBack` 设为 `false`，处理 `onBackPress`，并在用户同意后再返回：
 
 ```tsx
 import { Input, signal } from "nsh";
-import { Alert, Screen } from "nsh/ui/mobile";
+import { AlertDialog, NavPage } from "nsh/base";
 
 function EditNote() {
   const text = signal("");
+  const dirty = () => text().length > 0;
   const confirm = async () => {
-    const choice = await Alert.alert("Discard your changes?", undefined, [
-      { text: "Keep editing", style: "cancel" },
-      { text: "Discard", style: "destructive" },
-    ]);
-    if (choice === 1) nav.pop();
+    const choice = await AlertDialog.show({
+      title: "Discard your changes?",
+      actions: [
+        { label: "Keep editing", role: "cancel" },
+        { label: "Discard", role: "destructive", id: "discard" },
+      ],
+    });
+    if (choice === "discard") nav.pop();
   };
   return (
-    <Screen title="Edit" preventBack={text().length > 0} onBackRequest={confirm}>
-      <Input value={text()} onChangeText={(t) => text.set(t)} placeholder="A note" style={{ margin: 16, fontSize: 17 }} />
-    </Screen>
+    <NavPage title="Edit" popOnBack={!dirty()} onBackPress={() => dirty() && confirm()}>
+      <Input value={text()} onChange={(t) => text.set(t)} placeholder="A note" style={{ margin: 16, fontSize: 17 }} />
+    </NavPage>
   );
 }
 ```
 
-开启 `preventBack` 后，侧滑返回被禁用，返回按钮（标题栏中的、Android 返回键和返回手势）调用 `onBackRequest` 而不是返回。从代码调用 `nav.pop()` 仍然会返回。
+`popOnBack={false}` 时，每一种返回方式（返回按钮、Android 返回键和返回手势、桌面的返回键、浏览器的返回按钮、侧滑）都会让页面留下，`onBackPress` 告诉你用户试图返回。从代码调用 `nav.pop()` 照常返回。
 
 > [!IMPORTANT]
-> `preventBack` 是一个属性，而不是返回 true 或 false 的回调，因为主线程从不等待 JS。用户开始侧滑或按下返回时，系统会立即询问页面能否离开，NSH 根据已有的属性在原生端直接回答。所以要在有内容可能丢失时就设置 `preventBack`（像上面那样根据文本决定），而不是等用户试图离开时才设置。
+> `popOnBack` 是一个属性，而不是返回 true 或 false 的回调，因为主线程从不等待 JS。用户开始侧滑或按下返回时，系统会立即询问页面能否离开，NSH 根据已有的属性在原生端直接回答。所以要在有内容可能丢失时就设置 `popOnBack`（像上面那样根据文本决定），赶在用户试图离开之前。
 
-`gestureEnabled={false}` 是较轻的选择：它只关闭交互式手势（iOS 侧滑返回、Android 预测性返回动画），返回按钮仍会返回。
+`popOnSwipe={false}` 是较轻的选择：它只关闭交互式手势（iOS 侧滑返回、Android 预测性返回动画），返回按钮仍会返回。
 
-## 模态视图
+<a id="dialogs"></a>
 
-`Modal` 在其他所有内容之上呈现内容，处于独立的原生窗口层：iOS 上是被 present 的视图控制器，Android 上是一个对话框。把它渲染在其状态所在的地方，用 `visible` 控制：
+## 对话框
+
+`Dialog` 在其他所有内容之上呈现内容，处于独立的原生窗口层：iOS 上是被 present 的视图控制器，Android 上是一个对话框窗口，桌面和 Web 上是覆盖整个窗口的一层。它的外观由你决定：`class` 和 `style` 设置容纳子元素的弹出层（popup），`backdropClass` 或 `backdropStyle` 在它后面加一层背景（backdrop）。把它渲染在其状态所在的地方，用 `open` 控制：
 
 ```tsx
 import { signal, Text, View } from "nsh";
-import { Modal, SafeAreaView } from "nsh/ui/mobile";
+import { Dialog } from "nsh/base";
 
-function Settings() {
+function Files() {
   const open = signal(false);
   return (
     <View style={{ flex: 1 }}>
       <View onPress={() => open.set(true)} style={{ padding: 16 }}>
-        <Text>Edit profile</Text>
+        <Text>Delete the file</Text>
       </View>
-      <Modal visible={open()} animationType="slide" ios={{ presentationStyle: "pageSheet" }} onRequestClose={() => open.set(false)}>
-        <SafeAreaView style={{ flex: 1, padding: 20, gap: 12 }}>
-          <Text style={{ fontSize: 22, fontWeight: "700" }}>Profile</Text>
-          <View onPress={() => open.set(false)}>
-            <Text style={{ color: "#0969da" }}>Done</Text>
-          </View>
-        </SafeAreaView>
-      </Modal>
+      <Dialog
+        open={open()}
+        animation="fade"
+        onOpenChange={(next) => open.set(next)}
+        backdropClass="bg-black/40"
+        class="m-auto w-80 gap-3 rounded-2xl bg-white p-5"
+      >
+        <Text style={{ fontSize: 20, fontWeight: "700" }}>Delete the file?</Text>
+        <View onPress={() => open.set(false)}>
+          <Text style={{ color: "#cf222e" }}>Delete</Text>
+        </View>
+      </Dialog>
     </View>
   );
 }
 ```
 
-| 属性 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `visible` | `boolean` | `true` | 为 true 时显示。 |
-| `animationType` | `"slide" \| "fade" \| "none"` | | 出现的方式。 |
-| `transparent` | `boolean` | `false` | 背景透出后面的内容（对话框、自定义面板）。 |
-| `dismissible` | `boolean` | `false` | 用户以原生方式关闭它（iOS 下滑关闭页面表单、Android 返回键），之后再调用 `onRequestClose` 和 `onDismiss`。 |
-| `onRequestClose` | `() => void` | | 用户请求关闭：把 `visible` 设为 false。 |
-| `onShow` | `() => void` | | 已经出现。 |
-| `onDismiss` | `() => void` | | 已经消失。 |
-| `ios={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | iOS：表单样式会保留后面内容的可见部分。 |
-| `desktop={{ presentationStyle }}`、`web={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | 桌面和浏览器：表单是居中于变暗窗口上的卡片（手机浏览器中是停在顶部稍下方的表单）；Escape 或点击外部会请求关闭。 |
-| `ios={{ supportedOrientations }}` | `("portrait" \| "landscape" \| …)[]` | 与呈现者相同 | iOS：允许的方向。 |
-| `android={{ statusBarTranslucent }}` | `boolean` | `false` | Android：内容延伸到状态栏下方。 |
+Escape、Android 返回键、点击背景和在表单上下滑都会以原生方式关闭它（`closeOnEscape`、`closeOnBackdropPress` 和 `closeOnSwipe`，默认都是 `true`）；随后 `onOpenChange(false, reason)` 通知你，所以在那里把 `open` 设为 `false`。要先确认，就把对应开关设为 `false` 并处理 `onCancel`（它报告每一次尝试），然后自己关闭对话框。在 iOS 上，`presentation="pageSheet"` 或 `"formSheet"` 呈现一个保留后面内容可见的表单。
 
-模态视图默认是**受控**的：在 iOS 表单上下滑或按 Android 返回键只是发出请求（`onRequestClose`），直到你把 `visible` 设为 false 它才关闭。这样你可以先确认。设置 `dismissible` 后，平台会立即关闭它，然后再通知你；适合没有内容会丢失的面板。与 `preventBack` 一样，这是一个属性，因为系统会当场询问能否关闭。
-
-透明模态视图可以做成自定义对话框：
-
-```tsx
-<Modal visible={open()} transparent animationType="fade" onRequestClose={() => open.set(false)}>
-  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: 32 }}>
-    <View style={{ alignSelf: "stretch", backgroundColor: "#ffffff", borderRadius: 14, padding: 20, gap: 12 }}>
-      <Text style={{ fontSize: 20, fontWeight: "700" }}>Delete the file?</Text>
-      <View onPress={() => open.set(false)}><Text style={{ color: "#cf222e" }}>Delete</Text></View>
-    </View>
-  </View>
-</Modal>
-```
-
-在模态视图内部，`SafeAreaView` 和 `useSafeAreaInsets()` 给出的是模态视图自己的 inset。系统对话框（带按钮的提示框、操作表）请用 [`Alert`](../components/alert.md) 和 [`ActionSheet`](../components/action-sheet.md)；从底部滑出、覆盖在暗色背景上并跟随手指的面板，请用 [`Sheet`](../components/sheet.md)。
+全部属性见 [Dialog](../elements/dialog.md)。在对话框内部，`SafeAreaView` 和 `safeAreaInsets()` 给出的是对话框自己的 inset。系统对话框（带操作的提示框、操作表）请用 `nsh/base` 的 [`AlertDialog`](../modules/nsh-base.md#alertdialog)。
 
 ## Android 返回键
 
 在 Android 上，返回键（或返回手势）按以下顺序处理：
 
-1. 最上层的模态视图：调用 `onRequestClose`（设置了 `dismissible` 时直接关闭）。
+1. 最上层的对话框：调用 `onCancel`，`closeOnEscape`（默认）时关闭。
 2. 你在 `nsh/android` 中注册的 `BackHandler` 监听器，最近添加的最先执行。
-3. 最上层的栈：弹出栈顶页面，设置了 `preventBack` 时调用 `onBackRequest`。
+3. 最上层的栈：栈顶页面调用 `onBackPress`，`popOnBack` 为 `true` 时弹出。
 4. 都没有处理：应用退出。
 
 监听器处理了按键时返回 `true`，栈就不会弹出。注册了监听器时，Android 的返回手势不会预览弹出效果（手势结束后应用才给出答复），所以只在监听器可能处理按键时才注册它：
@@ -294,11 +311,11 @@ function Editor() {
 
 ## 标签页与其他布局
 
-`nsh/ui/mobile` 没有标签栏组件。标签栏就是一排可按压的视图加一个保存当前标签的 signal；用函数子元素或 [`<If>`](../elements/control-flow.md) 渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的 `Stack` 和 navigator，并让它们都保持挂载，用 `display: "none"` 隐藏未选中的标签。
+标签栏是应用自己的界面，用基础元素绘制：一排可按压的视图加一个保存当前标签的 signal；用函数子元素或 [`<If>`](../elements/control-flow.md) 渲染选中标签的内容。要在切换时保留每个标签的状态，给每个标签一个独立的 `NavStack` 和状态，并让它们都保持挂载，用 `display: "none"` 隐藏未选中的标签。
 
 ## 相关内容
 
-- [导航组件](../components/navigation.md)：`createNavigator`、`Stack`、`Screen` 和 `Modal` 参考。
-- [`SafeAreaView`](../components/safe-area-view.md) 与 [`StatusBar`](../components/status-bar.md)。
-- [`Alert`](../components/alert.md)、[`ActionSheet`](../components/action-sheet.md) 与 [`Sheet`](../components/sheet.md)。
+- [`nsh/base`](../modules/nsh-base.md)：`createNavStack`、`NavStack`、`NavPage`、`Dialog` 和 `SafeAreaView` 参考。
+- 页面和对话框的[状态栏](../modules/nsh-base.md#status-bar)。
+- [`AlertDialog`](../modules/nsh-base.md#alertdialog)。
 - [`nsh/android`](../modules/nsh-android.md)：`BackHandler`。

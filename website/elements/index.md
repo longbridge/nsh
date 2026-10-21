@@ -9,7 +9,8 @@ order: 1
 Host elements are the primitives every screen is made of: `<View>`, `<Text>`, `<Image>` and the rest, imported from NSH's
 modules. Each one is a native view (a UIView subclass on iOS and Mac Catalyst, an Android `View`), created and laid out
 by the NSH runtime. Everything an app shows is
-made of them: the components of [`nsh/ui/mobile`](../components/index.md) are drawn with the same elements.
+made of them: an app's buttons, cards, rows and screens are its own components, drawn with these elements and styled
+with `style` or Tailwind classes, so the app's look is entirely its own.
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
@@ -19,7 +20,7 @@ function App() {
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12 }}>
       <Text style={{ fontSize: 24 }}>Tapped {count()} times</Text>
-      <View onPress={() => count.update((n) => n + 1)} activeOpacity={0.6} class="rounded-lg bg-blue-600 px-4 py-2">
+      <View onPress={() => count.update((n) => n + 1)} class="rounded-lg bg-blue-600 px-4 py-2 active:opacity-60">
         <Text class="text-white">Tap</Text>
       </View>
     </View>
@@ -48,7 +49,7 @@ so importing them costs nothing at run time. See [JSX and components](../docs/js
 | `<Canvas>` | `nsh/canvas` | a view replaying a 2D drawing | [Canvas](./canvas.md) |
 | `<WebView>` | `nsh/webview` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `nsh/video` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
-| `<Modal>` | `nsh/ui/mobile` | presented view controller / Dialog | [Modal](./modal.md) |
+| `<Dialog>` | `nsh/base` | presented view controller / Dialog | [Dialog](./dialog.md) |
 | `<InputAccessoryView>` | `nsh/ios` | a bar over the keyboard (iOS only) | [nsh/ios](../modules/nsh-ios.md) |
 | `<If>`, `<Each>` | nothing: globals | none: control flow | [Control flow](./control-flow.md) |
 
@@ -67,11 +68,11 @@ Every host element accepts the props below (the `CommonProps` type). Element pag
 | `style` | `StyleProp<ViewStyle>` (`TextStyle` for `<Text>` and `<Input>`, `ImageStyle` for `<Image>`) | Inline style, or an array of styles merged left to right (falsy entries skipped; arrays may nest, so `style={[base, props.style]}` takes a `props.style` that is itself an array). Wins over `class`. See the [style reference](../modules/style-reference.md). |
 | `class` | `string` | Tailwind classes, resolved natively (`"flex-row gap-2 p-4 dark:bg-zinc-900"`). Later classes win over earlier ones. See [Tailwind](../docs/tailwind.md). |
 | `classList` | `Record<string, boolean \| null \| undefined>` | Classes applied while their value is truthy (`{ "opacity-50": busy() }`). |
-| `disabled` | `boolean` | Ignores presses (no press feedback either), applies `disabled:` classes and disables controls such as inputs. |
+| `disabled` | `boolean` | Ignores presses (no press feedback either), applies `disabled:` classes, disables controls such as inputs, and screen readers say it is disabled (`accessibilityState.disabled`). |
 
 ### Presses and feedback
 
-Press handling runs natively: the platform recognizes the press and shows the feedback, and JS only hears about it
+Press handling runs natively: the platform recognizes the press and applies the app's press styles, and JS only hears about it
 afterwards. Only the innermost pressable view responds; inside scroll views a press-in waits about 130 ms so a scroll can
 start first.
 
@@ -79,31 +80,56 @@ start first.
 |---|---|---|---|
 | `onPress` | `() => void` | | A tap ended inside the view. |
 | `onLongPress` | `() => void` | | The finger stayed down for `delayLongPress`. |
-| `onPressIn` | `() => void` | | A finger went down on the view. |
-| `onPressOut` | `() => void` | | The finger lifted or left. |
+| `onPressDown` | `() => void` | | A finger went down on the view. |
+| `onPressUp` | `() => void` | | The finger lifted or left. |
 | `delayLongPress` | `number` | `500` | Milliseconds before a press becomes a long press. |
-| `activeOpacity` | `number` | | The view's opacity while pressed. |
-| `underlayColor` | `ColorValue` | | The background while pressed; the children fade to `underlayOpacity`. |
-| `underlayOpacity` | `number` | `0.85` | The children's opacity while `underlayColor` shows. |
 | `hitSlop` | `number \| { top?, right?, bottom?, left? }` | | Extends the touch area beyond the bounds, in points. |
 | `pointerEvents` | `"auto" \| "none" \| "box-none" \| "box-only"` | `"auto"` | Which touches the view and its children receive: `"none"` neither, `"box-none"` only the children, `"box-only"` only the view itself. |
 
-`active:` Tailwind classes also apply while a view is pressed, with no JS round trip.
+The press feedback is the app's: `activeStyle` (or `active:` classes) applies while the view is pressed, natively,
+with no JS round trip (below).
+
+### State styles
+
+Styles that apply while the view is in a state, over its own `style` and classes, natively. Each is the object form of
+a Tailwind variant. Later states win (checked, then hover, focus, active); `disabledStyle` wins over all, and the others
+do not apply while the view is disabled.
+
+| Prop | Type | Class variant | Applies |
+|---|---|---|---|
+| `activeStyle` | `StyleProp<ViewStyle>` | `active:` | While pressed. |
+| `hoverStyle` | `StyleProp<ViewStyle>` | `hover:` | While a pointer is over the view. |
+| `focusStyle` | `StyleProp<ViewStyle>` | `focus:` | While the view has focus. |
+| `disabledStyle` | `StyleProp<ViewStyle>` | `disabled:` | While `disabled`. |
+| `checkedStyle` | `StyleProp<ViewStyle>` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
+
+```tsx
+<View onPress={save} activeStyle={{ opacity: 0.6 }} hoverStyle={{ backgroundColor: "#1d4ed8" }} class="rounded-lg bg-blue-600 px-4 py-2">
+  <Text class="text-white">Save</Text>
+</View>
+```
 
 ### Hover
 
-On macOS, Linux and the GPUI backend, JS can hear the mouse come over a view and leave it (other platforms do not raise these events
-yet; `hover:` classes style hovered views everywhere the platform tracks hover).
+JS can hear the mouse come over a view, move over it and leave it: on macOS, Windows, Linux, the GPUI backend and in
+desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mouse or a stylus on Android. `hover:`
+classes style hovered views in the same places.
 
 | Prop | Type | Description |
 |---|---|---|
 | `onHoverIn` | `() => void` | The mouse came over the view or a view inside it. |
+| `onHoverMove` | `(e: HoverEvent) => void` | The mouse moved over the view (or a view inside it) with no button down. |
 | `onHoverOut` | `() => void` | The mouse left the view and the views inside it, or the window. |
 
 Like CSS `:hover`, a view counts as hovered while the mouse is over it or over anything inside it, so the views around
 the one under the mouse hear `onHoverIn` too (from the outside in; `onHoverOut` from the inside out). The events come
-after the fact and never on touches. A view removed from under the mouse hears `onHoverOut`, on Linux at the next mouse
-move.
+after the fact and never on touches; a move with a button down is a touch (`onTouchMove`, the responder). A view removed
+from under the mouse hears `onHoverOut`, on Linux and Windows at the next mouse move.
+
+`HoverEvent` says where the mouse is: `locationX` / `locationY` in the view (points, its transforms undone), `pageX` /
+`pageY` in the root view it is in, as touches give them, and the modifier keys held (`altKey`, `ctrlKey`, `metaKey`:
+Command on Apple platforms, the Windows key elsewhere, `shiftKey`). Moves come at most once a frame, the latest one,
+and always before the `onHoverOut` that follows them, so a handler can redraw on each move:
 
 ```tsx
 const hovered = signal<string | null>(null);
@@ -111,7 +137,39 @@ const hovered = signal<string | null>(null);
 <View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
   <Text>{file.name}</Text>
 </View>
+
+// A crosshair over a chart.
+const at = signal<number | null>(null);
+
+<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+  <If when={at() !== null}>
+    <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
+  </If>
+</View>
 ```
+
+### Context menus
+
+`onContextMenu` tells a view that the secondary button was pressed over it: a right click, Control-click on macOS, a
+two-finger click on a touchpad, the secondary click of an iPad's pointer; in browsers also the keyboard's menu key.
+Open the app's own menu there with [`Menu.popup`](../modules/nsh-desktop.md):
+
+```tsx
+import { Menu } from "nsh/desktop";
+
+<View onContextMenu={(e) => Menu.popup(rowMenu(row), { x: e.pageX, y: e.pageY })}>…</View>
+```
+
+| Prop | Type | Description |
+|---|---|---|
+| `onContextMenu` | `(e: ContextMenuEvent) => void` | The secondary button was pressed over the view or a view inside it. |
+
+`ContextMenuEvent` has `locationX` / `locationY` in the view, `pageX` / `pageY` in its root view (where `Menu.popup`
+places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`). The nearest view that listens, from
+the one under the pointer outwards, hears it. A text input, or selectable text with an edit menu (Windows, the GPUI
+backend, browsers), nearer than that view shows its own menu instead. The platform decides this as the button goes
+down, from what is mounted, so the handler is told after the fact and nothing has to be cancelled. On touchscreens, a
+long press opens menus: handle `onLongPress` with the same function.
 
 ### Keyboard focus
 
@@ -181,7 +239,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `string` | What activating the element does. |
-| `accessibilityRole` / `role` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
+| `role` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `{ disabled?, selected?, checked?, busy?, expanded? }` | The state assistive technologies report (`checked` may be `"mixed"`). |
 | `accessibilityValue` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | `boolean` | Hides the view and its subtree from assistive technologies. |
@@ -198,7 +256,7 @@ current platform's object is sent; the others are ignored.
 
 | Prop | Description |
 |---|---|
-| `ios={{…}}` | iOS and Mac Catalyst. `<Input>`, `Modal` and `WebView` add their own keys. |
+| `ios={{…}}` | iOS and Mac Catalyst. `<Input>`, `Dialog` and `WebView` add their own keys. |
 | `android={{…}}` | Android. Every element takes `ripple`, `elevation` and `accessibilityLiveRegion` (below). |
 | `desktop={{…}}` | Desktop platforms and desktop browsers; ignored on mobile. Every element takes `windowDrag` (below). |
 | `web={{…}}` | Browsers; ignored elsewhere. |
@@ -251,6 +309,6 @@ let input!: YNode;
 ## Why handlers never block the UI
 
 The main thread never waits for JS. When the system needs an answer on the spot (may this text change, may the back
-button pop, may this sheet close), NSH answers it natively from props set beforehand (`maxLength`, `preventBack`,
-`dismissible`, `pointerEvents`, …), and the event reaches JS afterwards. This is why such behavior is a prop, not a
+button pop, may this sheet close), NSH answers it natively from props set beforehand (`maxLength`, `popOnBack`,
+`closeOnSwipe`, `pointerEvents`, …), and the event reaches JS afterwards. This is why such behavior is a prop, not a
 return value of a handler.

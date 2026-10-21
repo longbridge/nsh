@@ -6,6 +6,7 @@ use std::time::Duration;
 use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem, Size,
     canvas::{CanvasOp, Drawing, LineCap, Num, PathOp},
+    geometry::px,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -18,24 +19,24 @@ mount(
   () => (
     <Canvas
       style={{ width: 100, height: 50 }}
-      draw={(ctx, size) => {
-        ctx.save();
-        ctx.lineWidth = 3;
-        ctx.lineCap = "round";
-        ctx.translate(size.width / 2, 0);
-        ctx.beginPath();
-        ctx.moveTo(1, 2);
-        ctx.lineTo(3, 4);
-        ctx.arc(5, 6, 7, 0, 1);
-        ctx.roundRect(0, 0, 10, 10, [2, 4]);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
+      draw={(cx, size) => {
+        cx.save();
+        cx.lineWidth = 3;
+        cx.lineCap = "round";
+        cx.translate(size.width / 2, 0);
+        cx.beginPath();
+        cx.moveTo(1, 2);
+        cx.lineTo(3, 4);
+        cx.arc(5, 6, 7, 0, 1);
+        cx.roundRect(0, 0, 10, 10, [2, 4]);
+        cx.closePath();
+        cx.stroke();
+        cx.restore();
         // Restored: the state's value again.
-        if (ctx.lineWidth !== 1) throw new Error(`lineWidth ${ctx.lineWidth}`);
-        ctx.fillStyle = "#ff0000";
-        ctx.fillRect(0, 0, size.width, size.height);
-        ctx.fill(new Path2D("M0 0 L10 10"));
+        if (cx.lineWidth !== 1) throw new Error(`lineWidth ${cx.lineWidth}`);
+        cx.fillStyle = "#ff0000";
+        cx.fillRect(0, 0, size.width, size.height);
+        cx.fill(new Path2D("M0 0 L10 10"));
       }}
     />
   ),
@@ -57,28 +58,30 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry().into()])
-            .unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_base::registry().into()]).unwrap();
     // SAFETY: compiled just now by this runtime.
     let app = unsafe { Bundle::bytecode(bytecode) };
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: nsh_engine::App::Js(app),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_base::registry()],
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -134,46 +137,46 @@ fn a_drawing_records_what_the_context_was_told() {
 
 /// A drawing using every hand-written part of the context: the paints, the
 /// state stack, line dashes, text, images, paths and animated values.
-const DRAW: &str = r##"(ctx, size) => {
+const DRAW: &str = r##"(cx, size) => {
   const log = [];
-  const g = ctx.createLinearGradient(0, 0, size.width, 0);
+  const g = cx.createLinearGradient(0, 0, size.width, 0);
   g.addColorStop(1, "#0000ff");
   g.addColorStop(0, "red");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 10, 10);
-  const r = ctx.createRadialGradient(1, 2, 3, 4, 5, 6);
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, 10, 10);
+  const r = cx.createRadialGradient(1, 2, 3, 4, 5, 6);
   r.addColorStop(0.5, "#00ff00");
-  ctx.strokeStyle = r;
-  ctx.strokeRect(0, 0, 5, 5);
-  ctx.strokeStyle = ctx.createConicGradient(0.5, 10, 10);
-  ctx.shadowColor = "rgba(0,0,0,0.5)";
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetX = 2;
-  ctx.shadowOffsetY = 3;
-  log.push(ctx.shadowOffsetX, ctx.shadowOffsetY, ctx.lineCap, ctx.globalAlpha);
-  ctx.setLineDash([4, 2, 1]);
-  log.push(ctx.getLineDash().join(","));
-  ctx.lineDashOffset = 1.5;
-  ctx.save();
-  ctx.font = "bold 14px system-ui";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.globalAlpha = 0.25;
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillText(42, 5, 6);
-  ctx.strokeText("hi", 7, 8, 100);
-  log.push(ctx.font, ctx.measureText("abc").width);
-  ctx.restore();
-  log.push(ctx.font, ctx.globalAlpha);
-  ctx.resetTransform();
-  ctx.setTransform(1, 0, 0, 1, 2, 3);
-  ctx.transform(1, 0, 0, 1, 4, 5);
-  ctx.scale(2, 3);
-  ctx.rotate(0.1);
-  ctx.drawImage("https://example.com/a.png", 1, 2);
-  ctx.drawImage({ uri: "asset:/b.png", width: 20, height: 10 }, 1, 2);
-  ctx.drawImage("https://example.com/a.png", 1, 2, 3, 4);
-  ctx.drawImage("https://example.com/a.png", 1, 2, 3, 4, 5, 6, 7, 8);
+  cx.strokeStyle = r;
+  cx.strokeRect(0, 0, 5, 5);
+  cx.strokeStyle = cx.createConicGradient(0.5, 10, 10);
+  cx.shadowColor = "rgba(0,0,0,0.5)";
+  cx.shadowBlur = 4;
+  cx.shadowOffsetX = 2;
+  cx.shadowOffsetY = 3;
+  log.push(cx.shadowOffsetX, cx.shadowOffsetY, cx.lineCap, cx.globalAlpha);
+  cx.setLineDash([4, 2, 1]);
+  log.push(cx.getLineDash().join(","));
+  cx.lineDashOffset = 1.5;
+  cx.save();
+  cx.font = "bold 14px system-ui";
+  cx.textAlign = "center";
+  cx.textBaseline = "middle";
+  cx.globalAlpha = 0.25;
+  cx.globalCompositeOperation = "multiply";
+  cx.fillText(42, 5, 6);
+  cx.strokeText("hi", 7, 8, 100);
+  log.push(cx.font, cx.measureText("abc").width);
+  cx.restore();
+  log.push(cx.font, cx.globalAlpha);
+  cx.resetTransform();
+  cx.setTransform(1, 0, 0, 1, 2, 3);
+  cx.transform(1, 0, 0, 1, 4, 5);
+  cx.scale(2, 3);
+  cx.rotate(0.1);
+  cx.drawImage("https://example.com/a.png", 1, 2);
+  cx.drawImage({ uri: "asset:/b.png", width: 20, height: 10 }, 1, 2);
+  cx.drawImage("https://example.com/a.png", 1, 2, 3, 4);
+  cx.drawImage("https://example.com/a.png", 1, 2, 3, 4, 5, 6, 7, 8);
   const p = new Path2D();
   p.moveTo(0, 0);
   p.lineTo(v, 10);
@@ -186,19 +189,19 @@ const DRAW: &str = r##"(ctx, size) => {
   p.arcTo(1, 2, 3, 4, 5);
   const q = new Path2D(p);
   q.addPath(new Path2D("M0 0 L10 10 Z"));
-  ctx.fill(p, "evenodd");
-  ctx.fill("evenodd");
-  ctx.stroke(q);
-  ctx.clip(q);
-  ctx.clip();
-  ctx.lineWidth = v;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(1, 2, 3, 0, 1, true);
-  ctx.fill();
-  ctx.clearRect(0, 0, size.width, size.height);
-  log.push(ctx.canvas.width, ctx.canvas.height, ctx instanceof CanvasRenderingContext2D, g instanceof CanvasGradient, p instanceof Path2D);
-  ctx.fillText(log.join("|"), 0, 0);
+  cx.fill(p, "evenodd");
+  cx.fill("evenodd");
+  cx.stroke(q);
+  cx.clip(q);
+  cx.clip();
+  cx.lineWidth = v;
+  cx.fillStyle = color;
+  cx.beginPath();
+  cx.arc(1, 2, 3, 0, 1, true);
+  cx.fill();
+  cx.clearRect(0, 0, size.width, size.height);
+  log.push(cx.canvas.width, cx.canvas.height, cx instanceof CanvasRenderingContext2D, g instanceof CanvasGradient, p instanceof Path2D);
+  cx.fillText(log.join("|"), 0, 0);
 }"##;
 
 const DRAW_IMPORTS: &str = r##"import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
@@ -257,9 +260,9 @@ setTimeout(() => n.set(2), 30);
 mount(() => (
   <Canvas
     style={{ width: 10, height: 10 }}
-    draw={(ctx) => {
-      ctx.lineWidth = n();
-      ctx.stroke();
+    draw={(cx) => {
+      cx.lineWidth = n();
+      cx.stroke();
       if (n() === 2) throw new Error("drawn");
     }}
   />
@@ -294,11 +297,11 @@ setTimeout(() => {
 mount(() => (
   <Canvas
     style={{ width: 10, height: 10 }}
-    draw={(ctx) => {
-      ctx.lineWidth = n();
-      ctx.globalAlpha = v.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
-      ctx.translate(v.mul(10), 0);
-      ctx.stroke();
+    draw={(cx) => {
+      cx.lineWidth = n();
+      cx.globalAlpha = v.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] });
+      cx.translate(v.mul(10), 0);
+      cx.stroke();
     }}
   />
 ));
@@ -316,8 +319,8 @@ fn redrawing_derives_the_same_nodes() {
             match item {
                 MountItem::Canvas { drawing, .. } => drawings.push(drawing.slots.clone()),
                 MountItem::Animation(
-                    nsh_animation::AnimationOp::CreateInterpolate { .. }
-                    | nsh_animation::AnimationOp::CreateMath { .. },
+                    nsh_core::animation::AnimationOp::CreateInterpolate { .. }
+                    | nsh_core::animation::AnimationOp::CreateMath { .. },
                 ) => derived += 1,
                 _ => {}
             }
@@ -346,18 +349,18 @@ setTimeout(() => later.set(`later ${kept!.isPointInPath(p, 25, 5)} ${kept!.isPoi
 mount(() => (
   <Canvas
     style={{ width: 100, height: 100 }}
-    draw={(ctx) => {
-      kept ??= ctx;
+    draw={(cx) => {
+      kept ??= cx;
       const log: unknown[] = [];
-      ctx.translate(20, 0);
-      log.push(ctx.isPointInPath(p, 25, 5), ctx.isPointInPath(p, 5, 5));
-      ctx.beginPath();
-      ctx.arc(0, 20, 5, 0, 7);
-      log.push(ctx.isPointInPath(20, 20), ctx.isPointInPath(30, 20), ctx.isPointInStroke(20, 25.2), ctx.isPointInStroke(20, 20));
-      ctx.fontVariantNumeric = "tabular-nums";
-      ctx.font = "12px system-ui";
-      log.push(ctx.fontVariantNumeric);
-      ctx.fillText(log.join("|") + later(), 0, 0);
+      cx.translate(20, 0);
+      log.push(cx.isPointInPath(p, 25, 5), cx.isPointInPath(p, 5, 5));
+      cx.beginPath();
+      cx.arc(0, 20, 5, 0, 7);
+      log.push(cx.isPointInPath(20, 20), cx.isPointInPath(30, 20), cx.isPointInStroke(20, 25.2), cx.isPointInStroke(20, 20));
+      cx.fontVariantNumeric = "tabular-nums";
+      cx.font = "12px system-ui";
+      log.push(cx.fontVariantNumeric);
+      cx.fillText(log.join("|") + later(), 0, 0);
     }}
   />
 ));

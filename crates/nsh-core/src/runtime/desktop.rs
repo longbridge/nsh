@@ -5,6 +5,7 @@
 use crate::{
     Command, ROOT_ID,
     desktop::{DesktopCommand, TitleBarStyle, WindowFrame, WindowLevel},
+    geometry::Points,
     ui::{ModuleCx, module, task::Action},
 };
 
@@ -38,7 +39,7 @@ impl Window {
     /// to lay out the bar at AppKit's actual height. An embedding host's
     /// existing toolbar keeps its own style and height.
     pub(crate) fn set_title_bar(style: TitleBarStyle, height: Option<f32>, cx: &mut ModuleCx) {
-        let height = crate::desktop::title_bar_height(height);
+        let height = crate::desktop::title_bar_height(height.map(Points));
         desktop(cx, DesktopCommand::SetTitleBar { style, height });
     }
 
@@ -69,8 +70,8 @@ impl Window {
         let frame = WindowFrame {
             x: frame.x.filter(|v| v.is_finite()),
             y: frame.y.filter(|v| v.is_finite()),
-            width: frame.width.filter(|v| v.is_finite() && *v > 0.0),
-            height: frame.height.filter(|v| v.is_finite() && *v > 0.0),
+            width: frame.width.filter(|v| v.is_finite() && v.0 > 0.0),
+            height: frame.height.filter(|v| v.is_finite() && v.0 > 0.0),
             animated: frame.animated,
             anchor_top: frame.anchor_top,
         };

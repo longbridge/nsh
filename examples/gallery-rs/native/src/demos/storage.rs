@@ -95,7 +95,7 @@ fn note_card(
                     input()
                         .multiline(true)
                         .value(move || value.get())
-                        .on_change_text(move |text: &str| write(text))
+                        .on_change(move |text: &str| write(text))
                         .placeholder("Write something, then come back to it")
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))

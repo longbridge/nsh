@@ -12,6 +12,9 @@
 //! - `wheel <x> <y> <dx> <dy>`: a wheel / touchpad scroll.
 //! - `hover <x> <y>`: moves the pointer.
 //! - `type <text>`: types into the focused field.
+//! - `mark [text]`: an input method's composition (its preedit text) in
+//!   the focused field, as GTK reports it; `mark` alone ends it. A
+//!   commit is the text typed before the end: `type 腾; mark`.
 //! - `selectall`: selects the focused field's text.
 //! - `key <name>`: presses a key (GDK names: `Return`, `BackSpace`, ...).
 //! - `dark` / `light`: switches the system's appearance (an app that
@@ -97,6 +100,10 @@ fn next(window: gtk::ApplicationWindow, surface: Rc<Surface>, steps: Rc<Vec<Stri
         "type" => {
             let text = step.split_once(' ').map(|x| x.1).unwrap_or_default();
             type_text(&window, text);
+        }
+        "mark" => {
+            let text = step.split_once(' ').map(|x| x.1).unwrap_or_default();
+            mark(&window, text);
         }
         "selectall" => select_all(&window),
         "key" => press_key(&window, &surface, args.first().copied().unwrap_or_default()),
@@ -203,6 +210,15 @@ fn select_all(window: &gtk::ApplicationWindow) {
             }
         }
         None => log::warn!("script: no focused text field to select in"),
+    }
+}
+
+/// GTK's report of a preedit change, as its input method context makes it
+/// (the editor's own context is private).
+fn mark(window: &gtk::ApplicationWindow, text: &str) {
+    match focused_text(window) {
+        Some(w) => w.emit_by_name::<()>("preedit-changed", &[&text]),
+        None => log::warn!("script: no focused text field to compose in"),
     }
 }
 

@@ -1,11 +1,11 @@
 //! `PressRecognizer`: presses with React Native semantics in one gesture
-//! recognizer: `onPressIn` when the finger lands (later inside scroll
-//! views, where it may start a scroll), `onPressOut` when it lifts or
+//! recognizer: `onPressDown` when the finger lands (later inside scroll
+//! views, where it may start a scroll), `onPressUp` when it lifts or
 //! leaves, `onLongPress` after half a second, and `onPress` on release.
 //!
 //! It stays in the possible state while tracking and only recognizes on
 //! release, so scroll views and pans on the same touches win whenever they
-//! start first; it then fails and reports `onPressOut`.
+//! start first; it then fails and reports `onPressUp`.
 
 use std::cell::Cell;
 
@@ -24,7 +24,7 @@ use objc2_ui_kit::{
 
 use crate::{target::EventTarget, text_view::TextView};
 
-/// Delay before `onPressIn` inside scroll views, so starting a scroll does
+/// Delay before `onPressDown` inside scroll views, so starting a scroll does
 /// not flash pressed states.
 const SCROLL_PRESS_DELAY: f64 = 0.13;
 /// How long a press must be held to become a long press (by default).
@@ -35,7 +35,7 @@ const RETENTION: f64 = 20.0;
 pub(crate) struct PressIvars {
     target: Retained<EventTarget>,
     start: Cell<CGPoint>,
-    /// `onPressIn` was reported.
+    /// `onPressDown` was reported.
     pressed: Cell<bool>,
     /// `onLongPress` fired: the release is not a press.
     long_pressed: Cell<bool>,
@@ -238,8 +238,8 @@ impl PressRecognizer {
         let target = &self.ivars().target;
         if let Some(link) = self.ivars().link.get() {
             let kind = match report {
-                Report::PressIn => EventKind::PressIn,
-                Report::PressOut => EventKind::PressOut,
+                Report::PressIn => EventKind::PressDown,
+                Report::PressOut => EventKind::PressUp,
                 Report::LongPress => EventKind::LongPress,
             };
             return target.link_event(&link, kind);

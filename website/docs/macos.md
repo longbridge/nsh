@@ -8,13 +8,13 @@ group: platforms
 # macOS
 
 NSH apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
-text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the
+text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the native modules are the
 same as on iOS and Android, so one bundle runs everywhere. On macOS, `Platform.OS` is `"macos"` and the
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
 [`nsh/desktop`](../modules/nsh-desktop.md).
 
-The macOS backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, centered sheets
-and a menu bar.
+The macOS backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, dialogs
+over the window and a menu bar.
 
 ## Requirements
 
@@ -125,6 +125,10 @@ closes the retained window, stops the engine and returns from `run_app`.
 `nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
 
 
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust).
 
@@ -136,25 +140,25 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `Pl
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.
 `selectable` text is selected by dragging, double- and triple-clicking, and copied with Cmd+C. Escape, Option+Left,
-Cmd+[ and the mouse's back button go back in a stack or ask a modal to close (Escape in a focused field or web page
-only leaves it; a page gets these keys first, and keeps those it uses); page and form sheets are cards centered
-in the window over a dimmed backdrop. A click anywhere in an `Input`, its padding too, puts the caret at the nearest
-point. `Alert` and `ActionSheet` show an `NSAlert` sheet on the window: up to two alert buttons in a row (the cancel
-button leftmost, the last regular one the default for Return), more buttons and an action sheet's options stacked in
-their order with the cancel button last and no default; Escape presses the cancel button.
+Cmd+[ and the mouse's back button close the newest dialog or go back in a stack (Escape in a focused field or web page
+only leaves it; a page gets these keys first, and keeps those it uses); a `Dialog` is a layer over the whole window
+that shows the app's popup and backdrop. Pages show their `header` at the top. A click anywhere in an `Input`, its padding too, puts the caret at the nearest
+point. `AlertDialog` shows an `NSAlert` sheet on the window: up to two alert actions in a row (the cancel
+action leftmost, the last regular one the default for Return), more actions and an action sheet's actions stacked in
+their order with the cancel action last and no default; Escape chooses the cancel action.
 
 ### Keyboard
 
 | Keys | Do |
 |---|---|
-| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmitEditing`), submit and leave the field, or a new line (multiline inputs) |
+| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmit`), submit and leave the field, or a new line (multiline inputs) |
 | Return, keypad Enter, Space | Activate a focused view with `onPress` once on key-down; auto-repeat is consumed |
 | Shift+Return, Option+Return, Ctrl+Return | A new line in a multiline input whose return submits |
-| Tab, Shift+Tab (Ctrl too) | The next / previous field or pressable view in screen order, within the newest modal; Option+Tab types a tab in a multiline input |
-| Escape | Leaves the focused field; else clears a text selection, then goes back or asks the newest modal to close |
+| Tab, Shift+Tab (Ctrl too) | The next / previous field or pressable view in screen order, within the newest dialog; Option+Tab types a tab in a multiline input |
+| Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Option+Left, Cmd+[, mouse back button | Go back (not while a field has the focus: there Option+Left moves the caret) |
 | Option / Cmd + arrows, with Shift; Option+Delete, Cmd+Delete; Ctrl+A / E / K | Move, select and delete by word and line in a field, as in every Mac app |
-| Cmd+Z, Shift+Cmd+Z, Cmd+X / C / V / A | Undo, redo, cut, copy, paste, select all (a secure field refuses cut and copy); Cmd+A / Cmd+C select and copy `selectable` text |
+| Cmd+Z, Shift+Cmd+Z, Cmd+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Cmd+A / Cmd+C select and copy `selectable` text |
 | Arrows; Page Up / Down, Space, Shift+Space, Option+Up / Down; Home / End, Cmd+Up / Down | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Cmd+W, Cmd+M, Ctrl+Cmd+F, Cmd+H, Option+Cmd+H, Cmd+Q | Close, minimize, full screen, hide, hide others, quit (`nsh package` and `nsh run` apps' menus) |
 | Cmd+R | Reloads the latest build (`nsh run`) |

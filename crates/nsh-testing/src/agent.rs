@@ -1,0 +1,1038 @@
+//! The test agent of a real host (`nsh test --target`, feature `agent`):
+//! it takes the steps of a test on the app the host shows, as the
+//! headless driver takes them on a model of the views, but acts with the
+//! platform's own input at the views the selectors name.
+//!
+//! The host keeps a [`Model`]: it hands it every batch it applied (on its
+//! main thread) and the app's errors, and the model keeps the same
+//! [`Screen`] the headless driver does, so selectors find the same views
+//! on every platform. The host's dev client hands each [`TestStep`] to an
+//! [`Agent`] on a thread of its own, which resolves the selector on the
+//! model, asks the platform ([`Native`]) where the view is on screen and
+//! acts there (a click or a tap, a drag, typed keys), then waits until the
+//! app is quiet: no batch and no native animation for 100 ms, 2 s at
+//! most. [`Native`]'s calls come from that thread; implementations do
+//! their work on the main thread and return when it is done.
+
+use std::{
+    sync::{Condvar, Mutex, MutexGuard},
+    time::Duration,
+};
+
+// The core's: std's panics in WebAssembly, where the web's page keeps the
+// model.
+use nsh_core::time::Instant;
+use nsh_core::{
+    MountBatch, NodeId,
+    geometry::{Bounds, Point, Points, Size},
+};
+use nsh_dev::protocol::{PickTarget, SceneQuery, StepOutcome, TestStep};
+
+pub use crate::screen::Pick;
+use crate::{screen::Screen, selector::Selector};
+
+/// How long after the last batch the app is quiet.
+const QUIET: Duration = Duration::from_millis(100);
+/// How long a step waits for the app to be quiet at most.
+const SETTLE: Duration = Duration::from_secs(2);
+/// How often waits look again while nothing comes.
+const POLL: Duration = Duration::from_millis(20);
+/// A long press's hold when the view does not say (`delayLongPress`).
+const LONG_PRESS: Duration = Duration::from_millis(500);
+/// How many gestures scrolling a view into view takes at most.
+const SCROLLS_INTO_VIEW: usize = 20;
+
+/// What a host's app shows, as test steps see it: the batches the host
+/// applied and the errors the app reported.
+#[derive(Default)]
+pub struct Model {
+    state: Mutex<State>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct State {
+    screen: Screen,
+    /// Batches applied so far.
+    batches: u64,
+    /// When the last one was.
+    last: Option<Instant>,
+    /// What the app threw since the last step looked.
+    errors: Vec<String>,
+}
+
+impl Model {
+    /// Takes in a batch the host applied (on its main thread, after
+    /// applying it).
+    pub fn apply(&self, batch: &MountBatch) {
+        let mut state = self.lock();
+        state.screen.apply(batch);
+        state.batches += 1;
+        state.last = Some(Instant::now());
+        drop(state);
+        self.changed.notify_all();
+    }
+
+    /// The app threw `message` (an exception that escaped a callback, a
+    /// bundle that did not load): the step taken meanwhile fails with it.
+    pub fn error(&self, message: impl Into<String>) {
+        self.lock().errors.push(message.into());
+        self.changed.notify_all();
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// How busy the app is: what [`Agent`]'s waits look at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Activity {
+    /// Batches applied so far.
+    pub batches: u64,
+    /// How long ago the last one was (`None`: none yet).
+    pub since_last: Option<Duration>,
+}
+
+/// The app as an [`Agent`] sees it: the host's [`Model`] (the agent runs on
+/// the host), or one asked about through the host ([`RemoteScene`]: the
+/// web, whose agent runs in `nsh`).
+pub trait Scene: Send + Sync {
+    /// How busy the app is.
+    fn activity(&self) -> Result<Activity, String>;
+    /// Waits until a batch after the `seen`th came or the app threw,
+    /// `timeout` at most.
+    fn wait_for_batch(&self, seen: u64, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            match self.activity() {
+                Ok(a) if a.batches <= seen => std::thread::sleep(POLL.min(timeout)),
+                _ => return,
+            }
+        }
+    }
+    /// The app's errors since the last time, taken.
+    fn take_errors(&self) -> Result<Vec<String>, String>;
+    /// The one view `selector` names for a step on `target`.
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String>;
+    /// The scroll views around `id`, innermost first, and whether each
+    /// scrolls horizontally.
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String>;
+    /// `id`'s long press delay in milliseconds, if it says.
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String>;
+    /// Whether scroll view `id` scrolls horizontally.
+    fn horizontal(&self, id: NodeId) -> Result<bool, String>;
+    /// The texts on screen, in order.
+    fn texts(&self) -> Result<Vec<String>, String>;
+    /// How many views `selector` matches.
+    fn count(&self, selector: &str) -> Result<usize, String>;
+    /// Whether a view matches `selector`.
+    fn matches(&self, selector: &str) -> Result<bool, String>;
+    /// Whether the view `selector` names takes input.
+    fn enabled(&self, selector: &str) -> Result<bool, String>;
+    /// The input `selector` names.
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
+    /// The dialogs the app showed.
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String>;
+    /// The oldest dialog not answered yet.
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String>;
+    /// The oldest dialog was answered.
+    fn answered(&self) -> Result<(), String>;
+}
+
+impl Scene for Model {
+    fn activity(&self) -> Result<Activity, String> {
+        let state = self.lock();
+        Ok(Activity {
+            batches: state.batches,
+            since_last: state.last.map(|t| t.elapsed()),
+        })
+    }
+    fn wait_for_batch(&self, seen: u64, timeout: Duration) {
+        let state = self.lock();
+        let _ = self
+            .changed
+            .wait_timeout_while(state, timeout, |s| s.batches <= seen && s.errors.is_empty());
+    }
+    fn take_errors(&self) -> Result<Vec<String>, String> {
+        Ok(std::mem::take(&mut self.lock().errors))
+    }
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String> {
+        let parsed = Selector::parse(selector)?;
+        let state = self.lock();
+        let screen = &state.screen;
+        Ok(match target {
+            PickTarget::Pressable => screen.pressable(&parsed),
+            PickTarget::LongPressable => screen.long_pressable(&parsed),
+            PickTarget::Input => screen.input_view(&parsed),
+            PickTarget::ScrollView => screen.scroll_view(&parsed),
+        })
+    }
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
+        Ok(self.lock().screen.scroll_ancestors(id))
+    }
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
+        Ok(self.lock().screen.long_press_delay(id))
+    }
+    fn horizontal(&self, id: NodeId) -> Result<bool, String> {
+        Ok(self.lock().screen.scroll(id).is_some_and(|s| s.horizontal))
+    }
+    fn texts(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .lock()
+            .screen
+            .texts()
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
+    }
+    fn count(&self, selector: &str) -> Result<usize, String> {
+        self.lock().screen.count(selector)
+    }
+    fn matches(&self, selector: &str) -> Result<bool, String> {
+        self.lock().screen.matches(selector)
+    }
+    fn enabled(&self, selector: &str) -> Result<bool, String> {
+        self.lock().screen.enabled(selector)
+    }
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        self.lock().screen.input_id(selector)
+    }
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
+        Ok(self.lock().screen.dialogs().to_vec())
+    }
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String> {
+        Ok(self.lock().screen.pending_dialog().cloned())
+    }
+    fn answered(&self) -> Result<(), String> {
+        self.lock().screen.answered();
+        Ok(())
+    }
+}
+
+/// `pick` as a [`SceneQuery::Pick`]'s answer: `{"one": id}`, `"none"`,
+/// `{"many": n}` or `"disabled"`.
+fn pick_value(pick: Pick) -> serde_json::Value {
+    match pick {
+        Pick::One(id) => serde_json::json!({ "one": id }),
+        Pick::None => serde_json::json!("none"),
+        Pick::Many(n) => serde_json::json!({ "many": n }),
+        Pick::Disabled => serde_json::json!("disabled"),
+    }
+}
+
+fn pick_of(value: &serde_json::Value) -> Result<Pick, String> {
+    if let Some(id) = value.get("one").and_then(serde_json::Value::as_u64) {
+        return Ok(Pick::One(id as NodeId));
+    }
+    if let Some(n) = value.get("many").and_then(serde_json::Value::as_u64) {
+        return Ok(Pick::Many(n as usize));
+    }
+    match value.as_str() {
+        Some("none") => Ok(Pick::None),
+        Some("disabled") => Ok(Pick::Disabled),
+        _ => Err(format!("the host answered oddly: {value}")),
+    }
+}
+
+/// What `model` answers of a host's part of `step` (a query
+/// [`TestStep`], or a [`TestStep::Scene`] question about the model):
+/// `None` for what only the platform's views answer (where a view is, the
+/// viewport, an input's text, animations, a dialog's buttons). The web's
+/// page answers its agent's questions so.
+pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value, String>> {
+    use serde_json::{Value, to_value};
+    let json = |r: Result<Value, serde_json::Error>| r.map_err(|e| e.to_string());
+    Some(match step {
+        TestStep::Texts => model.texts().map(Value::from),
+        TestStep::Count { selector } => model.count(selector).map(Value::from),
+        TestStep::Shows { selector } => model.matches(selector).map(Value::from),
+        TestStep::Enabled { selector } => model.enabled(selector).map(Value::from),
+        TestStep::Dialogs => model.dialogs().and_then(|d| json(to_value(d))),
+        TestStep::PendingDialog => model.pending_dialog().and_then(|d| json(to_value(d))),
+        TestStep::Scene { query } => match query {
+            SceneQuery::Activity => model.activity().map(|a| {
+                serde_json::json!({
+                    "batches": a.batches,
+                    "since_last_ms": a.since_last.map(|d| d.as_secs_f64() * 1000.0),
+                })
+            }),
+            SceneQuery::TakeErrors => model.take_errors().map(Value::from),
+            SceneQuery::Pick { selector, target } => model.pick(selector, *target).map(pick_value),
+            SceneQuery::ScrollAncestors { id } => {
+                model.scroll_ancestors(*id).and_then(|a| json(to_value(a)))
+            }
+            SceneQuery::LongPressDelay { id } => model.long_press_delay(*id).map(Value::from),
+            SceneQuery::Horizontal { id } => model.horizontal(*id).map(Value::from),
+            SceneQuery::InputId { selector } => model.input_id(selector).map(Value::from),
+            SceneQuery::Answered => model.answered().map(|()| Value::Null),
+            SceneQuery::Bounds { .. }
+            | SceneQuery::Viewport
+            | SceneQuery::InputText { .. }
+            | SceneQuery::Animating
+            | SceneQuery::DialogPoint { .. } => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// A host's model asked about through the host ([`SceneQuery`]): the web's
+/// agent, which runs in `nsh`, sees the page's app so.
+pub struct RemoteScene {
+    ask: Box<dyn Fn(TestStep) -> Result<serde_json::Value, String> + Send + Sync>,
+}
+
+impl RemoteScene {
+    /// Asks through `ask`, which takes a step on the host and gives its
+    /// value.
+    pub fn new(
+        ask: impl Fn(TestStep) -> Result<serde_json::Value, String> + Send + Sync + 'static,
+    ) -> Self {
+        RemoteScene { ask: Box::new(ask) }
+    }
+
+    fn query<T: serde::de::DeserializeOwned>(&self, query: SceneQuery) -> Result<T, String> {
+        self.get(TestStep::Scene { query })
+    }
+
+    fn get<T: serde::de::DeserializeOwned>(&self, step: TestStep) -> Result<T, String> {
+        let value = (self.ask)(step)?;
+        serde_json::from_value(value).map_err(|e| format!("the host answered oddly: {e}"))
+    }
+}
+
+impl Scene for RemoteScene {
+    fn activity(&self) -> Result<Activity, String> {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            batches: u64,
+            since_last_ms: Option<f64>,
+        }
+        let wire: Wire = self.query(SceneQuery::Activity)?;
+        Ok(Activity {
+            batches: wire.batches,
+            since_last: wire
+                .since_last_ms
+                .map(|ms| Duration::from_secs_f64(ms.max(0.0) / 1000.0)),
+        })
+    }
+    fn take_errors(&self) -> Result<Vec<String>, String> {
+        self.query(SceneQuery::TakeErrors)
+    }
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String> {
+        let value: serde_json::Value = self.query(SceneQuery::Pick {
+            selector: selector.into(),
+            target,
+        })?;
+        pick_of(&value)
+    }
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
+        self.query(SceneQuery::ScrollAncestors { id })
+    }
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
+        self.query(SceneQuery::LongPressDelay { id })
+    }
+    fn horizontal(&self, id: NodeId) -> Result<bool, String> {
+        self.query(SceneQuery::Horizontal { id })
+    }
+    fn texts(&self) -> Result<Vec<String>, String> {
+        self.get(TestStep::Texts)
+    }
+    fn count(&self, selector: &str) -> Result<usize, String> {
+        self.get(TestStep::Count {
+            selector: selector.into(),
+        })
+    }
+    fn matches(&self, selector: &str) -> Result<bool, String> {
+        self.get(TestStep::Shows {
+            selector: selector.into(),
+        })
+    }
+    fn enabled(&self, selector: &str) -> Result<bool, String> {
+        self.get(TestStep::Enabled {
+            selector: selector.into(),
+        })
+    }
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        self.query(SceneQuery::InputId {
+            selector: selector.into(),
+        })
+    }
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
+        self.get(TestStep::Dialogs)
+    }
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String> {
+        self.get(TestStep::PendingDialog)
+    }
+    fn answered(&self) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::Answered)
+            .map(drop)
+    }
+}
+
+/// A key the agent presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    /// Return (Enter).
+    Return,
+    /// Deletes the character before the caret, or the selection.
+    Backspace,
+    /// Selects all the text of the focused input (Cmd+A, Ctrl+A).
+    SelectAll,
+}
+
+/// The platform's part: where views are and the input that acts on them.
+/// Called from the agent's thread; each call does its work on the host's
+/// main thread and returns once it is done (input posted, not answered).
+pub trait Native: Send + Sync {
+    /// The view `id`'s bounds in the window's content, in points from its
+    /// top-left (`None`: it has no native view on screen).
+    fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
+    /// The size of the window's content, in points.
+    fn viewport(&self) -> Size<Points>;
+    /// A press (a click, a tap) at `at`.
+    fn press(&self, at: Point<Points>);
+    /// A press at `at` held for `hold`.
+    fn long_press(&self, at: Point<Points>, hold: Duration);
+    /// Scrolls what is at `at` by `delta` points (positive: down or right,
+    /// towards the content's end), as a trackpad or a finger does.
+    fn scroll(&self, at: Point<Points>, delta: Point<Points>);
+    /// Types `text` into the focused input, key by key.
+    fn type_text(&self, text: &str);
+    /// Presses `key`.
+    fn key(&self, key: Key);
+    /// The text of input `id` as the platform holds it.
+    fn input_text(&self, id: NodeId) -> Option<String>;
+    /// Goes back as the user does (a back gesture, the back button,
+    /// Escape): an error when the platform has none.
+    fn back(&self) -> Result<(), String>;
+    /// Answers the dialog the app shows now (the oldest): presses its
+    /// button with the text `button`, or closes it without one.
+    fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
+    /// Whether a native animation runs now.
+    fn animating(&self) -> bool;
+    /// A picture of the window, as a PNG.
+    fn screenshot(&self) -> Result<Vec<u8>, String>;
+    /// Makes the window `size` points.
+    fn resize(&self, width: Points, height: Points) -> Result<(), String>;
+    /// Switches the appearance the app sees.
+    fn set_dark(&self, dark: bool) -> Result<(), String>;
+    /// Closes the app: the host exits.
+    fn quit(&self);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// An [`Agent`] on a thread of its own, taking the steps handed to it one
+/// after the other: what a host's dev client feeds the steps it gets.
+pub struct Worker {
+    steps: Mutex<std::sync::mpsc::Sender<(u64, TestStep)>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Worker {
+    /// Starts `agent`'s thread; each step's outcome goes to `done` with the
+    /// step's id.
+    pub fn spawn(
+        agent: Agent,
+        done: impl Fn(u64, StepOutcome) + Send + 'static,
+    ) -> std::io::Result<Worker> {
+        let (tx, rx) = std::sync::mpsc::channel::<(u64, TestStep)>();
+        std::thread::Builder::new()
+            .name("nsh-test-agent".into())
+            .spawn(move || {
+                for (id, step) in rx {
+                    done(id, agent.take(step));
+                }
+            })?;
+        Ok(Worker {
+            steps: Mutex::new(tx),
+        })
+    }
+
+    /// Hands step `id` to the agent; false when its thread is gone.
+    pub fn take(&self, id: u64, step: TestStep) -> bool {
+        self.steps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send((id, step))
+            .is_ok()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// A dev host's test session: when the server says it runs one
+/// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
+/// platform's [`Native`] (`start`, which attaches the model to the surface
+/// before the first bundle comes) and takes the steps that follow on a
+/// [`Worker`], answering each through the dev client.
+pub struct Tester {
+    start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
+    client: std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>,
+    worker: Mutex<Option<Worker>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Tester {
+    /// A host's tester; `start` runs on the dev client's thread.
+    pub fn new(
+        start: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+    ) -> std::sync::Arc<Tester> {
+        std::sync::Arc::new(Tester {
+            start: Box::new(start),
+            client: std::sync::OnceLock::new(),
+            worker: Mutex::new(None),
+        })
+    }
+
+    /// The client that answers the steps (once it exists).
+    pub fn set_client(&self, client: &std::sync::Arc<nsh_dev::DevClient>) {
+        let _ = self.client.set(std::sync::Arc::downgrade(client));
+    }
+
+    /// Takes the test session's events (on the dev client's thread); gives
+    /// back the others.
+    pub fn event(&self, event: nsh_dev::DevEvent) -> Option<nsh_dev::DevEvent> {
+        match event {
+            nsh_dev::DevEvent::Testing => self.start(),
+            nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
+            other => return Some(other),
+        }
+        None
+    }
+
+    fn start(&self) {
+        let mut worker = self.worker.lock().unwrap_or_else(|e| e.into_inner());
+        if worker.is_some() {
+            return;
+        }
+        let model = std::sync::Arc::new(Model::default());
+        let native = (self.start)(model.clone());
+        let client = self.client.clone();
+        let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
+            if let Some(client) = client.get().and_then(std::sync::Weak::upgrade) {
+                client.step_done(id, outcome);
+            }
+        });
+        match started {
+            Ok(started) => *worker = Some(started),
+            Err(err) => log::error!("cannot start the test agent: {err}"),
+        }
+    }
+
+    fn take(&self, id: u64, step: TestStep) {
+        let taken = self
+            .worker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|w| w.take(id, step));
+        if !taken && let Some(client) = self.client.get().and_then(std::sync::Weak::upgrade) {
+            client.step_done(
+                id,
+                StepOutcome::Failed {
+                    message: "the host runs no test session".into(),
+                },
+            );
+        }
+    }
+}
+
+/// Takes test steps on a host's app ([`Model`], [`Native`]).
+pub struct Agent {
+    scene: std::sync::Arc<dyn Scene>,
+    native: Box<dyn Native>,
+}
+
+impl Agent {
+    /// An agent on the app `scene` sees, acting through `native`.
+    pub fn new(scene: std::sync::Arc<dyn Scene>, native: Box<dyn Native>) -> Agent {
+        Agent { scene, native }
+    }
+
+    /// Takes `step`; blocks until it is done and the app is quiet.
+    pub fn take(&self, step: TestStep) -> StepOutcome {
+        match self.run(step) {
+            Ok(value) => StepOutcome::Done { value },
+            Err(message) => StepOutcome::Failed { message },
+        }
+    }
+
+    fn run(&self, step: TestStep) -> Result<serde_json::Value, String> {
+        use serde_json::Value;
+        let done = |r: Result<(), String>| r.map(|()| Value::Null);
+        match step {
+            TestStep::Ready { timeout_ms } => done(self.ready(Duration::from_millis(timeout_ms))),
+            TestStep::Press { selector } => done(self.press(&selector)),
+            TestStep::LongPress { selector } => done(self.long_press(&selector)),
+            TestStep::Type { selector, text } => done(self.type_text(&selector, &text)),
+            TestStep::Submit { selector } => done(self.submit(&selector)),
+            TestStep::Clear { selector } => done(self.clear(&selector)),
+            TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
+            TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
+            TestStep::Wait { ms } => {
+                std::thread::sleep(Duration::from_millis(ms));
+                done(self.check())
+            }
+            TestStep::WaitFor {
+                selector,
+                timeout_ms,
+                gone,
+            } => done(self.wait_for(&selector, Duration::from_millis(timeout_ms), gone)),
+            TestStep::NextChange { timeout_ms } => {
+                let seen = self.scene.activity()?.batches;
+                self.scene
+                    .wait_for_batch(seen, Duration::from_millis(timeout_ms));
+                done(self.check())
+            }
+            TestStep::Texts => Ok(Value::from(self.scene.texts()?)),
+            TestStep::Count { selector } => Ok(Value::from(self.scene.count(&selector)?)),
+            TestStep::Shows { selector } => Ok(Value::from(self.scene.matches(&selector)?)),
+            TestStep::Enabled { selector } => Ok(Value::from(self.scene.enabled(&selector)?)),
+            TestStep::Value { selector } => {
+                let id = self.scene.input_id(&selector)?;
+                Ok(id
+                    .and_then(|id| self.native.input_text(id))
+                    .map_or(Value::Null, Value::from))
+            }
+            TestStep::Dialogs => {
+                serde_json::to_value(self.scene.dialogs()?).map_err(|e| e.to_string())
+            }
+            TestStep::PendingDialog => {
+                serde_json::to_value(self.scene.pending_dialog()?).map_err(|e| e.to_string())
+            }
+            TestStep::AnswerDialog { button } => done(self.answer_dialog(button.as_deref())),
+            TestStep::Screenshot => {
+                use base64::Engine as _;
+                let png = self.native.screenshot()?;
+                Ok(Value::from(
+                    base64::engine::general_purpose::STANDARD.encode(png),
+                ))
+            }
+            TestStep::SetViewport { width, height } => done(
+                self.native
+                    .resize(Points(width), Points(height))
+                    .and_then(|()| self.settled()),
+            ),
+            TestStep::SetColorScheme { dark } => {
+                done(self.native.set_dark(dark).and_then(|()| self.settled()))
+            }
+            TestStep::Quit => {
+                self.native.quit();
+                Ok(Value::Null)
+            }
+            TestStep::Scene { query } => self.scene_query(query),
+        }
+    }
+
+    /// Answers an agent elsewhere with this one's scene and platform.
+    fn scene_query(&self, query: SceneQuery) -> Result<serde_json::Value, String> {
+        use serde_json::{Value, to_value};
+        let json = |r: Result<Value, serde_json::Error>| r.map_err(|e| e.to_string());
+        let scene = &*self.scene;
+        match query {
+            SceneQuery::Activity => scene.activity().map(|a| {
+                serde_json::json!({
+                    "batches": a.batches,
+                    "since_last_ms": a.since_last.map(|d| d.as_secs_f64() * 1000.0),
+                })
+            }),
+            SceneQuery::TakeErrors => scene.take_errors().map(Value::from),
+            SceneQuery::Pick { selector, target } => scene.pick(&selector, target).map(pick_value),
+            SceneQuery::ScrollAncestors { id } => {
+                scene.scroll_ancestors(id).and_then(|a| json(to_value(a)))
+            }
+            SceneQuery::LongPressDelay { id } => scene.long_press_delay(id).map(Value::from),
+            SceneQuery::Horizontal { id } => scene.horizontal(id).map(Value::from),
+            SceneQuery::InputId { selector } => scene.input_id(&selector).map(Value::from),
+            SceneQuery::Answered => scene.answered().map(|()| Value::Null),
+            SceneQuery::Bounds { id } => {
+                json(to_value(self.native.bounds(id).map(|b| {
+                    [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
+                })))
+            }
+            SceneQuery::Viewport => {
+                let v = self.native.viewport();
+                json(to_value([v.width.0, v.height.0]))
+            }
+            SceneQuery::InputText { id } => {
+                Ok(self.native.input_text(id).map_or(Value::Null, Value::from))
+            }
+            SceneQuery::Animating => Ok(Value::from(self.native.animating())),
+            SceneQuery::DialogPoint { .. } => {
+                Err("this host answers dialogs itself (`AnswerDialog`)".into())
+            }
+        }
+    }
+
+    /// Waits for the first render, `timeout` at most, then until the app
+    /// is quiet.
+    fn ready(&self, timeout: Duration) -> Result<(), String> {
+        self.scene.wait_for_batch(0, timeout);
+        let rendered = self.scene.activity()?.batches > 0;
+        self.check()?;
+        if !rendered {
+            return Err(format!(
+                "the app rendered nothing in {} s",
+                timeout.as_secs()
+            ));
+        }
+        self.settled()
+    }
+
+    /// The one view `pick` gave for `selector` (from [`Self::find`]).
+    fn picked(&self, pick: Pick, selector: &str, what: &str) -> Result<NodeId, String> {
+        match pick {
+            Pick::One(id) => Ok(id),
+            Pick::None => Err(format!(
+                "no {what} matches `{selector}`; {}",
+                self.on_screen()
+            )),
+            Pick::Many(n) => Err(format!(
+                "`{selector}` matches {n} {what}s: say which (`{selector} >> nth=0`), or look inside \
+                 a view around it (`id:list >> {selector}`)"
+            )),
+            Pick::Disabled => Err(format!("`{selector}` is disabled; {}", self.on_screen())),
+        }
+    }
+
+    /// The view `selector` names as `pick` finds it in the model, and the
+    /// middle of it on screen.
+    fn find(
+        &self,
+        selector: &str,
+        what: &str,
+        target: PickTarget,
+    ) -> Result<(NodeId, Point<Points>), String> {
+        Selector::parse(selector)?;
+        self.settled()?;
+        let picked = self.scene.pick(selector, target)?;
+        let id = self.picked(picked, selector, what)?;
+        Ok((id, self.scroll_into_view(id, selector)?))
+    }
+
+    /// The middle of view `id` on screen, scrolled into view first when it
+    /// is not: the innermost scroll view around it that hides it scrolls it
+    /// towards its own middle, a gesture at a time, as a user would.
+    fn scroll_into_view(&self, id: NodeId, selector: &str) -> Result<Point<Points>, String> {
+        let not_on_screen = || {
+            format!(
+                "`{selector}` is not on screen (it has no native view); {}",
+                self.on_screen()
+            )
+        };
+        let scrollers = self.scene.scroll_ancestors(id)?;
+        for _ in 0..SCROLLS_INTO_VIEW {
+            let at = self.native.bounds(id).ok_or_else(not_on_screen)?.center();
+            let viewport = self.native.viewport();
+            let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
+            // The innermost scroll view whose bounds leave the middle out,
+            // else the outermost one when the window does.
+            let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
+                let b = self.native.bounds(scroller)?;
+                (!b.contains(&at)).then_some((scroller, horizontal, b))
+            });
+            let hiding = hiding.or_else(|| {
+                (!window.contains(&at))
+                    .then(|| scrollers.last())
+                    .flatten()
+                    .and_then(|&(s, h)| Some((s, h, self.native.bounds(s)?)))
+            });
+            let Some((_, horizontal, scroller)) = hiding else {
+                if window.contains(&at) {
+                    return Ok(at);
+                }
+                return Err(not_on_screen());
+            };
+            let middle = scroller.center();
+            let (distance, extent) = if horizontal {
+                (at.x.0 - middle.x.0, scroller.size.width.0)
+            } else {
+                (at.y.0 - middle.y.0, scroller.size.height.0)
+            };
+            let step = distance.clamp(-extent * 0.8, extent * 0.8);
+            let delta = if horizontal {
+                Point::new(Points(step), Points(0.0))
+            } else {
+                Point::new(Points(0.0), Points(step))
+            };
+            self.native.scroll(middle, delta);
+            self.settled()?;
+        }
+        Err(format!(
+            "`{selector}` did not come into view; {}",
+            self.on_screen()
+        ))
+    }
+
+    fn press(&self, selector: &str) -> Result<(), String> {
+        let (_, at) = self.find(selector, "pressable view", PickTarget::Pressable)?;
+        self.native.press(at);
+        self.settled()
+    }
+
+    fn long_press(&self, selector: &str) -> Result<(), String> {
+        let (id, at) = self.find(selector, "pressable view", PickTarget::LongPressable)?;
+        let hold = self.scene.long_press_delay(id)?.map_or(LONG_PRESS, |ms| {
+            Duration::from_secs_f64(f64::from(ms.max(0.0)) / 1000.0)
+        });
+        // A little past the delay, as a finger holds on.
+        self.native
+            .long_press(at, hold + Duration::from_millis(100));
+        self.settled()
+    }
+
+    /// Focuses the input `selector` names by pressing it.
+    fn focus(&self, selector: &str) -> Result<(), String> {
+        let (_, at) = self.find(selector, "input", PickTarget::Input)?;
+        self.native.press(at);
+        self.settled()
+    }
+
+    fn type_text(&self, selector: &str, text: &str) -> Result<(), String> {
+        self.focus(selector)?;
+        // A line break is the return key, as the headless driver types it.
+        for (i, line) in text.split('\n').enumerate() {
+            if i > 0 {
+                self.native.key(Key::Return);
+            }
+            if !line.is_empty() {
+                self.native.type_text(line);
+            }
+        }
+        self.settled()
+    }
+
+    fn submit(&self, selector: &str) -> Result<(), String> {
+        self.focus(selector)?;
+        self.native.key(Key::Return);
+        self.settled()
+    }
+
+    fn clear(&self, selector: &str) -> Result<(), String> {
+        self.focus(selector)?;
+        self.native.key(Key::SelectAll);
+        self.native.key(Key::Backspace);
+        self.settled()
+    }
+
+    fn scroll(&self, selector: &str, distance: f32) -> Result<(), String> {
+        let (id, at) = self.find(selector, "scroll view", PickTarget::ScrollView)?;
+        let horizontal = self.scene.horizontal(id)?;
+        let delta = if horizontal {
+            Point::new(Points(distance), Points(0.0))
+        } else {
+            Point::new(Points(0.0), Points(distance))
+        };
+        self.native.scroll(at, delta);
+        self.settled()
+    }
+
+    fn answer_dialog(&self, button: Option<&str>) -> Result<(), String> {
+        if self.scene.pending_dialog()?.is_none() {
+            return Err("no dialog to answer".into());
+        }
+        self.native.answer_dialog(button)?;
+        self.scene.answered()?;
+        self.settled()
+    }
+
+    fn wait_for(&self, selector: &str, timeout: Duration, gone: bool) -> Result<(), String> {
+        Selector::parse(selector)?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            let seen = self.scene.activity()?.batches;
+            let holds = self.scene.matches(selector)? != gone;
+            self.check()?;
+            if holds {
+                return Ok(());
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                let what = if gone { "gone" } else { "showing" };
+                return Err(format!(
+                    "`{selector}` {what} never happened in {} ms; {}",
+                    timeout.as_millis(),
+                    self.on_screen()
+                ));
+            }
+            self.scene.wait_for_batch(seen, left.min(POLL * 5));
+        }
+    }
+
+    /// Waits until the app is quiet ([`QUIET`], no native animation),
+    /// [`SETTLE`] at most, then fails if it threw meanwhile.
+    fn settled(&self) -> Result<(), String> {
+        let start = Instant::now();
+        // When an animation last ran: what it ends with (a screen popped
+        // once it slid out) comes after it.
+        let mut moved = start;
+        loop {
+            let activity = self.scene.activity()?;
+            if self.native.animating() {
+                moved = Instant::now();
+            }
+            // Quiet since the step began, the last batch and the last
+            // animation.
+            let since = activity
+                .since_last
+                .map_or(start.elapsed(), |d| d.min(start.elapsed()))
+                .min(moved.elapsed());
+            if since >= QUIET || start.elapsed() >= SETTLE {
+                break;
+            }
+            self.scene.wait_for_batch(activity.batches, POLL);
+        }
+        self.check()
+    }
+
+    /// Fails with the app's first error since the last look.
+    fn check(&self) -> Result<(), String> {
+        match self.scene.take_errors()?.into_iter().next() {
+            Some(error) => Err(format!("the app threw: {error}")),
+            None => Ok(()),
+        }
+    }
+
+    fn on_screen(&self) -> String {
+        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use nsh_core::{
+        EventKind, EventPayload,
+        geometry::{Size, point},
+        ui::{Root, prelude::*},
+    };
+    use nsh_engine::{EngineConfig, EngineControl};
+
+    use super::*;
+
+    /// A count and a button that adds one.
+    #[component]
+    fn Tally() -> impl IntoElement {
+        let count = signal(0_u32);
+        view()
+            .child(text(move || format!("Count: {}", count.get())))
+            .child(
+                view()
+                    .on_press(move || count.update(|c| *c += 1))
+                    .child(text("Add")),
+            )
+    }
+
+    /// A platform whose views are where their ids say (`x` is the id), and
+    /// whose presses go to the view they are at, as the engine's events.
+    struct Fake(EngineControl, Arc<Mutex<Vec<String>>>);
+
+    impl Native for Fake {
+        fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+            Some(Bounds::new(
+                point(Points(id as f32 - 0.5), Points(0.0)),
+                Size::new(Points(1.0), Points(1.0)),
+            ))
+        }
+        fn viewport(&self) -> Size<Points> {
+            Size::new(Points(10_000.0), Points(10_000.0))
+        }
+        fn press(&self, at: Point<Points>) {
+            let id = at.x.0.round() as NodeId;
+            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+                self.0.dispatch_event(id, kind, EventPayload::None);
+            }
+        }
+        fn long_press(&self, _: Point<Points>, _: Duration) {}
+        fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn type_text(&self, text: &str) {
+            self.1.lock().unwrap().push(format!("type {text}"));
+        }
+        fn key(&self, key: Key) {
+            self.1.lock().unwrap().push(format!("{key:?}"));
+        }
+        fn input_text(&self, _: NodeId) -> Option<String> {
+            None
+        }
+        fn back(&self) -> Result<(), String> {
+            Err("no back here".into())
+        }
+        fn answer_dialog(&self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn animating(&self) -> bool {
+            false
+        }
+        fn screenshot(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+        fn resize(&self, _: Points, _: Points) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_dark(&self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn quit(&self) {}
+    }
+
+    #[test]
+    fn the_agent_finds_views_in_the_model_and_acts_where_they_are() {
+        let (engine, batches) = crate::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        let model = Arc::new(Model::default());
+        let feeding = model.clone();
+        std::thread::spawn(move || {
+            while let Ok(batch) = batches.recv() {
+                feeding.apply(&batch);
+            }
+        });
+        let typed = Arc::new(Mutex::new(Vec::new()));
+        let agent = Agent::new(model, Box::new(Fake(engine.control(), typed.clone())));
+        let ok = StepOutcome::Done {
+            value: serde_json::Value::Null,
+        };
+        assert_eq!(agent.take(TestStep::Ready { timeout_ms: 5000 }), ok);
+        assert_eq!(
+            agent.take(TestStep::Texts),
+            StepOutcome::Done {
+                value: serde_json::json!(["Count: 0", "Add"])
+            }
+        );
+        assert_eq!(
+            agent.take(TestStep::Press {
+                selector: "Add".into()
+            }),
+            ok
+        );
+        assert_eq!(
+            agent.take(TestStep::WaitFor {
+                selector: "Count: 1".into(),
+                timeout_ms: 2000,
+                gone: false
+            }),
+            ok
+        );
+        assert_eq!(
+            agent.take(TestStep::Press {
+                selector: "Nothing".into()
+            }),
+            StepOutcome::Failed {
+                message: "no pressable view matches `Nothing`; on screen: [\"Count: 1\", \"Add\"]"
+                    .into()
+            }
+        );
+        assert_eq!(
+            agent.take(TestStep::Back),
+            StepOutcome::Failed {
+                message: "no back here".into()
+            }
+        );
+        // No input to type into.
+        assert!(matches!(
+            agent.take(TestStep::Type { selector: "Add".into(), text: "x".into() }),
+            StepOutcome::Failed { message } if message.starts_with("no input matches `Add`")
+        ));
+        assert!(typed.lock().unwrap().is_empty());
+        drop(engine);
+    }
+}

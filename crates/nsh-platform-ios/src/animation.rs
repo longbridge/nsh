@@ -1,7 +1,7 @@
 //! Runs the native animation graph on the main thread, driven by a
 //! `CADisplayLink` that only runs while something animates.
 
-use nsh_animation::{AnimationOp, AnimationValue, Finished, Graph, NodeId};
+use nsh_core::animation::{AnimationOp, AnimationValue, Finished, Graph, NodeId};
 use objc2::{rc::Retained, sel};
 use objc2_foundation::{NSRunLoop, NSRunLoopCommonModes};
 use objc2_quartz_core::CADisplayLink;

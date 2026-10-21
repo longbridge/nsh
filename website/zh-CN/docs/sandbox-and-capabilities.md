@@ -20,11 +20,15 @@ bundle 中只有应用自己的代码：响应式图、渲染器以及应用导�
 
 ## 限制
 
-每个 VM 都有以下限制：
+嵌入在其他应用中的应用，在宿主应用决定的限制内运行。独立运行的应用（用 `nsh package` 打包的应用，包括 Web，以及用
+`nsh run` 运行的应用）是你自己的代码，和原生应用一样：它可以使用设备给它的内存和时间；4096 KB 的解释器栈让过深的递归
+抛出应用可以捕获的 `RangeError`。
+
+嵌入的应用有以下限制：
 
 | 限制 | 默认值 | 触发时 |
 |---|---|---|
-| JS 堆 | 独立运行的应用在 macOS、Windows 和 Linux（以及 Mac Catalyst）上为 1 GB，在 iOS 和 Android 上为 512 MB；嵌入在其他应用中的为 256 MB（嵌入方可另行设置） | VM 停止。 |
+| JS 堆 | 256 MB | VM 停止。 |
 | 解释器栈 | 4096 KB（也是上限） | 过深的递归抛出 `RangeError`，应用可以捕获。 |
 | 执行 bundle 的时间 | 10 s | 执行被中断。 |
 | 其他任意一次进入 JS 的调用的时间 | 2 s | 该调用被中断；应用继续运行。 |
@@ -52,8 +56,11 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
 
-宿主应用可以按视图修改限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
+宿主应用按视图设定限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
 [Android](./embedding-android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
+
+开发时想看应用在宿主应用的限制下表现如何，用 [`--limits`](./cli.md#nsh-run) 运行它：`nsh run --limits` 使用上面的默认值，
+`nsh run --limits memory=128MB,call=500ms` 像宿主应用那样设置这两项，其余保持默认值。
 
 ## 加固
 
@@ -76,7 +83,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 依然可以正常工作。
 
 由 `nsh dev` / `nsh run` 提供的 bundle（无论是否带 `--release`）都不加固，所以你可以用 `eval` 调试。在发布依赖动态
-代码的功能之前，请用 `nsh trace`（会加固）或打包后的构建测试 release 下的行为。
+代码的功能之前，请用 `nsh test`（会加固）或打包后的构建测试 release 下的行为。
 
 ## 能力
 
@@ -91,7 +98,8 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
   "capabilities": {
     "network": {
       "hosts": ["api.example.com", "*.cdn.example.com"],
-      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }]
+      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
+      "sockets": ["feed.example.com:7000"]
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
@@ -100,26 +108,37 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 }
 ```
 
-**没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。**有 `"capabilities"` 的应用
-只能做其中列出的事**：其他一律拒绝。未知的键会导致构建错误，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。
+**没有 `"capabilities"` 的应用可以做任何事**：独立应用归开发者自己所有，不受任何限制。原始 TCP socket 在每个应用中都按名称授予，即
+`network.sockets`。**有 `"capabilities"` 的应用
+只能做其中列出的事**：其他一律拒绝。未知的键会导致构建错误，因此拼写错误会在构建时被发现，而不会变成运行时缺失的权限。由更新的 NSH 签名的
+[签名包](./signed-packages.md#由更新版本的-nsh-签名的包)可能声明了旧运行时不认识的能力：旧运行时不会授予它们。
 
 ### `network`
 
-涵盖 `fetch`（包括每一次重定向）、远程图片（`<Image>`、`defaultSource`、canvas 图片、`Image.getSize` /
-`Image.prefetch`）以及视频源。
+涵盖 `fetch`（包括每一次重定向）、WebSocket、远程图片（`<Image>`、`defaultSource`、canvas 图片、`Image.getSize` /
+`Image.prefetch`）、视频源以及原始 TCP socket（`net.connect`）。
 
 | 键 | 类型 | 说明 |
 |---|---|---|
 | `hosts` | `string[]` | 应用可以用任意方法和协议（`http`、`https`、`ws`、`wss`）访问的主机。 |
-| `http` | `object[]` | 更细粒度的授权，每个主机一条。 |
-| `http[].host` | `string` | 主机（必填）。 |
-| `http[].methods` | `string[]` | 允许的方法，例如 `["GET", "HEAD"]`。为空或缺省：任意。 |
-| `http[].schemes` | `string[]` | 允许的协议。为空或缺省：`http`、`https`、`ws`、`wss` 中的任意一种。 |
-| `http[].pathPrefix` | `string` | URL 的路径必须以它开头。 |
+| `http` | `object[]` | 更细粒度的授权：一个主机，由下面任意的键进一步限定。 |
+| `http[].host` | `string` | 主机或主机模式（必填）。 |
+| `http[].methods` | `string[]` | 允许的方法，例如 `["GET", "HEAD"]`。缺省：任意。 |
+| `http[].schemes` | `string[]` | 允许的协议（`scheme`：以字符串写一个）。缺省：`http`、`https`、`ws`、`wss` 中的任意一种。 |
+| `http[].port` | `number` | 端口；URL 未写端口时按其协议的默认端口（`https` 为 443）。缺省：任意。 |
+| `http[].paths` | `string[]` | 精确路径，例如 `["/v1/quote"]`（查询参数不属于路径）。 |
+| `http[].pathPrefixes` | `string[]` | 按完整路径段匹配的前缀：`/v1` 覆盖 `/v1` 和 `/v1/quote`，`/v1/` 覆盖其后的路径。`pathPrefix`（以字符串写一个）和 `path_prefixes` 含义相同。 |
+| `sockets` | `string[]` | [`net.connect`](../modules/standard-modules.md) 可连接的原始 TCP 目标，每项是精确的 `"host:port"`（IPv6 写作 `"[::1]:9000"`）。 |
+
+`http` 规则没有列出 `paths` 或 `pathPrefixes` 时覆盖所有路径；两者都列出时，匹配其一的路径即被覆盖。
 
 主机模式可以是 `*`（任意主机）、`*.example.com`（`example.com` 的任意子域名，不包括 `example.com` 本身）或一个确切的
 主机名。匹配时忽略大小写和端口。主机取最后一个 `@` 之后的部分，因此 `https://api.example.com@evil.io/` 会按 `evil.io`
 检查。
+
+WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https://` 检查，因此允许以 GET 访问该 URL 的主机和
+`http` 授权也允许这个 WebSocket。原始 socket 不经过任何 HTTP 规则，所以 `sockets` 精确列出每个主机和端口，也只有
+`sockets` 能授予它们。
 
 `asset:` URI（应用自己的文件）始终允许；图片和视频还可以使用 `data:` URI 和相对路径。
 
@@ -135,7 +154,7 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 
 ### `statusBar`
 
-`"statusBar": true` 允许应用修改状态栏（[`nsh/ui/mobile`](../components/status-bar.md) 中的 `StatusBar` 组件及其函数）。
+`"statusBar": true` 允许应用修改状态栏（[`nsh/base`](../modules/nsh-base.md#status-bar) 中页面和对话框的 `statusBar`，以及 `nsh.json` 中 `"statusBar"` 的默认值）。
 
 ### `clipboard`
 
@@ -199,7 +218,7 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 
 | 层 | 由谁执行 | 由谁设定 |
 |---|---|---|
-| 限制（堆、栈、时间、节点） | 运行时，按 VM | 默认值；宿主应用按视图设定 |
+| 限制（堆、栈、时间、节点） | 运行时，按 VM | 宿主应用按视图设定（嵌入的应用） |
 | 加固 | 运行时，在加载时 | 开发环境之外始终开启 |
 | 能力 | 运行时（fetch、图片、视频、web view、状态栏） | 应用（`nsh.json`）和宿主应用（授权） |
 | 代码完整性 | 签名验证 | `nsh publish`；宿主应用信任的根密钥 |

@@ -2,8 +2,10 @@
 //! drags and scroll offsets update it; changed view properties go back to
 //! Java as `[animating, (view, prop, value)*]` float arrays.
 
-use nsh_animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId};
-use nsh_core::{GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform};
+use nsh_core::{
+    GestureValues, MAX_TRANSFORMS, MountItem, Shadow, Transform,
+    animation::{AnimationProp, AnimationValue, Finished, Graph, NodeId},
+};
 use rustc_hash::FxHashMap;
 
 // Java-side property codes (`Mounter.java`).
@@ -38,14 +40,14 @@ const TRANSFORM_CODES: [f32; 8] = [1.0, 2.0, 4.0, 5.0, 6.0, 8.0, 9.0, 10.0];
 pub(crate) fn view_transform(t: &Transform, value: impl Fn(usize) -> Option<f32>) -> [f32; 8] {
     match t.matrix(value).decompose() {
         Some(d) => [
-            d.translate[0] as f32,
-            d.translate[1] as f32,
+            d.translate[0].0,
+            d.translate[1].0,
             d.scale[0] as f32,
             d.scale[1] as f32,
-            d.rotate[2] as f32,
-            d.rotate[0] as f32,
-            d.rotate[1] as f32,
-            d.perspective as f32,
+            d.rotate[2].to_degrees(),
+            d.rotate[0].to_degrees(),
+            d.rotate[1].to_degrees(),
+            d.perspective.map_or(0.0, |distance| -1.0 / distance.0),
         ],
         // A zero scale: invisible.
         None => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],

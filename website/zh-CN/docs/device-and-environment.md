@@ -15,16 +15,17 @@ demo: guide-device
 | `windowSize()` | `nsh/device` | surface 的 `{ width, height }`，单位为点。 |
 | `colorScheme()` | `nsh/device` | `"light"` 或 `"dark"`。 |
 | `fontScale()` | `nsh/device` | 用户偏好的文字大小相对于默认值的比例（1 为默认）。 |
-| `safeArea()` | `nsh/ui/mobile` | surface 中未被系统 UI 遮挡的 inset：`{ top, right, bottom, left }`。 |
-| `useSafeAreaInsets()` | `nsh/ui/mobile` | 调用组件渲染位置（页面、模态视图）的 inset。 |
-| `keyboard()` | `nsh/ui/mobile` | 软键盘的 `{ height, duration }`。 |
+| `safeArea()` | `nsh/base` | surface 中未被系统 UI 遮挡的 inset：`{ top, right, bottom, left }`。 |
+| `safeAreaInsets()` | `nsh/base` | 调用组件渲染位置（页面、对话框）的 inset。 |
+| `keyboardFrame()` | `nsh/base` | 软键盘的 `{ height, duration }`。 |
+| `locale()` | `nsh/device` | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
 | `I18nManager.isRTL` | `nsh/device` | 应用是否从右到左布局。 |
 | `reduceMotion()`、`screenReaderEnabled()` | `nsh/accessibility` | 见[无障碍](./accessibility.md)。 |
 
 ```tsx
 import { mount, Text, View } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
-import { safeArea } from "nsh/ui/mobile";
+import { safeArea } from "nsh/base";
 
 function App() {
   return (
@@ -89,7 +90,26 @@ const palette = computed(() =>
 </View>
 ```
 
-`nsh/ui/mobile` 的组件从组件主题中取色，主题为每种颜色提供浅色和深色两个值（`nsh.json` 的 `"theme"`），所以它们也会随系统切换。要让状态栏与背景相配，见 [`StatusBar`](../components/status-bar.md)。
+应用自己 crate 中的 Rust 组件从主题中取色，主题为每种颜色提供浅色和深色两个值（`nsh.json` 的 `"theme"`，见[用 Rust 开发](./rust.md)），所以它们也会随系统切换。要让状态栏与背景相配，为页面和对话框设置 [`statusBar`](../modules/nsh-base.md#status-bar)，或在 `nsh.json` 中为应用设置。
+
+### 应用自己的外观
+
+始终使用深色（或始终使用浅色）的应用在 `nsh.json` 中声明，`colorScheme()`、`dark:` 类、主题、状态栏的默认样式和提示框从第一帧起就跟随它（打包后的应用启动时也是这个外观）：
+
+```json
+{ "appearance": "dark" }
+```
+
+`nsh/device` 中的 `setColorScheme` 在运行时修改它，用于应用内的外观设置；`"system"` 恢复跟随系统：
+
+```tsx
+import { Text, View } from "nsh";
+import { colorScheme, setColorScheme } from "nsh/device";
+
+<View onPress={() => setColorScheme(colorScheme() === "dark" ? "light" : "dark")} role="button" class="rounded-lg px-4 py-2 bg-neutral-200 dark:bg-neutral-800">
+  <Text class="text-neutral-900 dark:text-neutral-50">{colorScheme() === "dark" ? "Light" : "Dark"}</Text>
+</View>
+```
 
 > [!TIP]
 > 开发时两种外观都要测试：`xcrun simctl ui booted appearance dark` 可以切换 iOS 模拟器，Android 的快捷设置里有深色主题开关。变化会立即传到应用中，无需重新加载。
@@ -109,17 +129,36 @@ const palette = computed(() =>
 
 对于不会自动跟随文字的布局，读取 `fontScale()` 来调整，例如文字变大时把横排改为竖排：`flexDirection: fontScale() > 1.3 ? "column" : "row"`。
 
+文字大小缩放的是文字：所有允许字体缩放的 `<Text>` 和 `<Input>`，以及平台的提示框和 toast。长度保持原样：间距、宽高、圆角、边框和图片，无论写成点数还是类名（`p-4`、`rounded-lg`、`w-[2rem]`）。按内容决定大小的盒子会随文字一起变大。
+
+## 语言和地区
+
+`locale()` 是用户的区域设置，形式为 BCP 47 标签。`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取 `locale()` 来选择你自己的翻译文案：读取它的文字会在它变化时更新。
+
+```tsx
+import { Text } from "nsh";
+import { locale } from "nsh/device";
+
+const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
+
+<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+```
+
+## 在嵌入它的应用中
+
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./embedding-ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./embedding-android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
+
 ## 安全区域
 
 刘海、Home 指示条、状态栏、Android 导航栏以及 Mac Catalyst 的标题栏会遮挡 surface 的一部分。NSH 应用在所有平台上都是全屏绘制，被遮挡的部分以 inset 的形式提供。
 
 - `safeArea()` 给出整个 surface 的 inset。
-- `useSafeAreaInsets()` 给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[模态视图](./navigation.md#模态视图)中是模态视图自己的。可能出现在多个地方的组件应该优先用它。
-- `nsh/ui/mobile` 中的 `SafeAreaView` 是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
+- `safeAreaInsets()` 给出**组件渲染位置**的 inset：在导航[页面](./navigation.md#标题栏下的安全区域)中从标题栏下方算起，在[对话框](../elements/dialog.md)中是对话框自己的。可能出现在多个地方的组件应该优先用它。
+- `nsh/base` 中的 `SafeAreaView` 是一个按这些 inset 添加内边距的视图（默认四边都加，或用 `edges={["top", "bottom"]}` 指定），叠加在它自己的内边距之上。
 
 ```tsx
 import { View } from "nsh";
-import { SafeAreaView, useSafeAreaInsets } from "nsh/ui/mobile";
+import { SafeAreaView, safeAreaInsets } from "nsh/base";
 
 function Screen() {
   return (
@@ -131,7 +170,7 @@ function Screen() {
 }
 
 function BottomBar() {
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   return <View style={{ paddingBottom: insets().bottom + 8, paddingTop: 8, flexDirection: "row" }}>…</View>;
 }
 ```
@@ -159,7 +198,7 @@ import { Platform } from "nsh/device";
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
 ```
 
-`nsh trace` 以 iOS 身份无界面运行。
+`nsh test` 以 iOS 身份无界面运行。
 
 在 [Linux](./linux.md) 上，`Platform.OS` 为 `"linux"`，界面风格为 `"desktop"`，`Platform.Version` 为内核的主、次版本号（`"6.12"`）：
 各发行版给版本编号的方式无法相互比较。在那里，安全区域和键盘高度为 0，`colorScheme()` 实时跟随桌面的设置（XDG 设置门户），
@@ -223,5 +262,5 @@ const hairline = 1 / PixelRatio.get();
 - [`nsh/device`](../modules/nsh-device.md)：参考。
 - [平台特定代码](./platform-specific.md)：`Platform.select`、平台属性与模块。
 - [无障碍](./accessibility.md)：屏幕阅读器与减少动态效果。
-- [`SafeAreaView`](../components/safe-area-view.md) 与 [`StatusBar`](../components/status-bar.md)。
+- [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 与[状态栏](../modules/nsh-base.md#status-bar)。
 - [Tailwind](./tailwind.md)：`dark:`、断点与方向变体。

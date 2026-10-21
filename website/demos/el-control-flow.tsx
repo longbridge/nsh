@@ -28,14 +28,14 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8 }}>
         <View
           onPress={add}
-          activeOpacity={0.6}
+          activeStyle={{ opacity: 0.6 }}
           style={{ ...ui().accentFill, ...button }}
         >
           <Text style={{ color: ui().onAccent, fontWeight: "600" }}>Add</Text>
         </View>
         <View
           onPress={() => showDone.set(!showDone())}
-          activeOpacity={0.6}
+          activeStyle={{ opacity: 0.6 }}
           style={{ ...ui().raised, ...button }}
         >
           <Text style={{ color: ui().text }}>{showDone() ? "Hide done" : "Show done"}</Text>

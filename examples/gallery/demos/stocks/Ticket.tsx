@@ -135,7 +135,7 @@ export function Ticket(props: { open: () => boolean; stock: Stock; side: () => S
           <Text style={{ flex: 1, fontSize: 14, color: colors.muted }}>Limit price</Text>
           <Text
             onPress={() => limit.set(props.stock.quote().last)}
-            accessibilityRole="button"
+            role="button"
             hitSlop={10}
             style={{ fontSize: 13, color: colors.accent, fontVariant: ["tabular-nums"] }}
           >

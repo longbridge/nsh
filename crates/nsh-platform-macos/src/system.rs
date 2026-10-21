@@ -43,10 +43,12 @@ use std::{
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
-    Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    Rect,
+    Bounds, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
+    Points, ROOT_ID,
+    geometry::{Point, Size, px},
+    platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Environment, Idiom, Insets, Locale, Os};
+use nsh_engine::{ColorScheme, Edges, Environment, Idiom, Locale, Os};
 use objc2::{
     MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
@@ -54,14 +56,15 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAccessibilityPriorityLevel, NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSAppearance,
-    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor, NSFont,
-    NSModalResponse, NSPasteboard, NSPasteboardTypeString, NSResponder, NSScreen, NSTextAlignment,
-    NSTextField, NSView, NSWorkspace, NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
+    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+    NSBitmapImageFileType, NSBitmapImageRep, NSColor, NSFont, NSModalResponse, NSPasteboard,
+    NSPasteboardTypeString, NSResponder, NSScreen, NSTextAlignment, NSTextField, NSView,
+    NSWorkspace, NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 use objc2_foundation::{
-    NSCurrentLocaleDidChangeNotification, NSKeyValueObservingOptions, NSLocale,
-    NSLocaleLanguageDirection, NSNotification, NSNotificationCenter, NSObject,
+    NSCurrentLocaleDidChangeNotification, NSData, NSDictionary, NSKeyValueObservingOptions,
+    NSLocale, NSLocaleLanguageDirection, NSNotification, NSNotificationCenter, NSObject,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSPoint,
     NSProcessInfo, NSString, ns_string,
 };
@@ -257,6 +260,13 @@ fn system_changed() {
     }
 }
 
+/// The embedding app set its locale or text size
+/// ([`crate::AppView::set_locale`]): the system's settings are read again,
+/// with the host's over them.
+pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface);
+}
+
 /// Writes the system's settings and the surface's own values into its
 /// environment.
 fn update(surface: &Surface) {
@@ -272,8 +282,8 @@ fn update(surface: &Surface) {
     env.os = Os::MacOs;
     env.os_version = os_version();
     env.idiom = Idiom::Desktop;
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = px(0.0);
     surface.set_environment(env);
 }
 
@@ -293,10 +303,10 @@ fn follow_background(surface: &Surface) {
         .and_then(|top| {
             let root = surface.root.state().frame;
             let s = top.state();
-            let fills = s.frame.x <= 0.0
-                && s.frame.y <= 0.0
-                && s.frame.x + s.frame.width >= root.width
-                && s.frame.y + s.frame.height >= root.height;
+            let fills = s.frame.origin.x.0 <= 0.0
+                && s.frame.origin.y.0 <= 0.0
+                && s.frame.origin.x.0 + s.frame.size.width.0 >= root.size.width.0
+                && s.frame.origin.y.0 + s.frame.size.height.0 >= root.size.height.0;
             let color = s.background();
             (fills && color.0 & 0xff == 0xff).then_some(color)
         });
@@ -374,11 +384,24 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
+        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::ReadClipboardImage { id, has_only } => {
+            read_clipboard_image(surface, *id, *has_only)
+        }
+        Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
-            if let Some(window) = surface.root.ns().window() {
-                window.close();
-            }
+            // Closing calls the window delegate synchronously, which stops
+            // the surface and clears its mounter. Wait until this batch has
+            // released the mounter's mutable borrow.
+            let key = surface.key();
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = Surface::with_key(key)
+                    && let Some(window) = surface.root.ns().window()
+                {
+                    window.close();
+                }
+            });
         }
         // The status bar is a phone's; layout animations arrive as mount
         // items.
@@ -519,15 +542,9 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         (None, Some(message)) => alert.setMessageText(&NSString::from_str(message)),
         (None, None) => {}
     }
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let cancel = buttons
         .iter()
         .position(|b| b.style == DialogButtonStyle::Cancel);
@@ -594,6 +611,38 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     alert.beginSheetModalForWindow_completionHandler(&window, Some(&handler));
 }
 
+/// Answers the oldest dialog shown on `surface` as a user would: presses
+/// its button titled `button`, or closes it without one (`None`).
+#[cfg(feature = "dev")]
+pub(crate) fn answer_dialog(surface: &Rc<Surface>, button: Option<&str>) -> Result<(), String> {
+    let alert = SYSTEM
+        .with(|s| {
+            s.borrow()
+                .dialogs
+                .iter()
+                .find(|d| d.surface.upgrade().is_some_and(|x| Rc::ptr_eq(&x, surface)))
+                .map(|d| d.alert.clone())
+        })
+        .ok_or("no dialog is shown")?;
+    match button {
+        Some(text) => {
+            let buttons = alert.buttons();
+            let found = buttons
+                .iter()
+                .find(|b| b.title().to_string() == text)
+                .ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+            // SAFETY: a button of a live alert, clicked on the main thread
+            // with no sender, as a user's click has none to hand over.
+            unsafe { found.performClick(None) };
+        }
+        None => {
+            let window = surface.root.ns().window().ok_or("the window is gone")?;
+            window.endSheet_returnCode(&alert.window(), objc2_app_kit::NSModalResponseCancel);
+        }
+    }
+    Ok(())
+}
+
 /// Shows `text` at the bottom of the surface for a while (one at a time:
 /// a new toast replaces the one showing).
 fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
@@ -655,7 +704,7 @@ fn show_toast(surface: &Rc<Surface>, text: &str, long: bool) {
         label,
     };
     let env = surface.environment.get();
-    place_toast(&toast, env.window.0, env.window.1);
+    place_toast(&toast, env.window.width.0, env.window.height.0);
     SYSTEM.with(|s| s.borrow_mut().toasts.push(toast));
     let fade_in = if env.reduce_motion { 0.0 } else { FADE_IN };
     fade(surface, &view, 1.0, fade_in, || {});
@@ -701,11 +750,15 @@ fn place_toast(toast: &Toast, width: f32, height: f32) {
     let (bw, bh) = (w + 32.0, h + 18.0);
     toast.root.set_native(
         &toast.view,
-        Rect {
-            x: ((width - bw) / 2.0).round(),
-            y: height - 64.0 - bh,
-            width: bw,
-            height: bh,
+        Bounds {
+            origin: Point {
+                x: Points(((width - bw) / 2.0).round()),
+                y: Points(height - 64.0 - bh),
+            },
+            size: Size {
+                width: Points(bw),
+                height: Points(bh),
+            },
         },
     );
 }
@@ -743,6 +796,116 @@ fn fade(
         }
         false
     });
+}
+
+/// The pasteboard types of images NSH reads and writes, by MIME type, in
+/// the order they are read: the first one the pasteboard holds wins.
+const IMAGE_TYPES: [(&str, &str); 6] = [
+    ("image/png", "public.png"),
+    ("image/jpeg", "public.jpeg"),
+    ("image/gif", "com.compuserve.gif"),
+    ("image/webp", "org.webmproject.webp"),
+    ("image/bmp", "com.microsoft.bmp"),
+    ("image/tiff", "public.tiff"),
+];
+
+/// `Clipboard.setImage`: the image of a `data:` URI on the pasteboard,
+/// under its own type (and TIFF too, which every AppKit app reads, unless
+/// it is TIFF already).
+fn set_clipboard_image(uri: &str) {
+    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    let Some((_, kind)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
+        log::warn!("Clipboard.setImage: unsupported image type {mime}");
+        return;
+    };
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    let data = NSData::with_bytes(&bytes);
+    pasteboard.setData_forType(Some(&data), &NSString::from_str(kind));
+    if *kind != "public.tiff"
+        && let Some(tiff) =
+            NSBitmapImageRep::imageRepWithData(&data).and_then(|r| r.TIFFRepresentation())
+    {
+        pasteboard.setData_forType(Some(&tiff), &NSString::from_str("public.tiff"));
+    }
+}
+
+/// `Clipboard.getImage` / `hasImage`: answers read `id` with the
+/// pasteboard's first image of [`IMAGE_TYPES`]; a TIFF becomes PNG (an
+/// image source of any platform), off the main thread.
+fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    // The types on offer: reading them is no paste (no privacy notice).
+    let kind = pasteboard.types().and_then(|types| {
+        IMAGE_TYPES
+            .iter()
+            .map(|(_, kind)| NSString::from_str(kind))
+            .find(|kind| types.containsObject(kind))
+    });
+    let data = kind
+        .as_ref()
+        .filter(|_| !has_only)
+        .and_then(|kind| pasteboard.dataForType(kind));
+    let Some(data) = data else {
+        let payload = clipboard::image_answer(id, kind.is_some(), None);
+        surface.event(ROOT_ID, EventKind::Clipboard, payload);
+        return;
+    };
+    let bytes = data.to_vec();
+    let key = surface.key();
+    DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::Priority(
+        dispatch2::DispatchQueueGlobalPriority::Default,
+    ))
+    .exec_async(move || {
+        let png = clipboard::Image::sniff(&bytes)
+            .filter(|i| i.mime != "image/tiff")
+            .is_none()
+            .then(|| to_png(&bytes))
+            .flatten();
+        let bytes = png.as_deref().unwrap_or(&bytes);
+        let payload = clipboard::image_answer(id, true, clipboard::Image::sniff(bytes));
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key) {
+                surface.event(ROOT_ID, EventKind::Clipboard, payload);
+            }
+        });
+    });
+}
+
+/// Encoded image `bytes` (a TIFF) encoded again as PNG.
+fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(bytes))?;
+    // SAFETY: an empty dictionary of properties is valid for every type.
+    let png = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }?;
+    Some(png.to_vec())
+}
+
+/// `Clipboard.getFiles`: the local files' `file:` URLs on the pasteboard
+/// (one item each, as Finder copies them).
+fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    let kind = NSString::from_str("public.file-url");
+    let files: Vec<String> = pasteboard
+        .pasteboardItems()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.stringForType(&kind))
+                .filter(|uri| crate::file_drop::is_local_uri(uri))
+                .map(|uri| uri.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    surface.event(
+        ROOT_ID,
+        EventKind::Clipboard,
+        clipboard::files_answer(id, &files),
+    );
 }
 
 /// `Clipboard.getString` / `hasString`: answers read `id` with whether the

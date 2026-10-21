@@ -70,14 +70,15 @@ use std::{
 };
 
 use gpui::{Font, FontStyle, Hsla, RenderImage, TextRun, WindowTextSystem, px};
-use nsh_animation::AnimationValue;
 use nsh_core::{
     Color,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Damage, DamageScan, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint,
         PathOp, arc_sweep, fit_radii,
     },
+    geometry::{Corners, Points, Radians, size},
 };
 use rustc_hash::FxHashMap;
 use tiny_skia as sk;
@@ -374,7 +375,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(drawing) = canvas.drawing.as_ref() else {
         return;
     };
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if drawing.ops.is_empty() || w <= 0.0 || h <= 0.0 || cx.culled() {
         return;
     }
@@ -911,12 +912,17 @@ fn patch(
     args: &[Option<AnimationValue>],
     images: &FxHashMap<Arc<str>, Option<Arc<sk::Pixmap>>>,
     text: (&WindowTextSystem, &Arc<gpui::TextSystem>),
-    damage: nsh_core::Rect,
+    damage: nsh_core::Bounds<nsh_core::Points>,
 ) -> bool {
     let [a, b, c, d] = recorded.key.linear;
     let frac = recorded.frac;
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    let (rx, ry, rw, rh) = (damage.x, damage.y, damage.width, damage.height);
+    let (rx, ry, rw, rh) = (
+        damage.origin.x.0,
+        damage.origin.y.0,
+        damage.size.width.0,
+        damage.size.height.0,
+    );
     for (x, y) in [(rx, ry), (rx + rw, ry), (rx, ry + rh), (rx + rw, ry + rh)] {
         let (px, py) = (a * x + c * y + frac.0, b * x + d * y + frac.1);
         x0 = x0.min(px);
@@ -1025,10 +1031,10 @@ fn shadow_reach(drawing: &Drawing, k: f64) -> i32 {
     for op in &drawing.ops {
         match *op {
             CanvasOp::ShadowBlur(b) => {
-                blur = blur.max(3.0 * (b.max(0.0) as f64 / 2.0 * k).min(MAX_SIGMA));
+                blur = blur.max(3.0 * (b.0.max(0.0) as f64 / 2.0 * k).min(MAX_SIGMA));
             }
-            CanvasOp::ShadowOffset(x, y) => {
-                offset = offset.max((x.abs() + y.abs()) as f64 * k);
+            CanvasOp::ShadowOffset(o) => {
+                offset = offset.max((o.x.0.abs() + o.y.0.abs()) as f64 * k);
             }
             _ => {}
         }
@@ -1049,7 +1055,7 @@ struct State {
     cap: LineCap,
     join: LineJoin,
     miter: f64,
-    dash: Arc<[f32]>,
+    dash: Arc<[Points]>,
     dash_offset: f64,
     alpha: f64,
     composite: Composite,
@@ -1254,10 +1260,10 @@ impl<'a> Replay<'a> {
             }
             CanvasOp::Composite(m) => self.state.composite = *m,
             CanvasOp::ShadowColor(color) => self.state.shadow.0 = *color,
-            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = *b as f64,
-            CanvasOp::ShadowOffset(x, y) => {
-                self.state.shadow.2 = *x as f64;
-                self.state.shadow.3 = *y as f64;
+            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = b.0 as f64,
+            CanvasOp::ShadowOffset(o) => {
+                self.state.shadow.2 = o.x.0 as f64;
+                self.state.shadow.3 = o.y.0 as f64;
             }
             CanvasOp::Font(f) => {
                 // The shorthand keeps the numeric variant, as in browsers.
@@ -1275,19 +1281,26 @@ impl<'a> Replay<'a> {
                 max_width,
             } => {
                 let mode = Mode::Fill(FillRule::NonZero);
-                self.text_op(text, self.n(*x), self.n(*y), *max_width, mode)
+                self.text_op(text, self.n(*x), self.n(*y), max_width.map(|m| m.0), mode)
             }
             CanvasOp::StrokeText {
                 text,
                 x,
                 y,
                 max_width,
-            } => self.text_op(text, self.n(*x), self.n(*y), *max_width, Mode::Stroke),
+            } => {
+                let max_width = max_width.map(|m| m.0);
+                self.text_op(text, self.n(*x), self.n(*y), max_width, Mode::Stroke)
+            }
             CanvasOp::DrawImage {
                 image,
                 source,
                 dest,
-            } => self.image(&image.uri, *source, dest),
+            } => {
+                let source = source
+                    .map(|s| [s.origin.x, s.origin.y, s.size.width, s.size.height].map(|v| v.0));
+                self.image(&image.uri, source, dest)
+            }
         }
     }
 
@@ -1325,7 +1338,8 @@ impl<'a> Replay<'a> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 let unit = m.then(&Affine::translate(n(*x), n(*y)).then(&Affine::scale(r, r)));
                 path.arc(&unit, start, sweep);
             }
@@ -1344,7 +1358,8 @@ impl<'a> Replay<'a> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 let unit = m.then(
                     &Affine::translate(x, y)
                         .then(&Affine::rotate(rotation))
@@ -1362,8 +1377,23 @@ impl<'a> Replay<'a> {
             }
             PathOp::RoundRect(rect, radii) => {
                 let [x, y, w, h] = rect.map(n);
-                let [tl, tr, br, bl] =
-                    fit_radii(w as f32, h as f32, radii.map(|r| n(r) as f32)).map(f64::from);
+                let [tl, tr, br, bl] = radii.map(|r| Points(n(r) as f32));
+                let fitted = fit_radii(
+                    size(Points(w as f32), Points(h as f32)),
+                    Corners {
+                        top_left: tl,
+                        top_right: tr,
+                        bottom_right: br,
+                        bottom_left: bl,
+                    },
+                );
+                let [tl, tr, br, bl] = [
+                    fitted.top_left,
+                    fitted.top_right,
+                    fitted.bottom_right,
+                    fitted.bottom_left,
+                ]
+                .map(|r| f64::from(r.0));
                 path.move_to(m.map((x + tl, y)));
                 self.arc_to(path, x + w, y, x + w, y + h, tr);
                 self.arc_to(path, x + w, y + h, x, y + h, br);
@@ -1754,7 +1784,7 @@ impl<'a> Replay<'a> {
             return;
         }
         let font = canvas_font(self.system, &self.state.font);
-        let size = self.state.font.size.max(0.1);
+        let size = self.state.font.size.0.max(0.1);
         let system: &gpui::TextSystem = self.text;
         let id = system.resolve_font(&font);
         let ascent = f32::from(system.ascent(id, px(size))) as f64;
@@ -2346,13 +2376,13 @@ fn union(a: &sk::Rect, b: &sk::Rect) -> sk::Rect {
 
 /// Canvas dashes in tiny-skia's form (an even count: odd lists repeat);
 /// `None` for a solid line (no dashes, or all zero: canvas draws solid).
-fn dash_pattern(dash: &[f32], offset: f64) -> Option<(Vec<f32>, f32)> {
-    if !dash.iter().any(|d| *d > 0.0) || dash.iter().any(|d| !d.is_finite() || *d < 0.0) {
+fn dash_pattern(dash: &[Points], offset: f64) -> Option<(Vec<f32>, f32)> {
+    let mut d: Vec<f32> = dash.iter().map(|d| d.0).collect();
+    if !d.iter().any(|d| *d > 0.0) || d.iter().any(|d| !d.is_finite() || *d < 0.0) {
         return None;
     }
-    let mut d = dash.to_vec();
     if d.len() % 2 == 1 {
-        d.extend_from_slice(dash);
+        d.extend_from_within(..);
     }
     Some((d, offset as f32))
 }
@@ -2541,11 +2571,12 @@ fn gradient_table(g: &CanvasGradient, alpha: f32) -> Vec<[f32; 4]> {
     (0..GRADIENT_STEPS)
         .map(|i| {
             let t = i as f32 / (GRADIENT_STEPS - 1) as f32;
-            if t <= first.0 {
+            if t <= first.0.0 {
                 return premultiplied(first.1);
             }
             for w in stops.windows(2) {
                 let ((o0, c0), (o1, c1)) = (w[0], w[1]);
+                let (o0, o1) = (o0.0, o1.0);
                 if t < o1 {
                     let f = if o1 > o0 { (t - o0) / (o1 - o0) } else { 1.0 };
                     let (a, b) = (premultiplied(c0), premultiplied(c1));
@@ -2561,13 +2592,26 @@ fn gradient_table(g: &CanvasGradient, alpha: f32) -> Vec<[f32; 4]> {
 /// `None` where it paints nothing (outside a radial gradient's cone).
 fn gradient_offset(shape: &GradientShape, (x, y): Pt) -> Option<f64> {
     match *shape {
-        GradientShape::Linear([x0, y0, x1, y1]) => {
+        GradientShape::Linear { start, end } => {
+            let [x0, y0, x1, y1] = [start.x, start.y, end.x, end.y].map(|v| v.0);
             let (dx, dy) = ((x1 - x0) as f64, (y1 - y0) as f64);
             let len = dx * dx + dy * dy;
             Some(((x - x0 as f64) * dx + (y - y0 as f64) * dy) / len)
         }
-        GradientShape::Radial(circles) => radial_offset(circles.map(f64::from), (x, y)),
-        GradientShape::Conic([angle, cx, cy]) => {
+        GradientShape::Radial {
+            start,
+            start_radius,
+            end,
+            end_radius,
+        } => {
+            let circles = [start.x, start.y, start_radius, end.x, end.y, end_radius];
+            radial_offset(circles.map(|v| f64::from(v.0)), (x, y))
+        }
+        GradientShape::Conic {
+            start_angle,
+            center,
+        } => {
+            let (angle, cx, cy) = (start_angle.0, center.x.0, center.y.0);
             let a = (y - cy as f64).atan2(x - cx as f64) - angle as f64;
             Some((a / TAU).rem_euclid(1.0))
         }
@@ -2622,9 +2666,14 @@ fn gradient_pixels(
     }
     match g.shape {
         // Canvas paints nothing along a gradient of no length...
-        GradientShape::Linear([x0, y0, x1, y1]) if x0 == x1 && y0 == y1 => return None,
+        GradientShape::Linear { start, end } if start == end => return None,
         // ... or between two equal circles.
-        GradientShape::Radial([x0, y0, r0, x1, y1, r1]) if x0 == x1 && y0 == y1 && r0 == r1 => {
+        GradientShape::Radial {
+            start,
+            start_radius,
+            end,
+            end_radius,
+        } if start == end && start_radius == end_radius => {
             return None;
         }
         _ => {}
@@ -2972,7 +3021,13 @@ fn arc_to_geometry(p0: Pt, p1: Pt, p2: Pt, r: f64) -> Option<ArcTo> {
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::geometry::percentage;
+
     use super::*;
+
+    fn pt(x: f32, y: f32) -> nsh_core::Point<Points> {
+        nsh_core::geometry::point(Points(x), Points(y))
+    }
 
     fn close(a: Pt, b: Pt) -> bool {
         (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
@@ -3132,8 +3187,8 @@ mod tests {
             CanvasOp::FillRect(rect(0.0, 0.0, 200.0, 100.0)),
             CanvasOp::Save,
             CanvasOp::ShadowColor(BLUE),
-            CanvasOp::ShadowBlur(16.0),
-            CanvasOp::ShadowOffset(4.0, 4.0),
+            CanvasOp::ShadowBlur(Points(16.0)),
+            CanvasOp::ShadowOffset(pt(4.0, 4.0)),
             CanvasOp::FillStyle(Paint::Color(RED)),
             CanvasOp::FillRect(rect(75.0, 30.0, 60.0, 40.0)),
             CanvasOp::Restore,
@@ -3164,12 +3219,7 @@ mod tests {
             (0.0, 0.0),
         );
         // The damage, as the scan bounds it, reaches into the card.
-        let damage = nsh_core::Rect {
-            x: 55.0,
-            y: 5.0,
-            width: 40.0,
-            height: 90.0,
-        };
+        let damage = crate::geom::rect(55.0, 5.0, 40.0, 90.0);
         assert!(patch(
             &mut patched,
             &drawing,
@@ -3195,9 +3245,9 @@ mod tests {
         // A gradient fill wholly outside the pixmap paints nothing but
         // still counts as painting: the pixmap is kept, as where the fill
         // shows, so a partial redraw has the layers of a full one.
-        let g = CanvasGradient::linear(0.0, 0.0, 10.0, 0.0)
-            .add_color_stop(0.0, RED)
-            .add_color_stop(1.0, BLUE);
+        let g = CanvasGradient::linear(pt(0.0, 0.0), pt(10.0, 0.0))
+            .add_color_stop(percentage(0.0), RED)
+            .add_color_stop(percentage(1.0), BLUE);
         let ops = vec![
             CanvasOp::FillStyle(Paint::Gradient(Arc::new(g))),
             CanvasOp::FillRect(rect(500.0, 500.0, 10.0, 10.0)),
@@ -3390,18 +3440,24 @@ mod tests {
     #[test]
     fn dashes_repeat_odd_lists() {
         assert_eq!(dash_pattern(&[], 0.0), None);
-        assert_eq!(dash_pattern(&[0.0, 0.0], 0.0), None);
-        assert_eq!(dash_pattern(&[4.0, -1.0], 0.0), None);
-        assert_eq!(dash_pattern(&[4.0, 2.0], 3.0), Some((vec![4.0, 2.0], 3.0)));
+        assert_eq!(dash_pattern(&[Points(0.0), Points(0.0)], 0.0), None);
+        assert_eq!(dash_pattern(&[Points(4.0), Points(-1.0)], 0.0), None);
         assert_eq!(
-            dash_pattern(&[5.0, 3.0, 2.0], 0.0),
+            dash_pattern(&[Points(4.0), Points(2.0)], 3.0),
+            Some((vec![4.0, 2.0], 3.0))
+        );
+        assert_eq!(
+            dash_pattern(&[Points(5.0), Points(3.0), Points(2.0)], 0.0),
             Some((vec![5.0, 3.0, 2.0, 5.0, 3.0, 2.0], 0.0))
         );
     }
 
     #[test]
     fn gradients_are_exact() {
-        let linear = GradientShape::Linear([0.0, 0.0, 10.0, 0.0]);
+        let linear = GradientShape::Linear {
+            start: pt(0.0, 0.0),
+            end: pt(10.0, 0.0),
+        };
         assert_eq!(gradient_offset(&linear, (5.0, 7.0)), Some(0.5));
         assert_eq!(gradient_offset(&linear, (-5.0, 0.0)), Some(-0.5));
         // Concentric circles: t runs from the inner to the outer one.
@@ -3416,7 +3472,10 @@ mod tests {
         let side = [0.0, 0.0, 5.0, 100.0, 0.0, 5.0];
         assert_eq!(radial_offset(side, (50.0, 50.0)), None);
         assert!(radial_offset(side, (50.0, 2.0)).is_some());
-        let conic = GradientShape::Conic([0.0, 0.0, 0.0]);
+        let conic = GradientShape::Conic {
+            start_angle: Radians(0.0),
+            center: pt(0.0, 0.0),
+        };
         let t = gradient_offset(&conic, (0.0, 5.0)).unwrap();
         assert!((t - 0.25).abs() < 1e-9);
         let t = gradient_offset(&conic, (0.0, -5.0)).unwrap();
@@ -3425,9 +3484,9 @@ mod tests {
 
     #[test]
     fn gradient_stops_interpolate_premultiplied() {
-        let g = CanvasGradient::linear(0.0, 0.0, 1.0, 0.0)
-            .add_color_stop(0.0, RED)
-            .add_color_stop(1.0, Color::TRANSPARENT);
+        let g = CanvasGradient::linear(pt(0.0, 0.0), pt(1.0, 0.0))
+            .add_color_stop(percentage(0.0), RED)
+            .add_color_stop(percentage(1.0), Color::TRANSPARENT);
         let table = gradient_table(&g, 1.0);
         let mid = table[GRADIENT_STEPS / 2];
         // Red fading out, not darkening: premultiplied, the red stays the
@@ -3435,11 +3494,11 @@ mod tests {
         assert!((mid[0] - mid[3]).abs() < 1e-6 && (mid[3] - 0.5).abs() < 0.01);
         assert_eq!(table[0], [1.0, 0.0, 0.0, 1.0]);
         // Hard stops stay hard.
-        let g = CanvasGradient::linear(0.0, 0.0, 1.0, 0.0)
-            .add_color_stop(0.0, RED)
-            .add_color_stop(0.5, RED)
-            .add_color_stop(0.5, BLUE)
-            .add_color_stop(1.0, BLUE);
+        let g = CanvasGradient::linear(pt(0.0, 0.0), pt(1.0, 0.0))
+            .add_color_stop(percentage(0.0), RED)
+            .add_color_stop(percentage(0.5), RED)
+            .add_color_stop(percentage(0.5), BLUE)
+            .add_color_stop(percentage(1.0), BLUE);
         let table = gradient_table(&g, 0.5);
         assert_eq!(table[GRADIENT_STEPS / 2 - 2], [0.5, 0.0, 0.0, 0.5]);
         assert_eq!(table[GRADIENT_STEPS / 2 + 1], [0.0, 0.0, 0.5, 0.5]);
@@ -3557,8 +3616,8 @@ mod tests {
             let r = raster(
                 vec![
                     CanvasOp::ShadowColor(BLUE),
-                    CanvasOp::ShadowBlur(blur),
-                    CanvasOp::ShadowOffset(3.0, 3.0),
+                    CanvasOp::ShadowBlur(Points(blur)),
+                    CanvasOp::ShadowOffset(pt(3.0, 3.0)),
                     CanvasOp::FillStyle(Paint::Color(RED)),
                     CanvasOp::FillRect(rect(0.0, 0.0, 1.0e6, 1.0e6)),
                     CanvasOp::FillRect(rect(-1.0e12, -1.0e12, 2.0e12, 2.0e12)),
@@ -3602,7 +3661,7 @@ mod tests {
         let r = raster(
             vec![
                 CanvasOp::ShadowColor(BLUE),
-                CanvasOp::ShadowOffset(10.0, 0.0),
+                CanvasOp::ShadowOffset(pt(10.0, 0.0)),
                 CanvasOp::FillStyle(Paint::Color(RED)),
                 CanvasOp::FillRect(rect(5.0, 5.0, 10.0, 10.0)),
             ],

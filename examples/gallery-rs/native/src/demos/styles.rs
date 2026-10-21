@@ -4,7 +4,7 @@
 //! `demos/Styles.tsx`).
 
 use nsh_core::{
-    nsh_animation::{Curve, EaseMode},
+    animation::{Curve, EaseMode},
     ui::{Animation, TransformKind, prelude::*},
 };
 
@@ -158,28 +158,28 @@ fn face(
             [
                 inset_shadow(1.0, 0.0, rgb(0xffffff)),
                 BoxShadow {
-                    offset_x: 0.0,
-                    offset_y: 8.0,
-                    blur: 20.0,
-                    spread: 0.0,
-                    color: rgb_a(0x14140a, 0.10),
+                    offset_x: px(0.0),
+                    offset_y: px(8.0),
+                    blur: px(20.0),
+                    spread: px(0.0),
+                    color: rgb_a(0x14140a, 0.10).to_packed(),
                     inset: false,
                 },
             ],
             [
                 inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.07)),
                 BoxShadow {
-                    offset_x: 0.0,
-                    offset_y: 10.0,
-                    blur: 24.0,
-                    spread: 0.0,
-                    color: rgb_a(0x000000, 0.4),
+                    offset_x: px(0.0),
+                    offset_y: px(10.0),
+                    blur: px(24.0),
+                    spread: px(0.0),
+                    color: rgb_a(0x000000, 0.4).to_packed(),
                     inset: false,
                 },
             ],
         )
         .border_color(rim)
-        .perspective(800.0)
+        .perspective(px(800.0))
         .child(
             view().flex_row().justify_between().child(badge).child(
                 text(degrees)
@@ -311,7 +311,7 @@ fn corners() -> Card {
                         .size(px(60.0))
                         .rounded(px(20.0))
                         .border_curve(BorderCurve::Continuous)
-                        .border(2.5)
+                        .border(px(2.5))
                         .border_color(colors::ACCENT)
                         .rounded_tl(px(4.0)),
                 ))
@@ -338,7 +338,7 @@ fn corners() -> Card {
                     None,
                     specimen_box()
                         .rounded_t(px(28.0))
-                        .border(1.5)
+                        .border(px(1.5))
                         .border_color(colors::ACCENT)
                         .child(label("28 pt", colors::ACCENT)),
                 ))
@@ -372,13 +372,13 @@ fn borders() -> Card {
                     some("6 · 2 · 4 · 1 pt, clockwise"),
                     None,
                     specimen_box()
-                        .border_t(6.0)
+                        .border_t(px(6.0))
                         .border_t_color(colors::DANGER)
-                        .border_r(2.0)
+                        .border_r(px(2.0))
                         .border_r_color(colors::UP)
-                        .border_b(4.0)
+                        .border_b(px(4.0))
                         .border_b_color(colors::INFO)
-                        .border_l(1.0)
+                        .border_l(px(1.0))
                         .border_l_color(colors::WARN),
                 ))
                 .child(tile(
@@ -393,7 +393,7 @@ fn borders() -> Card {
                                 .w(px(112.0))
                                 .h(px(28.0))
                                 .rounded(px(8.0))
-                                .border(1.5)
+                                .border(px(1.5))
                                 .border_color(colors::INFO)
                                 .border_dashed(),
                         )
@@ -402,7 +402,7 @@ fn borders() -> Card {
                                 .w(px(112.0))
                                 .h(px(28.0))
                                 .rounded(px(8.0))
-                                .border(3.0)
+                                .border(px(3.0))
                                 .border_color(colors::WARN)
                                 .border_dotted(),
                         ),
@@ -429,8 +429,8 @@ fn shadows() -> Card {
                         .bg(colors::ACCENT_FILL)
                         .shadow_color(colors::ACCENT_FILL)
                         .shadow_opacity(0.55)
-                        .shadow_radius(18.0)
-                        .shadow_offset(0.0, 6.0)
+                        .shadow_radius(px(18.0))
+                        .shadow_offset(point(px(0.0), px(6.0)))
                         .child(label("Glow", colors::ON_ACCENT)),
                 ))
                 .child(tile(
@@ -446,8 +446,8 @@ fn shadows() -> Card {
                         .border_color(colors::INFO)
                         .shadow_color(colors::INFO)
                         .shadow_opacity(0.45)
-                        .shadow_radius(10.0)
-                        .shadow_offset(4.0, 8.0)
+                        .shadow_radius(px(10.0))
+                        .shadow_offset(point(px(4.0), px(8.0)))
                         .child(label("Offset", colors::INFO)),
                 ))
                 .child(tile(
@@ -463,8 +463,8 @@ fn shadows() -> Card {
                         .bg(colors::RAISED)
                         .shadow_color(rgb(0x000000))
                         .shadow_opacity(move || if dark() { 0.6_f32 } else { 0.22 })
-                        .shadow_radius(12.0)
-                        .shadow_offset(0.0, 8.0),
+                        .shadow_radius(px(12.0))
+                        .shadow_offset(point(px(0.0), px(8.0))),
                 ))
                 // A transparent view's shadow follows its content: the
                 // text.
@@ -474,17 +474,17 @@ fn shadows() -> Card {
                     some("Shadow of the content"),
                     None,
                     specimen_box()
-                        .bg(Color::TRANSPARENT)
+                        .bg(transparent_black())
                         .shadow_color(colors::DANGER)
                         .shadow_opacity(0.9)
-                        .shadow_radius(8.0)
-                        .shadow_offset(0.0, 0.0)
+                        .shadow_radius(px(8.0))
+                        .shadow_offset(point(px(0.0), px(0.0)))
                         .child(
                             text("Shadow")
                                 .text_size(px(24.0))
                                 .font_weight(FontWeight::EXTRA_BOLD)
                                 .text_color(colors::TEXT)
-                                .letter_spacing(-0.5),
+                                .letter_spacing(px(-0.5)),
                         ),
                 ))
                 .child(tile(
@@ -512,8 +512,8 @@ fn shadows() -> Card {
                         .rounded(px(16.0))
                         .bg(colors::RAISED)
                         .shadow_opacity(0.5)
-                        .shadow_radius(10.0)
-                        .shadow_offset(0.0, 6.0)
+                        .shadow_radius(px(10.0))
+                        .shadow_offset(point(px(0.0), px(6.0)))
                         .child(label("Elevation", colors::TEXT)),
                 )),
         )
@@ -544,14 +544,14 @@ fn layers() -> Card {
                 .rounded(px(12.0))
                 .border_curve(BorderCurve::Continuous)
                 .bg(color)
-                .border(move || if on_top.get() { 2.0_f32 } else { 0.0 })
+                .border(move || px(if on_top.get() { 2.0 } else { 0.0 }))
                 .border_color(colors::TEXT)
                 .z_index(0)
                 .style_when(on_top, |s| s.z_index(10))
                 .shadow_color(rgb(0x000000))
                 .shadow_opacity(move || if dark() { 0.5_f32 } else { 0.18 })
-                .shadow_radius(6.0)
-                .shadow_offset(0.0, 3.0)
+                .shadow_radius(px(6.0))
+                .shadow_offset(point(px(0.0), px(3.0)))
         });
     Card::new()
         .icon(IconName::Lists)
@@ -580,7 +580,7 @@ fn layers() -> Card {
                     specimen_box()
                         .bg(tints::WARN)
                         .rounded(px(22.0))
-                        .border(1.5)
+                        .border(px(1.5))
                         .border_color(colors::WARN)
                         .style_when(clip, |s| s.overflow_hidden())
                         .child(
@@ -678,7 +678,7 @@ fn transforms() -> Card {
                         .bg(tints::INFO)
                         .border_1()
                         .border_color(colors::INFO)
-                        .perspective(400.0)
+                        .perspective(px(400.0))
                         .bind_transform(TransformKind::RotateY, &sway)
                         .child(label("Y axis", colors::INFO)),
                 ))
@@ -692,8 +692,8 @@ fn transforms() -> Card {
                         .bg(tints::ACCENT)
                         .border_1()
                         .border_color(colors::ACCENT)
-                        .perspective(400.0)
-                        .rotate_x(40.0)
+                        .perspective(px(400.0))
+                        .rotate_x(deg(40.0))
                         .child(label("X axis", colors::ACCENT)),
                 ))
                 .child(tile(
@@ -706,7 +706,7 @@ fn transforms() -> Card {
                         .bg(tints::WARN)
                         .border_1()
                         .border_color(colors::WARN)
-                        .skew_x(-12.0)
+                        .skew_x(deg(-12.0))
                         .child(label("Skew", colors::WARN)),
                 ))
                 .child(tile(
@@ -737,7 +737,7 @@ fn transforms() -> Card {
                                 .rounded(px(6.0))
                                 .bg(colors::DANGER.opacity(0.55))
                                 .origin_top_left()
-                                .rotate(30.0),
+                                .rotate(deg(30.0)),
                         )
                         .child(
                             view()
@@ -881,7 +881,7 @@ fn right_to_left() -> Card {
                     chip(label.into_reactive(), tints::ACCENT, colors::ACCENT).me(px(6.0))
                 })
                 .horizontal()
-                .estimated_item_size(46.0)
+                .estimated_item_size(px(46.0))
                 .shows_indicator(false)
                 .h(px(40.0)),
             )

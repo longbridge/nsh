@@ -23,7 +23,8 @@ use std::{
 };
 
 use nsh_core::{
-    EventMask, MAX_TRANSFORMS, NodeId, Rect, TransformKind, ViewKind, ViewProps, ViewStyle,
+    Bounds, EventMask, MAX_TRANSFORMS, NodeId, Points, TransformKind, ViewKind, ViewProps,
+    ViewStyle,
 };
 
 use crate::{geom::Mat4, render::DrawCx};
@@ -82,8 +83,8 @@ impl ScrollState {
     pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
         let inset = self.behavior.content_inset;
         (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
+            (self.content.0 + inset.left.0 + inset.right.0 - viewport.0).max(0.0),
+            (self.content.1 + inset.top.0 + inset.bottom.0 - viewport.1).max(0.0),
         )
     }
 
@@ -91,7 +92,7 @@ impl ScrollState {
     /// content inset.
     pub(crate) fn origin(&self) -> (f32, f32) {
         let inset = self.behavior.content_inset;
-        (self.x - inset.left, self.y - inset.top)
+        (self.x - inset.left.0, self.y - inset.top.0)
     }
 }
 
@@ -150,7 +151,7 @@ pub(crate) struct Native {
     /// The item.
     pub(crate) item: Rc<dyn Hosted>,
     /// Where it goes.
-    pub(crate) rect: Rect,
+    pub(crate) rect: nsh_core::Bounds<Points>,
 }
 
 /// Everything the mounter set on one view.
@@ -160,7 +161,7 @@ pub(crate) struct ViewState {
     /// What it is.
     pub(crate) kind: ViewKind,
     /// Frame in the parent (points).
-    pub(crate) frame: Rect,
+    pub(crate) frame: nsh_core::Bounds<Points>,
     /// Visual style.
     pub(crate) style: Box<ViewStyle>,
     /// Native animation values.
@@ -193,7 +194,7 @@ pub(crate) struct ViewState {
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// hit testing looks there too.
-    pub(crate) overflow: Option<Rect>,
+    pub(crate) overflow: Option<nsh_core::Bounds<Points>>,
     /// Running layout / style transitions and keyframes.
     pub(crate) live: Option<Box<crate::transition::Live>>,
 }
@@ -203,7 +204,7 @@ impl ViewState {
         ViewState {
             id,
             kind,
-            frame: Rect::default(),
+            frame: Bounds::default(),
             style: Box::default(),
             anim: AnimValues::default(),
             events: EventMask::default(),
@@ -236,7 +237,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.unwrap_or(s.radius);
+        s.radius = a.shadow_radius.map_or(s.radius, Points);
         s
     }
 
@@ -258,9 +259,11 @@ impl ViewState {
     /// clamped as CSS clamps them to the box.
     pub(crate) fn radii(&self) -> [f32; 4] {
         let s = &self.style;
-        let mut r: [f32; 4] =
-            std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
-        let (w, h) = (self.frame.width, self.frame.height);
+        let mut r: [f32; 4] = s
+            .corner_radius
+            .to_array()
+            .map(|r| r.unwrap_or(s.border_radius).0);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
         let lens = [w, h, w, h];
         let f = sums
@@ -293,10 +296,17 @@ impl ViewState {
         if extra.is_none() && (t.ops().is_empty() || (!animated && t.is_identity())) {
             return None;
         }
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let o = self.style.transform_origin;
-        let (ox, oy) = (o.x.resolve(w), o.y.resolve(h));
-        let mut m = Mat4::new().translate_3d(ox, oy, o.z);
+        let at = |l: nsh_core::geometry::DefiniteLength, side: f32| {
+            l.to_points(
+                nsh_core::geometry::AbsoluteLength::Points(Points(side)),
+                nsh_core::geometry::REM_SIZE,
+            )
+            .0
+        };
+        let (ox, oy, oz) = (at(o.x, w), at(o.y, h), o.z.0);
+        let mut m = Mat4::new().translate_3d(ox, oy, oz);
         for (i, op) in t.ops().iter().enumerate() {
             let v = self.anim.transform[i].unwrap_or(op.value);
             m = match op.kind {
@@ -318,19 +328,23 @@ impl ViewState {
         if let Some(extra) = extra {
             m = extra.apply(m, h);
         }
-        Some(m.translate_3d(-ox, -oy, -o.z))
+        Some(m.translate_3d(-ox, -oy, -oz))
     }
 
     /// Where a child at `frame` (with its `shift`) goes in this view's
     /// coordinates: its frame's origin, less the scroll offset, mirrored in
     /// a right-to-left list.
-    pub(crate) fn child_origin(&self, frame: Rect, shift: (f32, f32)) -> (f32, f32) {
+    pub(crate) fn child_origin(
+        &self,
+        frame: nsh_core::Bounds<Points>,
+        shift: (f32, f32),
+    ) -> (f32, f32) {
         let (sx, sy) = self.scroll.as_ref().map_or((0.0, 0.0), ScrollState::origin);
-        let mut x = frame.x - sx + shift.0;
+        let mut x = frame.origin.x.0 - sx + shift.0;
         if self.scroll.as_ref().is_some_and(|s| s.mirrored) {
-            x = self.frame.width - x - frame.width;
+            x = self.frame.size.width.0 - x - frame.size.width.0;
         }
-        (x, frame.y - sy + shift.1)
+        (x, frame.origin.y.0 - sy + shift.1)
     }
 }
 
@@ -484,7 +498,7 @@ impl NshView {
     }
 
     /// Hosts `item` at `rect` (or moves it there).
-    pub(crate) fn set_native(&self, item: &Rc<dyn Hosted>, rect: Rect) {
+    pub(crate) fn set_native(&self, item: &Rc<dyn Hosted>, rect: nsh_core::Bounds<Points>) {
         {
             let mut s = self.state_mut();
             match s.natives.iter_mut().find(|n| Rc::ptr_eq(&n.item, item)) {

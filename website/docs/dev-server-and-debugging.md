@@ -12,22 +12,24 @@ Two commands do this:
 
 - `nsh run` starts the dev server **and** launches a development host: a Mac Catalyst or AppKit window, a GTK window on
   Linux, a Win32 window on Windows, an iOS simulator or an Android device or emulator.
-- `nsh dev` starts only the dev server, for hosts you start yourself: your own app with the development SDK, a device
+- `nsh dev --server-only` starts the dev server, for hosts you start yourself: your own app with the development SDK, a device
   on the network, or several hosts at once.
 
 ```sh
-nsh run App.tsx                     # Mac Catalyst window, 390×844 (macOS); GTK window (Linux); Win32 window (Windows)
+nsh run App.tsx                     # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
 nsh run App.tsx --target macos      # AppKit window (macOS)
 nsh run App.tsx --target ios        # iOS simulator
 nsh run App.tsx --target android    # Android device or emulator
-nsh dev App.tsx                     # server only
+nsh dev App.tsx --server-only       # server only
 ```
+
+`nsh dev` also opens the native host by default; mobile hosts use `--target ios` or `--target android`.
 
 ## `nsh run`
 
 | Flag | Description |
 |---|---|
-| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | Where to run. Default `catalyst` on macOS (an iPhone-sized, 390×844 Mac window), `linux` on Linux, `windows` on Windows. |
+| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | Where to run. Default `macos` on macOS (AppKit), `linux` on Linux, `windows` on Windows. |
 | `--device <name or UDID>` | The iOS simulator to use. Default: a booted one, else the newest iPhone (booted for you). |
 | `--port <port>` | Dev server port. Default 8790; the next free port is used if it is taken. |
 | `--release` | Serve release builds (minified, no debug info, no hot updates). |
@@ -104,8 +106,8 @@ What happens to your app:
   screen stays where it was, with the same input text and scroll position.
 - **Modules that changed run again**, and so do the modules importing a changed module that cannot take the update
   by itself, up to the entry. Module-level code therefore runs again, except for what keeps its state:
-- **Top-level signals and navigators keep their state**: a `const` made by `signal(…)` or `createNavigator(…)` at the
-  top of a module keeps its value (a navigator its screens) across edits, as long as its own initializer is the same;
+- **Top-level signals and navigation stacks keep their state**: a `const` made by `signal(…)` or `createNavStack(…)` at the
+  top of a module keeps its value (a stack its pages) across edits, as long as its own initializer is the same;
   change the initializer (`signal(0)` to `signal(10)`) to start afresh.
 - **Top-level `context()` objects keep their identity**, taking the new default value, so providers and consumers in
   different modules keep matching.
@@ -151,6 +153,20 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 objects and arrays as JSON. When the host is not connected, logs go to the platform's log (Xcode's console / the
 unified log on iOS, `adb logcat` on Android).
 
+A promise that is rejected and still has no handler once the work that rejected it is done (its microtasks ran) is
+logged as an error too, the way a browser reports it: an `async` function that throws while nobody awaits it, a
+`Promise.reject(…)` nobody catches, a call into Rust that fails with nothing waiting for it. The line goes wherever
+`console.error` goes (the terminal, the platform's log, the browser console on the web), with its stack pointing at
+your sources:
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+A handler attached later in the same turn (`const p = load(); …; p.catch(…)`) counts as handling it. Await the
+promise or give it a `.catch` where the failure matters.
+
 The rest of the terminal is one line per step (`✓` done, `→` where to connect, `•` what a device did); the output of
 the tools NSH runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
 prints everything: every log line with its level and source, cargo's output and the hosts' own.
@@ -161,7 +177,7 @@ prints everything: every log line with its level and source, cargo's output and 
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-See [Testing with nsh trace](./testing-and-trace.md) for what these numbers mean.
+See [Testing](./testing-and-trace.md) for what these numbers mean.
 
 ## The error overlay
 
@@ -214,7 +230,7 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
   signals and navigators on purpose. Restart with Ctrl-C and `nsh run`, or change the state's initializer.
 - **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md);
   refusals are logged with the key to add.
-- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh trace`](./testing-and-trace.md), which
+- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which
   prints every native view operation.
 - **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date; see
   [Project structure](./project-structure.md).
@@ -222,5 +238,5 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
 ## See also
 
 - [CLI](./cli.md)
-- [Testing with nsh trace](./testing-and-trace.md)
+- [Testing](./testing-and-trace.md)
 - [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)

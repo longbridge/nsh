@@ -54,7 +54,7 @@ cargo run          # 同一个根组件，直接在桌面后端上运行
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 function App() {
   const count = signal(0);
@@ -63,8 +63,8 @@ function App() {
       <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
@@ -79,15 +79,15 @@ mount(App);
 逐行来看：
 
 - **`import { mount, signal, Text, View } from "nsh"`**：`nsh` 是核心模块，提供 [signals](./reactivity.md)、`mount`、其他响应式原语，以及宿主元素 `View` 和 `Text`。它由原生运行时提供，不会被打包。
-- **`import { SafeAreaView } from "nsh/ui/mobile"`**：移动端 UI 组件集。[`SafeAreaView`](../components/safe-area-view.md) 会为内容加上内边距，使其避开刘海、状态栏和 Home 指示条；桌面上安全区域为 0，它不会加内边距。
+- **`import { SafeAreaView } from "nsh/base"`**：应用界面的无样式基础（导航栈、模态框、安全区域、对话框、键盘和状态栏），各平台通用。[`SafeAreaView`](../modules/nsh-base.md#safeareaview) 会为内容加上内边距，使其避开刘海、状态栏和 Home 指示条；桌面上安全区域为 0，它不会加内边距。
 - **`function App()`** 是一个组件：返回 JSX 的函数。它只运行**一次**。`signal(0)` 创建一个会随时间变化的值。
 - **`{count()}`** 在 JSX 中读取 signal。编译器看到这是一次调用，就让这段文本跟随该 signal：`count` 变化时，运行时只更新这一段文本，其他什么都不动。
-- **`<View onPress>`** 是一个响应按压的原生视图；`activeOpacity` 让它在按下时以原生方式变淡。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 NSH 的模块导入；只有 `If` 和 `Each` 无需导入。
+- **`<View onPress>`** 是一个响应按压的原生视图；`activeStyle` 是它按下时的样式，由原生应用。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 NSH 的模块导入；只有 `If` 和 `Each` 无需导入。这个按钮属于应用自己：NSH 提供基本元素和各项能力，应用用它们绘制自己的界面，可以用 `style`、Tailwind 类，或应用自己的 Rust 组件。
 - **`style={{ … }}`** 接受由 camelCase 样式属性组成的对象，数字的单位是点。布局是 flexbox，子元素默认按列排列（[布局](./layout.md)）。
 - **`mount(App)`** 把组件渲染到应用的界面上。
 
 > [!IMPORTANT]
-> 文本必须放在 `<Text>` 中。直接写在 `<View>` 里的字符串（`<View>Hello</View>`）不会显示。
+> 文字在 `<Text>` 中显示。直接写在 `<View>` 里的文字（`<View>Hello</View>`）会在构建时报错并指出位置；由表达式放进去的字符串（`<View>{name}</View>`）会在日志中提示。
 
 ## 开发
 
@@ -95,16 +95,16 @@ mount(App);
 
 `nsh run` 会启动开发服务器、构建应用、启动加载该应用的开发宿主，并在你编辑时持续重新构建。应用的日志（`console.log`、错误）会显示在终端中。
 
-不传 `--target` 时，`nsh run` 使用你所在的机器：Windows 上是一个 Win32 窗口，Linux 上是一个 GTK 窗口，macOS 上是一个以 iPhone 的样子显示应用的 Mac Catalyst 窗口。用 `--target` 选择其他平台：
+不传 `--target` 时，`nsh run` 使用你所在的机器：Windows 上是一个 Win32 窗口，Linux 上是一个 GTK 窗口，macOS 上是一个 AppKit 窗口。用 `--target` 选择其他平台：
 
 | 目标 | 命令 | 在哪里运行 |
 |---|---|---|
 | iOS 模拟器 | `nsh run my-app/App.tsx --target ios` | 装有 Xcode 的 macOS |
 | Android | `nsh run my-app/App.tsx --target android` | macOS、Windows、Linux |
-| macOS（AppKit） | `nsh run my-app/App.tsx --target macos` | macOS |
+| macOS（AppKit） | `nsh run my-app/App.tsx` | macOS（默认） |
 | Windows | `nsh run my-app/App.tsx` | Windows（默认） |
 | Linux（GTK 4） | `nsh run my-app/App.tsx` | Linux（默认） |
-| Mac Catalyst | `nsh run my-app/App.tsx` | macOS（默认） |
+| Mac Catalyst | `nsh run my-app/App.tsx --target catalyst` | macOS |
 
 #### iOS 模拟器
 
@@ -149,10 +149,10 @@ nsh run my-app/App.tsx
 
 应用会在一个 GTK 窗口（390×844 点）中打开。需要 GTK 4.14 及以上；见 [Linux](./linux.md)。
 
-#### Mac Catalyst（macOS 上默认）
+#### Mac Catalyst
 
 ```sh
-nsh run my-app/App.tsx
+nsh run my-app/App.tsx --target catalyst
 ```
 
 应用会在 Mac 上一个 iPhone 尺寸（390×844 点）的窗口中打开。这是查看模块在手机上效果最快的方式：不需要启动模拟器。它和 iOS 一样使用 UIKit，所以看到的效果就是 iPhone 上的效果，只有 Mac 特有的行为除外，例如用鼠标滚轮滚动。要运行 Mac 应用本身，请用 `--target macos`。
@@ -170,7 +170,7 @@ nsh run my-app/App.tsx
 ```tsx
 function TapButton(props: { onPress: () => void }) {
   return (
-    <View onPress={props.onPress} activeOpacity={0.6} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
       <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
     </View>
   );
@@ -270,13 +270,13 @@ nsh package my-app --target windows
 
 ## 在终端中试运行
 
-`nsh trace` 以无界面方式（不需要设备）运行应用，打印它产生的原生视图操作及耗时，然后点击第一个可按压的视图两次：
+`nsh test` 以无界面方式（不需要设备）运行应用的测试：`nsh init` 已经写好了一个 `App.test.tsx`，它打开应用、按下按钮并检查显示的内容：
 
 ```sh
-nsh trace my-app/App.tsx
+nsh test my-app
 ```
 
-这是检查应用能否正常启动、查看一次交互引起多少工作量的快捷方式（[测试与 trace](./testing-and-trace.md)）。
+加上 `--trace` 时，它还会打印应用产生的原生视图操作及耗时，可以快速查看一次交互引起多少工作量（[测试](./testing-and-trace.md)）。
 
 ## 下一步
 

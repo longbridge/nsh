@@ -30,8 +30,8 @@ use std::{
 };
 
 use nsh_core::{
-    EventMask, MAX_TRANSFORMS, Matrix, NodeId, PointerEvents, ROOT_ID, Rect, ViewKind, ViewProps,
-    ViewStyle,
+    Bounds, EventMask, MAX_TRANSFORMS, Matrix, NodeId, PointerEvents, Points, ROOT_ID, ViewKind,
+    ViewProps, ViewStyle,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -102,7 +102,7 @@ pub(crate) struct ScrollState {
 impl ScrollState {
     /// The largest offsets.
     pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset;
+        let inset = self.behavior.content_inset.map(|v| v.0);
         (
             (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
             (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
@@ -116,7 +116,7 @@ pub(crate) struct Native {
     /// The view (a subview of the node's view).
     pub(crate) view: Retained<NSView>,
     /// Where it goes.
-    pub(crate) rect: Rect,
+    pub(crate) rect: Bounds<Points>,
 }
 
 /// Everything the mounter set on one view.
@@ -126,7 +126,7 @@ pub(crate) struct ViewState {
     /// What it is.
     pub(crate) kind: ViewKind,
     /// Frame in the parent (points).
-    pub(crate) frame: Rect,
+    pub(crate) frame: Bounds<Points>,
     /// Visual style.
     pub(crate) style: Box<ViewStyle>,
     /// Native animation values.
@@ -141,7 +141,7 @@ pub(crate) struct ViewState {
     pub(crate) states: u8,
     /// Extra translation (sticky list cells, screen transitions).
     pub(crate) shift: (f32, f32),
-    /// Extra opacity (press feedback, screen and modal transitions).
+    /// Extra opacity (screen and modal transitions).
     pub(crate) fade: f32,
     /// Scroll state (scroll views).
     pub(crate) scroll: Option<ScrollState>,
@@ -157,7 +157,7 @@ pub(crate) struct ViewState {
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// hit testing looks there too.
-    pub(crate) overflow: Option<Rect>,
+    pub(crate) overflow: Option<Bounds<Points>>,
     /// Running layout / style transitions and keyframes.
     pub(crate) live: Option<Box<crate::transition::Live>>,
     /// The layers decoration added ([`crate::decor`]).
@@ -171,7 +171,7 @@ impl ViewState {
         ViewState {
             id,
             kind,
-            frame: Rect::default(),
+            frame: Bounds::default(),
             style: Box::default(),
             anim: AnimValues::default(),
             events: EventMask::default(),
@@ -215,7 +215,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.unwrap_or(s.radius);
+        s.radius = a.shadow_radius.map(Points).unwrap_or(s.radius);
         s
     }
 
@@ -257,13 +257,20 @@ impl ViewState {
         if extra.is_none() && (t.ops().is_empty() || (!animated && t.is_identity())) {
             return None;
         }
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let mut m = t.matrix(|i| self.anim.transform.get(i).copied().flatten());
         if let Some(extra) = extra {
             m = extra.apply(m, h);
         }
         let o = self.style.transform_origin;
-        let (ox, oy, oz) = (o.x.resolve(w) as f64, o.y.resolve(h) as f64, o.z as f64);
+        let at = |len: nsh_core::geometry::DefiniteLength, side: f32| {
+            len.to_points(
+                nsh_core::geometry::AbsoluteLength::Points(Points(side)),
+                nsh_core::geometry::REM_SIZE,
+            )
+            .0 as f64
+        };
+        let (ox, oy, oz) = (at(o.x, w), at(o.y, h), o.z.0 as f64);
         // To the origin, transform, and back (row vectors).
         Some(
             translation(-ox, -oy, -oz)
@@ -361,25 +368,25 @@ define_class!(
 
     unsafe impl CALayerDelegate for Drawer {
         #[unsafe(method(drawLayer:inContext:))]
-        fn draw_layer(&self, layer: &CALayer, ctx: &CGContext) {
+        fn draw_layer(&self, layer: &CALayer, cx: &CGContext) {
             let Some(view) = self.ivars().load() else {
                 return;
             };
             let Ok(state) = view.ivars().state.try_borrow() else {
                 return;
             };
-            let c = Some(ctx);
+            let c = Some(cx);
             CGContext::save_g_state(c);
             if !layer.contentsAreFlipped() {
                 // Drawing is top down, as in a flipped view.
                 CGContext::translate_ctm(c, 0.0, layer.bounds().size.height);
                 CGContext::scale_ctm(c, 1.0, -1.0);
             }
-            crate::text::draw(ctx, &state);
+            crate::text::draw(cx, &state);
             // What Core Animation redraws (all of it, or a canvas's part
             // that animated values changed), top down.
             let dirty = CGContext::clip_bounding_box(c);
-            crate::canvas::draw(ctx, &state, dirty);
+            crate::canvas::draw(cx, &state, dirty);
             CGContext::restore_g_state(c);
         }
 
@@ -1044,7 +1051,7 @@ impl NshView {
         if let Some(c) = &*self.ivars().container.borrow() {
             let f = self.state().frame;
             let origin = c.bounds().origin;
-            c.setFrame(ns_rect(0.0, 0.0, f.width, f.height));
+            c.setFrame(ns_rect(0.0, 0.0, f.size.width.0, f.size.height.0));
             c.setBoundsOrigin(origin);
         }
     }
@@ -1140,20 +1147,20 @@ impl NshView {
 
     /// Part of what it draws changed (`rect`, in its own coordinates, y
     /// down): only that is drawn again (a canvas's animated values).
-    pub(crate) fn redraw_rect(&self, rect: nsh_core::Rect) {
+    pub(crate) fn redraw_rect(&self, rect: nsh_core::Bounds<nsh_core::Points>) {
         let Some(layer) = self.content_layer() else {
             return;
         };
         // Layer space is y up unless its contents are flipped
         // (`drawLayer:inContext:` flips the drawing the same way).
         let y = if layer.contentsAreFlipped() {
-            rect.y as CGFloat
+            rect.origin.y.0 as CGFloat
         } else {
-            layer.bounds().size.height - (rect.y + rect.height) as CGFloat
+            layer.bounds().size.height - (rect.origin.y.0 + rect.size.height.0) as CGFloat
         };
         layer.setNeedsDisplayInRect(CGRect::new(
-            CGPoint::new(rect.x as CGFloat, y),
-            CGSize::new(rect.width as CGFloat, rect.height as CGFloat),
+            CGPoint::new(rect.origin.x.0 as CGFloat, y),
+            CGSize::new(rect.size.width.0 as CGFloat, rect.size.height.0 as CGFloat),
         ));
     }
 
@@ -1182,18 +1189,18 @@ impl NshView {
             s.scroll
                 .as_ref()
                 .is_some_and(|sc| sc.mirrored)
-                .then_some(s.frame.width)
+                .then_some(s.frame.size.width.0)
         });
         let (rect, root) = {
             let s = self.state();
             let f = s.frame;
-            let mut x = f.x + s.shift.0;
+            let mut x = f.origin.x.0 + s.shift.0;
             if let Some(w) = mirror {
-                x = w - x - f.width;
+                x = w - x - f.size.width.0;
             }
-            let y = f.y + s.shift.1;
+            let y = f.origin.y.0 + s.shift.1;
             (
-                ns_rect(x, y, f.width, f.height),
+                ns_rect(x, y, f.size.width.0, f.size.height.0),
                 s.id == ROOT_ID && self.ivars().surface.borrow().strong_count() > 0,
             )
         };
@@ -1245,7 +1252,12 @@ impl NshView {
         let natives = self.state().natives.clone();
         for n in natives {
             let r = n.rect;
-            n.view.setFrame(ns_rect(r.x, r.y, r.width, r.height));
+            n.view.setFrame(ns_rect(
+                r.origin.x.0,
+                r.origin.y.0,
+                r.size.width.0,
+                r.size.height.0,
+            ));
         }
     }
 
@@ -1296,7 +1308,7 @@ impl NshView {
     }
 
     /// Hosts `view` at `rect` (or moves it there).
-    pub(crate) fn set_native(&self, view: &NSView, rect: Rect) {
+    pub(crate) fn set_native(&self, view: &NSView, rect: Bounds<Points>) {
         {
             let mut s = self.state_mut();
             match s.natives.iter_mut().find(|n| &*n.view == view) {
@@ -1310,7 +1322,12 @@ impl NshView {
         if superview(view).as_deref() != Some(self.ns()) {
             self.ns().addSubview(view);
         }
-        view.setFrame(ns_rect(rect.x, rect.y, rect.width, rect.height));
+        view.setFrame(ns_rect(
+            rect.origin.x.0,
+            rect.origin.y.0,
+            rect.size.width.0,
+            rect.size.height.0,
+        ));
     }
 
     /// Stops hosting `view`.

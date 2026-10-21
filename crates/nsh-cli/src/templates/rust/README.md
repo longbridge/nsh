@@ -3,9 +3,9 @@
 An app written in Rust: its UI is `src/lib.rs`, and `nsh.json` names the root component (`"root": "App"`).
 
 ```sh
-nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
-nsh trace                    # headless: what the root mounts, and the time of each commit
-nsh package --target web     # or ios, android, macos, linux, windows, gpui
+nsh run                      # this machine's backend; --target ios, android, web, macos, linux or windows
+nsh test nsh.json --trace    # headless: what the root mounts, and the time of each commit
+nsh package --target web     # or ios, android, macos, linux, windows
 ```
 
 `nsh run` and `nsh package` mount the root on every platform, the browser included, without QuickJS: the app is Rust
@@ -42,3 +42,6 @@ and a `tsconfig.json` (copy one from `nsh init --template ts`), then run it with
 runs on QuickJS, while `nsh run` alone keeps running the Rust root. The first `nsh build App.tsx` writes the TypeScript
 declarations of `__SPECIFIER__` into `.nsh/types`. Register more with `registry.register::<…>()` (components),
 `registry.module::<…>()` and `registry.class::<…>()`.
+
+NSH-generated files stay in `.nsh/`: runner sources in `.nsh/rust/` and default packages in `.nsh/out/`.
+Cargo keeps its normal `target/` directory and respects your existing `CARGO_TARGET_DIR`.

@@ -89,7 +89,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
         // An app on its own, not a module embedded in another app.
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

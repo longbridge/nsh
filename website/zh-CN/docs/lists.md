@@ -98,11 +98,12 @@ const toggle = (id: number) =>
 | `numColumns` | `number` | `1` | 每行的条目数（纵向列表）。 |
 | `inverted` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
 | `stickyHeaderIndices` | `number[]` | | 滚过时吸附在顶部的条目（单列且非倒置）。 |
-| `contentContainerStyle` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
-| `ListHeaderComponent` | 组件或元素 | | 在条目之前。 |
-| `ListFooterComponent` | 组件或元素 | | 在条目之后。 |
-| `ListEmptyComponent` | 组件或元素 | | `each` 为空时代替条目显示。 |
-| `ItemSeparatorComponent` | 组件或元素 | | 条目之间（单列）。 |
+| `contentStyle` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
+| `contentClass` | `string` | | 同上，写成类名（`p-*`、`gap-*`）；`contentStyle` 优先。 |
+| `header` | 组件或元素 | | 在条目之前。 |
+| `footer` | 组件或元素 | | 在条目之后。 |
+| `empty` | 组件或元素 | | `each` 为空时代替条目显示。 |
+| `separator` | 组件或元素 | | 条目之间（单列）。 |
 | `initialScrollIndex` | `number` | | 第一帧之前滚动到该条目。 |
 | `onEndReached` | `() => void` | | 接近末尾（见下文）。 |
 | `onEndReachedThreshold` | `number` | `1` | 距离末尾多少个视口时触发 `onEndReached`。 |
@@ -113,11 +114,11 @@ const toggle = (id: number) =>
 | `showsIndicator` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `ref` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
-头部、尾部和空状态插槽接受组件（`ListHeaderComponent={Header}`）或元素（`ListHeaderComponent={<Header />}`）。它们是独立的单元格，从不被复用，并且和其他 JSX 一样是响应式的。
+头部、尾部和空状态插槽接受组件（`header={Header}`）或元素（`header={<Header />}`）。它们是独立的单元格，从不被复用，并且和其他 JSX 一样是响应式的。
 
 ## 多列与网格
 
-`numColumns` 把条目排成每行若干列；`contentContainerStyle` 为内容四周添加内边距，并设置行间距（`rowGap`）、列间距（`columnGap`）或两者（`gap`）。网格中各行的高度可以不同：每行与其中最高的条目一样高。
+`numColumns` 把条目排成每行若干列；`contentStyle` 为内容四周添加内边距，并设置行间距（`rowGap`）、列间距（`columnGap`）或两者（`gap`）。网格中各行的高度可以不同：每行与其中最高的条目一样高。
 
 ```tsx
 <List
@@ -125,7 +126,7 @@ const toggle = (id: number) =>
   numColumns={3}
   estimatedItemSize={120}
   style={{ flex: 1 }}
-  contentContainerStyle={{ padding: 12, gap: 8 }}
+  contentStyle={{ padding: 12, gap: 8 }}
 >
   {(photo) => <Image src={photo().thumb} style={{ aspectRatio: 1, borderRadius: 8 }} />}
 </List>
@@ -167,7 +168,7 @@ for (const [letter, names] of groups) {
 ```tsx
 import { Input, mount, signal, Text, View } from "nsh";
 import { List } from "nsh/list";
-import { KeyboardAvoidingView } from "nsh/ui/mobile";
+import { KeyboardAvoidingView } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
 
@@ -189,7 +190,7 @@ function Chat() {
         inverted
         estimatedItemSize={44}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 12, gap: 6 }}
+        contentStyle={{ padding: 12, gap: 6 }}
         keyboardDismissMode="interactive"
         onEndReached={loadOlder}
         onEndReachedThreshold={0.5}
@@ -212,8 +213,8 @@ function Chat() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8 }}>
         <Input
           value={draft()}
-          onChangeText={(t) => draft.set(t)}
-          onSubmitEditing={send}
+          onChange={(t) => draft.set(t)}
+          onSubmit={send}
           multiline
           submitBehavior="submit"
           returnKeyType="send"
@@ -243,7 +244,7 @@ mount(Chat);
   decelerationRate="fast"
   showsIndicator={false}
   style={{ height: 140 }}
-  contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+  contentStyle={{ paddingHorizontal: 16, gap: 12 }}
 >
   {(card) => <View style={{ width: 220, height: 140, borderRadius: 14, backgroundColor: card().color }} />}
 </List>
@@ -278,7 +279,7 @@ loadMore();
   style={{ flex: 1 }}
   onEndReached={loadMore}
   onEndReachedThreshold={0.5}
-  ListFooterComponent={<Text style={{ padding: 16, textAlign: "center", color: "#8c959f" }}>Loading…</Text>}
+  footer={<Text style={{ padding: 16, textAlign: "center", color: "#8c959f" }}>Loading…</Text>}
 >
   {(post) => <PostRow post={post()} />}
 </List>
@@ -335,24 +336,53 @@ list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 
 `scrollToIndex`（以及 `scrollToEnd`）由原生根据当时已知的尺寸计算：已测量的行用实测值，其余用 `estimatedItemSize`。之后在目标附近的行被测量时，列表会持续跟随目标，因此能准确落位，直到用户自己滚动或数据变化为止。要让列表一打开就停在某个条目，请用 `initialScrollIndex`，而不是在第一帧之后再滚动。
 
-## nsh/ui/mobile 中的 ListView
+<a id="a-settings-style-list"></a>
 
-`nsh/ui/mobile` 中的 `ListView` 是基于同一套机制的现成列表：你传入 `each` 并渲染行，它负责内边距、分隔线以及 `inset` 分组外观。需要与移动端 UI 套件其他部分外观一致的设置类列表和普通列表时用它；需要完全掌控外观时用 `List`。见 [ListView](../components/list-view.md)。
+## 设置风格的列表
+
+列表的外观属于应用自己：`List` 负责摆放和复用行，行、分隔线和表面都是你的视图。分组的设置风格列表就是一个带内边距、分隔线、首尾行圆角的 `List`。把它写成自己的组件，在应用中需要列出设置的地方使用：
 
 ```tsx
-import { Text } from "nsh";
-import { ListView } from "nsh/ui/mobile";
+import { Text, View } from "nsh";
+import { List } from "nsh/list";
 
-<ListView variant="inset" dividers each={settings} keyExtractor={(s) => s.id}>
-  {(s) => <Text>{s().label}</Text>}
-</ListView>
+type Setting = { id: string; label: string };
+
+function SettingsList(props: { each: Setting[]; onSelect: (s: Setting) => void }) {
+  return (
+    <View class="flex-1 bg-neutral-100 dark:bg-neutral-950">
+      <List
+        each={props.each}
+        estimatedItemSize={48}
+        style={{ flex: 1 }}
+        contentStyle={{ padding: 16 }}
+        separator={() => (
+          <View class="bg-white dark:bg-neutral-900">
+            <View class="ml-4 h-px bg-neutral-200 dark:bg-neutral-800" />
+          </View>
+        )}
+      >
+        {(s, i) => (
+          <View
+            onPress={() => props.onSelect(s())}
+            role="button"
+            class="h-12 justify-center bg-white px-4 active:bg-neutral-200 dark:bg-neutral-900"
+            classList={{ "rounded-t-xl": i() === 0, "rounded-b-xl": i() === props.each.length - 1 }}
+          >
+            <Text>{s().label}</Text>
+          </View>
+        )}
+      </List>
+    </View>
+  );
+}
 ```
 
 ## 性能提示
 
 - 每个单元格单独排版，滚动时只重新排版有变化的单元格。行的层级保持浅一些，避免在行里读取每帧都会变化的 signal。
 - 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新；快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次 JS。
-- 用 [`nsh trace --scroll`](./testing-and-trace.md) 测量行在每一帧的开销。
+- 用 [`nsh test --trace` 加上 `scroll` 步骤](./testing-and-trace.md#滚动)测量行在每一帧的开销。
 
 ## 相关内容
 

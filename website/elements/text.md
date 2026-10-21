@@ -30,6 +30,27 @@ paragraph (`color`, `fontSize`, `fontWeight`, …) and override what they set. T
 </Text>
 ```
 
+### Span backgrounds
+
+A span with `backgroundColor` fills the box of its characters, behind them: as tall as its font (the ascent above the
+baseline and the descent below it, whatever the line height), and on every line it wraps to, each line's part a box of
+its own with the span's `borderRadius`. Spans inside it share its background unless they set their own. It is drawing
+only: the text lays out as without it, and a selectable text copies the span's characters with the rest. Inline code
+is a span:
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 22 }} selectable>
+  {"Run "}
+  <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
+    {" cargo test "}
+  </Text>
+  {" before you commit."}
+</Text>
+```
+
+The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded">`. Padding and borders are box styles and
+leave spans as they are; spaces inside the span give the box room on its sides.
+
 ### Links
 
 A span with a press handler is a link: a press on its characters goes to the span, a press elsewhere to the paragraph.
@@ -81,10 +102,9 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Text
 | `adjustsFontSizeToFit` | `boolean` | `false` | Shrink the font until the text fits its lines (`numberOfLines`) and its box. |
 | `minimumFontScale` | `number` | | How far `adjustsFontSizeToFit` shrinks at most (0..1; at least 0.1). |
 | `selectable` | `boolean` | | The user can select ranges of the text: a long press selects a word, handles extend it, the edit menu copies it. Unset, text is not selectable, except in desktop browsers, where it is unless it is inside an interactive element; `false` keeps it unselectable there too. |
-| `selectionColor` | `ColorValue` | | The highlight (and handles) of the selection of selectable text; the platform's accent by default. |
 | `onTextLayout` | `(e: { lines: TextLayoutLine[] }) => void` | | The laid-out lines after each layout. |
 
-The `select-text` Tailwind class is the same as `selectable`.
+The `select-text` Tailwind class is the same as `selectable`. The selection's highlight and handles take the style key `selectionColor` (`selection:text-*`), the platform's accent by default.
 
 ## Text styles
 

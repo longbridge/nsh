@@ -10,21 +10,23 @@ group: tools
 开发期间，NSH 会在每次保存时构建应用，并推送给所有已连接的宿主，宿主就地更新。有两条命令可以做到这一点：
 
 - `nsh run` 启动开发服务器，**并且** 启动一个开发宿主：Mac Catalyst 或 AppKit 窗口、Linux 上的 GTK 窗口、Windows 上的 Win32 窗口、iOS 模拟器，或者 Android 真机或模拟器。
-- `nsh dev` 只启动开发服务器，宿主由你自己启动：集成了开发版 SDK 的自有应用、网络中的某台设备，或同时连接多个宿主。
+- `nsh dev --server-only` 启动开发服务器，宿主由你自己启动：集成了开发版 SDK 的自有应用、网络中的某台设备，或同时连接多个宿主。
 
 ```sh
-nsh run App.tsx                     # Mac Catalyst window, 390×844 (macOS); GTK window (Linux); Win32 window (Windows)
+nsh run App.tsx                     # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
 nsh run App.tsx --target macos      # AppKit window (macOS)
 nsh run App.tsx --target ios        # iOS simulator
 nsh run App.tsx --target android    # Android device or emulator
-nsh dev App.tsx                     # server only
+nsh dev App.tsx --server-only       # server only
 ```
+
+`nsh dev` 默认也打开原生宿主；移动端需要指定 `--target ios` 或 `--target android`。
 
 ## `nsh run`
 
 | 参数 | 说明 |
 |---|---|
-| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | 在哪里运行。macOS 上默认 `catalyst`（一个 iPhone 尺寸、390×844 的 Mac 窗口），Linux 上默认 `linux`，Windows 上默认 `windows`。 |
+| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | 在哪里运行。macOS 上默认 `macos`（AppKit 窗口），Linux 上默认 `linux`，Windows 上默认 `windows`。 |
 | `--device <name or UDID>` | 要使用的 iOS 模拟器。默认：已启动的那个，否则使用最新的 iPhone（会自动为你启动）。 |
 | `--port <port>` | 开发服务器端口。默认 8790；如被占用，则使用下一个空闲端口。 |
 | `--release` | 提供 release 构建（压缩、无调试信息、无热更新）。 |
@@ -125,6 +127,18 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 `console.log` 像浏览器控制台一样格式化值：字符串原样输出，错误附带调用栈，函数显示名称，对象和数组输出为 JSON。宿主
 未连接时，日志会写入平台日志（iOS 上是 Xcode 控制台 / 统一日志，Android 上是 `adb logcat`）。
 
+被 reject 的 Promise，如果在引起它的那段工作结束（它的微任务都已运行）时仍然没有处理函数，也会像浏览器那样记录为一条错误：
+没人 await 的 `async` 函数抛出了异常、没人 catch 的 `Promise.reject(…)`、没有人等待结果的 Rust 调用失败了。这一行和
+`console.error` 去往同样的地方（终端、平台日志，Web 上是浏览器控制台），调用栈指向你的源码：
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+在同一轮中稍后附加的处理函数（`const p = load(); …; p.catch(…)`）也算作处理了它。失败需要处理的地方，请 await 这个
+Promise 或给它加上 `.catch`。
+
 终端里的其余内容是每个步骤一行（`✓` 完成，`→` 连接地址，`•` 设备的动态）；NSH 调用的工具（cargo、宿主本身）的输出
 只在出错时打印。`nsh run -v`（或 `NSH_VERBOSE=1`）打印全部内容：每条日志及其级别和来源、cargo 的输出以及宿主自己的输出。
 
@@ -134,7 +148,7 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-这些数字的含义参见[用 nsh trace 测试](./testing-and-trace.md)。
+这些数字的含义参见[测试](./testing-and-trace.md)。
 
 ## 错误浮层
 
@@ -183,12 +197,12 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 - **应用保留了你以为会重置的旧状态**：热替换会刻意保留未变化组件的状态。用 Ctrl-C 后重新 `nsh run` 重启，或者修改入口
   模块。
 - **请求只在打包或嵌入的构建中失败**：检查应用的[能力](./sandbox-and-capabilities.md)；被拒绝时日志会写明需要添加的键。
-- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
+- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh test --trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
   原生视图操作。
 - **编辑器中出现类型错误**：`nsh run` 和 `nsh dev` 会保持 `.nsh/types` 为最新；参见[项目结构](./project-structure.md)。
 
 ## 另请参阅
 
 - [CLI](./cli.md)
-- [用 nsh trace 测试](./testing-and-trace.md)
+- [测试](./testing-and-trace.md)
 - [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)

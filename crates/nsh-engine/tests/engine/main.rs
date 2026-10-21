@@ -13,6 +13,7 @@ use nsh_engine::MountSink;
 
 mod canvas;
 mod class_bench;
+mod clock;
 mod compat;
 mod compiled;
 mod component_bench;
@@ -20,6 +21,8 @@ mod components;
 mod counter;
 mod errors;
 mod fetch;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod fs;
 mod handle_bench;
 mod host_modules;
 mod hot;
@@ -28,9 +31,13 @@ mod js_touch;
 mod keymap;
 mod list;
 mod list_bench;
+mod logs;
 mod native;
+mod net;
 mod package;
+mod parity;
 mod platform;
+mod process;
 mod rust_animation;
 mod rust_app;
 mod rust_classes;
@@ -41,7 +48,11 @@ mod rust_touch;
 mod shutdown;
 mod split;
 mod storage;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod system;
+mod test_ui;
 mod theme;
+mod websocket;
 
 /// Hands the engine's batches to the test.
 struct ChannelSink(Sender<MountBatch>);
@@ -50,4 +61,17 @@ impl MountSink for ChannelSink {
     fn submit(&self, batch: MountBatch) {
         let _ = self.0.send(batch);
     }
+}
+
+/// Where tests make their files: `TMPDIR`, or `~/.cache/nsh-benchs-test-tmp`
+/// where none is set (CI's runners), never `/tmp`.
+fn temporary_root() -> std::path::PathBuf {
+    let root = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+                .join(".cache/nsh-benchs-test-tmp")
+        });
+    assert!(root.is_absolute() && !root.starts_with("/tmp"));
+    root
 }

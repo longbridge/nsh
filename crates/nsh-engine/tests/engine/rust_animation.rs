@@ -9,7 +9,7 @@ use std::time::Duration;
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size,
-    nsh_animation::{AnimationOp, AnimationProp, Finished, Graph},
+    animation::{AnimationOp, AnimationProp, Finished, Graph},
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
@@ -93,17 +93,20 @@ impl Platform {
         let (tx, rx) = crossbeam_channel::unbounded();
         let config = EngineConfig {
             app: App::Rust(Root::of::<Jumper>()),
-            viewport: Size::new(390.0, 844.0),
+            viewport: Size::new(px(390.0), px(844.0)),
             trace: false,
             network: None,
+            websocket: None,
+            filesystem: None,
             assets: None,
             environment: Environment::default(),
-            header_heights: (44.0, 96.0),
+            header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
             limits: nsh_engine::Limits::default(),
             ui_sets: Vec::new(),
             runtime: None,
             data_dir: None,
             storage: None,
+            clock: Default::default(),
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

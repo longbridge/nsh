@@ -39,14 +39,15 @@
 
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
 
-use nsh_animation::AnimationValue;
 use nsh_core::{
-    Color,
+    Color, Corners, Points,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint, PathOp, arc_sweep,
         fit_radii,
     },
+    geometry::{Percentage, Radians, size},
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -234,7 +235,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     let Some(drawing) = canvas.drawing.as_ref() else {
         return;
     };
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if drawing.ops.is_empty() || w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -380,7 +381,7 @@ struct State {
     cap: LineCap,
     join: LineJoin,
     miter: f64,
-    dash: Arc<[f32]>,
+    dash: Arc<[Points]>,
     dash_offset: f64,
     alpha: f64,
     composite: Composite,
@@ -578,10 +579,10 @@ impl<'a> Replay<'a> {
             }
             CanvasOp::Composite(m) => self.state.composite = *m,
             CanvasOp::ShadowColor(color) => self.state.shadow.0 = *color,
-            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = *b as f64,
-            CanvasOp::ShadowOffset(x, y) => {
-                self.state.shadow.2 = *x as f64;
-                self.state.shadow.3 = *y as f64;
+            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = b.0 as f64,
+            CanvasOp::ShadowOffset(offset) => {
+                self.state.shadow.2 = offset.x.0 as f64;
+                self.state.shadow.3 = offset.y.0 as f64;
             }
             CanvasOp::Font(f) => {
                 // The shorthand keeps the numeric variant, as in browsers.
@@ -599,19 +600,27 @@ impl<'a> Replay<'a> {
                 max_width,
             } => {
                 let mode = Mode::Fill(FillRule::NonZero);
-                self.text_op(text, self.n(*x), self.n(*y), *max_width, mode)?
+                let max_width = max_width.map(|m| m.0);
+                self.text_op(text, self.n(*x), self.n(*y), max_width, mode)?
             }
             CanvasOp::StrokeText {
                 text,
                 x,
                 y,
                 max_width,
-            } => self.text_op(text, self.n(*x), self.n(*y), *max_width, Mode::Stroke)?,
+            } => {
+                let max_width = max_width.map(|m| m.0);
+                self.text_op(text, self.n(*x), self.n(*y), max_width, Mode::Stroke)?
+            }
             CanvasOp::DrawImage {
                 image,
                 source,
                 dest,
-            } => self.image(&image.uri, *source, dest)?,
+            } => {
+                let source =
+                    source.map(|s| [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]);
+                self.image(&image.uri, source, dest)?
+            }
         }
         Ok(())
     }
@@ -650,7 +659,8 @@ impl<'a> Replay<'a> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 let unit = m.then(&Affine::translate(n(*x), n(*y)).then(&Affine::scale(r, r)));
                 path.arc(&unit, start, sweep);
             }
@@ -669,7 +679,8 @@ impl<'a> Replay<'a> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 let unit = m.then(
                     &Affine::translate(x, y)
                         .then(&Affine::rotate(rotation))
@@ -687,8 +698,23 @@ impl<'a> Replay<'a> {
             }
             PathOp::RoundRect(rect, radii) => {
                 let [x, y, w, h] = rect.map(n);
-                let [tl, tr, br, bl] =
-                    fit_radii(w as f32, h as f32, radii.map(|r| n(r) as f32)).map(f64::from);
+                let [tl, tr, br, bl] = radii.map(|r| Points(n(r) as f32));
+                let fit = fit_radii(
+                    size(Points(w as f32), Points(h as f32)),
+                    Corners {
+                        top_left: tl,
+                        top_right: tr,
+                        bottom_right: br,
+                        bottom_left: bl,
+                    },
+                );
+                let [tl, tr, br, bl] = [
+                    fit.top_left,
+                    fit.top_right,
+                    fit.bottom_right,
+                    fit.bottom_left,
+                ]
+                .map(|r| f64::from(r.0));
                 path.move_to(m.map((x + tl, y)));
                 self.arc_to(path, x + w, y, x + w, y + h, tr);
                 self.arc_to(path, x + w, y + h, x, y + h, br);
@@ -1243,7 +1269,8 @@ impl<'a> Replay<'a> {
             return Ok(None);
         }
         let brush: ID2D1Brush = match g.shape {
-            GradientShape::Linear([x0, y0, x1, y1]) => {
+            GradientShape::Linear { start, end } => {
+                let (x0, y0, x1, y1) = (start.x.0, start.y.0, end.x.0, end.y.0);
                 // Canvas paints nothing along a gradient of no length.
                 if x0 == x1 && y0 == y1 {
                     return Ok(None);
@@ -1263,7 +1290,20 @@ impl<'a> Replay<'a> {
                     .cast()?
                 }
             }
-            GradientShape::Radial(circles) => {
+            GradientShape::Radial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+            } => {
+                let circles = [
+                    start.x.0,
+                    start.y.0,
+                    start_radius.0,
+                    end.x.0,
+                    end.y.0,
+                    end_radius.0,
+                ];
                 let Some(r) = radial(circles) else {
                     return Ok(None);
                 };
@@ -1290,7 +1330,7 @@ impl<'a> Replay<'a> {
                     .cast()?
                 }
             }
-            GradientShape::Conic(_) => return Ok(Some(Brush::Conic(g.clone()))),
+            GradientShape::Conic { .. } => return Ok(Some(Brush::Conic(g.clone()))),
         };
         Ok(Some(Brush::Plain(brush)))
     }
@@ -1304,10 +1344,14 @@ impl<'a> Replay<'a> {
         g: &CanvasGradient,
         alpha: f32,
     ) -> windows::core::Result<()> {
-        let GradientShape::Conic([angle, x, y]) = g.shape else {
+        let GradientShape::Conic {
+            start_angle,
+            center,
+        } = g.shape
+        else {
             return Ok(());
         };
-        let (angle, x, y) = (angle as f64, x as f64, y as f64);
+        let (angle, x, y) = (start_angle.0 as f64, center.x.0 as f64, center.y.0 as f64);
         // SAFETY: COM calls on live objects inside the recording context's
         // draw; the layer is popped and the antialiasing restored.
         unsafe {
@@ -1465,7 +1509,7 @@ impl<'a> Replay<'a> {
         let place = Affine::translate(x, y + down)
             .then(&Affine::scale(squeeze, 1.0))
             .then(&Affine::translate(dx, -ascent));
-        let conic = matches!(self.paint(mode), Paint::Gradient(g) if matches!(g.shape, GradientShape::Conic(_)));
+        let conic = matches!(self.paint(mode), Paint::Gradient(g) if matches!(g.shape, GradientShape::Conic { .. }));
         if matches!(mode, Mode::Fill(_)) && !conic {
             // Glyphs drawn as glyphs keep DirectWrite's rendering.
             let Some(to_layout) = place.invert() else {
@@ -1592,12 +1636,16 @@ unsafe fn stop_collection(
 /// Canvas gradient stops as Direct2D's: reversed (offset 1 - t) when
 /// `reversed`, then moved into `inner..1`; stops at one offset are kept
 /// apart by a hair so hard stops stay hard (in order).
-fn gradient_stops(stops: &[(f32, Color)], reversed: bool, inner: f64) -> Vec<D2D1_GRADIENT_STOP> {
+fn gradient_stops(
+    stops: &[(Percentage, Color)],
+    reversed: bool,
+    inner: f64,
+) -> Vec<D2D1_GRADIENT_STOP> {
     let inner = inner as f32;
     let mut out: Vec<(f32, Color)> = if reversed {
-        stops.iter().rev().map(|&(o, c)| (1.0 - o, c)).collect()
+        stops.iter().rev().map(|&(o, c)| (1.0 - o.0, c)).collect()
     } else {
-        stops.to_vec()
+        stops.iter().map(|&(o, c)| (o.0, c)).collect()
     };
     let mut last = f32::NEG_INFINITY;
     for (o, _) in &mut out {
@@ -1956,13 +2004,13 @@ fn line_join(join: LineJoin) -> D2D1_LINE_JOIN {
 /// Canvas dashes (points) as Direct2D's, which are in line widths, and
 /// the offset likewise; `None` for a solid line (no dashes, or all zero:
 /// canvas draws solid).
-fn dash_pattern(dash: &[f32], width: f64, offset: f64) -> Option<(Vec<f32>, f32)> {
-    if !dash.iter().any(|d| *d > 0.0) || width <= 0.0 {
+fn dash_pattern(dash: &[Points], width: f64, offset: f64) -> Option<(Vec<f32>, f32)> {
+    if !dash.iter().any(|d| d.0 > 0.0) || width <= 0.0 {
         return None;
     }
     let w = width as f32;
     Some((
-        dash.iter().map(|d| d / w).collect(),
+        dash.iter().map(|d| d.0 / w).collect(),
         (offset / width) as f32,
     ))
 }
@@ -2027,11 +2075,11 @@ fn destructive(c: Composite) -> bool {
 fn stop_color(g: &CanvasGradient, t: f32, after: bool) -> Color {
     let stops = &g.stops;
     let (first, last) = (stops[0], stops[stops.len() - 1]);
-    if t < first.0 || (t == first.0 && !after) {
+    if t < first.0.0 || (t == first.0.0 && !after) {
         return first.1;
     }
     for w in stops.windows(2) {
-        let ((o0, c0), (o1, c1)) = (w[0], w[1]);
+        let ((o0, c0), (o1, c1)) = ((w[0].0.0, w[0].1), (w[1].0.0, w[1].1));
         if t < o1 || (t == o1 && !after) {
             let f = if o1 > o0 { (t - o0) / (o1 - o0) } else { 1.0 };
             return lerp(c0, c1, f);
@@ -2057,7 +2105,7 @@ fn lerp(a: Color, b: Color, t: f32) -> Color {
 fn conic_steps(g: &CanvasGradient) -> Vec<f32> {
     let mut steps: Vec<f32> = (0..=CONIC_WEDGES)
         .map(|i| i as f32 / CONIC_WEDGES as f32)
-        .chain(g.stops.iter().map(|(o, _)| *o))
+        .chain(g.stops.iter().map(|(o, _)| o.0))
         .collect();
     steps.sort_by(f32::total_cmp);
     steps.dedup();
@@ -2099,7 +2147,7 @@ struct FontKey {
 impl FontKey {
     fn new(font: &CanvasFont) -> Self {
         FontKey {
-            size: font.size.to_bits(),
+            size: font.size.0.to_bits(),
             weight: font.weight,
             italic: font.italic,
             family: font.family.clone(),
@@ -2159,7 +2207,7 @@ fn make_layout(text: &str, font: &CanvasFont, family: &str) -> windows::core::Re
                 DWRITE_FONT_STYLE_NORMAL
             },
             DWRITE_FONT_STRETCH_NORMAL,
-            font.size.max(0.1),
+            font.size.0.max(0.1),
             &HSTRING::new(),
         )?;
         format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
@@ -2338,11 +2386,13 @@ mod tests {
     use super::*;
 
     fn gradient(stops: &[(f32, u32)]) -> CanvasGradient {
-        stops
-            .iter()
-            .fold(CanvasGradient::conic(0.0, 0.0, 0.0), |g, (o, c)| {
-                g.add_color_stop(*o, Color(*c))
-            })
+        stops.iter().fold(
+            CanvasGradient::conic(
+                Radians(0.0),
+                nsh_core::geometry::point(Points(0.0), Points(0.0)),
+            ),
+            |g, (o, c)| g.add_color_stop(Percentage(*o), Color(*c)),
+        )
     }
 
     fn close(a: Pt, b: Pt) -> bool {
@@ -2467,7 +2517,8 @@ mod tests {
     fn gradient_stops_convert() {
         let red = Color(0xff0000ff);
         let blue = Color(0x0000ffff);
-        let stops = [(0.0, red), (0.5, red), (0.5, blue), (1.0, blue)];
+        let stops =
+            [(0.0, red), (0.5, red), (0.5, blue), (1.0, blue)].map(|(o, c)| (Percentage(o), c));
         let s = gradient_stops(&stops, false, 0.0);
         assert_eq!(s.len(), 4);
         // Hard stops are kept apart, in order.
@@ -2475,7 +2526,11 @@ mod tests {
         assert_eq!(s[1].color.r, 1.0);
         assert_eq!(s[2].color.b, 1.0);
         // Reversed and moved into inner..1.
-        let s = gradient_stops(&[(0.0, red), (1.0, blue)], true, 0.5);
+        let s = gradient_stops(
+            &[(Percentage(0.0), red), (Percentage(1.0), blue)],
+            true,
+            0.5,
+        );
         assert_eq!(s[0].position, 0.5);
         assert_eq!(s[0].color.b, 1.0);
         assert_eq!(s[1].position, 1.0);
@@ -2485,9 +2540,9 @@ mod tests {
     #[test]
     fn dashes_are_in_line_widths() {
         assert_eq!(dash_pattern(&[], 2.0, 0.0), None);
-        assert_eq!(dash_pattern(&[0.0, 0.0], 2.0, 0.0), None);
+        assert_eq!(dash_pattern(&[Points(0.0), Points(0.0)], 2.0, 0.0), None);
         assert_eq!(
-            dash_pattern(&[4.0, 2.0], 2.0, 3.0),
+            dash_pattern(&[Points(4.0), Points(2.0)], 2.0, 3.0),
             Some((vec![2.0, 1.0], 1.5))
         );
     }

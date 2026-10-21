@@ -5,8 +5,8 @@
 use std::cell::Cell;
 
 use nsh_core::{
-    AutoCapitalize, AutoFill, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId, Rect,
-    ReturnKeyType, SubmitBehavior, TextAlign,
+    AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
+    Points, ReturnKeyType, SubmitBehavior, TextAlign,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
@@ -217,6 +217,20 @@ fn backspace_on_empty(view: &UIView) {
     }
 }
 
+/// The text an input method is composing in an input view (its marked
+/// text), or `None` while no composition is in progress.
+pub(crate) fn marked_text(view: &UIView) -> Option<String> {
+    // SAFETY: UITextField and UITextView adopt UITextInput.
+    unsafe {
+        let range: Option<Retained<AnyObject>> = msg_send![view, markedTextRange];
+        let range = range?;
+        let text: Option<Retained<NSString>> = msg_send![view, textInRange: &*range];
+        // An empty marked range composes nothing: input methods unmark
+        // with it.
+        text.map(|t| t.to_string()).filter(|t| !t.is_empty())
+    }
+}
+
 /// The selection of an input view, in UTF-16 units.
 pub(crate) fn selection(view: &UIView) -> Option<(u32, u32)> {
     // SAFETY: UITextField and UITextView adopt UITextInput.
@@ -333,8 +347,19 @@ pub(crate) struct Input {
     id: NodeId,
     /// Edits reported to the engine.
     pub(crate) count: u32,
+    /// The text the engine knows the input has: the last one reported
+    /// (`onChangeText`) or set from JS. A UIKit callback that sees another
+    /// text comes before the one reporting it.
+    pub(crate) known: String,
+    /// The text an input method is composing, while a composition is in
+    /// progress.
+    composition: Option<String>,
+    /// The value JS wrote (text, count) while a composition was in
+    /// progress: setting it then would end the input method's session and
+    /// commit what it composes, so it waits for the composition to end.
+    pending: Option<(String, u32)>,
     config: Option<InputConfig>,
-    content: Rect,
+    content: Bounds<Points>,
 }
 
 impl Input {
@@ -347,8 +372,11 @@ impl Input {
             editor,
             id,
             count: 0,
+            known: String::new(),
+            composition: None,
+            pending: None,
             config: None,
-            content: Rect::default(),
+            content: Bounds::default(),
         };
         input.attach(target);
         input
@@ -522,15 +550,48 @@ impl Input {
         }
     }
 
-    /// Sets the text from JS unless the user typed since JS saw `count`.
+    /// Sets the text from JS unless the user typed since JS saw `count`;
+    /// during a composition the value waits for it to end.
     pub(crate) fn set_value(&mut self, text: &str, count: u32) {
+        // The marked text is read too: the callback reporting a composition
+        // that just started may still be queued behind this batch.
+        if self.composition.is_some() || marked_text(self.editor_view()).is_some() {
+            self.pending = Some((text.to_owned(), count));
+            return;
+        }
+        self.pending = None;
+        self.apply_value(text, count);
+    }
+
+    fn apply_value(&mut self, text: &str, count: u32) {
         if count != self.count || self.text() == text {
             return;
         }
         self.set_text(text);
     }
 
-    fn set_text(&self, text: &str) {
+    /// Records the composition `marked` (the marked text, `None` once it
+    /// ended); returns the change to report (`composing`, text), if it
+    /// changed. The end applies the value JS wrote meanwhile, if JS saw
+    /// every edit (a commit that changed the text was reported first).
+    pub(crate) fn compose(&mut self, marked: Option<String>) -> Option<(bool, String)> {
+        if self.composition == marked {
+            return None;
+        }
+        self.composition.clone_from(&marked);
+        if let Some(text) = marked {
+            return Some((true, text));
+        }
+        if let Some((text, count)) = self.pending.take()
+            && self.text() == self.known
+        {
+            self.apply_value(&text, count);
+        }
+        Some((false, String::new()))
+    }
+
+    fn set_text(&mut self, text: &str) {
+        self.known = text.to_owned();
         let text = NSString::from_str(text);
         match &self.editor {
             Editor::Line(field) => field.setText(Some(&text)),
@@ -540,14 +601,15 @@ impl Input {
     }
 
     /// Where the text goes, relative to the container.
-    pub(crate) fn set_content(&mut self, content: Rect) {
+    pub(crate) fn set_content(&mut self, content: Bounds<Points>) {
         self.content = content;
         let bounds = self.container.bounds().size;
         let insets = UIEdgeInsets {
-            top: content.y as CGFloat,
-            left: content.x as CGFloat,
-            bottom: (bounds.height - (content.y + content.height) as CGFloat).max(0.0),
-            right: (bounds.width - (content.x + content.width) as CGFloat).max(0.0),
+            top: content.origin.y.0 as CGFloat,
+            left: content.origin.x.0 as CGFloat,
+            bottom: (bounds.height - (content.origin.y.0 + content.size.height.0) as CGFloat)
+                .max(0.0),
+            right: (bounds.width - (content.origin.x.0 + content.size.width.0) as CGFloat).max(0.0),
         };
         match &self.editor {
             Editor::Line(field) => {
@@ -557,14 +619,17 @@ impl Input {
             Editor::Area { view, placeholder } => {
                 view.setTextContainerInset(insets);
                 placeholder.setFrame(CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(content.width as CGFloat, content.height as CGFloat),
+                    CGPoint::new(content.origin.x.0 as CGFloat, content.origin.y.0 as CGFloat),
+                    CGSize::new(
+                        content.size.width.0 as CGFloat,
+                        content.size.height.0 as CGFloat,
+                    ),
                 ));
                 placeholder.sizeToFit();
                 let size = placeholder.frame().size;
                 placeholder.setFrame(CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(content.width as CGFloat, size.height),
+                    CGPoint::new(content.origin.x.0 as CGFloat, content.origin.y.0 as CGFloat),
+                    CGSize::new(content.size.width.0 as CGFloat, size.height),
                 ));
             }
         }

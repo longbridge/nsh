@@ -28,7 +28,10 @@
 use std::cell::RefCell;
 
 use gtk4::{self as gtk, gdk, graphene, gsk, prelude::*};
-use nsh_core::{BorderStyle, Color, Filter, Gradient, GradientKind, GradientSize};
+use nsh_core::{
+    BorderStyle, Color, Filter, Gradient, GradientKind, GradientSize,
+    geometry::{Percentage, Points, Radians, Size, deg},
+};
 
 use crate::view::{ViewState, rounded};
 
@@ -151,7 +154,7 @@ fn outset_shadow(
 /// content; the border too when the children are not clipped. `soft`
 /// draws outer shadows as blurred shapes ([`soft_shadows`]).
 pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft: bool) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -166,10 +169,10 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
             snapshot,
             &outline,
             &faded(s.color, s.opacity),
-            s.offset_x,
-            s.offset_y,
+            s.offset_x.0,
+            s.offset_y.0,
             0.0,
-            s.radius * 2.0,
+            s.radius.0 * 2.0,
             soft,
         );
     }
@@ -181,10 +184,10 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
                     snapshot,
                     &outline,
                     &rgba(b.color),
-                    b.offset_x,
-                    b.offset_y,
-                    b.spread,
-                    b.blur.max(0.0),
+                    b.offset_x.0,
+                    b.offset_y.0,
+                    b.spread.0,
+                    b.blur.0.max(0.0),
                     soft,
                 );
             }
@@ -212,16 +215,21 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
     if let Some(e) = effects
         && e.box_shadows.iter().any(|b| b.inset && b.is_visible())
     {
-        let padding = padding_box(w, h, radii, state.style.borders.widths);
+        let padding = padding_box(
+            w,
+            h,
+            radii,
+            state.style.borders.widths.to_array().map(|w| w.0),
+        );
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 snapshot.append_inset_shadow(
                     &padding,
                     &rgba(b.color),
-                    b.offset_x,
-                    b.offset_y,
-                    b.spread,
-                    b.blur.max(0.0),
+                    b.offset_x.0,
+                    b.offset_y.0,
+                    b.spread.0,
+                    b.blur.0.max(0.0),
                 );
             }
         }
@@ -231,7 +239,7 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
 /// The border and the outline, over the children (as UIKit draws layer
 /// borders, so content the core placed under a border never covers it).
 pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -250,7 +258,7 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
     if o.is_visible() {
         // Outside the border box by `offset`; rounded corners follow the
         // border radius outwards, square ones stay square.
-        let d = o.offset + o.width;
+        let (d, width) = ((o.offset + o.width).0, o.width.0);
         let (ow, oh) = (w + 2.0 * d, h + 2.0 * d);
         if ow <= 0.0 || oh <= 0.0 {
             return;
@@ -259,14 +267,14 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
         if o.style == BorderStyle::Solid {
             let c = rgba(o.color);
             let outer = rounded(rect, radii.map(|r| grown(r, d)));
-            snapshot.append_border(&outer, &[o.width; 4], &[c, c, c, c]);
+            snapshot.append_border(&outer, &[width; 4], &[c, c, c, c]);
         } else {
-            let half = o.width / 2.0;
+            let half = width / 2.0;
             let line = rounded(
-                graphene::Rect::new(-d + half, -d + half, ow - o.width, oh - o.width),
+                graphene::Rect::new(-d + half, -d + half, ow - width, oh - width),
                 radii.map(|r| grown(r, d - half)),
             );
-            stroke(snapshot, &line, o.width, o.style, &rgba(o.color));
+            stroke(snapshot, &line, width, o.style, &rgba(o.color));
         }
     }
 }
@@ -303,10 +311,14 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         return;
     }
     if b.style == BorderStyle::Solid {
-        snapshot.append_border(outline, &b.widths, &b.colors.map(rgba));
+        snapshot.append_border(
+            outline,
+            &b.widths.to_array().map(|w| w.0),
+            &b.colors.map(rgba),
+        );
         return;
     }
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let radii = state.radii();
     let line = |bw: f32| {
         let half = bw / 2.0;
@@ -316,6 +328,7 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         )
     };
     if let Some((bw, c)) = b.uniform() {
+        let bw = bw.0;
         stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
         return;
     }
@@ -323,7 +336,7 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
     // and color, clipped to that side's trapezoid (corners split at 45°).
     let m = w.min(h) / 2.0;
     for side in 0..4 {
-        let (bw, c) = (b.widths[side], b.colors[side]);
+        let (bw, c) = (b.width(side).0, b.colors[side]);
         if bw <= 0.0 || c.is_transparent() {
             continue;
         }
@@ -376,9 +389,9 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
     if s.is_visible() && !has_fill(state) {
         snapshot.push_shadow(&[gsk::Shadow::new(
             faded(s.color, s.opacity),
-            s.offset_x,
-            s.offset_y,
-            s.radius * 2.0,
+            s.offset_x.0,
+            s.offset_y.0,
+            s.radius.0 * 2.0,
         )]);
         pushes += 1;
     }
@@ -412,8 +425,8 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
         match f[end - 1] {
             // CSS's blur length is the Gaussian's deviation, GSK's radius
             // twice that.
-            Filter::Blur(r) if r > 0.0 => {
-                snapshot.push_blur(r as f64 * 2.0);
+            Filter::Blur(r) if r.0 > 0.0 => {
+                snapshot.push_blur(r.0 as f64 * 2.0);
                 pushes += 1;
             }
             Filter::DropShadow {
@@ -424,9 +437,9 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
             } if !color.is_transparent() => {
                 snapshot.push_shadow(&[gsk::Shadow::new(
                     rgba(color),
-                    offset_x,
-                    offset_y,
-                    blur.max(0.0),
+                    offset_x.0,
+                    offset_y.0,
+                    blur.0.max(0.0),
                 )]);
                 pushes += 1;
             }
@@ -460,6 +473,7 @@ fn gsk_color_matrix(m: &[f32; 20]) -> ([f32; 16], [f32; 4]) {
 /// Reused stop buffers: resolved stops, the tiles of a repeating conic
 /// gradient, the stops fitted to `0..=1`, and GSK's.
 struct Stops {
+    typed: Vec<(Color, Percentage)>,
     resolved: Vec<(Color, f32)>,
     tiled: Vec<(Color, f32)>,
     fitted: Vec<(Color, f32)>,
@@ -469,6 +483,7 @@ struct Stops {
 thread_local! {
     static STOPS: RefCell<Stops> = const {
         RefCell::new(Stops {
+            typed: Vec::new(),
             resolved: Vec::new(),
             tiled: Vec::new(),
             fitted: Vec::new(),
@@ -487,21 +502,30 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
             return;
         };
         let Stops {
+            typed,
             resolved,
             tiled,
             fitted,
             gsk: out,
         } = &mut *stops;
-        resolve_stops(g, resolved);
+        let size = Size::new(Points(w), Points(h));
+        g.resolve_stops(size, typed);
+        resolved.clear();
+        resolved.extend(typed.iter().map(|&(c, p)| (c, p.0)));
         dehue(resolved);
         let first = resolved[0].1;
         let last = resolved[resolved.len() - 1].1;
         let repeating = g.repeating && last - first > 1e-4;
         let bounds = graphene::Rect::new(0.0, 0.0, w, h);
         match g.kind {
-            GradientKind::Radial { circle, size, x, y } => {
-                let (cx, cy) = (x * w, y * h);
-                let (rx, ry) = radial_radii(circle, size, cx, cy, w, h);
+            GradientKind::Radial {
+                circle,
+                size: shape,
+                x,
+                y,
+            } => {
+                let (cx, cy) = (x.0 * w, y.0 * h);
+                let (rx, ry) = radial_radii(circle, shape, cx, cy, w, h);
                 // GSK's ray starts at the center or beyond.
                 let (lo, hi) = if repeating {
                     (first.max(0.0), last)
@@ -538,11 +562,12 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
                     fit_stops(resolved, 0.0, 1.0, fitted);
                 }
                 gsk_stops(fitted, out);
-                let center = graphene::Point::new(x * w, y * h);
-                snapshot.append_conic_gradient(&bounds, &center, from, out);
+                let center = graphene::Point::new(x.0 * w, y.0 * h);
+                // GSK takes the start angle in degrees.
+                snapshot.append_conic_gradient(&bounds, &center, from.to_degrees(), out);
             }
             kind => {
-                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
+                let angle = kind.linear_angle(size).unwrap_or(deg(180.0));
                 let (a, b) = linear_line(angle, w, h);
                 // GSK's stops lie in `0..=1`: the line is stretched to
                 // cover stops outside it (and, repeating, cut to one
@@ -571,49 +596,6 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
 fn gsk_stops(stops: &[(Color, f32)], out: &mut Vec<gsk::ColorStop>) {
     out.clear();
     out.extend(stops.iter().map(|&(c, p)| gsk::ColorStop::new(p, rgba(c))));
-}
-
-/// [`Gradient::resolved_stops`] into a reused buffer: missing positions
-/// spread evenly, each at least the one before it.
-fn resolve_stops(g: &Gradient, out: &mut Vec<(Color, f32)>) {
-    out.clear();
-    out.extend(
-        g.stops
-            .iter()
-            .map(|s| (s.color, s.position.unwrap_or(f32::NAN))),
-    );
-    let n = out.len();
-    if n == 0 {
-        return;
-    }
-    if out[0].1.is_nan() {
-        out[0].1 = 0.0;
-    }
-    if out[n - 1].1.is_nan() {
-        out[n - 1].1 = 1.0;
-    }
-    let mut max = f32::NEG_INFINITY;
-    for s in out.iter_mut().filter(|s| !s.1.is_nan()) {
-        max = max.max(s.1);
-        s.1 = max;
-    }
-    let mut i = 1;
-    while i < n {
-        if !out[i].1.is_nan() {
-            i += 1;
-            continue;
-        }
-        let start = i - 1;
-        let mut end = i;
-        while out[end].1.is_nan() {
-            end += 1;
-        }
-        let (a, b) = (out[start].1, out[end].1);
-        for (k, s) in out[i..end].iter_mut().enumerate() {
-            s.1 = a + (b - a) * (k + 1) as f32 / (end - start) as f32;
-        }
-        i = end;
-    }
 }
 
 /// Gives transparent stops their neighbor's hue, so fades to transparent
@@ -721,8 +703,8 @@ fn tile_stops(stops: &[(Color, f32)], out: &mut Vec<(Color, f32)>) {
 /// The ends of a CSS linear gradient line at `angle` degrees (0 up,
 /// clockwise) through the center of a `w` × `h` box: long enough that the
 /// corners get the end colors.
-fn linear_line(angle: f32, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
-    let (s, c) = angle.to_radians().sin_cos();
+fn linear_line(angle: Radians, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
+    let (s, c) = angle.sin_cos();
     let len = (w * s).abs() + (h * c).abs();
     let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
     let (cx, cy) = (w / 2.0, h / 2.0);
@@ -755,8 +737,6 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ColorStop;
-
     use super::*;
 
     const RED: Color = Color(0xff00_00ff);
@@ -769,15 +749,15 @@ mod tests {
     #[test]
     fn linear_lines() {
         // `to right` over a wide box spans its width.
-        let (a, b) = linear_line(90.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(90.0), 200.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 50.0));
         assert!(close(b.0, 200.0) && close(b.1, 50.0));
         // 180° (the default) runs top to bottom.
-        let (a, b) = linear_line(180.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(180.0), 200.0, 100.0);
         assert!(close(a.0, 100.0) && close(a.1, 0.0));
         assert!(close(b.0, 100.0) && close(b.1, 100.0));
         // 45° over a square runs corner to corner.
-        let (a, b) = linear_line(45.0, 100.0, 100.0);
+        let (a, b) = linear_line(deg(45.0), 100.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 100.0));
         assert!(close(b.0, 100.0) && close(b.1, 0.0));
     }
@@ -790,24 +770,6 @@ mod tests {
         assert!(close(rx, 175.0) && close(ry, 50.0));
         let (rx, _) = radial_radii(true, GradientSize::ClosestSide, 25.0, 50.0, 200.0, 100.0);
         assert!(close(rx, 25.0));
-    }
-
-    #[test]
-    fn stops_resolve_like_core() {
-        let g = Gradient {
-            kind: GradientKind::Linear { angle: 90.0 },
-            stops: [None, None, Some(0.8), Some(0.5), None]
-                .into_iter()
-                .map(|position| ColorStop {
-                    color: RED,
-                    position,
-                })
-                .collect(),
-            repeating: false,
-        };
-        let mut out = Vec::new();
-        resolve_stops(&g, &mut out);
-        assert_eq!(out, g.resolved_stops());
     }
 
     #[test]

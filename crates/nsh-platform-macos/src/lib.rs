@@ -21,6 +21,8 @@
 #![cfg(target_os = "macos")]
 
 mod access;
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod blur;
@@ -42,6 +44,7 @@ mod net;
 mod script;
 mod scroll;
 mod surface;
+mod synth;
 mod system;
 mod text;
 mod text_input;
@@ -49,7 +52,7 @@ mod transition;
 mod view;
 mod visual;
 
-pub use nsh_core::platform::Appearance;
+pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, Bundle, Limits, Root, perf};
 pub use objc2;
 pub use objc2_app_kit;

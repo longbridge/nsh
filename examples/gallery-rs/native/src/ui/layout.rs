@@ -14,13 +14,13 @@ pub(crate) const SIDEBAR: f32 = 264.0;
 /// layout, unchanged. The shell is made again when it changes, so demos
 /// read it once; reading it in a binding subscribes to the window's size.
 pub(crate) fn desktop() -> bool {
-    window().width >= if is_desktop() { 700.0 } else { 900.0 }
+    window().width >= if is_desktop() { px(700.0) } else { px(900.0) }
 }
 
 /// The width of the desktop layout's content pane, right of the sidebar.
 /// Reading it in a binding subscribes to the window's size.
 pub(crate) fn pane_width() -> f32 {
-    window().width - SIDEBAR
+    window().width.0 - SIDEBAR
 }
 
 /// How many columns at least `min` pt wide fit in `width` (the content

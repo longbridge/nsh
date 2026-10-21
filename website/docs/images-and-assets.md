@@ -166,6 +166,10 @@ function RemoteImage(props: { uri: string }) {
 | `.ttf`, `.otf` | The font's family name, registered before the first frame | [Fonts](./fonts.md) |
 | `.json` | The parsed value, bundled into the script | [Project structure](./project-structure.md#modules) |
 
+### A module's own URL
+
+`import.meta.url` is the URL of the module it is written in, so `new URL("./data.json", import.meta.url)` names a file beside it. A local or packaged desktop app's modules have `file:` URLs in the app's directory, which `fs/promises` reads under a `${pluginDir}` grant; a web app's are the page's; a packaged mobile app's are `asset:/` URLs like those of imported images. Import an image to ship it: a URL made this way names the file, it does not package it.
+
 Images are also drawn on a canvas with `drawImage` ([Canvas](./canvas.md)), and the gradients of `backgroundImage` replace many decorative images ([Styling](./styling.md#gradients)).
 
 ## Related

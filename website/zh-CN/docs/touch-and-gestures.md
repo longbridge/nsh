@@ -26,8 +26,8 @@ function App() {
       <View
         onPress={() => count.update((n) => n + 1)}
         onLongPress={() => count.set(0)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "#ffffff", fontWeight: "600" }}>Pressed {count()} times</Text>
@@ -43,47 +43,50 @@ mount(App);
 |---|---|---|---|
 | `onPress` | `() => void` | | 手指在视图内抬起（普通按压，不是长按）。 |
 | `onLongPress` | `() => void` | | 手指按住达到 `delayLongPress`。之后不会再触发 `onPress`。 |
-| `onPressIn` | `() => void` | | 按压开始。 |
-| `onPressOut` | `() => void` | | 按压结束：抬起、滑出，或被滚动视图接管。 |
+| `onPressDown` | `() => void` | | 按压开始。 |
+| `onPressUp` | `() => void` | | 按压结束：抬起、滑出，或被滚动视图接管。 |
 | `delayLongPress` | `number` | `500` | 按压变为长按前的毫秒数。 |
-| `disabled` | `boolean` | `false` | 不接受按压，也不显示反馈；应用 `disabled:` 类。 |
+| `disabled` | `boolean` | `false` | 不接受按压，也不显示反馈；应用 `disabled:` 类；屏幕阅读器会读出它已停用。 |
 
 按压的行为：
 
 - **只有最内层的可按压视图响应。** 可按压的行里包含一个可按压的按钮时，按下按钮不会触发行的按压。
 - **在滚动视图内，按压会等待约 130 ms** 才开始（并显示反馈），这样从按钮上开始的拖动会滚动页面，而不是按下按钮。
-- **滑出即取消。** 手指移出视图时，按压以 `onPressOut` 结束，不触发 `onPress`。
+- **滑出即取消。** 手指移出视图时，按压以 `onPressUp` 结束，不触发 `onPress`。
 - **`disabled` 会把按压监听从挂载的视图上移除**，因此完全没有反馈，同时应用 `disabled:` 类（`class="disabled:opacity-40"`）。
 - **带 `onPress` 的嵌套 `<Text>` 片段就是链接。** 整段文字是一个原生视图，按压会交给手指下的那个片段。见[文本](./text.md)。
 
 ## 按压反馈
 
-按压反馈在手指按下的瞬间由平台绘制，不需要往返 JS。每个视图选一种：
+按压反馈由应用决定：视图在被按下、悬停、获得焦点或禁用时采用的样式。状态一变，样式就在原生侧立即生效，不需要往返 JS。每种状态都有一个样式属性和一个 [Tailwind 变体](./tailwind.md)：
 
-| 属性 | 类型 | 默认值 | 说明 |
+| 属性 | 类 | 类型 | 说明 |
 |---|---|---|---|
-| `activeOpacity` | `number` | | 按下时视图的不透明度。 |
-| `underlayColor` | `ColorValue` | | 按下时的背景色；子视图淡到 `underlayOpacity`。 |
-| `underlayOpacity` | `number` | `0.85` | 显示 `underlayColor` 时子视图的不透明度。 |
-| `android={{ ripple }}` | `{ color?, borderless?, radius?, foreground? }` | | Android 的 Material 水波纹。iOS 上忽略。 |
+| `activeStyle` | `active:` | `ViewStyle` | 按下时。 |
+| `hoverStyle` | `hover:` | `ViewStyle` | 指针悬停在上面时（桌面、iPad 指针、浏览器）。 |
+| `focusStyle` | `focus:` | `ViewStyle` | 获得焦点时。 |
+| `disabledStyle` | `disabled:` | `ViewStyle` | `disabled` 时。 |
+| `android={{ ripple }}` | | `{ color?, borderless?, radius?, foreground? }` | Android 的 Material 水波纹，叠加在这些样式之上。 |
+
+状态样式叠加在视图自身的 `style` 和类之上。后面的状态优先（hover、focus、active），`disabledStyle` 优先于所有状态，视图禁用时其他状态样式不生效。
 
 ```tsx
-<View onPress={open} activeOpacity={0.5}>…</View>
+<View onPress={open} activeStyle={{ opacity: 0.5 }}>…</View>
 
-<View onPress={open} underlayColor="#ddf4ff" style={{ padding: 16 }}>…</View>
+<View onPress={open} activeStyle={{ backgroundColor: "#ddf4ff" }} style={{ padding: 16 }}>…</View>
 
 <View
   onPress={open}
-  activeOpacity={0.6}
+  activeStyle={{ opacity: 0.6 }}
   android={{ ripple: { color: "rgba(9,105,218,0.3)" } }}
 >
   …
 </View>
 ```
 
-无边界水波纹会扩散到视图之外，适合图标按钮：`android={{ ripple: { borderless: true, radius: 24 } }}`。`activeOpacity` 与水波纹常常一起使用：iOS 用不透明度，Android 用水波纹。见[平台特定代码](./platform-specific.md)。
+无边界水波纹会扩散到视图之外，适合图标按钮：`android={{ ripple: { borderless: true, radius: 24 } }}`。见[平台特定代码](./platform-specific.md)。
 
-第三种选择是 Tailwind 的 `active:` 变体。它在视图被按下时应用对应的类，配合 `transition` 类时变化会有动画：
+同样的状态写成类时，在视图被按下时生效，配合 `transition` 类时变化会有动画。`group-active:` 给被按下的 `group` 视图的子元素设置样式：
 
 ```tsx
 <View
@@ -280,12 +283,12 @@ function Sketch() {
         const all = strokes();
         strokes.set([...all.slice(0, -1), [...all[all.length - 1], point(e)]]);
       }}
-      draw={(ctx) => {
-        ctx.lineWidth = 3;
+      draw={(cx) => {
+        cx.lineWidth = 3;
         for (const s of strokes()) {
-          ctx.beginPath();
-          s.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-          ctx.stroke();
+          cx.beginPath();
+          s.forEach(([x, y], i) => (i === 0 ? cx.moveTo(x, y) : cx.lineTo(x, y)));
+          cx.stroke();
         }
       }}
     />

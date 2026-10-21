@@ -294,7 +294,37 @@ macro_rules! number {
 }
 
 number!(any: f32, f64);
-number!(whole: i32, i64, u32, u64, usize);
+
+/// A number of points.
+impl JsValue for crate::geometry::Points {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "number".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        f32::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+number!(whole: i16, i32, i64, u16, u32, u64, usize);
+
+/// A whole number of pixels (an image's size).
+impl JsValue for crate::geometry::DevicePixels {
+    fn ts_type(types: &mut TsTypes) -> String {
+        i32::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        i32::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
 
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
@@ -324,6 +354,22 @@ impl JsValue for String {
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.new_string(self)?))
+    }
+}
+
+/// A CSS color string from JS (`"#2563eb"`, `"rgb(0 0 0 / 0.5)"`), as
+/// [`Color`] takes it: the color of Rust components' props.
+impl JsValue for crate::Hsla {
+    fn ts_type(types: &mut TsTypes) -> String {
+        Color::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        Color::from_js(value).map(Into::into)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Color::from(*self).to_js(host)
     }
 }
 
@@ -410,6 +456,85 @@ impl<T: JsValue> JsValue for Option<T> {
             Some(v) => v.to_js(host),
             None => Ok(JsOwned::new(host, host.null())),
         }
+    }
+}
+
+/// Bytes are a `Uint8Array` (a `Buffer` is one too), not an array of
+/// numbers: `u8` is no [`JsValue`], so this and the arrays below never
+/// overlap.
+impl JsValue for Vec<u8> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Uint8Array".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .as_bytes()
+            .ok_or_else(|| value.expected("a Uint8Array"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_bytes(self)?))
+    }
+}
+
+/// An object of strings by name (`process.env`): `Record<string, string>`.
+impl JsValue for std::collections::BTreeMap<String, String> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Record<string, string>".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("an object of strings"));
+        }
+        let JsonValue::Object(fields) = value.to_json()? else {
+            return Err(value.expected("an object of strings"));
+        };
+        fields
+            .into_iter()
+            .map(|(key, v)| match v {
+                JsonValue::String(s) => Ok((key, s)),
+                other => Err(PropError::expected("a string", &other)),
+            })
+            .collect()
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let object = JsOwned::new(host, host.new_object()?);
+        for (key, value) in self {
+            host.set_field(object.get().raw(), key, host.new_string(value)?)?;
+        }
+        Ok(object)
+    }
+}
+
+/// A time is a `Date` (its milliseconds since the Unix epoch).
+impl JsValue for std::time::SystemTime {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Date".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let millis = value
+            .as_date()
+            .filter(|m| m.is_finite())
+            .ok_or_else(|| value.expected("a valid Date"))?;
+        let since = std::time::Duration::from_secs_f64(millis.abs() / 1000.0);
+        let time = if millis < 0.0 {
+            std::time::UNIX_EPOCH.checked_sub(since)
+        } else {
+            std::time::UNIX_EPOCH.checked_add(since)
+        };
+        time.ok_or_else(|| value.expected("a Date in range"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let millis = match self.duration_since(std::time::UNIX_EPOCH) {
+            Ok(since) => since.as_secs_f64() * 1000.0,
+            Err(before) => -before.duration().as_secs_f64() * 1000.0,
+        };
+        Ok(JsOwned::new(host, host.new_date(millis)?))
     }
 }
 

@@ -152,6 +152,26 @@ public final class NshAppView: UIView {
         }
     }
 
+    /// The host app's language, standing in for the user's: what `Intl`
+    /// formats for by default and what `locale()` (`nsh/device`) reads, at
+    /// once and for every app loaded later. `nil` follows the system's.
+    public var locale: Locale? {
+        didSet {
+            // Every `Locale` identifier (`zh_Hans_CN`) is one nsh reads.
+            try? check(nsh_app_set_locale(app, locale?.identifier))
+        }
+    }
+
+    /// The host app's text size relative to the default (1), standing in for
+    /// Dynamic Type's: texts and inputs are laid out again at it and
+    /// `fontScale()` reads it, at once and for every app loaded later; lengths
+    /// stay as they are. `nil` follows the system's.
+    public var fontScale: CGFloat? {
+        didSet {
+            nsh_app_set_font_scale(app, Float(fontScale ?? 0))
+        }
+    }
+
     /// Grants the apps loaded from now on at most these capabilities: JSON in
     /// the form of `nsh.json`'s `capabilities` (`nil`: what each app
     /// declares). A request must be allowed by both.

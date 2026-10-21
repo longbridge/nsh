@@ -13,12 +13,14 @@ workspace = true
 env_logger.workspace = true
 log.workspace = true
 nsh-core.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-# `headless`: the gallery on an engine without a window, with display frames.
-nsh-engine = { workspace = true, features = ["headless"] }
+# The gallery on an engine without a window, with display frames (no
+# QuickJS: nsh-testing's default features).
+nsh-engine.workspace = true
+nsh-testing.workspace = true
 crossbeam-channel.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

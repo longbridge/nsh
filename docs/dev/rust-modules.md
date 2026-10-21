@@ -16,7 +16,8 @@ others and registered them all under its specifier.
 - `rust_app.rs` writes one generated workspace with all of them: the describe program, the headless runners and every
   host and runner (iOS, Android, Linux, macOS, Windows, the web, the GPUI workspace, a Rust app's runners) depend on
   each crate and pass all their registries (`Description::of`, `headless::runner`, `set_ui_sets`, `ui_sets!`) in the
-  list's order, after `nsh/ui/mobile` (the describe program describes the app's sets only).
+  list's order, after `nsh_base::registry()`, served beside the runtime's modules (the describe program describes
+  the app's sets only).
 - The generated code links each crate under a name of its own, `app_<package>` (`-` as `_`), and makes its set in a
   function of its own, `set_app_<package>()`, whose body glob-imports that crate: the fixed-name entry
   `__nsh_native_module` of each crate is found in its own scope, and one crate without an entry fails the build with

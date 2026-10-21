@@ -6,7 +6,7 @@ order: 10
 
 # nsh/accessibility
 
-`nsh/accessibility` 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果），并与屏幕阅读器交互。元素的无障碍属性（`accessibilityLabel`、`accessibilityRole` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
+`nsh/accessibility` 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果），并与屏幕阅读器交互。元素的无障碍属性（`accessibilityLabel`、`role` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
 
 ```ts
 import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/accessibility";
@@ -80,7 +80,7 @@ function Saved() {
   cleanup(() => sub.remove());
   return (
     <View style={{ gap: 8 }}>
-      <Text onPress={save} accessibilityRole="button">Save</Text>
+      <Text onPress={save} role="button">Save</Text>
       <Text ref={note}>Your changes are kept on this device.</Text>
     </View>
   );

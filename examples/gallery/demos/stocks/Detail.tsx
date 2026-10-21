@@ -1,9 +1,9 @@
 import { cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
-import { Modal, Screen, Sheet, useSafeAreaInsets } from "nsh/ui/mobile";
+import { Dialog, NavPage, safeAreaInsets } from "nsh/base";
 import { Icon } from "../../icons";
-import { Button, colors, finish, header, Press, Stat } from "../../ui";
+import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat } from "../../ui";
 import { Depth, OrderBook } from "./Book";
 import { Chart } from "./Chart";
 import { compact, type Market, percent, price, sectors, type Stock, signed, time, toneOf } from "./market";
@@ -163,56 +163,56 @@ function Ranges(props: { market: Market; stock: Stock }) {
       <Canvas
         style={{ height: horizons.length * 34 + 16 }}
         accessibilityLabel="Price ranges"
-        draw={(ctx, { width }) => {
+        draw={(cx, { width }) => {
           const r = rows();
           const q = untracked(() => props.stock.quote());
           const lo = Math.min(...r.map((x) => x.lo)), hi = Math.max(...r.map((x) => x.hi));
           const left = 40, right = 6;
           const X = (v: number) => left + ((v - lo) / (hi - lo || 1)) * (width - left - right);
-          ctx.font = "11px system-ui";
-          ctx.textBaseline = "middle";
+          cx.font = "11px system-ui";
+          cx.textBaseline = "middle";
           r.forEach((row, i) => {
             const y = 10 + i * 34;
-            ctx.fillStyle = colors.muted;
-            ctx.textAlign = "left";
-            ctx.fillText(`${row.n}d`, 0, y);
-            ctx.strokeStyle = colors.border;
-            ctx.lineWidth = 3;
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(X(row.lo), y);
-            ctx.lineTo(X(row.hi), y);
-            ctx.stroke();
+            cx.fillStyle = colors.muted;
+            cx.textAlign = "left";
+            cx.fillText(`${row.n}d`, 0, y);
+            cx.strokeStyle = colors.border;
+            cx.lineWidth = 3;
+            cx.lineCap = "round";
+            cx.beginPath();
+            cx.moveTo(X(row.lo), y);
+            cx.lineTo(X(row.hi), y);
+            cx.stroke();
             for (const [v, c] of [[row.lo, colors.down], [row.hi, colors.up]] as const) {
-              ctx.fillStyle = c;
-              ctx.beginPath();
-              ctx.arc(X(v), y, 4.5, 0, Math.PI * 2);
-              ctx.fill();
+              cx.fillStyle = c;
+              cx.beginPath();
+              cx.arc(X(v), y, 4.5, 0, Math.PI * 2);
+              cx.fill();
             }
-            ctx.fillStyle = colors.faint;
-            ctx.textAlign = "left";
-            ctx.fillText(price(row.lo, props.stock), X(row.lo) - 4, y + 13);
-            ctx.textAlign = "right";
-            ctx.fillText(price(row.hi, props.stock), X(row.hi) + 4, y + 13);
+            cx.fillStyle = colors.faint;
+            cx.textAlign = "left";
+            cx.fillText(price(row.lo, props.stock), X(row.lo) - 4, y + 13);
+            cx.textAlign = "right";
+            cx.fillText(price(row.hi, props.stock), X(row.hi) + 4, y + 13);
           });
           const bottom = horizons.length * 34;
-          ctx.strokeStyle = colors.faint;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([3, 4]);
-          ctx.beginPath();
-          ctx.moveTo(X(q.prevClose), 0);
-          ctx.lineTo(X(q.prevClose), bottom);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(X(q.last), 0);
-          ctx.lineTo(X(q.last), bottom);
-          ctx.stroke();
-          ctx.fillStyle = colors.accent;
-          ctx.textAlign = "center";
-          ctx.fillText(`last ${price(q.last, props.stock)}`, Math.max(left + 30, Math.min(width - 40, X(q.last))), bottom + 8);
+          cx.strokeStyle = colors.faint;
+          cx.lineWidth = 1;
+          cx.setLineDash([3, 4]);
+          cx.beginPath();
+          cx.moveTo(X(q.prevClose), 0);
+          cx.lineTo(X(q.prevClose), bottom);
+          cx.stroke();
+          cx.setLineDash([]);
+          cx.strokeStyle = colors.accent;
+          cx.lineWidth = 2;
+          cx.beginPath();
+          cx.moveTo(X(q.last), 0);
+          cx.lineTo(X(q.last), bottom);
+          cx.stroke();
+          cx.fillStyle = colors.accent;
+          cx.textAlign = "center";
+          cx.fillText(`last ${price(q.last, props.stock)}`, Math.max(left + 30, Math.min(width - 40, X(q.last))), bottom + 8);
         }}
       />
     </Block>
@@ -237,9 +237,14 @@ function PauseButton(props: { market: Market }) {
 /** A stock, pushed: its view under a header with the pause button. */
 export function Detail(props: { market: Market; stock: Stock }) {
   return (
-    <Screen title={props.stock.code} {...header} headerRight={<PauseButton market={props.market} />}>
+    <NavPage
+      title={props.stock.code}
+      {...header}
+      headerRight={<PauseButton market={props.market} />}
+      header={<PageHeader title={props.stock.code} right={<PauseButton market={props.market} />} />}
+    >
       <StockView market={props.market} stock={props.stock} />
-    </Screen>
+    </NavPage>
   );
 }
 
@@ -257,7 +262,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
   const side = signal<Side>("buy");
   const ticket = signal(false);
   const banner = createBanner();
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   const trade = (s: Side) => {
     side.set(s);
     ticket.set(true);
@@ -361,9 +366,9 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           </Sheet>
         }
       >
-        <Modal visible={ticket()} desktop={{ presentationStyle: "formSheet" }} onRequestClose={() => ticket.set(false)}>
+        <Dialog open={ticket()} presentation="formSheet" onOpenChange={(open) => ticket.set(open)}>
           <View style={{ flex: 1, padding: 20, backgroundColor: colors.surface }}>{ticketView}</View>
-        </Modal>
+        </Dialog>
       </If>
     </View>
   );

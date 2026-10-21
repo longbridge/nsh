@@ -50,7 +50,7 @@ const PAGE: &str = include_str!("web/index.html");
 /// The development host's page, which the dev server serves at `/`.
 const DEV_PAGE: &str = include_str!("web/dev.html");
 
-/// The UI sets the web runtime serves: the mobile UI, and for an app with
+/// The UI sets the web runtime serves: nsh's, and for an app with
 /// Rust components of its own the app's set too (its runtime is built with
 /// the sets this command line has, `rust_app::RustApp::web`).
 fn ui_sets() -> Vec<String> {
@@ -450,24 +450,52 @@ fn manifest(name: &str, id: &str, appearance: Appearance, icons: &Icons) -> Stri
 /// declaration). `None`: no declaration, or one that allows any host.
 fn connect_src(capabilities: Option<&nsh_core::access::Capabilities>) -> Option<String> {
     let network = &capabilities?.network;
-    let patterns = network
-        .hosts
-        .iter()
-        .chain(network.http.iter().map(|grant| &grant.host))
-        .map(nsh_core::access::HostPattern::as_str);
     let mut sources = vec!["'self'".to_owned()];
-    for pattern in patterns {
-        if pattern == "*" {
-            return None;
-        }
-        // A host declared without a port allows any port, as nsh does.
-        let source = if pattern.ends_with(']') || !pattern.contains(':') {
-            format!("{pattern}:*")
+    let mut add = |scheme: &str, host: &str, port: Option<u16>| {
+        let host = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+            format!("[{host}]")
         } else {
-            pattern.to_owned()
+            host.to_owned()
         };
+        let authority = if let Some(port) = port {
+            format!("{host}:{port}")
+        } else if host.ends_with(']') || !host.contains(':') {
+            format!("{host}:*")
+        } else {
+            host.to_owned()
+        };
+        let source = format!("{scheme}://{authority}");
         if !sources.contains(&source) {
             sources.push(source);
+        }
+    };
+    for host in &network.hosts {
+        let host = host.as_str();
+        if host == "*" {
+            return None;
+        }
+        for scheme in ["http", "https", "ws", "wss"] {
+            add(scheme, host, None);
+        }
+    }
+    for grant in &network.http {
+        let get = grant.methods.is_empty() || grant.methods.iter().any(|method| method == "GET");
+        for scheme in ["http", "https", "ws", "wss"] {
+            if !grant.schemes.is_empty() && !grant.schemes.iter().any(|s| s == scheme) {
+                continue;
+            }
+            if matches!(scheme, "http" | "https") {
+                add(scheme, grant.host.as_str(), grant.port);
+            }
+            // NSH checks a WebSocket handshake as GET over http/https,
+            // or against a legacy ws/wss grant. CSP needs explicit schemes.
+            if get {
+                let websocket = match scheme {
+                    "http" | "ws" => "ws",
+                    _ => "wss",
+                };
+                add(websocket, grant.host.as_str(), grant.port);
+            }
         }
     }
     Some(sources.join(" "))
@@ -634,7 +662,7 @@ mod tests {
             "{page}"
         );
         assert!(!page.contains("{{"), "{page}");
-        assert!(page.contains("const UI_SETS = [\"nsh/ui/mobile\"];"));
+        assert!(page.contains("const UI_SETS = [\"nsh/base\"];"));
         fs::write(&runtime.wasm, "two").unwrap();
         assert_ne!(version(&dev_host(&runtime, false).unwrap().1), first);
         assert!(
@@ -649,7 +677,7 @@ mod tests {
     #[test]
     fn urls_escape_what_names_may_hold() {
         assert_eq!(url_path("assets/a b/中.png"), "assets/a%20b/%E4%B8%AD.png");
-        assert_eq!(url_path("assets/@nsh-ui/x.ttf"), "assets/@nsh-ui/x.ttf");
+        assert_eq!(url_path("assets/@nsh-base/x.ttf"), "assets/@nsh-base/x.ttf");
     }
 
     #[test]
@@ -694,7 +722,35 @@ mod tests {
         } }));
         assert_eq!(
             connect_src(Some(&declared)).as_deref(),
-            Some("'self' api.example.com:* *.cdn.example.com:* localhost:8080")
+            Some(
+                "'self' http://api.example.com:* https://api.example.com:* ws://api.example.com:* wss://api.example.com:* http://*.cdn.example.com:* https://*.cdn.example.com:* ws://*.cdn.example.com:* wss://*.cdn.example.com:* http://localhost:8080 https://localhost:8080 ws://localhost:8080 wss://localhost:8080"
+            )
+        );
+        let constrained = caps(serde_json::json!({ "network": {"http": [
+            { "host": "secure.example.com", "methods": ["GET"], "schemes": ["https"], "port": 8443 },
+            { "host": "upload.example.com", "methods": ["POST"], "schemes": ["https"], "port": 9443 },
+            { "host": "legacy.example.com", "methods": ["GET"], "schemes": ["ws"], "port": 9000 }
+        ]} }));
+        assert_eq!(
+            connect_src(Some(&constrained)).as_deref(),
+            Some(
+                "'self' https://secure.example.com:8443 wss://secure.example.com:8443 https://upload.example.com:9443 ws://legacy.example.com:9000"
+            )
+        );
+        let wildcard = caps(serde_json::json!({ "network": {"http": [
+            { "host": "*", "methods": ["GET"], "schemes": ["https"], "port": 443 }
+        ]} }));
+        assert_eq!(
+            connect_src(Some(&wildcard)).as_deref(),
+            Some("'self' https://*:443 wss://*:443")
+        );
+        let ipv6 = caps(serde_json::json!({ "network": {"http": [
+            { "host": "::1", "methods": ["GET"], "schemes": ["http"], "port": 9877 },
+            { "host": "[::2]", "methods": ["GET"], "schemes": ["https"] }
+        ]} }));
+        assert_eq!(
+            connect_src(Some(&ipv6)).as_deref(),
+            Some("'self' http://[::1]:9877 ws://[::1]:9877 https://[::2]:* wss://[::2]:*")
         );
         let any = caps(serde_json::json!({ "network": { "hosts": ["*"] } }));
         assert_eq!(connect_src(Some(&any)), None);

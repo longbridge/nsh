@@ -37,7 +37,7 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8 }}>
         <View
           onPress={() => lines.set(lines() === 2 ? 0 : 2)}
-          activeOpacity={0.6}
+          activeStyle={{ opacity: 0.6 }}
           style={{ ...ui().raised, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
         >
           <Text style={{ color: ui().text }}>{lines() === 2 ? "Show all" : "numberOfLines 2"}</Text>

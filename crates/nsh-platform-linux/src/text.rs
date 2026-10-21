@@ -23,8 +23,8 @@ use std::{
 
 use gtk4::{self as gtk, glib, glib::translate::ToGlibPtr, graphene, gsk, prelude::*};
 use nsh_core::{
-    ATTACHMENT_CHAR, AttributedText, Color, DecorationStyle, EllipsizeMode, EventKind, Rect,
-    ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
+    ATTACHMENT_CHAR, AttributedText, Bounds, Color, DecorationStyle, EllipsizeMode, EventKind,
+    Points, ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextLine, TextSpan,
 };
 use rustc_hash::FxHashMap;
 
@@ -125,7 +125,7 @@ pub(crate) fn font_description(
     if style.italic {
         desc.set_style(pango::Style::Italic);
     }
-    desc.set_absolute_size(f64::from(style.font_size) * f64::from(pango::SCALE));
+    desc.set_absolute_size(f64::from(style.font_size.0) * f64::from(pango::SCALE));
     desc
 }
 
@@ -242,6 +242,8 @@ struct FontInfo {
     strikethrough: (f32, f32),
     /// Cap height and x height (points), for `onTextLayout`.
     cap_x: (f32, f32),
+    /// Ascent and descent (points), for span backgrounds.
+    extents: (f32, f32),
 }
 
 /// One glyph of a run (Pango units, as Pango shaped it).
@@ -489,6 +491,7 @@ impl PangoTextEngine {
                 from_pango(metrics.strikethrough_thickness()),
             ),
             cap_x: cap_and_x_height(font, size),
+            extents: (from_pango(metrics.ascent()), from_pango(metrics.descent())),
         });
         let mut fonts = self.fonts.borrow_mut();
         // Bounded: animated font sizes make new fonts every frame.
@@ -625,7 +628,7 @@ impl TextEngine for PangoTextEngine {
             let start = utf16_to_byte(s, at, span.start);
             let end = utf16_to_byte(s, (start, span.start), span.end);
             at = (end, span.end);
-            sizes.push((end as u32, span.style.font_size));
+            sizes.push((end as u32, span.style.font_size.0));
             if start >= end {
                 continue;
             }
@@ -638,16 +641,16 @@ impl TextEngine for PangoTextEngine {
             };
             let desc = font_description(style, &self.ui_family);
             insert(pango::AttrFontDesc::new(&desc).into());
-            if style.letter_spacing != 0.0 {
-                insert(pango::AttrInt::new_letter_spacing(to_pango(style.letter_spacing)).into());
+            if style.letter_spacing.0 != 0.0 {
+                insert(pango::AttrInt::new_letter_spacing(to_pango(style.letter_spacing.0)).into());
             }
             // Lines are as tall as the span's own font
             // ([`natural_line_heights`]): a fallback font (CJK, emoji) must
             // not grow them, or an input grows when the user types Chinese
             // (UIKit keeps the font's line height too).
-            if style.line_height > 0.0 {
+            if style.line_height.0 > 0.0 {
                 insert(
-                    pango::AttrInt::new_line_height_absolute(to_pango(style.line_height)).into(),
+                    pango::AttrInt::new_line_height_absolute(to_pango(style.line_height.0)).into(),
                 );
             } else {
                 let (ascent, descent) = self.natural_metrics(context, &desc);
@@ -671,15 +674,15 @@ impl TextEngine for PangoTextEngine {
             // All above the baseline, as the other platforms place them.
             let rect = pango::Rectangle::new(
                 0,
-                -to_pango(a.height),
-                to_pango(a.width),
-                to_pango(a.height),
+                -to_pango(a.height.0),
+                to_pango(a.width.0),
+                to_pango(a.height.0),
             );
             let mut shape = pango::AttrShape::new(&rect, &rect);
             shape.set_start_index(start as u32);
             shape.set_end_index(end as u32);
             attrs.insert(shape);
-            attachments.push((start as u32, a.height));
+            attachments.push((start as u32, a.height.0));
         }
         layout.set_attributes(Some(&attrs));
         natural_line_heights(&layout, &attrs, s, &natural, &placeholders);
@@ -709,14 +712,15 @@ impl TextEngine for PangoTextEngine {
             slack: text
                 .spans
                 .iter()
-                .map(|s| to_pango(s.style.letter_spacing.abs()))
+                .map(|s| to_pango(s.style.letter_spacing.0.abs()))
                 .max()
                 .unwrap_or(0),
             flush,
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let max_width = max_width.map(|m| m.0);
         let shown = self.configure(prepared, max_width);
         let mut iter = prepared.layout.iter();
         let mut width = 0i32;
@@ -735,11 +739,11 @@ impl TextEngine for PangoTextEngine {
         {
             width = width.min(max.max(0.0));
         }
-        Size::new(width, from_pango(bottom).ceil())
+        Size::new(Points(width), Points(from_pango(bottom).ceil()))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
-        let shown = self.configure(prepared, Some(size.width));
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
+        let shown = self.configure(prepared, Some(size.width.0));
         let layout = &prepared.layout;
         let utf16 = &prepared.utf16;
         let at = |byte: i32| utf16[(byte.max(0) as usize).min(utf16.len() - 1)];
@@ -748,9 +752,9 @@ impl TextEngine for PangoTextEngine {
         // lines it aligned in the box with the slack move back.
         let dx = if layout.width() < 0 {
             let (_, logical) = layout.extents();
-            (size.width - from_pango(logical.width())).max(0.0) * prepared.flush
+            (size.width.0 - from_pango(logical.width())).max(0.0) * prepared.flush
         } else {
-            -from_pango(prepared.slack) * prepared.flush
+            (Points(-from_pango(prepared.slack) * prepared.flush)).0
         };
         let mut out = LinuxLayout {
             attachments: vec![None; prepared.attachments.len()],
@@ -854,14 +858,14 @@ impl TextEngine for PangoTextEngine {
                     text: String::new(),
                     start: at(start),
                     end: at(start + line.length()),
-                    x: from_pango(logical.x()) + dx,
-                    y: top,
-                    width: from_pango(logical.width()),
-                    height: bottom - top,
-                    ascender: baseline - from_pango(logical.y()),
-                    descender: from_pango(logical.y() + logical.height()) - baseline,
-                    cap_height,
-                    x_height,
+                    x: Points(from_pango(logical.x()) + dx),
+                    y: Points(top),
+                    width: Points(from_pango(logical.width())),
+                    height: Points(bottom - top),
+                    ascender: Points(baseline - from_pango(logical.y())),
+                    descender: Points(from_pango(logical.y() + logical.height()) - baseline),
+                    cap_height: Points(cap_height),
+                    x_height: Points(x_height),
                 },
                 runs: first..out.runs.len(),
             });
@@ -875,10 +879,13 @@ impl TextEngine for PangoTextEngine {
         })
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
-        layout
-            .downcast::<LinuxLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<nsh_core::Point<Points>>> {
+        layout.downcast::<LinuxLayout>().map_or_else(Vec::new, |l| {
+            l.attachments
+                .iter()
+                .map(|a| a.map(|(x, y)| nsh_core::geometry::point(Points(x), Points(y))))
+                .collect()
+        })
     }
 
     fn register_font(&self, data: &[u8]) -> Result<(), String> {
@@ -1034,7 +1041,7 @@ pub(crate) struct DrawnText {
     /// The content.
     pub(crate) text: Arc<AttributedText>,
     /// Where the layout goes in the view.
-    pub(crate) content: Rect,
+    pub(crate) content: Bounds<Points>,
     /// The engine's layout of it.
     layout: TextLayout,
     /// The render node, built on first draw.
@@ -1044,7 +1051,12 @@ pub(crate) struct DrawnText {
 }
 
 /// A text view's new content.
-pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
+pub(crate) fn set(
+    view: &NshView,
+    text: &Arc<AttributedText>,
+    layout: &TextLayout,
+    content: Bounds<Points>,
+) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let mut selection = None;
@@ -1083,6 +1095,17 @@ pub(crate) fn selectable(state: &ViewState) -> bool {
 /// Draws a text view's text.
 pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     let Some(drawn) = &state.text else { return };
+    if drawn.text.has_backgrounds()
+        && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
+    {
+        let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+        layout.background_rects(&drawn.text, |x, y, w, h, r, color| {
+            let rect = graphene::Rect::new(cx + x, cy + y, w, h);
+            snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, r));
+            snapshot.append_color(&crate::decor::rgba(color), &rect);
+            snapshot.pop();
+        });
+    }
     if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get())
         && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
     {
@@ -1094,7 +1117,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
             color.blue(),
             color.alpha() * 0.3,
         );
-        let (cx, cy) = (drawn.content.x, drawn.content.y);
+        let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
         layout.selection_rects(&drawn.text, range, |x, y, w, h| {
             snapshot.append_color(&color, &graphene::Rect::new(cx + x, cy + y, w, h));
         });
@@ -1140,7 +1163,11 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
 
 /// The render node of a laid out text: glyph runs split where the color
 /// or decoration changes, decorations, the shadow.
-fn build(text: &AttributedText, layout: &LinuxLayout, content: Rect) -> Option<gsk::RenderNode> {
+fn build(
+    text: &AttributedText,
+    layout: &LinuxLayout,
+    content: Bounds<Points>,
+) -> Option<gsk::RenderNode> {
     if layout.runs.is_empty() {
         return None;
     }
@@ -1148,9 +1175,9 @@ fn build(text: &AttributedText, layout: &LinuxLayout, content: Rect) -> Option<g
     if let Some(shadow) = text.shadow {
         snapshot.push_shadow(&[gsk::Shadow::new(
             crate::decor::rgba(shadow.color),
-            shadow.offset_x,
-            shadow.offset_y,
-            shadow.radius,
+            shadow.offset_x.0,
+            shadow.offset_y.0,
+            shadow.radius.0,
         )]);
     }
     let default = ResolvedTextStyle::default();
@@ -1158,8 +1185,8 @@ fn build(text: &AttributedText, layout: &LinuxLayout, content: Rect) -> Option<g
         let Some(font) = main_font(&run.font.desc) else {
             continue;
         };
-        let baseline = content.y + run.baseline;
-        let mut x = content.x + run.x;
+        let baseline = content.origin.y.0 + run.baseline;
+        let mut x = content.origin.x.0 + run.x;
         let mut i = 0;
         while i < run.glyphs.len() {
             let span = span_at(&text.spans, run.glyphs[i].index);
@@ -1246,7 +1273,7 @@ fn decorate(
     let pixels = |v: f32| (v / px).round().max(1.0) * px;
     let color = crate::decor::rgba(style.decoration_color.unwrap_or(style.color));
     let line = |top: f32, thickness: f32| {
-        let thickness = pixels(style.decoration_thickness.unwrap_or(thickness));
+        let thickness = pixels(style.decoration_thickness.map_or(thickness, |t| t.0));
         let top = (top / px).round() * px;
         let mid = top + thickness / 2.0;
         match style.decoration_style {
@@ -1298,7 +1325,7 @@ fn decorate(
     };
     if d.underline {
         let top = match style.underline_offset {
-            Some(offset) => baseline + offset,
+            Some(offset) => baseline + offset.0,
             None => baseline - font.underline.0,
         };
         line(top, font.underline.1);
@@ -1313,11 +1340,11 @@ fn decorate(
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     let drawn = state.text.as_ref()?;
     let layout = drawn.layout.downcast::<LinuxLayout>()?;
-    let (x, y) = (x - drawn.content.x, y - drawn.content.y);
+    let (x, y) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
     let line = layout
         .lines
         .iter()
-        .find(|l| y >= l.info.y && y < l.info.y + l.info.height)?;
+        .find(|l| y >= l.info.y.0 && y < (l.info.y + l.info.height).0)?;
     for run in &layout.runs[line.runs.clone()] {
         let mut gx = run.x;
         for g in &run.glyphs {
@@ -1575,9 +1602,9 @@ fn pressed(view: &NshView, n: i32, x: f32, y: f32, modifiers: gtk::gdk::Modifier
         let Some(layout) = drawn.layout.downcast::<LinuxLayout>() else {
             return;
         };
-        let (lx, ly) = (x - drawn.content.x, y - drawn.content.y);
+        let (lx, ly) = (x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         let char_index = char_at(&state, x, y);
-        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressIn];
+        let press = [EventKind::Press, EventKind::LongPress, EventKind::PressDown];
         let over_press = press.iter().any(|&k| state.events.contains(k))
             || char_index
                 .and_then(|i| drawn.text.link_at(i))
@@ -1643,7 +1670,7 @@ fn dragged(view: &NshView, dx: f32, dy: f32, x: f32, y: f32) {
         let Some(layout) = drawn.layout.downcast::<LinuxLayout>() else {
             return;
         };
-        let caret = layout.caret_at(x - drawn.content.x, y - drawn.content.y);
+        let caret = layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0);
         extend(&drawn.text.text, s.anchor.get(), caret, s.unit.get())
     };
     select(view, Some(range));
@@ -1776,7 +1803,7 @@ impl LinuxLayout {
         let Some(line) = self
             .lines
             .iter()
-            .find(|l| y < l.info.y + l.info.height)
+            .find(|l| y < (l.info.y + l.info.height).0)
             .or(self.lines.last())
         else {
             return 0;
@@ -1803,6 +1830,48 @@ impl LinuxLayout {
         }
     }
 
+    /// Calls `f(x, y, width, height, radius, color)` with the boxes
+    /// (content coordinates) of the span backgrounds of `text`.
+    fn background_rects(
+        &self,
+        text: &AttributedText,
+        mut f: impl FnMut(f32, f32, f32, f32, f32, nsh_core::Color),
+    ) {
+        for line in &self.lines {
+            let runs = &self.runs[line.runs.clone()];
+            let Some(baseline) = runs.first().map(|r| r.baseline) else {
+                continue;
+            };
+            let pieces = runs.iter().flat_map(|run| {
+                let mut gx = run.x;
+                let (ascent, descent) = run.font.extents;
+                run.glyphs.iter().map(move |g| {
+                    let x = gx;
+                    let width = from_pango(g.width);
+                    gx += width;
+                    nsh_core::LinePiece {
+                        x: Points(x),
+                        width: Points(width),
+                        background: text.background_at(g.index),
+                        ascent: Points(ascent),
+                        descent: Points(descent),
+                    }
+                })
+            });
+            let clip = (line.info.x, line.info.x + line.info.width);
+            nsh_core::BackgroundBox::join(pieces, clip, |b| {
+                f(
+                    b.x.0,
+                    baseline - b.ascent.0,
+                    b.width.0,
+                    (b.ascent + b.descent).0,
+                    b.radius().0,
+                    b.background.color,
+                );
+            });
+        }
+    }
+
     /// Calls `f(x, y, width, height)` with the rectangles (content
     /// coordinates) that highlight the characters of `range`: per line,
     /// the spans of selected glyphs and attachments, line high.
@@ -1813,7 +1882,7 @@ impl LinuxLayout {
         mut f: impl FnMut(f32, f32, f32, f32),
     ) {
         for line in &self.lines {
-            let (y, h) = (line.info.y, line.info.height);
+            let (y, h) = (line.info.y.0, line.info.height.0);
             let mut span: Option<(f32, f32)> = None;
             for (gx, w, g, _) in self.line_glyphs(line) {
                 if g.index >= a && g.index < b {
@@ -1839,7 +1908,7 @@ impl LinuxLayout {
                     && attachment.index >= line.info.start
                     && attachment.index < line.info.end
                 {
-                    f(*x, y, attachment.width, h);
+                    f(*x, y, attachment.width.0, h);
                 }
             }
         }
@@ -1909,7 +1978,7 @@ mod tests {
     fn layout_matches_measure() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let plain = ResolvedTextStyle {
-            font_size: 15.0,
+            font_size: Points(15.0),
             ..Default::default()
         };
         let texts = [
@@ -1921,7 +1990,7 @@ mod tests {
                 (
                     "Spaced letters ",
                     ResolvedTextStyle {
-                        letter_spacing: 1.3,
+                        letter_spacing: Points(1.3),
                         ..plain
                     },
                 ),
@@ -1936,8 +2005,8 @@ mod tests {
                 (
                     " mixed with big text",
                     ResolvedTextStyle {
-                        font_size: 31.0,
-                        line_height: 40.0,
+                        font_size: Points(31.0),
+                        line_height: Points(40.0),
                         ..plain
                     },
                 ),
@@ -1963,7 +2032,7 @@ mod tests {
                 t.text
             );
             for width in (40..400).step_by(7) {
-                let size = engine.measure(&prepared, Some(width as f32));
+                let size = engine.measure(&prepared, Some(Points(width as f32)));
                 // The core rounds measurements up.
                 let size = Size::new(size.width.ceil(), size.height.ceil());
                 let measured_lines = {
@@ -1972,9 +2041,9 @@ mod tests {
                 };
                 let lines = engine.lines(&engine.layout(&prepared, size));
                 assert_eq!(lines.len(), measured_lines, "{:?} at {width}", t.text);
-                let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
+                let bottom = lines.last().map_or(0.0, |l| (l.y + l.height).0);
                 assert!(
-                    bottom <= size.height,
+                    bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
                     t.text
                 );
@@ -1982,7 +2051,7 @@ mod tests {
                 let slack = from_pango(prepared.slack) + 0.01;
                 for line in &lines {
                     assert!(
-                        line.x + line.width <= size.width + slack,
+                        (line.x + line.width).0 <= size.width.0 + slack,
                         "{:?} at {width}: {line:?}",
                         t.text
                     );
@@ -1996,25 +2065,26 @@ mod tests {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle::default();
         let mut t = text(&[("Before ", style)]);
-        t.push_attachment(20.0, 30.0, style);
+        t.push_attachment(Size::new(Points(20.0), Points(30.0)), style);
         t.push(
             " after the attachment, and long enough to wrap a few times here.",
             style,
         );
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(120.0));
+        let size = engine.measure(&prepared, Some(Points(120.0)));
         let layout = engine.layout(&prepared, size);
         let points = engine.attachments(&layout);
         assert_eq!(points.len(), 1);
-        let (x, y) = points[0].expect("attachment shown");
+        let at = points[0].expect("attachment shown");
+        let (x, y) = (at.x.0, at.y.0);
         assert!(x > 0.0 && y >= 0.0, "{x}, {y}");
         let lines = engine.lines(&layout);
-        assert!(lines[0].height >= 30.0, "{:?}", lines[0]);
+        assert!(lines[0].height.0 >= 30.0, "{:?}", lines[0]);
 
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let two = engine.measure(&prepared, Some(120.0));
+        let two = engine.measure(&prepared, Some(Points(120.0)));
         assert!(two.height < size.height);
         assert_eq!(engine.lines(&engine.layout(&prepared, two)).len(), 2);
 
@@ -2022,7 +2092,7 @@ mod tests {
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(200.0));
+        let size = engine.measure(&prepared, Some(Points(200.0)));
         let layout = engine.layout(&prepared, size);
         let lines = engine.lines(&layout);
         assert_eq!(lines.len(), 2);
@@ -2106,14 +2176,14 @@ mod tests {
     fn cap_and_x_heights() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle {
-            font_size: 20.0,
+            font_size: Points(20.0),
             ..Default::default()
         };
         let t = text(&[("Hx", style)]);
         let prepared = engine.prepare(&t);
         let size = engine.measure(&prepared, None);
         let lines = engine.lines(&engine.layout(&prepared, size));
-        let (cap, x) = (lines[0].cap_height, lines[0].x_height);
+        let (cap, x) = (lines[0].cap_height.0, lines[0].x_height.0);
         assert!(cap > 11.0 && cap < 16.0 && x > 8.0 && x < cap, "{cap} {x}");
     }
 
@@ -2148,10 +2218,50 @@ mod tests {
     }
 
     #[test]
+    fn span_backgrounds_box_each_line() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let style = ResolvedTextStyle {
+            font_size: Points(15.0),
+            ..Default::default()
+        };
+        let code = ResolvedTextStyle {
+            font_size: Points(13.0),
+            background: Some(nsh_core::TextBackground {
+                color: nsh_core::Color(0xeeee_eeff),
+                radius: Points(4.0),
+                node: 4,
+            }),
+            ..style
+        };
+        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
+        let boxes = |width: Option<f32>| {
+            let prepared = engine.prepare(&t);
+            let size = engine.measure(&prepared, width.map(Points));
+            let layout = engine.layout(&prepared, size);
+            let l = layout.downcast::<LinuxLayout>().unwrap();
+            let mut rects = Vec::new();
+            l.background_rects(&t, |x, y, w, h, r, _| rects.push((x, y, w, h, r)));
+            (size, rects)
+        };
+        let (size, rects) = boxes(None);
+        assert_eq!(rects.len(), 1, "{rects:?}");
+        let (x, y, w, h, r) = rects[0];
+        assert!(
+            x > 0.0 && x + w < size.width.0 && y >= 0.0 && h <= size.height.0,
+            "{rects:?}"
+        );
+        assert_eq!(r, 4.0);
+        // Wrapped: a box on each line the span reaches.
+        let (_, rects) = boxes(Some(w * 0.7));
+        assert!(rects.len() >= 2, "{rects:?}");
+        assert!(rects[1].1 > rects[0].1);
+    }
+
+    #[test]
     fn carets_and_highlights() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle {
-            font_size: 15.0,
+            font_size: Points(15.0),
             ..Default::default()
         };
         let t = text(&[("First line here\nsecond", style)]);
@@ -2161,10 +2271,10 @@ mod tests {
         let l = layout.downcast::<LinuxLayout>().unwrap();
         assert_eq!(l.lines.len(), 2);
         assert_eq!(l.caret_at(-5.0, 2.0), 0);
-        assert_eq!(l.caret_at(size.width + 20.0, 2.0), 15);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, 2.0), 15);
         // Below the text: the last line.
-        assert_eq!(l.caret_at(size.width + 20.0, size.height + 50.0), 22);
-        let mid = l.caret_at(size.width / 2.0, 2.0);
+        assert_eq!(l.caret_at(size.width.0 + 20.0, size.height.0 + 50.0), 22);
+        let mid = l.caret_at((size.width / 2.0).0, 2.0);
         assert!(mid > 3 && mid < 12, "{mid}");
         // Nearest glyph edge: just right of a glyph's start is before it.
         let (gx, w, g, _) = l.line_glyphs(&l.lines[0]).nth(2).unwrap();
@@ -2186,7 +2296,7 @@ mod tests {
         let layout = engine.layout(&prepared, size);
         let l = layout.downcast::<LinuxLayout>().unwrap();
         // Right to left: the right edge is the start.
-        assert_eq!(l.caret_at(size.width + 5.0, 2.0), 0);
+        assert_eq!(l.caret_at(size.width.0 + 5.0, 2.0), 0);
         assert_eq!(l.caret_at(-5.0, 2.0), 9);
     }
 }
@@ -2200,7 +2310,7 @@ mod fallback_tests {
         t.push(
             s,
             ResolvedTextStyle {
-                font_size: 16.0,
+                font_size: Points(16.0),
                 ..Default::default()
             },
         );

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Error, app_matches,
     keys::{PublicKey, SecretKey, Signed},
-    package::VerifiedPackage,
+    package::{PackageReceipt, VerifiedPackage},
 };
 
 const CERTIFICATE: &str = "nsh-certificate-v1";
@@ -281,14 +281,40 @@ impl TrustStore {
     }
 
     /// Records that `package` was installed: older builds of its app are
-    /// refused from now on.
+    /// refused from now on. [`TrustStore::accept_receipt`] with its
+    /// receipt.
     pub fn accept(&mut self, package: &VerifiedPackage) -> Result<(), Error> {
-        let build = self.state.builds.entry(package.app.id.clone()).or_insert(0);
-        if package.app.build > *build {
-            *build = package.app.build;
+        self.accept_receipt(&package.receipt())
+    }
+
+    /// Records that the verified package `receipt` stands for was installed
+    /// ([`VerifiedPackage::receipt`]): older builds of its app are refused
+    /// from now on. Until then, the builds accepted before still verify, so
+    /// an embedding app can run a new package and accept it once it proved
+    /// healthy, or go back to the one it had. Refused if the package or its
+    /// release key was revoked since it was verified (accepting it would
+    /// refuse the builds the app can still go back to); a build at or below
+    /// the one accepted changes nothing.
+    pub fn accept_receipt(&mut self, receipt: &PackageReceipt) -> Result<(), Error> {
+        let revoked = self.revocations().unwrap_or_default();
+        if revoked.keys.contains(&receipt.key_id) {
+            return Err(Error::Revoked(format!("release key {}", receipt.key_id)));
+        }
+        if revoked.packages.contains(&receipt.sha256) {
+            return Err(Error::Revoked(format!("package {}", receipt.sha256)));
+        }
+        let build = self.state.builds.entry(receipt.app.id.clone()).or_insert(0);
+        if receipt.app.build > *build {
+            *build = receipt.app.build;
             self.save()?;
         }
         Ok(())
+    }
+
+    /// The highest build of app `id` accepted so far: older ones are
+    /// refused.
+    pub fn accepted_build(&self, id: &str) -> Option<u64> {
+        self.state.builds.get(id).copied()
     }
 
     fn save(&self) -> Result<(), Error> {

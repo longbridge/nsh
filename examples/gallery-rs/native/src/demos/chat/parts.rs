@@ -321,7 +321,7 @@ fn tool_body(kind: &ToolKind, done: bool) -> Option<View> {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors::TEXT)
                                 .tabular_nums()
-                                .letter_spacing(-1.0),
+                                .letter_spacing(px(-1.0)),
                         )
                         .child(
                             view()

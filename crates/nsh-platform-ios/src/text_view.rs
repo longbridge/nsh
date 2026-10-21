@@ -1,6 +1,6 @@
 use std::{cell::RefCell, sync::Arc};
 
-use nsh_core::{AttributedText, Rect, TextLayout, TextLink};
+use nsh_core::{AttributedText, Bounds, Points, TextLayout, TextLink};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::Retained,
@@ -32,7 +32,7 @@ use crate::{
 
 /// Draws the decoration lines CoreText does not: strikethroughs, and
 /// underlines with a style, thickness or offset (y-up text space).
-fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
+fn draw_decorations(cx: &CGContext, line: &LaidLine) {
     // SAFETY: the line's own run array (of CTRuns) and their attribute
     // dictionaries, whose values have the types set by the text engine.
     unsafe {
@@ -89,7 +89,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
             );
             if let Some(color) = strike {
                 let y = line.origin.y + font.x_height() / 2.0;
-                stroke_decoration(ctx, &color, style, x, y, width, thickness);
+                stroke_decoration(cx, &color, style, x, y, width, thickness);
             }
             if let Some(color) = under {
                 // Below the baseline: the font's position, or the offset.
@@ -99,7 +99,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
                     offset + thickness / 2.0
                 };
                 stroke_decoration(
-                    ctx,
+                    cx,
                     &color,
                     style,
                     x,
@@ -115,7 +115,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
 /// One decoration line centered on `y` (y-up), `style` as encoded by the
 /// text engine: solid, double, dotted, dashed, wavy.
 fn stroke_decoration(
-    ctx: &CGContext,
+    cx: &CGContext,
     color: &CGColor,
     style: i32,
     x: CGFloat,
@@ -123,7 +123,7 @@ fn stroke_decoration(
     width: CGFloat,
     thickness: CGFloat,
 ) {
-    let c = Some(ctx);
+    let c = Some(cx);
     CGContext::save_g_state(c);
     CGContext::set_stroke_color_with_color(c, Some(color));
     CGContext::set_line_width(c, thickness);
@@ -170,7 +170,7 @@ fn stroke_decoration(
 
 #[derive(Default)]
 pub(crate) struct TextViewIvars {
-    pub(crate) layout: RefCell<Option<(TextLayout, Rect)>>,
+    pub(crate) layout: RefCell<Option<(TextLayout, Bounds<Points>)>>,
     /// The content, for accessibility and the block's shadow.
     pub(crate) text: RefCell<Option<Arc<AttributedText>>>,
     /// `selectable`: the range selection (`text_selection.rs`).
@@ -278,13 +278,16 @@ define_class!(
             let layout = self.ivars().layout.borrow();
             let Some((layout, content)) = layout.as_ref() else { return };
             let Some(text) = layout.downcast::<CoreTextLayout>() else { return };
-            let Some(ctx) = UIGraphicsGetCurrentContext() else { return };
-            let c = Some(&*ctx);
+            let Some(cx) = UIGraphicsGetCurrentContext() else { return };
+            let c = Some(&*cx);
             CGContext::save_g_state(c);
+            if let Some(t) = self.ivars().text.borrow().as_ref().filter(|t| t.has_backgrounds()) {
+                crate::text::draw_backgrounds(&cx, t, text, *content);
+            }
             // CoreText draws in a y-up space with the origin at the bottom of
             // the box.
             CGContext::set_text_matrix(c, CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 });
-            CGContext::translate_ctm(c, content.x as CGFloat, (content.y + content.height) as CGFloat);
+            CGContext::translate_ctm(c, content.origin.x.0 as CGFloat, (content.origin.y.0 + content.size.height.0) as CGFloat);
             CGContext::scale_ctm(c, 1.0, -1.0);
             if let Some(shadow) = self.ivars().text.borrow().as_ref().and_then(|t| t.shadow) {
                 let (r, g, b, a) = shadow.color.to_f64();
@@ -292,8 +295,8 @@ define_class!(
                 // The context is flipped: a positive offset must still go down.
                 CGContext::set_shadow_with_color(
                     c,
-                    CGSize::new(shadow.offset_x as CGFloat, -shadow.offset_y as CGFloat),
-                    shadow.radius as CGFloat,
+                    CGSize::new(shadow.offset_x.0 as CGFloat, -shadow.offset_y.0 as CGFloat),
+                    shadow.radius.0 as CGFloat,
                     // SAFETY: a plain getter.
                     Some(&*unsafe { color.CGColor() }),
                 );
@@ -309,9 +312,9 @@ define_class!(
             for line in &text.lines {
                 CGContext::set_text_position(c, line.origin.x, line.origin.y);
                 // SAFETY: a valid line and context.
-                unsafe { line.line.draw(&ctx) };
+                unsafe { line.line.draw(&cx) };
                 if text.strikethrough {
-                    draw_decorations(&ctx, line);
+                    draw_decorations(&cx, line);
                 }
             }
             if let Some(color) = color {
@@ -528,7 +531,12 @@ impl TextView {
         }
     }
 
-    pub(crate) fn set_layout(&self, text: Arc<AttributedText>, layout: TextLayout, content: Rect) {
+    pub(crate) fn set_layout(
+        &self,
+        text: Arc<AttributedText>,
+        layout: TextLayout,
+        content: Bounds<Points>,
+    ) {
         let (selectable, color) = (text.is_selectable(), text.selection_color);
         let changed = self
             .ivars()
@@ -578,8 +586,8 @@ impl TextView {
         let (layout, content) = layout.as_ref()?;
         let lines = &layout.downcast::<CoreTextLayout>()?.lines;
         // CoreText's y-up space from the bottom of the box.
-        let x = point.x - content.x as CGFloat;
-        let y = (content.y + content.height) as CGFloat - point.y;
+        let x = point.x - content.origin.x.0 as CGFloat;
+        let y = (content.origin.y.0 + content.size.height.0) as CGFloat - point.y;
         let mut best: Option<(&LaidLine, CGFloat)> = None;
         for line in lines {
             let (mut ascent, mut descent) = (0.0, 0.0);

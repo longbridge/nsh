@@ -130,7 +130,11 @@ fn lists_switch_tabs_and_change_their_rows() {
         .control()
         .dispatch_event(chat, EventKind::EndReached, EventPayload::None);
     drain(&rx, &mut screen);
-    engine.control().scroll(chat, 0.0, 0.0, u32::MAX);
+    engine.control().scroll(
+        chat,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0)),
+        u32::MAX,
+    );
     drain(&rx, &mut screen);
     assert!(
         screen

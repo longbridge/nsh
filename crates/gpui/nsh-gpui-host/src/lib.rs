@@ -1,5 +1,5 @@
-//! Development host on GPUI: runs any nsh app in a GPUI window, on macOS,
-//! Windows and Linux.
+//! Development host on GPUI: runs a TSX app in a GPUI window, on macOS,
+//! Windows and Linux, as GPUI apps that embed it show it.
 //!
 //! - `nsh-gpui-host --dev-server ws://127.0.0.1:8790/ws [--trace]` loads
 //!   bundles pushed by `nsh dev` / `nsh run` and reloads on every rebuild.
@@ -30,9 +30,9 @@ pub fn main() -> std::process::ExitCode {
 
     dev::init_logging();
     let mut source = None;
-    // As the release runner runs the app: on its own.
+    // As an app on its own, like the desktop runners run it.
     let mut options = AppOptions {
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let mut args = env::args().skip(1);
@@ -64,6 +64,9 @@ pub fn main() -> std::process::ExitCode {
             }
             "--fps" => options.fps = true,
             "--script" => options.script = args.next(),
+            // Where apps keep their data (`nsh test --target` gives each app
+            // a fresh one); the system's data directory otherwise.
+            "--data-dir" => options.data_dir = args.next().map(PathBuf::from),
             "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));

@@ -131,7 +131,7 @@ fn inline(likes: Signal<u32>) -> Card {
                                 .text_color(colors::UP)
                                 .text_size(px(11.0))
                                 .font_weight(FontWeight::BOLD)
-                                .letter_spacing(0.5),
+                                .letter_spacing(px(0.5)),
                         ),
                 )
                 .child(" and a button inside the sentence ")
@@ -194,7 +194,11 @@ fn fonts() -> Card {
                 .child(text("Bold ").font_weight(FontWeight::BOLD))
                 .child(text("Italic ").italic())
                 .child(text("Both ").font_weight(FontWeight::BOLD).italic())
-                .child(text("Spaced").letter_spacing(4.0).text_color(colors::MUTED)),
+                .child(
+                    text("Spaced")
+                        .letter_spacing(px(4.0))
+                        .text_color(colors::MUTED),
+                ),
         ))
         .child(specimen(
             "Decorations",
@@ -247,11 +251,11 @@ fn fonts() -> Card {
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(colors::ACCENT)
                         .text_shadow_color(AdaptiveColor::new(
-                            colors::ACCENT.light.with_alpha(0.3),
-                            colors::ACCENT.dark.with_alpha(0.6),
+                            colors::ACCENT.light.opacity(0.3),
+                            colors::ACCENT.dark.opacity(0.6),
                         ))
-                        .text_shadow_offset(0.0, 0.0)
-                        .text_shadow_radius(10.0),
+                        .text_shadow_offset(point(px(0.0), px(0.0)))
+                        .text_shadow_radius(px(10.0)),
                 )
                 .child(
                     view()
@@ -273,8 +277,8 @@ fn fonts() -> Card {
                                     rgb_a(0x14140a, 0.22),
                                     rgb_a(0x000000, 0.9),
                                 ))
-                                .text_shadow_offset(2.0, 3.0)
-                                .text_shadow_radius(3.0),
+                                .text_shadow_offset(point(px(2.0), px(3.0)))
+                                .text_shadow_radius(px(3.0)),
                         ),
                 ),
         ))

@@ -27,8 +27,8 @@ use std::{cell::RefCell, f32::consts::TAU, rc::Rc, time::Duration};
 
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
+    animation::{Curve, EaseMode},
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
-    nsh_animation::{Curve, EaseMode},
     time::Instant,
     ui::{AccessibilityState, AnimatedNode, View, prelude::*},
 };
@@ -43,8 +43,8 @@ use self::{
 use crate::{
     nav,
     ui::{
-        IconName, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors,
-        desktop, header, icon, motion, pane_width,
+        IconName, PageHeader, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize,
+        colors, desktop, header, icon, lengths, motion, pane_width, pt, with_header,
     },
 };
 
@@ -165,12 +165,14 @@ fn open(live: &Live, index: usize) {
     nav::push(format!("stock:{code}"), move || {
         // The screen is outside the watchlist: it gets the market here.
         provide_context(live.clone());
-        header(screen().title(code))
-            .header_right(MarketButton::element(()))
-            .child(StockView::element(StockViewProps {
-                stock: index as u32,
-                ..StockViewProps::default()
-            }))
+        with_header(
+            header(screen().title(code)).header_right(MarketButton::element(())),
+            || PageHeader::new(code).right(MarketButton::element(())),
+        )
+        .child(StockView::element(StockViewProps {
+            stock: index as u32,
+            ..StockViewProps::default()
+        }))
     });
 }
 
@@ -600,8 +602,8 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
         let mut p = p.move_to(x_of(0), y_of(ys[0]));
         for k in 1..n.saturating_sub(1) {
             p = p.quadratic_curve_to(
-                (x_of(k), y_of(ys[k])),
-                (
+                pt(x_of(k), y_of(ys[k])),
+                pt(
                     (x_of(k) + x_of(k + 1)) / 2.0,
                     (y_of(ys[k]) + y_of(ys[k + 1])) / 2.0,
                 ),
@@ -612,9 +614,9 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
 
     // The fill: down from the line's top, strictly under the curve...
     let top = ys.iter().fold(bottom, |t, &v| t.min(y_of(v)));
-    let fill = CanvasGradient::linear(0.0, top, 0.0, bottom)
-        .add_color_stop(0.0, color(tone.opacity(0.22)))
-        .add_color_stop(1.0, color(tone.opacity(0.0)));
+    let fill = CanvasGradient::linear(pt(0.0, top), pt(0.0, bottom))
+        .add_color_stop(percentage(0.0), color(tone.opacity(0.22)))
+        .add_color_stop(percentage(1.0), color(tone.opacity(0.0)));
     let p = curve(Painter::new().begin_path())
         .line_to(x_of(n - 1), bottom)
         .line_to(x_of(0), bottom)
@@ -623,9 +625,9 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
         .fill();
     // ...and faded in over the first fifth (erased, not overdrawn).
     let fade_to = left + (right - left) * 0.2;
-    let fade = CanvasGradient::linear(left, 0.0, fade_to, 0.0)
-        .add_color_stop(0.0, rgb(0x000000))
-        .add_color_stop(1.0, Color(0));
+    let fade = CanvasGradient::linear(pt(left, 0.0), pt(fade_to, 0.0))
+        .add_color_stop(percentage(0.0), rgb(0x000000))
+        .add_color_stop(percentage(1.0), transparent_black());
     let p = p
         .composite(Composite::DestinationOut)
         .fill_style(fade)
@@ -636,7 +638,7 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
     let p = p
         .stroke_color(color(colors::MUTED.opacity(0.4)))
         .line_width(1.0)
-        .line_dash(&[1.0, 3.0])
+        .line_dash(&lengths([1.0, 3.0]))
         .begin_path()
         .move_to(left, y_of(q.prev_close))
         .line_to(right, y_of(q.prev_close))
@@ -762,7 +764,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .px_4()
         .on_press(move |_: &()| cx.emit(StockRowEvent::Press))
         // Pressed, the row shows the surface under its content.
-        .underlay(|| color(colors::SURFACE), 0.85)
+        .active(|s| s.bg(colors::SURFACE))
         .role(AccessibilityRole::Button)
         .label(name)
         .when(props.wide, |v| {

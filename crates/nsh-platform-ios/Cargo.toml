@@ -26,7 +26,7 @@ embed = ["js"]
 [dependencies]
 nsh-core.workspace = true
 nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-base.workspace = true
 serde_json.workspace = true
 log.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
@@ -40,7 +40,6 @@ objc2-core-graphics.workspace = true
 objc2-core-text.workspace = true
 objc2-image-io.workspace = true
 block2.workspace = true
-nsh-animation.workspace = true
 objc2-foundation.workspace = true
 objc2-quartz-core.workspace = true
 objc2-ui-kit.workspace = true

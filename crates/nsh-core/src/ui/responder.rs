@@ -11,7 +11,10 @@
 use std::cell::Cell;
 
 use super::{IntoListener, Listener};
-use crate::{PanActivation, TouchEvent, TouchPhase, TouchPoint};
+use crate::{
+    PanActivation, TouchEvent, TouchPhase, TouchPoint,
+    geometry::{Point, Points, point, px},
+};
 
 /// A pan gesture followed through touch events (TS: `PanResponder`'s
 /// `PanResponderGestureState`): the fingers' centroid, how far it moved
@@ -22,18 +25,14 @@ use crate::{PanActivation, TouchEvent, TouchPhase, TouchPoint};
 /// ([`super::Interactive::on_touch`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PanGesture {
-    /// The centroid's latest position (surface points).
-    pub move_x: f32,
-    /// The centroid's latest position (surface points).
-    pub move_y: f32,
-    /// Where the centroid was when the gesture began (the grant).
-    pub x0: f32,
-    /// Where the centroid was when the gesture began (the grant).
-    pub y0: f32,
-    /// How far the centroid moved since then.
-    pub dx: f32,
-    /// How far the centroid moved since then.
-    pub dy: f32,
+    /// The centroid's latest position in the surface (TS: `moveX`,
+    /// `moveY`).
+    pub position: Point<Points>,
+    /// Where the centroid was when the gesture began, the grant (TS: `x0`,
+    /// `y0`).
+    pub origin: Point<Points>,
+    /// How far the centroid moved since then (TS: `dx`, `dy`).
+    pub delta: Point<Points>,
     /// Its velocity, points per millisecond (smoothed over a few
     /// samples).
     pub vx: f32,
@@ -51,8 +50,8 @@ fn centroid(touch: &TouchEvent) -> (f32, f32, u32) {
     let lifted = matches!(touch.phase, TouchPhase::End | TouchPhase::Cancel);
     let (mut x, mut y, mut n) = (0.0, 0.0, 0u32);
     for p in touch.points.iter().filter(|p| !lifted || !p.changed) {
-        x += p.page_x;
-        y += p.page_y;
+        x += p.page.x.0;
+        y += p.page.y.0;
         n += 1;
     }
     let d = n.max(1) as f32;
@@ -64,10 +63,8 @@ impl PanGesture {
     pub fn begin(touch: &TouchEvent) -> Self {
         let (x, y, n) = centroid(touch);
         Self {
-            move_x: x,
-            move_y: y,
-            x0: x,
-            y0: y,
+            position: point(px(x), px(y)),
+            origin: point(px(x), px(y)),
             active_touches: n,
             last: (x, y, touch.timestamp, n),
             ..Self::default()
@@ -85,13 +82,12 @@ impl PanGesture {
         self.active_touches = n;
         if n == ln {
             let dt = (touch.timestamp - lt).max(1.0) as f32;
-            self.dx += x - lx;
-            self.dy += y - ly;
+            self.delta.x += px(x - lx);
+            self.delta.y += px(y - ly);
             self.vx = self.vx * 0.3 + (x - lx) / dt * 0.7;
             self.vy = self.vy * 0.3 + (y - ly) / dt * 0.7;
         }
-        self.move_x = x;
-        self.move_y = y;
+        self.position = point(px(x), px(y));
         self.last = (x, y, touch.timestamp, n);
     }
 }
@@ -100,14 +96,11 @@ impl PanGesture {
 /// the finger it is about and the gesture so far.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ResponderEvent {
-    /// Where the finger is in the view it went down on (TS: `locationX`).
-    pub location_x: f32,
-    /// Where the finger is in the view it went down on (TS: `locationY`).
-    pub location_y: f32,
-    /// Where it is in the surface (TS: `pageX`).
-    pub page_x: f32,
-    /// Where it is in the surface (TS: `pageY`).
-    pub page_y: f32,
+    /// Where the finger is in the view it went down on (TS: `locationX`,
+    /// `locationY`).
+    pub location: Point<Points>,
+    /// Where it is in the surface (TS: `pageX`, `pageY`).
+    pub page: Point<Points>,
     /// Milliseconds since an arbitrary origin.
     pub timestamp: f64,
     /// The gesture since it began: since the grant for the responder's
@@ -118,10 +111,8 @@ pub struct ResponderEvent {
 impl ResponderEvent {
     pub(crate) fn new(about: &TouchPoint, timestamp: f64, gesture: PanGesture) -> Self {
         Self {
-            location_x: about.location_x,
-            location_y: about.location_y,
-            page_x: about.page_x,
-            page_y: about.page_y,
+            location: about.location,
+            page: about.page,
             timestamp,
             gesture,
         }
@@ -234,7 +225,7 @@ impl TouchClaim {
 
     /// Claims only when `listener` does ([`ClaimRequest::claim`]), deciding
     /// with the component's state and the gesture so far (a horizontal
-    /// swipe: `request.event.gesture.dx.abs() > 10.0`).
+    /// swipe: `request.event.gesture.delta.x.abs() > px(10.0)`).
     pub fn ask<M>(mut self, listener: impl IntoListener<ClaimRequest, M>) -> Self {
         self.ask = Some(listener.into_listener());
         self

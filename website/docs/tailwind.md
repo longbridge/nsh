@@ -39,7 +39,7 @@ How conflicts resolve:
 3. **`style` wins over classes.**
 4. `!` makes a class important: `!p-0`.
 
-Components from `nsh/ui/mobile` accept `class` and `classList` too; your classes are merged after the component's own styles and win at equal rank.
+Rust components (`SafeAreaView`, `KeyboardAvoidingView` and those of an app's own crate) accept `class` and `classList` too; your classes are merged after the component's own styles and win at equal rank.
 
 ## Variants
 
@@ -50,10 +50,13 @@ Components from `nsh/ui/mobile` accept `class` and `classList` too; your classes
 | `focus:`, `focus-visible:` | An input has focus |
 | `focus-within:` | The view or a descendant has focus |
 | `disabled:`, `enabled:` | The element's `disabled` prop is true / false |
-| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:` | The nearest ancestor with the `group` class is in that state |
+| `selected:` | The element is selected (a `Button`'s `selected`, `accessibilityState.selected`) |
+| `checked:` | The element is checked (`accessibilityState.checked` is `true`; `"mixed"` is not checked) |
+| `group-active:`, `group-hover:`, `group-focus:`, `group-focus-within:`, `group-disabled:`, `group-selected:`, `group-checked:` | The nearest ancestor with the `group` class is in that state |
 | `group-active/name:` ... | The same, for an ancestor marked `group/name` |
 | `first:`, `last:`, `odd:`, `even:`, `only:` | The element's own position among its siblings. To color a row's label by the row's position, put `last:text-*` on the row: the label inherits it |
 | `placeholder:` | Styles an input's placeholder (`placeholder:text-zinc-400`) |
+| `selection:` | Styles the selection of an input or a selectable text (`selection:text-violet-500`) |
 | `dark:` | The system appearance is dark |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | The window is at least 640, 768, 1024, 1280, 1536 points wide |
 | `max-sm:`, `max-md:`, ... | The window is narrower than the breakpoint |
@@ -88,7 +91,7 @@ Breakpoints compare against the window (the surface NSH renders into), not the d
 - **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps NSH's default column. `block` and `flow-root` use block layout; `inline` and `inline-block` lay out as views (there is no inline formatting context).
 - **Text classes on views are inherited.** `text-*`, `font-*`, `leading-*`, `tracking-*` and the other text utilities on a view pass to the `<Text>` and `<Input>` elements inside it, as CSS inheritance does: `<View class="text-white">` makes its labels white.
 - **`space-x-*` / `space-y-*` are gaps** (`gap-x` / `gap-y`).
-- **State backgrounds show over gradients.** In CSS a gradient covers `background-color`, so `active:bg-*` on a `bg-linear-*` surface would never be seen; in NSH a background color from `active:`, `hover:`, `focus:` or `group-*:` replaces the gradient while that state holds (unless the state sets a gradient of its own, such as `active:from-*`). So do `underlayColor` and animated background colors.
+- **State backgrounds show over gradients.** In CSS a gradient covers `background-color`, so `active:bg-*` on a `bg-linear-*` surface would never be seen; in NSH a background color from `active:`, `hover:`, `focus:` or `group-*:` replaces the gradient while that state holds (unless the state sets a gradient of its own, such as `active:from-*`). So do `activeStyle` and the other state styles, and animated background colors.
 - **Classes for settings that are props in NSH**: `line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*` (image resize mode), `select-text`, `caret-*` and `placeholder:text-*` work, and lose to the explicit props (`numberOfLines`, `pointerEvents`, `resizeMode`, ...) when both are set.
 - **Not supported**: `peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[mask-type:luminance]`). Web-only utilities that need nothing natively (`antialiased`, `will-change-*`, `touch-*`, `scroll-*`, `snap-*`, `overscroll-*`, `box-border`, ...) are accepted and ignored.
 
@@ -135,11 +138,41 @@ With this theme, `bg-brand-500`, `text-brand` (the `DEFAULT` shade), `border-ink
 
 Unknown keys and invalid values are build errors (`nsh.json: tailwind: unknown theme key 'colours'`). The theme is compiled into the bundle and applied before the first frame.
 
-The theme only shapes your own classes. The components of `nsh/ui/mobile` take their colors from the component theme, `"theme"` in `nsh.json` ([Components](../components/index.md)).
+The Tailwind theme only shapes your own classes. Rust components take their colors from the component theme, `"theme"` in `nsh.json` ([Rust](./rust.md)).
+
+## Theme tokens
+
+Your classes can also name the colors and numbers of the component theme, so the app follows the same theme its Rust components do:
+
+```tsx
+<View class="rounded-(--radius-lg) border border-border bg-background p-4">
+  <Text class="text-foreground">Balance</Text>
+  <Text class="text-muted-foreground">Updated just now</Text>
+  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
+    <Text class="text-primary-foreground text-(length:--font-size)">Continue</Text>
+  </View>
+</View>
+```
+
+A token is a key of the theme file with its dots written as dashes: `muted.foreground` is `muted-foreground`, `radius.lg` is `--radius-lg`. Keys ending in `.background` can leave it out: `bg-primary` is `primary.background`, and `bg-primary-background` works too.
+
+| Form | Takes | Example |
+|---|---|---|
+| A color name in any color utility | A theme color | `bg-primary`, `text-muted-foreground/70`, `border-t-border`, `ring-ring`, `from-accent`, `placeholder:text-muted-foreground` |
+| `(--name)`, Tailwind 4's variable shorthand | A theme color or number | `bg-(--primary)`, `rounded-(--radius)`, `p-(--gap-card)` |
+| `(color:--name)`, `(length:--name)`, `(number:--name)` | The same, typed where a utility takes several kinds | `text-(color:--link)`, `text-(length:--font-size)` |
+
+- **Every key is a token.** The keys the components use (`primary.background`, `border`, `radius`, `font.size`, ...; the list is in [Rust](./rust.md)), and any other key a theme file has: `"sidebar.background"` makes `bg-sidebar`, `"chart.up": "#16a34a"` makes `text-chart-up`, a number `"radius.card": 10` makes `rounded-(--radius-card)`. Numbers are points; `(number:--name)` passes the plain number.
+- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary` switches with the appearance by itself, with no `dark:` class. A color the theme sets in one mode only is used in both.
+- **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token only when the Tailwind theme has no color `primary`.
+- **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens are restyled natively, with no JavaScript running. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's).
+- **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
+
+Classes naming tokens are resolved once per theme, like any other class: drawing them costs what a palette color does.
 
 ## The class check
 
-`nsh build`, `nsh dev`, `nsh run` and `nsh trace` check the static class names in your JSX (string literals in `class` and the keys of `classList`) with the same parser and theme the runtime uses, and warn about classes that do not exist:
+`nsh build`, `nsh dev`, `nsh run` and `nsh test` check the static class names in your JSX (string literals in `class` and the keys of `classList`) with the same parser and theme the runtime uses, and warn about classes that do not exist:
 
 ```text
  warn nsh::build App.tsx:12:36: unknown class `bg-brand-550`

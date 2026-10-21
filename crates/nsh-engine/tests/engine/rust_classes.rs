@@ -367,9 +367,96 @@ impl Component for Framed {
     }
 }
 
+/// Bytes, the VM's `System` and tasks started in the call.
+#[module]
+pub(crate) struct Sys;
+
+#[module]
+impl Sys {
+    /// The bytes reversed, at once.
+    pub(crate) fn reversed(mut bytes: Vec<u8>) -> Vec<u8> {
+        bytes.reverse();
+        bytes
+    }
+
+    /// Whether the app may open a socket to `127.0.0.1:port`.
+    pub(crate) fn may_connect(port: u16, sys: System) -> bool {
+        sys.access.allows_socket("127.0.0.1", port)
+    }
+
+    /// The count of `kind` held after taking one (kept by `keep`).
+    pub(crate) fn take(sys: System, max: u32, keep: bool) -> Result<u32, JsError> {
+        let held = sys
+            .quotas
+            .take("test", max as usize)
+            .ok_or_else(|| JsError::Range(format!("at most {max}")))?;
+        let count = sys.quotas.held("test") as u32;
+        if keep {
+            std::mem::forget(held);
+        }
+        Ok(count)
+    }
+
+    /// `n` doubled later: a negative one throws in the call, a zero one
+    /// rejects.
+    pub(crate) fn later(n: i32) -> Result<Later<i32>, JsError> {
+        if n < 0 {
+            return Err(JsError::Range(format!("{n} is negative")));
+        }
+        Ok(Later::new(async move {
+            timer(Duration::from_millis(1)).await;
+            if n == 0 {
+                Err("zero".to_owned())
+            } else {
+                Ok(n * 2)
+            }
+        }))
+    }
+}
+
+/// Listeners kept in a field, heard from a task.
+#[class]
+pub(crate) struct Emitter {
+    listeners: Vec<Callback<String>>,
+}
+
+#[class]
+impl Emitter {
+    /// No listeners.
+    pub(crate) fn new() -> Self {
+        Emitter {
+            listeners: Vec::new(),
+        }
+    }
+
+    /// Calls `listener` with each text emitted.
+    pub(crate) fn on(&mut self, #[args(text)] listener: Callback<String>) {
+        self.listeners.push(listener);
+    }
+
+    /// Emits `text` to every listener after `ms` milliseconds.
+    pub(crate) fn emit_later(&self, text: String, ms: u32) -> Later<()> {
+        let listeners = self.listeners.clone();
+        Later::new(async move {
+            timer(Duration::from_millis(ms.into())).await;
+            for listener in &listeners {
+                listener.post(text.clone());
+            }
+            Ok::<(), String>(())
+        })
+    }
+
+    /// The app's data directory, as its `System` says.
+    pub(crate) fn data_dir(&self, sys: System) -> Option<String> {
+        sys.data_dir.map(|d| d.display().to_string())
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
     r.class::<Counter>()
+        .class::<Emitter>()
+        .module::<Sys>()
         .class::<Dial>()
         .module::<Tools>()
         .module::<Ints>()
@@ -387,6 +474,15 @@ fn other_registry() -> Registry {
 
 /// The app, compiled by nsh with the classes' set and loaded as bytecode.
 pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<MountBatch>) {
+    start_with(app, ui_sets, None)
+}
+
+/// [`start`], the app declaring `capabilities`.
+pub(crate) fn start_with(
+    app: &str,
+    ui_sets: Vec<Registry>,
+    capabilities: Option<&str>,
+) -> (Engine, Receiver<MountBatch>) {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-classes-{}-{}",
@@ -408,18 +504,25 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
-        app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        app: nsh_engine::App::Js(
+            unsafe { Bundle::bytecode(bytecode) }
+                .with_capabilities_json(capabilities)
+                .unwrap(),
+        ),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -530,6 +633,51 @@ fn functions_run_in_the_call_as_ops_or_as_tasks() {
     );
 }
 
+const SYSTEM: &str = r#"import { mount, signal, Text } from "nsh";
+import { Emitter, Sys } from "test/classes";
+
+const shown = signal("waiting");
+const msg = (f) => { try { return String(f()); } catch (e) { return `${e.constructor.name}: ${e.message}`; } };
+const settled = async (p) => { try { return String(await p); } catch (e) { return `${e.constructor.name}: ${e.message}`; } };
+setTimeout(async () => {
+  const lines = [];
+  const bytes = Sys.reversed(new Uint8Array([1, 2, 255]));
+  lines.push(`${bytes instanceof Uint8Array} ${[...bytes]}`);
+  lines.push(msg(() => Sys.reversed([1, 2])));
+  lines.push(`${Sys.mayConnect(4000)} ${Sys.mayConnect(4001)}`);
+  lines.push(`${Sys.take(2, true)} ${Sys.take(2, false)} ${msg(() => Sys.take(1, false))}`);
+  lines.push(msg(() => Sys.later(-1)));
+  lines.push(await settled(Sys.later(21)));
+  lines.push(await settled(Sys.later(0)));
+  const e = new Emitter();
+  const heard = [];
+  e.on((t) => heard.push(`a ${t}`));
+  e.on((t) => heard.push(`b ${t}`));
+  await e.emitLater("hi", 5);
+  await new Promise((r) => setTimeout(r, 10));
+  lines.push(heard.join(","));
+  lines.push(String(e.dataDir()));
+  shown.set(`done ${lines.join("|")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn calls_take_bytes_the_vms_system_and_start_tasks_that_throw_in_the_call() {
+    let (_engine, rx) = start_with(
+        SYSTEM,
+        vec![registry()],
+        Some(r#"{"network":{"sockets":["127.0.0.1:4000"]}}"#),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done true 255,2,1|TypeError: Sys.reversed: `bytes`: expected a Uint8Array, got an array|\
+         true false|1 2 RangeError: at most 1|RangeError: -1 is negative|42|Error: zero|\
+         a hi,b hi|null"
+    );
+}
+
 const ORDER: &str = r#"import { mount, signal, Text } from "nsh";
 import { Tools } from "test/classes";
 
@@ -574,6 +722,29 @@ setTimeout(async () => {
 
 mount(() => <Text>{shown()}</Text>);
 "#;
+
+const UNAWAITED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tools } from "test/classes";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  // Nobody waits for the first: its `Err` is an unhandled rejection.
+  Tools.markOrFail("no");
+  Tools.markOrFail("no").catch(() => {});
+  await Tools.markOrFail("yes");
+  shown.set("done");
+}, 0);
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn an_op_failing_unawaited_logs_an_unhandled_rejection() {
+    crate::logs::capture();
+    let (_engine, rx) = start(UNAWAITED, vec![registry()]);
+    assert_eq!(shown(&rx, "done"), "done");
+    let lines = crate::logs::wait_for("refused \"no\"");
+    assert_eq!(lines, ["unhandled rejection: Error: refused \"no\""]);
+}
 
 #[test]
 fn ops_returning_nothing_are_plain_calls_and_others_promises() {
@@ -707,6 +878,48 @@ fn classes_a_signature_names_are_exported_with_it() {
     assert_eq!(shown(&rx, "done"), "done true true twin");
 }
 
+/// Checks, exported one by one.
+#[module]
+pub(crate) struct Checks;
+
+#[module(flat, default)]
+impl Checks {
+    /// `name`, checked.
+    pub(crate) fn check(name: String) -> String {
+        format!("check {name}")
+    }
+}
+
+/// The variants of `check`.
+#[module]
+pub(crate) struct CheckVariants;
+
+#[module(name = "check")]
+impl CheckVariants {
+    /// The variants there are.
+    pub(crate) const COUNT: u32 = 1;
+
+    /// `name`, skipped.
+    pub(crate) fn skip(name: String) -> String {
+        format!("skip {name}")
+    }
+}
+
+const MEMBERS: &str = r#"import { mount, Text } from "nsh";
+import Checks, { check } from "test/checks";
+
+const lines = [check("a"), check.skip("b"), String(check.COUNT), Checks.check.skip("c"), typeof Checks.check.skip];
+mount(() => <Text>{`done ${lines.join("|")}`}</Text>);
+"#;
+
+#[test]
+fn a_module_named_like_a_function_is_on_the_function() {
+    let mut set = Registry::ui_set("test/checks");
+    set.module::<Checks>().module::<CheckVariants>();
+    let (_engine, rx) = start(MEMBERS, vec![set]);
+    assert_eq!(shown(&rx, "done"), "done check a|skip b|1|skip c|function");
+}
+
 const FRAMED: &str = r#"import { mount } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { Framed } from "test/classes";
@@ -729,7 +942,7 @@ fn a_style_prop_takes_what_a_host_elements_style_does() {
         ),
         "{items}"
     );
-    assert!(items.contains("offset_x: 1.0, offset_y: 2.0"), "{items}");
+    assert!(items.contains("offset_x: 1pt, offset_y: 2pt"), "{items}");
     assert!(items.contains("bindings: [(Opacity, "), "{items}");
 }
 

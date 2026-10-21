@@ -5,6 +5,11 @@
 //! frame with the payload and, if announced, one binary frame with the
 //! source map (JSON). A [`ServerMessage::Patch`] (a hot update) is framed the
 //! same way and precedes the bundle of the same version.
+//!
+//! `nsh test --target` drives a host's app through the same connection: the
+//! server's hello asks for a test session, and each [`ServerMessage::Step`]
+//! (a [`TestStep`] with an id) gets one [`ClientMessage::StepDone`] with
+//! that id, from the host's test agent (`nsh_testing::agent`).
 
 use serde::{Deserialize, Serialize};
 
@@ -35,12 +40,22 @@ pub enum ClientMessage {
         /// (`None`: a host that does not say).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         platform: Option<HostPlatform>,
-        /// The UI sets the host serves, by specifier (`nsh/ui/mobile`, an
+        /// The UI sets the host serves, by specifier (an
         /// app's own `gallery/native`): bundles importing others are not
         /// sent to it ([`ServerMessage::CannotRun`]). `None`: a host that
         /// does not say, which gets every bundle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ui_sets: Option<Vec<String>>,
+        /// The host takes test steps ([`ServerMessage::Step`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tests: bool,
+    },
+    /// The outcome of the [`ServerMessage::Step`] with this id.
+    StepDone {
+        /// The step's id.
+        id: u64,
+        /// What it gave, or why it failed.
+        outcome: StepOutcome,
     },
     /// A log line from the host (JS console or native).
     Log {
@@ -93,6 +108,18 @@ pub enum ServerMessage {
         /// by it.
         #[serde(default)]
         session: u64,
+        /// A test session: the host keeps the model of its app that steps
+        /// need from the first bundle on ([`ServerMessage::Step`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        test: bool,
+    },
+    /// A step of a test, which the host answers with a
+    /// [`ClientMessage::StepDone`] of the same id.
+    Step {
+        /// Its id.
+        id: u64,
+        /// What to do.
+        step: TestStep,
     },
     /// A rebuild started.
     Building,
@@ -141,6 +168,232 @@ pub enum ServerMessage {
         /// data.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app_id: Option<String>,
+        /// The VM limits to run the app with, as an embedding app would
+        /// set them (`nsh run --limits`, in `nsh_core::js::HostLimits`'
+        /// syntax: `memory=128MB,call=500ms`; empty: the embedding
+        /// defaults). `None`: none, as an app on its own has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limits: Option<String>,
+    },
+}
+
+/// A step of a test on a host's app, named as `nsh/test` names them: views
+/// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
+/// actions are native input at the view the selector names.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "step", rename_all = "snake_case")]
+pub enum TestStep {
+    /// Waits for the app's first render, then until it is quiet.
+    Ready {
+        /// How long to wait for the first render, in milliseconds.
+        timeout_ms: u64,
+    },
+    /// Presses the view (`app.press`).
+    Press {
+        /// The view.
+        selector: String,
+    },
+    /// Holds a press on the view for its long press delay (`app.longPress`).
+    LongPress {
+        /// The view.
+        selector: String,
+    },
+    /// Types `text` into the input (`app.type`).
+    Type {
+        /// The input.
+        selector: String,
+        /// What to type; `\n` is the return key in a single-line input.
+        text: String,
+    },
+    /// The return key in the input (`app.submit`).
+    Submit {
+        /// The input.
+        selector: String,
+    },
+    /// Empties the input (`app.clear`).
+    Clear {
+        /// The input.
+        selector: String,
+    },
+    /// Scrolls the scroll view by `distance` points along its axis
+    /// (`app.scroll`).
+    Scroll {
+        /// The scroll view.
+        selector: String,
+        /// Points; negative scrolls back.
+        distance: f32,
+    },
+    /// Goes back as the user does (`app.back`).
+    Back,
+    /// Lets the app run (`app.wait`).
+    Wait {
+        /// Milliseconds.
+        ms: u64,
+    },
+    /// Waits until a view matches, or none does (`app.waitFor`).
+    WaitFor {
+        /// The view.
+        selector: String,
+        /// Milliseconds at most.
+        timeout_ms: u64,
+        /// Until none matches.
+        gone: bool,
+    },
+    /// Waits for the next batch, `timeout_ms` at most: what polling a
+    /// condition waits for between looks (`app.waitUntil`).
+    NextChange {
+        /// Milliseconds at most.
+        timeout_ms: u64,
+    },
+    /// The texts on screen, in order: a list of strings.
+    Texts,
+    /// How many views match: a number.
+    Count {
+        /// The selector.
+        selector: String,
+    },
+    /// Whether a view matches: a boolean.
+    Shows {
+        /// The selector.
+        selector: String,
+    },
+    /// Whether the view takes input: a boolean.
+    Enabled {
+        /// The selector.
+        selector: String,
+    },
+    /// The text of the input: a string, or null when none matches.
+    Value {
+        /// The selector.
+        selector: String,
+    },
+    /// The dialogs the app showed, in order (`app.dialogs`): a list of
+    /// `nsh_core::Dialog`s.
+    Dialogs,
+    /// The oldest dialog not answered yet: an `nsh_core::Dialog`, or null.
+    PendingDialog,
+    /// Answers the oldest dialog not answered yet: presses its button
+    /// `button`, or closes it without one.
+    AnswerDialog {
+        /// The button's text (`None`: close it without one).
+        button: Option<String>,
+    },
+    /// A picture of the app's window: a PNG, base64-encoded (the test's
+    /// side saves it: the host may run on another machine).
+    Screenshot,
+    /// Makes the window `width` × `height` points (`app.setViewport`).
+    SetViewport {
+        /// Points.
+        width: f32,
+        /// Points.
+        height: f32,
+    },
+    /// Switches the system's appearance as the app sees it
+    /// (`app.setColorScheme`).
+    SetColorScheme {
+        /// Dark rather than light.
+        dark: bool,
+    },
+    /// Closes the app: the host exits.
+    Quit,
+    /// A question about the host's model of the app or about its views,
+    /// from a test agent that runs elsewhere (the web: `nsh` acts through
+    /// the browser, the page knows the app).
+    Scene {
+        /// The question.
+        query: SceneQuery,
+    },
+}
+
+/// What a test agent that runs outside the host asks of it
+/// ([`TestStep::Scene`]); the answers' shapes are `nsh_testing::agent`'s.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "query", rename_all = "snake_case")]
+pub enum SceneQuery {
+    /// How many batches the app applied and how long ago the last was.
+    Activity,
+    /// The app's errors since the last time, taken.
+    TakeErrors,
+    /// The one view `selector` names for a step on `target`.
+    Pick {
+        /// The selector.
+        selector: String,
+        /// What the step acts on.
+        target: PickTarget,
+    },
+    /// The scroll views around view `id`, innermost first.
+    ScrollAncestors {
+        /// The view.
+        id: u32,
+    },
+    /// View `id`'s long press delay in milliseconds, if it says.
+    LongPressDelay {
+        /// The view.
+        id: u32,
+    },
+    /// Whether scroll view `id` scrolls horizontally.
+    Horizontal {
+        /// The view.
+        id: u32,
+    },
+    /// The input `selector` names.
+    InputId {
+        /// The selector.
+        selector: String,
+    },
+    /// The oldest dialog was answered.
+    Answered,
+    /// View `id`'s bounds on screen, in points from the viewport's top left.
+    Bounds {
+        /// The view.
+        id: u32,
+    },
+    /// The viewport's size in points.
+    Viewport,
+    /// The text input `id` holds.
+    InputText {
+        /// The view.
+        id: u32,
+    },
+    /// Whether a native animation runs.
+    Animating,
+    /// Where to press to answer the dialog shown: its button `button`, or
+    /// outside it (`None`).
+    DialogPoint {
+        /// The button's text.
+        button: Option<String>,
+    },
+}
+
+/// What a step acts on, which decides the view a selector names
+/// ([`SceneQuery::Pick`]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PickTarget {
+    /// A press: the view, or the nearest around it that hears presses.
+    Pressable,
+    /// A long press.
+    LongPressable,
+    /// An input.
+    Input,
+    /// A scroll view.
+    ScrollView,
+}
+
+/// How a [`TestStep`] ended.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum StepOutcome {
+    /// It was taken; `value` is what a query gives (`null` for actions).
+    Done {
+        /// The value.
+        #[serde(default)]
+        value: serde_json::Value,
+    },
+    /// It could not be taken, or the app threw meanwhile.
+    Failed {
+        /// Why, with what is on screen.
+        message: String,
     },
 }
 
@@ -194,6 +447,7 @@ mod tests {
             source_map: true,
             capabilities: None,
             app_id: None,
+            limits: None,
         };
         // No declaration: the field is left out (older hosts read the same).
         assert_eq!(
@@ -215,7 +469,7 @@ mod tests {
             }
         ));
         let hello: ClientMessage = serde_json::from_str(
-            r#"{"type":"hello","protocol":2,"bytecode_version":"x","device":"Mac","platform":"vision","ui_sets":["nsh/ui/mobile"]}"#,
+            r#"{"type":"hello","protocol":2,"bytecode_version":"x","device":"Mac","platform":"vision","ui_sets":["app/native","app/charts"]}"#,
         )
         .unwrap();
         assert!(matches!(
@@ -224,7 +478,7 @@ mod tests {
                 platform: Some(HostPlatform::Other),
                 ui_sets: Some(sets),
                 ..
-            } if sets == ["nsh/ui/mobile"]
+            } if sets == ["app/native", "app/charts"]
         ));
     }
 }

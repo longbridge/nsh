@@ -31,7 +31,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use dispatch2::DispatchQueue;
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
+use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink, perf::PerfMonitor};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
@@ -51,7 +51,7 @@ enum Message {
     Frame,
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
-    Resized(Size),
+    Resized(Size<Points>),
 }
 
 /// How long the main thread waits for the layout at a new window size
@@ -113,7 +113,7 @@ impl MountSink for Sink {
         self.send(Message::HotUpdateFailed);
     }
 
-    fn resized(&self, size: Size) {
+    fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
     }
 }
@@ -167,11 +167,17 @@ pub(crate) struct Surface {
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
     /// scheme is the system's resolved with it ([`crate::system`]).
     pub(crate) appearance: Cell<nsh_core::platform::Appearance>,
+    /// The embedding app's locale and text size, standing in for the
+    /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
+    pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Frame callbacks of the platform's own animations (scroll glides,
     /// transitions): called on every frame while they return true.
     frame_callbacks: RefCell<Vec<FrameCallback>>,
+    /// The model of a test session's app (`nsh test --target`).
+    #[cfg(feature = "dev")]
+    test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The display link, while it runs.
     link: RefCell<Option<Retained<CADisplayLink>>>,
     /// The performance monitor ([`Surface::set_perf_monitor`]), and whether
@@ -224,8 +230,11 @@ impl Surface {
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             environment: Cell::new(environment),
             appearance: Cell::default(),
+            host_environment: Cell::default(),
             js_frame: Cell::new(false),
             frame_callbacks: RefCell::default(),
+            #[cfg(feature = "dev")]
+            test_model: RefCell::default(),
             link: RefCell::new(None),
             perf: RefCell::new(None),
             perf_on: Arc::new(AtomicBool::new(false)),
@@ -266,7 +275,7 @@ impl Surface {
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();
         let env = self.environment.get();
-        config.viewport = Size::new(env.window.0, env.window.1);
+        config.viewport = Size::new(env.window.width, env.window.height);
         config.environment = env;
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
@@ -333,7 +342,9 @@ impl Surface {
     }
 
     /// Updates the environment and tells the engine.
-    pub(crate) fn set_environment(&self, environment: Environment) {
+    pub(crate) fn set_environment(&self, mut environment: Environment) {
+        // The embedding app's settings over the system's.
+        self.host_environment.get().apply(&mut environment);
         if self.environment.replace(environment) != environment {
             self.control(|c| c.set_environment(environment));
             crate::system::environment_applied(self);
@@ -346,29 +357,29 @@ impl Surface {
     pub(crate) fn resized(self: &Rc<Self>, width: f32, height: f32) {
         {
             let mut s = self.root.state_mut();
-            if s.frame.width == width && s.frame.height == height {
+            if s.frame.size.width.0 == width && s.frame.size.height.0 == height {
                 return;
             }
-            s.frame.width = width;
-            s.frame.height = height;
+            s.frame.size.width.0 = width;
+            s.frame.size.height.0 = height;
         }
         let mut env = self.environment.get();
-        env.window = (width, height);
+        env.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
         self.environment.set(env);
         self.control(|c| {
-            c.resize(Size::new(width, height));
+            c.resize(Size::new(Points(width), Points(height)));
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);
         crate::system::surface_resized(self, width, height);
         // Full screen and the window's size change the title bar's area.
         crate::chrome::update_area(self);
-        self.await_layout(Size::new(width, height));
+        self.await_layout(Size::new(Points(width), Points(height)));
     }
 
     /// Waits for the engine's layout at `size` and applies what it sent
     /// meanwhile ([`Surface::resized`]).
-    fn await_layout(self: &Rc<Self>, size: Size) {
+    fn await_layout(self: &Rc<Self>, size: Size<Points>) {
         if self.resize_late.get() || self.mounter.try_borrow_mut().is_err() {
             return;
         }
@@ -468,6 +479,10 @@ impl Surface {
             }
             Message::Error(message) => {
                 log::error!("{message}");
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.borrow() {
+                    model.error(message.to_string());
+                }
                 if let Some(f) = &*self.on_error.borrow() {
                     f(&message);
                 }
@@ -495,6 +510,10 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.borrow() {
+            model.apply(batch);
+        }
     }
 
     /// Writes the animated values to the views and reports finished
@@ -517,6 +536,21 @@ impl Surface {
     ) {
         self.frame_callbacks.borrow_mut().push(Box::new(f));
         self.ensure_ticking();
+    }
+
+    /// Whether a native animation runs: the graph's, or the platform's own
+    /// (scroll glides, zooms).
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.anim.borrow().animating() || !self.frame_callbacks.borrow().is_empty()
+    }
+
+    /// Keeps the model `nsh test --target` steps see of the app
+    /// ([`nsh_testing::agent::Model`]): every batch applied and every error
+    /// go to it from now on.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
+        *self.test_model.borrow_mut() = model;
     }
 
     fn wants_frames(&self) -> bool {

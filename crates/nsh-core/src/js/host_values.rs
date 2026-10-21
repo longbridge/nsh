@@ -7,8 +7,9 @@ use std::sync::Arc;
 use super::host::{HostCx, HostInput, HostValue, field};
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
-    ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp, Viewability,
-    WebSource,
+    ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp, StatusBarSetting,
+    StatusBarStyle, Viewability, WebSource,
+    geometry::{Points, point, size},
     mount::ModalConfig,
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
     ui::TsTypes,
@@ -19,6 +20,11 @@ fn number<I: HostInput>(input: &I, key: &str) -> Option<f32> {
         .field(key)
         .and_then(|v| v.as_number())
         .map(|n| n as f32)
+}
+
+/// Field `key` of `input` as a number of points.
+fn points<I: HostInput>(input: &I, key: &str) -> Option<Points> {
+    number(input, key).map(Points)
 }
 
 /// `"https://…"` or a bundled asset `{ uri, width, height }`.
@@ -32,7 +38,7 @@ impl HostValue for ImageSource {
         }
         let uri = input.field("uri")?.as_string()?;
         let size = match (number(input, "width"), number(input, "height")) {
-            (Some(w), Some(h)) => Some((w, h)),
+            (Some(w), Some(h)) => Some(size(Points(w), Points(h))),
             _ => None,
         };
         Some(ImageSource {
@@ -67,15 +73,15 @@ impl HostValue for WebSource {
     }
 }
 
-/// A list's `contentContainerStyle`: the padding properties (numbers) and
+/// A list's `contentStyle`: the padding properties (numbers) and
 /// `gap` / `rowGap` / `columnGap`.
 impl HostValue for ListContentStyle {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
-        let n = |key| number(input, key);
-        let all = n("padding").unwrap_or(0.0);
+        let n = |key| points(input, key);
+        let all = n("padding").unwrap_or_default();
         let horizontal = n("paddingHorizontal").unwrap_or(all);
         let vertical = n("paddingVertical").unwrap_or(all);
-        let gap = n("gap").unwrap_or(0.0);
+        let gap = n("gap").unwrap_or_default();
         Some(ListContentStyle {
             padding: EdgeInsets {
                 top: n("paddingTop").unwrap_or(vertical),
@@ -90,13 +96,37 @@ impl HostValue for ListContentStyle {
 
     fn ts_type(types: &mut TsTypes) -> String {
         types.declare("ListContentStyle", |_| {
-            "/** Padding and gaps of a list's content (`contentContainerStyle`). */\n\
+            "/** Padding and gaps of a list's content (`contentStyle`). */\n\
              export interface ListContentStyle {\n  padding?: number;\n  paddingHorizontal?: number;\n  \
              paddingVertical?: number;\n  paddingTop?: number;\n  paddingRight?: number;\n  \
              paddingBottom?: number;\n  paddingLeft?: number;\n  gap?: number;\n  rowGap?: number;\n  \
              columnGap?: number;\n}"
                 .into()
         })
+    }
+}
+
+/// A page's or dialog's `statusBar`: `{ foreground, hidden, animated }`
+/// (`StatusBar`, declared with the navigation in `nsh/base`); the fields
+/// left out keep what is below. An unknown `foreground` is left out.
+impl HostValue for StatusBarSetting {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let flag = |key| input.field(key).and_then(|v| v.as_bool());
+        Some(StatusBarSetting {
+            style: input
+                .field("foreground")
+                .and_then(|v| v.as_string())
+                .and_then(|s| StatusBarStyle::from_name(&s)),
+            hidden: flag("hidden"),
+            animated: flag("animated"),
+        })
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "StatusBar".into()
     }
 }
 
@@ -120,7 +150,7 @@ impl HostValue for PanActivation {
         if !input.is_object() {
             return None;
         }
-        let offset = |key| number(input, key).map(f32::abs);
+        let offset = |key| points(input, key).map(Points::abs);
         Some(PanActivation {
             active_offset_x: offset("activeOffsetX"),
             active_offset_y: offset("activeOffsetY"),
@@ -311,7 +341,7 @@ impl HostValue for Ripple {
         Some(Ripple {
             color: field(input, "color", cx),
             borderless: flag("borderless"),
-            radius: number(input, "radius"),
+            radius: points(input, "radius"),
             foreground: flag("foreground"),
         })
     }
@@ -400,7 +430,7 @@ pub(crate) fn scroll_value<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Pr
 /// `hitSlop`: one number for every edge, or the edges.
 pub(crate) fn hit_slop<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Prop> {
     Some(Prop::HitSlop(match input.as_number() {
-        Some(n) => EdgeInsets::all(n as f32),
+        Some(n) => EdgeInsets::all(Points(n as f32)),
         None => EdgeInsets::decode(input, cx).unwrap_or_default(),
     }))
 }
@@ -427,14 +457,14 @@ pub(crate) fn ui_theme<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> 
     Some(Prop::UiTheme(input.as_string()?.into()))
 }
 
-/// `accessibilityRole`: one of the role names; others are no role (and a
+/// `role`: one of the role names; others are no role (and a
 /// warning).
 pub(crate) fn role<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<AccessibilityProp> {
     let role = AccessibilityRole::decode(input, cx);
     if role.is_none()
         && let Some(name) = input.as_string().filter(|n| !n.is_empty())
     {
-        cx.warn(format!("unknown accessibilityRole `{name}`"));
+        cx.warn(format!("unknown role `{name}`"));
     }
     Some(AccessibilityProp::Role(role.unwrap_or_default()))
 }
@@ -465,14 +495,14 @@ pub(crate) fn deceleration<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Sc
 /// `maintainVisibleContentPosition`: `{ autoscrollToBottomThreshold }`.
 pub(crate) fn visible_content<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::FollowEnd(
-        number(input, "autoscrollToBottomThreshold").map(|t| t.max(0.0)),
+        points(input, "autoscrollToBottomThreshold").map(|t| t.max(Points::ZERO)),
     ))
 }
 
 /// `contentOffset`: `{ x, y }`.
 pub(crate) fn content_offset<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ScrollProp> {
-    let n = |key| number(input, key).unwrap_or(0.0);
-    Some(ScrollProp::ContentOffset(n("x"), n("y")))
+    let n = |key| points(input, key).unwrap_or_default();
+    Some(ScrollProp::ContentOffset(point(n("x"), n("y"))))
 }
 
 /// `keyboardShouldPersistTaps`: a boolean or `"never"` / `"always"` /

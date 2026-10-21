@@ -29,7 +29,7 @@ function App() {
       >
         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#8250df" }} />
         <Text style={{ flex: 1, fontSize: 16 }}>一张卡片</Text>
-        <View onPress={() => liked.set(!liked())} activeOpacity={0.5} hitSlop={8}>
+        <View onPress={() => liked.set(!liked())} activeStyle={{ opacity: 0.5 }} hitSlop={8}>
           <Text style={{ fontSize: 22 }}>{liked() ? "♥" : "♡"}</Text>
         </View>
       </View>
@@ -48,18 +48,20 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 
 ## 属性
 
-除[通用属性](./index.md)外，`<View>` 没有自己的属性：`style`（`ViewStyle`）、`class`、`classList`、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressIn`、`onPressOut`、`delayLongPress`、`activeOpacity`、`underlayColor`、`underlayOpacity`、`hitSlop`、`pointerEvents`），`onHoverIn` / `onHoverOut`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`onLayout`、`ref`、`nativeID`、`testID`，手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
+除[通用属性](./index.md)外，`<View>` 没有自己的属性：`style`（`ViewStyle`）、`class`、`classList`、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressDown`、`onPressUp`、`delayLongPress`、`hitSlop`、`pointerEvents`），状态样式（`activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle`），`onHoverIn` / `onHoverMove` / `onHoverOut`、`onContextMenu`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`onLayout`、`ref`、`nativeID`、`testID`，手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
 
 ## 按压反馈
 
-带有按压处理函数的 view 就是可按压的。手指按下期间，有三种反馈在原生侧运行，不经过 JS：
+带有按压处理函数的 view 就是可按压的。它的反馈由应用决定：按下时的样式，在手指按下期间于原生侧生效，不经过 JS。`hoverStyle`、`focusStyle` 和 `disabledStyle` 对其他状态同样如此：
 
 ```tsx
 // 整个视图淡化。
-<View onPress={open} activeOpacity={0.6}>…</View>
+<View onPress={open} activeStyle={{ opacity: 0.6 }}>…</View>
 
-// 显示背景色并淡化子元素（默认 0.85）。
-<View onPress={open} underlayColor="#e5e7eb" underlayOpacity={0.7}>…</View>
+// 显示背景色；group-active: 设置子元素的样式。
+<View onPress={open} class="group" activeStyle={{ backgroundColor: "#e5e7eb" }}>
+  <Text class="group-active:opacity-70">Open</Text>
+</View>
 
 // 用 active: 类在按下时改变任意样式。
 <View onPress={open} class="bg-blue-600 active:bg-blue-800 active:scale-95">…</View>
@@ -79,8 +81,10 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 |---|---|---|
 | `onPress` | 无 | 在视图内完成一次点击。 |
 | `onLongPress` | 无 | 手指按住达到 `delayLongPress`（500 ms）。 |
-| `onPressIn` / `onPressOut` | 无 | 手指按下 / 抬起或移出。 |
-| `onHoverIn` / `onHoverOut` | 无 | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口；macOS、Linux 和 GPUI（见[悬停](./index.md#悬停)）。 |
+| `onPressDown` / `onPressUp` | 无 | 手指按下 / 抬起或移出。 |
+| `onHoverIn` / `onHoverOut` | 无 | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口（见[悬停](./index.md#悬停)）。 |
+| `onHoverMove` | `HoverEvent` | 没有按下按键时鼠标在视图上移动：`locationX` / `locationY`、`pageX` / `pageY` 和修饰键；每帧最多一次。 |
+| `onContextMenu` | `ContextMenuEvent` | 辅助按钮在视图上按下（见[上下文菜单](./index.md#上下文菜单)）。 |
 | `onFileDragEnter` / `onFileDragLeave` | 无 | 本地文件拖入 / 离开当前桌面拖放目标。 |
 | `onFileDrop` | `{ uris: string[] }` | 本地文件或目录被放到桌面拖放目标。 |
 | `onLayout` | `{ x, y, width, height }` | 相对父视图的 frame 发生变化。 |

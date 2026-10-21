@@ -52,7 +52,7 @@ mod transition;
 mod view;
 mod window;
 
-pub use nsh_core::platform::Appearance;
+pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, Bundle, Limits, Root};
 pub use windows;
 

@@ -102,6 +102,6 @@ fn typed_styles_send_gradients_filters_and_animations_natively() {
     assert!(count(&|s| s.transition.is_some()) >= 4);
     // Rings and inset shadows are box shadows; outlines their own.
     assert!(count(&|s| effects(s).box_shadows.iter().any(|b| b.inset)) >= 1);
-    assert_eq!(count(&|s| s.outline.width == 2.0), 1);
+    assert_eq!(count(&|s| s.outline.width.0 == 2.0), 1);
     assert!(tracked > 0, "press states are reported natively");
 }

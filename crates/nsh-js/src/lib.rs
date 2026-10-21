@@ -14,6 +14,7 @@ mod bytecode;
 mod canvas;
 mod chunks;
 mod classes;
+mod clock;
 mod components;
 mod console;
 mod declarations;
@@ -31,15 +32,30 @@ mod net;
 mod platform_modules;
 mod protocol;
 mod reactive;
+mod rejections;
+mod resource;
 mod sandbox;
+mod standard;
 mod state;
 mod timers;
 mod touch;
 mod web;
 
+// The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
+// nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
+#[cfg(test)]
+#[path = "../../nsh-core/src/geometry/unit_scan.rs"]
+mod unit_scan;
+
+#[cfg(test)]
+#[test]
+fn public_api_is_typed() {
+    unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
+}
+
 pub use nsh_core::{
     js::Limits,
-    platform::{ColorScheme, Environment, Idiom, Insets, Os},
+    platform::{ColorScheme, Environment, Idiom, Os},
 };
 
 pub use crate::{
@@ -53,3 +69,13 @@ pub use crate::{
     net::{FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, NetworkQueue, RequestId},
     sandbox::compile_harden,
 };
+
+/// The names native module `specifier` exports, if it is one: nsh's own
+/// modules, the runtime's and those of `ui_sets` (a bundler checks named
+/// imports against them).
+pub fn native_module_exports(
+    specifier: &str,
+    ui_sets: &[nsh_core::ui::description::SetDescription],
+) -> Option<Vec<String>> {
+    modules::ModuleTable::compiling(ui_sets).export_names(specifier)
+}

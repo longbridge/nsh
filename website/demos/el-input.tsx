@@ -7,7 +7,7 @@ function App() {
   const notes = signal("");
   const submitted = signal("");
   let passwordInput!: YNode;
-  const field = () => ({ ...ui().inset, fontSize: 16, color: ui().text, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 });
+  const field = () => ({ ...ui().inset, fontSize: 16, color: ui().text, placeholderColor: ui().faint, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 });
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 10 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>input</Text>
@@ -16,13 +16,12 @@ function App() {
       <Input
         style={field()}
         value={name()}
-        onChangeText={(text) => name.set(text)}
+        onChange={(text) => name.set(text)}
         placeholder="Ada Lovelace"
-        placeholderTextColor={ui().faint}
         autoCapitalize="words"
         maxLength={20}
         returnKeyType="next"
-        onSubmitEditing={() => passwordInput.focus()}
+        onSubmit={() => passwordInput.focus()}
       />
       <Text style={{ fontSize: 12, color: ui().muted }}>{name().length} / 20</Text>
 
@@ -31,11 +30,11 @@ function App() {
         ref={passwordInput}
         style={field()}
         value={password()}
-        onChangeText={(text) => password.set(text)}
-        secureTextEntry
+        onChange={(text) => password.set(text)}
+        masked
         autoComplete="current-password"
         returnKeyType="done"
-        onSubmitEditing={() => submitted.set(`Signed in as ${name() || "nobody"}`)}
+        onSubmit={() => submitted.set(`Signed in as ${name() || "nobody"}`)}
       />
 
       <Text style={{ color: ui().muted }}>Notes (multiline)</Text>
@@ -43,14 +42,13 @@ function App() {
         style={{ ...field(), height: 100 }}
         multiline
         value={notes()}
-        onChangeText={(text) => notes.set(text)}
+        onChange={(text) => notes.set(text)}
         placeholder="Anything else?"
-        placeholderTextColor={ui().faint}
       />
 
       <View
         onPress={() => submitted.set(`Signed in as ${name() || "nobody"}`)}
-        activeOpacity={0.7}
+        activeStyle={{ opacity: 0.7 }}
         disabled={password().length === 0}
         class="disabled:opacity-40"
         style={{

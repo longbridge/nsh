@@ -86,10 +86,10 @@ impl Target {
     }
 
     /// Sets event handler attribute `kind` (`null` removes it).
-    fn set_handler(&mut self, ctx: Ctx, kind: &str, value: Raw) {
+    pub(crate) fn set_handler(&mut self, cx: Ctx, kind: &str, value: Raw) {
         let callable = js::is_object(value);
         match self.handlers.iter_mut().find(|(k, _)| k == kind) {
-            Some((_, v)) if callable => *v = V::dup(ctx, value),
+            Some((_, v)) if callable => *v = V::dup(cx, value),
             Some(_) => {
                 self.handlers.retain(|(k, _)| k != kind);
                 if let Some(i) = self
@@ -101,7 +101,7 @@ impl Target {
                 }
             }
             None if callable => {
-                self.handlers.push((kind.to_owned(), V::dup(ctx, value)));
+                self.handlers.push((kind.to_owned(), V::dup(cx, value)));
                 self.listeners.push(Listener {
                     kind: kind.to_owned(),
                     callback: V::undefined(),
@@ -115,34 +115,28 @@ impl Target {
         }
     }
 
-    fn handler(&self, ctx: Ctx, kind: &str) -> V {
+    pub(crate) fn handler(&self, cx: Ctx, kind: &str) -> V {
         self.handlers
             .iter()
             .find(|(k, _)| k == kind)
-            .map_or_else(V::null, |(_, v)| V::dup(ctx, v.raw()))
+            .map_or_else(V::null, |(_, v)| V::dup(cx, v.raw()))
     }
 }
 
-fn target<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Target>> {
-    role(ctx, v, "EventTarget", |o| o.target())
+fn target<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Target>> {
+    role(cx, v, "EventTarget", |o| o.target())
 }
 
 /// `performance.now()`.
-fn now(ctx: Ctx) -> f64 {
-    let g = js::global(ctx);
-    js::get(ctx, g.raw(), "performance")
-        .and_then(|p| js::invoke(ctx, p.raw(), "now", &[]))
-        .and_then(|n| js::to_number(ctx, n.raw()))
+fn now(cx: Ctx) -> f64 {
+    let g = js::global(cx);
+    js::get(cx, g.raw(), "performance")
+        .and_then(|p| js::invoke(cx, p.raw(), "now", &[]))
+        .and_then(|n| js::to_number(cx, n.raw()))
         .unwrap_or(0.0)
 }
 
-fn new_event_data(
-    ctx: Ctx,
-    kind: String,
-    bubbles: bool,
-    cancelable: bool,
-    composed: bool,
-) -> Event {
+fn new_event_data(cx: Ctx, kind: String, bubbles: bool, cancelable: bool, composed: bool) -> Event {
     Event {
         kind,
         bubbles,
@@ -157,85 +151,85 @@ fn new_event_data(
         phase: 0,
         target: V::null(),
         current_target: V::null(),
-        time: now(ctx),
+        time: now(cx),
         detail: V::null(),
     }
 }
 
 /// An `EventInit`'s flags.
-fn event_init(ctx: Ctx, init: Raw) -> R<(bool, bool, bool)> {
+fn event_init(cx: Ctx, init: Raw) -> R<(bool, bool, bool)> {
     if js::is_nullish(init) {
         return Ok((false, false, false));
     }
     if !js::is_object(init) {
-        return Err(js::type_error(ctx, "EventInit must be an object"));
+        return Err(js::type_error(cx, "EventInit must be an object"));
     }
-    let flag = |name| js::get(ctx, init, name).map(|v| js::to_bool(ctx, v.raw()));
+    let flag = |name| js::get(cx, init, name).map(|v| js::to_bool(cx, v.raw()));
     Ok((flag("bubbles")?, flag("cancelable")?, flag("composed")?))
 }
 
 native!(
-    fn event_constructor(ctx, this, args) {
+    fn event_constructor(cx, this, args) {
         if args.len() == 0 {
-            return Err(js::type_error(ctx, "Event requires a type"));
+            return Err(js::type_error(cx, "Event requires a type"));
         }
-        let kind = js::to_string(ctx, args.get(0))?;
-        let (bubbles, cancelable, composed) = event_init(ctx, args.get(1))?;
-        let data = new_event_data(ctx, kind, bubbles, cancelable, composed);
-        instance(ctx, this, Class::Event, data)
+        let kind = js::to_string(cx, args.get(0))?;
+        let (bubbles, cancelable, composed) = event_init(cx, args.get(1))?;
+        let data = new_event_data(cx, kind, bubbles, cancelable, composed);
+        instance(cx, this, Class::Event, data)
     }
 );
 
 native!(
-    fn custom_event_constructor(ctx, this, args) {
+    fn custom_event_constructor(cx, this, args) {
         if args.len() == 0 {
-            return Err(js::type_error(ctx, "CustomEvent requires a type"));
+            return Err(js::type_error(cx, "CustomEvent requires a type"));
         }
-        let kind = js::to_string(ctx, args.get(0))?;
+        let kind = js::to_string(cx, args.get(0))?;
         let init = args.get(1);
-        let (bubbles, cancelable, composed) = event_init(ctx, init)?;
-        let mut data = new_event_data(ctx, kind, bubbles, cancelable, composed);
+        let (bubbles, cancelable, composed) = event_init(cx, init)?;
+        let mut data = new_event_data(cx, kind, bubbles, cancelable, composed);
         if js::is_object(init) {
-            data.detail = js::get(ctx, init, "detail")?;
+            data.detail = js::get(cx, init, "detail")?;
             if data.detail.is_undefined() {
                 data.detail = V::null();
             }
         }
-        instance(ctx, this, Class::CustomEvent, data)
+        instance(cx, this, Class::CustomEvent, data)
     }
 );
 
-fn event<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Event>> {
-    data::<Event>(ctx, v, "Event")
+fn event<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Event>> {
+    data::<Event>(cx, v, "Event")
 }
 
 macro_rules! event_getter {
-    ($name:ident, |$ctx:ident, $e:ident| $body:expr) => {
+    ($name:ident, |$cx:ident, $e:ident| $body:expr) => {
         native!(
-            fn $name($ctx, this, args) {
-                let $e = event($ctx, this)?;
+            fn $name($cx, this, args) {
+                let $e = event($cx, this)?;
                 Ok($body)
             }
         );
     };
 }
 
-event_getter!(event_type, |ctx, e| js::string(ctx, &e.kind)?);
-event_getter!(event_target, |ctx, e| V::dup(ctx, e.target.raw()));
-event_getter!(event_current_target, |ctx, e| V::dup(
-    ctx,
+event_getter!(event_type, |cx, e| js::string(cx, &e.kind)?);
+event_getter!(event_target, |cx, e| V::dup(cx, e.target.raw()));
+event_getter!(event_current_target, |cx, e| V::dup(
+    cx,
     e.current_target.raw()
 ));
-event_getter!(event_phase, |ctx, e| V::num(f64::from(e.phase)));
-event_getter!(event_bubbles, |ctx, e| V::bool(e.bubbles));
-event_getter!(event_cancelable, |ctx, e| V::bool(e.cancelable));
-event_getter!(event_default_prevented, |ctx, e| V::bool(e.canceled));
-event_getter!(event_composed, |ctx, e| V::bool(e.composed));
-event_getter!(event_is_trusted, |ctx, e| V::bool(e.trusted));
-event_getter!(event_time_stamp, |ctx, e| V::num(e.time));
-event_getter!(event_return_value, |ctx, e| V::bool(!e.canceled));
-event_getter!(event_cancel_bubble, |ctx, e| V::bool(e.stop_propagation));
-event_getter!(event_detail, |ctx, e| V::dup(ctx, e.detail.raw()));
+event_getter!(event_phase, |cx, e| V::num(f64::from(e.phase)));
+event_getter!(event_bubbles, |cx, e| V::bool(e.bubbles));
+event_getter!(event_cancelable, |cx, e| V::bool(e.cancelable));
+event_getter!(event_default_prevented, |cx, e| V::bool(e.canceled));
+event_getter!(event_composed, |cx, e| V::bool(e.composed));
+event_getter!(event_is_trusted, |cx, e| V::bool(e.trusted));
+event_getter!(event_time_stamp, |cx, e| V::num(e.time));
+event_getter!(event_return_value, |cx, e| V::bool(!e.canceled));
+event_getter!(event_cancel_bubble, |cx, e| V::bool(e.stop_propagation));
+event_getter!(event_detail, |cx, e| V::dup(cx, e.detail.raw()));
 
 impl Event {
     fn prevent_default(&mut self) {
@@ -246,40 +240,40 @@ impl Event {
 }
 
 native!(
-    fn event_set_return_value(ctx, this, args) {
-        if !js::to_bool(ctx, args.get(0)) {
-            event(ctx, this)?.prevent_default();
+    fn event_set_return_value(cx, this, args) {
+        if !js::to_bool(cx, args.get(0)) {
+            event(cx, this)?.prevent_default();
         }
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn event_set_cancel_bubble(ctx, this, args) {
-        if js::to_bool(ctx, args.get(0)) {
-            event(ctx, this)?.stop_propagation = true;
+    fn event_set_cancel_bubble(cx, this, args) {
+        if js::to_bool(cx, args.get(0)) {
+            event(cx, this)?.stop_propagation = true;
         }
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn event_prevent_default(ctx, this, args) {
-        event(ctx, this)?.prevent_default();
+    fn event_prevent_default(cx, this, args) {
+        event(cx, this)?.prevent_default();
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn event_stop_propagation(ctx, this, args) {
-        event(ctx, this)?.stop_propagation = true;
+    fn event_stop_propagation(cx, this, args) {
+        event(cx, this)?.stop_propagation = true;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn event_stop_immediate_propagation(ctx, this, args) {
-        let mut e = event(ctx, this)?;
+    fn event_stop_immediate_propagation(cx, this, args) {
+        let mut e = event(cx, this)?;
         e.stop_propagation = true;
         e.stop_immediate = true;
         Ok(V::undefined())
@@ -287,24 +281,24 @@ native!(
 );
 
 native!(
-    fn event_composed_path(ctx, this, args) {
+    fn event_composed_path(cx, this, args) {
         let current = {
-            let e = event(ctx, this)?;
-            (!e.current_target.is_nullish()).then(|| V::dup(ctx, e.current_target.raw()))
+            let e = event(cx, this)?;
+            (!e.current_target.is_nullish()).then(|| V::dup(cx, e.current_target.raw()))
         };
-        js::new_array(ctx, current.into_iter().collect())
+        js::new_array(cx, current.into_iter().collect())
     }
 );
 
 native!(
     /// `initEvent(type, bubbles, cancelable)` (legacy).
-    fn event_init_event(ctx, this, args) {
-        let kind = js::to_string(ctx, args.get(0))?;
-        let mut e = event(ctx, this)?;
+    fn event_init_event(cx, this, args) {
+        let kind = js::to_string(cx, args.get(0))?;
+        let mut e = event(cx, this)?;
         if !e.dispatching {
             e.kind = kind;
-            e.bubbles = js::to_bool(ctx, args.get(1));
-            e.cancelable = js::to_bool(ctx, args.get(2));
+            e.bubbles = js::to_bool(cx, args.get(1));
+            e.cancelable = js::to_bool(cx, args.get(2));
             e.canceled = false;
             e.stop_propagation = false;
             e.stop_immediate = false;
@@ -318,58 +312,58 @@ native!(
 // --- EventTarget ----------------------------------------------------------
 
 native!(
-    fn target_constructor(ctx, this, args) {
-        instance(ctx, this, Class::EventTarget, Target::default())
+    fn target_constructor(cx, this, args) {
+        instance(cx, this, Class::EventTarget, Target::default())
     }
 );
 
 /// The flags of `addEventListener`'s options: capture, once, passive,
 /// signal.
-fn listener_options(ctx: Ctx, options: Raw) -> R<(bool, bool, bool, Option<V>)> {
+fn listener_options(cx: Ctx, options: Raw) -> R<(bool, bool, bool, Option<V>)> {
     if !js::is_object(options) {
-        return Ok((js::to_bool(ctx, options), false, false, None));
+        return Ok((js::to_bool(cx, options), false, false, None));
     }
-    let flag = |name| js::get(ctx, options, name).map(|v| js::to_bool(ctx, v.raw()));
+    let flag = |name| js::get(cx, options, name).map(|v| js::to_bool(cx, v.raw()));
     let (capture, once, passive) = (flag("capture")?, flag("once")?, flag("passive")?);
-    let signal = js::get(ctx, options, "signal")?;
+    let signal = js::get(cx, options, "signal")?;
     let signal = if signal.is_undefined() {
         None
-    } else if super::is::<Signal>(ctx, signal.raw()) {
+    } else if super::is::<Signal>(cx, signal.raw()) {
         Some(signal)
     } else {
-        return Err(js::type_error(ctx, "signal is not an AbortSignal"));
+        return Err(js::type_error(cx, "signal is not an AbortSignal"));
     };
     Ok((capture, once, passive, signal))
 }
 
 /// `removeEventListener`'s capture flag.
-fn capture_option(ctx: Ctx, options: Raw) -> R<bool> {
+fn capture_option(cx: Ctx, options: Raw) -> R<bool> {
     if js::is_object(options) {
-        let c = js::get(ctx, options, "capture")?;
-        Ok(js::to_bool(ctx, c.raw()))
+        let c = js::get(cx, options, "capture")?;
+        Ok(js::to_bool(cx, c.raw()))
     } else {
-        Ok(js::to_bool(ctx, options))
+        Ok(js::to_bool(cx, options))
     }
 }
 
 native!(
-    fn add_event_listener(ctx, this, args) {
-        let kind = js::to_string(ctx, args.get(0))?;
+    fn add_event_listener(cx, this, args) {
+        let kind = js::to_string(cx, args.get(0))?;
         let callback = args.get(1);
-        let (capture, once, passive, signal) = listener_options(ctx, args.get(2))?;
+        let (capture, once, passive, signal) = listener_options(cx, args.get(2))?;
         if js::is_nullish(callback) {
             return Ok(V::undefined());
         }
         if !js::is_object(callback) {
-            return Err(js::type_error(ctx, "the listener is not an object"));
+            return Err(js::type_error(cx, "the listener is not an object"));
         }
         if let Some(s) = &signal
-            && aborted(ctx, s.raw())?
+            && aborted(cx, s.raw())?
         {
             return Ok(V::undefined());
         }
         {
-            let mut t = target(ctx, this)?;
+            let mut t = target(cx, this)?;
             let exists = t.listeners.iter().any(|l| {
                 l.kind == kind && l.capture == capture && js::same(l.callback.raw(), callback)
             });
@@ -378,7 +372,7 @@ native!(
             }
             t.listeners.push(Listener {
                 kind: kind.clone(),
-                callback: V::dup(ctx, callback),
+                callback: V::dup(cx, callback),
                 capture,
                 once,
                 passive,
@@ -387,34 +381,34 @@ native!(
         }
         if let Some(s) = signal {
             // Aborting the signal removes the listener.
-            let captures = vec![V::dup(ctx, this), V::dup(ctx, callback)];
-            let remove = js::closure(ctx, captures, move |ctx, c, _| {
-                target(ctx, c[0].raw())?.remove(&kind, c[1].raw(), capture);
+            let captures = vec![V::dup(cx, this), V::dup(cx, callback)];
+            let remove = js::closure(cx, captures, move |cx, c, _| {
+                target(cx, c[0].raw())?.remove(&kind, c[1].raw(), capture);
                 Ok(V::undefined())
             })?;
-            add_algorithm(ctx, s.raw(), remove)?;
+            add_algorithm(cx, s.raw(), remove)?;
         }
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn remove_event_listener(ctx, this, args) {
-        let kind = js::to_string(ctx, args.get(0))?;
-        let capture = capture_option(ctx, args.get(2))?;
-        target(ctx, this)?.remove(&kind, args.get(1), capture);
+    fn remove_event_listener(cx, this, args) {
+        let kind = js::to_string(cx, args.get(0))?;
+        let capture = capture_option(cx, args.get(2))?;
+        target(cx, this)?.remove(&kind, args.get(1), capture);
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn dispatch_event(ctx, this, args) {
+    fn dispatch_event(cx, this, args) {
         let e = args.get(0);
-        if !super::is::<Event>(ctx, e) {
-            return Err(js::type_error(ctx, "dispatchEvent needs an Event"));
+        if !super::is::<Event>(cx, e) {
+            return Err(js::type_error(cx, "dispatchEvent needs an Event"));
         }
-        event(ctx, e)?.trusted = false;
-        dispatch(ctx, this, e).map(V::bool)
+        event(cx, e)?.trusted = false;
+        dispatch(cx, this, e).map(V::bool)
     }
 );
 
@@ -423,24 +417,24 @@ native!(
 type Snapshot = (V, bool, bool, bool, Rc<Cell<bool>>);
 
 /// Dispatches event `e` at `target`: whether it was not canceled.
-pub(crate) fn dispatch(ctx: Ctx, target_obj: Raw, e: Raw) -> R<bool> {
+pub(crate) fn dispatch(cx: Ctx, target_obj: Raw, e: Raw) -> R<bool> {
     let kind = {
-        let mut ev = event(ctx, e)?;
+        let mut ev = event(cx, e)?;
         if ev.dispatching {
             return Err(js::throw_dom(
-                ctx,
+                cx,
                 "The event is already being dispatched.",
                 "InvalidStateError",
             ));
         }
         ev.dispatching = true;
-        ev.target = V::dup(ctx, target_obj);
-        ev.current_target = V::dup(ctx, target_obj);
+        ev.target = V::dup(cx, target_obj);
+        ev.current_target = V::dup(cx, target_obj);
         ev.phase = AT_TARGET as u8;
         ev.kind.clone()
     };
     // The listeners as they are now; removals during dispatch still apply.
-    let snapshot: Vec<Snapshot> = target(ctx, target_obj)?
+    let snapshot: Vec<Snapshot> = target(cx, target_obj)?
         .listeners
         .iter()
         .filter(|l| l.kind == kind)
@@ -460,39 +454,39 @@ pub(crate) fn dispatch(ctx: Ctx, target_obj: Raw, e: Raw) -> R<bool> {
                 continue;
             }
             if *once {
-                target(ctx, target_obj)?.remove(&kind, callback.raw(), *capture);
+                target(cx, target_obj)?.remove(&kind, callback.raw(), *capture);
             }
             let callback = if callback.is_undefined() {
                 // An event handler attribute: its current value.
-                target(ctx, target_obj)?.handler(ctx, &kind)
+                target(cx, target_obj)?.handler(cx, &kind)
             } else {
                 callback.clone_ref()
             };
-            event(ctx, e)?.in_passive = *passive;
-            let result = if js::is_function(ctx, callback.raw()) {
-                js::call(ctx, callback.raw(), target_obj, &[e])
+            event(cx, e)?.in_passive = *passive;
+            let result = if js::is_function(cx, callback.raw()) {
+                js::call(cx, callback.raw(), target_obj, &[e])
             } else if js::is_object(callback.raw()) {
-                js::get(ctx, callback.raw(), "handleEvent").and_then(|h| {
-                    if js::is_function(ctx, h.raw()) {
-                        js::call(ctx, h.raw(), callback.raw(), &[e])
+                js::get(cx, callback.raw(), "handleEvent").and_then(|h| {
+                    if js::is_function(cx, h.raw()) {
+                        js::call(cx, h.raw(), callback.raw(), &[e])
                     } else {
-                        Err(js::type_error(ctx, "handleEvent is not a function"))
+                        Err(js::type_error(cx, "handleEvent is not a function"))
                     }
                 })
             } else {
                 Ok(V::undefined())
             };
             if result.is_err() {
-                js::report_exception(ctx);
+                js::report_exception(cx);
             }
-            let mut ev = event(ctx, e)?;
+            let mut ev = event(cx, e)?;
             ev.in_passive = false;
             if ev.stop_immediate {
                 break 'phases;
             }
         }
     }
-    let mut ev = event(ctx, e)?;
+    let mut ev = event(cx, e)?;
     ev.dispatching = false;
     ev.phase = 0;
     ev.current_target = V::null();
@@ -502,11 +496,17 @@ pub(crate) fn dispatch(ctx: Ctx, target_obj: Raw, e: Raw) -> R<bool> {
 }
 
 /// Fires a trusted event `kind` at `target`.
-pub(crate) fn fire(ctx: Ctx, target_obj: Raw, kind: &str) -> R<bool> {
-    let mut data = new_event_data(ctx, kind.to_owned(), false, false, false);
+pub(crate) fn fire(cx: Ctx, target_obj: Raw, kind: &str) -> R<bool> {
+    let e = trusted(cx, kind)?;
+    dispatch(cx, target_obj, e.raw())
+}
+
+/// A new trusted event `kind`, not dispatched yet.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn trusted(cx: Ctx, kind: &str) -> R<V> {
+    let mut data = new_event_data(cx, kind.to_owned(), false, false, false);
     data.trusted = true;
-    let e = instance(ctx, js::UNDEFINED, Class::Event, data)?;
-    dispatch(ctx, target_obj, e.raw())
+    instance(cx, js::UNDEFINED, Class::Event, data)
 }
 
 // --- AbortSignal ----------------------------------------------------------
@@ -541,33 +541,33 @@ impl Object for Signal {
     }
 }
 
-fn signal<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Signal>> {
-    data::<Signal>(ctx, v, "AbortSignal")
+fn signal<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Signal>> {
+    data::<Signal>(cx, v, "AbortSignal")
 }
 
 /// A new signal, not aborted.
-pub(crate) fn new_signal(ctx: Ctx) -> R<V> {
-    instance(ctx, js::UNDEFINED, Class::AbortSignal, Signal::default())
+pub(crate) fn new_signal(cx: Ctx) -> R<V> {
+    instance(cx, js::UNDEFINED, Class::AbortSignal, Signal::default())
 }
 
 /// Whether `v` is an AbortSignal.
-pub(crate) fn is_signal(ctx: Ctx, v: Raw) -> bool {
-    super::is::<Signal>(ctx, v)
+pub(crate) fn is_signal(cx: Ctx, v: Raw) -> bool {
+    super::is::<Signal>(cx, v)
 }
 
 /// Whether signal `s` is aborted.
-pub(crate) fn aborted(ctx: Ctx, s: Raw) -> R<bool> {
-    Ok(signal(ctx, s)?.aborted)
+pub(crate) fn aborted(cx: Ctx, s: Raw) -> R<bool> {
+    Ok(signal(cx, s)?.aborted)
 }
 
 /// Signal `s`'s abort reason.
-pub(crate) fn reason(ctx: Ctx, s: Raw) -> R<V> {
-    Ok(signal(ctx, s)?.reason.clone_ref())
+pub(crate) fn reason(cx: Ctx, s: Raw) -> R<V> {
+    Ok(signal(cx, s)?.reason.clone_ref())
 }
 
 /// Runs `f` when signal `s` aborts; its id, to remove it.
-pub(crate) fn add_algorithm(ctx: Ctx, s: Raw, f: V) -> R<u32> {
-    let mut sig = signal(ctx, s)?;
+pub(crate) fn add_algorithm(cx: Ctx, s: Raw, f: V) -> R<u32> {
+    let mut sig = signal(cx, s)?;
     if sig.aborted {
         return Ok(u32::MAX);
     }
@@ -578,9 +578,9 @@ pub(crate) fn add_algorithm(ctx: Ctx, s: Raw, f: V) -> R<u32> {
 }
 
 /// Removes abort algorithm `id` of `s`.
-pub(crate) fn remove_algorithm(ctx: Ctx, s: Raw, id: u32) -> R<()> {
+pub(crate) fn remove_algorithm(cx: Ctx, s: Raw, id: u32) -> R<()> {
     let removed = {
-        let mut sig = signal(ctx, s)?;
+        let mut sig = signal(cx, s)?;
         sig.algorithms
             .iter()
             .position(|(i, _)| *i == id)
@@ -591,19 +591,19 @@ pub(crate) fn remove_algorithm(ctx: Ctx, s: Raw, id: u32) -> R<()> {
     Ok(())
 }
 
-fn default_reason(ctx: Ctx) -> R<V> {
-    js::dom_exception(ctx, "signal is aborted without reason", "AbortError")
+fn default_reason(cx: Ctx) -> R<V> {
+    js::dom_exception(cx, "signal is aborted without reason", "AbortError")
 }
 
 /// Aborts signal `s` with `reason` (`undefined`: an `AbortError`).
-pub(crate) fn abort(ctx: Ctx, s: Raw, reason: Raw) -> R<()> {
+pub(crate) fn abort(cx: Ctx, s: Raw, reason: Raw) -> R<()> {
     let reason = if js::is_undefined(reason) {
-        default_reason(ctx)?
+        default_reason(cx)?
     } else {
-        V::dup(ctx, reason)
+        V::dup(cx, reason)
     };
     let weak = {
-        let mut sig = signal(ctx, s)?;
+        let mut sig = signal(cx, s)?;
         if sig.aborted {
             return Ok(());
         }
@@ -613,11 +613,11 @@ pub(crate) fn abort(ctx: Ctx, s: Raw, reason: Raw) -> R<()> {
     };
     let mut dependents = Vec::new();
     for w in weak {
-        let d = js::invoke(ctx, w.raw(), "deref", &[])?;
+        let d = js::invoke(cx, w.raw(), "deref", &[])?;
         if js::is_undefined(d.raw()) {
             continue;
         }
-        let mut dep = signal(ctx, d.raw())?;
+        let mut dep = signal(cx, d.raw())?;
         if !dep.aborted {
             dep.aborted = true;
             dep.reason = reason.clone_ref();
@@ -625,118 +625,118 @@ pub(crate) fn abort(ctx: Ctx, s: Raw, reason: Raw) -> R<()> {
             dependents.push(d);
         }
     }
-    run_abort_steps(ctx, s)?;
+    run_abort_steps(cx, s)?;
     for d in dependents {
-        run_abort_steps(ctx, d.raw())?;
+        run_abort_steps(cx, d.raw())?;
     }
     Ok(())
 }
 
-fn run_abort_steps(ctx: Ctx, s: Raw) -> R<()> {
-    let algorithms = std::mem::take(&mut signal(ctx, s)?.algorithms);
+fn run_abort_steps(cx: Ctx, s: Raw) -> R<()> {
+    let algorithms = std::mem::take(&mut signal(cx, s)?.algorithms);
     for (_, f) in algorithms {
-        if js::call(ctx, f.raw(), js::UNDEFINED, &[]).is_err() {
-            js::report_exception(ctx);
+        if js::call(cx, f.raw(), js::UNDEFINED, &[]).is_err() {
+            js::report_exception(cx);
         }
     }
-    fire(ctx, s, "abort")?;
+    fire(cx, s, "abort")?;
     Ok(())
 }
 
 native!(
-    fn signal_aborted(ctx, this, args) {
-        Ok(V::bool(signal(ctx, this)?.aborted))
+    fn signal_aborted(cx, this, args) {
+        Ok(V::bool(signal(cx, this)?.aborted))
     }
 );
 
 native!(
-    fn signal_reason(ctx, this, args) {
-        Ok(signal(ctx, this)?.reason.clone_ref())
+    fn signal_reason(cx, this, args) {
+        Ok(signal(cx, this)?.reason.clone_ref())
     }
 );
 
 native!(
-    fn signal_throw_if_aborted(ctx, this, args) {
-        let sig = signal(ctx, this)?;
+    fn signal_throw_if_aborted(cx, this, args) {
+        let sig = signal(cx, this)?;
         if sig.aborted {
             let reason = sig.reason.clone_ref();
             drop(sig);
-            return Err(js::throw(ctx, reason));
+            return Err(js::throw(cx, reason));
         }
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn signal_onabort(ctx, this, args) {
-        Ok(target(ctx, this)?.handler(ctx, "abort"))
+    fn signal_onabort(cx, this, args) {
+        Ok(target(cx, this)?.handler(cx, "abort"))
     }
 );
 
 native!(
-    fn signal_set_onabort(ctx, this, args) {
-        target(ctx, this)?.set_handler(ctx, "abort", args.get(0));
+    fn signal_set_onabort(cx, this, args) {
+        target(cx, this)?.set_handler(cx, "abort", args.get(0));
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn signal_abort(ctx, this, args) {
-        let s = new_signal(ctx)?;
-        abort(ctx, s.raw(), args.get(0))?;
+    fn signal_abort(cx, this, args) {
+        let s = new_signal(cx)?;
+        abort(cx, s.raw(), args.get(0))?;
         Ok(s)
     }
 );
 
 native!(
-    fn signal_timeout(ctx, this, args) {
-        let ms = js::to_number(ctx, args.get(0))?;
+    fn signal_timeout(cx, this, args) {
+        let ms = js::to_number(cx, args.get(0))?;
         if !ms.is_finite() || ms < 0.0 {
-            return Err(js::type_error(ctx, "the timeout must be a non-negative number"));
+            return Err(js::type_error(cx, "the timeout must be a non-negative number"));
         }
-        let s = new_signal(ctx)?;
-        let fire = js::closure(ctx, vec![s.clone_ref()], |ctx, c, _| {
-            let reason = js::dom_exception(ctx, "signal timed out", "TimeoutError")?;
-            abort(ctx, c[0].raw(), reason.raw())?;
+        let s = new_signal(cx)?;
+        let fire = js::closure(cx, vec![s.clone_ref()], |cx, c, _| {
+            let reason = js::dom_exception(cx, "signal timed out", "TimeoutError")?;
+            abort(cx, c[0].raw(), reason.raw())?;
             Ok(V::undefined())
         })?;
-        let g = js::global(ctx);
-        let set_timeout = js::get(ctx, g.raw(), "setTimeout")?;
-        js::call(ctx, set_timeout.raw(), js::UNDEFINED, &[fire.raw(), V::num(ms).raw()])?;
+        let g = js::global(cx);
+        let set_timeout = js::get(cx, g.raw(), "setTimeout")?;
+        js::call(cx, set_timeout.raw(), js::UNDEFINED, &[fire.raw(), V::num(ms).raw()])?;
         Ok(s)
     }
 );
 
 native!(
-    fn signal_any(ctx, this, args) {
+    fn signal_any(cx, this, args) {
         let mut signals = Vec::new();
-        js::for_each(ctx, args.get(0), |s| {
-            if !is_signal(ctx, s.raw()) {
-                return Err(js::type_error(ctx, "AbortSignal.any takes AbortSignals"));
+        js::for_each(cx, args.get(0), |s| {
+            if !is_signal(cx, s.raw()) {
+                return Err(js::type_error(cx, "AbortSignal.any takes AbortSignals"));
             }
             signals.push(s);
             Ok(())
         })?;
-        let result = new_signal(ctx)?;
+        let result = new_signal(cx)?;
         for s in &signals {
-            let sig = signal(ctx, s.raw())?;
+            let sig = signal(cx, s.raw())?;
             if sig.aborted {
                 let reason = sig.reason.clone_ref();
                 drop(sig);
-                let mut r = signal(ctx, result.raw())?;
+                let mut r = signal(cx, result.raw())?;
                 r.aborted = true;
                 r.reason = reason;
                 drop(r);
                 return Ok(result);
             }
         }
-        signal(ctx, result.raw())?.dependent = true;
-        let g = js::global(ctx);
-        let weak_ref = js::get(ctx, g.raw(), "WeakRef")?;
+        signal(cx, result.raw())?.dependent = true;
+        let g = js::global(cx);
+        let weak_ref = js::get(cx, g.raw(), "WeakRef")?;
         for s in &signals {
             // A dependent signal's sources stand for it.
             let sources = {
-                let sig = signal(ctx, s.raw())?;
+                let sig = signal(cx, s.raw())?;
                 if sig.dependent {
                     sig.sources.iter().map(V::clone_ref).collect()
                 } else {
@@ -744,24 +744,24 @@ native!(
                 }
             };
             for source in sources {
-                let already = signal(ctx, result.raw())?
+                let already = signal(cx, result.raw())?
                     .sources
                     .iter()
                     .any(|x| js::same(x.raw(), source.raw()));
                 if already {
                     continue;
                 }
-                let weak = js::construct(ctx, weak_ref.raw(), &[result.raw()])?;
+                let weak = js::construct(cx, weak_ref.raw(), &[result.raw()])?;
                 let stale = {
-                    let mut src = signal(ctx, source.raw())?;
+                    let mut src = signal(cx, source.raw())?;
                     src.dependents.push(weak);
                     // Dependents that were collected: dropped now and then.
                     src.dependents.len() > 32
                 };
                 if stale {
-                    prune(ctx, source.raw())?;
+                    prune(cx, source.raw())?;
                 }
-                signal(ctx, result.raw())?.sources.push(source);
+                signal(cx, result.raw())?.sources.push(source);
             }
         }
         Ok(result)
@@ -769,16 +769,16 @@ native!(
 );
 
 /// Drops the collected dependents of `s`.
-fn prune(ctx: Ctx, s: Raw) -> R<()> {
-    let weak = std::mem::take(&mut signal(ctx, s)?.dependents);
+fn prune(cx: Ctx, s: Raw) -> R<()> {
+    let weak = std::mem::take(&mut signal(cx, s)?.dependents);
     let mut alive = Vec::with_capacity(weak.len());
     for w in weak {
-        let d = js::invoke(ctx, w.raw(), "deref", &[])?;
+        let d = js::invoke(cx, w.raw(), "deref", &[])?;
         if !js::is_undefined(d.raw()) {
             alive.push(w);
         }
     }
-    signal(ctx, s)?.dependents.extend(alive);
+    signal(cx, s)?.dependents.extend(alive);
     Ok(())
 }
 
@@ -793,22 +793,22 @@ trace!(Controller { signal });
 impl Object for Controller {}
 
 native!(
-    fn controller_constructor(ctx, this, args) {
-        let signal = new_signal(ctx)?;
-        instance(ctx, this, Class::AbortController, Controller { signal })
+    fn controller_constructor(cx, this, args) {
+        let signal = new_signal(cx)?;
+        instance(cx, this, Class::AbortController, Controller { signal })
     }
 );
 
 native!(
-    fn controller_signal(ctx, this, args) {
-        Ok(data::<Controller>(ctx, this, "AbortController")?.signal.clone_ref())
+    fn controller_signal(cx, this, args) {
+        Ok(data::<Controller>(cx, this, "AbortController")?.signal.clone_ref())
     }
 );
 
 native!(
-    fn controller_abort(ctx, this, args) {
-        let s = data::<Controller>(ctx, this, "AbortController")?.signal.clone_ref();
-        abort(ctx, s.raw(), args.get(0))?;
+    fn controller_abort(cx, this, args) {
+        let s = data::<Controller>(cx, this, "AbortController")?.signal.clone_ref();
+        abort(cx, s.raw(), args.get(0))?;
         Ok(V::undefined())
     }
 );

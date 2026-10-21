@@ -1,7 +1,8 @@
 # Reactive Rust components (design proposal)
 
 Status: implemented. `docs/dev/components.md` is the reference for the API as built; this page keeps the proposal
-and its reasons. Where the implementation differs from the proposal:
+and its reasons. The components it takes as examples (`Button`, `Stepper`, `Sheet` of `nsh-ui-mobile`) were NSH's own
+when it was written; NSH now ships capabilities and no styled components, and the same API writes an app's own. Where the implementation differs from the proposal:
 
 - **The shape.** `#[component] fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement`:
   `Scope` is typed by the event, not the component (it only emits, reads the insets and registers methods), and the
@@ -287,6 +288,9 @@ dynamic(move || if wide.get() { two_columns() } else { one_column() })
   when the owner goes. Async code writes signals directly; `WeakComponent`, `this.update(..)` and `Updated` go.
 - `set_timeout`, `set_interval`, `request_animation_frame`, `timer(..).await`, `next_frame().await`: free functions,
   owned the same way. Dropping the returned handle still cancels early.
+- `resource(source, fetcher)` (TS: `resource`): a render effect reads the source and spawns the load, whose task the
+  next run (or the owner's disposal) drops, cancelling what it awaited; the value, error and state are signals, and
+  which load counts is `nsh_core::resource::Runs`, the JS face's too.
 - Platform services (`dialog`, `toast`, `set_clipboard`, `clipboard_string`, `announce`, `image_size`, ...) become free
   functions on the current runtime, as `nsh/*` modules are free functions in TSX. `Context`, `RenderCx` and `AsyncCx`
   go; `ModuleCx` keeps only what a module call needs.
@@ -319,7 +323,7 @@ children holders, the JS glue, the declarations.
 
 ## Example: `Stepper`
 
-Today (`crates/nsh-ui-mobile/src/stepper.rs`, 230 lines): state in fields, `setup` and `props_changed` to keep the value
+At the time (`crates/nsh-ui-mobile/src/stepper.rs`, 230 lines): state in fields, `setup` and `props_changed` to keep the value
 in range, `Context` methods, a `spawn` with `this.update(..)` to repeat while held, and a render that runs again on
 every step.
 
@@ -373,16 +377,16 @@ impl Component for Stepper {
                 .size_10()
                 .items_center()
                 .justify_center()
-                .rounded(px(theme().radius))
-                .bg(theme().secondary)
-                .active(|s| s.bg(theme().secondary_active))
+                .rounded(theme().radius())
+                .bg(theme().muted())
+                .active(|s| s.bg(theme().border()))
                 .style_when(off, |s| s.opacity(0.4))
                 .disabled(off)
                 .role(AccessibilityRole::Button)
                 .label(name)
                 .on_press_in(move |_| press(direction))
                 .on_press_out(move |_| repeat.set(None))
-                .child(text(label).text_size(px(theme().font_size + 4.0)))
+                .child(text(label).text_size(theme().font_size() + px(4.0)))
         };
         view()
             .flex_row()

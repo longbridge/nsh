@@ -32,7 +32,7 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 ```tsx
 import { mount, signal, Text, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 /** The host app's badge: a label it draws, sized to its text. */
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {

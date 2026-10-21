@@ -292,7 +292,7 @@ fn hero(
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(colors::TEXT)
                         .tabular_nums()
-                        .letter_spacing(-1.0)
+                        .letter_spacing(px(-1.0))
                         .child(
                             text(" photos")
                                 .text_size(px(15.0))
@@ -414,9 +414,9 @@ pub(crate) fn Photos() -> impl IntoElement {
         let header = header.clone();
         move || {
             virtual_list(count, move |at| row(photo_at(at)))
-                .estimated_item_size(76.0)
+                .estimated_item_size(px(76.0))
                 .flex_1()
-                .content_padding_bottom(24.0)
+                .content_padding_bottom(px(24.0))
                 .scroll_value(&scroll_y)
                 .refreshing(refreshing)
                 .on_refresh(on_refresh)
@@ -434,9 +434,9 @@ pub(crate) fn Photos() -> impl IntoElement {
             // A 4:3 picture across the column, its caption under it.
             .estimated_item_size(move || (pane_width() - 48.0) / columns.get() as f32 * 0.75 + 60.0)
             .flex_1()
-            .content_padding(24.0)
-            .row_gap(16.0)
-            .column_gap(16.0)
+            .content_padding(px(24.0))
+            .row_gap(px(16.0))
+            .column_gap(px(16.0))
             .scroll_value(&scroll_y)
             .refreshing(refreshing)
             .on_refresh(on_refresh)

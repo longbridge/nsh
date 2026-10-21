@@ -12,30 +12,22 @@ NSH apps make HTTP requests with the standard `fetch`. It runs on the platform's
 ## Getting JSON
 
 ```tsx
-import { mount, Scroll, signal, Text, View } from "nsh";
+import { mount, resource, Scroll, Text, View } from "nsh";
 
 type Post = { id: number; title: string };
 
 function App() {
-  const posts = signal<Post[]>([]);
-  const status = signal("loading…");
-
-  (async () => {
-    try {
-      const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=5");
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      posts.set(await response.json());
-      status.set("");
-    } catch (e) {
-      status.set(String(e));
-    }
-  })();
+  const posts = resource(async ({ signal }) => {
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=5", { signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return (await response.json()) as Post[];
+  });
 
   return (
     <Scroll style={{ flex: 1 }}>
       <View style={{ padding: 16, paddingTop: 60, gap: 8 }}>
-        <Text style={{ color: "#57606a" }}>{status()}</Text>
-        <Each of={posts()}>{(post) => <Text numberOfLines={1}>{post().title}</Text>}</Each>
+        <Text style={{ color: "#57606a" }}>{posts.loading() ? "loading…" : String(posts.error() ?? "")}</Text>
+        <Each of={posts() ?? []}>{(post) => <Text numberOfLines={1}>{post().title}</Text>}</Each>
       </View>
     </Scroll>
   );
@@ -43,6 +35,8 @@ function App() {
 
 mount(App);
 ```
+
+[`resource`](./reactivity.md#resource) keeps the value, the error and whether a load runs, loads again from a source that changes, and aborts a load that no longer counts (the component goes away, or a newer load starts) through the `signal` it passes on.
 
 A `Response` reads its body once, as `json()`, `text()`, `arrayBuffer()`, `bytes()`, `blob()` or `formData()`, or as the `body` stream. `response.ok` is true for 2xx statuses; like in browsers, an HTTP error status does not reject the promise.
 
@@ -212,7 +206,7 @@ An app may declare in `nsh.json` which hosts it talks to. Once `"capabilities"` 
 | Key | Description |
 |---|---|
 | `network.hosts` | Hosts reachable with any method: `"*"` (any host), `"*.example.com"` (its subdomains, not `example.com` itself) or a host name. |
-| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes` and a `pathPrefix`. |
+| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes`, a `port`, exact `paths` and `pathPrefixes`. |
 
 The checks are enforced in Rust, outside your JS, before a request reaches the network:
 
@@ -233,7 +227,7 @@ NSH's `fetch` follows the Fetch standard with the differences that make sense fo
 - **`data:` and `blob:` URLs** are answered locally. `URL.createObjectURL(blob)` makes a `blob:` URL that `fetch` can read until you revoke it.
 - Browser-only options (`mode`, `credentials`, `cache`, `referrer`, `integrity`, `keepalive`, `priority`) are accepted for compatibility with libraries.
 
-Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`, and no WebSocket API.
+Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`; native hosts provide the global `WebSocket` and the [`websocket` module](../modules/standard-modules.md), checked against the same grants as `fetch`.
 
 ## From Rust components
 
@@ -259,6 +253,21 @@ let response = fetch(request).await?;
 ```
 
 The URL is absolute. A request whose task ends (the component goes, or the task is cancelled) is cancelled with it.
+
+To show loaded data, `resource` keeps the value, the error and the state, as in TSX: a new source or `refetch()` drops the running load's task, which cancels its request.
+
+```rust
+let items = resource(move || Some(page.get()), |page, _| async move {
+    let response = fetch(format!("https://api.example.com/items?page={page}")).await?;
+    parse(&response.text())   // Result<Vec<Item>, String>
+});
+
+text(move || match (items.get(), items.error()) {
+    (Some(items), _) => format!("{} items", items.len()),
+    (None, Some(error)) => error,
+    _ => "loading…".into(),
+})
+```
 
 ## Related
 

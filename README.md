@@ -14,6 +14,9 @@ Documentation, guides and live demos: **[nsh.dev](https://nsh.dev)**.
 
 - Write apps in Rust, TSX, or both, and render with each platform's own UI, sharing the same reactive engine,
   flexbox and grid layout, system text, input and accessibility.
+- Give your app its own look: NSH provides the primitives, Tailwind classes, a theme and an unstyled UI foundation
+  (`nsh/base`: navigation, safe areas, dialogs, the keyboard, the status bar), and your app draws its components from
+  them in TSX or Rust.
 - Embed in existing native apps alongside components such as maps and web views, or package as standalone apps
   and static websites.
 - Deliver TSX screens at run time with signed packages and host-controlled sandbox capabilities.
@@ -33,9 +36,10 @@ Documentation, guides and live demos: **[nsh.dev](https://nsh.dev)**.
 | GPUI (macOS, Windows, Linux) | GPUI (GPUI Fast) | `AppView` (Rust, a GPUI view, `nsh-platform-gpui`) | macOS, Windows; Linux with Vulkan |
 | Web | HTML, CSS | `createPlayer` (JavaScript) or an iframe | Modern browsers |
 
-The GPUI backend (`nsh run --target gpui`, `nsh package --target gpui`) draws apps with GPUI on all three desktops and
-embeds in GPUI and GPUI Kit apps. The web platform (`nsh run --target web`, `nsh package --target web`) publishes apps
-as static sites and runs the website's live demos.
+Each desktop runs and packages apps with its own backend (AppKit, Win32, GTK 4). The GPUI backend draws with GPUI on
+all three desktops and embeds NSH in GPUI and GPUI Kit apps; `nsh run --target gpui` shows an app as they do. The web
+platform (`nsh run --target web`, `nsh package --target web`) publishes apps as static sites and runs the website's
+live demos.
 
 ## Quick start
 
@@ -47,6 +51,16 @@ Install the `nsh` command ([other ways](https://nsh.dev/docs/installation)):
 ```sh
 curl -fsSL https://nsh.dev/install.sh | sh
 ```
+
+Build and install the latest `main` from source (Git, Rust and the
+[platform build dependencies](https://nsh.dev/docs/installation) required):
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+Re-run to update. The checkout stays in `~/.nsh/source` for runtime builds.
 
 </details>
 
@@ -132,7 +146,7 @@ nsh run my-app --target linux      # GTK 4 window
 <summary>GPUI (macOS, Windows, Linux)</summary>
 
 ```sh
-nsh run my-app --target gpui
+nsh run my-app --target gpui       # as GPUI apps that embed it show it
 ```
 
 </details>

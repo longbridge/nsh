@@ -51,10 +51,12 @@ use std::{
 };
 
 use nsh_core::{
-    Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
-    ROOT_ID, Rect, platform::Appearance,
+    Bounds, Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId,
+    PayloadValue, Points, ROOT_ID,
+    geometry::px,
+    platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Environment, Insets, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Locale};
 use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
@@ -232,6 +234,13 @@ fn settings() -> Settings {
     }
 }
 
+/// The embedding app set its locale or text size
+/// ([`crate::AppView::set_locale`]): the system's settings are read again,
+/// with the host's over them.
+pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface, settings());
+}
+
 /// Writes `settings` and the surface's own values into its environment.
 fn update(surface: &Surface, settings: Settings) {
     let mut env: Environment = surface.environment.get();
@@ -250,8 +259,8 @@ fn update(surface: &Surface, settings: Settings) {
         env.pixel_ratio = surface.scale();
     }
     env.os_version = os_version();
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = px(0.0);
     surface.set_environment(env);
 }
 
@@ -447,6 +456,29 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 clipboard_answer(*id, has, text),
             );
         }
+        Command::SetClipboardImage(uri) => match clipboard::decode_data_uri(uri) {
+            Some(("image/png", bytes)) => {
+                if !set_clipboard_bytes(png_format(), &bytes) {
+                    log::debug!("windows: cannot set the clipboard");
+                }
+            }
+            _ => log::warn!("Clipboard.setImage: Windows takes a base64 PNG data: URI"),
+        },
+        Command::ReadClipboardImage { id, has_only } => {
+            let has = clipboard_has_image();
+            let bytes = (has && !*has_only).then(clipboard_image).flatten();
+            let image = bytes.as_deref().and_then(clipboard::Image::sniff);
+            surface.event(
+                ROOT_ID,
+                EventKind::Clipboard,
+                clipboard::image_answer(*id, has, image),
+            );
+        }
+        Command::ReadClipboardFiles { id } => surface.event(
+            ROOT_ID,
+            EventKind::Clipboard,
+            clipboard::files_answer(*id, &clipboard_files()),
+        ),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -629,7 +661,7 @@ fn add_overlay(surface: &Rc<Surface>, serial: u64, kind: OverlayKind) {
         crate::native::take_keyboard(surface);
     }
     let env = surface.environment.get();
-    place(surface, &kind, env.window.0, env.window.1);
+    place(surface, &kind, env.window.width.0, env.window.height.0);
     OVERLAYS.with(|o| {
         o.borrow_mut().push(Overlay {
             key: surface.key(),
@@ -780,15 +812,15 @@ impl Label {
     }
 }
 
-fn rounded(r: Rect, radius: f32) -> D2D1_ROUNDED_RECT {
+fn rounded(r: Bounds<Points>, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT {
-        rect: rect_f(r.x, r.y, r.width, r.height),
+        rect: rect_f(r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
         radiusX: radius,
         radiusY: radius,
     }
 }
 
-fn fill_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color) {
+fn fill_rounded(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, color: Color) {
     // SAFETY: a COM call between BeginDraw and EndDraw.
     unsafe {
         cx.dc
@@ -796,9 +828,14 @@ fn fill_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color) {
     };
 }
 
-fn stroke_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color, width: f32) {
+fn stroke_rounded(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, color: Color, width: f32) {
     let i = width / 2.0;
-    let r = rect(r.x + i, r.y + i, r.width - width, r.height - width);
+    let r = rect(
+        r.origin.x.0 + i,
+        r.origin.y.0 + i,
+        r.size.width.0 - width,
+        r.size.height.0 - width,
+    );
     // SAFETY: a COM call between BeginDraw and EndDraw.
     unsafe {
         cx.dc.DrawRoundedRectangle(
@@ -813,16 +850,16 @@ fn stroke_rounded(cx: &DrawCx<'_>, r: Rect, radius: f32, color: Color, width: f3
 /// A soft shadow under a card: rounded rectangles growing outward with
 /// falling opacity (Direct2D's blur would need an offscreen target in the
 /// middle of the pass).
-fn draw_shadow(cx: &DrawCx<'_>, r: Rect, radius: f32, dy: f32, alpha: f32) {
+fn draw_shadow(cx: &DrawCx<'_>, r: Bounds<Points>, radius: f32, dy: f32, alpha: f32) {
     const STEPS: usize = 14;
     for i in (0..STEPS).rev() {
         let grow = (i + 1) as f32 * 2.0;
         let a = alpha * (1.0 - i as f32 / STEPS as f32).powi(2) / STEPS as f32 * 2.5;
         let shadow = rect(
-            r.x - grow,
-            r.y - grow + dy,
-            r.width + 2.0 * grow,
-            r.height + 2.0 * grow,
+            r.origin.x.0 - grow,
+            r.origin.y.0 - grow + dy,
+            r.size.width.0 + 2.0 * grow,
+            r.size.height.0 + 2.0 * grow,
         );
         fill_rounded(cx, shadow, radius + grow, with_alpha(Color::BLACK, a));
     }
@@ -939,15 +976,15 @@ enum Part {
 #[derive(Debug, Default, Clone, PartialEq)]
 struct Geometry {
     /// The cards (an alert's one; a sheet's options and its cancel card).
-    cards: Vec<Rect>,
+    cards: Vec<Bounds<Points>>,
     /// An alert's footer (the buttons' band at the bottom of the card).
-    footer: Option<Rect>,
+    footer: Option<Bounds<Points>>,
     /// A sheet's line between its text and its options.
-    separator: Option<Rect>,
-    title: Option<Rect>,
-    message: Option<Rect>,
+    separator: Option<Bounds<Points>>,
+    title: Option<Bounds<Points>>,
+    message: Option<Bounds<Points>>,
     /// The buttons, by index.
-    buttons: Vec<Rect>,
+    buttons: Vec<Bounds<Points>>,
     /// An alert's buttons are in one row (else a column).
     row: bool,
 }
@@ -1014,14 +1051,14 @@ fn layout_alert(
             if row {
                 rect(
                     x + PAD + i * (column + BUTTON_GAP),
-                    footer.y + PAD,
+                    footer.origin.y.0 + PAD,
                     column,
                     BUTTON_HEIGHT,
                 )
             } else {
                 rect(
                     x + PAD,
-                    footer.y + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
+                    footer.origin.y.0 + PAD + i * (BUTTON_HEIGHT + BUTTON_GAP),
                     inner,
                     BUTTON_HEIGHT,
                 )
@@ -1270,10 +1307,10 @@ impl DialogItem {
             )
         };
         if let (Some(l), Some(r)) = (&t.title, geometry.title) {
-            l.fit(r.width, r.height);
+            l.fit(r.size.width.0, r.size.height.0);
         }
         if let (Some(l), Some(r)) = (&t.message, geometry.message) {
-            l.fit(r.width, r.height);
+            l.fit(r.size.width.0, r.size.height.0);
         }
         for (l, r) in t.buttons.iter().zip(&geometry.buttons) {
             let pad = if self.sheet {
@@ -1281,7 +1318,7 @@ impl DialogItem {
             } else {
                 metrics::BUTTON_PAD
             };
-            l.fit(r.width - 2.0 * pad, r.height);
+            l.fit(r.size.width.0 - 2.0 * pad, r.size.height.0);
         }
         *layout = Some(DialogLayout {
             size,
@@ -1294,7 +1331,12 @@ impl DialogItem {
         let Some(g) = self.layout.borrow().as_ref().map(|l| l.geometry.clone()) else {
             return Target::Outside;
         };
-        let inside = |r: &Rect| x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+        let inside = |r: &Bounds<Points>| {
+            x >= r.origin.x.0
+                && y >= r.origin.y.0
+                && x < r.origin.x.0 + r.size.width.0
+                && y < r.origin.y.0 + r.size.height.0
+        };
         if let Some(i) = g.buttons.iter().position(inside) {
             Target::Button(i)
         } else if g.cards.iter().any(inside) {
@@ -1383,8 +1425,8 @@ impl Hosted for DialogItem {
         {
             let last = g.cards.last().unwrap_or(first);
             let (mx, my) = (
-                first.x + first.width / 2.0,
-                (first.y + last.y + last.height) / 2.0,
+                first.origin.x.0 + first.size.width.0 / 2.0,
+                (first.origin.y.0 + last.origin.y.0 + last.size.height.0) / 2.0,
             );
             let s = 1.0 + 0.04 * (1.0 - opacity);
             cx.set_transform(
@@ -1405,7 +1447,12 @@ impl Hosted for DialogItem {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.FillRectangle(
-                    &rect_f(footer.x, footer.y, footer.width, footer.height),
+                    &rect_f(
+                        footer.origin.x.0,
+                        footer.origin.y.0,
+                        footer.size.width.0,
+                        footer.size.height.0,
+                    ),
                     cx.solid(p.footer),
                 )
             };
@@ -1418,17 +1465,32 @@ impl Hosted for DialogItem {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe {
                 cx.dc.FillRectangle(
-                    &rect_f(sep.x, sep.y, sep.width, sep.height),
+                    &rect_f(
+                        sep.origin.x.0,
+                        sep.origin.y.0,
+                        sep.size.width.0,
+                        sep.size.height.0,
+                    ),
                     cx.solid(p.separator),
                 )
             };
         }
         let t = &self.texts;
         if let (Some(l), Some(r)) = (&t.title, g.title) {
-            l.draw(cx, r.x, r.y, if self.sheet { p.secondary } else { p.text });
+            l.draw(
+                cx,
+                r.origin.x.0,
+                r.origin.y.0,
+                if self.sheet { p.secondary } else { p.text },
+            );
         }
         if let (Some(l), Some(r)) = (&t.message, g.message) {
-            l.draw(cx, r.x, r.y, if self.sheet { p.secondary } else { p.text });
+            l.draw(
+                cx,
+                r.origin.x.0,
+                r.origin.y.0,
+                if self.sheet { p.secondary } else { p.text },
+            );
         }
         let hover = self.hover.get();
         let pressed = match self.pressed.get() {
@@ -1483,9 +1545,14 @@ impl Hosted for DialogItem {
             } else {
                 BUTTON_PAD
             };
-            label.draw(cx, r.x + pad, r.y, text);
+            label.draw(cx, r.origin.x.0 + pad, r.origin.y.0, text);
             if self.keyboard.get() && self.focus.get() == Some(i) {
-                let ring = rect(r.x - 3.0, r.y - 3.0, r.width + 6.0, r.height + 6.0);
+                let ring = rect(
+                    r.origin.x.0 - 3.0,
+                    r.origin.y.0 - 3.0,
+                    r.size.width.0 + 6.0,
+                    r.size.height.0 + 6.0,
+                );
                 stroke_rounded(cx, ring, BUTTON_RADIUS + 3.0, p.focus, 2.0);
             }
         }
@@ -1552,15 +1619,9 @@ impl Hosted for DialogItem {
 /// button's index; -1 when dismissed (a click outside or Escape, when
 /// cancelable); Escape presses the cancel button when there is one.
 fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let styles: Vec<DialogButtonStyle> = buttons.iter().map(|b| b.style).collect();
     let cancel = styles.iter().position(|s| *s == DialogButtonStyle::Cancel);
     let fs = surface.environment.get().font_scale;
@@ -1813,6 +1874,168 @@ pub(crate) fn clipboard_text() -> Option<String> {
     }
 }
 
+/// The clipboard format browsers, Office and the Snipping Tool put PNG
+/// images in.
+fn png_format() -> u32 {
+    use windows::{Win32::System::DataExchange::RegisterClipboardFormatW, core::w};
+    // SAFETY: a plain registration of a constant name.
+    unsafe { RegisterClipboardFormatW(w!("PNG")) }
+}
+
+/// The bytes of clipboard `format`, if it holds that format.
+fn clipboard_bytes(format: u32) -> Option<Vec<u8>> {
+    use windows::Win32::{
+        Foundation::HGLOBAL,
+        System::{
+            DataExchange::{
+                CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+            },
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        },
+    };
+    // SAFETY: the clipboard is opened and closed here; the data is read
+    // while locked and copied out.
+    unsafe {
+        IsClipboardFormatAvailable(format).ok()?;
+        OpenClipboard(None).ok()?;
+        let bytes = GetClipboardData(format).ok().and_then(|h| {
+            let memory = HGLOBAL(h.0);
+            let ptr = GlobalLock(memory) as *const u8;
+            if ptr.is_null() {
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts(ptr, GlobalSize(memory)).to_vec();
+            let _ = GlobalUnlock(memory);
+            Some(bytes)
+        });
+        let _ = CloseClipboard();
+        bytes
+    }
+}
+
+/// Puts `bytes` on the clipboard as `format`, replacing what it holds.
+fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
+    use windows::Win32::{
+        Foundation::{GlobalFree, HANDLE, HGLOBAL},
+        System::{
+            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        },
+    };
+    // SAFETY: as in `set_clipboard_text`: the memory is the clipboard's once
+    // `SetClipboardData` succeeds, freed here otherwise.
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return false;
+        }
+        let mut ok = false;
+        if EmptyClipboard().is_ok()
+            && let Ok(memory) = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1))
+        {
+            let ptr = GlobalLock(memory) as *mut u8;
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                let _ = GlobalUnlock(memory);
+                ok = SetClipboardData(format, Some(HANDLE(memory.0))).is_ok();
+            }
+            if !ok {
+                let _ = GlobalFree(Some(HGLOBAL(memory.0)));
+            }
+        }
+        let _ = CloseClipboard();
+        ok
+    }
+}
+
+/// True when the clipboard has an image (a PNG or a bitmap).
+fn clipboard_has_image() -> bool {
+    use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_DIB};
+    // SAFETY: plain queries.
+    unsafe {
+        IsClipboardFormatAvailable(png_format()).is_ok()
+            || IsClipboardFormatAvailable(u32::from(CF_DIB.0)).is_ok()
+    }
+}
+
+/// The clipboard's image: its PNG, else its bitmap as a BMP file.
+fn clipboard_image() -> Option<Vec<u8>> {
+    use windows::Win32::System::Ole::CF_DIB;
+    clipboard_bytes(png_format())
+        .or_else(|| clipboard_bytes(u32::from(CF_DIB.0)).and_then(|dib| bmp_file(&dib)))
+}
+
+/// A BMP file of a packed device-independent bitmap (`CF_DIB`): the file
+/// header, which says where the pixels start, before it.
+fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
+    let u32_at = |i: usize| Some(u32::from_le_bytes(dib.get(i..i + 4)?.try_into().ok()?));
+    let header = u32_at(0)? as usize;
+    let bit_count = u32::from(u16::from_le_bytes(dib.get(14..16)?.try_into().ok()?));
+    let compression = u32_at(16)?;
+    let colors_used = u32_at(32)? as usize;
+    // BI_BITFIELDS after a BITMAPINFOHEADER: three masks follow it.
+    let masks = if header == 40 && compression == 3 {
+        12
+    } else {
+        0
+    };
+    let palette = match colors_used {
+        0 if bit_count <= 8 => (1usize << bit_count) * 4,
+        n => n * 4,
+    };
+    let offset = 14 + header + masks + palette;
+    let size = 14 + dib.len();
+    let mut file = Vec::with_capacity(size);
+    file.extend_from_slice(b"BM");
+    file.extend_from_slice(&u32::try_from(size).ok()?.to_le_bytes());
+    file.extend_from_slice(&[0; 4]);
+    file.extend_from_slice(&u32::try_from(offset).ok()?.to_le_bytes());
+    file.extend_from_slice(dib);
+    Some(file)
+}
+
+/// The `file:` URLs of the files on the clipboard (`CF_HDROP`: files
+/// copied in Explorer).
+fn clipboard_files() -> Vec<String> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+
+    use windows::Win32::{
+        System::{
+            DataExchange::{
+                CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+            },
+            Ole::CF_HDROP,
+        },
+        UI::Shell::{DragQueryFileW, HDROP},
+    };
+    let mut files = Vec::new();
+    // SAFETY: the clipboard is opened and closed here; the HDROP is the
+    // clipboard's and only read while it is open.
+    unsafe {
+        if IsClipboardFormatAvailable(u32::from(CF_HDROP.0)).is_err()
+            || OpenClipboard(None).is_err()
+        {
+            return files;
+        }
+        if let Ok(handle) = GetClipboardData(u32::from(CF_HDROP.0)) {
+            let drop = HDROP(handle.0);
+            for index in 0..DragQueryFileW(drop, u32::MAX, None) {
+                let length = DragQueryFileW(drop, index, None);
+                let mut name = vec![0; length as usize + 1];
+                let copied = DragQueryFileW(drop, index, Some(&mut name));
+                if copied == 0 || copied != length {
+                    continue;
+                }
+                let path = PathBuf::from(OsString::from_wide(&name[..copied as usize]));
+                if path.is_absolute() {
+                    files.push(clipboard::file_url(&path.to_string_lossy()));
+                }
+            }
+        }
+        let _ = CloseClipboard();
+    }
+    files
+}
+
 /// True when the clipboard has text.
 pub(crate) fn clipboard_has_text() -> bool {
     use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_UNICODETEXT};
@@ -1823,6 +2046,23 @@ pub(crate) fn clipboard_has_text() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bitmaps_become_bmp_files() {
+        // A BITMAPINFOHEADER of a 2x1 32-bit bitmap, then its pixels.
+        let mut dib = vec![0u8; 40];
+        dib[0] = 40;
+        dib[4] = 2;
+        dib[8] = 1;
+        dib[12] = 1;
+        dib[14] = 32;
+        dib.extend([0xFF; 8]);
+        let file = bmp_file(&dib).unwrap();
+        assert_eq!(&file[..2], b"BM");
+        assert_eq!(u32::from_le_bytes(file[2..6].try_into().unwrap()), 62);
+        assert_eq!(u32::from_le_bytes(file[10..14].try_into().unwrap()), 54);
+        assert_eq!(clipboard::image_size(&file), Some((2, 1)));
+    }
 
     #[test]
     fn locales() {
@@ -1890,23 +2130,32 @@ mod tests {
         let g = layout_alert((1000.0, 800.0), true, true, 2, &measure(&["Cancel", "OK"]));
         let card = g.cards[0];
         // As wide as the message, up to the maximum, centered.
-        assert_eq!(card.width, metrics::MAX_WIDTH);
-        assert_eq!(card.x, ((1000.0 - card.width) / 2.0).round());
+        assert_eq!(card.size.width.0, metrics::MAX_WIDTH);
+        assert_eq!(
+            card.origin.x.0,
+            ((1000.0 - card.size.width.0) / 2.0).round()
+        );
         assert!(g.row);
         // Equal columns in the footer.
-        assert_eq!(g.buttons[0].width, g.buttons[1].width);
-        assert_eq!(g.buttons[0].y, g.buttons[1].y);
+        assert_eq!(g.buttons[0].size.width.0, g.buttons[1].size.width.0);
+        assert_eq!(g.buttons[0].origin.y.0, g.buttons[1].origin.y.0);
         assert_eq!(
-            g.buttons[1].x + g.buttons[1].width,
-            card.x + card.width - metrics::PAD
+            g.buttons[1].origin.x.0 + g.buttons[1].size.width.0,
+            card.origin.x.0 + card.size.width.0 - metrics::PAD
         );
         let footer = g.footer.unwrap();
-        assert_eq!(footer.y + footer.height, card.y + card.height);
+        assert_eq!(
+            footer.origin.y.0 + footer.size.height.0,
+            card.origin.y.0 + card.size.height.0
+        );
         // The message wraps at the inner width, below the title.
         let message = g.message.unwrap();
-        assert_eq!(message.width, card.width - 2.0 * metrics::PAD);
-        assert!(message.height > 20.0);
-        assert_eq!(message.y, g.title.unwrap().y + 20.0 + metrics::TITLE_GAP);
+        assert_eq!(message.size.width.0, card.size.width.0 - 2.0 * metrics::PAD);
+        assert!(message.size.height.0 > 20.0);
+        assert_eq!(
+            message.origin.y.0,
+            g.title.unwrap().origin.y.0 + 20.0 + metrics::TITLE_GAP
+        );
     }
 
     #[test]
@@ -1923,7 +2172,7 @@ mod tests {
         assert!(
             g.buttons
                 .windows(2)
-                .all(|b| b[1].y > b[0].y && b[1].x == b[0].x)
+                .all(|b| b[1].origin.y.0 > b[0].origin.y.0 && b[1].origin.x.0 == b[0].origin.x.0)
         );
         // So do labels too long for their column.
         let g = layout_alert(
@@ -1935,7 +2184,7 @@ mod tests {
         );
         assert!(!g.row);
         // A narrow window: the card fits it, less the gutters.
-        assert_eq!(g.cards[0].width, 360.0 - 2.0 * metrics::GUTTER);
+        assert_eq!(g.cards[0].size.width.0, 360.0 - 2.0 * metrics::GUTTER);
     }
 
     #[test]
@@ -1950,12 +2199,18 @@ mod tests {
         );
         assert_eq!(g.cards.len(), 2);
         let (options, cancel) = (g.cards[0], g.cards[1]);
-        assert_eq!(options.width, metrics::SHEET_MAX_WIDTH);
-        assert_eq!(cancel.y + cancel.height, 800.0 - 2.0 * metrics::BUTTON_GAP);
-        assert_eq!(options.y + options.height + metrics::BUTTON_GAP, cancel.y);
+        assert_eq!(options.size.width.0, metrics::SHEET_MAX_WIDTH);
+        assert_eq!(
+            cancel.origin.y.0 + cancel.size.height.0,
+            800.0 - 2.0 * metrics::BUTTON_GAP
+        );
+        assert_eq!(
+            options.origin.y.0 + options.size.height.0 + metrics::BUTTON_GAP,
+            cancel.origin.y.0
+        );
         // The options in order in the first card, the cancel button alone.
-        assert!(g.buttons[0].y < g.buttons[2].y);
-        assert!(g.buttons[1].y > cancel.y);
+        assert!(g.buttons[0].origin.y.0 < g.buttons[2].origin.y.0);
+        assert!(g.buttons[1].origin.y.0 > cancel.origin.y.0);
         assert!(g.separator.is_some());
     }
 

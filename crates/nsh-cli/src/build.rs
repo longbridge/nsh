@@ -111,7 +111,7 @@ pub(crate) fn crate_assets() -> impl Iterator<Item = Asset> {
     assets.into_iter()
 }
 
-/// The native modules of `natives` that are UI sets (`nsh/ui/mobile`, an
+/// The native modules of `natives` that are UI sets (`nsh/base`, an
 /// app's own): what a host must serve besides nsh's own modules, which
 /// every host has.
 fn imported_sets(natives: &[String]) -> Vec<String> {
@@ -351,8 +351,8 @@ mod tests {
 
     #[test]
     fn hosts_must_serve_the_ui_sets_an_app_imports() {
-        let natives = ["nsh", "nsh/list", "nsh/ui/mobile"].map(String::from);
-        assert_eq!(super::imported_sets(&natives), ["nsh/ui/mobile"]);
+        let natives = ["nsh", "nsh/list", "nsh/base"].map(String::from);
+        assert_eq!(super::imported_sets(&natives), ["nsh/base"]);
     }
 
     #[test]

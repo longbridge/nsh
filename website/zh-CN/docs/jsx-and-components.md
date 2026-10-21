@@ -22,7 +22,7 @@ NSH 应用用 JSX 描述界面，但其中没有 React，也没有虚拟 DOM。N
 | `<Scroll>` | `nsh` | `UIScrollView` / `ScrollView` | [Scroll](../elements/scroll.md) |
 | `<Input>` | `nsh` | `UITextField` / `UITextView` / `EditText` | [Input](../elements/input.md) |
 | `<List>` | `nsh/list` | 虚拟化、可复用单元格的列表 | [List](../elements/list.md) |
-| `<Canvas>`、`<WebView>`、`<Video>`、`<Modal>` | `nsh/canvas`、`nsh/webview`、`nsh/video`、`nsh/ui/mobile` | 绘图、网页、视频播放器、弹出层 | [元素](../elements/index.md) |
+| `<Canvas>`、`<WebView>`、`<Video>`、`<Dialog>` | `nsh/canvas`、`nsh/webview`、`nsh/video`、`nsh/base` | 绘图、网页、视频播放器、弹出层 | [元素](../elements/index.md) |
 | `<If>`、`<Each>` | 无：全局组件 | 控制流，本身不产生视图 | [控制流](../elements/control-flow.md) |
 
 ```tsx
@@ -49,6 +49,8 @@ x lowercase tag <view>: tags are PascalCase components: write <View> and
 > 文本只有放在 `<Text>` 中才会显示。直接写在 `<View>` 里的字符串不会创建原生视图，也不会显示。
 
 ## 组件
+
+应用的外观由应用自己决定。NSH 提供两层：基础元素（上面的元素、样式、Tailwind 类）和 [`nsh/base`](../modules/nsh-base.md) 中无样式的基础组件，后者负责导航、对话框、键盘、状态栏、安全区域等行为。第三层组件库属于你：按钮、卡片以及界面的其他部分，都是你在这两层之上编写的组件、应用在自己的 crate 中提供的 Rust 组件（[用 Rust 开发](./rust.md)），或社区提供的组件库（[三层结构](./architecture.md#three-layers)）。
 
 组件是一个接收 props 对象并返回 JSX 的函数：
 
@@ -113,6 +115,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+在参数里直接解构 props 的组件（`function Title({ text }: …)`）同样只读取一次，构建时会给出警告，并说明应该改读哪些 props：
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+组件确实只需要读取一次的 prop（比如初始化时用的 id），在函数体里读取（`const { id } = props;`），这种写法表明了意图。
+
 默认值也是一样：在 JSX 中写 `props.color ?? "#ddf4ff"`，而不是用带默认值的解构。要从 props 计算出某个值，使用一个函数或 [`computed`](./reactivity.md#computed)：
 
 ```tsx
@@ -141,7 +151,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。children 也可以是函数，即组件带参数调用的渲染回调：
+每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。多个子元素中会变化的那一个（`<If>`、`<Each>`、`{cond() ? a : b}`）以函数的形式传入，`{props.children}` 只更新它自己：其他子元素保留各自的视图，输入框保留输入的文字和焦点。children 也可以是函数，即组件带参数调用的渲染回调：
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {
@@ -159,7 +169,7 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 
 ```tsx
 <If when={user()} else={<Text>Signed out</Text>}>
-  <Text>Hello, {user()!.name}</Text>
+  {(u) => <Text>Hello, {u().name}</Text>}
 </If>
 
 <Each of={todos()} key={(t) => t.id}>
@@ -171,7 +181,7 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 </Each>
 ```
 
-- **`<If when else>`** 在 `when` 为真值时渲染子元素，否则渲染 `else` 元素。只有当条件的真假发生变化时才会重新渲染分支，而不是每次重新计算 `when` 都渲染。
+- **`<If when else>`** 在 `when` 为真值时渲染子元素，否则渲染 `else` 元素。只有当条件的真假发生变化时才会重新渲染分支，而不是每次重新计算 `when` 都渲染。子元素写成函数时，它会收到 `when` 值的访问器，类型中已去掉 `null` 和 `undefined`：分支显示期间 `u()` 就是当前用户，用户变化时它也随之更新。
 - **`<Each of key>`** 为每一项渲染它唯一的子节点（一个函数）。行按 `key(item)` 保留（默认是项本身：对象按引用，原始值按值）：数组变化时，保留下来的行会被移动而不是重建，只有新的 key 才会创建新行。函数接收的是**访问器** `todo()` 和 `index()`，因为保留下来的行，其对应的项和位置都可能改变。
 
 在 JSX 中使用三元表达式或 `&&` 也可以（`{busy() ? <Spinner /> : <Content />}`），但只要它读取的任何值变化，就会重建分支。分支包含较多元素时，优先使用 `<If>`。
@@ -180,7 +190,12 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 
 ## ref
 
-`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。传入变量时会给它赋值，传入函数时会调用它：
+`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。`ref={…}` 指向的目标会收到这个节点：
+
+- 用 `let` 声明的变量：把节点赋给它；
+- 对象字段（`ref={refs.input}`、`ref={refs[name]}`）：把节点赋给它；
+- [signal](./reactivity.md)：把它设为这个节点，读取这个 signal 的地方会跟着更新；
+- 函数：以节点为参数调用它。
 
 ```tsx
 import type { YNode } from "nsh";
@@ -201,7 +216,9 @@ function Search() {
 <Scroll ref={(node) => (scroller = node)} />
 ```
 
-ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`nsh/ui/mobile` 中的组件同样接受 `ref`。
+`const` 或 import 的绑定应当持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他值时，会在元素创建时报错，并说明该怎么写。
+
+ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`SafeAreaView`、`KeyboardAvoidingView` 以及你自己 crate 中的 Rust 组件同样接受 `ref`。
 
 ## 展开 props
 
@@ -220,7 +237,7 @@ function Field(props: InputProps & { label: string }) {
   );
 }
 
-<Field label="Email" value={email()} onChangeText={(t) => email.set(t)} keyboardType="email-address" />
+<Field label="Email" value={email()} onChange={(t) => email.set(t)} keyboardType="email-address" />
 ```
 
 `split(props, keys)` 返回 `[picked, rest]`，两者都仍然读取原始 props（而解构 `{ label, ...rest } = props` 会把每个 prop 都读取一次）。在 JSX 中靠后的元素 props 会覆盖靠前的。
@@ -229,10 +246,18 @@ function Field(props: InputProps & { label: string }) {
 
 ## 标签与名称
 
-标签和平常一样，指向作用域中的绑定：`<Badge />`、`<Theme.Provider>`、导入的 `<Button>`。指向作用域中不存在的名称的标签会导致构建错误，全局的 `<If>` 和 `<Each>` 除外。
+标签和平常一样，指向作用域中的绑定：`<Badge />`、`<Theme.Provider>`、你自己的 `<Button>`。指向作用域中不存在的名称的标签会导致构建错误，全局的 `<If>` 和 `<Each>` 除外。
 
 ```tsx
-import { Button } from "nsh/ui/mobile";
+import { Text, View } from "nsh";
+
+function Button(props: { title: string; onPress: () => void }) {
+  return (
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} role="button" class="rounded-lg bg-blue-600 px-5 py-3">
+      <Text class="text-base font-semibold text-white">{props.title}</Text>
+    </View>
+  );
+}
 
 <Button title="Save" onPress={save} />
 ```
@@ -257,4 +282,5 @@ mount(() => (
 
 - [响应式](./reactivity.md)：signal、effect、context。
 - [元素](../elements/index.md)：所有宿主元素及其 props。
-- [组件](../components/index.md)：`nsh/ui/mobile` 中现成的组件。
+- [样式](./styling.md) 与 [Tailwind](./tailwind.md)：组件的外观。
+- [用 Rust 开发](./rust.md)：在应用自己的 crate 中用 Rust 编写的组件。

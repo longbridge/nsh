@@ -20,7 +20,7 @@ NSH runs on phones and desktops alike: iOS (UIKit), Android (Android views), mac
 
 - **A format models write well.** A module is one TSX file using signals, a handful of host elements and Tailwind classes — the vocabulary models already know from the web, with no build configuration and no NPM.
 - **A precise, generated contract.** Every element, prop, style key and module has TypeScript declarations generated from the Rust sources (`.nsh/types`), so generated code can be type-checked, and a model can be given the exact API instead of guessing. These docs are also served as plain text for models ([`llms.txt`](/llms.txt), [`llms-full.txt`](/llms-full.txt)).
-- **Checkable before it ships.** `nsh trace` runs a module headless, without a device, and reports errors and the views it produced; build errors come with a code frame. A generation loop can compile, run, read the result and retry. The compiler also runs in-process as a library (`nsh_bundler::compile_module`) and in the browser ([Playground](/playground)).
+- **Checkable before it ships.** `nsh test` runs a module headless, without a device, takes steps on it and reports errors and the views it produced; build errors come with a code frame. A generation loop can compile, run, read the result and retry. The compiler also runs in-process as a library (`nsh_bundler::compile_module`) and in the browser ([Playground](/playground)).
 - **Safe to run when it is not trusted.** Generated code is untrusted code. Each module runs in its own QuickJS VM with memory, call-time and node limits, reaches only the capabilities the host grants, and arrives as a signed package the app verifies first.
 - **Native without native code.** The output is the platform's own UI — UIKit, Android views, AppKit, GTK 4 or Win32 with Direct2D — with the system's text, input and accessibility, yet the model never writes Swift, Kotlin, Java or Rust, and the app never needs a new release.
 
@@ -62,7 +62,7 @@ function Counter() {
       <Text style={{ fontSize: 48, fontWeight: "700" }}>{count()}</Text>
       <View
         onPress={() => count.update((n) => n + 1)}
-        activeOpacity={0.6}
+        activeStyle={{ opacity: 0.6 }}
         class="rounded-lg bg-blue-600 px-5 py-3"
       >
         <Text class="text-white text-lg">Tap</Text>
@@ -74,7 +74,7 @@ function Counter() {
 mount(Counter);
 ```
 
-`<View>` becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS and a GTK widget on Linux, `<Text>` a native text view, and the button's press feedback (`activeOpacity`) runs on the main thread without a round trip to JavaScript. When you tap, `count.update` changes one signal, and only the text that reads `count()` is updated: the component function does not run again.
+`<View>` becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS and a GTK widget on Linux, `<Text>` a native text view, and the button's press feedback (`activeStyle`) runs on the main thread without a round trip to JavaScript. When you tap, `count.update` changes one signal, and only the text that reads `count()` is updated: the component function does not run again.
 
 The host app shows it with a few lines of native code ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app)). On iOS:
 
@@ -97,7 +97,7 @@ A module (an "app" in the CLI's terms) is a set of `.tsx` / `.ts` files with an 
 Because JavaScript only describes the UI and handles events, the work done in the interpreter is small. Parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
 
 > [!NOTE]
-> The main thread never waits for JavaScript. Questions the system asks synchronously (may this input accept another character, may the user swipe back, may this sheet close) are answered natively from props you set beforehand, such as `maxLength`, `preventBack` or `dismissible`. Events reach your code afterwards.
+> The main thread never waits for JavaScript. Questions the system asks synchronously (may this input accept another character, may the user swipe back, may this sheet close) are answered natively from props you set beforehand, such as `maxLength`, `popOnBack` or `closeOnSwipe`. Events reach your code afterwards.
 
 ## What you get
 
@@ -108,7 +108,7 @@ Because JavaScript only describes the UI and handles events, the work done in th
 - **Native views.** Embedding a native map, web view or video player has no layering problems, accessibility uses the platform's own tree, and text input is the system's.
 - **Fine-grained reactivity.** [Signals](./reactivity.md) like Solid's, implemented natively. Components run once; only the expressions that read a changed signal run again.
 - **Styles and Tailwind**, resolved natively: flexbox, CSS grid, shadows, gradients, filters, transitions ([Styling](./styling.md), [Tailwind](./tailwind.md)).
-- **A mobile UI set** (`nsh/ui/mobile`) whose components are written in Rust and drawn by NSH, so they look the same on every platform: [Button](../components/button.md), [Card](../components/card.md), [ListView](../components/list-view.md), [navigation](../components/navigation.md), and more. Desktop layouts are built from the primitives with `desktop={{…}}` props and `Platform.select` ([Platform-specific code](./platform-specific.md)), and a desktop UI set is on the way.
+- **Primitives and base components; the look is the app's.** Apps draw their UI from the primitives (`View`, `Text`, `Input`, `List`, ...) with styles and Tailwind classes, and build on [`nsh/base`](../modules/nsh-base.md), unstyled base components that own behavior, state and accessibility: navigation stacks and modals, safe areas, system alerts, the keyboard and the status bar. The styled component library on top is the app's own or the community's ([Three layers](./architecture.md#three-layers)). Desktop layouts are built from the primitives with `desktop={{…}}` props and `Platform.select` ([Platform-specific code](./platform-specific.md)).
 - **One binary toolchain.** A single `nsh` executable builds modules, writes their type declarations, serves them with hot module replacement, packages and signs them.
 
 ## Where it runs
@@ -120,7 +120,7 @@ Because JavaScript only describes the UI and handles events, the work done in th
 | macOS | Supported (macOS 14+) | AppKit | Standalone apps; embedded with `AppView` ([macOS](./macos.md)) |
 | Windows | Supported (Windows 10 1809+) | Win32, Direct2D | Standalone apps; embedded with `AppView` ([Windows](./windows.md)) |
 | Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |
-| GPUI (macOS, Windows, Linux) | Supported | GPUI | Standalone apps; embedded with `AppView` in GPUI and GPUI Kit apps ([GPUI](./gpui.md)) |
+| GPUI (macOS, Windows, Linux) | Supported | GPUI | Embedded with `AppView` in GPUI and GPUI Kit apps ([GPUI](./gpui.md)) |
 | Web | Supported (modern browsers) | HTML | Static sites; embedded in a page with `createPlayer` or an iframe ([Web](./web.md)) |
 | Mac Catalyst | For development | UIKit | The iPhone-sized window `nsh run` opens on a Mac, to see a module as on a phone |
 

@@ -34,7 +34,7 @@ impl Timers {
                 interval: repeat.then_some(delay),
             },
         );
-        self.heap.push(Reverse((Instant::now() + delay, id)));
+        self.heap.push(Reverse((nsh_core::time::now() + delay, id)));
         id
     }
 

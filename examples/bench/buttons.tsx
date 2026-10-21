@@ -1,6 +1,5 @@
-// The two benchmark screens, parameterized by the Button under test, so the
-// Rust component (`nsh/ui/mobile`) and a TSX composition (`TsButton.tsx`) run
-// the same app.
+// The two benchmark screens, parameterized by the Button under test, so a
+// Rust component and a TSX composition (`TsButton.tsx`) run the same app.
 import { type Component, Scroll, signal, Text, View } from "nsh";
 import { List } from "nsh/list";
 

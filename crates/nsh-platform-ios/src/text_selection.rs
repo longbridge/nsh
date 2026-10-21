@@ -472,7 +472,7 @@ impl TextView {
         let Some(text) = layout.downcast::<CoreTextLayout>() else {
             return Vec::new();
         };
-        let bottom = (content.y + content.height) as CGFloat;
+        let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
         text.lines
             .iter()
             .map(|l| {
@@ -487,7 +487,7 @@ impl TextView {
                     line: l.line.clone(),
                     start,
                     end: start + l.range.length.max(0) as usize,
-                    x: content.x as CGFloat + l.origin.x,
+                    x: content.origin.x.0 as CGFloat + l.origin.x,
                     top: bottom - (l.origin.y + ascent),
                     bottom: bottom - (l.origin.y - descent),
                     width,
@@ -562,8 +562,8 @@ impl TextView {
                     .map(|(_, c)| *c)
                     .unwrap_or_default();
                 CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(2.0, content.height as CGFloat),
+                    CGPoint::new(content.origin.x.0 as CGFloat, content.origin.y.0 as CGFloat),
+                    CGSize::new(2.0, content.size.height.0 as CGFloat),
                 )
             }
         }

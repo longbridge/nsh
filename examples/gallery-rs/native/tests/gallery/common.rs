@@ -8,7 +8,8 @@ use std::{sync::Arc, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     AttributedText, Command, EventKind, EventMask, EventPayload, GestureValues, MountBatch,
-    MountItem, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing, ui::Root,
+    MountItem, Points, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing,
+    geometry::px, ui::Root,
 };
 use nsh_engine::{Engine, EngineConfig};
 
@@ -197,25 +198,25 @@ pub fn logger() {
 
 /// A headless engine running the gallery on a phone, and its batches.
 pub fn start() -> (nsh_engine::Engine, Receiver<MountBatch>) {
-    start_at(Size::new(390.0, 844.0))
+    start_at(Size::new(px(390.0), px(844.0)))
 }
 
 /// A headless engine running the gallery in a window of `viewport`, and
 /// its batches.
-pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
+pub fn start_at(viewport: Size<Points>) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     start_with(viewport, None)
 }
 
 /// A headless engine running the gallery in a window of `viewport`,
 /// keeping its data in `data_dir` (`None`: in memory), and its batches.
 pub fn start_with(
-    viewport: Size,
+    viewport: Size<Points>,
     data_dir: Option<std::path::PathBuf>,
 ) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();
-    // A phone-sized engine with display frames (`nsh_engine::headless`),
+    // A phone-sized engine with display frames (`nsh_testing::start`),
     // here in a window of `viewport`.
-    nsh_engine::headless::start(EngineConfig {
+    nsh_testing::start(EngineConfig {
         viewport,
         data_dir,
         ..EngineConfig::new(
@@ -313,10 +314,8 @@ pub fn touch(
             } else {
                 Vec::new()
             },
-            page_x: x + 100.0,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x + 100.0), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     };

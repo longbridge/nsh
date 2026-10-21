@@ -10,7 +10,7 @@ use std::{
 };
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineJoin},
     ui::{
         Animation, LayoutAnimation, LayoutCurve, LayoutTransition, prelude::*, sample_easing,
@@ -21,7 +21,7 @@ use nsh_core::{
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
     PressRole, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, Tone, caption,
-    colors, icon, legend, press_with, radius, segmented, tints,
+    colors, icon, legend, lengths, press_with, radius, rect, segmented, tints,
 };
 
 /// The tones of the demos' dots and tiles.
@@ -34,7 +34,7 @@ const TONES: [AdaptiveColor; 5] = [
 ];
 
 /// Text on a tone's fill.
-const ON_TONE: AdaptiveColor = AdaptiveColor::new(rgb(0xffffff), rgb(0x13160c));
+const ON_TONE: AdaptiveColor = AdaptiveColor::rgb(0xffffff, 0x13160c);
 
 /// `Easing.inOut(Easing.cubic)`.
 const CUBIC_IN_OUT: Easing = Easing::Curve(Curve::Cubic, EaseMode::InOut);
@@ -233,7 +233,7 @@ fn Hero() -> impl IntoElement {
             .top(px(34.0))
             .size(px(S - 68.0))
             .rounded(px((S - 68.0) / 2.0))
-            .border(1.5)
+            .border(px(1.5))
             .border_color(colors::ACCENT)
             .bind_opacity(&r.interpolate(&[0.0, 0.15, 1.0], &[0.0, 0.6, 0.0]))
             .bind_scale(&r.interpolate(&[0.0, 1.0], &[0.35, 1.45]))
@@ -281,11 +281,11 @@ fn Hero() -> impl IntoElement {
 // --- Easing -----------------------------------------------------------------
 
 /// Diagonal hatching inside a rectangle.
-fn hatch(p: Painter, color: Color, (x, y, w, h): (f32, f32, f32, f32)) -> Painter {
+fn hatch(p: Painter, color: Hsla, (x, y, w, h): (f32, f32, f32, f32)) -> Painter {
     let mut p = p
         .save()
         .begin_path()
-        .rect(x, y, w, h)
+        .rect(rect(x, y, w, h))
         .clip()
         .stroke_color(color)
         .line_width(1.0)
@@ -318,7 +318,9 @@ fn draw_plot(width: f32, selected: usize, px: &AnimatedValue, py: &AnimatedValue
     for q in [0.25, 0.5, 0.75] {
         p = p.begin_path().move_to(x(q), t).line_to(x(q), b).stroke();
     }
-    p = p.line_dash(&[3.0, 4.0]).stroke_color(color(colors::FAINT));
+    p = p
+        .line_dash(&lengths([3.0, 4.0]))
+        .stroke_color(color(colors::FAINT));
     for v in [0.0, 1.0] {
         p = p.begin_path().move_to(l, y(v)).line_to(r, y(v)).stroke();
     }
@@ -367,7 +369,7 @@ fn draw_plot(width: f32, selected: usize, px: &AnimatedValue, py: &AnimatedValue
         .begin_path()
         .move_to(l, &hy)
         .line_to(&hx, &hy)
-        .line_dash(&[2.0, 3.0])
+        .line_dash(&lengths([2.0, 3.0]))
         .stroke()
         .line_dash(&[])
         .fill_color(color(colors::LIGHT))
@@ -431,7 +433,7 @@ fn EasingPlot() -> impl IntoElement {
         .child(
             canvas(move || draw_plot(width.get(), selected.get(), &dot_x, &dot_y))
                 .h(px(PLOT))
-                .on_layout(move |frame: &Rect| width.set(frame.width)),
+                .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
         .child(
             scroll()
@@ -474,8 +476,8 @@ fn EasingRace() -> impl IntoElement {
                         .h(px(12.0))
                         .justify_center()
                         .when(i == 0, |v| {
-                            v.on_layout(move |frame: &Rect| {
-                                travel.set((frame.width - 12.0).max(0.0));
+                            v.on_layout(move |frame: &Bounds<Points>| {
+                                travel.set((frame.size.width.0 - 12.0).max(0.0));
                             })
                         })
                         .child(view().h(px(2.0)).rounded(px(1.0)).bg(colors::RAISED))
@@ -725,7 +727,7 @@ fn draw_springs(
         gx += 12.0;
     }
     p = p
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .stroke_color(color(colors::FAINT))
         .begin_path()
         .move_to(l, y(1.0))
@@ -788,7 +790,7 @@ fn Springs() -> impl IntoElement {
                 .bg(colors::BACKGROUND)
                 .finish(Finish::Track)
                 .when(i == 0, |v| {
-                    v.on_layout(move |frame: &Rect| width.set(frame.width))
+                    v.on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 })
                 .child(
                     view()
@@ -827,7 +829,7 @@ fn Springs() -> impl IntoElement {
         .child(
             canvas(move || draw_springs(plot.get(), width.get(), there.get(), &clock, &xs))
                 .h(px(150.0))
-                .on_layout(move |frame: &Rect| plot.set(frame.width)),
+                .on_layout(move |frame: &Bounds<Points>| plot.set(frame.size.width.0)),
         )
         .child(
             view().flex_row().gap(px(14.0)).flex_wrap().children(

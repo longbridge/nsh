@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
+use nsh_core::js::HostLimits;
 use serde::Deserialize;
 
 use crate::{dev::DevSession, runtime::Platform, ui};
@@ -12,7 +13,7 @@ use crate::{dev::DevSession, runtime::Platform, ui};
 const APP_NAME: &str = "NshDev";
 const BUNDLE_ID: &str = "com.longbridge.nsh.host";
 
-/// Where `nsh run` runs the app.
+/// Where `nsh dev` and `nsh run` run the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Target {
     /// The Mac Catalyst development host (an iPhone-sized window).
@@ -31,27 +32,26 @@ pub(crate) enum Target {
     /// page).
     Web,
     /// The GPUI development host, in a window on this machine (macOS,
-    /// Windows or Linux).
+    /// Windows or Linux): the app as GPUI apps that embed it show it.
     Gpui,
 }
 
 impl Target {
-    /// The default: the host that runs on this machine (Mac Catalyst on
-    /// macOS, the GTK host on Linux, the Win32 host on Windows; Android
-    /// elsewhere).
+    /// The default: this system’s native desktop host (AppKit on macOS,
+    /// GTK on Linux, Win32 on Windows; the browser elsewhere).
     pub(crate) fn native() -> Target {
         if cfg!(target_os = "macos") {
-            Target::Catalyst
+            Target::Macos
         } else if cfg!(target_os = "linux") {
             Target::Linux
         } else if cfg!(windows) {
             Target::Windows
         } else {
-            Target::Android
+            Target::Web
         }
     }
 
-    fn platform(self) -> crate::runtime::Platform {
+    pub(crate) fn platform(self) -> crate::runtime::Platform {
         match self {
             Target::Catalyst => crate::runtime::Platform::MacCatalyst,
             Target::Linux => crate::runtime::Platform::Linux,
@@ -65,9 +65,12 @@ impl Target {
     }
 }
 
-/// What the development host shows besides the app.
+/// How the development host runs the app and what it shows besides it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostFlags {
+    /// The VM limits an embedding app would set (`--limits`); `None`: none,
+    /// as an app on its own.
+    pub(crate) limits: Option<HostLimits>,
     /// Log per-commit timings.
     pub(crate) trace: bool,
     /// The performance monitor (the macOS host's).
@@ -89,9 +92,16 @@ pub(crate) struct HostWindow<'a> {
 impl HostWindow<'_> {
     /// Refuses the options `target`'s host does not take. An app of Rust
     /// only (`rust_root`) runs in its runner, which takes the script
-    /// (`NSH_SCRIPT`) on macOS, Linux and Windows: GPUI's runner has no
-    /// screenshots (they need GPUI's test support).
+    /// (`NSH_SCRIPT`) on macOS, Linux and Windows; GPUI has no runner (it is
+    /// the backend for embedding in GPUI apps), so such an app does not run
+    /// there at all.
     fn check(&self, target: Target, rust_root: bool) -> anyhow::Result<()> {
+        if rust_root && target == Target::Gpui {
+            bail!(
+                "a Rust app runs on this OS's own backend (--target macos, linux or windows); \
+                 GPUI apps embed its root with AppView"
+            );
+        }
         let desktop = matches!(
             target,
             Target::Macos | Target::Linux | Target::Windows | Target::Gpui
@@ -106,15 +116,8 @@ impl HostWindow<'_> {
                 "--window-size needs a desktop host (--target macos, linux, windows or gpui) and a TSX entry"
             );
         }
-        if self.script.is_some() {
-            if rust_root && !matches!(target, Target::Macos | Target::Linux | Target::Windows) {
-                bail!("--script runs in a desktop runner: pass --target macos, linux or windows");
-            }
-            if !desktop {
-                bail!(
-                    "--script runs in a desktop host: pass --target macos, linux, windows or gpui"
-                );
-            }
+        if self.script.is_some() && !desktop {
+            bail!("--script runs in a desktop host: pass --target macos, linux, windows or gpui");
         }
         Ok(())
     }
@@ -146,7 +149,7 @@ pub(crate) fn run(
     device: Option<&str>,
     window: HostWindow<'_>,
 ) -> anyhow::Result<()> {
-    let HostFlags { trace, fps } = flags;
+    let HostFlags { limits, trace, fps } = flags;
     if fps && target != Target::Macos {
         bail!("--fps needs --target macos (the other hosts have no performance monitor yet)");
     }
@@ -159,10 +162,10 @@ pub(crate) fn run(
         return run_rust_app(entry, port, target, device, &work, window.script);
     }
     if target == Target::Android {
-        return run_android(entry, port, release, &work, trace);
+        return run_android(entry, port, release, limits, &work, trace);
     }
     if target == Target::Web {
-        return run_web(entry, port, release);
+        return run_web(entry, port, release, limits);
     }
     // The host a previous session left running would connect to this one
     // until it is replaced.
@@ -181,7 +184,7 @@ pub(crate) fn run(
         | Target::Gpui => None,
     };
     // The host it starts connects by itself: no addresses to show.
-    let session = DevSession::start(entry, port, release)?;
+    let session = DevSession::start(entry, port, release, limits)?;
     let host = crate::runtime::file(target.platform(), false)?;
     let mut args = vec!["--dev-server".to_owned(), session.local_url()];
     if trace {
@@ -196,6 +199,7 @@ pub(crate) fn run(
             let exe = app.join("Contents/MacOS/nsh-ios-host");
             // Its own output (AppKit's notes) is kept for when it fails.
             let mut command = Command::new(&exe);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 // A host that crashed must not ask to reopen its windows
@@ -207,6 +211,7 @@ pub(crate) fn run(
         // bundle around it.
         Target::Linux => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
@@ -224,6 +229,7 @@ pub(crate) fn run(
             let (app_name, id) = crate::package::name_and_id(&entry, &config);
             let name = window.name.unwrap_or(&app_name);
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--name", name, "--app-id", &id])
@@ -233,6 +239,7 @@ pub(crate) fn run(
         }
         Target::Windows => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
@@ -243,6 +250,7 @@ pub(crate) fn run(
         // macOS too) without an app bundle around it.
         Target::Gpui => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?])
@@ -278,10 +286,15 @@ pub(crate) fn run(
 /// address, on a phone) runs the app until the session ends. The browser
 /// is the user's to open: a session that starts again (the app's Rust code
 /// changed) finds its page still open, and it reloads by itself.
-fn run_web(entry: &Path, port: u16, release: bool) -> anyhow::Result<()> {
+fn run_web(
+    entry: &Path,
+    port: u16,
+    release: bool,
+    limits: Option<HostLimits>,
+) -> anyhow::Result<()> {
     // Built first in a checkout: the session serves the runtime it finds.
     crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-    let session = DevSession::start(entry, port, release)?;
+    let session = DevSession::start(entry, port, release, limits)?;
     session.print_web_url();
     session.watch(|| Ok(false))
 }
@@ -327,7 +340,7 @@ fn run_rust_app(
     };
     let run = work.join("rust");
     match target {
-        Target::Linux | Target::Macos | Target::Windows | Target::Gpui => {
+        Target::Linux | Target::Macos | Target::Windows => {
             let runner = crate::runtime::file(target.platform(), false)?;
             let dir = run.join("run/nsh");
             resources(&dir)?;
@@ -420,10 +433,11 @@ fn run_rust_app(
         }
         Target::Web => {
             crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-            let session = DevSession::start(&entry, port, false)?;
+            let session = DevSession::start(&entry, port, false, None)?;
             session.print_web_url();
             session.watch(|| Ok(false))
         }
+        Target::Gpui => unreachable!("refused by HostWindow::check"),
     }
 }
 
@@ -566,6 +580,7 @@ fn run_android(
     entry: &Path,
     port: u16,
     release: bool,
+    limits: Option<HostLimits>,
     work: &Path,
     trace: bool,
 ) -> anyhow::Result<()> {
@@ -574,7 +589,7 @@ fn run_android(
     let serial = android::device(&sdk)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
-    let session = DevSession::start(entry, port, release)?;
+    let session = DevSession::start(entry, port, release, limits)?;
     let runtime = crate::runtime::android(true)?;
     let apk_path = work.join("android/NshDev.apk");
     fs::create_dir_all(apk_path.parent().context("apk dir")?)?;
@@ -908,7 +923,9 @@ mod tests {
         for target in [Target::Macos, Target::Linux, Target::Windows] {
             assert!(script.check(target, true).is_ok(), "Rust app, {target:?}");
         }
+        // GPUI runs no Rust app on its own, with or without a script.
         assert!(script.check(Target::Gpui, true).is_err());
+        assert!(HostWindow::default().check(Target::Gpui, true).is_err());
         let sized = HostWindow {
             size: Some("700x500"),
             ..HostWindow::default()

@@ -8,15 +8,13 @@
 //! derived decoders, and their declarations go into the ones apps are
 //! checked against (`nsh-js` `declarations.rs`).
 
-use std::time::Duration;
-
 /// nsh's own native ES modules, which bundles compiled with nsh's JSX
 /// compiler import (served by `nsh-js`, left as imports by the bundler):
 /// `nsh`, the API apps write against; `nsh:rt`, the renderer compiled JSX
 /// calls; `nsh/device` and `nsh/accessibility`, the environment; the
 /// platforms' and host elements' modules. Registries add theirs
-/// (`Registry::specifier`: `nsh/ui/mobile`, ...) or the functions of
-/// nsh's own (`nsh/image`, `nsh/android`).
+/// (`Registry::specifier`: `nsh/base`, an app's set) or
+/// the functions of nsh's own (`nsh/image`, `nsh/android`).
 pub const NATIVE_MODULES: &[&str] = &[
     "nsh",
     "nsh:rt",
@@ -36,6 +34,27 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/keymap",
 ];
 
+/// The exact gpui-shell standard catalog, using canonical bare specifiers.
+/// Privileged entries route through NSH capability adapters.
+pub const STANDARD_MODULES: &[&str] = &[
+    "buffer",
+    "console",
+    "crypto",
+    "fs/promises",
+    "net",
+    "os",
+    "path",
+    "process",
+    "url",
+    "websocket",
+    "zlib",
+];
+
+/// Whether a module is a standard builtin with its canonical spelling.
+pub fn is_standard_module(name: &str) -> bool {
+    STANDARD_MODULES.contains(&name)
+}
+
 /// The module name of an app's bundle (its entry chunk): stack traces show
 /// `bundle.js:LINE:COL`, and the chunks of a split bundle import it as
 /// `./bundle.js`.
@@ -46,68 +65,6 @@ pub const ENTRY_CHUNK: &str = "bundle.js";
 /// ["shared.js"])`): it makes the chunk and the chunks it imports
 /// statically available (on the web, fetched), then imports the first.
 pub const IMPORT_CHUNK: &str = "__nsh_import";
-
-/// Resource limits of one VM.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Limits {
-    /// QuickJS heap, in bytes (0: no limit). Running out stops the VM.
-    pub memory_bytes: usize,
-    /// Interpreter stack, in bytes: deep recursion becomes a `RangeError`
-    /// rather than a native stack overflow. Must stay below the engine
-    /// thread's stack.
-    pub stack_bytes: usize,
-    /// Evaluating the bundle.
-    pub load_budget: Duration,
-    /// Any other call into JS: one event (with the rendering it causes), one
-    /// list bind, one timer, one frame's callbacks, the microtask drain.
-    pub call_budget: Duration,
-    /// Changes JS may make at once (the op queue's length): they are held in
-    /// Rust memory, which the heap limit does not cover.
-    pub max_op_values: usize,
-    /// Operations one canvas drawing may record.
-    pub max_canvas_ops: usize,
-    /// Nodes the core keeps (each may have a native view, whose memory the
-    /// heap limit does not cover either).
-    pub max_nodes: usize,
-}
-
-impl Limits {
-    /// The limits of an app nsh runs on its own on a desktop (the macOS,
-    /// Windows and Linux hosts and runners): a 1 GB heap, as a desktop app
-    /// may hold much more data than a module embedded in a host app.
-    pub fn standalone_desktop() -> Self {
-        Self {
-            memory_bytes: 1 << 30,
-            ..Self::default()
-        }
-    }
-
-    /// The limits of an app nsh runs on its own on a phone or tablet (the
-    /// iOS and Android hosts and runners): a 512 MB heap, well below where
-    /// the systems end apps for their memory.
-    pub fn standalone_mobile() -> Self {
-        Self {
-            memory_bytes: 512 << 20,
-            ..Self::default()
-        }
-    }
-}
-
-/// The limits of an app embedded in a host app (`NshAppView`, `NshView`,
-/// `AppView`): a 256 MB heap; the embedder may set others.
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            memory_bytes: 256 << 20,
-            stack_bytes: 4 << 20,
-            load_budget: Duration::from_secs(10),
-            call_budget: Duration::from_secs(2),
-            max_op_values: 8_000_000,
-            max_canvas_ops: 1_000_000,
-            max_nodes: 200_000,
-        }
-    }
-}
 
 /// Constants of encoded operations and a table of them for the generators.
 macro_rules! codes {
@@ -127,9 +84,12 @@ pub mod animation;
 pub mod canvas;
 pub mod host;
 pub(crate) mod host_values;
+mod limits;
 pub mod ops;
 pub mod protocol;
 pub mod style;
+
+pub use limits::{HostLimits, Limits};
 
 #[cfg(test)]
 mod tests {
@@ -164,14 +124,18 @@ mod tests {
             ("HostProps", "  onLayout?: (e: LayoutEvent) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
-            ("InputHostProps", "  onChangeText?: (text: string) => void;"),
+            ("InputHostProps", "  onChange?: (text: string) => void;"),
+            (
+                "InputHostProps",
+                "  onSubmit?: (e: { text: string }) => void;",
+            ),
+            ("InputHostProps", "  masked?: boolean;"),
+            ("InputHostProps", "  readonly?: boolean;"),
             ("IOSInputHostProps", "  inputAccessoryViewID?: string;"),
             (
                 "IOSInputHostProps",
                 "  keyboardAppearance?: KeyboardAppearance;",
             ),
-            ("TextHostProps", "  selectionColor?: ColorValue;"),
-            ("InputHostProps", "  selectionColor?: ColorValue;"),
             (
                 "ImageHostProps",
                 "  onLoad?: (e: { width: number; height: number }) => void;",
@@ -188,28 +152,15 @@ mod tests {
                 "ScrollingHostProps",
                 "  onScroll?: (e: ScrollEvent) => void;",
             ),
-            (
-                "ListHostProps",
-                "  contentContainerStyle?: ListContentStyle;",
-            ),
-            (
-                "IOSModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            (
-                "DesktopModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            (
-                "WebModalHostProps",
-                "  presentationStyle?: ModalPresentation;",
-            ),
-            ("DesktopScreenHostProps", "  headerBackTitle?: string;"),
+            ("ListHostProps", "  contentStyle?: ListContentStyle;"),
+            ("DialogHostProps", "  presentation?: ModalPresentation;"),
+            ("DialogHostProps", "  closeOnEscape?: boolean;"),
+            ("NavPageHostProps", "  headerBackTitle?: string;"),
+            ("NavPageHostProps", "  popOnBack?: boolean;"),
             (
                 "DesktopWebViewHostProps",
                 "  allowsBackForwardNavigationGestures?: boolean;",
             ),
-            ("ModalHostProps", "  onRequestClose?: () => void;"),
         ] {
             let at = elements
                 .find(&format!("export interface {interface} {{"))
@@ -231,7 +182,17 @@ mod tests {
         );
         assert!(animation.contains("  readonly scaleXY: \"scaleXY\";"));
         // What the runtime sets itself is not part of the types.
-        for internal in ["splice?", "cellIndex?", "tailwindTheme?", "headerSlot?"] {
+        for internal in [
+            "splice?",
+            "cellIndex?",
+            "tailwindTheme?",
+            "headerSlot?",
+            "onChangeText?",
+            "onDismiss?",
+            "onRequestClose?",
+            "selectionColor?",
+            "placeholderTextColor?",
+        ] {
             assert!(!elements.contains(internal), "{internal}");
         }
     }

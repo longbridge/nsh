@@ -8,11 +8,11 @@ group: platforms
 # macOS
 
 NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
-渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 macOS 上，
+渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 macOS 上，
 `Platform.OS` 为 `"macos"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
-macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可调整大小的窗口，居中的表单和菜单栏。
+macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可调整大小的窗口，覆盖窗口的对话框和菜单栏。
 
 ## 环境要求
 
@@ -106,6 +106,8 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
+`AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
+
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-macos-上注册rust)。
 
 默认情况下，关闭窗口或选择退出会停止引擎，并从 `run_app` 返回；调用方可以继续完成清理或重新启动可执行文件。
@@ -121,23 +123,23 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
 输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。`selectable` 文本通过拖动、双击和三击选择，用 Cmd+C 复制。
-Escape、Option+Left、Cmd+[ 和鼠标的后退键会在栈中返回，或请求模态视图关闭（焦点在输入框或网页中时，Escape 只会离开它；
-网页先收到这些按键，它自己用掉的不会触发返回）；`pageSheet` 和 `formSheet` 是窗口中居中的卡片，背后的内容变暗。
+Escape、Option+Left、Cmd+[ 和鼠标的后退键会关闭最新的对话框或在栈中返回（焦点在输入框或网页中时，Escape 只会离开它；
+网页先收到这些按键，它自己用掉的不会触发返回）；`Dialog` 是覆盖整个窗口的一层，显示应用的弹出层和背景。页面在顶部显示它的 `header`。
 点击 `Input` 的任意位置（包括内边距）都会把光标放到最近的位置。
-`Alert` 和 `ActionSheet` 以 `NSAlert` 表单的形式显示在窗口上：不超过两个按钮的提示框按钮排成一行（取消按钮在最左边，最后一个普通按钮是
-Return 的默认按钮）；更多按钮以及操作表的选项按顺序竖排，取消按钮在最后，没有默认按钮；Escape 按下取消按钮。
+`AlertDialog` 以 `NSAlert` 表单的形式显示在窗口上：不超过两个操作的提示框操作排成一行（取消操作在最左边，最后一个普通操作是
+Return 的默认操作）；更多操作以及操作表的操作按顺序竖排，取消操作在最后，没有默认操作；Escape 选择取消操作。
 
 ### 键盘
 
 | 按键 | 作用 |
 |---|---|
-| Return | 在 `Input` 中按 `submitBehavior` 的设定：提交（`onSubmitEditing`）、提交并离开输入框，或换行（多行输入框） |
+| Return | 在 `Input` 中按 `submitBehavior` 的设定：提交（`onSubmit`）、提交并离开输入框，或换行（多行输入框） |
 | Shift+Return、Option+Return、Ctrl+Return | 在 Return 用于提交的多行输入框中换行 |
-| Tab、Shift+Tab（加 Ctrl 亦可） | 按屏幕顺序切换到下一个 / 上一个输入框或可按压视图，限于最新的模态视图内；Option+Tab 在多行输入框中输入制表符 |
-| Escape | 离开有焦点的输入框；否则清除文本选区，再返回或请求最新的模态视图关闭 |
+| Tab、Shift+Tab（加 Ctrl 亦可） | 按屏幕顺序切换到下一个 / 上一个输入框或可按压视图，限于最新的对话框内；Option+Tab 在多行输入框中输入制表符 |
+| Escape | 离开有焦点的输入框；否则清除文本选区，再关闭最新的对话框或返回 |
 | Option+Left、Cmd+[、鼠标后退键 | 返回（输入框有焦点时不会：此时 Option+Left 移动光标） |
 | Option / Cmd + 方向键（可加 Shift）；Option+Delete、Cmd+Delete；Ctrl+A / E / K | 在输入框中按词和按行移动、选择和删除，与所有 Mac 应用一致 |
-| Cmd+Z、Shift+Cmd+Z、Cmd+X / C / V / A | 撤销、重做、剪切、复制、粘贴、全选（密码框拒绝剪切和复制）；Cmd+A / Cmd+C 选择并复制 `selectable` 文本 |
+| Cmd+Z、Shift+Cmd+Z、Cmd+X / C / V / A | 撤销、重做、剪切、复制、粘贴、全选（`masked` 输入框拒绝剪切和复制）；Cmd+A / Cmd+C 选择并复制 `selectable` 文本 |
 | 方向键；Page Up / Down、Space、Shift+Space、Option+Up / Down；Home / End、Cmd+Up / Down | 滚动有焦点的视图所在或鼠标下方的滚动视图：一行、一页、到开头 / 结尾（输入框有焦点时不滚动） |
 | Cmd+W、Cmd+M、Ctrl+Cmd+F、Cmd+H、Option+Cmd+H、Cmd+Q | 关闭、最小化、全屏、隐藏、隐藏其他、退出（`nsh package` 和 `nsh run` 应用的菜单） |
 | Cmd+R | 重新加载最新的构建（`nsh run`） |
@@ -157,7 +159,7 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 - **无障碍**：自定义 `accessibilityActions`。
 - **状态栏**和**触感反馈**（桌面上没有对应物）。
 
-带有 `onPress` 的已启用普通视图与输入框一起参与 Tab/Shift+Tab 焦点导航，范围限制在最上层模态窗口中。
+带有 `onPress` 的已启用普通视图与输入框一起参与 Tab/Shift+Tab 焦点导航，范围限制在最上层对话框中。
 聚焦的可按压视图会在 Return、数字键盘 Enter 或 Space 按下时触发一次按压事件；长按重复和按键抬起不会再次触发。
 这些激活键优先交给聚焦的控件，带修饰键的快捷键沿用原有优先级。`focus:` 样式和无障碍焦点会同步键盘焦点。
 

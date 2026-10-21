@@ -54,7 +54,7 @@ See [Building with Rust](./rust.md), [the CLI reference](./cli.md#nsh-init), and
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 function App() {
   const count = signal(0);
@@ -63,8 +63,8 @@ function App() {
       <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeOpacity={0.6}
-        accessibilityRole="button"
+        activeStyle={{ opacity: 0.6 }}
+        role="button"
         style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
       >
         <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
@@ -79,15 +79,15 @@ mount(App);
 Line by line:
 
 - **`import { mount, signal, Text, View } from "nsh"`**: `nsh` is the core module: [signals](./reactivity.md), `mount`, the other reactive primitives, and the host elements `View` and `Text`. It is served by the native runtime, not bundled.
-- **`import { SafeAreaView } from "nsh/ui/mobile"`**: the mobile UI set. [`SafeAreaView`](../components/safe-area-view.md) pads its content so it stays clear of the notch, the status bar and the home indicator; on desktops, where the safe area is 0, it adds no padding.
+- **`import { SafeAreaView } from "nsh/base"`**: the unstyled foundation of an app's UI (navigation stacks, modals, safe areas, dialogs, the keyboard and the status bar), on every platform. [`SafeAreaView`](../modules/nsh-base.md#safeareaview) pads its content so it stays clear of the notch, the status bar and the home indicator; on desktops, where the safe area is 0, it adds no padding.
 - **`function App()`** is a component: a function that returns JSX. It runs **once**. `signal(0)` makes a value that changes over time.
 - **`{count()}`** reads the signal inside JSX. The compiler sees a call and makes this text follow the signal: when `count` changes, the runtime updates this one text, nothing else.
-- **`<View onPress>`** is a native view that reacts to presses; `activeOpacity` fades it while pressed, natively. `View`, `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from NSH's modules, like any component; only `If` and `Each` need no import.
+- **`<View onPress>`** is a native view that reacts to presses; `activeStyle` is its style while pressed, applied natively. `View`, `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from NSH's modules, like any component; only `If` and `Each` need no import. The button is the app's own: NSH provides the primitives and the capabilities, and an app draws its UI from them, with `style`, Tailwind classes or Rust components of its own.
 - **`style={{ … }}`** takes an object of camelCase style properties, with numbers in points. Layout is flexbox, and children stack in a column by default ([Layout](./layout.md)).
 - **`mount(App)`** renders the component into the app's surface.
 
 > [!IMPORTANT]
-> Text must be inside `<Text>`. A bare string in a `<View>` (`<View>Hello</View>`) is not displayed.
+> Text shows in a `<Text>`. Text written straight in a `<View>` (`<View>Hello</View>`) is a build error that points at it, and a string an expression puts there (`<View>{name}</View>`) is reported in the log.
 
 ## Develop it
 
@@ -95,16 +95,16 @@ Line by line:
 
 `nsh run` starts a dev server, builds the app, launches a development host that loads it, and keeps rebuilding while you edit. Logs from the app (`console.log`, errors) appear in the terminal.
 
-Without `--target`, `nsh run` uses the machine you are on: a Win32 window on Windows, a GTK window on Linux, and on macOS a Mac Catalyst window that shows the app as an iPhone would. Pick another platform with `--target`:
+Without `--target`, `nsh run` uses the machine you are on: a Win32 window on Windows, a GTK window on Linux, and on macOS an AppKit window. Pick another platform with `--target`:
 
 | Target | Command | Runs from |
 |---|---|---|
 | iOS simulator | `nsh run my-app/App.tsx --target ios` | macOS with Xcode |
 | Android | `nsh run my-app/App.tsx --target android` | macOS, Windows, Linux |
-| macOS (AppKit) | `nsh run my-app/App.tsx --target macos` | macOS |
+| macOS (AppKit) | `nsh run my-app/App.tsx` | macOS (the default) |
 | Windows | `nsh run my-app/App.tsx` | Windows (the default) |
 | Linux (GTK 4) | `nsh run my-app/App.tsx` | Linux (the default) |
-| Mac Catalyst | `nsh run my-app/App.tsx` | macOS (the default) |
+| Mac Catalyst | `nsh run my-app/App.tsx --target catalyst` | macOS |
 
 #### iOS simulator
 
@@ -149,10 +149,10 @@ nsh run my-app/App.tsx
 
 The app opens in a GTK window (390×844 points). It needs GTK 4.14 or later; see [Linux](./linux.md).
 
-#### Mac Catalyst (default on macOS)
+#### Mac Catalyst
 
 ```sh
-nsh run my-app/App.tsx
+nsh run my-app/App.tsx --target catalyst
 ```
 
 The app opens in an iPhone-sized window (390×844 points) on your Mac. This is the quickest way to see a module as a phone shows it: no simulator to boot. It uses UIKit like iOS, so what you see is what an iPhone shows, apart from Mac-specific behavior such as scrolling with a mouse wheel. For the Mac app itself, use `--target macos`.
@@ -170,7 +170,7 @@ Save. The CLI rebuilds and sends a patch; the host runs the changed module again
 ```tsx
 function TapButton(props: { onPress: () => void }) {
   return (
-    <View onPress={props.onPress} activeOpacity={0.6} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
+    <View onPress={props.onPress} activeStyle={{ opacity: 0.6 }} style={{ padding: 12, borderRadius: 10, backgroundColor: "#0969da" }}>
       <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
     </View>
   );
@@ -270,13 +270,13 @@ This is a supported use on every platform, and the quickest way to put a module 
 
 ## Try it in the terminal
 
-`nsh trace` runs an app headless (no device) and prints the native view operations it produces and their timings, then taps the first pressable view twice:
+`nsh test` runs an app's tests headless (no device): `nsh init` wrote one, `App.test.tsx`, which opens the app, presses its button and checks what it shows:
 
 ```sh
-nsh trace my-app/App.tsx
+nsh test my-app
 ```
 
-It is a quick way to check that an app starts without errors, and to see how much work an interaction causes ([Testing and trace](./testing-and-trace.md)).
+With `--trace`, it also prints the native view operations the app produces and their timings: a quick way to see how much work an interaction causes ([Testing](./testing-and-trace.md)).
 
 ## Next steps
 

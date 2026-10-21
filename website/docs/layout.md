@@ -20,7 +20,7 @@ A view lays out its children with flexbox. The defaults differ from the web's:
 |---|---|---|
 | `flexDirection` | `"column"` | `row` |
 | `flexShrink` | `0` | `1` |
-| `alignContent` | `"flex-start"` | `stretch` |
+| `alignContent` | `"flex-start"` (grids: `"normal"`) | `normal` |
 | `alignItems` | `"stretch"` | `stretch` |
 | `minWidth` / `minHeight` | `0` | `auto` |
 | `position` | `"relative"` | `static` |
@@ -39,14 +39,16 @@ A view lays out its children with flexbox. The defaults differ from the web's:
 | Property | Values |
 |---|---|
 | `flexDirection` | `"column"`, `"row"`, `"column-reverse"`, `"row-reverse"` |
-| `justifyContent` | Main axis: `"flex-start"`, `"flex-end"`, `"center"`, `"space-between"`, `"space-around"`, `"space-evenly"`, `"stretch"` |
-| `alignItems` | Cross axis: `"stretch"`, `"flex-start"`, `"flex-end"`, `"center"`, `"baseline"` |
+| `justifyContent` | Main axis: `"flex-start"`, `"flex-end"`, `"start"`, `"end"`, `"center"`, `"space-between"`, `"space-around"`, `"space-evenly"`, `"stretch"` |
+| `alignItems` | Cross axis: `"stretch"`, `"flex-start"`, `"flex-end"`, `"start"`, `"end"`, `"self-start"`, `"self-end"`, `"center"`, `"baseline"` |
 | `alignSelf` | One child's cross-axis alignment; `"auto"` follows the parent's `alignItems` |
 | `alignContent` | Lines of a wrapping container |
 | `flexWrap` | `"nowrap"`, `"wrap"`, `"wrap-reverse"` |
 | `flex` | A single-number shorthand (below) |
 | `flexGrow`, `flexShrink`, `flexBasis` | As in CSS |
 | `gap`, `rowGap`, `columnGap` | Space between children |
+
+`flex-start` and `flex-end` follow the flex direction; `start` and `end` follow the writing direction, as in CSS (right to left, `start` is the right side), and `self-start` / `self-end` the child's own.
 
 `flex` takes one number and is not the CSS shorthand: a positive number `n` means grow by `n`, shrink by 1 and start from a basis of 0, so `flex: 1` siblings share the space equally whatever their content; `flex: 0` (the default) sizes the view to its content; a negative number shrinks it by that much down to its minimum.
 
@@ -101,9 +103,22 @@ Images imported from files have a natural size and lay out at it when no size is
 | `gridTemplateColumns`, `gridTemplateRows` | CSS track lists: `"repeat(3, 1fr)"`, `"200px 1fr"`, `minmax()`, `auto-fill` / `auto-fit`, line names |
 | `gridAutoColumns`, `gridAutoRows` | Tracks of implicitly created columns and rows |
 | `gridAutoFlow` | `"row"`, `"column"`, `"dense"`, `"row dense"`, `"column dense"` |
-| `gridColumn`, `gridRow` | `"1 / 3"`, `"span 2"`, a line number or name |
+| `gridColumn`, `gridRow` | `"1 / 3"`, `"span 2"`, a line number or name: `"content-start / content-end"`, `"2 col"` (the second line named `col`), `"span col"` (up to the next line named `col`) |
 | `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd` | Line numbers or names |
-| `justifyItems`, `justifySelf` | How items sit in their areas along the row |
+| `justifyItems`, `justifySelf` | How items sit in their areas along the row: `"start"`, `"end"`, `"center"`, `"stretch"`, ... |
+| `alignItems`, `alignSelf` | How items sit in their areas along the column |
+| `justifyContent`, `alignContent` | How the tracks sit in the grid along the row and the column |
+
+Templates name their lines in brackets, one or several names per line, and items are placed by those names, as in CSS:
+
+```tsx
+<View style={{ display: "grid", gridTemplateColumns: "[full-start] 16px [content-start] 1fr [content-end] 16px [full-end]" }}>
+  <View style={{ gridColumn: "content-start / content-end", height: 60, backgroundColor: "#b083f0" }} />
+  <View style={{ gridColumn: "full-start / full-end", height: 60, backgroundColor: "#8250df" }} />
+</View>
+```
+
+In a grid, `justifyContent` and `alignContent` default to CSS's `"normal"`: tracks sized `auto` stretch to fill the container, so a grid with a height and no row template shares that height among its rows. A value set explicitly (`"start"`, `"center"`, `"space-between"`, ...) places the tracks as it does in CSS. The alignment classes set exactly what Tailwind CSS sets: `content-start` (`align-content: flex-start`) and `place-content-start` pack the tracks at the start, and `content-normal` and `justify-normal` stretch them, as in a browser.
 
 `display: "block"` uses CSS block layout (children stacked, each as wide as the container), and `display: "none"` removes the view from layout.
 
@@ -147,7 +162,7 @@ Tailwind's breakpoints (`sm:`, `md:`, ...) and `portrait:` / `landscape:` give t
 
 ## Safe areas
 
-The root view covers the whole screen, under the status bar and the home indicator. Wrap screens in [`SafeAreaView`](../components/safe-area-view.md) from `nsh/ui/mobile`, which pads its content by the safe area insets, or read the insets with `safeArea()` / `useSafeAreaInsets()` and apply them yourself. Screens of a [navigation stack](./navigation.md) already sit below their header.
+The root view covers the whole screen, under the status bar and the home indicator. Wrap screens in [`SafeAreaView`](../modules/nsh-base.md#safeareaview) from `nsh/base`, which pads its content by the safe area insets, or read the insets with `safeArea()` / `safeAreaInsets()` and apply them yourself. Screens of a [navigation stack](./navigation.md) already sit below their header.
 
 ## Right to left
 

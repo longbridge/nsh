@@ -13,7 +13,7 @@ const ENTRY: &str = "__nsh_native_module";
 
 /// The public function that makes the set, at the crate's root, for tests
 /// and other Rust code (`my_app_native::registry()`, as
-/// `nsh_ui_mobile::registry()`).
+/// `nsh_base::registry()`).
 const PUBLIC: &str = "registry";
 
 pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream2> {
@@ -87,7 +87,7 @@ pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream
     let public = syn::Ident::new(PUBLIC, span);
     let doc = format!(
         " The crate's UI set: what TSX imports as `{}` (`#[native_module]` on `{ident}`), as \
-         `nsh` serves it: what tests run next to nsh's own sets (`nsh_ui_mobile::registry()`).",
+         `nsh` serves it: what tests run next to nsh's own sets (`nsh_base::registry()`).",
         specifier.value()
     );
     Ok(quote! {
@@ -173,7 +173,8 @@ mod tests {
         for bad in [
             "",
             "nsh",
-            "nsh/ui/mobile",
+            "nsh/base",
+            "nsh/base/mobile",
             "./native",
             "../native",
             "/native",

@@ -37,7 +37,7 @@ pub fn main() -> std::process::ExitCode {
     // Named "nsh" unless `--name` names the app.
     // As the release runner runs the app: on its own.
     let mut options = AppOptions {
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let mut args = env::args().skip(1);
@@ -77,6 +77,9 @@ pub fn main() -> std::process::ExitCode {
             // Steps run once the window shows (`nsh_platform_macos`'s
             // `script` module): window screenshots and simulated input.
             "--script" => options.script = args.next(),
+            // Where apps keep their data (`nsh test --target` gives each app
+            // a fresh one); the system's data directory otherwise.
+            "--data-dir" => options.data_dir = args.next().map(std::path::PathBuf::from),
             "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));

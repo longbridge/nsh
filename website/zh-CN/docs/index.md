@@ -20,7 +20,7 @@ NSH 同时运行在手机和桌面上：iOS（UIKit）、Android（Android 视�
 
 - **模型擅长的格式。** 一个模块就是一个 TSX 文件，用到信号、少量宿主元素和 Tailwind 类——都是模型在 Web 上早已熟悉的词汇，不需要构建配置，也无需 NPM。
 - **精确的、自动生成的契约。** 每个元素、属性、样式键和模块都有从 Rust 源码生成的 TypeScript 声明（`.nsh/types`），生成的代码可以做类型检查，也可以把准确的 API 交给模型，而不是让它去猜。本文档也以纯文本形式提供给模型（[`llms.txt`](/llms.txt)、[`llms-full.txt`](/llms-full.txt)）。
-- **下发之前就能验证。** `nsh trace` 可以无界面、不需要设备地运行模块，报告错误和它生成的视图；构建错误附带代码定位。生成流程可以编译、运行、读取结果再重试。编译器也能作为库在进程内运行（`nsh_bundler::compile_module`），甚至在浏览器里运行（[在线试用](/zh-CN/playground)）。
+- **下发之前就能验证。** `nsh test` 可以无界面、不需要设备地运行模块，在其上执行操作步骤，报告错误和它生成的视图；构建错误附带代码定位。生成流程可以编译、运行、读取结果再重试。编译器也能作为库在进程内运行（`nsh_bundler::compile_module`），甚至在浏览器里运行（[在线试用](/zh-CN/playground)）。
 - **不可信也能安全运行。** 生成的代码就是不可信代码。每个模块运行在独立的 QuickJS 虚拟机里，受内存、调用时长和节点数限制，只能使用宿主授予的能力，并以签名包的形式到达、先经应用校验。
 - **原生，却无需写原生代码。** 产出的是平台自己的界面——UIKit、Android 视图、AppKit、GTK 4，或用 Direct2D 绘制的 Win32——拥有平台的文本、输入和无障碍能力，但模型从不需要写 Swift、Kotlin、Java 或 Rust，应用也不需要发新版本。
 
@@ -62,7 +62,7 @@ function Counter() {
       <Text style={{ fontSize: 48, fontWeight: "700" }}>{count()}</Text>
       <View
         onPress={() => count.update((n) => n + 1)}
-        activeOpacity={0.6}
+        activeStyle={{ opacity: 0.6 }}
         class="rounded-lg bg-blue-600 px-5 py-3"
       >
         <Text class="text-white text-lg">Tap</Text>
@@ -74,7 +74,7 @@ function Counter() {
 mount(Counter);
 ```
 
-`<View>` 在 iOS 上变成 `UIView`，在 Android 上变成 `ViewGroup`，在 macOS 上变成 `NSView`，在 Linux 上变成 GTK 控件，`<Text>` 变成原生文本视图，按钮的按压反馈（`activeOpacity`）在主线程上完成，不需要往返 JavaScript。点击时，`count.update` 只修改一个信号，只有读取 `count()` 的那段文本会更新：组件函数不会重新执行。
+`<View>` 在 iOS 上变成 `UIView`，在 Android 上变成 `ViewGroup`，在 macOS 上变成 `NSView`，在 Linux 上变成 GTK 控件，`<Text>` 变成原生文本视图，按钮的按压反馈（`activeStyle`）在主线程上完成，不需要往返 JavaScript。点击时，`count.update` 只修改一个信号，只有读取 `count()` 的那段文本会更新：组件函数不会重新执行。
 
 宿主应用只需几行原生代码就能显示它（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Windows](./windows.md#嵌入-win32-应用)、[Linux](./linux.md#嵌入-gtk-应用)）。在 iOS 上：
 
@@ -97,7 +97,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 由于 JavaScript 只描述界面、处理事件，解释器里的工作量很小。解析样式、解析 Tailwind 类名、差异比较、布局和文本处理都在 Rust 中完成。
 
 > [!NOTE]
-> 主线程从不等待 JavaScript。系统同步提出的问题（这个输入框还能再接受一个字符吗、用户可以侧滑返回吗、这个面板可以关闭吗）由原生层根据你事先设置的 props 直接回答，例如 `maxLength`、`preventBack` 或 `dismissible`。事件随后才会到达你的代码。
+> 主线程从不等待 JavaScript。系统同步提出的问题（这个输入框还能再接受一个字符吗、用户可以侧滑返回吗、这个面板可以关闭吗）由原生层根据你事先设置的 props 直接回答，例如 `maxLength`、`popOnBack` 或 `closeOnSwipe`。事件随后才会到达你的代码。
 
 ## 你能得到什么
 
@@ -108,7 +108,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 - **原生视图。** 嵌入原生地图、WebView 或视频播放器没有层级问题，无障碍使用平台自己的树，文本输入是系统的输入。
 - **细粒度响应式。** 与 Solid 类似的[信号](./reactivity.md)，在原生层实现。组件只运行一次，只有读取了变化信号的表达式会重新执行。
 - **样式与 Tailwind**，在原生层解析：flexbox、CSS grid、阴影、渐变、滤镜、过渡（[样式](./styling.md)、[Tailwind](./tailwind.md)）。
-- **移动端 UI 组件集**（`nsh/ui/mobile`），组件用 Rust 编写、由 NSH 绘制，在每个平台上外观一致：[Button](../components/button.md)、[Card](../components/card.md)、[ListView](../components/list-view.md)、[导航](../components/navigation.md) 等。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)），桌面 UI 套件也在路上。
+- **基础元素与基础组件，外观由应用决定。** 应用用基础元素（`View`、`Text`、`Input`、`List` 等）配合样式和 Tailwind 类绘制界面，并以 [`nsh/base`](../modules/nsh-base.md) 为依托，这些无样式的基础组件负责行为、状态和无障碍：导航栈和 modal、安全区域、系统提示框、键盘和状态栏。其上带样式的组件库由应用自己或社区提供（[三层结构](./architecture.md#three-layers)）。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)）。
 - **单一可执行文件的工具链。** 一个 `nsh` 可执行文件负责构建模块、生成类型声明、以热模块替换的方式提供开发服务、打包和签名。
 
 ## 运行平台
@@ -120,7 +120,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 | macOS | 已支持（macOS 14+） | AppKit | 独立应用；通过 `AppView` 嵌入（[macOS](./macos.md)） |
 | Windows | 已支持（Windows 10 1809+） | Win32、Direct2D | 独立应用；通过 `AppView` 嵌入（[Windows](./windows.md)） |
 | Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |
-| GPUI（macOS、Windows、Linux） | 已支持 | GPUI | 独立应用；通过 `AppView` 嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)） |
+| GPUI（macOS、Windows、Linux） | 已支持 | GPUI | 通过 `AppView` 嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)） |
 | Web | 已支持（现代浏览器） | HTML | 静态网站；在网页中用 `createPlayer` 或 iframe 嵌入（[Web](./web.md)） |
 | Mac Catalyst | 用于开发 | UIKit | `nsh run` 在 Mac 上打开的 iPhone 尺寸窗口，用来查看模块在手机上的样子 |
 

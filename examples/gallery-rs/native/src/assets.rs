@@ -18,16 +18,21 @@ pub(crate) const PACIFICO: FontAsset = asset!("fonts/Pacifico-Regular.ttf");
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::ui::{px, size};
+
     use super::*;
 
     #[test]
     fn assets_are_read_at_compile_time() {
         // 128 pixels at 2 per point.
         assert_eq!(
-            (LOGO.uri, LOGO.width, LOGO.height),
-            ("asset:/@gallery-native/logo@2x.png", 64.0, 64.0)
+            (LOGO.uri, LOGO.size),
+            (
+                "asset:/@gallery-native/logo@2x.png",
+                size(px(64.0), px(64.0))
+            )
         );
-        assert_eq!((BOUNCE.width, BOUNCE.height), (96.0, 96.0));
+        assert_eq!(BOUNCE.size, size(px(96.0), px(96.0)));
         assert_eq!(
             PACIFICO,
             FontAsset {

@@ -27,7 +27,7 @@ pub struct BundleOptions {
     /// otherwise the bundle holds the whole app, dynamically imported
     /// modules included.
     pub split: bool,
-    /// The UI sets the hosts serve, described (`nsh_ui_mobile::registry()`
+    /// The UI sets the hosts serve, described (`nsh_base::registry()`
     /// and an app's own, as `SetDescription`s): their modules stay imports.
     pub ui_sets: Vec<nsh_core::ui::description::SetDescription>,
 }
@@ -89,7 +89,7 @@ pub struct Bundle {
     /// (`asset:/<path>` URIs refer to them).
     pub assets: Vec<PathBuf>,
     /// The native modules the app imports (`nsh`, `nsh/list`,
-    /// `nsh/ui/mobile`, an app's own UI set), sorted: what a host must
+    /// `nsh/base`, an app's own UI set), sorted: what a host must
     /// serve to run it.
     pub natives: Vec<String>,
     /// What the app declares it may reach (`nsh.json` `capabilities`);
@@ -247,20 +247,28 @@ impl ResolveSetup {
             resolve.alias = Some(self.alias.clone());
         }
         options.resolve = Some(resolve);
+        // tsconfig.json is the type checker's: its `paths` lead to `.nsh/types`'
+        // declarations and it extends `.nsh/tsconfig.json`, which may not be
+        // written yet. Aliases come from nsh.json, the JSX transform is nsh's.
+        options.tsconfig = Some(rolldown_common::TsConfig::Auto(false));
     }
 }
 
-/// The `"tailwind"`, `"theme"` and `"appearance"` of the `nsh.json` next to
-/// the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
+/// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
+/// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
 /// to `nsh.json`) or its content.
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
+    let mut setup = plugin::ThemeSetup::default();
+    // The theme's tokens are classes (`bg-primary`): the default's unless
+    // the app sets its own.
+    let mut tokens = nsh_base::Theme::default().into_tokens();
     let path = dir.join("nsh.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return Ok(Arc::default());
+        setup.theme.set_tokens(&tokens);
+        return Ok(Arc::new(setup));
     };
     let config: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
-    let mut setup = plugin::ThemeSetup::default();
     if let Some(tailwind) = config.get("tailwind") {
         let json = tailwind.to_string();
         setup.theme = nsh_core::tailwind::Theme::from_json(&json)
@@ -273,10 +281,12 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
             v => v.to_string(),
         };
-        nsh_core::ui::Theme::from_json(&json)
-            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
+        tokens = nsh_base::Theme::from_json(&json)
+            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
+            .into_tokens();
         setup.ui = Some(json);
     }
+    setup.theme.set_tokens(&tokens);
     if let Some(appearance) = config.get("appearance") {
         setup.appearance = match appearance.as_str() {
             Some("light") => Some("light"),
@@ -288,6 +298,11 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 ));
             }
         };
+    }
+    if let Some(status_bar) = config.get("statusBar") {
+        nsh_core::StatusBarSetting::from_json(status_bar)
+            .map_err(|e| BundleError::other(format!("nsh.json: statusBar: {e}")))?;
+        setup.status_bar = Some(status_bar.to_string());
     }
     Ok(Arc::new(setup))
 }
@@ -356,6 +371,7 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             tailwind,
             entry: entry.clone(),
             natives: natives.clone(),
+            preloads: None,
             modules: Arc::new(compile::NativeModules::new(&options.ui_sets)),
         })],
     )
@@ -423,9 +439,10 @@ pub struct HotBundle {
     modules: Vec<HotModule>,
     /// Module id of the entry.
     entry: String,
-    /// The native modules the app imports (the script imports their
-    /// namespaces for the factories' `require`).
+    /// All native modules the app imports, for host UI-set validation.
     natives: Vec<String>,
+    /// Native namespaces the factories require statically.
+    preloads: Vec<String>,
     /// Asset files the app imports (as in [`Bundle::assets`]).
     pub assets: Vec<PathBuf>,
     /// As in [`Bundle::capabilities`].
@@ -468,16 +485,17 @@ impl HotBundle {
     }
 
     /// The whole app as one script, an ES module: the native hot runtime
-    /// and the app's native modules imported, every module defined, and the
+    /// and the app's static native imports, every module defined, and the
     /// start of the entry.
     pub fn script(&self) -> (String, Option<String>) {
         let mut joiner = rolldown_sourcemap::SourceJoiner::default();
         joiner.enable_sourcemap = true;
         let mut imports = String::from("import \"nsh:hot\";");
         let mut map = String::new();
-        for (i, spec) in self.natives.iter().enumerate() {
+        for (i, spec) in self.preloads.iter().enumerate() {
             imports.push_str(&format!("import * as __nsh_n{i} from {spec:?};"));
-            map.push_str(&format!("{spec:?}: __nsh_n{i},"));
+            // CommonJS interop must select the real ESM default object, including its getters.
+            map.push_str(&format!("{spec:?}: {{...__nsh_n{i}, __esModule: true}},"));
         }
         joiner.append_source(imports);
         let start = format!("{HOT}.start({:?}, {{{map}}});", self.entry);
@@ -500,7 +518,9 @@ impl HotBundle {
             return HotPatch::Reload;
         }
         // A native module the running script did not import.
-        if !self.natives.iter().all(|s| previous.natives.contains(s)) {
+        if !self.natives.iter().all(|s| previous.natives.contains(s))
+            || !self.preloads.iter().all(|s| previous.preloads.contains(s))
+        {
             return HotPatch::Reload;
         }
         let old: std::collections::HashMap<&str, &HotModule> = previous
@@ -586,6 +606,7 @@ pub async fn bundle_hot_async(
         .ok_or_else(|| BundleError::other("entry has no parent directory"))?
         .to_path_buf();
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
+    let preloads = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let tailwind = tailwind_setup(&cwd)?;
@@ -621,6 +642,7 @@ pub async fn bundle_hot_async(
             tailwind,
             entry: entry.clone(),
             natives: natives.clone(),
+            preloads: Some(preloads.clone()),
             modules: Arc::new(compile::NativeModules::new(ui_sets)),
             split: false,
         })],
@@ -663,6 +685,9 @@ pub async fn bundle_hot_async(
     Ok(HotBundle {
         modules,
         natives: natives.into_iter().collect(),
+        preloads: std::mem::take(&mut *preloads.lock().expect("preloads lock"))
+            .into_iter()
+            .collect(),
         entry: entry_id.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?,
         assets,
         capabilities,
@@ -732,6 +757,31 @@ mod tests {
     }
 
     #[test]
+    fn hot_bundles_keep_optional_native_imports_deferred() {
+        let dir = app("hot-native-imports");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount, Text } from 'nsh';\n\
+             function App() { return <Text onPress={() => import('buffer')}>Load</Text>; }\n\
+             mount(App);",
+        )
+        .unwrap();
+        let bundle = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        let (code, _) = bundle.script();
+        assert!(bundle.natives().iter().any(|name| name == "buffer"));
+        assert!(code.contains("import(\"buffer\")"), "{code}");
+        assert!(!code.contains("from \"buffer\""), "{code}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { Buffer } from 'buffer'; export const bytes = Buffer.from('NSH');",
+        )
+        .unwrap();
+        let eager = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(matches!(eager.patch(&bundle), HotPatch::Reload));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn split_bundles_load_dynamic_imports_as_chunks() {
         let dir = app("chunks");
         let bundle = bundle_app(&dir, true);
@@ -798,11 +848,66 @@ mod tests {
     }
 
     #[test]
+    fn only_code_gets_its_import_meta_url_and_plain_js_keeps_its_imports() {
+        let dir = std::env::temp_dir().join(format!("nsh-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in [
+            (
+                "App.tsx",
+                "import { mount, Text } from \"nsh\";\nimport data from \"./data.json\";\nimport { here } from \"./lib.js\";\nmount(() => <Text>{data.note + here}</Text>);\n",
+            ),
+            ("data.json", "{ \"note\": \"uses import.meta.url\" }"),
+            (
+                "lib.js",
+                "import { unused } from \"./polyfill.js\";\nexport const here = import.meta.url;\n",
+            ),
+            (
+                "polyfill.js",
+                "globalThis.polyfilled = true;\nexport const unused = 1;\n",
+            ),
+        ] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let bundle = bundle_app(&dir, false);
+        let code = &bundle.code;
+        assert!(code.contains("uses import.meta.url"), "{code}");
+        assert!(
+            code.contains("metaUrl as ") && code.contains("(`lib.js`)"),
+            "{code}"
+        );
+        assert!(code.contains("polyfilled"), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn development_bundles_require_what_they_import_dynamically() {
         let dir = app("hot");
         let (code, _) = bundle_hot(&dir.join("App.tsx"), &[]).unwrap().script();
         assert!(code.contains("require(\"./Screen.js\")"), "{code}");
         assert!(!code.contains("import("), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundles_ignore_the_apps_tsconfig() {
+        // As an app is before any nsh command wrote `.nsh/tsconfig.json`, with
+        // `paths` only the type checker may follow.
+        let dir = app("tsconfig");
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{ "extends": "./.nsh/tsconfig.json",
+                 "compilerOptions": { "paths": { "./shared": ["./missing.d.ts"] } } }"#,
+        )
+        .unwrap();
+        let code = bundle_app(&dir, false).code;
+        assert!(code.contains("second screen"), "{code}");
+        let hot = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(
+            hot.modules.iter().any(|m| m.id.contains("shared")),
+            "{:?}",
+            hot.modules
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -918,5 +1023,86 @@ mod tests {
             assert_eq!(error.plain, message);
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// An app whose entry is `code`.
+    fn single(name: &str, code: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-import-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        dir
+    }
+
+    fn bundling(dir: &std::path::Path) -> Result<Bundle, BundleError> {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn named_imports_the_module_does_not_export_fail_the_build() {
+        let dir = single(
+            "missing",
+            "import { mount, Text } from \"nsh\";\n\
+             import { AnimatedValu } from \"nsh/animated\";\n\
+             mount(() => <Text>{String(AnimatedValu)}</Text>);\n",
+        );
+        let error = bundling(&dir).unwrap_err().plain;
+        assert!(error.contains("App.tsx"), "{error}");
+        assert!(
+            error.contains("`nsh/animated` has no export `AnimatedValu`"),
+            "{error}"
+        );
+        assert!(error.contains("2:"), "{error}");
+        assert!(error.contains("did you mean `AnimatedValue`?"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn named_imports_of_what_a_module_exports_and_types_bundle() {
+        let dir = single(
+            "present",
+            "import { mount, Text, type NoSuchType, NoSuchProps } from \"nsh\";\n\
+             let props: NoSuchProps | NoSuchType | undefined;\n\
+             import { AnimatedValue as V } from \"nsh/animated\";\n\
+             import type { Gone } from \"nsh/animated\";\n\
+             import * as animated from \"nsh/animated\";\n\
+             mount(() => <Text>{String(V)}{String(animated)}</Text>);\n",
+        );
+        bundling(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn development_bundles_refuse_what_a_ui_set_does_not_export() {
+        let dir = single(
+            "hot",
+            "import { mount } from \"nsh\";\n\
+             import { Buton } from \"nsh/base\";\n\
+             mount(() => <Buton title=\"Go\" />);\n",
+        );
+        let ui_sets = [nsh_base::registry().into()];
+        let Err(error) = bundle_hot(&dir.join("App.tsx"), &ui_sets) else {
+            panic!("bundled");
+        };
+        let error = error.plain;
+        assert!(
+            error.contains("`nsh/base` has no export `Buton`"),
+            "{error}"
+        );
+        assert!(error.contains("did you mean `Button`?"), "{error}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount } from \"nsh\";\n\
+             import { Button } from \"nsh/base\";\n\
+             mount(() => <Button title=\"Go\" />);\n",
+        )
+        .unwrap();
+        bundle_hot(&dir.join("App.tsx"), &ui_sets).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

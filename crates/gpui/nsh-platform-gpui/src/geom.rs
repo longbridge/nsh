@@ -10,38 +10,56 @@
 //! which [`crate::render`] approximates with its affine part (GPUI has no
 //! projective drawing).
 
-use nsh_core::Rect;
+use nsh_core::Points;
 
 /// A rectangle of `width` x `height` at `(x, y)`.
-pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
+pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> nsh_core::Bounds<Points> {
+    nsh_core::Bounds {
+        origin: nsh_core::Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: nsh_core::Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 
 /// `r` less `b`: up to four rectangles (above, below, left and right of
 /// `b`), or `r` itself when they do not overlap.
-pub(crate) fn subtract(r: Rect, b: Rect) -> Vec<Rect> {
-    let (x0, y0) = (r.x.max(b.x), r.y.max(b.y));
+pub(crate) fn subtract(
+    r: nsh_core::Bounds<Points>,
+    b: nsh_core::Bounds<Points>,
+) -> Vec<nsh_core::Bounds<Points>> {
+    let (x0, y0) = (
+        r.origin.x.0.max(b.origin.x.0),
+        r.origin.y.0.max(b.origin.y.0),
+    );
     let (x1, y1) = (
-        (r.x + r.width).min(b.x + b.width),
-        (r.y + r.height).min(b.y + b.height),
+        (r.origin.x.0 + r.size.width.0).min(b.origin.x.0 + b.size.width.0),
+        (r.origin.y.0 + r.size.height.0).min(b.origin.y.0 + b.size.height.0),
     );
     if x0 >= x1 || y0 >= y1 {
         return vec![r];
     }
-    let (right, bottom) = (r.x + r.width, r.y + r.height);
+    let (right, bottom) = (
+        r.origin.x.0 + r.size.width.0,
+        r.origin.y.0 + r.size.height.0,
+    );
     [
-        rect(r.x, r.y, r.width, y0 - r.y),
-        rect(r.x, y1, r.width, bottom - y1),
-        rect(r.x, y0, x0 - r.x, y1 - y0),
+        rect(
+            r.origin.x.0,
+            r.origin.y.0,
+            r.size.width.0,
+            y0 - r.origin.y.0,
+        ),
+        rect(r.origin.x.0, y1, r.size.width.0, bottom - y1),
+        rect(r.origin.x.0, y0, x0 - r.origin.x.0, y1 - y0),
         rect(x1, y0, right - x1, y1 - y0),
     ]
     .into_iter()
-    .filter(|p| p.width > 0.0 && p.height > 0.0)
+    .filter(|p| p.size.width.0 > 0.0 && p.size.height.0 > 0.0)
     .collect()
 }
 
@@ -274,7 +292,10 @@ mod tests {
         let r = rect(0.0, 0.0, 100.0, 40.0);
         // A button in the middle of a bar: four pieces around it.
         let pieces = subtract(r, rect(60.0, 10.0, 20.0, 20.0));
-        let area: f32 = pieces.iter().map(|p| p.width * p.height).sum();
+        let area: f32 = pieces
+            .iter()
+            .map(|p| p.size.width.0 * p.size.height.0)
+            .sum();
         assert_eq!(pieces.len(), 4);
         assert_eq!(area, 4000.0 - 400.0);
         // Apart: unchanged; covering: nothing left.

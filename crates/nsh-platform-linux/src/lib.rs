@@ -41,7 +41,7 @@ mod transition;
 mod view;
 
 pub use gtk4;
-pub use nsh_core::platform::Appearance;
+pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, Bundle, Limits, Root};
 
 pub use crate::{

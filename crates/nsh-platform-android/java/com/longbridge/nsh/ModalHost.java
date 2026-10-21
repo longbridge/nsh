@@ -27,9 +27,8 @@ final class ModalHost {
     private final Container container;
     private Dialog dialog;
     int animation; // 0 slide, 1 fade, 2 none
-    boolean transparent;
-    /** `dismissible`: the back button closes it here, then tells JS. */
-    boolean dismissible;
+    /** `closeOnEscape`: the back button (Android's Escape) closes it here, then tells JS. */
+    boolean closeOnEscape = true;
     /** The content reaches under the status bar (else it starts below). */
     private boolean translucent;
     private boolean closing;
@@ -81,7 +80,8 @@ final class ModalHost {
             if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false);
             else window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
-        container.setBackgroundColor(transparent ? 0 : 0xffffffff);
+        // No background of NSH's own: the app's popup (and backdrop) has its look.
+        container.setBackgroundColor(0);
         dialog.setCancelable(false);
         dialog.setOnKeyListener((d, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
@@ -115,7 +115,16 @@ final class ModalHost {
         });
     }
 
-    /** The dialog's bar icons as the activity's (`StatusBar` sets those). */
+    /**
+     * The status bar while the dialog is up: its window's, which the bar
+     * follows over the activity's (`Command::StatusBar`; the topmost page's
+     * or dialog's `statusBar`).
+     */
+    void statusBar(int style, boolean hidden, boolean night) {
+        if (dialog != null && !closing) SystemUi.statusBar(dialog.getWindow(), style, hidden, night);
+    }
+
+    /** The dialog's bar icons as the activity's. */
     @SuppressWarnings("deprecation")
     private void matchSystemBars(Window window) {
         android.app.Activity activity = SystemUi.activity(mounter.context);
@@ -136,14 +145,15 @@ final class ModalHost {
     }
 
     /**
-     * The back button. Answered from `dismissible`, not by asking JS: close
-     * here (then `onRequestClose`, and `onDismiss` when gone), or only ask
-     * (`visible` decides).
+     * The back button, Android's Escape. Answered from `closeOnEscape`, not
+     * by asking JS: close here (reported as `RequestClose` with reason
+     * `cancel`, then `Dismiss` when gone), or only report it (`open`
+     * decides).
      */
     void backPressed() {
         if (closing) return;
-        mounter.event(id, Native.REQUEST_CLOSE);
-        if (dismissible) {
+        mounter.requestClose(id, "cancel");
+        if (closeOnEscape) {
             dismiss();
             mounter.modalClosed(this);
         }

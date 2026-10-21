@@ -10,20 +10,25 @@
 //! shadows for both appearances (`.dark(..)` variants: native too).
 
 use nsh_core::{
-    nsh_animation::{Curve, EaseMode},
+    animation::{Curve, EaseMode},
+    geometry::px,
     ui::{
-        AdaptiveColor, BoxShadow, Color, Easing, Spring, StyleRefinement, Styled, Timing, rgb, rgba,
+        AdaptiveColor, BoxShadow, Easing, Rgba, Spring, StyleRefinement, Styled, Timing,
+        percentage, rgb, rgba,
     },
 };
 
 /// `#rrggbb` at opacity `alpha` (CSS's `rgba(r, g, b, alpha)`).
-pub(crate) const fn rgb_a(hex: u32, alpha: f32) -> Color {
+pub(crate) const fn rgb_a(hex: u32, alpha: f32) -> Rgba {
     rgba(hex << 8 | (alpha * 255.0 + 0.5) as u32)
 }
 
 /// A color for each appearance: `light`, `dark`.
-const fn tone(light: Color, dark: Color) -> AdaptiveColor {
-    AdaptiveColor::new(light, dark)
+const fn tone(light: Rgba, dark: Rgba) -> AdaptiveColor {
+    AdaptiveColor {
+        light: light.to_hsla(),
+        dark: dark.to_hsla(),
+    }
 }
 
 /// The roles of the palette (TS `colors`).
@@ -182,25 +187,25 @@ pub(crate) mod motion {
 }
 
 /// A box shadow outside the box.
-const fn drop(y: f32, blur: f32, color: Color) -> BoxShadow {
+const fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: y,
-        blur,
-        spread: 0.0,
-        color,
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(0.0),
+        color: color.to_packed(),
         inset: false,
     }
 }
 
 /// A box shadow inside the box (`spread`: a rim all around).
-const fn inner(y: f32, blur: f32, spread: f32, color: Color) -> BoxShadow {
+const fn inner(y: f32, blur: f32, spread: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: y,
-        blur,
-        spread,
-        color,
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(spread),
+        color: color.to_packed(),
         inset: true,
     }
 }
@@ -258,8 +263,8 @@ struct Look {
     backdrop_blur: f32,
 }
 
-const fn stop(light: Color, dark: Color, at: f32) -> (AdaptiveColor, f32) {
-    (AdaptiveColor::new(light, dark), at)
+const fn stop(light: Rgba, dark: Rgba, at: f32) -> (AdaptiveColor, f32) {
+    (tone(light, dark), at)
 }
 
 const CARD: Look = Look {
@@ -368,7 +373,7 @@ const KNOB: Look = Look {
 };
 
 const PILL: Look = Look {
-    fill: Some(AdaptiveColor::new(rgb(0xffffff), rgb(0x2a2c31))),
+    fill: Some(tone(rgb(0xffffff), rgb(0x2a2c31))),
     stops: &[
         stop(rgb(0xffffff), rgb(0x383a40), 0.0),
         stop(rgb(0xfcfcfa), rgb(0x2a2c31), 0.52),
@@ -387,7 +392,7 @@ const PILL: Look = Look {
         inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.28)),
         drop(2.0, 6.0, rgb_a(BLACK, 0.35)),
     ],
-    border: Some(AdaptiveColor::new(rgb_a(INK, 0.08), rgb_a(WHITE, 0.07))),
+    border: Some(tone(rgb_a(INK, 0.08), rgb_a(WHITE, 0.07))),
     backdrop_blur: 0.0,
 };
 
@@ -407,10 +412,7 @@ const CHIP: Look = Look {
 };
 
 const GLASS: Look = Look {
-    fill: Some(AdaptiveColor::new(
-        rgb_a(0xfafaf8, 0.66),
-        rgb_a(0x16171a, 0.62),
-    )),
+    fill: Some(tone(rgb_a(0xfafaf8, 0.66), rgb_a(0x16171a, 0.62))),
     stops: &[
         stop(rgb_a(WHITE, 0.7), rgb_a(WHITE, 0.06), 0.0),
         stop(rgb_a(WHITE, 0.0), rgb_a(WHITE, 0.0), 0.6),
@@ -423,15 +425,12 @@ const GLASS: Look = Look {
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.09)),
         drop(-8.0, 24.0, rgb_a(BLACK, 0.28)),
     ],
-    border: Some(AdaptiveColor::new(rgb_a(INK, 0.07), rgb_a(WHITE, 0.07))),
+    border: Some(tone(rgb_a(INK, 0.07), rgb_a(WHITE, 0.07))),
     backdrop_blur: 20.0,
 };
 
 const MENU: Look = Look {
-    fill: Some(AdaptiveColor::new(
-        rgb_a(WHITE, 0.84),
-        rgb_a(0x1e2024, 0.82),
-    )),
+    fill: Some(tone(rgb_a(WHITE, 0.84), rgb_a(0x1e2024, 0.82))),
     stops: &[
         stop(rgb_a(WHITE, 0.8), rgb_a(WHITE, 0.07), 0.0),
         stop(rgb_a(WHITE, 0.2), rgb_a(WHITE, 0.015), 0.4),
@@ -447,7 +446,7 @@ const MENU: Look = Look {
         inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.25)),
         drop(12.0, 32.0, rgb_a(BLACK, 0.42)),
     ],
-    border: Some(AdaptiveColor::new(rgb_a(INK, 0.08), rgb_a(WHITE, 0.08))),
+    border: Some(tone(rgb_a(INK, 0.08), rgb_a(WHITE, 0.08))),
     backdrop_blur: 24.0,
 };
 
@@ -510,12 +509,14 @@ pub(crate) trait Finished: Styled + Sized {
                 this = this
                     .bg_linear_to_b()
                     .gradient_from(*from)
-                    .gradient_from_position(*from_at);
+                    .gradient_from_position(percentage(*from_at));
                 if let [(via, via_at), _] = rest {
-                    this = this.gradient_via(*via).gradient_via_position(*via_at);
+                    this = this
+                        .gradient_via(*via)
+                        .gradient_via_position(percentage(*via_at));
                 }
                 let (to, to_at) = rest[rest.len() - 1];
-                this.gradient_to(to).gradient_to_position(to_at)
+                this.gradient_to(to).gradient_to_position(percentage(to_at))
             }
             _ => this,
         }
@@ -542,6 +543,6 @@ pub(crate) trait Finished: Styled + Sized {
 impl<T: Styled + Sized> Finished for T {}
 
 /// A shadow layer inside the box, for [`Finished::adaptive_shadow`].
-pub(crate) const fn inset_shadow(y: f32, blur: f32, color: Color) -> BoxShadow {
+pub(crate) const fn inset_shadow(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     inner(y, blur, 0.0, color)
 }

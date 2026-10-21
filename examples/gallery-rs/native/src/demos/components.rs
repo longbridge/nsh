@@ -1,20 +1,14 @@
-//! Components: the mobile UI's buttons and cards, native press feedback, a
-//! sheet opened by a pressable with press styles, layout animation, an
+//! Components: native press feedback, a sheet opened by a pressable with press styles, layout animation, an
 //! input's accessory bar, the keyboard avoiding view, modal options and
 //! the environment (as the TSX gallery's `demos/Components.tsx`).
 
 use std::hash::{BuildHasher, RandomState};
 
-use nsh_core::{
-    PatchValue, StyleKey, UNDERLAY_OPACITY,
-    ui::{
-        AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, Style,
-        prelude::*,
-    },
+use nsh_base::{
+    AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps,
 };
-use nsh_ui_mobile::{
-    AvoidBehavior, Button, ButtonEvent, ButtonProps, ButtonVariant, Card, CardProps, CardVariant,
-    KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps,
+use nsh_core::ui::{
+    AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
 };
 
 use crate::{
@@ -22,8 +16,8 @@ use crate::{
     ui::{
         self, Badge, ButtonVariant as UiVariant, DemoPage, Finish, Finished, IconName, IconTile,
         Inset, MONO, PressProps, Row, Segment, Segmented, SegmentedEvent, SegmentedProps,
-        SegmentedSize, ToggleEvent, Tone, appear, caption, colors, header, hint, icon,
-        inset_shadow, press_with, radius, rgb_a, segmented, tints, toggle,
+        SegmentedSize, ToggleEvent, Tone, appear, caption, colors, hint, icon, inset_shadow,
+        press_with, radius, rgb_a, segmented, tints, titled, toggle,
     },
 };
 
@@ -84,103 +78,9 @@ fn title_block(badge: impl Into<SharedString>, title: &str) -> View {
             text(title.to_owned())
                 .text_size(px(28.0))
                 .font_weight(FontWeight::BOLD)
-                .letter_spacing(-0.5)
+                .letter_spacing(px(-0.5))
                 .text_color(colors::TEXT),
         )
-}
-
-/// The components of `nsh/ui/mobile` (Rust, `nsh-ui-mobile`) in a Rust
-/// view.
-#[component]
-fn MobileComponents() -> impl IntoElement {
-    let presses = signal(0_u32);
-    let pressed = move |_: &ButtonEvent| presses.update(|p| *p += 1);
-    let mobile_button = |title: &str, variant: ButtonVariant, disabled: bool| {
-        Button::element(ButtonProps {
-            title: title.to_owned().into(),
-            variant: variant.into(),
-            disabled: disabled.into(),
-            ..ButtonProps::default()
-        })
-    };
-    ui::Card::new()
-        .icon(IconName::Mobile)
-        .title("nsh/ui/mobile")
-        .subtitle("Rust components, the app's theme")
-        .right(
-            Badge::new(move || {
-                let presses = presses.get();
-                let unit = if presses == 1 {
-                    hint("tap", "click")
-                } else {
-                    hint("taps", "clicks")
-                };
-                format!("{presses} {unit}")
-            })
-            .tone(move || {
-                if presses.get() > 0 {
-                    Tone::Accent
-                } else {
-                    Tone::Neutral
-                }
-            }),
-        )
-        .child(mobile_button("Primary", ButtonVariant::Primary, false).on_event(pressed))
-        .child(
-            view()
-                .flex_row()
-                .gap_2()
-                .child(cell(
-                    mobile_button("Secondary", ButtonVariant::Secondary, false).on_event(pressed),
-                ))
-                .child(cell(
-                    mobile_button("Danger", ButtonVariant::Danger, false).on_event(pressed),
-                )),
-        )
-        .child(
-            view()
-                .flex_row()
-                .gap_2()
-                .child(cell(
-                    mobile_button("Plain", ButtonVariant::Plain, false).on_event(pressed),
-                ))
-                .child(cell(
-                    mobile_button("Disabled", ButtonVariant::Secondary, true).on_event(pressed),
-                )),
-        )
-        .child(
-            Card::element(CardProps::default())
-                .fill("header", text("Card with slots"))
-                .fill(
-                    "footer",
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .child(cell(
-                            mobile_button("Reset", ButtonVariant::Secondary, false)
-                                .on_event(move |_: &ButtonEvent| presses.set(0)),
-                        ))
-                        .child(cell(
-                            mobile_button("Add one", ButtonVariant::Primary, false)
-                                .on_event(pressed),
-                        )),
-                )
-                .child(text(
-                    "The header, this body and the footer are JSX in a Rust component's slots \
-                     and children.",
-                )),
-        )
-        .child(
-            Card::element(CardProps {
-                variant: CardVariant::Outlined.into(),
-                ..CardProps::default()
-            })
-            .child(text("An outlined card, children only.")),
-        )
-        .child(caption(
-            "Colors come from the app's theme",
-            Some("theme.json"),
-        ))
 }
 
 /// A tile to press: its title, the prop it shows, something on the right.
@@ -239,52 +139,60 @@ fn PressFeedback() -> impl IntoElement {
         ))
         .child(
             tile()
-                .active_opacity(0.4)
+                .active(|s| s.opacity(0.4))
                 .on_press(pressed("Fading tile"))
                 .child(tile_content(
                     "Fades while pressed",
-                    "activeOpacity={0.4}",
+                    "activeStyle={{ opacity: 0.4 }}",
                     None,
                 )),
         )
         // The underlays' colors follow the appearance.
         .child(
             tile()
-                .underlay(|| color(colors::RAISED), UNDERLAY_OPACITY)
+                .group()
+                .active(|s| s.bg(colors::RAISED))
                 .on_press(pressed("Underlay tile"))
-                .child(tile_content(
-                    "Lights up while pressed",
-                    "underlayColor",
-                    None,
-                )),
+                .child(
+                    tile_content(
+                        "Lights up while pressed",
+                        "activeStyle={{ backgroundColor }}",
+                        None,
+                    )
+                    .group_active(|s| s.opacity(0.85)),
+                ),
         )
         .child(
             tile()
                 .disabled(disabled)
-                .underlay(|| color(tints::DANGER), UNDERLAY_OPACITY)
+                .group()
+                .active(|s| s.bg(tints::DANGER))
                 .disabled_style(|s| s.opacity(0.4))
                 .on_press(pressed("Enabled tile"))
-                .child(tile_content(
-                    move || {
-                        if disabled.get() {
-                            "Takes no presses"
-                        } else {
-                            "Enabled"
-                        }
-                    },
-                    "disabled + disabled:opacity-40",
-                    Some(
-                        Badge::new(move || if disabled.get() { "Off" } else { "On" })
-                            .tone(move || {
-                                if disabled.get() {
-                                    Tone::Neutral
-                                } else {
-                                    Tone::Up
-                                }
-                            })
-                            .into_element(),
-                    ),
-                )),
+                .child(
+                    tile_content(
+                        move || {
+                            if disabled.get() {
+                                "Takes no presses"
+                            } else {
+                                "Enabled"
+                            }
+                        },
+                        "disabled + disabled:opacity-40",
+                        Some(
+                            Badge::new(move || if disabled.get() { "Off" } else { "On" })
+                                .tone(move || {
+                                    if disabled.get() {
+                                        Tone::Neutral
+                                    } else {
+                                        Tone::Up
+                                    }
+                                })
+                                .into_element(),
+                        ),
+                    )
+                    .group_active(|s| s.opacity(0.85)),
+                ),
         )
         .child(
             view()
@@ -311,7 +219,7 @@ fn PressableSheet() -> impl IntoElement {
         modal()
             .presentation(ModalPresentation::PageSheet)
             .animation(ModalAnimation::Slide)
-            .on_request_close(open(false))
+            .on_cancel(open(false))
             .child(
                 SafeAreaView::element(SafeAreaViewProps::default())
                     .flex_1()
@@ -508,7 +416,7 @@ fn Accessory() -> impl IntoElement {
                 .value(move || content.get())
                 .placeholder("Focus me")
                 .input_accessory("counter")
-                .on_change_text(move |v: &str| content.set(v.to_owned())),
+                .on_change(move |v: &str| content.set(v.to_owned())),
         )
         .child(caption(
             if os() == Os::Android {
@@ -526,7 +434,7 @@ fn Accessory() -> impl IntoElement {
                     .gap_2()
                     .px_4()
                     .py_2()
-                    .border_t(hairline)
+                    .border_t(move || px(hairline()))
                     .border_t_color(colors::BORDER)
                     .child(
                         text(move || {
@@ -547,7 +455,7 @@ fn Accessory() -> impl IntoElement {
 }
 
 /// The behaviors of the keyboard avoiding view: label, what it does.
-const BEHAVIORS: [(AvoidBehavior, &str, &str); 3] = [
+const BEHAVIORS: [(AvoidBehavior, &str, &str); 2] = [
     (
         AvoidBehavior::Padding,
         "padding",
@@ -558,11 +466,6 @@ const BEHAVIORS: [(AvoidBehavior, &str, &str); 3] = [
         "height",
         "The view shrinks: its background ends at the keyboard.",
     ),
-    (
-        AvoidBehavior::Position,
-        "position",
-        "The inner content view moves up as a whole.",
-    ),
 ];
 
 /// The content of the keyboard avoiding view's screen.
@@ -571,12 +474,9 @@ fn AvoidingPage() -> impl IntoElement {
     let behavior = signal(0_u32);
     let focused = signal(false);
     let picked = move || BEHAVIORS[behavior.get() as usize];
-    // The inner view of `position` fills the avoiding view.
-    let fill = Style::default().with(StyleKey::Flex, PatchValue::Number(1.0));
     view().flex_1().child(
         KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
             behavior: Prop::bind(move || picked().0),
-            content_container_style: fill.into(),
             ..KeyboardAvoidingViewProps::default()
         })
         .flex_1()
@@ -629,7 +529,7 @@ fn ModalOptions() -> impl IntoElement {
             .animation(ModalAnimation::Slide)
             .status_bar_translucent(translucent)
             .supported_orientations([Orientation::Portrait, Orientation::Landscape])
-            .on_request_close(show(false))
+            .on_cancel(show(false))
             .child(
                 view()
                     .flex_1()
@@ -655,7 +555,7 @@ fn ModalOptions() -> impl IntoElement {
                                 text("A modal")
                                     .text_size(px(28.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .letter_spacing(-0.5)
+                                    .letter_spacing(px(-0.5))
                                     .text_color(colors::TEXT),
                             )
                             .child(
@@ -738,7 +638,7 @@ fn PlatformInfo() -> impl IntoElement {
         ),
         (
             "roundToNearestPixel(10.3)",
-            (|| round_to_nearest_pixel(10.3).to_string()).into_reactive(),
+            (|| round_to_nearest_pixel(px(10.3)).0.to_string()).into_reactive(),
         ),
         (
             "screenReaderEnabled()",
@@ -864,18 +764,16 @@ pub(crate) fn Components() -> impl IntoElement {
             .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
                 IconName::Form,
                 "KeyboardAvoidingView",
-                "padding / height / position",
+                "padding / height",
                 |_: &()| {
                     nav::push("keyboard-avoiding", || {
-                        header(screen().title("KeyboardAvoidingView"))
-                            .child(AvoidingPage::element(()))
+                        titled("KeyboardAvoidingView").child(AvoidingPage::element(()))
                     });
                 },
             )))
     };
     DemoPage::new()
         .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-        .card(|| MobileComponents::element(()))
         .card(|| PressFeedback::element(()))
         .card(|| PressableSheet::element(()))
         .card(|| LayoutAnimations::element(()))

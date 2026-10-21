@@ -65,8 +65,8 @@ use std::{
 
 use gpui::{Font, FontFeatures, FontStyle, FontWeight, SharedString, TextSystem, px};
 use nsh_core::{
-    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Rect, ReturnKeyType,
-    SubmitBehavior, TextAlign, tailwind::state,
+    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points,
+    ReturnKeyType, SubmitBehavior, TextAlign, tailwind::state,
 };
 use rustc_hash::FxHashMap;
 
@@ -104,6 +104,14 @@ enum Drag {
 
 /// The native side of an input view ([`crate::view::ViewState::input`]),
 /// and the editor it hosts.
+/// The text input `view` holds now (`None`: it is no input).
+#[cfg(feature = "dev")]
+pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
+    let input = view.state().input.clone()?;
+    let text = input.model.borrow().text().to_owned();
+    Some(text)
+}
+
 pub(crate) struct InputState {
     /// The surface's key ([`Surface::by_key`]): `focus()` and `blur()`
     /// come with the view only.
@@ -116,13 +124,20 @@ pub(crate) struct InputState {
     /// A configuration was applied (auto focus happens on the first).
     configured: Cell<bool>,
     /// Content box; the whole view until the core sends one.
-    content: Cell<Option<Rect>>,
+    content: Cell<Option<nsh_core::Bounds<Points>>>,
     /// The size the editor was hosted (and last drawn) at.
     size: Cell<(f32, f32)>,
     /// User edits reported to the engine.
     count: Cell<u32>,
     /// Selection as last reported (UTF-16).
     reported: Cell<(u32, u32)>,
+    /// The composition as last reported (`onCompositionChange`): its text
+    /// while one is in progress.
+    composed: RefCell<Option<String>>,
+    /// A value from JS (text, count) that arrived while the input method
+    /// composed, applied when the composition ends: replacing the text
+    /// under a composition would drop it without the input method knowing.
+    pending: RefCell<Option<(String, u32)>>,
     /// The animated text color, if a native animation sets one.
     anim_color: Cell<Option<Color>>,
     /// It has the surface's focus.
@@ -158,6 +173,8 @@ impl InputState {
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
             reported: Cell::new((0, 0)),
+            composed: RefCell::new(None),
+            pending: RefCell::new(None),
             anim_color: Cell::new(None),
             focused: Cell::new(false),
             active: Cell::new(true),
@@ -208,18 +225,18 @@ impl InputState {
         let s = &config.style;
         let line_height = if !config.multiline {
             0.0
-        } else if s.line_height > 0.0 {
-            s.line_height
+        } else if s.line_height.0 > 0.0 {
+            s.line_height.0
         } else if s.line_height_multiple > 0.0 {
-            s.line_height_multiple * s.font_size
+            s.line_height_multiple * s.font_size.0
         } else {
             0.0
         };
         let style = Style {
             font: font(s),
-            size: s.font_size.max(1.0),
+            size: s.font_size.0.max(1.0),
             line_height,
-            spacing: s.letter_spacing,
+            spacing: s.letter_spacing.0,
         };
         *self.style.borrow_mut() = Some(style.clone());
         style
@@ -654,6 +671,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
             // (the handler that would commit it is no longer registered).
             input.model.borrow_mut().composition = None;
             input.relayout();
+            report_composition(surface, old, &input);
         }
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = None);
         crate::input::set_state(surface, old, state::FOCUSED, false);
@@ -823,6 +841,7 @@ pub(crate) mod ime {
         } else {
             insert(surface, &view, &input, &text, true);
         }
+        report_composition(surface, &view, &input);
     }
 
     /// `replace_text_in_range`: typed or committed text replaces the
@@ -850,10 +869,15 @@ pub(crate) mod ime {
             if composed {
                 input.reveal();
                 view.changed();
+                report_composition(surface, &view, &input);
             }
             return;
         }
         insert(surface, &view, &input, &text, true);
+        if composed {
+            // After the committed text's `onChangeText`.
+            report_composition(surface, &view, &input);
+        }
     }
 
     /// `replace_and_mark_text_in_range`: the composition becomes
@@ -890,6 +914,7 @@ pub(crate) mod ime {
         input.wake_caret();
         input.reveal();
         view.changed();
+        report_composition(surface, &view, &input);
     }
 
     /// `bounds_for_range`: where the range shows, in window coordinates
@@ -920,8 +945,11 @@ pub(crate) mod ime {
         let m = view.to_root()?;
         let (ox, oy) = surface.origin.get();
         let (Some(a), Some(b)) = (
-            m.map(content.x + x0, content.y + y0),
-            m.map(content.x + x1 + CARET_WIDTH, content.y + y0 + h),
+            m.map(content.origin.x.0 + x0, content.origin.y.0 + y0),
+            m.map(
+                content.origin.x.0 + x1 + CARET_WIDTH,
+                content.origin.y.0 + y0 + h,
+            ),
         ) else {
             return None;
         };
@@ -943,7 +971,7 @@ pub(crate) mod ime {
         let m = view.to_root()?;
         let (x, y) = m.unproject(f32::from(point.x) - ox, f32::from(point.y) - oy)?;
         let content = content_rect(&view, &input);
-        let at = input.hit(x - content.x, y - content.y);
+        let at = input.hit(x - content.origin.x.0, y - content.origin.y.0);
         let model = input.model.borrow();
         Some(model::byte_to_utf16(model.text(), at) as usize)
     }
@@ -1076,6 +1104,35 @@ fn report_selection(surface: &Surface, view: &NshView, input: &InputState) {
             ("end", PayloadValue::Number(range.1 as f64)),
         ])
     });
+}
+
+/// Reports the composition if it started, changed or ended since last
+/// reported (and JS listens); once it ended, applies the value JS set
+/// meanwhile. Called after every change of the composition, after the
+/// `onChangeText` of what it committed.
+fn report_composition(surface: &Surface, view: &NshView, input: &InputState) {
+    let now = input
+        .model
+        .borrow()
+        .composition
+        .as_ref()
+        .filter(|c| !c.text.is_empty())
+        .map(|c| c.text.clone());
+    if *input.composed.borrow() != now {
+        input.composed.replace(now.clone());
+        send(surface, view, EventKind::CompositionChange, || {
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(now.is_some())),
+                ("text", PayloadValue::Str(now.unwrap_or_default())),
+            ])
+        });
+    }
+    if input.composed.borrow().is_none() {
+        let pending = input.pending.borrow_mut().take();
+        if let Some((text, count)) = pending {
+            set_value(view, input, &text, count);
+        }
+    }
 }
 
 /// After a user edit (`changed`: the text changed) or a caret movement:
@@ -1211,14 +1268,18 @@ fn auto_focus(surface: &Rc<Surface>, view: &NshView) {
 }
 
 /// The content box in the view.
-fn content_rect(view: &NshView, input: &InputState) -> Rect {
+fn content_rect(view: &NshView, input: &InputState) -> nsh_core::Bounds<Points> {
     input.content.get().unwrap_or_else(|| {
         let f = view.state().frame;
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            width: f.width,
-            height: f.height,
+        nsh_core::Bounds {
+            origin: nsh_core::Point {
+                x: Points(0.0),
+                y: Points(0.0),
+            },
+            size: nsh_core::Size {
+                width: f.size.width,
+                height: f.size.height,
+            },
         }
     })
 }
@@ -1226,19 +1287,38 @@ fn content_rect(view: &NshView, input: &InputState) -> Rect {
 /// Hosts the editor at the content box.
 fn place(view: &NshView, input: &Rc<InputState>) {
     let content = content_rect(view, input);
-    if content.width <= 0.0 || content.height <= 0.0 {
+    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
         return;
     }
-    input.set_size((content.width, content.height));
+    input.set_size((content.size.width.0, content.size.height.0));
     let item: Rc<dyn Hosted> = input.clone();
     view.set_native(&item, content);
 }
 
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.
+/// While the input method composes, the value waits for the composition
+/// to end (the newest one; whether it is stale is decided then).
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = input_of(view) else {
         return;
     };
+    if input.composing() {
+        input.pending.replace(Some((text.to_owned(), count)));
+        return;
+    }
+    set_value(view, &input, text, count);
+}
+
+/// The value JS set that waits for the composition to end (tests).
+#[cfg(all(test, feature = "shot"))]
+pub(crate) fn pending_value(view: &NshView) -> Option<String> {
+    let input = input_of(view)?;
+    let pending = input.pending.borrow();
+    pending.as_ref().map(|(text, _)| text.clone())
+}
+
+/// Applies JS's `text` unless the user edited since JS saw `count`.
+fn set_value(view: &NshView, input: &InputState, text: &str, count: u32) {
     if count < input.count.get() || input.model.borrow().text() == text {
         return;
     }
@@ -1264,7 +1344,7 @@ pub(crate) fn animated(view: &NshView) {
 }
 
 /// `InputContent`: where the text goes inside the view.
-pub(crate) fn content(view: &NshView, content: Rect) {
+pub(crate) fn content(view: &NshView, content: nsh_core::Bounds<Points>) {
     let Some(input) = input_of(view) else {
         return;
     };
@@ -1366,7 +1446,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, view: &NshView, event: &ItemPointer
         return false;
     };
     let content = content_rect(view, &input);
-    let (x, y) = (event.x - content.x, event.y - content.y);
+    let (x, y) = (event.x - content.origin.x.0, event.y - content.origin.y.0);
     match event.kind {
         PointerKind::Down => {
             if input.composing() && focused(surface).as_ref() == Some(view) {

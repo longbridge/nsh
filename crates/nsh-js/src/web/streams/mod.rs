@@ -55,25 +55,25 @@ impl Algo {
     }
 
     /// Calls it (exceptions propagate): undefined when there is none.
-    pub(crate) fn call(&self, ctx: Ctx, args: &[Raw]) -> R<V> {
+    pub(crate) fn call(&self, cx: Ctx, args: &[Raw]) -> R<V> {
         if self.f.is_undefined() {
             return Ok(V::undefined());
         }
-        js::call(ctx, self.f.raw(), self.this.raw(), args)
+        js::call(cx, self.f.raw(), self.this.raw(), args)
     }
 
     /// Calls it as a promise (exceptions reject it).
-    pub(crate) fn promise(&self, ctx: Ctx, args: &[Raw]) -> R<V> {
-        js::promise_of(ctx, || self.call(ctx, args))
+    pub(crate) fn promise(&self, cx: Ctx, args: &[Raw]) -> R<V> {
+        js::promise_of(cx, || self.call(cx, args))
     }
 }
 
 /// The method `name` of underlying object `obj` (undefined or a function).
-pub(crate) fn method(ctx: Ctx, obj: Raw, name: &str) -> R<V> {
+pub(crate) fn method(cx: Ctx, obj: Raw, name: &str) -> R<V> {
     if !js::is_object(obj) {
         return Ok(V::undefined());
     }
-    Ok(js::get_method(ctx, obj, name)?.unwrap_or_default())
+    Ok(js::get_method(cx, obj, name)?.unwrap_or_default())
 }
 
 /// A queue with sizes (`[[queue]]`, `[[queueTotalSize]]`).
@@ -87,10 +87,10 @@ trace!(SizedQueue { items });
 
 impl SizedQueue {
     /// EnqueueValueWithSize.
-    pub(crate) fn enqueue(&mut self, ctx: Ctx, value: V, size: f64) -> R<()> {
+    pub(crate) fn enqueue(&mut self, cx: Ctx, value: V, size: f64) -> R<()> {
         if !size.is_finite() || size < 0.0 {
             return Err(js::range_error(
-                ctx,
+                cx,
                 "the chunk size must be a finite, non-negative number",
             ));
         }
@@ -130,7 +130,7 @@ pub(crate) struct QueuingStrategy {
 
 impl QueuingStrategy {
     /// Converts `strategy` (undefined: the defaults).
-    pub(crate) fn read(ctx: Ctx, strategy: Raw) -> R<QueuingStrategy> {
+    pub(crate) fn read(cx: Ctx, strategy: Raw) -> R<QueuingStrategy> {
         if js::is_nullish(strategy) {
             return Ok(QueuingStrategy {
                 hwm: None,
@@ -138,30 +138,27 @@ impl QueuingStrategy {
             });
         }
         if !js::is_object(strategy) {
-            return Err(js::type_error(
-                ctx,
-                "the queuing strategy must be an object",
-            ));
+            return Err(js::type_error(cx, "the queuing strategy must be an object"));
         }
-        let hwm = js::get(ctx, strategy, "highWaterMark")?;
+        let hwm = js::get(cx, strategy, "highWaterMark")?;
         let hwm = if hwm.is_undefined() {
             None
         } else {
-            Some(js::to_number(ctx, hwm.raw())?)
+            Some(js::to_number(cx, hwm.raw())?)
         };
-        let size = js::get(ctx, strategy, "size")?;
-        if !size.is_undefined() && !js::is_function(ctx, size.raw()) {
-            return Err(js::type_error(ctx, "size must be a function"));
+        let size = js::get(cx, strategy, "size")?;
+        if !size.is_undefined() && !js::is_function(cx, size.raw()) {
+            return Err(js::type_error(cx, "size must be a function"));
         }
         Ok(QueuingStrategy { hwm, size })
     }
 
     /// ExtractHighWaterMark.
-    pub(crate) fn high_water_mark(&self, ctx: Ctx, default: f64) -> R<f64> {
+    pub(crate) fn high_water_mark(&self, cx: Ctx, default: f64) -> R<f64> {
         match self.hwm {
             None => Ok(default),
             Some(n) if n.is_nan() || n < 0.0 => Err(js::range_error(
-                ctx,
+                cx,
                 "highWaterMark must be a non-negative number",
             )),
             Some(n) => Ok(n),
@@ -170,12 +167,12 @@ impl QueuingStrategy {
 }
 
 /// Calls size algorithm `size` (undefined: 1) on `chunk`.
-pub(crate) fn chunk_size(ctx: Ctx, size: &V, chunk: Raw) -> R<f64> {
+pub(crate) fn chunk_size(cx: Ctx, size: &V, chunk: Raw) -> R<f64> {
     if size.is_undefined() {
         return Ok(1.0);
     }
-    let n = js::call(ctx, size.raw(), js::UNDEFINED, &[chunk])?;
-    js::to_number(ctx, n.raw())
+    let n = js::call(cx, size.raw(), js::UNDEFINED, &[chunk])?;
+    js::to_number(cx, n.raw())
 }
 
 // --- Queuing strategies ---------------------------------------------------
@@ -188,79 +185,79 @@ trace!(Strategy {});
 
 impl Object for Strategy {}
 
-fn strategy_init(ctx: Ctx, init: Raw) -> R<f64> {
+fn strategy_init(cx: Ctx, init: Raw) -> R<f64> {
     if !js::is_object(init) {
-        return Err(js::type_error(ctx, "the strategy needs { highWaterMark }"));
+        return Err(js::type_error(cx, "the strategy needs { highWaterMark }"));
     }
-    let hwm = js::get(ctx, init, "highWaterMark")?;
+    let hwm = js::get(cx, init, "highWaterMark")?;
     if hwm.is_undefined() {
-        return Err(js::type_error(ctx, "highWaterMark is required"));
+        return Err(js::type_error(cx, "highWaterMark is required"));
     }
-    js::to_number(ctx, hwm.raw())
+    js::to_number(cx, hwm.raw())
 }
 
 native!(
-    fn byte_strategy_constructor(ctx, this, args) {
-        let high_water_mark = strategy_init(ctx, args.get(0))?;
-        instance(ctx, this, Class::ByteLengthQueuingStrategy, Strategy { high_water_mark })
+    fn byte_strategy_constructor(cx, this, args) {
+        let high_water_mark = strategy_init(cx, args.get(0))?;
+        instance(cx, this, Class::ByteLengthQueuingStrategy, Strategy { high_water_mark })
     }
 );
 
 native!(
-    fn count_strategy_constructor(ctx, this, args) {
-        let high_water_mark = strategy_init(ctx, args.get(0))?;
-        instance(ctx, this, Class::CountQueuingStrategy, Strategy { high_water_mark })
+    fn count_strategy_constructor(cx, this, args) {
+        let high_water_mark = strategy_init(cx, args.get(0))?;
+        instance(cx, this, Class::CountQueuingStrategy, Strategy { high_water_mark })
     }
 );
 
 native!(
-    fn strategy_hwm(ctx, this, args) {
-        Ok(V::num(data::<Strategy>(ctx, this, "queuing strategy")?.high_water_mark))
+    fn strategy_hwm(cx, this, args) {
+        Ok(V::num(data::<Strategy>(cx, this, "queuing strategy")?.high_water_mark))
     }
 );
 
 native!(
-    fn byte_size(ctx, this, args) {
-        js::get(ctx, args.get(0), "byteLength")
+    fn byte_size(cx, this, args) {
+        js::get(cx, args.get(0), "byteLength")
     }
 );
 
 native!(
-    fn count_size(ctx, this, args) {
+    fn count_size(cx, this, args) {
         Ok(V::num(1.0))
     }
 );
 
 native!(
-    fn byte_strategy_size(ctx, this, args) {
-        data::<Strategy>(ctx, this, "ByteLengthQueuingStrategy")?;
-        super::cached_function(ctx, 0, c"size", byte_size)
+    fn byte_strategy_size(cx, this, args) {
+        data::<Strategy>(cx, this, "ByteLengthQueuingStrategy")?;
+        super::cached_function(cx, 0, c"size", byte_size)
     }
 );
 
 native!(
-    fn count_strategy_size(ctx, this, args) {
-        data::<Strategy>(ctx, this, "CountQueuingStrategy")?;
-        super::cached_function(ctx, 1, c"size", count_size)
+    fn count_strategy_size(cx, this, args) {
+        data::<Strategy>(cx, this, "CountQueuingStrategy")?;
+        super::cached_function(cx, 1, c"size", count_size)
     }
 );
 
 // --- Native streams -------------------------------------------------------
 
 /// A byte stream of `bytes` (`Blob.stream()`, bodies known up front).
-pub(crate) fn bytes_stream(ctx: Ctx, bytes: Vec<u8>) -> R<V> {
+pub(crate) fn bytes_stream(cx: Ctx, bytes: Vec<u8>) -> R<V> {
     let bytes = std::rc::Rc::new(std::cell::RefCell::new(Some(bytes)));
-    let pull = js::closure(ctx, Vec::new(), move |ctx, _, args| {
+    let pull = js::closure(cx, Vec::new(), move |cx, _, args| {
         let controller = args.get(0);
         if let Some(b) = bytes.borrow_mut().take()
             && !b.is_empty()
         {
-            readable::enqueue_bytes(ctx, controller, &b)?;
+            readable::enqueue_bytes(cx, controller, &b)?;
         }
-        readable::close_controller(ctx, controller)?;
+        readable::close_controller(cx, controller)?;
         Ok(V::undefined())
     })?;
-    let (stream, _) = readable::new_byte_stream(ctx, Algo::native(pull), Algo::default(), 0.0)?;
+    let (stream, _) = readable::new_byte_stream(cx, Algo::native(pull), Algo::default(), 0.0)?;
     Ok(stream)
 }
 

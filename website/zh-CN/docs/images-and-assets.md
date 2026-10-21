@@ -166,6 +166,10 @@ function RemoteImage(props: { uri: string }) {
 | `.ttf`、`.otf` | 字体的字体族名，在第一帧之前注册 | [字体](./fonts.md) |
 | `.json` | 解析后的值，打包进脚本 | [项目结构](./project-structure.md) |
 
+### 模块自身的 URL
+
+`import.meta.url` 是书写它的模块的 URL，因此 `new URL("./data.json", import.meta.url)` 指向它旁边的文件。本地运行或打包的桌面应用中，模块的 URL 是应用目录下的 `file:` URL，可在 `${pluginDir}` 授权下用 `fs/promises` 读取；Web 应用中是页面的 URL；打包的移动应用中是 `asset:/` URL，与导入的图片相同。要随应用发布图片，请导入它：这样构造的 URL 只指向文件，并不会打包它。
+
 图片也可以用 `drawImage` 绘制在画布上（[Canvas](./canvas.md)），而 `backgroundImage` 的渐变能替代许多装饰性图片（[样式](./styling.md)）。
 
 ## 相关内容

@@ -6,14 +6,24 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **QuickJS microtasks are run by the host.** Call `Host::run_jobs()` after every call from Rust into JS. `setTimeout` / `console` are our own;
   `queueMicrotask`, `WeakRef` and `FinalizationRegistry` are built into QuickJS-NG.
+- **`Host::run_jobs()` is also the end of the turn for unhandled rejections** (`rejections.rs`): QuickJS's rejection
+  tracker reports a promise rejected without a handler and one that gets a handler later; the host holds the first
+  kind until the job queue is drained, then reports those still unhandled (`Host::set_rejection_handler`, else a
+  `js` error log). A handler attached later in the same turn makes no report, as in browsers. A promise the host
+  settles or reads natively without `then` (the bundle's evaluation promise, a stream's) is marked handled
+  (`JS_PromiseMarkAsHandled`), or it is reported. Interrupts are uncatchable and reject nothing; rejections while
+  the heap ran out are dropped, the VM stops with that report.
 - **The JS object graph must stay reachable from a GC root.** The renderer holds the root node, which holds its children's
   objects and each node its handlers (`dom.rs`, reported by the classes' GC marks). Without that the whole rendered app (nodes,
-  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh trace` taps after 1.2s of idling by
-  default; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
+  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh test App.tsx` runs the steps of stdin after 1.2s of idling
+  for that; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`
-  is tested against the linked QuickJS version: update both when upgrading rquickjs.
+  names the QuickJS-NG release and revision, `BC_VERSION` and the byte order, never the binding. Native and
+  browser targets use `quickjs-jit` (the browser uses its interpreter and pregenerated bindings) and must build
+  the same QuickJS-NG, as the web runtime loads what the native CLI compiles. Tests hold it to the linked release, the bytecode's format byte and the `-sys` versions
+  in `Cargo.lock` (`ENGINES`): update them together when upgrading either.
 - **Encoded operations' codes** (`ANIMATION_*`, `CV_*`) come from `nsh_core::js` (`protocol.rs`, `canvas.rs`): never write a code's value
   by hand in `nsh-js`.
 - **rquickjs converts `Option::None` to `undefined`, not `null`**: compare native results with `== null` in JS.
@@ -21,8 +31,8 @@ Things that were found the hard way. Read the section of the area you change bef
   be named `on...` on host elements (`List` sends `onEndReachedThreshold` as `endReachedThreshold`).
 - **There is no error boundary**: hot component proxies catch what a component throws, report it and render nothing until the
   fix (`nsh-js` `hot.rs`).
-- **Hot proxies return accessors**, not nodes: runtime code that inspects what a component returned (`Stack` looks for a
-  `<screen>`, `navigation.rs`) must accept an accessor.
+- **Hot proxies return accessors**, not nodes: runtime code that inspects what a component returned (`NavStack` looks for a
+  `<NavPage>`, `navigation.rs`) must accept an accessor.
 
 ## Core and layout
 
@@ -42,7 +52,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped (Taffy runs a full rounding pass even over a clean root).
-- **Taffy defaults are CSS semantics**; `Style::default()` switches to RN semantics: column, flexShrink 0, alignContent flex-start, position relative,
+- **Taffy defaults are CSS semantics**; `Style::default()` switches to RN semantics: column, flexShrink 0, alignContent flex-start (stored as `normal` and
+  resolved per display by `style::resolve_normal_alignment`, so grids keep CSS's `normal`), position relative,
   and min sizes 0 (an unset or `auto` `minWidth` / `minHeight` is 0). Taffy's `auto` minimum is CSS's automatic minimum size (the
   min-content size); text has no cheap min-content and reports its natural width, so `flex: 1` text in a row could not shrink and
   overflowed instead of wrapping. Yoga has no automatic minimum.
@@ -113,9 +124,9 @@ Things that were found the hard way. Read the section of the area you change bef
   resize the text stays drawn at zero size.
 - **UINavigationController breaks transitions started during another one**: stack changes that arrive while
   `transitionCoordinator()` is set wait for `didShow` and are applied on the next main-queue turn (the coordinator outlives
-  the callback); only screens the controller actually had count as popped by the user.
+  the callback); only pages the controller actually had count as popped by the user.
 - **`UIAlertController` asserts when its presentation controller's delegate is set**; a popover action sheet (iPad, Mac) hides
-  its cancel action and runs it on a tap outside, so sheets without one get a hidden cancel answering "dismissed".
+  its cancel action and runs it on a tap outside, so sheets without one get a hidden, untitled cancel answering "dismissed" (`null`).
 - **Catalyst: a mouse drag does not scroll a UIScrollView** (Mac behavior); test scrolling with trackpad-style scroll wheel
   events (with phases), which also produce drag and momentum callbacks. Mouse drags do reach views as touches.
 - **Catalyst: the Mac idiom moves a navigation bar's contents into the window's toolbar** (`UINavigationBar.behavioralStyle`
@@ -161,7 +172,11 @@ Things that were found the hard way. Read the section of the area you change bef
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
   as key events; both feed `onKeyPress`. A hardware Enter reports its down and its up — act on the down only and consume the up, or the up advances
   focus again in the next field; blur by focusing the (focusable, highlight-free) `NshView`, as `clearFocus()` hands focus to the
-  first focusable view; set the typeface after the input type (password types reset it to monospace).
+  first focusable view; set the typeface after the input type (password types reset it to monospace). The composition
+  (`onCompositionChange`) is read from the composing span (`BaseInputConnection.getComposingSpanStart` / `End`) after every
+  edit, connection call and batch end, since keyboards start and end it in many ways (`setComposingRegion` included); a
+  value JS sets meanwhile waits for its end (`setText` restarts the keyboard, which commits the pre-edit text), and is
+  never applied from inside the text watcher.
 - **Android, keyboard avoidance**: the keyboard's height becomes bottom padding of the scroll around the focused input, and
   `ScrollBox.reveal` scrolls it into view; `requestRectangleOnScreen` cannot, as ScrollView ignores its padding when it decides
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
@@ -170,8 +185,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
-- **Android, modal content placement**: `Box.place` lays a view out at its core frame directly, so the status bar offset of a
-  non-translucent modal is a content view inside the dialog's container, not an offset applied to the root's layout; the dialog
+- **Android, `Dialog` content placement**: `Box.place` lays a view out at its core frame directly, so the status bar offset of a
+  non-translucent `Dialog` (no `statusBarTranslucent`) is a content view inside the Android dialog's container, not an offset applied to the root's layout; the dialog
   copies the activity's bar appearance (light / dark icons).
 - **Android, nested scrolling**: scroll views enable nested scrolling, or an outer vertical ScrollView intercepts every vertical
   drag meant for an inner one.
@@ -227,6 +242,10 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.
+  Commands applied while the mounter is borrowed defer window closure to the next main-queue turn
+  (`system.rs`, `ExitApp`), so teardown can borrow the mounter again.
+
 - **Changing `FullSizeContentView` can leave the content at its old size after `setStyleMask:` returns**:
   a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
@@ -264,7 +283,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
   `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, `--script`'s `shot`, shows them: WebKit
-  draws them for it). Screens and modals that leave as images take their live web views and videos along (`native::lend`).
+  draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
 
@@ -289,11 +308,13 @@ Things that were found the hard way. Read the section of the area you change bef
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).
 - **A focused WebView2 page has the keyboard in a window of its own** (`Chrome_WidgetWin_0`, a child of the
-  surface's window): the surface's window gets no keys until it takes the focus back, so dialogs and modals take it
+  surface's window): the surface's window gets no keys until it takes the focus back, so alerts and dialogs take it
   (`native::take_keyboard`), and `--script`'s `type` / `key` post to that window while it has the focus. A
   `MoveFocus` right after the click needs a few hundred milliseconds before typed characters reach the page.
 - **`std::fs::canonicalize` returns verbatim paths** (`\\?\C:\…`), which rolldown and path prefix comparisons do not
-  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid.
+  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid;
+  capability checks, trusted anchors and grant roots all go through `nsh_core::access::canonicalize`, which does the
+  same, so both sides of a containment check have one form.
 - **Git Bash sets `LANG`** whatever the user's settings: the Windows backend's locale is the user's regional format
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and

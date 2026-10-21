@@ -22,7 +22,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
+use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Limits, Policy};
 use rustc_hash::FxHashMap;
 
 use crate::{app::AppView, image::AssetBase};
@@ -152,6 +152,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
+        tests: false,
     };
     let started = DevClient::start(url, host, move |event| {
         match event {
@@ -213,6 +214,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
     match event {
         DevEvent::Connected => hide_status(ui),
         DevEvent::Disconnected => show_status(ui, "Dev server disconnected — reconnecting…"),
+        // No test agent here (`HostInfo::tests` is false): no steps come.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => show_status(ui, "Building…"),
         DevEvent::BuildFailed(message) => {
             hide_status(ui);
@@ -230,6 +233,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             hide_status(ui);
             let mut bundle = match format {
@@ -261,6 +265,10 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
                 Ok(bundle) => bundle,
                 Err(err) => return show_error(ui, "Invalid capabilities", &err, true),
             };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return show_error(ui, "Invalid limits", &err, true),
+            };
             let (view, running) = {
                 let mut ui = ui.borrow_mut();
                 ui.latest = Some((session, version, bundle.clone()));
@@ -273,6 +281,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             let Some(view) = view else { return };
             log::info!("loading build {version}");
             hide_error(ui);
+            view.set_limits(limits);
             view.load(App::Js(bundle));
         }
         DevEvent::Patch {

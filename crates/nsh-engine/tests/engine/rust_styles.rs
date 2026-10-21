@@ -30,17 +30,17 @@ fn Card() -> impl IntoElement {
                 .group()
                 .p_4()
                 .rounded_tl(px(20.0))
-                .border_t(4.0)
+                .border_t(px(4.0))
                 .border_dashed()
                 .bg_linear_to_br()
                 .gradient_from(SKY.shade(400))
                 .gradient_to(VIOLET.shade(600))
                 .shadow_lg()
-                .shadow_color(SKY.shade(500).with_alpha(0.5))
-                .ring(2.0)
+                .shadow_color(SKY.shade(500).opacity(0.5))
+                .ring(px(2.0))
                 .ring_color(SKY.shade(500))
-                .perspective(400.0)
-                .rotate_y(20.0)
+                .perspective(px(400.0))
+                .rotate_y(deg(20.0))
                 .animate_pulse()
                 .child(
                     text("In the group")
@@ -65,17 +65,20 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::new::<Card>(|| ())),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -125,9 +128,9 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
     let effects = card.effects.as_ref().unwrap();
     // The shadow's two layers and the ring.
     assert_eq!(effects.box_shadows.len(), 3);
-    assert_eq!(card.borders.widths[0], 4.0);
+    assert_eq!(card.borders.widths.top.0, 4.0);
     assert_eq!(card.borders.style, nsh_core::BorderStyle::Dashed);
-    assert_eq!(card.corner_radius[0], Some(20.0));
+    assert_eq!(card.corner_radius.top_left, Some(nsh_core::Points(20.0)));
     assert_eq!(card.transform.ops().len(), 2, "perspective and rotateY");
     assert_eq!(
         card.animation.map(|a| a.keyframes),
@@ -158,7 +161,7 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
         .iter()
         .find(|(_, t)| t.text == "In the group")
         .expect("restyled");
-    assert_eq!(inside.1.spans[0].style.color, VIOLET.shade(600));
+    assert_eq!(inside.1.spans[0].style.color, VIOLET.shade(600).into());
 
     // The link takes the press, not the sentence.
     engine

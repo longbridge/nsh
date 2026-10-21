@@ -21,9 +21,10 @@ use nsh_core::{
     AccessibilityRole, AutoCapitalize, AutoFill, BorderStyle, Checked, Color, Command,
     DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve,
     LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch,
-    MountItem, NativeProps, OriginLen, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
     ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
     ViewStyle, WebSource,
+    geometry::{DefiniteLength, REM_SIZE},
 };
 
 use crate::{
@@ -164,7 +165,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::Frame { id, frame } => {
                 e.int(FRAME);
                 e.int(id as i32);
-                for v in [frame.x, frame.y, frame.width, frame.height] {
+                for v in [
+                    frame.origin.x.0,
+                    frame.origin.y.0,
+                    frame.size.width.0,
+                    frame.size.height.0,
+                ] {
                     e.float(v);
                 }
             }
@@ -188,7 +194,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.int(e.objects.len() as i32);
                 e.objects.push(Obj::Layout(layout.clone()));
-                for v in [content.x, content.y, content.width, content.height] {
+                for v in [
+                    content.origin.x.0,
+                    content.origin.y.0,
+                    content.size.width.0,
+                    content.size.height.0,
+                ] {
                     e.float(v);
                 }
                 // Pressable spans: start, end, node, events (low, high).
@@ -230,7 +241,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ResizeMode::Center => 3,
                 });
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
-                e.float(options.blur_radius);
+                e.float(options.blur_radius.0);
                 e.float(options.fade_ms.unwrap_or(-1.0));
             }
             MountItem::ScrollConfig {
@@ -263,8 +274,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::ScrollContent { id, size } => {
                 e.int(SCROLL_CONTENT);
                 e.int(id as i32);
-                e.float(size.width);
-                e.float(size.height);
+                e.float(size.width.0);
+                e.float(size.height.0);
             }
             MountItem::StickyCells { id, cells } => {
                 e.int(STICKY_CELLS);
@@ -272,8 +283,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(cells.len() as i32);
                 for c in &cells {
                     e.int(c.cell as i32);
-                    e.float(c.start);
-                    e.float(c.end);
+                    e.float(c.start.0);
+                    e.float(c.end.0);
                 }
             }
             MountItem::LayoutDirection { rtl } => {
@@ -296,10 +307,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 e.bool(extent.is_some());
                 let r = extent.unwrap_or_default();
-                e.float(r.x);
-                e.float(r.y);
-                e.float(r.width);
-                e.float(r.height);
+                e.float(r.origin.x.0);
+                e.float(r.origin.y.0);
+                e.float(r.size.width.0);
+                e.float(r.size.height.0);
             }
             MountItem::TrackStates { id, states } => {
                 e.int(TRACK_STATES);
@@ -311,10 +322,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(SCROLL_BEHAVIOR);
                 e.int(id as i32);
                 e.bool(b.paging);
-                e.float(b.snap_interval);
+                e.float(b.snap_interval.0);
                 e.int(b.snap_offsets.len() as i32);
                 for &o in &b.snap_offsets {
-                    e.float(o);
+                    e.float(o.0);
                 }
                 e.int(match b.snap_alignment {
                     SnapAlignment::Start => 0,
@@ -325,10 +336,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.bool(b.enabled);
                 e.bool(b.bounces);
                 let i = b.content_inset;
-                e.float(i.top);
-                e.float(i.right);
-                e.float(i.bottom);
-                e.float(i.left);
+                e.float(i.top.0);
+                e.float(i.right.0);
+                e.float(i.bottom.0);
+                e.float(i.left.0);
                 e.int(match b.keyboard_taps {
                     KeyboardTaps::Never => 0,
                     KeyboardTaps::Always => 1,
@@ -345,8 +356,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::ScrollBy { id, dx, dy } => {
                 e.int(SCROLL_BY);
                 e.int(id as i32);
-                e.float(dx);
-                e.float(dy);
+                e.float(dx.0);
+                e.float(dy.0);
             }
             MountItem::Refreshing { id, refreshing } => {
                 e.int(REFRESHING);
@@ -409,9 +420,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     ModalPresentation::PageSheet => 1,
                     ModalPresentation::FormSheet => 2,
                 });
-                e.bool(config.transparent);
                 e.bool(config.status_bar_translucent);
-                e.bool(config.dismissible);
+                // The back button is Escape (`closeOnEscape`).
+                e.bool(config.close_on_escape);
             }
             MountItem::LayoutAnimation(animation) => {
                 e.int(LAYOUT_ANIMATION);
@@ -434,7 +445,12 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::InputContent { id, content } => {
                 e.int(INPUT_CONTENT);
                 e.int(id as i32);
-                for v in [content.x, content.y, content.width, content.height] {
+                for v in [
+                    content.origin.x.0,
+                    content.origin.y.0,
+                    content.size.width.0,
+                    content.size.height.0,
+                ] {
                     e.float(v);
                 }
             }
@@ -460,8 +476,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::Blur => e.int(1),
                     Command::ScrollTo { x, y, animated } => {
                         e.int(2);
-                        e.float(x);
-                        e.float(y);
+                        e.float(x.0);
+                        e.float(y.0);
                         e.bool(animated);
                     }
                     Command::ExitApp => e.int(3),
@@ -491,7 +507,6 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         });
                         e.bool(c.hidden);
                         e.bool(c.animated);
-                        opt_color(&mut e, c.background);
                     }
                     Command::Dialog(d) => {
                         e.int(12);
@@ -543,9 +558,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(20);
                         e.float(scale);
                         e.bool(center.is_some());
-                        let (x, y) = center.unwrap_or_default();
-                        e.float(x);
-                        e.float(y);
+                        let c = center.unwrap_or_default();
+                        e.float(c.x.0);
+                        e.float(c.y.0);
                         e.bool(animated);
                     }
                     Command::Native { name, args } => {
@@ -562,6 +577,11 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(id as i32);
                         e.bool(has_only);
                     }
+                    // Answered by the sink (`host::answer_clipboard_reads`);
+                    // images are not written to Android's clipboard.
+                    Command::ReadClipboardImage { .. }
+                    | Command::ReadClipboardFiles { .. }
+                    | Command::SetClipboardImage(_) => e.int(-1),
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
@@ -589,12 +609,12 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     e.int(argb(s.background_color));
     let radii = s.radii();
     for r in radii.to_array() {
-        e.float(r);
+        e.float(r.0);
     }
     e.bool(radii.continuous);
     let b = &s.borders;
-    for w in b.widths {
-        e.float(w);
+    for w in b.widths.to_array() {
+        e.float(w.0);
     }
     for c in b.colors {
         e.int(argb(c));
@@ -608,30 +628,30 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     e.bool(s.overflow_hidden);
     let shadow = s.shadow;
     e.int(argb(shadow.color));
-    e.float(shadow.offset_x);
-    e.float(shadow.offset_y);
+    e.float(shadow.offset_x.0);
+    e.float(shadow.offset_y.0);
     e.float(if shadow.is_visible() {
         shadow.opacity
     } else {
         0.0
     });
-    e.float(shadow.radius);
+    e.float(shadow.radius.0);
     for v in view_transform(&s.transform, |_| None) {
         e.float(v);
     }
     e.bool(s.tint_color.is_some());
     e.int(s.tint_color.map_or(0, argb));
-    e.float(s.elevation);
+    e.float(s.elevation.0);
     // Transform origin: kind (0 points, 1 fraction) and value per axis.
     for v in [s.transform_origin.x, s.transform_origin.y] {
         match v {
-            OriginLen::Px(p) => {
+            DefiniteLength::Absolute(p) => {
                 e.int(0);
-                e.float(p);
+                e.float(p.to_points(REM_SIZE).0);
             }
-            OriginLen::Fraction(f) => {
+            DefiniteLength::Fraction(f) => {
                 e.int(1);
-                e.float(f);
+                e.float(f.0);
             }
         }
     }
@@ -639,16 +659,26 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     effects(e, s);
 }
 
+/// An angle in the degrees `Decor.java` takes, rounded to 1e-4 so that
+/// whole degrees go as the style wrote them (radians to degrees in `f32`
+/// can be an ulp off).
+fn degrees(a: nsh_core::geometry::Radians) -> f32 {
+    (a.to_degrees() * 1e4).round() / 1e4
+}
+
 /// The effects of `Mounter.java` `style`: shadows, gradients, filters,
 /// blend mode, outline, visibility, cursor, transition, animation.
 fn effects(e: &mut Encoded, s: &ViewStyle) {
-    use nsh_core::{BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes};
+    use nsh_core::{
+        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes,
+        geometry::{DefiniteLength, REM_SIZE, Size},
+    };
     let fx = s.effects.as_deref();
     let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
     e.int(shadows.len() as i32);
     for sh in shadows {
         for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
-            e.float(v);
+            e.float(v.0);
         }
         e.int(argb(sh.color));
         e.bool(sh.inset);
@@ -659,7 +689,7 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         match g.kind {
             GradientKind::Linear { angle } => {
                 e.int(0);
-                e.float(angle);
+                e.float(degrees(angle));
                 e.int(0);
                 e.int(0);
             }
@@ -678,21 +708,40 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                     GradientSize::FarthestSide => 2,
                     GradientSize::FarthestCorner => 3,
                 });
-                e.float(x);
-                e.float(y);
+                e.float(x.0);
+                e.float(y.0);
             }
             GradientKind::Conic { from, x, y } => {
                 e.int(3);
-                e.float(from);
-                e.float(x);
-                e.float(y);
+                e.float(degrees(from));
+                e.float(x.0);
+                e.float(y.0);
             }
         }
-        let stops = g.resolved_stops();
-        e.int(stops.len() as i32);
-        for (c, p) in stops {
-            e.int(argb(c));
-            e.float(p);
+        if g.has_lengths() {
+            // Stops placed in points depend on the box, which `Decor`
+            // knows when it draws: they go as written, their count
+            // negated, each with its unit (0 spread, 1 fraction, 2
+            // points), and `Decor.Gradient.resolve` places them.
+            e.int(-(g.stops.len() as i32));
+            for s in &g.stops {
+                e.int(argb(s.color));
+                let (unit, v) = match s.position {
+                    None => (0, 0.0),
+                    Some(DefiniteLength::Fraction(f)) => (1, f.0),
+                    Some(DefiniteLength::Absolute(a)) => (2, a.to_points(REM_SIZE).0),
+                };
+                e.float(v);
+                e.int(unit);
+            }
+        } else {
+            // Without lengths the box does not matter.
+            let stops = g.resolved_stops(Size::default());
+            e.int(stops.len() as i32);
+            for (c, p) in stops {
+                e.int(argb(c));
+                e.float(p.0);
+            }
         }
     }
     let filter_list = |e: &mut Encoded, list: &[Filter]| {
@@ -703,14 +752,14 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         for v in matrix.unwrap_or([0.0; 20]) {
             e.float(v);
         }
-        e.float(nsh_core::blur_radius(list));
+        e.float(nsh_core::blur_radius(list).0);
         let shadow = list.iter().find_map(|f| match *f {
             Filter::DropShadow {
                 offset_x,
                 offset_y,
                 blur,
                 color,
-            } => Some((offset_x, offset_y, blur, color)),
+            } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         });
         e.bool(shadow.is_some());
@@ -743,14 +792,14 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         BlendMode::PlusLighter => 17,
     });
     let o = s.outline;
-    e.float(if o.is_visible() { o.width } else { 0.0 });
+    e.float(if o.is_visible() { o.width.0 } else { 0.0 });
     e.int(argb(o.color));
     e.int(match o.style {
         BorderStyle::Solid => 0,
         BorderStyle::Dashed => 1,
         BorderStyle::Dotted => 2,
     });
-    e.float(o.offset);
+    e.float(o.offset.0);
     e.bool(s.hidden);
     e.int(match s.cursor {
         Cursor::Auto => 0,
@@ -878,7 +927,8 @@ fn screen_config(e: &mut Encoded, c: &ScreenConfig) {
     for id in [c.left, c.right, c.title_view] {
         e.int(id.map_or(-1, |i| i as i32));
     }
-    e.float(c.header_height);
+    e.float(c.header_height.0);
+    e.opt_string(c.back_title.as_deref());
 }
 
 fn view_props(e: &mut Encoded, p: &ViewProps) {
@@ -890,9 +940,8 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
     });
     let h = p.hit_slop;
     for v in [h.top, h.right, h.bottom, h.left] {
-        e.float(v);
+        e.float(v.0);
     }
-    e.float(p.active_opacity.unwrap_or(f32::NAN));
     let a = &p.accessibility;
     e.int(match a.accessible {
         None => -1,
@@ -952,7 +1001,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(r) => {
             e.int(1 | (r.borderless as i32) << 1 | (r.foreground as i32) << 2);
             opt_color(e, r.color);
-            e.float(r.radius.unwrap_or(-1.0));
+            e.float(r.radius.map_or(-1.0, |r| r.0));
         }
         None => e.int(0),
     }
@@ -965,7 +1014,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
                 a.fail_offset_x,
                 a.fail_offset_y,
             ] {
-                e.float(v.unwrap_or(f32::NAN));
+                e.float(v.map_or(f32::NAN, |v| v.0));
             }
         }
         None => e.int(0),
@@ -1032,7 +1081,7 @@ fn layout_transition(e: &mut Encoded, t: Option<LayoutTransition>) {
 
 fn input(e: &mut Encoded, c: &InputConfig) {
     let s = &c.style;
-    e.float(s.font_size);
+    e.float(s.font_size.0);
     e.int(s.font_weight as i32);
     e.bool(s.italic);
     e.int(argb(s.color));
@@ -1040,7 +1089,7 @@ fn input(e: &mut Encoded, c: &InputConfig) {
         Some(f) => e.string(f.name().to_string()),
         None => e.int(-1),
     }
-    e.float(s.letter_spacing);
+    e.float(s.letter_spacing.0);
     e.int(match c.align {
         TextAlign::Auto | TextAlign::Left | TextAlign::Justify => 0,
         TextAlign::Center => 1,
@@ -1230,7 +1279,7 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 e.int(30);
                 e.int(d.len() as i32);
                 for &v in d.iter() {
-                    e.float(v);
+                    e.float(v.0);
                 }
             }
             Op::LineDashOffset(o) => {
@@ -1251,16 +1300,16 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
             }
             Op::ShadowBlur(b) => {
                 e.int(35);
-                e.float(*b);
+                e.float(b.0);
             }
-            Op::ShadowOffset(x, y) => {
+            Op::ShadowOffset(offset) => {
                 e.int(36);
-                e.float(*x);
-                e.float(*y);
+                e.float(offset.x.0);
+                e.float(offset.y.0);
             }
             Op::Font(f) => {
                 e.int(37);
-                e.float(f.size);
+                e.float(f.size.0);
                 e.int(f.weight as i32);
                 e.bool(f.italic);
                 e.opt_string(f.family.as_deref());
@@ -1297,7 +1346,7 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 });
                 e.string(text.to_string());
                 e.nums(&[*x, *y]);
-                e.float(max_width.unwrap_or(f32::NAN));
+                e.float(max_width.map_or(f32::NAN, |m| m.0));
             }
             Op::DrawImage {
                 image,
@@ -1307,7 +1356,10 @@ fn canvas(e: &mut Encoded, d: &nsh_core::canvas::Drawing) {
                 e.int(42);
                 e.string(image.uri.to_string());
                 e.bool(source.is_some());
-                for v in source.unwrap_or([0.0; 4]) {
+                let source = source.map_or([0.0; 4], |s| {
+                    [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]
+                });
+                for v in source {
                     e.float(v);
                 }
                 e.nums(dest);
@@ -1406,9 +1458,29 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
         Paint::Gradient(g) => {
             e.int(2);
             let (kind, values): (i32, &[f32]) = match &g.shape {
-                GradientShape::Linear(v) => (0, v),
-                GradientShape::Radial(v) => (1, v),
-                GradientShape::Conic(v) => (2, v),
+                GradientShape::Linear { start, end } => {
+                    (0, &[start.x.0, start.y.0, end.x.0, end.y.0])
+                }
+                GradientShape::Radial {
+                    start,
+                    start_radius,
+                    end,
+                    end_radius,
+                } => (
+                    1,
+                    &[
+                        start.x.0,
+                        start.y.0,
+                        start_radius.0,
+                        end.x.0,
+                        end.y.0,
+                        end_radius.0,
+                    ],
+                ),
+                GradientShape::Conic {
+                    start_angle,
+                    center,
+                } => (2, &[start_angle.0, center.x.0, center.y.0]),
             };
             e.int(kind);
             for &v in values {
@@ -1416,7 +1488,7 @@ fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
             }
             e.int(g.stops.len() as i32);
             for (offset, color) in &g.stops {
-                e.float(*offset);
+                e.float(offset.0);
                 e.int(argb(*color));
             }
         }

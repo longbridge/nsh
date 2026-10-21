@@ -2,18 +2,9 @@
 //! keyboard, appearance, device) and the HTTP requests it carries out: the
 //! data both Rust components and JS read, with or without a JS runtime.
 
-/// Edge insets in points.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Insets {
-    /// Top.
-    pub top: f32,
-    /// Right.
-    pub right: f32,
-    /// Bottom.
-    pub bottom: f32,
-    /// Left.
-    pub left: f32,
-}
+pub mod clipboard;
+
+use crate::geometry::{Edges, Points, Size};
 
 /// The system appearance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -90,7 +81,7 @@ impl Os {
 }
 
 impl Default for Os {
-    /// The mobile OS of this build (`nsh trace` behaves as iOS); desktop
+    /// The mobile OS of this build (headless runs, `nsh test`, behave as iOS); desktop
     /// backends set theirs.
     fn default() -> Self {
         if cfg!(target_os = "android") {
@@ -130,17 +121,17 @@ impl Idiom {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
     /// Size of the surface in points.
-    pub window: (f32, f32),
+    pub window: Size<Points>,
     /// Insets not covered by system UI (notch, home indicator, title bar).
-    pub safe_area: Insets,
+    pub safe_area: Edges<Points>,
     /// The title bar's area while the app hides it (desktops,
     /// [`crate::desktop::TitleBarStyle::Hidden`]): `top` is its height,
     /// `left` and `right` the widths the system's window controls take at
     /// its ends (`bottom` is 0); all 0 while the system shows its title
     /// bar.
-    pub title_bar: Insets,
+    pub title_bar: Edges<Points>,
     /// Height of the software keyboard over the surface; 0 when hidden.
-    pub keyboard_height: f32,
+    pub keyboard_height: Points,
     /// Duration of the keyboard's show / hide animation in seconds.
     pub keyboard_duration: f32,
     /// Light or dark appearance.
@@ -184,10 +175,10 @@ impl Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
-            window: (0.0, 0.0),
-            safe_area: Insets::default(),
-            title_bar: Insets::default(),
-            keyboard_height: 0.0,
+            window: Size::default(),
+            safe_area: Edges::default(),
+            title_bar: Edges::default(),
+            keyboard_height: Points(0.0),
             keyboard_duration: 0.25,
             color_scheme: ColorScheme::Light,
             font_scale: 1.0,
@@ -200,6 +191,33 @@ impl Default for Environment {
             idiom: Idiom::Phone,
             apple_keyboard: false,
             locale: Locale::EN_US,
+        }
+    }
+}
+
+/// The settings an embedding app gives its surfaces in place of the
+/// system's (`None`: the system's): its own language and text size, for an
+/// app inside a native app that lets its users switch them. The platforms
+/// write them over what they read from the system ([`Self::apply`]), so the
+/// app's `Intl`, `locale()`, `fontScale()` and text follow them like a system
+/// change.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct HostEnvironment {
+    /// The locale in place of the user's ([`Environment::locale`]).
+    pub locale: Option<Locale>,
+    /// The text size in place of the user's ([`Environment::font_scale`]);
+    /// values that are not finite and positive count as `None`.
+    pub font_scale: Option<f32>,
+}
+
+impl HostEnvironment {
+    /// Writes the settings `self` has over `env`'s.
+    pub fn apply(&self, env: &mut Environment) {
+        if let Some(locale) = self.locale {
+            env.locale = locale;
+        }
+        if let Some(scale) = self.font_scale.filter(|s| s.is_finite() && *s > 0.0) {
+            env.font_scale = scale;
         }
     }
 }
@@ -437,7 +455,30 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
-    use super::Locale;
+    use super::{Environment, HostEnvironment, Locale};
+
+    #[test]
+    fn a_host_environment_replaces_what_it_sets() {
+        let mut env = Environment {
+            font_scale: 1.25,
+            ..Environment::default()
+        };
+        HostEnvironment::default().apply(&mut env);
+        assert_eq!((env.locale, env.font_scale), (Locale::EN_US, 1.25));
+        let zh = Locale::parse("zh-Hans-CN").unwrap();
+        HostEnvironment {
+            locale: Some(zh),
+            font_scale: Some(f32::NAN),
+        }
+        .apply(&mut env);
+        assert_eq!((env.locale, env.font_scale), (zh, 1.25));
+        HostEnvironment {
+            locale: None,
+            font_scale: Some(1.5),
+        }
+        .apply(&mut env);
+        assert_eq!((env.locale, env.font_scale), (zh, 1.5));
+    }
 
     #[test]
     fn locales_parse_platform_identifiers() {

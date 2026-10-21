@@ -4,15 +4,15 @@
 //! accessibility labels (as the TSX gallery's `demos/Gestures.tsx`).
 
 use nsh_core::{
-    Rect, Ripple, TouchPhase, TouchPoint, UNDERLAY_OPACITY,
-    nsh_animation::{Curve, EaseMode},
+    Bounds, Points, Ripple, TouchPhase, TouchPoint,
+    animation::{Curve, EaseMode},
     ui::{Animation, BoxShadow, TouchEvent, prelude::*},
 };
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, MONO,
-    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, press_with, radius,
-    rgb_a, tints,
+    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, lengths, press_with,
+    radius, rect, rgb_a, tints,
 };
 
 /// A dot matrix behind a stage, drawn for its size (again when it or the
@@ -40,7 +40,9 @@ fn Dots() -> impl IntoElement {
             })
             .flex_1(),
         )
-        .on_layout(move |frame: &Rect| size.set((frame.width, frame.height)))
+        .on_layout(move |frame: &Bounds<Points>| {
+            size.set((frame.size.width.0, frame.size.height.0))
+        })
 }
 
 /// [`Dots`] filling its stage.
@@ -68,11 +70,11 @@ fn knob<E: Finished>(element: E) -> E {
         [
             inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.35)),
             BoxShadow {
-                offset_x: 0.0,
-                offset_y: 3.0,
-                blur: 10.0,
-                spread: 0.0,
-                color: rgb_a(0x000000, 0.45),
+                offset_x: px(0.0),
+                offset_y: px(3.0),
+                blur: px(10.0),
+                spread: px(0.0),
+                color: rgb_a(0x000000, 0.45).to_packed(),
                 inset: false,
             },
         ],
@@ -167,10 +169,10 @@ fn Transformable() -> impl IntoElement {
                         .pinch_value(&scale)
                         .rotation_value(&angle)
                         .on_pan_end(move |e: &PanEvent| {
-                            drag.set(e.translation_x.hypot(e.translation_y).round());
+                            drag.set(e.translation.x.0.hypot(e.translation.y.0).round());
                         })
                         .on_pinch_end(move |e: &GestureEvent| pinched.set(e.value))
-                        .on_rotation_end(move |e: &GestureEvent| turned.set(e.value))
+                        .on_rotation_end(move |e: &GestureEvent<Radians>| turned.set(e.value.0))
                         .bind_translate_x(&x)
                         .bind_translate_y(&y)
                         .bind_scale(&scale)
@@ -244,7 +246,7 @@ fn Ball() -> impl IntoElement {
             .map(knob)
             .style_with(move |s| {
                 let (x, y) = pos.get();
-                s.translate_x(x).translate_y(y)
+                s.translate_x(px(x)).translate_y(px(y))
             })
             .bind_scale(&grab.interpolate(&[0.0, 1.0], &[1.0, 1.15]))
             .claim_touches(TouchClaim::on_start())
@@ -256,7 +258,7 @@ fn Ball() -> impl IntoElement {
             .on_responder_move(move |e: &ResponderEvent| {
                 let g = e.gesture;
                 let (x, y) = start.with(|s| *s);
-                pos.set((x + g.dx, y + g.dy));
+                pos.set((x + g.delta.x.0, y + g.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
                 let g = e.gesture;
@@ -315,17 +317,19 @@ fn TouchPad() -> impl IntoElement {
         };
         let entry = format!(
             "{}, {} · page {}, {} · {} down",
-            p.location_x.round(),
-            p.location_y.round(),
-            p.page_x.round(),
-            p.page_y.round(),
+            p.location.x.0.round(),
+            p.location.y.0.round(),
+            p.page.x.0.round(),
+            p.page.y.0.round(),
             down.len()
         );
         batch(|| {
             fingers_down.set(if touch.phase == TouchPhase::Cancel {
                 Vec::new()
             } else {
-                down.iter().map(|f| (f.location_x, f.location_y)).collect()
+                down.iter()
+                    .map(|f| (f.location.x.0, f.location.y.0))
+                    .collect()
             });
             log.update(|log| {
                 log.insert(0, (name, entry));
@@ -496,9 +500,10 @@ fn PressEvents() -> impl IntoElement {
         .on_press(fire("ripple"))
         .on_long_press(fire("fast long press"))
         .long_press_delay(250.0)
-        .underlay(|| color(colors::BORDER), UNDERLAY_OPACITY)
+        .group()
+        .active(|s| s.bg(colors::BORDER))
         .ripple(Ripple {
-            color: Some(rgb_a(0xc8f26d, 0.25)),
+            color: Some(rgb_a(0xc8f26d, 0.25).to_packed()),
             ..Ripple::default()
         })
         .flex_1()
@@ -512,11 +517,17 @@ fn PressEvents() -> impl IntoElement {
         .items_center()
         .justify_center()
         .gap(px(2.0))
-        .child(text("Ripple").text_size(px(14.0)).text_color(colors::TEXT))
+        .child(
+            text("Ripple")
+                .text_size(px(14.0))
+                .text_color(colors::TEXT)
+                .group_active(|s| s.opacity(0.85)),
+        )
         .child(
             text("Long press after 250 ms")
                 .text_size(px(12.0))
-                .text_color(colors::FAINT),
+                .text_color(colors::FAINT)
+                .group_active(|s| s.opacity(0.85)),
         );
     Card::new()
         .icon(IconName::Components)
@@ -525,11 +536,11 @@ fn PressEvents() -> impl IntoElement {
         .right(Badge::new(move || count.get().to_string()))
         .child(
             view()
-                .on_press_in(fire("pressIn"))
-                .on_press_out(fire("pressOut"))
+                .on_press_down(fire("pressIn"))
+                .on_press_up(fire("pressOut"))
                 .on_press(fire("press"))
                 .on_long_press(fire("longPress"))
-                .active_opacity(0.55)
+                .active(|s| s.opacity(0.55))
                 .role(AccessibilityRole::Button)
                 .h(px(64.0))
                 .rounded(px(radius::CONTROL))
@@ -567,10 +578,10 @@ fn PressEvents() -> impl IntoElement {
                     .on_press(fire("borderless"))
                     .ripple(Ripple {
                         borderless: true,
-                        radius: Some(40.0),
+                        radius: Some(px(40.0)),
                         ..Ripple::default()
                     })
-                    .active_opacity(0.4)
+                    .active(|s| s.opacity(0.4))
                     .role(AccessibilityRole::Button)
                     .label("Star")
                     .size(px(56.0))
@@ -582,7 +593,7 @@ fn PressEvents() -> impl IntoElement {
         .child(
             text("Pressable text, dimmed while pressed")
                 .on_press(fire("text"))
-                .active_opacity(0.3)
+                .active(|s| s.opacity(0.3))
                 .self_start()
                 .text_size(px(15.0))
                 .text_color(colors::ACCENT)
@@ -680,7 +691,7 @@ fn hatch(width: f32) -> Painter {
     let mut p = Painter::new()
         .save()
         .begin_path()
-        .rect(width * 0.18, 0.0, width * 0.64, height)
+        .rect(rect(width * 0.18, 0.0, width * 0.64, height))
         .clip()
         .stroke_color(color(colors::WARN.opacity(0.28)))
         .line_width(1.0)
@@ -692,15 +703,12 @@ fn hatch(width: f32) -> Painter {
     }
     p.stroke()
         .restore()
-        .line_dash(&[4.0, 4.0])
+        .line_dash(&lengths([4.0, 4.0]))
         .stroke_color(color(colors::WARN))
         .begin_path()
         .round_rect(
-            width * 0.18 + 0.5,
-            0.5,
-            width * 0.64 - 1.0,
-            height - 1.0,
-            10.0,
+            rect(width * 0.18 + 0.5, 0.5, width * 0.64 - 1.0, height - 1.0),
+            px(10.0),
         )
         .stroke()
 }
@@ -721,7 +729,7 @@ fn pointer_events() -> impl IntoElement {
         .child(
             view()
                 .h(px(88.0))
-                .on_layout(move |frame: &Rect| overlay.set(frame.width))
+                .on_layout(move |frame: &Bounds<Points>| overlay.set(frame.size.width.0))
                 .child(
                     press_with(
                         PressProps {

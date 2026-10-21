@@ -8,7 +8,7 @@ order: 15
 
 除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
 
-本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和[组件](../components/index.md)搭建，其余能力来自应用导入的[模块](./index.md)。
+本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和应用自己的组件搭建，其余能力来自应用导入的[模块](./index.md)。
 
 这些全局对象的 TypeScript 声明会生成到 `.nsh/types/nsh/globals.d.ts`（见[项目结构](../docs/project-structure.md)）。
 
@@ -24,6 +24,8 @@ order: 15
 | [Fetch](#fetch) | `fetch`、`Headers`、`Request`、`Response` |
 | [数字与日期格式化](#数字与日期格式化) | `Intl.NumberFormat`、`Intl.DateTimeFormat`、`toLocaleString` |
 | [流](#流) | `ReadableStream`、`WritableStream`、`TransformStream`、各类 reader、writer 和 controller、`ByteLengthQueuingStrategy`、`CountQueuingStrategy`、`TextEncoderStream`、`TextDecoderStream` |
+
+原生宿主还提供 `Buffer`、`crypto`、`process` 和 `WebSocket`；其模块、授权和资源限制见[标准模块](./standard-modules.md)。
 
 ## 控制台与计时
 
@@ -176,7 +178,7 @@ channel.addEventListener("message", (e) => console.log((e as CustomEvent<string>
 channel.send("hello");
 ```
 
-它们与元素的事件（`onPress`、`onChangeText` 等）无关，后者是 props，参见[触摸与手势](../docs/touch-and-gestures.md)。
+它们与元素的事件（`onPress`、`onChange` 等）无关，后者是 props，参见[触摸与手势](../docs/touch-and-gestures.md)。
 
 `AbortSignal` 可以取消 `fetch` 请求和流的管道传输，也可以移除用 `{ signal }` 添加的监听器：
 
@@ -635,7 +637,7 @@ new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: 
 new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date); // "Oct 16, 2026, 3:04 PM"
 ```
 
-不传 `locales` 时使用设备的区域设置（iOS 的 `NSLocale.currentLocale`、Android 的 `Locale.getDefault()`）；`nsh trace` 和 Web 上为 `en-US`。
+不传 `locales` 时使用设备的区域设置（iOS 的 `NSLocale.currentLocale`、Android 的 `Locale.getDefault()`）；`nsh test` 和 Web 上为 `en-US`。
 
 - **数字**：`decimal`、`percent`、`currency`（`currencyDisplay` 为 `symbol`、`narrowSymbol`、`code`）和 `unit`（常用单位：长度、质量、时长、数据大小、温度、速度）样式；`minimumIntegerDigits`、`minimum` / `maximumFractionDigits`、`minimum` / `maximumSignificantDigits`、`roundingPriority`、`trailingZeroDisplay`、`useGrouping`、`signDisplay`；`standard`、`scientific`、`engineering` 和 `compact` 记数法（`compactDisplay` 为 `short` / `long`）。舍入方式是四舍五入（远离零），按数字的书写形式进行（`1.005` 舍入为 `1.01`，与浏览器一致）。`format` 也精确地接受 BigInt 和十进制字符串。`formatToParts` 和 `resolvedOptions` 与浏览器一致。
 - **日期**：`weekday`、`year`、`month`（`numeric`、`2-digit`、`short`、`long`、`narrow`）、`day`、`hour`、`minute`、`second`、`fractionalSecondDigits`、`hour12` / `hourCycle`、`timeZoneName` 以及 `dateStyle` / `timeStyle`，使用公历。`timeZone` 支持设备时区、`UTC` 和偏移量（`"+08:00"`）；其他时区名会抛出 `RangeError`（没有时区数据库）。

@@ -6,12 +6,11 @@
 use std::f32::consts::TAU;
 
 use nsh_core::{
-    ModalPresentation, Rect,
+    Bounds, ModalPresentation, Points,
+    animation::{Curve, EaseMode},
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineCap},
-    nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
 };
-use nsh_ui_mobile::{Sheet, SheetEvent, SheetProps};
 
 use super::{
     book::{Depth, OrderBook},
@@ -22,7 +21,10 @@ use super::{
     tape::{Flow, tape},
     ticket::{Side, Ticket, TicketEvent, TicketProps},
 };
-use crate::ui::{Button, ButtonVariant, Finish, Finished, IconName, Stat, colors, icon, radius};
+use crate::ui::{
+    Button, ButtonVariant, Finish, Finished, IconName, Sheet, SheetEvent, SheetProps, Stat, colors,
+    icon, lengths, radius,
+};
 
 /// The props of a part of a stock's screen.
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -110,7 +112,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
             ticket.set(true);
         }
     };
-    let bottom = move || cx.insets().bottom;
+    let bottom = move || cx.insets().bottom.0;
     let (second, market) = (live.second, live.market.clone());
     let footer = text(move || {
         second.get();
@@ -136,7 +138,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                     .pt(px(14.0))
                     .text_size(px(22.0))
                     .font_weight(FontWeight::BOLD)
-                    .letter_spacing(-0.3)
+                    .letter_spacing(px(-0.3))
                     .text_color(colors::TEXT),
             )
             .child(
@@ -296,7 +298,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)
                 })
-                .on_request_close(move |_: &()| ticket.set(false))
+                .on_cancel(move |_: &()| ticket.set(false))
                 .child(
                     view()
                         .flex_1()
@@ -428,7 +430,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                     text(move || p(quote.get().last))
                         .text_size(px(36.0))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .letter_spacing(-1.0)
+                        .letter_spacing(px(-1.0))
                         .text_color(tone)
                         .tabular_nums(),
                 )
@@ -539,8 +541,8 @@ fn DayRange(props: StockProps) -> impl IntoElement {
         .child(range_label(move || format!("L {}", p(quote.get().low))))
         .child(
             view()
-                .on_layout(move |frame: &Rect| {
-                    if width.replace(frame.width) != frame.width {
+                .on_layout(move |frame: &Bounds<Points>| {
+                    if width.replace(frame.size.width.0) != frame.size.width.0 {
                         place(quote.get_untracked());
                     }
                 })
@@ -577,7 +579,7 @@ fn DayRange(props: StockProps) -> impl IntoElement {
                         .left(px(-7.0))
                         .size(px(14.0))
                         .rounded(px(7.0))
-                        .border(3.0)
+                        .border(px(3.0))
                         .border_color(colors::BACKGROUND)
                         .bg(move || {
                             let q = quote.get();
@@ -634,7 +636,7 @@ fn draw_ranges(r: &[Range], last: f64, prev_close: f64, width: f32, decimals: u3
     let bottom = HORIZONS.len() as f32 * 34.0;
     p.stroke_color(color(colors::FAINT))
         .line_width(1.0)
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .begin_path()
         .move_to(x_of(prev_close), 0.0)
         .line_to(x_of(prev_close), bottom)
@@ -677,6 +679,6 @@ fn Ranges(props: StockProps) -> impl IntoElement {
             })
             .h(px(HORIZONS.len() as f32 * 34.0 + 16.0))
             .label("Price ranges")
-            .on_layout(move |frame: &Rect| width.set(frame.width)),
+            .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
 }
