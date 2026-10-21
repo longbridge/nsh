@@ -237,6 +237,11 @@ and more than one fails the step; a press whose match, or a view between it and 
   through nsh-core's `animation::Animator`, which the headless animator wraps, `PanEnd` with the velocity) or a
   scroll view (dragged within its content; past its top only when it listens to `Refresh`, rubber-banded, refreshing
   when released past `scroll::refreshes`) takes it, and the press under it is cancelled once it moves away;
+- `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh/keymap` parses it for the
+  environment's OS; on a desktop environment (`open`'s `platform`: `Environment::desktop`) the root's keymap
+  (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
+  root hears `KeyCommand`; else the focused input takes a character, Backspace or the return key, else Escape goes
+  back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
   of its JS condition), `idle` (until quiet for a while).
@@ -363,6 +368,9 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
 (`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
+keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
+`keymap::Key::virtual_key`, the web's CDP key events, Linux's bindings fired as its shortcut controller would, as GTK
+takes no made-up keys; the phones, without app shortcuts, refuse them),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in). `Native`'s calls do their work

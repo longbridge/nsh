@@ -175,6 +175,24 @@ impl Native for WindowsNative {
         self.on_main(move |s| synth::press(s, vk, modifiers));
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        let stroke = nsh_core::keymap::Keystroke::parse(keys, nsh_core::platform::Os::Windows)
+            .map_err(|e| e.to_string())?;
+        let vk = stroke
+            .key
+            .virtual_key()
+            .ok_or_else(|| format!("{keys:?} has no key on a Windows keyboard"))?;
+        let m = stroke.modifiers;
+        let modifiers = Modifiers {
+            shift: m.shift,
+            ctrl: m.ctrl,
+            alt: m.alt,
+            meta: m.cmd,
+        };
+        self.on_main(move |s| synth::press(s, vk, modifiers))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.on_main(move |surface| {
             let view = surface.mounter.borrow().views.get(id)?;

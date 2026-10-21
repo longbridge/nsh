@@ -28,6 +28,7 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+mod keyboard;
 #[cfg(feature = "live")]
 mod live;
 mod net;
@@ -1430,6 +1431,60 @@ mod tests {
         assert!(app.shows("Refreshes 1"));
         let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
         assert!(error.starts_with("no view matches `Nothing`"), "{error}");
+    }
+
+    /// A shortcut counting its presses, and a field.
+    #[component]
+    fn Shortcuts() -> impl IntoElement {
+        let palette = signal(0_u32);
+        let name = signal(String::new());
+        on_key("mod+k", move |_| palette.update(|p| *p += 1));
+        view()
+            .child(text(move || format!("Palette {}", palette.get())))
+            .child(
+                input()
+                    .test_id("name")
+                    .value(move || name.get())
+                    .on_change(move |text: &str| name.set(text.to_owned())),
+            )
+            .child(text(move || format!("Name {}", name.get())))
+    }
+
+    fn open_shortcuts(os: nsh_core::platform::Os) -> Headless {
+        let mut config = EngineConfig::new(Root::of::<Shortcuts>());
+        config.environment.os = os;
+        config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+        let mut app = Headless::start(config).unwrap();
+        app.first_render().unwrap();
+        app
+    }
+
+    #[test]
+    fn a_keyboard_presses_shortcuts_and_types_into_the_focus() {
+        let mut app = open_shortcuts(nsh_core::platform::Os::MacOs);
+        // `mod` is Command on macOS.
+        app.press_key("cmd+k").unwrap();
+        app.wait_for("Palette 1").unwrap();
+        app.press_key("ctrl+k").unwrap();
+        assert!(app.shows("Palette 1"));
+        // The focused field takes the keys it edits.
+        app.type_text("id:name", "Ad").unwrap();
+        app.press_key("shift+a").unwrap();
+        app.press_key("backspace").unwrap();
+        app.press_key("a").unwrap();
+        app.wait_for("Name Ada").unwrap();
+        // The shortcut fires in it too: Command+K edits no text.
+        app.press_key("mod+k").unwrap();
+        app.wait_for("Palette 2").unwrap();
+        assert!(
+            app.press_key("mod+nothing")
+                .unwrap_err()
+                .contains("nothing")
+        );
+        // Phones fire no app shortcuts.
+        let mut phone = open_shortcuts(nsh_core::platform::Os::Ios);
+        phone.press_key("mod+k").unwrap();
+        assert!(phone.shows("Palette 0"));
     }
 
     #[cfg(feature = "js")]

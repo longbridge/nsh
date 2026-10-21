@@ -38,6 +38,10 @@ pub(crate) struct KeymapState {
     held: Rc<Cell<Option<u32>>>,
     /// The window's key controller that sees releases, and its window.
     releases: RefCell<Option<(glib::WeakRef<gtk::Window>, gtk::EventControllerKey)>>,
+    /// The bindings, for keys pressed without a GDK event
+    /// ([`press`], `nsh test --target linux`).
+    #[cfg(feature = "dev")]
+    keymap: RefCell<Option<Arc<Keymap>>>,
 }
 
 /// `MountItem::Keymap`: replaces the surface's shortcuts.
@@ -45,6 +49,10 @@ pub(crate) fn set(surface: &Rc<Surface>, keymap: Arc<Keymap>) {
     clear(surface);
     if keymap.is_empty() {
         return;
+    }
+    #[cfg(feature = "dev")]
+    {
+        *surface.keymap.keymap.borrow_mut() = Some(keymap.clone());
     }
     let controller = gtk::ShortcutController::new();
     controller.set_scope(gtk::ShortcutScope::Global);
@@ -105,6 +113,32 @@ pub(crate) fn clear(surface: &Surface) {
     }
     surface.keymap.held.set(None);
     surface.keymap.triggers.borrow_mut().clear();
+    #[cfg(feature = "dev")]
+    surface.keymap.keymap.borrow_mut().take();
+}
+
+/// A key pressed without a GDK event (GTK takes no made-up ones; `nsh test
+/// --target linux`): the newest binding of `stroke` that fires where the
+/// focus is reports it, as its shortcut's action would. False if none.
+#[cfg(feature = "dev")]
+pub(crate) fn press(surface: &Surface, stroke: Keystroke) -> bool {
+    let keymap = surface.keymap.keymap.borrow().clone();
+    let Some(keymap) = keymap else {
+        return false;
+    };
+    let fired = keymap
+        .bindings()
+        .iter()
+        .rev()
+        .find(|b| b.keystroke == stroke && fires(surface, b.in_text));
+    if let Some(binding) = fired {
+        surface.event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(binding.id as f64)),
+        );
+    }
+    fired.is_some()
 }
 
 /// Whether a binding fires for `event` where the focus is: the application

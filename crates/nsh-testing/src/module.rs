@@ -372,8 +372,10 @@ pub struct OpenOptions {
     pub locale: Option<String>,
     /// The user asked for less motion (false).
     pub reduced_motion: Option<bool>,
-    /// The platform the app believes it runs on (`"ios"`).
-    pub platform: Option<MobilePlatform>,
+    /// The platform the app believes it runs on headless (`"ios"`; a
+    /// desktop's: `"macos"`, `"windows"`, `"linux"`, `"web"`). On a real
+    /// platform it is that one.
+    pub platform: Option<Platform>,
     /// A manual clock for the app (none: the system's): its time moves only
     /// as the test moves it (`app.clock`), steps finish native animations
     /// at once, and `app.wait` moves it.
@@ -435,15 +437,28 @@ impl From<ColorScheme> for nsh_core::platform::ColorScheme {
     }
 }
 
-/// The mobile platform an app is opened as.
+/// The platform a headless app is opened as.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
-pub enum MobilePlatform {
+pub enum Platform {
     /// iOS.
     #[default]
     Ios,
     /// Android.
     Android,
+    /// macOS: a desktop (keyboard shortcuts, the mouse's hover and context
+    /// menus).
+    Macos,
+    /// Windows: a desktop.
+    Windows,
+    /// Linux: a desktop.
+    Linux,
+    /// A browser, in the desktop idiom.
+    Web,
 }
+
+/// The platform a headless app is opened as.
+#[deprecated(note = "use `Platform`, which has the desktops too")]
+pub type MobilePlatform = Platform;
 
 /// A dialog the app showed (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, JsObject)]
@@ -701,7 +716,7 @@ pub(crate) struct Launch {
     pub(crate) color_scheme: ColorScheme,
     pub(crate) locale: Option<String>,
     pub(crate) reduced_motion: bool,
-    pub(crate) platform: MobilePlatform,
+    pub(crate) platform: Platform,
     /// A manual clock's start.
     pub(crate) clock: Option<std::time::SystemTime>,
 }
@@ -960,6 +975,25 @@ impl Clock {
     }
 }
 
+/// The keyboard of an app (`app.keyboard`), as Playwright's
+/// `page.keyboard`: a hardware keyboard's keys.
+#[class]
+pub struct Keyboard {
+    steps: Steps,
+}
+
+#[class]
+impl Keyboard {
+    /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`,
+    /// `"shift+/"`, `"escape"`; `mod` is the platform's command key): the
+    /// app's shortcut of it hears it (`onKeyCommand`), else the focused
+    /// input takes it, else Escape goes back.
+    pub async fn press(this: Instance<Self>, keys: String) -> Result<(), String> {
+        let steps = this.with(|k| k.steps.clone());
+        steps.run(move |app| app.press_key(&keys)).await
+    }
+}
+
 /// `ms` milliseconds, which a test gives as a number.
 fn duration(ms: f64) -> Result<Duration, String> {
     if ms.is_finite() && ms >= 0.0 {
@@ -1155,6 +1189,14 @@ impl App {
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
+    }
+
+    /// The app's keyboard, whose keys the test presses.
+    #[getter]
+    pub fn keyboard(&self) -> Keyboard {
+        Keyboard {
+            steps: self.steps.clone(),
+        }
     }
 
     /// The app's manual clock (`open`'s `clock`), which the test moves.

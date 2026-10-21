@@ -508,6 +508,18 @@ pub trait Native: Send + Sync {
     /// [`drag_path`] a display frame at a time and lifting at `to` at once,
     /// still moving, as a quick drag does.
     fn drag(&self, from: Point<Points>, to: Point<Points>);
+    /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
+    /// `mod` the platform's command key), on a hardware keyboard: the app's
+    /// shortcuts hear it, else what has the keyboard focus. Platforms
+    /// without app shortcuts (the phones) refuse it.
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        let _ = keys;
+        Err(
+            "this platform has no keyboard shortcuts (`nsh/keymap`) to press: \
+             run the test headless, or on a desktop or the web"
+                .into(),
+        )
+    }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);
     /// Presses `key`.
@@ -726,6 +738,9 @@ impl Agent {
             TestStep::Clear { selector } => done(self.clear(&selector)),
             TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
             TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
+            TestStep::PressKey { keys } => {
+                done(self.native.press_keys(&keys).and_then(|()| self.settled()))
+            }
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
                 std::thread::sleep(Duration::from_millis(ms));

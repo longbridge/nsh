@@ -196,6 +196,47 @@ impl Native for MacNative {
         self.on_main(move |_, window| synth::key(window, name));
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::{Key, Keystroke};
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::MacOs).map_err(|e| e.to_string())?;
+        // As `synth::key` names keys: modifiers, then the key.
+        let mut name = String::new();
+        let m = stroke.modifiers;
+        for (on, prefix) in [
+            (m.cmd, "cmd+"),
+            (m.ctrl, "ctrl+"),
+            (m.alt, "alt+"),
+            (m.shift, "shift+"),
+        ] {
+            if on {
+                name.push_str(prefix);
+            }
+        }
+        name.push_str(&match stroke.key {
+            Key::Char(' ') => "space".into(),
+            Key::Char(c) => c.to_string(),
+            Key::Enter => "Return".into(),
+            Key::Escape => "Escape".into(),
+            Key::Tab => "Tab".into(),
+            Key::Backspace => "BackSpace".into(),
+            Key::Delete => "Delete".into(),
+            Key::Insert => "Help".into(),
+            Key::Up => "Up".into(),
+            Key::Down => "Down".into(),
+            Key::Left => "Left".into(),
+            Key::Right => "Right".into(),
+            Key::Home => "Home".into(),
+            Key::End => "End".into(),
+            Key::PageUp => "Page_Up".into(),
+            Key::PageDown => "Page_Down".into(),
+            Key::F(n) => format!("F{n}"),
+        });
+        self.activate();
+        self.on_main(move |_, window| synth::key(window, &name))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.on_main(|surface, _| {
             let mounter = surface.mounter.borrow();

@@ -227,6 +227,32 @@ impl Native for GpuiNative {
         self.with_surface(move |surface| synth::press(surface, vk, modifiers));
     }
 
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::platform::Os;
+        let os = if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else if cfg!(windows) {
+            Os::Windows
+        } else {
+            Os::Linux
+        };
+        let stroke =
+            nsh_core::keymap::Keystroke::parse(keys, os).map_err(|e| e.to_string())?;
+        let vk = stroke
+            .key
+            .virtual_key()
+            .ok_or_else(|| format!("{keys:?} has no key on this keyboard"))?;
+        let m = stroke.modifiers;
+        let modifiers = Modifiers {
+            shift: m.shift,
+            ctrl: m.ctrl,
+            alt: m.alt,
+            meta: m.cmd,
+        };
+        self.with_surface(move |surface| synth::press(surface, vk, modifiers))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn input_text(&self, id: NodeId) -> Option<String> {
         self.with_surface(move |surface| {
             let view = surface.mounter.borrow().views.get(id)?;

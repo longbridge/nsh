@@ -90,6 +90,8 @@ pub struct Screen {
     /// The JS responder's grants since a drag looked (`SetJsResponder`'s
     /// `block`, in order).
     js_grants: Vec<bool>,
+    /// The app's keyboard shortcuts (`nsh/keymap`, the root's `Keymap`).
+    keymap: Option<Arc<nsh_core::keymap::Keymap>>,
 }
 
 #[derive(Debug, Default)]
@@ -228,6 +230,7 @@ impl Screen {
                 view.selection_area = props.selection_area;
                 view.pan_activation = props.pan_activation;
             }
+            MountItem::Keymap(keymap) => self.keymap = Some(keymap.clone()),
             MountItem::TrackStates { id, states } => {
                 self.nodes.entry(*id).or_default().tracked = *states;
             }
@@ -917,6 +920,12 @@ impl Screen {
             at = p.parent;
         }
         Some(Bounds::new(origin, view.frame.size))
+    }
+
+    /// The app's keyboard shortcuts (`nsh/keymap`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {
+        self.keymap.as_deref()
     }
 
     /// Whether a JS responder keeps native drags from starting.
