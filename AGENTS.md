@@ -81,7 +81,8 @@ crates/
   nsh-testing/         Headless tests: the driver (`headless/`: an engine without a window, display frames, a model of the views,
                        the steps, stand-in network and storage, fetch on ureq; no QuickJS, for Rust apps' `cargo test`); feature
                        `js`: `nsh test`'s side, the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
-                       engine of its own and each app it opens on a headless one (`run.rs`) or a real host (`driver.rs`, `--target`),
+                       engine of its own and each app it opens on a headless one (`run.rs`; the web page's host module,
+                       nsh.json `web.host`, answers `nsh/host` there: `page_host.rs`) or a real host (`driver.rs`, `--target`),
                        apps' headless runners (`runner.rs`); feature `bundle`: building entries in process (TSX entries of
                        `cargo test`, the CLI's compiler); feature `agent`: a real host's test agent (`agent.rs`, the dev hosts'),
                        which takes the steps with the platform's input
@@ -150,7 +151,8 @@ examples/             Example apps (gallery: a demo index, one module per demo, 
                       inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
-                      with a test), embedding samples
+                      with a test; host-echo: an app calling its web page's host (`nsh/host`, nsh.json `web.host`), the host
+                      module and their tests), embedding samples
                       (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
                       `cargo run -p example-embed-gpui`) and the app they run (embedded: uses a native component the samples
                       register); bench: component benchmarks

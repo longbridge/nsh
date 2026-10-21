@@ -1590,6 +1590,27 @@ impl<M: TextEngine> Core<M> {
                     }
                     continue;
                 }
+                // Checked before the grants: a host may put the name in a
+                // path or a URL, where `user.x/../admin` leaves `user.*`.
+                Command::HostCall { id: call, name, .. }
+                    if !crate::access::valid_host_name(name) =>
+                {
+                    let message = format!(
+                        "nsh/host: invalid function name {name:?} ({})",
+                        crate::access::HOST_NAME_CHARS
+                    );
+                    self.answer_host(*call, Err(message.clone()));
+                    self.deny(message);
+                    continue;
+                }
+                Command::HostCall { id: call, name, .. } if !self.access.allows_host(name) => {
+                    let message = format!(
+                        "nsh/host: `{name}` is not granted: add it to capabilities.host in nsh.json"
+                    );
+                    self.answer_host(*call, Err(message.clone()));
+                    self.deny(message);
+                    continue;
+                }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
                     self.deny("the status bar is not granted: add `\"statusBar\": true` to capabilities in nsh.json".into());
                     continue;

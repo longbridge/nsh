@@ -3259,6 +3259,7 @@ dependencies = [
  "nsh-dev",
  "nsh-engine",
  "nsh-js",
+ "quickjs-jit",
  "regex",
  "serde",
  "serde_json",

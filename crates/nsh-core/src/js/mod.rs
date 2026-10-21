@@ -31,6 +31,7 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/canvas",
     "nsh/list",
     "nsh/image",
+    "nsh/host",
     "nsh/keymap",
 ];
 

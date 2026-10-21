@@ -26,7 +26,7 @@ fn start_in(app: &str, environment: Environment) -> (Engine, Receiver<MountBatch
 
 /// [`start_in`] with the capabilities the app declares (JSON, `nsh.json`'s
 /// `capabilities` form) and an `nsh.json`.
-fn start_with(
+pub(crate) fn start_with(
     app: &str,
     environment: Environment,
     capabilities: Option<&str>,
@@ -209,7 +209,10 @@ fn a_stateful_component_steps_while_held_on((engine, rx): (Engine, Receiver<Moun
 }
 
 /// The batches until `done` holds for one (or nothing came for 500ms).
-fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -> Vec<MountBatch> {
+pub(crate) fn until(
+    rx: &Receiver<MountBatch>,
+    mut done: impl FnMut(&MountBatch) -> bool,
+) -> Vec<MountBatch> {
     let mut batches = Vec::new();
     while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
         let stop = done(&batch);
@@ -221,7 +224,7 @@ fn until(rx: &Receiver<MountBatch>, mut done: impl FnMut(&MountBatch) -> bool) -
     batches
 }
 
-fn shows(batch: &MountBatch, wanted: &str) -> bool {
+pub(crate) fn shows(batch: &MountBatch, wanted: &str) -> bool {
     text_ids(batch, wanted).is_some()
 }
 

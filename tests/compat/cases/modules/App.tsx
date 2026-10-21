@@ -9,6 +9,7 @@ import ModAndroid from "./mod-android";
 import ModClipboard from "./mod-clipboard";
 import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
+import ModHost from "./mod-host";
 import ModIos from "./mod-ios";
 import ModKeymap from "./mod-keymap";
 import ModStorage from "./mod-storage";
@@ -20,6 +21,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-clipboard": ModClipboard,
   "mod-desktop": ModDesktop,
   "mod-device": ModDevice,
+  "mod-host": ModHost,
   "mod-ios": ModIos,
   "mod-keymap": ModKeymap,
   "mod-storage": ModStorage,

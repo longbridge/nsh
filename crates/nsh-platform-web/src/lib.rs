@@ -334,9 +334,10 @@ fn page() -> Environment {
 /// (`"phone"`, `"pad"`, `"desktop"`), `locale` (a BCP 47 tag), `rtl`,
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
-/// covers) and `appleKeyboard` (the browser runs on an Apple platform: its
-/// shortcuts are Apple's); missing keys keep their value. Called before [`nsh_start`]
-/// and on every change; the idiom is the one at start, as on every
+/// covers), `appleKeyboard` (the browser runs on an Apple platform: its
+/// shortcuts are Apple's) and `host` (the page answers `nsh/host` calls:
+/// `createPlayer`'s `host`); missing keys keep their value. Called before [`nsh_start`]
+/// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
 /// # Safety
@@ -390,6 +391,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         .map(|&v| nsh_core::Points(v));
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
+    env.host = flag("host").unwrap_or(env.host);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -1158,6 +1160,7 @@ pub unsafe extern "C" fn nsh_event(
             text: text("text"),
             count: num("count") as u32,
         },
+        EventKind::Host => EventPayload::Json(value),
         _ => match &value {
             serde_json::Value::Object(map) => EventPayload::Map(
                 map.iter()

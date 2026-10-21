@@ -446,6 +446,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         types: "",
     },
     NativeModule {
+        name: "nsh/host",
+        exports: platform_modules::HOST_EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(platform_modules::HOST_TYPES),
+    },
+    NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
         also: &[],

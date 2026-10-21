@@ -39,6 +39,8 @@ pub mod menu;
 #[cfg(feature = "js")]
 mod module;
 #[cfg(feature = "js")]
+mod page_host;
+#[cfg(feature = "js")]
 mod run;
 #[cfg(feature = "js")]
 mod runner;

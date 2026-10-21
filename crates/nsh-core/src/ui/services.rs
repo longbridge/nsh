@@ -157,6 +157,22 @@ pub(crate) fn clipboard_files() -> (Answer<Vec<String>>, Action) {
     (answer, Action::ReadClipboard(ClipboardRead::Files(slot)))
 }
 
+/// Calls function `name` of the embedding app with `args` (`nsh/host`).
+pub(crate) fn host_call(
+    name: String,
+    args: crate::JsonValue,
+) -> (Answer<Result<crate::JsonValue, String>>, Action) {
+    let (answer, slot) = Answer::new();
+    (
+        answer,
+        Action::HostCall {
+            name,
+            args,
+            answer: slot,
+        },
+    )
+}
+
 /// The size of the image at `uri`, its bytes loaded.
 pub(crate) fn image_size(uri: String) -> (Answer<Result<ImageSize, String>>, Action) {
     let (answer, slot) = Answer::new();

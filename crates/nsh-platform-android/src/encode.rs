@@ -604,7 +604,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Measure { .. }
                     | Command::ScrollToEnd { .. }
                     // Desktops only.
-                    | Command::Desktop(_) => e.int(-1),
+                    | Command::Desktop(_)
+                    // No host answers `nsh/host` here (`Environment::host`):
+                    // the core rejects the calls first.
+                    | Command::HostCall { .. } => e.int(-1),
                 }
             }
         }

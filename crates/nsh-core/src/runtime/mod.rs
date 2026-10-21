@@ -2,7 +2,8 @@
 //! `nsh/accessibility`'s commands, all of `nsh/image`, `nsh/clipboard` and
 //! `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
-//! `net`'s sockets, `websocket`'s connections and `fs/promises`' files. Their JS face is made
+//! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
+//! `nsh/host`'s calls. Their JS face is made
 //! from their specs like a UI set's (`nsh-js` `components.rs`), and so are
 //! their declarations ([`crate::ui::declarations`]); `nsh-js` adds what has
 //! to run in JS (the app's listeners, reactive accessors).
@@ -16,6 +17,7 @@ mod android;
 mod clipboard;
 mod desktop;
 mod fs;
+pub(crate) mod host;
 mod image;
 mod net;
 mod os;
@@ -64,6 +66,8 @@ pub fn registries() -> &'static [Registry] {
             websocket.module::<websocket::WebSocket>();
             websocket
         };
+        let mut host = Registry::runtime("nsh/host");
+        host.module::<host::Host>();
         vec![
             android,
             accessibility,
@@ -76,6 +80,7 @@ pub fn registries() -> &'static [Registry] {
             process,
             fs,
             websocket,
+            host,
         ]
     })
 }

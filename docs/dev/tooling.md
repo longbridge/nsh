@@ -313,6 +313,18 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
+- with `TestRun::page_host` (`nsh test`'s `--web-host`, else `nsh.json` `web.host`; `TestRequest::page_host` for an
+  app's runner) the web page's host answers `nsh/host` (`page_host.rs`, feature `js`): each app `open` starts
+  headless gets a host of its own, started before the engine (`createHost(player)` in a QuickJS context of its own on
+  its own thread: timers on real time, `console` to the `js` log, no imports), `Environment::host` set, and the
+  driver hands the root's `Command::HostCall`s to it as their batches are applied (`Headless::on_host_call`); it
+  answers each with a `Host` `{ type: "reply" }` event as `nsh.js` `hostCall` does (`ok: false` with the message on a throw, a rejection or
+  a value that is not JSON), and `player.hostEvent` sends `Host` `{ type: "event" }`; what it sends before the engine runs waits in
+  `page_host::Target` until `attach`, so the app's top-level `host.on` hears it, and the host goes with the app
+  (its thread ends when the driver drops its calls). A module that does not load, exports no `createHost` or whose
+  `createHost` returns no `call` fails the `open`. A call's timeout (`runtime/host.rs`) is the core's timer, on the
+  engine's clock: virtual on a manual clock, real otherwise; the host module's own timers are real time. Real hosts
+  (`--target`) have none;
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
   app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
   device's;

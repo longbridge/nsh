@@ -330,10 +330,34 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 - **对话框会被回答**：由测试的 `onDialog` 回答，否则按它的取消按钮，否则在可以关闭时直接关闭；只能用其他按钮回答的对话框，
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
+- **页面的宿主应答 `nsh/host`**：应用的 `nsh.json` 在 `web.host` 中指定了宿主时（[页面的宿主](#页面的宿主)）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
+
+### 页面的宿主
+
+发布到 Web 的应用从页面得到宿主：`nsh.json` 的 `web.host`，一个导出 `createHost(player)` 的模块
+（[Web](./web.md#宿主的函数)）。无界面运行时，测试每打开一个应用，都会在应用启动前，在独立的 JavaScript 上下文中加载
+这个模块（有定时器和 `console`，没有浏览器的 API，不能 import）：它的 `call` 应答应用的
+[`host.call`](../modules/nsh-host.md)，它的 `player.hostEvent` 送到 `host.on`，`host.available()` 为 `true`。
+`call` 抛出异常、Promise 被拒绝或返回值不是 JSON 时，应用的调用以它的消息被拒绝，与页面上一致；应用启动前发送的事件
+会在应用启动后送到它顶层注册的监听器。`--web-host <module>` 指定另一个模块。应用调用的函数必须列在它的 `capabilities.host` 中，
+与页面上一致。调用的超时按应用的时间计算，手动时钟（`app.clock.runFor`）会推进它；宿主自己的定时器按真实时间运行。在真实平台上（`--target`）应用没有宿主：`host.available()` 为 `false`。
+
+```tsx
+// nsh.json：{ "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
+import { open, test } from "nsh/test";
+
+test("calls reach the page's host", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:call");
+  await app.waitFor('text:{"n":1}');
+});
+```
+
+`examples/host-echo` 有一个应用、它的宿主和它们的测试。
 
 ### 断言
 

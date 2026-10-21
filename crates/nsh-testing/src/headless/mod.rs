@@ -158,6 +158,11 @@ type Observer = Box<dyn FnMut(&str, &MountBatch) + Send>;
 /// Answers a dialog ([`Headless::on_dialog`]).
 type DialogHandler = Box<dyn FnMut(&Dialog) -> DialogAnswer + Send>;
 
+/// Takes the app's `nsh/host` calls ([`Headless::on_host_call`]): their
+/// id, the host's function and its argument.
+#[cfg(feature = "js")]
+type HostCalls = Box<dyn FnMut(u64, &str, &nsh_core::JsonValue) + Send>;
+
 /// The answer to a dialog (`AlertDialog.show`, an action sheet).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogAnswer {
@@ -213,7 +218,8 @@ enum Pumped {
 /// It plays the platform's part the NSH protocol defines and nothing
 /// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
-/// test, else [`default_answer`]), the clipboard holds text. Images are
+/// test, else [`default_answer`]), the clipboard holds text, and `nsh
+/// test`'s web page host answers `nsh/host` calls. Images are
 /// not loaded: no `onLoad` comes, and `Image.getSize` / `Image.prefetch`
 /// fail.
 pub struct Headless {
@@ -238,6 +244,9 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// Where the app's `nsh/host` calls go (the web page's host).
+    #[cfg(feature = "js")]
+    host_calls: Option<HostCalls>,
 }
 
 impl Headless {
@@ -270,6 +279,8 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            #[cfg(feature = "js")]
+            host_calls: None,
         })
     }
 
@@ -448,6 +459,18 @@ impl Headless {
         self.done()
     }
 
+    /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
+    /// `calls` as their batches are applied; the environment must say the
+    /// platform has a host (`Environment::host`), else the core rejects
+    /// them before they reach a batch.
+    #[cfg(feature = "js")]
+    pub(crate) fn on_host_call(
+        &mut self,
+        calls: impl FnMut(u64, &str, &nsh_core::JsonValue) + Send + 'static,
+    ) {
+        self.host_calls = Some(Box::new(calls));
+    }
+
     /// Puts `text` on the clipboard (`None`: nothing), as the user copying.
     pub fn set_clipboard(&mut self, text: Option<String>) {
         self.screen.set_clipboard(text);
@@ -478,6 +501,18 @@ impl Headless {
         });
         for item in &batch.items {
             self.animator.apply(item);
+        }
+        #[cfg(feature = "js")]
+        if let Some(calls) = &mut self.host_calls {
+            for item in &batch.items {
+                if let MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::HostCall { id, name, args },
+                } = item
+                {
+                    calls(*id, name, args);
+                }
+            }
         }
         self.applied += 1;
         if let Some(observer) = &mut self.observer {

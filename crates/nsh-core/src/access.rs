@@ -16,7 +16,8 @@
 //!     "sockets": ["mqtt.example.com:8883"]
 //!   },
 //!   "webview": { "hosts": ["*.example.com"] },
-//!   "statusBar": true
+//!   "statusBar": true,
+//!   "host": ["getUserInfo", "bridge.*"]
 //! }
 //! ```
 //!
@@ -28,10 +29,14 @@
 //! `network.sockets` grants raw TCP (`net.connect`) to exact `host:port`
 //! pairs only: no wildcards, and neither `hosts` nor `http` grants imply
 //! one. `webview` lists the hosts a web view may show and navigate to (its
-//! pages' own subresources are the web content's business). An app without
-//! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar and the clipboard; raw
-//! sockets, processes and the filesystem always require an explicit
+//! pages' own subresources are the web content's business). `host` lists
+//! the functions of the embedding app `nsh/host` may call: names (1 to 128
+//! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
+//! name), or prefixes of them ending in `*` (`true`: all of them); the
+//! host's events need no grant, the host sends them. An app without `"capabilities"` (a
+//! standalone app, its developer's own) retains unrestricted HTTP, web
+//! views, the status bar and the clipboard; raw sockets, processes, the
+//! filesystem and the host's functions always require an explicit
 //! declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
@@ -349,6 +354,10 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The functions of the embedding app `nsh/host` may call: names, or
+    /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
+    /// without a declaration ([`Capabilities::all`]).
+    pub host: Vec<String>,
 }
 
 /// The parts of a URL the checks look at.
@@ -411,8 +420,8 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
 
 impl Capabilities {
     /// Legacy unrestricted APIs for apps without a declaration. Socket,
-    /// process and filesystem grants stay empty and always require explicit
-    /// opt-in.
+    /// process, filesystem and host function grants stay empty and always
+    /// require explicit opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
@@ -424,6 +433,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            // The host's functions are never granted without a declaration.
             ..Self::default()
         }
     }
@@ -449,13 +459,14 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 6] = [
+        const KNOWN: [&str; 7] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
             "process",
             "fs",
+            "host",
         ];
         let obj = object(value, "capabilities")?;
         for key in obj.keys().filter(|k| !KNOWN.contains(&k.as_str())) {
@@ -601,6 +612,30 @@ impl Capabilities {
                 }
             }
         }
+        if let Some(host) = obj.get("host") {
+            caps.host = match host {
+                Value::Bool(all) => {
+                    if *all {
+                        vec!["*".into()]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                _ => {
+                    let names = strings(host, "capabilities.host")
+                        .map_err(|e| format!("{e} (or a boolean)"))?;
+                    if let Some(bad) = names.iter().find(|n| match n.strip_suffix('*') {
+                        Some(prefix) => !prefix.is_empty() && !valid_host_name(prefix),
+                        None => !valid_host_name(n),
+                    }) {
+                        return Err(format!(
+                            "capabilities.host: invalid function `{bad}` (a name of {HOST_NAME_CHARS}, or a prefix of them ending in `*`)"
+                        ));
+                    }
+                    names
+                }
+            };
+        }
         Ok(caps)
     }
 
@@ -662,6 +697,10 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        // Only when granted: older runtimes read what newer signers write.
+        if !self.host.is_empty() {
+            obj.insert("host".into(), self.host.clone().into());
+        }
         Value::Object(obj)
     }
 
@@ -673,6 +712,13 @@ impl Capabilities {
             || self.network.http.iter().any(|g| g.allows(method, url))
     }
 
+    fn allows_host(&self, name: &str) -> bool {
+        self.host.iter().any(|g| match g.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => g == name,
+        })
+    }
+
     fn allows_webview(&self, url: &UrlParts<'_>) -> bool {
         matches!(url.scheme.as_str(), "http" | "https")
             && self
@@ -680,6 +726,20 @@ impl Capabilities {
                 .as_ref()
                 .is_some_and(|hosts| hosts.iter().any(|h| h.matches(&url.host)))
     }
+}
+
+/// What host function names (`nsh/host`) are made of, for messages.
+pub(crate) const HOST_NAME_CHARS: &str = "1 to 128 of A-Z a-z 0-9 _ . : -, without `..`";
+
+/// Whether `name` may name a function of the embedding host: 1 to 128 of
+/// `[A-Za-z0-9_.:-]`, without `..`. Hosts may put a name in a path or a URL,
+/// so no name escapes the prefix a grant gives it.
+pub(crate) fn valid_host_name(name: &str) -> bool {
+    (1..=128).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+        && !name.contains("..")
 }
 
 fn valid_command(command: &str) -> bool {
@@ -1135,6 +1195,11 @@ impl Access {
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
+    }
+
+    /// Whether `nsh/host` may call the embedding app's function `name`.
+    pub fn allows_host(&self, name: &str) -> bool {
+        self.each(|c| c.allows_host(name))
     }
 }
 
@@ -1633,7 +1698,63 @@ mod tests {
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
+        assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
+    }
+
+    #[test]
+    fn host_functions_need_an_explicit_grant() {
+        // Undeclared, the other capabilities are all granted; the host's
+        // functions are not.
+        let all = Access::all();
+        assert!(all.allows_clipboard());
+        assert!(!all.allows_host("getUserInfo"));
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let every = access(r#"{ "host": true }"#);
+        assert!(every.allows_host("getUserInfo") && every.allows_host("bridge.call"));
+        assert!(!access(r#"{ "host": false }"#).allows_host("getUserInfo"));
+        let listed = access(r#"{ "host": ["getUserInfo", "bridge.*"] }"#);
+        assert!(listed.allows_host("getUserInfo"));
+        assert!(listed.allows_host("bridge.share"));
+        assert!(!listed.allows_host("getUserInfoX"));
+        assert!(!listed.allows_host("bridge"));
+        assert!(Capabilities::from_json(&serde_json::json!({ "host": ["a*b"] })).is_err());
+        assert!(Capabilities::from_json(&serde_json::json!({ "host": [""] })).is_err());
+        // The embedding app may grant less.
+        let narrowed = Access {
+            declared: caps(r#"{ "host": true }"#),
+            granted: Some(caps(r#"{ "host": ["bridge.*"] }"#)),
+        };
+        assert!(narrowed.allows_host("bridge.call") && !narrowed.allows_host("getUserInfo"));
+    }
+
+    #[test]
+    fn host_function_names_and_grants_keep_to_their_charset() {
+        for good in ["getUserInfo", "user.info", "a-b_c:d.E9", &"a".repeat(128)] {
+            assert!(valid_host_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            "user.x/../../admin",
+            "a..b",
+            "user x",
+            "a\\b",
+            "caf\u{e9}",
+            "ok\u{0}",
+            "a*",
+            &"a".repeat(129),
+        ] {
+            assert!(!valid_host_name(bad), "{bad:?}");
+        }
+        let parses =
+            |grant: &str| Capabilities::from_json(&serde_json::json!({ "host": [grant] })).is_ok();
+        assert!(parses("*") && parses("user.*") && parses("user.info"));
+        for bad in ["user/*", "a..*", "../*", "a b", "**"] {
+            assert!(!parses(bad), "{bad}");
+        }
     }
 
     #[test]

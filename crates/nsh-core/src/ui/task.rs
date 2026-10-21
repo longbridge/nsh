@@ -79,6 +79,16 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Calls function `name` of the embedding app (`nsh/host`); its
+    /// value, or why it failed, resolves the slot.
+    HostCall {
+        name: String,
+        args: crate::JsonValue,
+        answer: AnswerSlot<Result<crate::JsonValue, String>>,
+    },
+    /// Drops the slots of the host calls whose answers are gone (they
+    /// timed out).
+    ForgetHostCalls,
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.

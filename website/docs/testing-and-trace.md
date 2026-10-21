@@ -347,11 +347,38 @@ that only a real platform can do:
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
+- **The page's host answers `nsh/host`** when the app's `nsh.json` names one in `web.host` ([The page's
+  host](#the-pages-host)).
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
+
+### The page's host
+
+An app published to the web gets its host from its page: `nsh.json` `web.host`, a module exporting
+`createHost(player)` ([Web](./web.md#the-hosts-functions)). Headless runs load that module for each app a test opens,
+before the app starts, in a JavaScript context of its own (timers and `console`, nothing of the browser's, no
+imports): its `call` answers the app's [`host.call`](../modules/nsh-host.md), its `player.hostEvent` reaches
+`host.on`, and `host.available()` is `true`. A `call` that throws, rejects or returns what is not JSON rejects the
+app's call with its message, as on the page, and events sent before the app starts reach its top-level listeners
+once it does. `--web-host <module>` names another module. The app's `capabilities.host` must list what it calls, as on
+the page. A call's timeout runs on the app's time, so a manual clock moves it (`app.clock.runFor`); the host's own
+timers run on real time. On a real platform (`--target`) the apps have no host: `host.available()` is `false`.
+
+```tsx
+// nsh.json: { "capabilities": { "host": ["echo"] }, "web": { "host": "./host.js" } }
+import { open, test } from "nsh/test";
+
+test("calls reach the page's host", async () => {
+  const app = await open("./App.tsx");
+  await app.press("label:call");
+  await app.waitFor('text:{"n":1}');
+});
+```
+
+`examples/host-echo` has an app, its host and their tests.
 
 ### Expectations
 

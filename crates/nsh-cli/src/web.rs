@@ -13,6 +13,7 @@
 //! snippets.<digest>/<crate>-<hash>/ the JS snippets the glue imports, under their own paths
 //! app.<digest>.nshc                the app's bundle, compiled to QuickJS bytecode
 //! harden.<digest>.nshc             the sandbox's hardening, compiled likewise
+//! host.<digest>.js                 the page's host (`nsh.json` `web.host`), when the app has one
 //! chunks/<name>.<digest>.nshc      what `import()` loads, fetched when first imported
 //! assets/<path>.<digest>.<ext>     `asset:/<path>`, loaded from its URL when used
 //! icons/<size>.<digest>.png        favicon, apple-touch-icon, the manifest's
@@ -146,6 +147,16 @@ pub(crate) fn package(
         }
         assets.insert(asset.path.clone(), url.into());
     }
+    // The page imports it as it is: one module, its imports absolute URLs.
+    let host = match &config.web.host {
+        Some(path) => {
+            let path = crate::package::web_host_module(options.entry, path)?;
+            let bytes = fs::read(&path)
+                .with_context(|| format!("read nsh.json web.host {}", path.display()))?;
+            Some(site.add("host.js", &bytes)?)
+        }
+        None => None,
+    };
     let icons = match &config.icon {
         Some(icon) => Icons::write(&site, icon)?,
         None => Icons::default(),
@@ -167,6 +178,7 @@ pub(crate) fn package(
         "fonts": fonts,
         "chunkFonts": chunk_fonts,
         "chunks": chunks,
+        "host": host,
     });
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();

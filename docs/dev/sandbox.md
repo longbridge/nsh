@@ -37,13 +37,19 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
-  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
+  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none), `host`
+  (`nsh/host`: the embedding app's functions `host.call` may call, names or prefixes ending in `*`, `true` for all;
+  names and grants are 1 to 128 of `[A-Za-z0-9_.:-]` without `..` (`access::valid_host_name`), and the core refuses
+  the call of any other name before it reads the grants, since hosts may put names in paths or URLs;
+  never granted without it, also in apps without a declaration (`Capabilities::all` leaves it empty), and the bundler
+  warns of an app importing `nsh/host` without it (`bundle.rs` `ungranted_host`); the host's events need none, the
+  host sends them). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
   are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
   newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
   capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
-  retains unrestricted network, webview, status bar and clipboard access. Process execution and filesystem access
-  always require explicit declarations, including standalone apps. The embedding app
+  retains unrestricted network, webview, status bar and clipboard access. Process execution, filesystem access and
+  the host's functions always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change
@@ -51,7 +57,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - Enforced in Rust: `fetch` in the engine (`access.rs`; refused requests never reach the network, and redirects are
   followed by the engine with `follow_redirects` off for the platform, so every hop is checked — hops are issued on the
   engine thread when a hop's head arrives; a streamed request body is not sent again, so a 307 / 308 then fails); remote images, placeholders, canvas images, `Image.getSize` / `prefetch`, video sources, web view
-  sources, the status bar and the clipboard in the core (`Core::check_prop`; a refused image fails with `onError`, clipboard reads resolve empty, the rest show nothing;
+  sources, the status bar, the clipboard and host calls in the core (`Core::check_prop`, the commit's commands; a refused image fails with `onError`, clipboard reads resolve empty, host calls reject, the rest show nothing;
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
