@@ -36,6 +36,12 @@ coalescing interval, with the latest coordinates kept independently per view and
   cold in a trace's first VM, close to main's; the counter's hardened release first frame (`nsh trace
   examples/counter`, minimum of 81 interleaved runs) is ~650µs against main's ~540µs, of which `Buffer`'s cold
   setup is ~70µs.
+- Android passive press feedback (arm64 emulator, debug; one `nsh test examples/counter/App.tsx --target android --trace`
+  run before and after): the first commit stays at 56 ops / 49 mount items / 21 nodes, and the tap at
+  10 ops / 7 mount items / 24 nodes. First-commit core times were 56.8 → 112.7 ms, tap core times
+  3.85 → 4.09 ms; first-frame totals were 127.3 → 124.5 ms. These noisy single runs establish unchanged
+  engine work counts, not a speedup or a measurement of Java touch dispatch. Passive feedback reuses the root's
+  touch tracker; observers are picked at finger-down and cancelled when a native gesture takes over.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
