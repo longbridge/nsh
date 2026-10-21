@@ -27,7 +27,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Image
         testID="image"
-        src={{ uri: "https://example.com/compat.png" }}
+        src="https://example.com/compat.png"
         style={{ width: 64, height: 48 }}
         onLoadStart={() => add(image, "start")}
         onProgress={(e) => add(image, `progress ${e.loaded}/${e.total}`)}
@@ -37,18 +37,18 @@ function App() {
       <Text>Image: {image().join(" | ")}</Text>
       <Image
         testID="broken"
-        src={{ uri: "https://example.com/missing.png" }}
+        src="https://example.com/missing.png"
         style={{ width: 64, height: 48 }}
         onError={(e) => add(broken, `error ${e.message}`)}
       />
       <Text>Broken: {broken().join(" | ")}</Text>
       <Video
         testID="video"
-        source="https://example.com/compat.mp4"
+        src="https://example.com/compat.mp4"
         paused
         style={{ width: 160, height: 90 }}
         onLoadStart={() => add(video, "start")}
-        onLoad={(e) => add(video, `load ${e.duration}s ${e.width}x${e.height}`)}
+        onLoad={(e) => add(video, `load ${e.duration}s ${e.size.width}x${e.size.height}`)}
         onProgress={(e) => add(video, `at ${e.currentTime}/${e.duration}`)}
         onBuffer={(e) => add(video, `buffering ${e.isBuffering}`)}
         onEnd={() => add(video, "end")}
@@ -57,7 +57,7 @@ function App() {
       <Text>Video: {video().join(" | ")}</Text>
       <WebView
         testID="web"
-        source={{ uri: "https://example.com/" }}
+        src="https://example.com/"
         style={{ width: 180, height: 60 }}
         onLoadStart={(e) => add(web, `start ${nav(e)}`)}
         onLoad={(e) => add(web, `load ${nav(e)}`)}

@@ -8,7 +8,7 @@ import { Storage } from "nsh/storage";
 function App() {
   const state = signal("empty");
   const show = async (step: string) => {
-    const keys = await Storage.getAllKeys();
+    const keys = await Storage.keys();
     const values = await Promise.all(keys.map((k) => Storage.getItem(k)));
     const missing = await Storage.getItem("missing");
     state.set(`${step}: ${keys.map((k, i) => `${k}=${values[i]}`).join(",") || "none"} missing=${missing}`);

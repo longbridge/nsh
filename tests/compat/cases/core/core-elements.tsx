@@ -41,9 +41,9 @@ function App() {
         </View>
       </Scroll>
       <Input testID="input" value="typed" placeholder="Name" style={{ width: 200, height: 36 }} />
-      <Image testID="image" src={{ uri: "https://example.com/compat.png" }} style={{ width: 64, height: 48 }} />
-      <Video testID="video" source="https://example.com/compat.mp4" paused style={{ width: 160, height: 90 }} />
-      <WebView testID="web" source={{ html: "<p>compat</p>" }} style={{ width: 180, height: 60 }} />
+      <Image testID="image" src="https://example.com/compat.png" style={{ width: 64, height: 48 }} />
+      <Video testID="video" src="https://example.com/compat.mp4" paused style={{ width: 160, height: 90 }} />
+      <WebView testID="web" html="<p>compat</p>" style={{ width: 180, height: 60 }} />
       <Map testID="map" zoom={3} style={{ width: 100, height: 50 }} />
       <View testID="pan" {...pan.panHandlers} style={{ width: 50, height: 50 }} />
       <Text>Missing module: {missingModule()}</Text>

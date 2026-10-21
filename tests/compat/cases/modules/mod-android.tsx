@@ -16,11 +16,11 @@ function App() {
       <View
         testID="call"
         onPress={() => {
-          const listener = BackHandler.addEventListener("hardwareBackPress", () => true);
-          listener.remove();
+          const remove = BackHandler.onBackPress(() => true);
+          remove();
           Toast.show("Saved");
           Toast.show("Saved for long", "long");
-          calls.set(`done, remove ${typeof listener.remove}`);
+          calls.set(`done, remove ${typeof remove}`);
         }}
       >
         <Text>Call them</Text>

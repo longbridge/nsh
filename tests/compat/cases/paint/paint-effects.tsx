@@ -44,7 +44,6 @@ function App() {
         style={{ height: 4, backgroundImage: "linear-gradient(red, blue), radial-gradient(white, black)" }}
       />
       <View testID="over-color" style={{ height: 4, backgroundColor: "#ffffff", backgroundImage: "linear-gradient(#0000, #000)" }} />
-      <View testID="experimental" style={{ height: 4, experimental_backgroundImage: "linear-gradient(90deg, red, blue)" }} />
       <View testID="brightness" style={{ height: 4, filter: "brightness(1.5)" }} />
       <View testID="contrast" style={{ height: 4, filter: "contrast(200%)" }} />
       <View testID="grayscale" style={{ height: 4, filter: "grayscale(1)" }} />

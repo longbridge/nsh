@@ -15,7 +15,7 @@ function App() {
       </View>
       <Video
         testID="clip"
-        source={{ uri: "https://example.com/clip.mp4" }}
+        src="https://example.com/clip.mp4"
         paused={paused()}
         muted
         volume={0.25}

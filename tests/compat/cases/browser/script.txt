@@ -22,7 +22,7 @@ covers [props] allowFontScaling
 covers [props] maxFontSizeMultiplier
 # props-media-webview-desktop
 tap id:case-props-media-webview-desktop
-prop id:page source https://example.com/
+prop id:page src https://example.com/
 prop id:page desktop.allowsBackForwardNavigationGestures true
 covers [props] desktop.allowsBackForwardNavigationGestures
 # base-popups-desktop

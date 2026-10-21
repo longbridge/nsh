@@ -105,8 +105,6 @@ style id:repeating backgroundImage repeating-linear-gradient(90deg, #ff0000ff 0%
 style id:layers backgroundImage linear-gradient(180deg, #ff0000ff, #0000ffff), radial-gradient(ellipse farthest-corner at 50% 50%, #ffffffff, #000000ff)
 style id:over-color backgroundColor #ffffffff
 style id:over-color backgroundImage linear-gradient(180deg, #00000000, #000000ff)
-style id:experimental backgroundImage linear-gradient(90deg, #ff0000ff, #0000ffff)
-style id:experimental experimental_backgroundImage linear-gradient(90deg, #ff0000ff, #0000ffff)
 style id:brightness filter brightness(1.5)
 style id:contrast filter contrast(2)
 style id:grayscale filter grayscale(1)
@@ -142,7 +140,6 @@ style id:blend-luminosity mixBlendMode luminosity
 style id:blend-plus-darker mixBlendMode plus-darker
 style id:blend-plus-lighter mixBlendMode plus-lighter
 covers [styles] backgroundImage
-covers [styles] experimental_backgroundImage
 covers [styles] filter
 covers [styles] backdropFilter
 covers [styles] mixBlendMode

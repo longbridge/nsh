@@ -16,7 +16,9 @@ function App() {
       </View>
       <WebView
         testID="page"
-        source={html() ? { html: "<p>Hi</p>", baseUrl: "https://example.com/" } : "https://example.com/start"}
+        src="https://example.com/start"
+        html={html() ? "<p>Hi</p>" : undefined}
+        baseUrl={html() ? "https://example.com/" : undefined}
         injectedJavaScript="window.after = 1;"
         injectedJavaScriptBeforeContentLoaded="window.before = 1;"
         javaScriptEnabled={false}

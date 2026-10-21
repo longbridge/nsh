@@ -135,7 +135,7 @@ expect Next
 # The image as the platform receives it.
 prop id:photo src https://example.com/a.png
 prop id:photo resizeMode contain
-prop id:photo defaultSource https://example.com/placeholder.png
+prop id:photo placeholder https://example.com/placeholder.png
 prop id:photo blurRadius 6
 prop id:photo fadeDuration 150
 # A new source when the app changes it.
@@ -145,18 +145,18 @@ prop id:photo src https://example.com/b.png
 prop id:plain src https://example.com/plain.png
 prop id:plain resizeMode cover
 prop id:plain blurRadius 0
-noprop id:plain defaultSource
+noprop id:plain placeholder
 noprop id:plain fadeDuration
 covers [props] src
 covers [props] resizeMode
-covers [props] defaultSource
+covers [props] placeholder
 covers [props] blurRadius
 covers [props] fadeDuration
 # props-media-video
 tap id:case-props-media-video
 expect Play
 # The video as the platform receives it.
-prop id:clip source https://example.com/clip.mp4
+prop id:clip src https://example.com/clip.mp4
 prop id:clip paused true
 prop id:clip muted true
 prop id:clip volume 0.25
@@ -168,7 +168,7 @@ prop id:clip progressUpdateInterval 500
 # It plays when the app says so.
 tap id:play
 prop id:clip paused false
-covers [props] source
+covers [props] src
 covers [props] paused
 covers [props] muted
 covers [props] volume
@@ -181,7 +181,7 @@ covers [props] progressUpdateInterval
 tap id:case-props-media-webview
 expect HTML
 # The web view as the platform receives it on iOS.
-prop id:page source https://example.com/start
+prop id:page src https://example.com/start
 prop id:page injectedJavaScript window.after = 1;
 prop id:page injectedJavaScriptBeforeContentLoaded window.before = 1;
 prop id:page javaScriptEnabled false
@@ -190,8 +190,10 @@ prop id:page scrollable false
 prop id:page ios.allowsBackForwardNavigationGestures true
 # A page of HTML with its base URL when the app switches to it.
 tap id:html
-prop id:page source html=<p>Hi</p> baseUrl=https://example.com/
-covers [props] source
+prop id:page html <p>Hi</p>
+prop id:page baseUrl https://example.com/
+covers [props] html
+covers [props] baseUrl
 covers [props] injectedJavaScript
 covers [props] injectedJavaScriptBeforeContentLoaded
 covers [props] javaScriptEnabled
@@ -397,17 +399,17 @@ tap id:case-props-media-image-variants
 # screen's pixel ratio, as a source and as a placeholder, and keeps the
 # imported file's size in points.
 prop id:flag src asset:/images/flag.png
-prop id:remote defaultSource asset:/images/flag.png
+prop id:remote placeholder asset:/images/flag.png
 frame id:flag 0 64 4 3
 pixelratio 3
 prop id:flag src asset:/images/flag@3x.png
-prop id:remote defaultSource asset:/images/flag@3x.png
+prop id:remote placeholder asset:/images/flag@3x.png
 pixelratio 2
 prop id:flag src asset:/images/flag@2x.png
-prop id:remote defaultSource asset:/images/flag@2x.png
+prop id:remote placeholder asset:/images/flag@2x.png
 frame id:flag 0 64 4 3
 # Back to the start's ratio, for the cases after this one.
 pixelratio 1
 prop id:flag src asset:/images/flag.png
 covers [props] src
-covers [props] defaultSource
+covers [props] placeholder

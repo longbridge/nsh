@@ -14,7 +14,7 @@ function App() {
       <Image
         testID="remote"
         src="https://example.com/a.png"
-        defaultSource={flag}
+        placeholder={flag}
         style={{ width: 40, height: 30 }}
       />
     </View>

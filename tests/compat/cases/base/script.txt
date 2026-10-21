@@ -508,7 +508,6 @@ expect Math off: Math $x$
 expect From HTML: Hi there
 covers [nsh/base] TextView
 covers [props] TextView.markdown
-covers [props] TextView.html
 covers [props] TextView.document
 covers [props] TextView.options
 covers [props] TextView.extensions

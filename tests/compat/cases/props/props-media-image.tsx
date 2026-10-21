@@ -14,9 +14,9 @@ function App() {
       </View>
       <Image
         testID="photo"
-        src={{ uri: photo() }}
+        src={photo()}
         resizeMode="contain"
-        defaultSource="https://example.com/placeholder.png"
+        placeholder="https://example.com/placeholder.png"
         blurRadius={6}
         fadeDuration={150}
         style={{ width: 120, height: 80 }}

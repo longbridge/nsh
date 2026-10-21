@@ -9,7 +9,7 @@ function App() {
     <View style={{ flex: 1 }}>
       <WebView
         testID="page"
-        source="https://example.com/"
+        src="https://example.com/"
         ios={{ allowsBackForwardNavigationGestures: false }}
         desktop={{ allowsBackForwardNavigationGestures: true }}
         style={{ width: 400, height: 300 }}

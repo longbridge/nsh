@@ -15,11 +15,11 @@ function App() {
       <View
         testID="copy"
         onPress={() => {
-          Clipboard.setString("Copied text");
-          Clipboard.setImage(
+          Clipboard.writeText("Copied text");
+          Clipboard.writeImage(
             "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
           );
-          const reads = [Clipboard.getString(), Clipboard.hasString(), Clipboard.getImage(), Clipboard.hasImage(), Clipboard.getFiles()];
+          const reads = [Clipboard.readText(), Clipboard.hasText(), Clipboard.readImage(), Clipboard.hasImage(), Clipboard.readFiles()];
           for (const read of reads) read.catch((e) => failed.set(String(e)));
           calls.set(`${reads.filter((r) => typeof r.then === "function").length} promises`);
         }}
