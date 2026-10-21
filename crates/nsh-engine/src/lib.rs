@@ -33,7 +33,7 @@ fn public_api_is_typed() {
     unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
 }
 
-use std::{io, rc::Rc, sync::Arc, time::Duration};
+use std::{io, mem::ManuallyDrop, rc::Rc, sync::Arc, time::Duration};
 
 pub use app_directory::app_dir_name;
 use crossbeam_channel::{Receiver, Sender};
@@ -1142,7 +1142,9 @@ fn run<M: TextEngine + 'static, S: MountSink>(
 /// threads to block. Input sent through its [`EngineControl`] is handled
 /// at the next [`LocalEngine::pump`].
 pub struct LocalEngine<M: TextEngine + 'static> {
-    driver: Driver<M>,
+    /// Dropped while this engine's context is the thread's. The guard
+    /// would otherwise end when `drop` returns, before the fields drop.
+    driver: ManuallyDrop<Driver<M>>,
     rx: Receiver<Message>,
     control: EngineControl,
     /// The host's wake ([`LocalEngine::set_wake`]).
@@ -1163,7 +1165,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let _context = config.context.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
         Some(LocalEngine {
-            driver,
+            driver: ManuallyDrop::new(driver),
             rx,
             control,
             wake: None,
@@ -1233,6 +1235,18 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             wake();
         }
         self.driver.deadline()
+    }
+}
+
+impl<M: TextEngine + 'static> Drop for LocalEngine<M> {
+    fn drop(&mut self) {
+        // Cancelling tasks and dropping what they captured reads this
+        // engine's context. `run` keeps its guard across the driver's
+        // drop; this path enters for the drop itself.
+        let _context = self.driver.context.enter();
+        // SAFETY: `driver` is dropped once, here. `ManuallyDrop` keeps
+        // the field drop from dropping it again.
+        unsafe { ManuallyDrop::drop(&mut self.driver) };
     }
 }
 

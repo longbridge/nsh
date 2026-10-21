@@ -13,6 +13,8 @@ use std::{
     any::{Any, TypeId},
     cell::RefCell,
     fmt,
+    marker::PhantomData,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -47,7 +49,10 @@ impl EngineContext {
     /// [`engine_context`] reads there (the engine does this on its thread).
     pub fn enter(&self) -> EngineContextGuard {
         let previous = CURRENT.with(|current| current.replace(Some(self.clone())));
-        EngineContextGuard { previous }
+        EngineContextGuard {
+            previous,
+            _thread: PhantomData,
+        }
     }
 }
 
@@ -65,10 +70,28 @@ thread_local! {
 }
 
 /// Puts the thread's previous context back ([`EngineContext::enter`]).
+///
+/// It stays on the thread that entered. Its drop writes that thread's
+/// context, so the guard is not [`Send`].
 #[must_use = "the context is the thread's while the guard lives"]
 pub struct EngineContextGuard {
     previous: Option<EngineContext>,
+    /// `Rc` is not `Send`: the guard cannot move to a thread whose
+    /// thread-local it must not write.
+    _thread: PhantomData<Rc<()>>,
 }
+
+// `Send` would make `EngineContextGuard::check` ambiguous (both impls
+// apply). A guard that moves to another thread would restore this
+// thread's previous context there.
+const _: fn() = || {
+    trait AmbiguousIfSend<A> {
+        fn check() {}
+    }
+    impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+    impl<T: ?Sized + Send> AmbiguousIfSend<u8> for T {}
+    let _ = EngineContextGuard::check;
+};
 
 impl Drop for EngineContextGuard {
     fn drop(&mut self) {
