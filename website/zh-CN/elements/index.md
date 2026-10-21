@@ -139,7 +139,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 
 ### 状态样式
 
-视图处于某种状态时，在其自身样式之上、由原生侧应用的样式。每一个都是某个 Tailwind 变体的对象形式。后面的状态优先（selected 与 checked，然后是 hover、focus、active）；`disabledStyle` 优先于所有状态，视图被禁用时其他状态样式不生效。
+视图处于某种状态时，在其自身样式之上、由原生侧应用的样式。每一个都是某个 Tailwind 变体的对象形式。后面的状态优先（selected、checked 与 indeterminate，然后是 hover、focus、active）；`disabledStyle` 优先于所有状态，视图被禁用时其他状态样式不生效。
 
 | 属性 | Rust | 类变体 | 生效时机 |
 |---|---|---|---|
@@ -148,6 +148,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | 视图获得焦点时。 |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | `disabled` 时。 |
 | `checkedStyle` | `.checked(\|s\| ..)`、`.checked_style(style)` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
+| `indeterminateStyle` | `.indeterminate(\|s\| ..)`、`.indeterminate_style(style)` | `indeterminate:` | `accessibilityState.checked` 为 `"mixed"` 时（既非勾选也非未勾选的复选框）。 |
 | | `.selected(\|s\| ..)` | `selected:` | `accessibilityState.selected` 为 `true` 时（选中的 `Button`、标签页）。 |
 
 ```rust tabs

@@ -1219,7 +1219,7 @@ fn set_prop(
             return set_prop(cx, content, name, value, prev);
         }
         "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
-        | "checkedStyle" | "headerStyle" => {
+        | "checkedStyle" | "indeterminateStyle" | "headerStyle" => {
             let patch = part_style(cx, name, value)?;
             let prop = match name {
                 "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
@@ -1228,6 +1228,7 @@ fn set_prop(
                 "disabledStyle" => nsh_core::Prop::DisabledStyle(patch),
                 "selectedStyle" => nsh_core::Prop::SelectedStyle(patch),
                 "checkedStyle" => nsh_core::Prop::CheckedStyle(patch),
+                "indeterminateStyle" => nsh_core::Prop::IndeterminateStyle(patch),
                 _ => nsh_core::Prop::HeaderStyle(patch),
             };
             return dom(cx).push(cx, Op::SetProp { id, prop });

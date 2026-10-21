@@ -3657,6 +3657,68 @@ fn checked_style_follows_the_accessibility_state() {
 }
 
 #[test]
+fn indeterminate_style_follows_the_accessibility_state() {
+    use crate::{AccessibilityProp, AccessibilityState, Checked, StyleValue as V};
+    // A checkbox: the box by its mixed state, the mark by its group's.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "group bg-zinc-200 checked:bg-emerald-500 indeterminate:bg-black",
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-indeterminate:opacity-50"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let state = |checked| Op::SetProp {
+        id: 2,
+        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+            checked,
+            ..AccessibilityState::default()
+        })),
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 2,
+                prop: Prop::IndeterminateStyle(patch(&[("opacity", V::Number(0.7))])),
+            },
+            state(Some(Checked::Mixed)),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let mixed = view_style_of(&batch, 2).unwrap();
+    assert_eq!(mixed.background_color, Color(0x0000_00ff));
+    assert_eq!(mixed.opacity, 0.7);
+    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 0.5);
+    // The platform never tracks it.
+    assert!(!batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates { id: 2, states }
+            if states & crate::tailwind::state::INDETERMINATE != 0
+    )));
+    // Checked is not indeterminate.
+    apply(&mut c, vec![state(Some(Checked::True))]);
+    let batch = c.commit().unwrap();
+    let checked = view_style_of(&batch, 2).unwrap();
+    assert_eq!(checked.background_color, Color(0x00bc_7dff));
+    assert_eq!(checked.opacity, 1.0);
+    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 1.0);
+}
+
+#[test]
 fn projected_states_style_a_part_without_its_accessibility() {
     use crate::tailwind::state;
     // A switch's thumb: styled by the switch's value and disabled state,

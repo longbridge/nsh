@@ -43,6 +43,8 @@ pub(super) enum Part {
     Selected,
     /// `checkedStyle`.
     Checked,
+    /// `indeterminateStyle`.
+    Indeterminate,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -59,6 +61,7 @@ impl Part {
             Part::Disabled => (state::DISABLED, rank::DISABLED),
             Part::Selected => (state::SELECTED, rank::SELECTED),
             Part::Checked => (state::CHECKED, rank::CHECKED),
+            Part::Indeterminate => (state::INDETERMINATE, rank::INDETERMINATE),
             _ => return None,
         })
     }
@@ -69,8 +72,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<Arc<ClassList>>,
-    /// The state styles, by [`Part`] (the first six).
-    states: [Option<Arc<StylePatch>>; 6],
+    /// The state styles, by [`Part`] (the first seven).
+    states: [Option<Arc<StylePatch>>; 7],
     /// The state styles as rules (none without any).
     state_rules: Option<Arc<ClassList>>,
     /// The inline styles of the other parts.
@@ -80,13 +83,14 @@ pub(super) struct NodeParts {
 }
 
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 6] = [
+const STATE_PARTS: [Part; 7] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
     Part::Disabled,
     Part::Selected,
     Part::Checked,
+    Part::Indeterminate,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -237,6 +241,21 @@ impl<M: TextEngine> Core<M> {
             node.states |= state::CHECKED;
         } else {
             node.states &= !state::CHECKED;
+        }
+        if node.states != before {
+            self.states_changed(key);
+        }
+    }
+
+    /// `checked` of `key`'s accessibility state is mixed: the
+    /// `indeterminate:` variant.
+    pub(super) fn set_indeterminate(&mut self, key: Key, indeterminate: bool) {
+        let node = &mut self.nodes[key as usize];
+        let before = node.states;
+        if indeterminate {
+            node.states |= state::INDETERMINATE;
+        } else {
+            node.states &= !state::INDETERMINATE;
         }
         if node.states != before {
             self.states_changed(key);

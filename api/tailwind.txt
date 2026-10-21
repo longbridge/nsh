@@ -958,6 +958,8 @@ group-focus:p-4 - | group focused: padding: 16
 group-hover/item:p-4 - | group/item hovered: padding: 16
 group-hover:bg-accent - | group hovered: backgroundColor: #f5f5f5
 group-hover:p-4 - | group hovered: padding: 16
+group-indeterminate/item:p-4 -
+group-indeterminate:p-4 -
 group-selected/item:p-4 -
 group-selected:p-4 -
 group/ - | groups: group
@@ -982,6 +984,7 @@ hover:p-4 - | hovered: padding: 16
 hue-rotate-[0.5] filter: hue-rotate(0.5deg)
 hue-rotate-[2] filter: hue-rotate(2deg)
 hue-rotate-[45deg] filter: hue-rotate(45deg)
+indeterminate:p-4 -
 inline -
 inline-block -
 inline-flex flexDirection: row

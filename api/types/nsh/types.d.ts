@@ -44,6 +44,9 @@ export interface StateStyleProps {
    * is not checked): a checkbox, a switch or a radio styled by its
    * value. */
   checkedStyle?: StyleProp<ViewStyle>;
+  /** While `accessibilityState.checked` is `"mixed"` (`indeterminate:`):
+   * a checkbox that is neither checked nor unchecked. */
+  indeterminateStyle?: StyleProp<ViewStyle>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */

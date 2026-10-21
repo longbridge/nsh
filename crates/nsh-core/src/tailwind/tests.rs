@@ -745,6 +745,35 @@ fn checked_variants() {
 }
 
 #[test]
+fn indeterminate_variants() {
+    let theme = themed();
+    let list = parse(
+        &theme,
+        "indeterminate:bg-black group-indeterminate:opacity-50",
+    );
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
+    // The core sets it: nothing for the platform to report.
+    assert_eq!(list.tracked_states(), 0);
+    let env = ClassEnvironment::default();
+    let classes = "bg-white checked:bg-black indeterminate:bg-red-500";
+    let (s, _) = styled_with(classes, env, (390.0, 844.0), state::INDETERMINATE);
+    assert_eq!(s.view.background_color, Color(0xfb2c_36ff));
+    // Not checked: `checked:` waits for its own state.
+    let (s, _) = styled_with(classes, env, (390.0, 844.0), state::CHECKED);
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // A value state: the interaction states go over it.
+    let hovered = state::INDETERMINATE | state::HOVERED;
+    let (s, _) = styled_with(
+        "hover:bg-white indeterminate:bg-black",
+        env,
+        (390.0, 844.0),
+        hovered,
+    );
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+}
+
+#[test]
 fn groups() {
     let theme = themed();
     let root = parse(&theme, "group/card p-2");

@@ -12,6 +12,7 @@ import PaintShadows from "./paint-shadows";
 import PaintText from "./paint-text";
 import StateStyles from "./state-styles";
 import StateChecked from "./state-checked";
+import StateIndeterminate from "./state-indeterminate";
 
 const cases: Record<string, () => JSX.Element> = {
   "paint-borders": PaintBorders,
@@ -22,6 +23,7 @@ const cases: Record<string, () => JSX.Element> = {
   "paint-text": PaintText,
   "state-styles": StateStyles,
   "state-checked": StateChecked,
+  "state-indeterminate": StateIndeterminate,
 };
 const shown = signal("");
 

@@ -63,6 +63,11 @@ pub mod state {
     /// (a checkbox, a switch, a radio; not when mixed). Set by the core,
     /// never reported by the platform.
     pub const CHECKED: u8 = 64;
+    /// The view is indeterminate (`indeterminate:`): its
+    /// `accessibilityState.checked` is mixed (a checkbox that is neither
+    /// checked nor unchecked, as CSS's `:indeterminate`). Set by the core,
+    /// never reported by the platform.
+    pub const INDETERMINATE: u8 = 128;
 }
 
 /// The view's place among its siblings (`first:`, `odd:`, ...).
@@ -267,6 +272,9 @@ pub(crate) mod rank {
     pub(crate) const DISABLED: u16 = 35;
     pub(crate) const SELECTED: u16 = 29;
     pub(crate) const CHECKED: u16 = 28;
+    /// After `checked:` in Tailwind's order; a view is never both, so
+    /// they share a rank.
+    pub(crate) const INDETERMINATE: u16 = 28;
     pub(crate) const DARK: u16 = 80;
 }
 
@@ -492,7 +500,8 @@ impl ClassList {
 
     fn add(&mut self, rule: Rule) {
         self.deps |= rule.cond.deps();
-        self.tracked |= rule.cond.states & !(state::DISABLED | state::SELECTED | state::CHECKED);
+        self.tracked |= rule.cond.states
+            & !(state::DISABLED | state::SELECTED | state::CHECKED | state::INDETERMINATE);
         if rule.cond.states & state::FOCUS_WITHIN != 0 {
             self.tracked |= state::FOCUS_WITHIN;
         }
@@ -779,6 +788,10 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
             states(cond, CHECKED);
             rank::CHECKED
         }
+        "indeterminate" => {
+            states(cond, INDETERMINATE);
+            rank::INDETERMINATE
+        }
         "selected" => {
             states(cond, SELECTED);
             29
@@ -862,6 +875,7 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
                     "disabled" => DISABLED,
                     "selected" => SELECTED,
                     "checked" => CHECKED,
+                    "indeterminate" => INDETERMINATE,
                     _ => return None,
                 };
                 let entry = cond.group.get_or_insert_with(|| (name.into(), 0));

@@ -192,6 +192,8 @@ impl Variant {
     pub(crate) const SELECTED: Self = Self::states(state::SELECTED);
     /// While checked (set by the core from the accessibility state).
     pub(crate) const CHECKED: Self = Self::states(state::CHECKED);
+    /// While indeterminate (set by the core from the accessibility state).
+    pub(crate) const INDETERMINATE: Self = Self::states(state::INDETERMINATE);
     /// In dark appearance.
     const DARK: Self = Self {
         states: 0,
@@ -237,6 +239,7 @@ impl Variant {
             (state::DISABLED, rank::DISABLED),
             (state::SELECTED, rank::SELECTED),
             (state::CHECKED, rank::CHECKED),
+            (state::INDETERMINATE, rank::INDETERMINATE),
         ] {
             if self.states & bit != 0 {
                 r = r.max(rank);
@@ -3026,6 +3029,16 @@ pub trait Styled: Sized {
     fn checked(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::CHECKED, s);
+        self
+    }
+
+    /// Styles while indeterminate (Tailwind's `indeterminate:`): the
+    /// element's accessibility state says checked is mixed (a checkbox
+    /// that is neither), or the control it is a part of is
+    /// (`Interactive::project_indeterminate`: a checkbox's indicator).
+    fn indeterminate(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::INDETERMINATE, s);
         self
     }
 

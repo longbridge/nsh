@@ -48,7 +48,7 @@ view()
 | `.label(..)` | `accessibilityLabel` | `string` | What screen readers read, instead of the texts inside. |
 | `.hint(..)` | `accessibilityHint` | `string` | What activating the element does, read after a pause. |
 | `.role(..)` | `role` | `AccessibilityRole` | What the element is. |
-| `.accessibility_state(..)` | `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. `selected` also applies the selected style, `checked` (when true) the checked style. |
+| `.accessibility_state(..)` | `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. `selected` also applies the selected style, `checked` the checked style when true and the indeterminate style when `"mixed"`. |
 | | `accessibilityValue` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed (Rust: its name). |

@@ -1557,6 +1557,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// An app's style while indeterminate (`accessibility_state` `checked`
+    /// mixed: a checkbox's `indeterminate`), as `indeterminate:` classes
+    /// apply.
+    fn indeterminate_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::INDETERMINATE, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::IndeterminateStyle(patch))
+        });
+        self
+    }
+
     /// Styles it as checked while `checked` holds (its `checked:` classes
     /// and [`Self::checked_style`]), as a part of a control that is: a
     /// switch's track and thumb, a checkbox's mark (`gpui-base`'s
@@ -1565,6 +1575,18 @@ pub trait Interactive: Element {
     fn project_checked(mut self, checked: impl IntoReactive<bool>) -> Self {
         self.node().bind_attr(checked, |a, checked| {
             project(a, crate::tailwind::state::CHECKED, checked)
+        });
+        self
+    }
+
+    /// Styles it as indeterminate while `indeterminate` holds (its
+    /// `indeterminate:` classes and [`Self::indeterminate_style`]), as a
+    /// part of a control that is: a checkbox's indicator (`gpui-base`'s
+    /// `CheckboxIndicator::state(CheckboxState::Indeterminate)`). Screen
+    /// readers hear it from the control alone.
+    fn project_indeterminate(mut self, indeterminate: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(indeterminate, |a, indeterminate| {
+            project(a, crate::tailwind::state::INDETERMINATE, indeterminate)
         });
         self
     }
