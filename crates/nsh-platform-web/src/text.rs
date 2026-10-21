@@ -349,6 +349,14 @@ impl TextEngine for WebTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let mut styles: Vec<RunStyle> = Vec::with_capacity(text.spans.len());
         let mut atoms = Vec::new();
         // UTF-16 offset -> attachment: width, top above the baseline,
@@ -357,7 +365,7 @@ impl TextEngine for WebTextEngine {
             .attachments
             .iter()
             .map(|a| {
-                let font = if a.align == nsh_core::VerticalAlign::Baseline {
+                let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
                     nsh_core::FontExtent::default()
                 } else {
                     let style = text
@@ -372,8 +380,16 @@ impl TextEngine for WebTextEngine {
                         Points(self.x_height(&css, size)),
                     )
                 };
-                let (up, down) = a.extent(font);
-                (a.index, (a.width.0, a.ascent(font).0, up.0, down.0))
+                let (up, down) = a.extent(font, alignments.get(a.index));
+                (
+                    a.index,
+                    (
+                        a.width.0,
+                        a.ascent(font, alignments.get(a.index)).0,
+                        up.0,
+                        down.0,
+                    ),
+                )
             })
             .collect();
         let units: Vec<u16> = text.text.encode_utf16().collect();

@@ -600,6 +600,14 @@ impl TextEngine for PangoTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let s = text.text.as_str();
         let rtl = match text.writing_direction {
             Some(rtl) => rtl,
@@ -704,13 +712,13 @@ impl TextEngine for PangoTextEngine {
             // Placed by its `verticalAlign` in its placeholder's font, as
             // the other platforms place them: the ink is the attachment,
             // the logical rectangle what its line reserves.
-            let font = if a.align == nsh_core::VerticalAlign::Baseline {
+            let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
                 nsh_core::FontExtent::default()
             } else {
                 self.attachment_font(context, text, a)
             };
-            let top = a.ascent(font);
-            let (up, down) = a.extent(font);
+            let top = a.ascent(font, alignments.get(a.index));
+            let (up, down) = a.extent(font, alignments.get(a.index));
             let ink = pango::Rectangle::new(
                 0,
                 -to_pango(top.0),
@@ -2028,6 +2036,40 @@ mod tests {
 
     /// What is measured at a width lays out in as many lines at the
     /// measured size (the core sizes text views from `measure`).
+    #[test]
+    fn attachments_sit_by_vertical_align() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let style = ResolvedTextStyle::default();
+        for height in [4.0, 30.0] {
+            for align in [
+                nsh_core::VerticalAlign::Baseline,
+                nsh_core::VerticalAlign::TextTop,
+                nsh_core::VerticalAlign::TextBottom,
+                nsh_core::VerticalAlign::Middle,
+            ] {
+                let mut text = text(&[("Ax", style)]);
+                let mut alignments = nsh_core::AttachmentAlignments::default();
+                alignments.push(
+                    &mut text,
+                    nsh_core::Size::new(Points(10.0), Points(height)),
+                    align,
+                    style,
+                );
+                let a = text.attachments[0];
+                let font = engine.attachment_font(&engine.ltr, &text, &a);
+                let prepared = engine.prepare_aligned(&text, &alignments);
+                let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+                let line = engine.lines(&layout).remove(0);
+                let top = engine.attachments(&layout)[0].expect("shown").y;
+                let expected = line.y + line.ascender - a.ascent(font, align);
+                assert!(
+                    (top - expected).0.abs() < 0.01,
+                    "{align:?} {height}: {top:?} {expected:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn layout_matches_measure() {
         let engine = PangoTextEngine::new("sans-serif".into());

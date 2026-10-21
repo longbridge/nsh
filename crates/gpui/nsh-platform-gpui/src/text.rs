@@ -805,6 +805,7 @@ impl SpanBox {
 
 /// The text shaped for measuring and layout.
 pub(crate) struct Prepared {
+    alignments: nsh_core::AttachmentAlignments,
     text: AttributedText,
     /// The paragraphs' base direction is right to left.
     rtl: bool,
@@ -839,7 +840,8 @@ impl Prepared {
     /// line reserves above and below it (`TextAttachment::ascent` and
     /// `extent` in its placeholder's font).
     fn attachment_box(&self, a: &nsh_core::TextAttachment) -> (f32, f32, f32) {
-        let font = if a.align == nsh_core::VerticalAlign::Baseline {
+        let alignments = &self.alignments;
+        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
             nsh_core::FontExtent::default()
         } else {
             let i = self
@@ -849,8 +851,8 @@ impl Prepared {
             let s = &self.spans[i];
             nsh_core::FontExtent::new(Points(s.ascent), Points(s.descent), Points(s.x))
         };
-        let (up, down) = a.extent(font);
-        (a.ascent(font).0, up.0, down.0)
+        let (up, down) = a.extent(font, alignments.get(a.index));
+        (a.ascent(font, alignments.get(a.index)).0, up.0, down.0)
     }
 
     /// The width of clusters `start..end` without trailing whitespace.
@@ -1243,6 +1245,14 @@ impl TextEngine for GpuiTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
+        self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        t: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let s = t.text.as_str();
         let mut utf16 = Vec::with_capacity(s.len() + 1);
         let mut u = 0u32;
@@ -1348,6 +1358,7 @@ impl TextEngine for GpuiTextEngine {
             prefix.push(sum);
         }
         Prepared {
+            alignments: alignments.clone(),
             text: t.clone(),
             rtl,
             clusters: b.clusters,
@@ -3331,12 +3342,14 @@ mod tests {
         // line's extent above and below its baseline.
         let place = |align| {
             let mut t = text(&[("Ax", style)]);
-            t.push_aligned_attachment(
+            let mut alignments = nsh_core::AttachmentAlignments::default();
+            alignments.push(
+                &mut t,
                 nsh_core::geometry::size(Points(10.0), Points(30.0)),
                 align,
                 style,
             );
-            let prepared = engine.prepare(&t);
+            let prepared = engine.prepare_aligned(&t, &alignments);
             let size = engine.measure(&prepared, None);
             let layout = engine.layout(&prepared, size);
             let line = engine.lines(&layout).remove(0);

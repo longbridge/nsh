@@ -550,6 +550,7 @@ impl Node {
 /// Taffy context of a text block.
 struct TextContext<P> {
     text: Arc<AttributedText>,
+    alignments: crate::AttachmentAlignments,
     /// `text.layout_hash()`, computed once per content.
     layout_hash: u64,
     /// Platform typesetting state, created on first use.
@@ -565,6 +566,7 @@ impl<P> TextContext<P> {
     fn new(text: Arc<AttributedText>) -> Self {
         Self {
             layout_hash: text.layout_hash(),
+            alignments: Default::default(),
             text,
             prepared: None,
             cache: None,
@@ -3697,7 +3699,8 @@ impl<M: TextEngine> Core<M> {
         let base = inherited.inherit(&node.text_style);
         let multiplier = node.paragraph.font_multiplier(self.font_scale);
         let inserted = self.update_attachments(key);
-        self.collect_text(key, base, &mut text);
+        let mut alignments = crate::AttachmentAlignments::default();
+        self.collect_text(key, base, &mut text, &mut alignments);
         if multiplier != 1.0 {
             for span in &mut text.spans {
                 span.style = scaled(span.style, multiplier);
@@ -3707,20 +3710,21 @@ impl<M: TextEngine> Core<M> {
             .layout
             .expect("text block has layout");
         let cx = self.text_cx(layout);
-        if *cx.text == text {
+        if *cx.text == text && cx.alignments == alignments {
             if inserted {
                 // New attachment views: placed with the next final layout.
                 cx.laid_out = None;
             }
             return inserted;
         }
-        let same_layout = cx.text.layout_eq(&text);
+        let same_layout = cx.text.layout_eq(&text) && cx.alignments == alignments;
+        cx.alignments = alignments;
         cx.text = Arc::new(text);
         // Platform typesetting state embeds colors too: always rebuild it.
         cx.prepared = None;
         cx.laid_out = None;
         if !same_layout {
-            cx.layout_hash = cx.text.layout_hash();
+            cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
             self.layout.mark_dirty(layout).expect("taffy dirty");
             self.needs_layout = true;
@@ -3728,7 +3732,13 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
-    fn collect_text(&self, key: Key, style: ResolvedTextStyle, out: &mut AttributedText) {
+    fn collect_text(
+        &self,
+        key: Key,
+        style: ResolvedTextStyle,
+        out: &mut AttributedText,
+        alignments: &mut crate::AttachmentAlignments,
+    ) {
         for &c in &self.nodes[key as usize].children {
             let child = &self.nodes[c as usize];
             match child.kind {
@@ -3739,7 +3749,7 @@ impl<M: TextEngine> Core<M> {
                     if let Some(b) = span_background(&child.view_style, child.id) {
                         inner.background = Some(b);
                     }
-                    self.collect_text(c, inner, out);
+                    self.collect_text(c, inner, out, alignments);
                     if pressable(child.events) {
                         out.links.push(crate::text::TextLink {
                             start,
@@ -3755,7 +3765,8 @@ impl<M: TextEngine> Core<M> {
                 _ => {
                     if let Some(l) = child.layout {
                         let size = self.layout.layout(l).expect("taffy layout").size;
-                        out.push_aligned_attachment(
+                        alignments.push(
+                            out,
                             crate::geometry::size_pt(size.width, size.height),
                             child.vertical_align,
                             style,
@@ -4361,8 +4372,8 @@ impl<M: TextEngine> Core<M> {
                 if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
                     continue;
                 }
-                let text = Arc::new(fitted(engine, &cx.text, size, min));
-                let prepared = engine.prepare(&text);
+                let text = Arc::new(fitted(engine, &cx.text, &cx.alignments, size, min));
+                let prepared = engine.prepare_aligned(&text, &cx.alignments);
                 let text_layout = engine.layout(&prepared, size);
                 cx.laid_out = Some((content, text_layout.clone()));
                 if report_lines {
@@ -4388,7 +4399,9 @@ impl<M: TextEngine> Core<M> {
                 // Only moved (padding, vertical alignment): the same layout.
                 Some((r, l)) if r.size == size => l.clone(),
                 _ => {
-                    let prepared = cx.prepared.get_or_insert_with(|| engine.prepare(&cx.text));
+                    let prepared = cx
+                        .prepared
+                        .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
                     let layout = engine.layout(prepared, size);
                     if report_lines {
                         self.events.push(crate::ui::JsEvent::Event(
@@ -4994,6 +5007,7 @@ fn text_lines<M: TextEngine>(
 fn fitted<M: TextEngine>(
     engine: &M,
     text: &AttributedText,
+    alignments: &crate::AttachmentAlignments,
     size: Size<Points>,
     min: f32,
 ) -> AttributedText {
@@ -5013,9 +5027,11 @@ fn fitted<M: TextEngine>(
             max_lines: 0,
             ..t.clone()
         };
-        let full = engine.measure(&engine.prepare(&all), Some(size.width));
+        let full = engine.measure(&engine.prepare_aligned(&all, alignments), Some(size.width));
         let limited = if t.max_lines > 0 {
-            engine.measure(&engine.prepare(t), Some(size.width)).height
+            engine
+                .measure(&engine.prepare_aligned(t, alignments), Some(size.width))
+                .height
         } else {
             Points(f32::INFINITY)
         };
@@ -5055,7 +5071,9 @@ fn measure_text<M: TextEngine>(
     let size = match cache.get(cx.layout_hash, typed) {
         Some(size) => size,
         None => {
-            let prepared = cx.prepared.get_or_insert_with(|| engine.prepare(&cx.text));
+            let prepared = cx
+                .prepared
+                .get_or_insert_with(|| engine.prepare_aligned(&cx.text, &cx.alignments));
             let size = engine.measure(prepared, typed);
             // Round up so rendering never truncates the last glyph.
             let size = size.map(Points::ceil);

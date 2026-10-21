@@ -4093,13 +4093,11 @@ fn views_inside_text_are_attachments() {
                 index: 2,
                 width: Points(20.0),
                 height: Points(10.0),
-                align: crate::VerticalAlign::Baseline,
             },
             crate::TextAttachment {
                 index: 5,
                 width: Points(12.0),
                 height: Points(12.0),
-                align: crate::VerticalAlign::Baseline,
             },
         ]
     );
@@ -4153,10 +4151,16 @@ fn views_inside_text_are_attachments() {
             vec![style_op(4, &[("verticalAlign", StyleValue::Str(align))])],
         );
         let batch = c.commit()?;
-        batch.items.iter().find_map(|i| match i {
-            MountItem::Text { id: 2, text, .. } => Some(text.attachments[0].align),
-            _ => None,
-        })
+        if !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Text { id: 2, .. }))
+        {
+            return None;
+        }
+        let layout = c.nodes[c.key(2).unwrap() as usize].layout.unwrap();
+        let cx = c.text_cx(layout);
+        Some(cx.alignments.get(cx.text.attachments[0].index))
     };
     assert_eq!(
         align_of(&mut c, "text-top"),

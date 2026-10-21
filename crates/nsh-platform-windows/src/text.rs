@@ -1536,6 +1536,14 @@ impl TextEngine for DWriteTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
+        self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        t: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let text: Vec<u16> = t.text.encode_utf16().collect();
         let rtl = t
             .writing_direction
@@ -1606,7 +1614,7 @@ impl TextEngine for DWriteTextEngine {
                 .attachments
                 .iter()
                 .map(|a| {
-                    let font = if a.align == nsh_core::VerticalAlign::Baseline {
+                    let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
                         nsh_core::FontExtent::default()
                     } else {
                         let style = t
@@ -1620,12 +1628,12 @@ impl TextEngine for DWriteTextEngine {
                             Points(m.x * size),
                         )
                     };
-                    let (up, down) = a.extent(font);
+                    let (up, down) = a.extent(font, alignments.get(a.index));
                     AttachmentBox {
                         index: a.index,
                         width: a.width.0,
                         height: a.height.0,
-                        top: a.ascent(font).0,
+                        top: a.ascent(font, alignments.get(a.index)).0,
                         up: up.0,
                         down: down.0,
                     }
@@ -3283,12 +3291,14 @@ mod tests {
         // line's extent above and below its baseline.
         let place = |align| {
             let mut t = text(&[("Ax", style)]);
-            t.push_aligned_attachment(
+            let mut alignments = nsh_core::AttachmentAlignments::default();
+            alignments.push(
+                &mut t,
                 nsh_core::geometry::size(Points(10.0), Points(30.0)),
                 align,
                 style,
             );
-            let prepared = engine.prepare(&t);
+            let prepared = engine.prepare_aligned(&t, &alignments);
             let size = engine.measure(&prepared, None);
             let layout = engine.layout(&prepared, size);
             let line = engine.lines(&layout).remove(0);

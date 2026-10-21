@@ -343,8 +343,9 @@ impl CoreTextEngine {
         &self,
         text: &AttributedText,
         a: &nsh_core::TextAttachment,
+        alignments: &nsh_core::AttachmentAlignments,
     ) -> (CGFloat, CGFloat, CGFloat) {
-        let font = if a.align == nsh_core::VerticalAlign::Baseline {
+        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
             nsh_core::FontExtent::default()
         } else {
             let style = text
@@ -359,15 +360,19 @@ impl CoreTextEngine {
                 Points(x as f32),
             )
         };
-        let (up, down) = a.extent(font);
+        let (up, down) = a.extent(font, alignments.get(a.index));
         (
-            a.ascent(font).0 as CGFloat,
+            a.ascent(font, alignments.get(a.index)).0 as CGFloat,
             up.0 as CGFloat,
             down.0 as CGFloat,
         )
     }
 
-    fn attributed_string(&self, text: &AttributedText) -> CFRetained<CFMutableAttributedString> {
+    fn attributed_string(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> CFRetained<CFMutableAttributedString> {
         let string =
             CFMutableAttributedString::new(None, 0).expect("CFAttributedStringCreateMutable");
         let s = Some(&*string);
@@ -476,7 +481,7 @@ impl CoreTextEngine {
                 location: a.index as CFIndex,
                 length: 1,
             };
-            let (_, ascent, descent) = self.attachment_metrics(text, a);
+            let (_, ascent, descent) = self.attachment_metrics(text, a, alignments);
             if let Some(delegate) = run_delegate(a.width.0 as CGFloat, ascent, descent) {
                 set(
                     range,
@@ -731,7 +736,15 @@ impl TextEngine for CoreTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
-        let string = self.attributed_string(text);
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
+        let string = self.attributed_string(text, alignments);
         let attributed: &CFAttributedString = &string;
         // SAFETY: a valid attributed string.
         let framesetter = unsafe { CTFramesetter::with_attributed_string(attributed) };
@@ -745,7 +758,12 @@ impl TextEngine for CoreTextEngine {
             attachments: text
                 .attachments
                 .iter()
-                .map(|a| (a.index as CFIndex, self.attachment_metrics(text, a).0))
+                .map(|a| {
+                    (
+                        a.index as CFIndex,
+                        self.attachment_metrics(text, a, alignments).0,
+                    )
+                })
                 .collect(),
         }
     }

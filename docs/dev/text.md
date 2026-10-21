@@ -80,7 +80,10 @@
   `AttributedText::attachments`) that the engine sizes to it (CTRunDelegate; Android a `ReplacementSpan`), so
   it wraps with the text. Its style key `verticalAlign` (`VerticalAlign`, CSS `vertical-align` of a replaced inline
   box, `align-*` classes; a node field like `zIndex`, a change rebuilds the block) places it in its line:
-  `TextAttachment::ascent` is how far its top is above the baseline (`baseline` the height, the default and the only
+  `AttachmentAlignments` keeps alignment separately from the legacy `TextAttachment` and
+  `AttributedText` structs. The core stores it in its private text context and includes it in measurement-cache
+  keys; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing engines.
+  `TextAttachment::ascent(font, align)` is how far its top is above the baseline (`baseline` the height, the default and the only
   value before; `text-top` the font's ascent, `text-bottom` the height minus the descent, `middle` half the height
   plus the x height), `extent` what the line reserves above and below (each at least 0), both from the
   `FontExtent` of the placeholder's font, the only platform part. Every engine gives the placeholder that extent

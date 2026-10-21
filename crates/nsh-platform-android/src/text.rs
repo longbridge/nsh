@@ -52,6 +52,14 @@ impl TextEngine for AndroidTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let mut ints = Vec::with_capacity(text.spans.len() * SPAN_INTS);
         let mut floats = Vec::with_capacity(text.spans.len() * SPAN_FLOATS);
         let mut families: Vec<Arc<str>> = Vec::new();
@@ -140,7 +148,7 @@ impl TextEngine for AndroidTextEngine {
             .attachments
             .iter()
             .flat_map(|a| {
-                let align = match a.align {
+                let align = match alignments.get(a.index) {
                     nsh_core::VerticalAlign::Baseline => 0.0,
                     nsh_core::VerticalAlign::TextTop => 1.0,
                     nsh_core::VerticalAlign::TextBottom => 2.0,
