@@ -75,6 +75,8 @@ fn launch(
         data_dir: data_dir.map(Into::into),
         storage: storage.map(|data| FileStorage::open(data) as _),
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -175,6 +177,8 @@ fn rust_shares_the_entries_of_js() {
         data_dir: None,
         storage: Some(FileStorage::open(&data)),
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
@@ -266,6 +270,8 @@ fn rust_edits_the_storage() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
@@ -335,6 +341,8 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         data_dir: Some(root.clone()),
         storage: None,
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust wrote");

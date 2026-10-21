@@ -105,6 +105,9 @@ pub struct HostOptions {
     /// What answers the app's requests (`nsh_dev::DevServer::set_test_network`):
     /// the test's routes, the network itself, or none.
     pub network: Option<Arc<dyn nsh_dev::protocol::TestNetwork>>,
+    /// What the test fixes of the app's environment, and its clipboard
+    /// (`nsh_dev::DevServer::set_test_environment`).
+    pub environment: nsh_dev::protocol::TestEnvironment,
     /// Traces the app (`nsh test --trace`, `nsh_dev::DevServer::set_test_trace`):
     /// what prints the items of each batch it applied, a line each
     /// (`nsh_dev::ClientEvent::Trace`), under the step it came in.
@@ -117,6 +120,7 @@ impl std::fmt::Debug for HostOptions {
             .field("size", &self.size)
             .field("storage", &self.storage)
             .field("network", &self.network.is_some())
+            .field("environment", &self.environment)
             .field("trace", &self.trace.is_some())
             .finish()
     }
@@ -523,19 +527,25 @@ impl Session {
         launch: Launch,
         start: &StartHost,
     ) -> Result<Opened, String> {
-        // What a real platform cannot be given yet: refused rather than
-        // left out, so a test never passes on what it did not set up.
-        let refused = [
-            (launch.clipboard.is_some(), "`clipboard`"),
-            (launch.locale.is_some(), "`locale`"),
-            (launch.reduced_motion, "`reducedMotion`"),
-            (launch.safe_area != SafeArea::default(), "`safeArea`"),
-        ];
-        if let Some((_, what)) = refused.iter().find(|(set, _)| *set) {
-            return Err(format!(
-                "open({entry:?}): {what} runs headless only for now: run the test without `--target`"
-            ));
+        // What the test fixes of the environment, whatever the platform
+        // reports, and its clipboard (the app's calls never reach the
+        // machine's).
+        if let Some(tag) = &launch.locale
+            && Locale::parse(tag).is_none()
+        {
+            return Err(format!("open({entry:?}): {tag:?} is not a locale"));
         }
+        let safe_area = launch.safe_area;
+        let mut environment = nsh_dev::protocol::TestEnvironment::default();
+        environment.clipboard = launch.clipboard.clone();
+        environment.locale = launch.locale.clone();
+        environment.reduced_motion = launch.reduced_motion.then_some(true);
+        environment.safe_area = (safe_area != SafeArea::default()).then_some([
+            safe_area.top.0,
+            safe_area.right.0,
+            safe_area.bottom.0,
+            safe_area.left.0,
+        ]);
         // The app's requests come to the test, as on a headless engine:
         // answered from the routes, failed without any, or let through.
         let (inner, live): (Arc<dyn nsh_engine::Network>, bool) = match launch.network {
@@ -574,6 +584,7 @@ impl Session {
                 requests: requests.clone(),
                 live,
             })),
+            environment,
             trace,
         };
         let host = start(path, &options).map_err(|e| format!("open({entry:?}): {e}"))?;

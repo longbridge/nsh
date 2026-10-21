@@ -431,7 +431,7 @@ impl Driver for Remote {
         self.query(TestStep::Menu)
     }
     fn clipboard(&mut self) -> Result<Option<String>, String> {
-        Err(headless_only("Reading the clipboard"))
+        self.query(TestStep::Clipboard)
     }
     fn screenshot(&mut self) -> Result<Vec<u8>, String> {
         use base64::Engine as _;

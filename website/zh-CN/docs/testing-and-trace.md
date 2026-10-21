@@ -374,8 +374,9 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕。时间是真实的：`clock` 和系统时钟一样走，所以
 `app.clock.runFor(ms)` 会真的等待这么久，而真实时间做不到的 `fastForward` 和 `setSystemTime` 会 reject。应用的请求和 headless
 时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
-`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。真实平台暂时还给不了的选项会让 `open` reject，而不是被忽略：
-`clipboard`、`locale`、`reducedMotion` 和 `safeArea`。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
+`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`locale`、`reducedMotion` 和 `safeArea` 不随平台上报的值变化；
+应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
+粘贴使用系统剪贴板。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或

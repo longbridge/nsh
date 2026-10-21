@@ -40,6 +40,8 @@ pub enum DevEvent {
         /// Trace the app: log each commit's timings and send each batch
         /// ([`DevClient::trace`]).
         trace: bool,
+        /// What the test fixes of the app's environment, and its clipboard.
+        environment: crate::protocol::TestEnvironment,
     },
     /// The test's answer to request `id` ([`DevClient::fetch`]): one
     /// event of it.
@@ -270,9 +272,15 @@ fn session(
                     }
                 }
                 Ok(ServerMessage::Step { id, step }) => on_event(DevEvent::Step { id, step }),
-                Ok(ServerMessage::TestSetup { storage, trace }) => {
-                    on_event(DevEvent::TestSetup { storage, trace })
-                }
+                Ok(ServerMessage::TestSetup {
+                    storage,
+                    trace,
+                    environment,
+                }) => on_event(DevEvent::TestSetup {
+                    storage,
+                    trace,
+                    environment,
+                }),
                 Ok(ServerMessage::Fetch { id, reply }) => on_event(DevEvent::Fetch { id, reply }),
                 Ok(ServerMessage::Root) => on_event(DevEvent::Root),
                 Ok(ServerMessage::Building) => on_event(DevEvent::Building),

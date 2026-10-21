@@ -686,14 +686,15 @@ class Player {
 
   /**
    * What the test sets the app up with (`ServerMessage::TestSetup`): the
-   * storage it starts with, and whether it traces the app. Its requests,
+   * storage it starts with, whether it traces the app, and what it fixes of
+   * the environment and the clipboard. Its requests,
    * and a traced app's batches, then go to the test through `onTestSend`
    * (`{type: "fetch", id, request}`, `{type: "fetch_cancel", id}`,
    * `{type: "trace", items}`).
    */
-  testSetup(storage, trace) {
+  testSetup(storage, trace, environment) {
     if (!this.wasm.nsh_test_setup) return;
-    const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace });
+    const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace, environment: environment ?? {} });
     this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
   }
 

@@ -182,7 +182,7 @@ jobs:
       - name: Run the examples' tests in Chrome
         run: |
           ./target/debug/nsh test examples/counter --target web
-          for file in form gestures hover navigation network photos shortcuts storage; do
+          for file in device form gestures hover navigation network photos shortcuts storage; do
             ./target/debug/nsh test "examples/gallery/tests/$file.test.tsx" --target web
           done
           ./target/debug/nsh test examples/gallery/tests/environment.test.tsx --target web --filter appearance

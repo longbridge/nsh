@@ -204,6 +204,7 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
     // What the app starts with and what answers its requests: the test's.
     server.set_test_storage(options.storage.clone());
     server.set_test_trace(options.trace.is_some());
+    server.set_test_environment(options.environment.clone());
     if let Some(network) = &options.network {
         server.set_test_network(network.clone());
     }

@@ -87,6 +87,8 @@ mount(() => <Text>{{shown()}}</Text>);
         data_dir: data,
         storage: None,
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -643,6 +645,8 @@ mount(() => <Text>{shown}</Text>);
         data_dir: Some(root.clone()),
         storage: None,
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(

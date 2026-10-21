@@ -398,9 +398,10 @@ The window opens at the viewport's size (390 × 844 unless `open` says), within 
 moves as the system's does, so `app.clock.runFor(ms)` waits that long, and `fastForward` and `setSystemTime`, which
 real time cannot do, reject. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
-all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. What a real
-platform cannot be given yet makes `open` reject rather than being left out: `clipboard`, `locale`, `reducedMotion`
-and `safeArea`. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
+`reducedMotion` and `safeArea` hold whatever the platform reports, and the app's clipboard calls are served from the
+test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
+as it was; a text input's own copy and paste use the system's. An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed

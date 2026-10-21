@@ -1,7 +1,7 @@
 import { Input, type InputProps, type JSX, signal, Text, View, type YNode } from "nsh";
 import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/accessibility";
 import { LayoutAnimation } from "nsh/animated";
-import { PixelRatio, Platform } from "nsh/device";
+import { locale, PixelRatio, Platform } from "nsh/device";
 import { InputAccessoryView } from "nsh/ios";
 import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView, safeArea, Sheet } from "nsh/base";
 import { Icon, type IconName } from "../icons";
@@ -340,6 +340,7 @@ function PlatformInfo() {
     ["roundToNearestPixel(10.3)", String(PixelRatio.roundToNearestPixel(10.3))],
     ["screenReaderEnabled()", String(screenReaderEnabled())],
     ["reduceMotion()", String(reduceMotion())],
+    ["locale()", locale()],
   ];
   const announced = signal(0);
   let target: YNode | undefined;

@@ -429,6 +429,8 @@ impl RootView {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

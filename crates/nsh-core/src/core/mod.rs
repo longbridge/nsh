@@ -686,6 +686,9 @@ pub struct Core<M: TextEngine> {
     access: Arc<crate::access::Access>,
     /// Denials already logged (each once).
     denied: rustc_hash::FxHashSet<String>,
+    /// Serves the app's clipboard calls in place of the platform
+    /// ([`Core::set_clipboard`]).
+    clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -733,6 +736,7 @@ impl<M: TextEngine> Core<M> {
             max_nodes: usize::MAX,
             access: Arc::default(),
             denied: Default::default(),
+            clipboard: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             roots: Vec::new(),
@@ -866,6 +870,12 @@ impl<M: TextEngine> Core<M> {
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
         self.access = access;
+    }
+
+    /// Serves the app's clipboard calls from `backend` instead of the
+    /// platform's clipboard (`None`: the platform's, the default).
+    pub fn set_clipboard(&mut self, backend: Option<Arc<dyn crate::clipboard::ClipboardBackend>>) {
+        self.clipboard = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -1309,6 +1319,39 @@ impl<M: TextEngine> Core<M> {
                         self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
+                    continue;
+                }
+                // A clipboard of the embedder's own answers in place of
+                // the platform's.
+                Command::SetClipboard(_)
+                | Command::ReadClipboard { .. }
+                | Command::SetClipboardImage(_)
+                | Command::ReadClipboardImage { .. }
+                | Command::ReadClipboardFiles { .. }
+                    if self.clipboard.is_some() =>
+                {
+                    let clipboard = self.clipboard.clone().expect("a clipboard");
+                    match &command {
+                        Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
+                        Command::SetClipboardImage(_) => clipboard.set_text(None),
+                        Command::ReadClipboard {
+                            id: request,
+                            has_only,
+                        } => {
+                            let text = clipboard.text();
+                            let answer = components::ClipboardAnswer {
+                                has: text.is_some(),
+                                text: text.filter(|_| !has_only),
+                                ..Default::default()
+                            };
+                            self.answer_clipboard(*request, answer);
+                        }
+                        Command::ReadClipboardImage { id: request, .. }
+                        | Command::ReadClipboardFiles { id: request } => {
+                            self.answer_clipboard(*request, components::ClipboardAnswer::default());
+                        }
+                        _ => {}
+                    }
                     continue;
                 }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {

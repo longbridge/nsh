@@ -108,6 +108,8 @@ impl Platform {
             data_dir: None,
             storage: None,
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

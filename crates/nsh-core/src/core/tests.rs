@@ -6790,6 +6790,41 @@ mod components {
         assert_eq!(shown.last().unwrap(), "pasted hello");
     }
 
+    #[test]
+    fn a_clipboard_of_the_embedders_own_answers_in_place_of_the_platform() {
+        use crate::clipboard::{ClipboardBackend, MemoryClipboard};
+        let clipboard = std::sync::Arc::new(MemoryClipboard::new(Some("hello".into())));
+        let mut c = core();
+        c.set_clipboard(Some(clipboard.clone()));
+        c.mount_root(&crate::ui::Root::new::<Paster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        // Nothing goes to the platform: the reads are answered from it.
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        assert!(
+            !items.iter().any(|i| matches!(
+                i,
+                MountItem::Command {
+                    command: Command::ReadClipboard { .. },
+                    ..
+                }
+            )),
+            "{items:?}"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted h")));
+        assert_eq!(shown.last().unwrap(), "pasted hello");
+        clipboard.set_text(None);
+        assert_eq!(clipboard.text(), None);
+    }
+
     /// Pastes the clipboard's image and files when pressed.
     #[component]
     fn ImagePaster() -> impl IntoElement {

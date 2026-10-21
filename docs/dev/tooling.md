@@ -400,8 +400,11 @@ then waits until neither a batch came nor a native animation ran for 100 ms (2 s
 finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
 test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
-`runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (clipboard,
-locale, reduced motion, safe area).
+`runFor` waits, and `fastForward` and `setSystemTime` fail. `open`'s locale, reduced motion and safe area reach the
+host in the test's setup (`TestEnvironment`, `DevServer::set_test_environment`) and its engine pins them
+(`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports); its clipboard is the
+test's (`EngineConfig::clipboard`: the core serves the app's clipboard commands from a `ClipboardBackend`, here a
+`MemoryClipboard` the agent's model keeps, which `app.clipboard()` reads), so the machine's is never touched.
 
 Routes and storage reach the host through the dev server (`HostOptions`, `DevServer::set_test_storage` and
 `set_test_network`). Before the first bundle, the server sends the test host a `ServerMessage::TestSetup` with the

@@ -414,6 +414,8 @@ impl Run {
             data_dir,
             storage: None,
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         let sink = Sink {
             batches: tx,

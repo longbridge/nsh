@@ -139,6 +139,8 @@ impl Host {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         let density = self.density;
         let sink = Sink(self.clone());

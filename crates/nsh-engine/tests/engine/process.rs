@@ -91,6 +91,8 @@ mount(() => <Text>{{shown()}}</Text>);
             data_dir: Some(root.join("data")),
             storage: None,
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let data = root.join("data/com.example.process");

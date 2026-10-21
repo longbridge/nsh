@@ -155,6 +155,9 @@ struct Shared {
     test_storage: Mutex<Vec<(String, String)>>,
     /// Whether a test session's app is traced ([`DevServer::set_test_trace`]).
     test_trace: AtomicBool,
+    /// What a test session fixes of its app's environment
+    /// ([`DevServer::set_test_environment`]).
+    test_environment: Mutex<crate::protocol::TestEnvironment>,
     /// What answers a test session's app's requests.
     test_network: Mutex<Option<Arc<dyn TestNetwork>>>,
 }
@@ -215,6 +218,7 @@ impl DevServer {
             next_connection: AtomicU64::new(1),
             test_storage: Mutex::default(),
             test_trace: AtomicBool::new(false),
+            test_environment: Mutex::default(),
             test_network: Mutex::new(None),
         });
         let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
@@ -297,6 +301,16 @@ impl DevServer {
     /// (hosts connecting from now on).
     pub fn set_test_storage(&self, entries: Vec<(String, String)>) {
         *self.shared.test_storage.lock().expect("storage lock") = entries;
+    }
+
+    /// What a test session fixes of its app's environment, and its
+    /// clipboard (hosts connecting from now on).
+    pub fn set_test_environment(&self, environment: crate::protocol::TestEnvironment) {
+        *self
+            .shared
+            .test_environment
+            .lock()
+            .expect("environment lock") = environment;
     }
 
     /// Traces a test session's app (`nsh test --trace`; hosts connecting
@@ -610,7 +624,20 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         // Before the first bundle: what the app starts with.
         let storage = shared.test_storage.lock().expect("storage lock").clone();
         let trace = shared.test_trace.load(Ordering::Relaxed);
-        send(&mut socket, &ServerMessage::TestSetup { storage, trace }).await?;
+        let environment = shared
+            .test_environment
+            .lock()
+            .expect("environment lock")
+            .clone();
+        send(
+            &mut socket,
+            &ServerMessage::TestSetup {
+                storage,
+                trace,
+                environment,
+            },
+        )
+        .await?;
     }
     // The app's requests the test answers, by id: what cancels them.
     let fetches: Arc<Mutex<Cancels>> = Arc::default();

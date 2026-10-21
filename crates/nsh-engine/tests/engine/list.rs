@@ -116,6 +116,8 @@ fn start(app: &str) -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) 
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     (engine, rx, dir)

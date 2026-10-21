@@ -239,6 +239,8 @@ impl AppView {
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
             clock: Default::default(),
+            pinned: Default::default(),
+            clipboard: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface

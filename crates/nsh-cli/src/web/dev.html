@@ -178,7 +178,7 @@
           break;
         case "test_setup":
           player.onTestSend = send;
-          player.testSetup(message.storage, message.trace);
+          player.testSetup(message.storage, message.trace, message.environment);
           break;
         case "fetch":
           player.testFetchReply(message.id, message.reply);

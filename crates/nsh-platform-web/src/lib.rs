@@ -548,6 +548,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         })),
         storage: Some(std::sync::Arc::new(storage)),
         clock: Default::default(),
+        pinned: Default::default(),
+        clipboard: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
@@ -836,9 +838,10 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
 }
 
 /// What the test sets the app up with (JSON `{"storage": [[key, value], …],
-/// "trace": bool}`, a `nsh_dev::protocol::ServerMessage::TestSetup`'s
-/// fields, `len` bytes at `ptr`): the storage it starts with, and whether
-/// it traces the app; its requests, and a traced app's batches, go to the
+/// "trace": bool, "environment": {…}}`, a
+/// `nsh_dev::protocol::ServerMessage::TestSetup`'s fields, `len` bytes at
+/// `ptr`): the storage it starts with, whether it traces the app, and what
+/// it fixes of the environment and the clipboard; its requests, and a traced app's batches, go to the
 /// test over the page's socket from then on.
 ///
 /// # Safety
@@ -853,11 +856,13 @@ pub unsafe extern "C" fn nsh_test_setup(ptr: *const u8, len: usize) {
     let storage: Vec<(String, String)> =
         serde_json::from_value(setup["storage"].take()).unwrap_or_default();
     let trace = setup["trace"].as_bool().unwrap_or(false);
+    let environment = serde_json::from_value(setup["environment"].take()).unwrap_or_default();
     let model = TEST_MODEL.with(|m| m.borrow().clone());
     if let Some(model) = model {
         model.set_up(
             storage,
             trace,
+            environment,
             std::sync::Arc::new(|message: nsh_testing::agent::Outgoing| {
                 if let Ok(json) = serde_json::to_string(&message.into_message()) {
                     ffi::test_send(&json);
