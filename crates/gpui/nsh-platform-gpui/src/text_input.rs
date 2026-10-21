@@ -680,6 +680,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
         && let Some(input) = input_of(view)
     {
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = Some(view.clone()));
+        surface.wants_window_focus.set(true);
         input.focused.set(true);
         input.active.set(window_active(surface));
         input.wake_caret();

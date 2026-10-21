@@ -115,6 +115,10 @@ pub(crate) fn install(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if surface.wants_window_focus.take() && !focus.is_focused(window) {
+        let focus = focus.clone();
+        window.defer(cx, move |window, cx| window.focus(&focus, cx));
+    }
     // The focused field's caret shows while the surface has the window's
     // focus; text and input methods come through the input handler.
     let has_focus = window.is_window_active() && focus.is_focused(window);

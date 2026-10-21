@@ -84,6 +84,23 @@ function App() {
 mount(App);
 "#;
 
+/// A host view around a surface that holds the window's focus itself,
+/// as an embedding app's own widgets do.
+struct Host {
+    view: Entity<AppView>,
+    focus: gpui::FocusHandle,
+}
+
+impl gpui::Render for Host {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::{InteractiveElement as _, ParentElement as _};
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .child(self.view.clone())
+    }
+}
+
 /// The focused field's text.
 fn field_text(view: &Entity<AppView>, cx: &mut VisualTestContext) -> Option<String> {
     view.read_with(cx, |view, _| {
@@ -155,6 +172,7 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -202,4 +220,25 @@ fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppCont
     ime(&view, cx, |s| crate::text_input::char_input(s, "好"));
     assert_eq!(field_text(&view, cx).as_deref(), Some("held好"));
     wait_for(&view, cx, "compose ni|end|compose hao|change held好|end");
+}
+
+fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (host, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| AppView::new(AppOptions::default(), window, cx));
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Host { view, focus }
+    });
+    let view = host.read_with(cx, |host, _| host.view.clone());
+    view.update(cx, |view, _| {
+        view.register_component("test.square", Rc::new(|_| Box::new(Square)));
+        view.load(App::Js(Bundle::source(code)));
+    });
+    // The app's autoFocus field. The window's focus stays on the host's
+    // own element until the surface takes it.
+    wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "abc");
 }
