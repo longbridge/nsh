@@ -153,6 +153,62 @@ pub(crate) struct Chrome {
     entries: RefCell<Vec<Entry>>,
     /// The context menu to show once the batch is applied.
     popup: RefCell<Option<Popup>>,
+    /// The app's context menu tracking now, and the item a test chose
+    /// from it (`nsh test --target windows`), carried out once it closes.
+    #[cfg(feature = "dev")]
+    tracked_popup: RefCell<Option<Arc<[MenuItem]>>>,
+    #[cfg(feature = "dev")]
+    test_choice: Cell<Option<(u32, Option<MenuRole>)>>,
+}
+
+/// Chooses the item of the app's open context menu at the end of `path`
+/// (the labels of the submenus on the way, then its own), as a click on it
+/// does: the menu ends, then the item is carried out (`nsh test --target
+/// windows`).
+#[cfg(feature = "dev")]
+pub(crate) fn choose_open_menu(surface: &Surface, path: &[String]) -> Result<(), String> {
+    let items = surface
+        .chrome
+        .tracked_popup
+        .borrow()
+        .clone()
+        .ok_or("no context menu is open")?;
+    let mut level: &[MenuItem] = &items;
+    for (n, label) in path.iter().enumerate() {
+        let last = n + 1 == path.len();
+        let item = level
+            .iter()
+            .find(|item| match item {
+                MenuItem::Action(action) => last && action.label == *label,
+                MenuItem::Submenu { label: l, .. } => !last && l == label,
+                MenuItem::Separator => false,
+            })
+            .ok_or_else(|| format!("the menu has no item {label:?}"))?;
+        match item {
+            MenuItem::Action(action) => {
+                surface
+                    .chrome
+                    .test_choice
+                    .set(Some((action.id, action.role)));
+            }
+            MenuItem::Submenu { items, .. } => level = items,
+            MenuItem::Separator => {}
+        }
+    }
+    // SAFETY: ends the menu this thread tracks.
+    let _ = unsafe { EndMenu() };
+    Ok(())
+}
+
+/// Closes the app's open context menu with nothing chosen.
+#[cfg(feature = "dev")]
+pub(crate) fn close_open_menu(surface: &Surface) -> Result<(), String> {
+    if surface.chrome.tracked_popup.borrow().is_none() {
+        return Err("no context menu is open".into());
+    }
+    // SAFETY: ends the menu this thread tracks.
+    let _ = unsafe { EndMenu() };
+    Ok(())
 }
 
 fn top_level(hwnd: HWND) -> bool {
@@ -966,6 +1022,10 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         // The window must be in front for the menu to close when clicking
         // elsewhere.
         let _ = SetForegroundWindow(hwnd);
+        #[cfg(feature = "dev")]
+        if actions.is_empty() {
+            *surface.chrome.tracked_popup.borrow_mut() = Some(items.clone());
+        }
         let chosen = TrackPopupMenuEx(
             menu,
             (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN).0,
@@ -977,6 +1037,13 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
         let _ = DestroyMenu(menu);
         chosen.0 as usize
     };
+    #[cfg(feature = "dev")]
+    {
+        surface.chrome.tracked_popup.borrow_mut().take();
+        if let Some((id, role)) = surface.chrome.test_choice.take() {
+            choose(surface, id, role);
+        }
+    }
     if let Some(entry) = entries.get(chosen.wrapping_sub(1)).copied() {
         match actions.get((entry.id as usize).wrapping_sub(1)) {
             Some(action) => action(surface),

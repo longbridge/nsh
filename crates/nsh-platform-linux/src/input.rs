@@ -668,6 +668,8 @@ pub(crate) enum Simulated {
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
     Hover(f32, f32),
+    /// The secondary button pressed at `(x, y)` (a context menu).
+    ContextMenu(f32, f32),
 }
 
 /// Feeds a simulated pointer action through the same path as real input.
@@ -694,6 +696,9 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
         Simulated::Hover(x, y) => {
             hover(surface, x, y);
             hover_moved(surface, x, y, gdk::ModifierType::empty());
+        }
+        Simulated::ContextMenu(x, y) => {
+            context_menu(surface, x, y, gdk::ModifierType::empty());
         }
     }
 }

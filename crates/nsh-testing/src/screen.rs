@@ -95,6 +95,9 @@ pub struct Screen {
     /// The views under the mouse that care (`input::hoverable`), innermost
     /// first.
     hovered: Vec<NodeId>,
+    /// The context menu the app showed (`Menu.popup`), until it is chosen
+    /// from or closed.
+    menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
 }
 
 #[derive(Debug, Default)]
@@ -309,6 +312,11 @@ impl Screen {
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
             Command::Back => self.back_asked = true,
+            Command::Desktop(desktop) => {
+                if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
+                    self.menu = Some(items.clone());
+                }
+            }
             Command::SetJsResponder { block } => {
                 self.js_block = *block;
                 self.js_grants.push(*block);
@@ -956,6 +964,22 @@ impl Screen {
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
         view.states = next;
         Some(next)
+    }
+
+    /// The context menu the app shows (`Menu.popup`), if one is open.
+    pub(crate) fn menu(&self) -> Option<&[nsh_core::desktop::MenuItem]> {
+        self.menu.as_deref()
+    }
+
+    /// The open context menu was chosen from or closed.
+    pub(crate) fn menu_closed(&mut self) {
+        self.menu = None;
+    }
+
+    /// The view a right click on `id` asks for a context menu: it, or the
+    /// nearest around it listening to `onContextMenu`.
+    pub(crate) fn context_menu_target(&self, id: NodeId) -> Option<NodeId> {
+        self.up_to(id, |v| v.events.contains(EventKind::ContextMenu))
     }
 
     /// The app's keyboard shortcuts (`nsh/keymap`).

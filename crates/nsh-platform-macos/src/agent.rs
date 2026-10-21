@@ -200,6 +200,27 @@ impl Native for MacNative {
         true
     }
 
+    fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        self.activate();
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        self.on_main(move |_, window| {
+            synth::mouse(window, NSEventType::RightMouseDown, x, y, 1);
+            synth::mouse(window, NSEventType::RightMouseUp, x, y, 1);
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
+        let path = path.to_vec();
+        self.on_main(move |_, _| crate::chrome::choose_open_menu(&path))
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
+    fn close_menu(&self) -> Result<(), String> {
+        self.on_main(|_, _| crate::chrome::close_open_menu())
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
         // Straight to the surface's input: AppKit hands a posted mouse

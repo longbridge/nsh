@@ -282,6 +282,20 @@ pub enum TestStep {
         /// The view.
         selector: String,
     },
+    /// The mouse's secondary button over the view (`app.rightClick`).
+    RightClick {
+        /// The view.
+        selector: String,
+    },
+    /// The open context menu's actions (`app.menu`): `null` when none is.
+    Menu,
+    /// Chooses the open context menu's action (`app.chooseMenuItem`).
+    ChooseMenuItem {
+        /// Its label (a submenu's: `"Share > Mail"`).
+        label: String,
+    },
+    /// Closes the open context menu with nothing chosen (`app.closeMenu`).
+    CloseMenu,
     /// Presses a key with its modifiers, as `nsh/keymap` names it
     /// (`app.keyboard.press`).
     PressKey {
@@ -408,6 +422,10 @@ pub enum SceneQuery {
     },
     /// The oldest dialog was answered.
     Answered,
+    /// The context menu the app shows (`Menu.popup`): its items, or `null`.
+    Menu,
+    /// The open context menu was chosen from or closed.
+    MenuClosed,
     /// The app's storage: its entries.
     Storage,
     /// View `id`'s bounds on screen, in points from the viewport's top left.

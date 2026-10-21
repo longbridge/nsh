@@ -234,6 +234,10 @@ pub trait Scene: Send + Sync {
     fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String>;
     /// The oldest dialog was answered.
     fn answered(&self) -> Result<(), String>;
+    /// The context menu the app shows (`Menu.popup`), if one is open.
+    fn menu(&self) -> Result<Option<Vec<nsh_core::desktop::MenuItem>>, String>;
+    /// The open context menu was chosen from or closed.
+    fn menu_closed(&self) -> Result<(), String>;
     /// The app's storage's entries.
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String>;
 }
@@ -307,6 +311,13 @@ impl Scene for Model {
         self.lock().screen.answered();
         Ok(())
     }
+    fn menu(&self) -> Result<Option<Vec<nsh_core::desktop::MenuItem>>, String> {
+        Ok(self.lock().screen.menu().map(<[_]>::to_vec))
+    }
+    fn menu_closed(&self) -> Result<(), String> {
+        self.lock().screen.menu_closed();
+        Ok(())
+    }
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Ok(self.storage_entries())
     }
@@ -314,6 +325,81 @@ impl Scene for Model {
 
 /// `pick` as a [`SceneQuery::Pick`]'s answer: `{"one": id}`, `"none"`,
 /// `{"many": n}` or `"disabled"`.
+/// A context menu's item as a scene's answer carries it.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum MenuValue {
+    Separator,
+    Action {
+        id: u32,
+        label: String,
+        enabled: bool,
+        checked: Option<bool>,
+    },
+    Submenu {
+        label: String,
+        enabled: bool,
+        items: Vec<MenuValue>,
+    },
+}
+
+impl MenuValue {
+    fn into_item(self) -> nsh_core::desktop::MenuItem {
+        use nsh_core::desktop::{MenuAction, MenuItem};
+        match self {
+            MenuValue::Separator => MenuItem::Separator,
+            MenuValue::Action {
+                id,
+                label,
+                enabled,
+                checked,
+            } => MenuItem::Action(MenuAction {
+                id,
+                label,
+                shortcut: None,
+                enabled,
+                checked,
+                role: None,
+            }),
+            MenuValue::Submenu {
+                label,
+                enabled,
+                items,
+            } => MenuItem::Submenu {
+                label,
+                enabled,
+                items: items.into_iter().map(MenuValue::into_item).collect(),
+            },
+        }
+    }
+}
+
+/// `items` as a scene's answer carries them.
+fn menu_value(items: Vec<nsh_core::desktop::MenuItem>) -> Vec<MenuValue> {
+    use nsh_core::desktop::MenuItem;
+    items
+        .into_iter()
+        .map(|item| match item {
+            MenuItem::Separator => MenuValue::Separator,
+            MenuItem::Action(action) => MenuValue::Action {
+                id: action.id,
+                label: action.label,
+                enabled: action.enabled,
+                checked: action.checked,
+            },
+            MenuItem::Submenu {
+                label,
+                enabled,
+                items,
+            } => MenuValue::Submenu {
+                label,
+                enabled,
+                items: menu_value(items),
+            },
+        })
+        .collect()
+}
+
 fn pick_value(pick: Pick) -> serde_json::Value {
     match pick {
         Pick::One(id) => serde_json::json!({ "one": id }),
@@ -368,6 +454,8 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::Horizontal { id } => model.horizontal(*id).map(Value::from),
             SceneQuery::InputId { selector } => model.input_id(selector).map(Value::from),
             SceneQuery::Answered => model.answered().map(|()| Value::Null),
+            SceneQuery::Menu => model.menu().and_then(|m| json(to_value(m.map(menu_value)))),
+            SceneQuery::MenuClosed => model.menu_closed().map(|()| Value::Null),
             SceneQuery::Storage => json(to_value(model.storage_entries())),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
@@ -471,6 +559,14 @@ impl Scene for RemoteScene {
         self.query::<serde_json::Value>(SceneQuery::Answered)
             .map(drop)
     }
+    fn menu(&self) -> Result<Option<Vec<nsh_core::desktop::MenuItem>>, String> {
+        let menu: Option<Vec<MenuValue>> = self.query(SceneQuery::Menu)?;
+        Ok(menu.map(|items| items.into_iter().map(MenuValue::into_item).collect()))
+    }
+    fn menu_closed(&self) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::MenuClosed)
+            .map(drop)
+    }
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         self.query(SceneQuery::Storage)
     }
@@ -519,6 +615,22 @@ pub trait Native: Send + Sync {
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         let _ = at;
         Err("this platform has no mouse".into())
+    }
+    /// The mouse's secondary button pressed and released at `at` (a
+    /// context menu). Only asked when the platform has a mouse.
+    fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("this platform has no mouse".into())
+    }
+    /// Chooses the action of the open context menu (`Menu.popup`) at the
+    /// end of `path`: the labels of the submenus on the way, then its own.
+    fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
+        let _ = path;
+        Err("this platform shows no context menus to choose from".into())
+    }
+    /// Closes the open context menu with nothing chosen.
+    fn close_menu(&self) -> Result<(), String> {
+        Err("this platform shows no context menus to close".into())
     }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
     /// `mod` the platform's command key), on a hardware keyboard: the app's
@@ -751,6 +863,14 @@ impl Agent {
             TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
             TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
             TestStep::Hover { selector } => done(self.hover(&selector)),
+            TestStep::RightClick { selector } => done(self.right_click(&selector)),
+            TestStep::Menu => {
+                let menu = self.scene.menu()?;
+                serde_json::to_value(menu.map(|m| crate::menu::entries(&m)))
+                    .map_err(|e| e.to_string())
+            }
+            TestStep::ChooseMenuItem { label } => done(self.choose_menu_item(&label)),
+            TestStep::CloseMenu => done(self.close_menu()),
             TestStep::PressKey { keys } => {
                 done(self.native.press_keys(&keys).and_then(|()| self.settled()))
             }
@@ -831,6 +951,8 @@ impl Agent {
             SceneQuery::Horizontal { id } => scene.horizontal(id).map(Value::from),
             SceneQuery::InputId { selector } => scene.input_id(&selector).map(Value::from),
             SceneQuery::Answered => scene.answered().map(|()| Value::Null),
+            SceneQuery::Menu => scene.menu().and_then(|m| json(to_value(m.map(menu_value)))),
+            SceneQuery::MenuClosed => scene.menu_closed().map(|()| Value::Null),
             SceneQuery::Storage => scene.storage().and_then(|e| json(to_value(e))),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
@@ -1048,6 +1170,36 @@ impl Agent {
             Point::new(Points(0.0), Points(distance))
         };
         self.native.scroll(at, delta);
+        self.settled()
+    }
+
+    fn right_click(&self, selector: &str) -> Result<(), String> {
+        if !self.native.mouse() {
+            return Err(
+                "this platform has no mouse to right-click with: run the test headless \
+                        as a desktop (`platform`), or on a desktop or the web"
+                    .into(),
+            );
+        }
+        let (_, at) = self.find(selector, "view", PickTarget::View)?;
+        self.native.right_click(at)?;
+        self.settled()
+    }
+
+    fn choose_menu_item(&self, label: &str) -> Result<(), String> {
+        let items = self.scene.menu()?.ok_or("no context menu is open")?;
+        crate::menu::find(&items, label)?;
+        self.native.choose_menu_item(&crate::menu::path(label))?;
+        self.scene.menu_closed()?;
+        self.settled()
+    }
+
+    fn close_menu(&self) -> Result<(), String> {
+        if self.scene.menu()?.is_none() {
+            return Err("no context menu is open".into());
+        }
+        self.native.close_menu()?;
+        self.scene.menu_closed()?;
         self.settled()
     }
 

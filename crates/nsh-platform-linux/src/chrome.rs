@@ -69,6 +69,10 @@ pub(crate) struct Chrome {
     controls: RefCell<Option<(gtk::WindowControls, gtk::WindowControls)>>,
     /// The application menu.
     menu: RefCell<Option<Arc<[MenuItem]>>>,
+    /// The app's context menu shown, and its items (`nsh test --target
+    /// linux` chooses from it).
+    #[cfg(feature = "dev")]
+    open_popup: RefCell<Option<(Arc<[MenuItem]>, gtk::PopoverMenu)>>,
     /// The menu bar shown.
     bar: RefCell<Option<gtk::PopoverMenuBar>>,
     /// The application menu's shortcuts (on the window).
@@ -687,6 +691,56 @@ fn show_menu_bar(surface: &Surface) {
 }
 
 /// Shows a context menu at `at` (root coordinates) or at the pointer.
+/// Chooses the item of the app's open context menu at the end of `path`
+/// (the labels of the submenus on the way, then its own), as a click on it
+/// does: the item is carried out and the menu closes (`nsh test --target
+/// linux`).
+#[cfg(feature = "dev")]
+pub(crate) fn choose_open_menu(surface: &Rc<Surface>, path: &[String]) -> Result<(), String> {
+    let (items, menu) = surface
+        .chrome
+        .open_popup
+        .borrow()
+        .clone()
+        .ok_or("no context menu is open")?;
+    let mut level: &[MenuItem] = &items;
+    let mut chosen = None;
+    for (n, label) in path.iter().enumerate() {
+        let last = n + 1 == path.len();
+        let item = level
+            .iter()
+            .find(|item| match item {
+                MenuItem::Action(action) => last && action.label == *label,
+                MenuItem::Submenu { label: l, .. } => !last && l == label,
+                MenuItem::Separator => false,
+            })
+            .ok_or_else(|| format!("the menu has no item {label:?}"))?;
+        match item {
+            MenuItem::Action(action) => chosen = Some((action.id, action.role)),
+            MenuItem::Submenu { items, .. } => level = items,
+            MenuItem::Separator => {}
+        }
+    }
+    let (id, role) = chosen.ok_or("no item chosen")?;
+    // What the item's action does.
+    choose(surface, id, role);
+    menu.popdown();
+    Ok(())
+}
+
+/// Closes the app's open context menu with nothing chosen.
+#[cfg(feature = "dev")]
+pub(crate) fn close_open_menu(surface: &Surface) -> Result<(), String> {
+    let (_, menu) = surface
+        .chrome
+        .open_popup
+        .borrow()
+        .clone()
+        .ok_or("no context menu is open")?;
+    menu.popdown();
+    Ok(())
+}
+
 fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
     let Some(window) = window(surface) else {
         return;
@@ -705,6 +759,10 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
         .or_else(|| crate::input::last_pointer(surface))
         .unwrap_or_default();
     let menu = gtk::PopoverMenu::from_model(Some(&model));
+    #[cfg(feature = "dev")]
+    {
+        *surface.chrome.open_popup.borrow_mut() = Some((items.into(), menu.clone()));
+    }
     menu.set_parent(&surface.root);
     menu.set_has_arrow(false);
     menu.set_halign(gtk::Align::Start);
@@ -719,6 +777,8 @@ fn popup(surface: &Rc<Surface>, items: &[MenuItem], at: Option<(f32, f32)>) {
         glib::idle_add_local_once(move || {
             menu.unparent();
             if let Some(surface) = weak.upgrade() {
+                #[cfg(feature = "dev")]
+                surface.chrome.open_popup.borrow_mut().take();
                 surface.event(
                     ROOT_ID,
                     EventKind::Menu,

@@ -241,6 +241,11 @@ and more than one fails the step; a press whose match, or a view between it and 
   out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
   (`Screen::set_hovered`), `input::hover_changes` says which hear `HoverOut` and `HoverIn` (with their `HOVERED` state
   reported, `EngineControl::set_states`), and the hovered views hear `HoverMove`;
+- `right_click`, `choose_menu_item`, `close_menu` (`headless/menus.rs`): on a desktop environment the match, or the
+  nearest view around it listening, hears `ContextMenu`; the menu the app then shows (`Menu.popup`,
+  `DesktopCommand::PopupMenu`) is the model's (`Screen::menu`, read through `menu.rs`: its actions by label, a
+  submenu's as `"Share > Mail"`) until it is chosen from (the root hears `Menu` with the action's id, then
+  `Menu { closed }`) or closed;
 - `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh/keymap` parses it for the
   environment's OS; on a desktop environment (`open`'s `platform`: `Environment::desktop`) the root's keymap
   (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
@@ -372,7 +377,12 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
 (`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
-the mouse's hover (`hover`, when `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
+the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
+(`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the
+agent's calls and the app's batches go on while it tracks; Windows' `TrackPopupMenuEx` ended with `EndMenu` and the
+chosen item carried out after; GTK's popover with the item's action's work done and the popover popped down; GPUI's
+menus of its own; the web, whose `Menu.popup` is the app's own UI, has none), the mouse's hover (`hover`, when
+`Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
 moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
 `keymap::Key::virtual_key`, the web's CDP key events, Linux's bindings fired as its shortcut controller would, as GTK
 takes no made-up keys; the phones, without app shortcuts, refuse them),

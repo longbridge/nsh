@@ -35,6 +35,7 @@ mod driver;
 // agent's model runs (the web's page).
 #[cfg(not(target_arch = "wasm32"))]
 mod headless;
+pub mod menu;
 #[cfg(feature = "js")]
 mod module;
 #[cfg(feature = "js")]

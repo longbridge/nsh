@@ -496,6 +496,18 @@ pub struct DragBy {
     pub y: Points,
 }
 
+/// An action of the context menu the app shows (`app.menu()`).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct MenuEntry {
+    /// Its label; a submenu's actions after the submenu's (`"Share > Mail"`).
+    pub label: String,
+    /// It can be chosen.
+    pub enabled: bool,
+    /// Its check mark, when it is a checkable item.
+    #[prop(skip_none)]
+    pub checked: Option<bool>,
+}
+
 /// What [`WaitOptions`] waits for.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum WaitState {
@@ -1055,6 +1067,26 @@ impl App {
         step(&this, move |app| app.drag(&selector, by)).await
     }
 
+    /// The mouse's secondary button over the middle of what `selector`
+    /// names: it, or the nearest view around it listening, hears
+    /// `onContextMenu`, whose handler shows a menu (`Menu.popup`: read it
+    /// with `menu()`). Desktops and the web only: a phone has no mouse.
+    pub async fn right_click(this: Instance<Self>, selector: String) -> Result<(), String> {
+        step(&this, move |app| app.right_click(&selector)).await
+    }
+
+    /// Chooses the open context menu's action labelled `label` (a
+    /// submenu's: `"Share > Mail"`), as a click on it: the app hears
+    /// `onMenu`, then the menu closes.
+    pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), String> {
+        step(&this, move |app| app.choose_menu_item(&label)).await
+    }
+
+    /// Closes the open context menu with nothing chosen, as Escape does.
+    pub async fn close_menu(this: Instance<Self>) -> Result<(), String> {
+        step(&this, move |app| app.close_menu()).await
+    }
+
     /// Moves the mouse over the middle of what `selector` names: the views
     /// under it hear `onHoverIn` (and the ones it left `onHoverOut`), take
     /// their `hover:` styles and hear `onHoverMove`. Desktops and the web
@@ -1197,6 +1229,24 @@ impl App {
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
+    }
+
+    /// The actions of the context menu the app shows (`Menu.popup`), a
+    /// submenu's after its label (`"Share > Mail"`); `null` when none is
+    /// open.
+    pub fn menu(&self) -> Result<Option<Vec<MenuEntry>>, String> {
+        self.with(|app| {
+            Ok(app.menu()?.map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|e| MenuEntry {
+                        label: e.label,
+                        enabled: e.enabled,
+                        checked: e.checked,
+                    })
+                    .collect()
+            }))
+        })
     }
 
     /// The app's keyboard, whose keys the test presses.

@@ -31,6 +31,7 @@ mod animation;
 mod keyboard;
 #[cfg(feature = "live")]
 mod live;
+mod menus;
 mod net;
 mod pointer;
 mod stub;

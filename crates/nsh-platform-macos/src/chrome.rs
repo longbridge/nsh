@@ -330,15 +330,25 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
         DesktopCommand::PopupMenu { items, at } => {
             // The menu tracks the mouse in a loop of its own: not while the
-            // batch is applied.
+            // batch is applied. From the run loop, not the main queue: a
+            // main-queue block would hold the queue while the menu tracks,
+            // and the app's batches (which come through it) would wait.
             let key = surface.key();
             let items = items.clone();
             let at = at.map(|p| (p.x.0, p.y.0));
-            DispatchQueue::main().exec_async(move || {
+            let block = block2::RcBlock::new(move || {
                 if let Some(surface) = Surface::with_key(key) {
                     popup(&surface, &items, at);
                 }
             });
+            // SAFETY: the common modes' name is a constant of Foundation's.
+            let modes = objc2_foundation::NSArray::from_slice(&[unsafe {
+                objc2_foundation::NSRunLoopCommonModes
+            }]);
+            // SAFETY: the block runs on the main thread, where it was made.
+            unsafe {
+                objc2_foundation::NSRunLoop::mainRunLoop().performInModes_block(&modes, &block)
+            };
         }
     }
 }
@@ -711,6 +721,51 @@ fn restore_menu(app: &NSApplication) {
     }
 }
 
+#[cfg(feature = "dev")]
+thread_local! {
+    /// The context menu tracking now, for the test agent to choose from
+    /// ([`choose_open_menu`]).
+    static OPEN_MENU: std::cell::RefCell<Option<Retained<NSMenu>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Chooses the item of the open context menu at the end of `path` (the
+/// labels of the submenus on the way, then its own), as a click on it
+/// does, and closes the menu (`nsh test --target macos`).
+#[cfg(feature = "dev")]
+pub(crate) fn choose_open_menu(path: &[String]) -> Result<(), String> {
+    let root = OPEN_MENU
+        .with(|open| open.borrow().clone())
+        .ok_or("no context menu is open")?;
+    let mut menu = root.clone();
+    for (n, label) in path.iter().enumerate() {
+        let index = menu.indexOfItemWithTitle(&NSString::from_str(label));
+        if index < 0 {
+            return Err(format!("the menu has no item {label:?}"));
+        }
+        if n + 1 == path.len() {
+            menu.performActionForItemAtIndex(index);
+        } else {
+            menu = menu
+                .itemAtIndex(index)
+                .and_then(|item| item.submenu())
+                .ok_or_else(|| format!("{label:?} opens no submenu"))?;
+        }
+    }
+    root.cancelTracking();
+    Ok(())
+}
+
+/// Closes the open context menu with nothing chosen.
+#[cfg(feature = "dev")]
+pub(crate) fn close_open_menu() -> Result<(), String> {
+    let root = OPEN_MENU
+        .with(|open| open.borrow().clone())
+        .ok_or("no context menu is open")?;
+    root.cancelTracking();
+    Ok(())
+}
+
 /// Shows a context menu at `at` (root coordinates) or at the mouse.
 fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>) {
     let root = surface.root.ns();
@@ -724,8 +779,12 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
             root.convertPoint_fromView(in_window, None)
         }
     };
+    #[cfg(feature = "dev")]
+    OPEN_MENU.with(|open| *open.borrow_mut() = Some(menu.clone()));
     // Returns once the menu closed (the chosen item's action sent).
     menu.popUpMenuPositioningItem_atLocation_inView(None, location, Some(root));
+    #[cfg(feature = "dev")]
+    OPEN_MENU.with(|open| open.borrow_mut().take());
     // A menu opened during a press (`onPressDown`, a long press) took its
     // release: the press ends here, or the view would stay pressed.
     crate::input::cancel_pointer(surface);

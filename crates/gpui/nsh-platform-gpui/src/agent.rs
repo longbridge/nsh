@@ -231,6 +231,23 @@ impl Native for GpuiNative {
         true
     }
 
+    fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        // The secondary button.
+        self.click(at, CLICK, 1);
+        Ok(())
+    }
+
+    fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
+        let path = path.to_vec();
+        self.with_surface(move |surface| crate::chrome::choose_menu_path(surface, &path))
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
+    fn close_menu(&self) -> Result<(), String> {
+        self.with_surface(|surface| crate::chrome::close_menu(surface))
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         self.mouse(PointerKind::Move, at, 0);
         Ok(())

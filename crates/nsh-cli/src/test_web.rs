@@ -340,6 +340,24 @@ impl Native for WebNative {
         true
     }
 
+    fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        self.mouse("mouseMoved", at, 0);
+        for kind in ["mousePressed", "mouseReleased"] {
+            self.call(
+                "Input.dispatchMouseEvent",
+                json!({
+                    "type": kind,
+                    "x": at.x.0,
+                    "y": at.y.0,
+                    "button": "right",
+                    "buttons": if kind == "mousePressed" { 2 } else { 0 },
+                    "clickCount": 1,
+                }),
+            );
+        }
+        Ok(())
+    }
+
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         // From next to it, as a mouse arrives: the browser reports no move
         // to where the mouse already is (scrolling into view can leave it

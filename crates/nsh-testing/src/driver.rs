@@ -28,6 +28,9 @@ pub(crate) trait Driver: Send {
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
     fn press_key(&mut self, keys: &str) -> Result<(), String>;
     fn hover(&mut self, selector: &str) -> Result<(), String>;
+    fn right_click(&mut self, selector: &str) -> Result<(), String>;
+    fn choose_menu_item(&mut self, label: &str) -> Result<(), String>;
+    fn close_menu(&mut self) -> Result<(), String>;
     fn back(&mut self) -> Result<(), String>;
     fn wait(&mut self, time: Duration) -> Result<(), String>;
     fn wait_for_within(&mut self, selector: &str, timeout: Duration) -> Result<(), String>;
@@ -47,6 +50,8 @@ pub(crate) trait Driver: Send {
     fn shows(&mut self, selector: &str) -> Result<bool, String>;
     fn value(&mut self, selector: &str) -> Result<Option<String>, String>;
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String>;
+    /// The open context menu's actions, `None` when none is open.
+    fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String>;
     fn clipboard(&mut self) -> Result<Option<String>, String>;
     /// A picture of the app's window, as a PNG.
     fn screenshot(&mut self) -> Result<Vec<u8>, String>;
@@ -87,6 +92,15 @@ impl Driver for Headless {
     }
     fn hover(&mut self, selector: &str) -> Result<(), String> {
         Headless::hover(self, selector)
+    }
+    fn right_click(&mut self, selector: &str) -> Result<(), String> {
+        Headless::right_click(self, selector)
+    }
+    fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {
+        Headless::choose_menu_item(self, label)
+    }
+    fn close_menu(&mut self) -> Result<(), String> {
+        Headless::close_menu(self)
     }
     fn back(&mut self) -> Result<(), String> {
         Headless::back(self)
@@ -158,6 +172,10 @@ impl Driver for Headless {
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.catch_up();
         Ok(self.screen().dialogs().to_vec())
+    }
+    fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String> {
+        self.catch_up();
+        Ok(Headless::menu(self))
     }
     fn clipboard(&mut self) -> Result<Option<String>, String> {
         self.catch_up();
@@ -233,6 +251,9 @@ fn step_name(step: &TestStep) -> Option<String> {
         }
         TestStep::PressKey { keys } => format!("keyboard.press({keys})"),
         TestStep::Hover { selector } => format!("hover({selector})"),
+        TestStep::RightClick { selector } => format!("rightClick({selector})"),
+        TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
+        TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::Back => "back".to_owned(),
         TestStep::Wait { ms } => format!("wait({ms})"),
         TestStep::WaitFor {
@@ -310,6 +331,19 @@ impl Driver for Remote {
         self.action(TestStep::Hover {
             selector: selector.into(),
         })
+    }
+    fn right_click(&mut self, selector: &str) -> Result<(), String> {
+        self.action(TestStep::RightClick {
+            selector: selector.into(),
+        })
+    }
+    fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {
+        self.action(TestStep::ChooseMenuItem {
+            label: label.into(),
+        })
+    }
+    fn close_menu(&mut self) -> Result<(), String> {
+        self.action(TestStep::CloseMenu)
     }
     fn back(&mut self) -> Result<(), String> {
         self.action(TestStep::Back)
@@ -392,6 +426,9 @@ impl Driver for Remote {
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.query(TestStep::Dialogs)
+    }
+    fn menu(&mut self) -> Result<Option<Vec<crate::menu::Entry>>, String> {
+        self.query(TestStep::Menu)
     }
     fn clipboard(&mut self) -> Result<Option<String>, String> {
         Err(headless_only("Reading the clipboard"))

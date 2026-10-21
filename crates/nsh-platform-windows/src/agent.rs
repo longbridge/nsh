@@ -179,6 +179,23 @@ impl Native for WindowsNative {
         true
     }
 
+    fn right_click(&self, at: Point<Points>) -> Result<(), String> {
+        // The secondary button.
+        self.click(at, CLICK, 1);
+        Ok(())
+    }
+
+    fn choose_menu_item(&self, path: &[String]) -> Result<(), String> {
+        let path = path.to_vec();
+        self.on_main(move |s| crate::chrome::choose_open_menu(s, &path))
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
+    fn close_menu(&self) -> Result<(), String> {
+        self.on_main(|s| crate::chrome::close_open_menu(s))
+            .unwrap_or_else(|| Err("the window is gone".to_owned()))
+    }
+
     fn hover(&self, at: Point<Points>) -> Result<(), String> {
         let (x, y) = (at.x.0, at.y.0);
         self.on_main(move |s| synth::pointer(s, PointerKind::Move, x, y, 0))
