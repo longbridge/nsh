@@ -119,7 +119,8 @@ impl Host {
         drop(self.engine.lock().expect("engine").take());
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
         *self.ui.lock().expect("ui") = UiAnimation::default();
-        let config = EngineConfig {
+        #[allow(unused_mut)]
+        let mut config = EngineConfig {
             app,
             viewport,
             trace: self.trace,
@@ -141,6 +142,14 @@ impl Host {
         };
         let density = self.density;
         let sink = Sink(self.clone());
+        // A test session's app: the test's storage and network.
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+            config.network = model.engine_network(config.network.take());
+            if let Some(storage) = model.engine_storage() {
+                config.storage = Some(storage);
+            }
+        }
         match Engine::start(config, move || AndroidTextEngine { density }, sink) {
             Ok(engine) => {
                 *self.answers.lock().expect("answers") = Some(engine.control());

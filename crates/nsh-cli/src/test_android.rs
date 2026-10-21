@@ -34,8 +34,8 @@ pub(crate) fn starter(work: &Path) -> anyhow::Result<StartHost> {
     let sdk = Arc::new(Sdk::find()?);
     let serial = crate::android::device(&sdk)?;
     crate::run::install_android_host(&sdk, &serial, work)?;
-    Ok(Arc::new(move |entry: &Path, _options: &HostOptions| {
-        start(&sdk, &serial, entry).map(|h| Box::new(h) as Box<dyn Host>)
+    Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
+        start(&sdk, &serial, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -107,8 +107,13 @@ impl Drop for DeviceHost {
 static NEXT_APP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Builds `entry`, serves it in a test session and starts the host on it.
-fn start(sdk: &Arc<Sdk>, serial: &str, entry: &Path) -> Result<DeviceHost, String> {
-    let server = crate::test_host::serve(entry)?;
+fn start(
+    sdk: &Arc<Sdk>,
+    serial: &str,
+    entry: &Path,
+    options: &HostOptions,
+) -> Result<DeviceHost, String> {
+    let server = crate::test_host::serve(entry, options)?;
     let port = format!("tcp:{}", server.local_addr().port());
     let host = DeviceHost {
         server,

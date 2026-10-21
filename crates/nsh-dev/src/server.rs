@@ -21,8 +21,8 @@ use axum::{
 use tokio::sync::broadcast;
 
 use crate::protocol::{
-    BundleFormat, ClientMessage, HostPlatform, LogLevel, PROTOCOL_VERSION, ServerMessage,
-    StepOutcome, TestStep, WS_PATH,
+    BundleFormat, ClientMessage, FetchReply, HostPlatform, LogLevel, PROTOCOL_VERSION,
+    ServerMessage, StepOutcome, TestNetwork, TestStep, WS_PATH,
 };
 
 /// What a dev host did, for the server's owner to show ([`DevServer::start`]).
@@ -142,7 +142,14 @@ struct Shared {
     steps: Mutex<std::collections::HashMap<u64, (u64, std::sync::mpsc::Sender<StepOutcome>)>>,
     next_step: AtomicU64,
     next_connection: AtomicU64,
+    /// What a test session's app starts with: its storage's entries.
+    test_storage: Mutex<Vec<(String, String)>>,
+    /// What answers a test session's app's requests.
+    test_network: Mutex<Option<Arc<dyn TestNetwork>>>,
 }
+
+/// What cancels the test's answers to requests, by id.
+type Cancels = std::collections::HashMap<u64, Box<dyn FnOnce() + Send>>;
 
 /// An id for this run of the server, different from earlier runs' (the
 /// clock and the process).
@@ -195,6 +202,8 @@ impl DevServer {
             steps: Mutex::default(),
             next_step: AtomicU64::new(1),
             next_connection: AtomicU64::new(1),
+            test_storage: Mutex::default(),
+            test_network: Mutex::new(None),
         });
         let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
         let addr = listener.local_addr()?;
@@ -270,6 +279,18 @@ impl DevServer {
     /// need ([`DevServer::step`]).
     pub fn test_session(&self) {
         self.shared.test.store(true, Ordering::Relaxed);
+    }
+
+    /// The storage a test session's app starts with, in place of its own
+    /// (hosts connecting from now on).
+    pub fn set_test_storage(&self, entries: Vec<(String, String)>) {
+        *self.shared.test_storage.lock().expect("storage lock") = entries;
+    }
+
+    /// What answers a test session's app's requests: without one, the
+    /// hosts make them themselves.
+    pub fn set_test_network(&self, network: Arc<dyn TestNetwork>) {
+        *self.shared.test_network.lock().expect("network lock") = Some(network);
     }
 
     /// Whether a host that takes test steps is connected.
@@ -557,8 +578,15 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
     let _connection = Connection::new(&shared, &device, build);
     // A host taking a test session's steps: steps reach it through `steps`.
     let (step_tx, mut steps) = tokio::sync::mpsc::unbounded_channel();
-    let _tester =
-        (tests && shared.test.load(Ordering::Relaxed)).then(|| Tester::new(&shared, step_tx));
+    let testing = tests && shared.test.load(Ordering::Relaxed);
+    let _tester = testing.then(|| Tester::new(&shared, step_tx.clone()));
+    if testing {
+        // Before the first bundle: what the app starts with.
+        let storage = shared.test_storage.lock().expect("storage lock").clone();
+        send(&mut socket, &ServerMessage::TestSetup { storage }).await?;
+    }
+    // The app's requests the test answers, by id: what cancels them.
+    let fetches: Arc<Mutex<Cancels>> = Arc::default();
     if let Some(event) = latest {
         send_event(&mut socket, &shared, &mut host, &event).await?;
     }
@@ -583,6 +611,31 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
                     Ok(ClientMessage::StepDone { id, outcome }) => {
                         if let Some((_, waiting)) = shared.steps.lock().expect("steps lock").remove(&id) {
                             let _ = waiting.send(outcome);
+                        }
+                    }
+                    Ok(ClientMessage::Fetch { id, request }) => {
+                        let network = shared.test_network.lock().expect("network lock").clone();
+                        let replies = step_tx.clone();
+                        match network {
+                            None => {
+                                let _ = replies.send(ServerMessage::Fetch { id, reply: FetchReply::Pass });
+                            }
+                            Some(network) => {
+                                let done = fetches.clone();
+                                let cancel = network.fetch(request, Box::new(move |reply| {
+                                    if matches!(reply, FetchReply::Pass | FetchReply::End | FetchReply::Failed { .. }) {
+                                        done.lock().expect("fetches lock").remove(&id);
+                                    }
+                                    let _ = replies.send(ServerMessage::Fetch { id, reply });
+                                }));
+                                fetches.lock().expect("fetches lock").insert(id, cancel);
+                            }
+                        }
+                    }
+                    Ok(ClientMessage::FetchCancel { id }) => {
+                        let cancel = fetches.lock().expect("fetches lock").remove(&id);
+                        if let Some(cancel) = cancel {
+                            cancel();
                         }
                     }
                     _ => {}

@@ -33,8 +33,8 @@ pub(crate) fn starter(work: &Path) -> anyhow::Result<StartHost> {
     let step = crate::ui::Step::start("installing the development host in the simulator");
     simctl(&["install", &udid, &app.to_string_lossy()])?;
     step.finish();
-    Ok(Arc::new(move |entry: &Path, _options: &HostOptions| {
-        start(&udid, entry).map(|h| Box::new(h) as Box<dyn Host>)
+    Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
+        start(&udid, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -96,8 +96,8 @@ fn appearance(udid: &str) -> Result<String, String> {
 }
 
 /// Builds `entry`, serves it in a test session and launches the host on it.
-fn start(udid: &str, entry: &Path) -> Result<SimulatorHost, String> {
-    let server = crate::test_host::serve(entry)?;
+fn start(udid: &str, entry: &Path, options: &HostOptions) -> Result<SimulatorHost, String> {
+    let server = crate::test_host::serve(entry, options)?;
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     let data = crate::test_host::fresh_data_dir()?;
     let data_arg = data.to_string_lossy().into_owned();

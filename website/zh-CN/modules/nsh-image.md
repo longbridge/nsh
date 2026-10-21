@@ -29,12 +29,12 @@ const Image: ((props: ImageProps) => YNode) & {
 getSize(source: string | { uri: string }): Promise<ImageSize>;
 
 interface ImageSize {
-  width: number;   // 像素
+  width: number;   // 像素（SVG 为点）
   height: number;
 }
 ```
 
-加载图片，并 resolve 为它的像素尺寸（源图片的尺寸，而不是降采样后的副本）。加载的数据会保留在内存中，接下来显示它的 `<Image>` 不会再次下载。图片无法加载时 Promise 会 reject。
+加载图片，并 resolve 为它的像素尺寸（源图片的尺寸，而不是降采样后的副本；SVG 为它以点为单位的固有尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。加载的数据会保留在内存中，接下来显示它的 `<Image>` 不会再次下载。图片无法加载时 Promise 会 reject。
 
 ```tsx
 import { Image, signal } from "nsh";

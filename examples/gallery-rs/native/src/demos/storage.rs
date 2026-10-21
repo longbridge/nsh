@@ -4,9 +4,10 @@
 //! gallery's own last demo among them), all still there after a restart
 //! (as the TSX gallery's `demos/Storage.tsx`).
 
+use nsh_base::alert_dialog;
 use nsh_core::{
     storage::Storage,
-    ui::{AnyElement, Dialog, DialogButton, DialogButtonStyle, prelude::*},
+    ui::{AnyElement, prelude::*},
 };
 
 use crate::ui::{
@@ -114,9 +115,9 @@ fn note_card(
                 .items_center()
                 .gap(px(6.0))
                 .min_h(px(16.0))
-                .child(If::new(
+                .child(when(
                     move || saved.get() == NoteState::Saved,
-                    || icon(IconName::Check, 14.0, colors::UP),
+                    || icon().name(IconName::Check).size(14.0).tint(colors::UP),
                 ))
                 .child(text(hint).flex_1().text_size(px(12.0)).text_color(
                     move || match saved.get() {
@@ -145,7 +146,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
                 .sum::<usize>()
         })
     };
-    let rows = Each::new(
+    let rows = each(
         move || entries.get(),
         |entry: &Entry| entry.0.clone(),
         |entry, i| {
@@ -171,7 +172,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
         .title("Stored keys")
         .subtitle("get_all_keys() and each value's length")
         .child(view().child(rows))
-        .child(If::new(
+        .child(when(
             move || count() == 0,
             || caption("Nothing stored", None::<&str>),
         ))
@@ -230,29 +231,19 @@ pub(crate) fn StorageDemo() -> impl IntoElement {
     };
     let owner = Owner::current();
     let clear_all = move || {
-        let chosen = dialog(Dialog {
-            id: 0,
-            title: Some("Clear the storage?".into()),
-            message: Some(
-                "Removes every key the gallery keeps, the launch count and the note among them."
-                    .into(),
-            ),
-            buttons: vec![
-                DialogButton {
-                    text: "Cancel".into(),
-                    style: DialogButtonStyle::Cancel,
-                },
-                DialogButton {
-                    text: "Clear".into(),
-                    style: DialogButtonStyle::Destructive,
-                },
-            ],
-            cancelable: true,
-            sheet: false,
-        });
+        let chosen = alert_dialog()
+            .title("Clear the storage?")
+            .description(
+                "Removes every key the gallery keeps, the launch count and the note among them.",
+            )
+            .cancel("Cancel")
+            .destructive("Clear")
+            .close_on_escape(true)
+            .close_on_backdrop_press(true)
+            .show();
         owner.run(|| {
             spawn(async move {
-                if chosen.await != 1 {
+                if chosen.await != Ok(Some("Clear".into())) {
                     return;
                 }
                 Storage::clear();

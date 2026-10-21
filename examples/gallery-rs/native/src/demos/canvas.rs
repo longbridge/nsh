@@ -20,8 +20,8 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, Segment,
-    SegmentedEvent, Stat, Tone, caption, colors, hint, legend, lengths, pt, rect, segmented,
+    Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, Segment, Stat, Tone,
+    caption, colors, hint, legend, lengths, pt, rect, segmented,
 };
 
 /// A canvas font of the system family (TS `SANS(size, weight)`).
@@ -336,13 +336,13 @@ fn Dial() -> impl IntoElement {
             draw_dial(c, width, height, &needle, load.get())
         }))
         .child(
-            segmented(PRESETS.map(|(label, _)| Segment::new(label)), preset).on_event(
-                move |event: &SegmentedEvent| {
-                    let SegmentedEvent::Change(to) = *event;
+            segmented()
+                .options(PRESETS.map(|(label, _)| Segment::new(label)))
+                .selected(preset)
+                .on_change(move |&to: &u32| {
                     preset.set(to);
                     needle.spring(load_of(to) as f32, spring(140.0, 11.0));
-                },
-            ),
+                }),
         )
         .child(
             view()
@@ -1203,13 +1203,13 @@ fn Sketch() -> impl IntoElement {
 pub(crate) fn CanvasDemo() -> impl IntoElement {
     DemoPage::new()
         .columns(3)
-        .card(|| Dial::element(()))
-        .card(|| AreaChart::element(()))
-        .card(|| Ridgeline::element(()))
-        .card(|| DotMatrix::element(()))
-        .card(|| Dumbbell::element(()))
-        .card(|| Clock::element(()))
-        .card(|| Glyphs::element(()))
-        .card(|| Compositing::element(()))
-        .card(|| Sketch::element(()))
+        .card(dial)
+        .card(area_chart)
+        .card(ridgeline)
+        .card(dot_matrix)
+        .card(dumbbell)
+        .card(clock)
+        .card(glyphs)
+        .card(compositing)
+        .card(sketch)
 }

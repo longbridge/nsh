@@ -52,7 +52,7 @@ profiles and icons: [Packaging](./packaging.md#ios-devices).
 
 An existing iOS app can show NSH apps inside its own UI. An iOS app with Rust code links your crate and the
 `nsh-platform-ios` crate and shows your root in an `AppView` ([Embedding a Rust app](#embedding-a-rust-app)). A Swift
-app links `NativeShell.xcframework`, a static framework with a Swift module: you create an `NshAppView` (a `UIView`),
+app links `NativeShell.xcframework`, a framework with a Swift module: you create an `NshAppView` (a `UIView`),
 add it anywhere in your view hierarchy and load a TSX app or a signed package into it. Your native screens,
 navigation and the NSH app live side by side in one UIKit hierarchy.
 
@@ -107,14 +107,24 @@ From a checkout of NSH you can build just the frameworks:
 cargo xtask ios-embed    # writes dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework
 ```
 
-Each XCFramework has three arm64 slices: iOS devices, the iOS simulator (Apple silicon) and Mac Catalyst. The minimum
+The default build produces static frameworks. To build dynamic frameworks, use:
+
+```sh
+cargo xtask ios-embed --dynamic
+```
+
+Dynamic frameworks give the runtime its own library image and unwind table, supporting host apps that already link
+other Rust runtimes. Choose the Xcode embedding setting below to match the framework you build.
+
+By default, each XCFramework has three arm64 slices: iOS devices, the iOS simulator (Apple silicon) and Mac Catalyst. The minimum
 deployment target is iOS 15.0. The Swift module is compiled with library evolution, so apps built with other Swift
 compiler versions can import it, and the framework links everything it needs: you add nothing else.
 
 ## Add it to an Xcode project
 
 1. Drag `NativeShell.xcframework` (or `NativeShellDev.xcframework` for development builds) into the app target's
-   **Frameworks, Libraries, and Embedded Content**. It is a static framework, so choose **Do Not Embed**.
+   **Frameworks, Libraries, and Embedded Content**. Choose **Do Not Embed** for the default static frameworks,
+   or **Embed & Sign** for dynamic frameworks built with `--dynamic`.
 2. In Swift, `import NativeShell`.
 
 > [!TIP]

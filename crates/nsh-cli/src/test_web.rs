@@ -88,7 +88,7 @@ fn start(
     entry: &Path,
     options: &HostOptions,
 ) -> Result<WebHost, String> {
-    let server = Arc::new(crate::test_host::serve(entry)?);
+    let server = Arc::new(crate::test_host::serve(entry, options)?);
     server.serve_web(host.0.clone(), host.1.clone());
     let browser = {
         let mut running = running.lock().unwrap_or_else(|e| e.into_inner());

@@ -3,9 +3,9 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
-use nsh_base::{SafeAreaView, SafeAreaViewProps, dialog, nav_page};
+use nsh_base::{alert_dialog, dialog, nav_page, safe_area_view};
 use nsh_core::{
-    Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
+    ModalPresentation,
     ui::{AnyElement, Os, Screen, prelude::*},
 };
 
@@ -13,8 +13,8 @@ use crate::{
     nav,
     ui::{
         Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
-        Inset, MONO, PageHeader, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors,
-        header_style, hint, icon, motion, press_with, radius, tints, titled, toggle, with_header,
+        Inset, MONO, PageHeader, Section, Stat, Tone, appear, colors, hint, icon, motion, press,
+        radius, tints, titled, toggle, with_header,
     },
 };
 
@@ -33,10 +33,6 @@ fn Insets(cx: Scope<NoEvent>) -> impl IntoElement {
     view().flex_row().children(edges.map(|(edge, inset)| {
         Stat::new(edge, move || format!("{} pt", inset(cx.insets()).round())).width(0.25)
     }))
-}
-
-fn insets() -> AnyElement {
-    Insets::element(()).into_element()
 }
 
 /// Muted body text.
@@ -76,15 +72,15 @@ fn page(intro: &str, content: impl IntoIterator<Item = AnyElement>) -> AnyElemen
                 .p_4()
                 .pb(px(40.0))
                 .gap_4()
-                .child(appear(0).child(body(intro.to_owned()).px_1()))
+                .child(appear().index(0).child(body(intro.to_owned()).px_1()))
                 .child(
-                    appear(1).child(
+                    appear().index(1).child(
                         Section::new("Safe area")
                             .note("safeAreaInsets()")
                             .child(insets()),
                     ),
                 )
-                .child(appear(2).child(view().gap_4().children(content))),
+                .child(appear().index(2).child(view().gap_4().children(content))),
         )
         .into_element()
 }
@@ -138,11 +134,11 @@ fn transparent() -> Screen {
         nav_page()
             .title("Transparent")
             .header_transparent(true)
-            .header_style(header_style(
-                AdaptiveColor::TRANSPARENT,
-                colors::TEXT,
-                colors::TEXT,
-            )),
+            .header_style_with(|s| {
+                s.bg(AdaptiveColor::TRANSPARENT)
+                    .text_color(colors::TEXT)
+                    .tint_color(colors::TEXT)
+            }),
         || {
             PageHeader::new("Transparent")
                 .colors(colors::TEXT, colors::TEXT)
@@ -177,7 +173,7 @@ fn transparent() -> Screen {
                     .bg(tints::INFO),
             )
             .child(
-                appear(0).child(
+                appear().index(0).child(
                     title_block("headerTransparent", "Content under the header", 30.0)
                         .gap_3()
                         .child(body(
@@ -186,7 +182,7 @@ fn transparent() -> Screen {
                         )),
                 ),
             )
-            .child(appear(1).child(Inset::new().child(insets()))),
+            .child(appear().index(1).child(Inset::new().child(insets()))),
     )
 }
 
@@ -199,7 +195,7 @@ fn custom_header() -> Screen {
             .text_size(px(17.0))
             .font_weight(FontWeight::MEDIUM)
             .hit_slop(EdgeInsets::all(px(10.0)))
-            .on_press(|_: &()| nav::pop())
+            .on_press(nav::pop)
     };
     let title = || {
         view()
@@ -220,8 +216,13 @@ fn custom_header() -> Screen {
             .items_center()
             .gap(px(5.0))
             .hit_slop(EdgeInsets::all(px(10.0)))
-            .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
-            .child(icon(IconName::Star, 18.0, colors::ON_ACCENT))
+            .on_press(move || likes.update(|likes| likes.0 += 1))
+            .child(
+                icon()
+                    .name(IconName::Star)
+                    .size(18.0)
+                    .tint(colors::ON_ACCENT),
+            )
             .child(
                 text(move || count().to_string())
                     .text_color(colors::ON_ACCENT)
@@ -233,11 +234,11 @@ fn custom_header() -> Screen {
     with_header(
         nav_page()
             .title("Custom")
-            .header_style(header_style(
-                colors::ACCENT_FILL,
-                colors::ON_ACCENT,
-                colors::ON_ACCENT,
-            ))
+            .header_style_with(|s| {
+                s.bg(colors::ACCENT_FILL)
+                    .text_color(colors::ON_ACCENT)
+                    .tint_color(colors::ON_ACCENT)
+            })
             .header_back_visible(false)
             .header_left(close())
             .header_title(title())
@@ -329,8 +330,8 @@ fn DraftCard() -> impl IntoElement {
                 })
                 .rounded(px(radius::CONTROL))
                 .finish(Finish::Inset)
-                .on_focus(move |_: &()| focused.set(true))
-                .on_blur(move |_: &()| focused.set(false))
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
                 .on_change(move |text: &str| {
                     let text = text.to_owned();
                     draft.update(|draft| draft.0 = text);
@@ -353,26 +354,16 @@ fn unsaved() -> Screen {
     let draft = global::<Draft>();
     titled("Unsaved changes")
         .pop_on_back(move || draft.with(|d| d.0.is_empty()))
-        .on_back_press(move |_: &()| {
-            let answer = nsh_core::ui::prelude::dialog(Dialog {
-                id: 0,
-                title: Some("Discard your changes?".into()),
-                message: None,
-                buttons: vec![
-                    DialogButton {
-                        text: "Keep editing".into(),
-                        style: DialogButtonStyle::Cancel,
-                    },
-                    DialogButton {
-                        text: "Discard".into(),
-                        style: DialogButtonStyle::Destructive,
-                    },
-                ],
-                cancelable: true,
-                sheet: false,
-            });
+        .on_back_press(move || {
+            let answer = alert_dialog()
+                .title("Discard your changes?")
+                .cancel("Keep editing")
+                .destructive("Discard")
+                .close_on_escape(true)
+                .close_on_backdrop_press(true)
+                .show();
             spawn(async move {
-                if answer.await == 1 {
+                if answer.await == Ok(Some("Discard".into())) {
                     // TS's draft is the screen's own and goes with it.
                     draft.update(|draft| draft.0.clear());
                     nav::pop();
@@ -386,7 +377,7 @@ fn unsaved() -> Screen {
                 "Type something, then go back (header button, Escape, Alt+Left, the mouse's back \
                  button): the screen asks first.",
             ),
-            [DraftCard::element(()).into_element()],
+            [draft_card().into_element()],
         ))
 }
 
@@ -407,35 +398,32 @@ fn instant() -> Screen {
 
 fn headerless() -> Screen {
     nav_page().header_shown(false).child(
-        SafeAreaView::element(SafeAreaViewProps::default())
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .child(
-                view()
-                    .flex_1()
-                    .p_4()
-                    .gap_4()
-                    .child(
-                        appear(0).child(
-                            title_block("headerShown={false}", "No header", 30.0)
-                                .px_1()
-                                .pt_3()
-                                .child(body(
-                                    "The screen owns the whole surface; a SafeAreaView keeps it \
+        safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+            view()
+                .flex_1()
+                .p_4()
+                .gap_4()
+                .child(
+                    appear().index(0).child(
+                        title_block("headerShown={false}", "No header", 30.0)
+                            .px_1()
+                            .pt_3()
+                            .child(body(
+                                "The screen owns the whole surface; a SafeAreaView keeps it \
                                      clear of the status bar and the home indicator.",
-                                )),
-                        ),
-                    )
-                    .child(
-                        appear(1).child(
-                            Section::new("Safe area")
-                                .note("SafeAreaView")
-                                .child(insets()),
-                        ),
-                    )
-                    .child(view().flex_1())
-                    .child(Button::new("Back", |_: &()| nav::pop())),
-            ),
+                            )),
+                    ),
+                )
+                .child(
+                    appear().index(1).child(
+                        Section::new("Safe area")
+                            .note("SafeAreaView")
+                            .child(insets()),
+                    ),
+                )
+                .child(view().flex_1())
+                .child(Button::new("Back", |_: &()| nav::pop())),
+        ),
     )
 }
 
@@ -503,15 +491,8 @@ fn link_row(
     first: bool,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            scale: 0.98.into(),
-            label: Some(title.into()).into(),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
+    let on_press: Listener<()> = on_press.into();
+    press().scale(0.98).label(title).on_press(on_press).child(
         view()
             .min_h(px(60.0))
             .flex_row()
@@ -539,7 +520,12 @@ fn link_row(
                             .font_family(MONO),
                     ),
             )
-            .child(icon(IconName::Chevron, 14.0, colors::FAINT)),
+            .child(
+                icon()
+                    .name(IconName::Chevron)
+                    .size(14.0)
+                    .tint(colors::FAINT),
+            ),
     )
 }
 
@@ -610,28 +596,25 @@ fn modal_body(
     text_body: &str,
     close: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    SafeAreaView::element(SafeAreaViewProps::default())
-        .flex_1()
-        .bg(colors::BACKGROUND)
-        .child(
-            view()
-                .flex_1()
-                .p_4()
-                .gap_4()
-                .child(
-                    title_block(note.to_owned(), title.to_owned(), 28.0)
-                        .px_1()
-                        .pt_2()
-                        .child(body(text_body.to_owned())),
-                )
-                .child(
-                    Section::new("Safe area")
-                        .note("the modal's")
-                        .child(insets()),
-                )
-                .child(view().flex_1())
-                .child(Button::new("Close", close)),
-        )
+    safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+        view()
+            .flex_1()
+            .p_4()
+            .gap_4()
+            .child(
+                title_block(note.to_owned(), title.to_owned(), 28.0)
+                    .px_1()
+                    .pt_2()
+                    .child(body(text_body.to_owned())),
+            )
+            .child(
+                Section::new("Safe area")
+                    .note("the modal's")
+                    .child(insets()),
+            )
+            .child(view().flex_1())
+            .child(Button::new("Close", close)),
+    )
 }
 
 /// The demo's page: rows pushing the screens, its modals, and the Android
@@ -738,12 +721,9 @@ pub(crate) fn Navigation() -> impl IntoElement {
     };
     let tiles = move || {
         modals().map(|(presented, _, title, note, icon_name)| {
-            press_with(
-                PressProps {
-                    label: Some(title.into()).into(),
-                    ..PressProps::default()
-                },
-                move |_: &()| {
+            press()
+                .label(title)
+                .on_press(move || {
                     if presented == Presented::Dialog {
                         // The dialog springs up from a little smaller each
                         // time it opens.
@@ -751,33 +731,32 @@ pub(crate) fn Navigation() -> impl IntoElement {
                         pop.spring(1.0, motion::SETTLE);
                     }
                     sheet.set(Some(presented));
-                },
-            )
-            .w(relative(0.485))
-            .child(
-                view()
-                    .min_h(px(100.0))
-                    .p_3()
-                    .gap_3()
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .bg(colors::INSET)
-                    .border_1()
-                    .border_color(colors::LINE)
-                    .finish(Finish::Inset)
-                    .child(IconTile::new(icon_name).size(32.0))
-                    .child(
-                        view()
-                            .gap(px(2.0))
-                            .child(
-                                text(title)
-                                    .text_size(px(15.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(colors::TEXT),
-                            )
-                            .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
-                    ),
-            )
+                })
+                .w(relative(0.485))
+                .child(
+                    view()
+                        .min_h(px(100.0))
+                        .p_3()
+                        .gap_3()
+                        .rounded(px(radius::INSET))
+                        .border_curve(BorderCurve::Continuous)
+                        .bg(colors::INSET)
+                        .border_1()
+                        .border_color(colors::LINE)
+                        .finish(Finish::Inset)
+                        .child(IconTile::new(icon_name).size(32.0))
+                        .child(
+                            view()
+                                .gap(px(2.0))
+                                .child(
+                                    text(title)
+                                        .text_size(px(15.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(colors::TEXT),
+                                )
+                                .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
+                        ),
+                )
         })
     };
     let close = move |_: &()| sheet.set(None);
@@ -924,12 +903,14 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     "Android: BackHandler",
                     "BackHandler: Escape, Alt+Left",
                 ))
-                .right(toggle(intercepting, "Intercept the back button").on_event(
-                    move |e: &ToggleEvent| {
-                        let ToggleEvent::Change(on) = *e;
-                        intercepting.set(on);
-                    },
-                ))
+                .right(
+                    toggle()
+                        .value(intercepting)
+                        .label("Intercept the back button")
+                        .on_change(move |&on: &bool| {
+                            intercepting.set(on);
+                        }),
+                )
                 .child(
                     Figure::new(move || presses.get().to_string())
                         .unit(move || {

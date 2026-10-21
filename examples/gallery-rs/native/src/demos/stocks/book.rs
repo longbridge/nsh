@@ -11,9 +11,9 @@ use super::{
     detail::StockProps,
     figure, live,
     market::{Book, LEVELS, Level, compact, price, tone_of},
-    parts::{Block, Calm, Col, GRID, SpringBar, SpringBarProps, hatch, head, spring_bar},
+    parts::{Block, Calm, Col, GRID, hatch, head, spring_bar},
 };
-use crate::ui::{PressProps, colors, legend, lengths, press_with, radius};
+use crate::ui::{colors, legend, lengths, press, radius};
 
 const ROW: f32 = 26.0;
 /// Ticks either side of the mid price the depth chart spans.
@@ -199,7 +199,7 @@ pub(crate) fn OrderBook(props: StockProps) -> impl IntoElement {
         decimals,
     };
     let side = move |bid: bool| {
-        Each::new(
+        each(
             move || (0..depth.get()).collect::<Vec<usize>>(),
             |slot: &usize| *slot,
             move |slot, _| level_row(bid, slot.get_untracked(), ladder),
@@ -208,38 +208,34 @@ pub(crate) fn OrderBook(props: StockProps) -> impl IntoElement {
     Block::new()
         .title("Order book")
         .right(
-            press_with(
-                PressProps {
-                    hit_slop: Some(8.0),
-                    label: Prop::bind(move || {
-                        Some(
-                            if five() {
-                                "Show ten levels"
-                            } else {
-                                "Show five levels"
-                            }
-                            .into(),
-                        )
-                    }),
-                    ..PressProps::default()
-                },
-                toggle,
-            )
-            .child(
-                view()
-                    .h(px(30.0))
-                    .px_3()
-                    .rounded(px(radius::CONTROL))
-                    .justify_center()
-                    .bg(colors::RAISED)
-                    .child(
-                        text(move || if five() { "5 → 10" } else { "10 → 5" })
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors::TEXT)
-                            .tabular_nums(),
-                    ),
-            ),
+            press()
+                .hit_slop(8.0)
+                .label(move || {
+                    Some(
+                        if five() {
+                            "Show ten levels"
+                        } else {
+                            "Show five levels"
+                        }
+                        .into(),
+                    )
+                })
+                .on_press(toggle)
+                .child(
+                    view()
+                        .h(px(30.0))
+                        .px_3()
+                        .rounded(px(radius::CONTROL))
+                        .justify_center()
+                        .bg(colors::RAISED)
+                        .child(
+                            text(move || if five() { "5 → 10" } else { "10 → 5" })
+                                .text_size(px(12.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(colors::TEXT)
+                                .tabular_nums(),
+                        ),
+                ),
         )
         .child(
             view()
@@ -250,11 +246,13 @@ pub(crate) fn OrderBook(props: StockProps) -> impl IntoElement {
                         .rounded(px(3.0))
                         .overflow_hidden()
                         .bg(colors::DOWN)
-                        .child(SpringBar::element(SpringBarProps {
-                            height: 6.0,
-                            radius: Some(0.0),
-                            ..spring_bar(move || share.get(), colors::UP)
-                        })),
+                        .child(
+                            spring_bar()
+                                .share(move || share.get() as f32)
+                                .color(colors::UP)
+                                .height(6.0)
+                                .radius(0.0),
+                        ),
                 )
                 .child(
                     view()

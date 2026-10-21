@@ -27,7 +27,7 @@ log.workspace = true
 
 # Empty off Linux (like the other platform crates off their targets).
 [target.'cfg(target_os = "linux")'.dependencies]
-nsh-core.workspace = true
+nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine = { workspace = true, features = ["net"] }
 nsh-base = { workspace = true, features = ["highlight"] }
 gtk4.workspace = true

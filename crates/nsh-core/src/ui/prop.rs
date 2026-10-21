@@ -258,3 +258,79 @@ impl<T: Clone + PartialEq + 'static> IntoReactive<T> for Prop<T> {
         Reactive::Bound(Rc::new(move || self.get()))
     }
 }
+
+/// What a component's prop setter takes (`button().disabled(..)`): a value
+/// of a type that becomes a `T` (set once; a `T` for an `Option<T>`, and a
+/// string for an optional text), a [`Signal`], [`Memo`],
+/// [`ReadSignal`], [`Prop`] or [`Reactive`] of `T`, or a closure returning
+/// what becomes a `T` (bound: run again when what it reads changes). `M`
+/// tells them apart: it is inferred, never written.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a prop of `{T}`",
+    label = "not a prop of `{T}`",
+    note = "a prop is a value that becomes a `{T}`, a signal, memo or prop of it, or a closure `move || ..` returning one"
+)]
+pub trait IntoProp<T, M> {
+    /// As a value or a binding.
+    fn into_prop(self) -> Reactive<T>;
+}
+
+/// How a value is a prop ([`IntoProp`]).
+#[doc(hidden)]
+pub struct PropValue(());
+
+/// How a closure is a prop ([`IntoProp`]).
+#[doc(hidden)]
+pub struct PropClosure(());
+
+/// How a reactive handle is a prop ([`IntoProp`]).
+#[doc(hidden)]
+pub struct PropHandle(());
+
+/// How a string is an optional text prop ([`IntoProp`]).
+#[doc(hidden)]
+pub struct PropText(());
+
+/// A string as a set text prop (`.accessibility_label("Save")`).
+impl IntoProp<Option<super::SharedString>, PropText> for &'static str {
+    fn into_prop(self) -> Reactive<Option<super::SharedString>> {
+        Reactive::Static(Some(self.into()))
+    }
+}
+
+/// A string as a set text prop.
+impl IntoProp<Option<super::SharedString>, PropText> for String {
+    fn into_prop(self) -> Reactive<Option<super::SharedString>> {
+        Reactive::Static(Some(self.into()))
+    }
+}
+
+impl<T, U: Into<T>> IntoProp<T, PropValue> for U {
+    fn into_prop(self) -> Reactive<T> {
+        Reactive::Static(self.into())
+    }
+}
+
+impl<T: 'static, U: Into<T>, F: Fn() -> U + 'static> IntoProp<T, PropClosure> for F {
+    fn into_prop(self) -> Reactive<T> {
+        Reactive::Bound(Rc::new(move || self().into()))
+    }
+}
+
+macro_rules! prop_handles {
+    ($($handle:ident),*) => {$(
+        impl<T: Clone + PartialEq + 'static> IntoProp<T, PropHandle> for $handle<T> {
+            fn into_prop(self) -> Reactive<T> {
+                self.into_reactive()
+            }
+        }
+    )*};
+}
+
+prop_handles!(Signal, ReadSignal, Memo, Prop);
+
+impl<T> IntoProp<T, PropHandle> for Reactive<T> {
+    fn into_prop(self) -> Reactive<T> {
+        self
+    }
+}

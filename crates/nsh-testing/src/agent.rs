@@ -15,7 +15,7 @@
 //! their work on the main thread and return when it is done.
 
 use std::{
-    sync::{Condvar, Mutex, MutexGuard},
+    sync::{Arc, Condvar, Mutex, MutexGuard},
     time::Duration,
 };
 
@@ -24,12 +24,15 @@ use std::{
 use nsh_core::time::Instant;
 use nsh_core::{
     MountBatch, NodeId,
-    geometry::{Bounds, Point, Points, Size},
+    geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_dev::protocol::{PickTarget, SceneQuery, StepOutcome, TestStep};
 
+mod forward;
+
+pub use self::forward::{Outgoing, Send as SendOutgoing};
 pub use crate::screen::Pick;
-use crate::{screen::Screen, selector::Selector};
+use crate::{MemoryStorage, screen::Screen, selector::Selector};
 
 /// How long after the last batch the app is quiet.
 const QUIET: Duration = Duration::from_millis(100);
@@ -48,6 +51,14 @@ const SCROLLS_INTO_VIEW: usize = 20;
 pub struct Model {
     state: Mutex<State>,
     changed: Condvar,
+    /// What the test set the app up with ([`Model::set_up`]).
+    setup: Mutex<Option<Setup>>,
+}
+
+/// What a test session's app starts with, in place of the platform's.
+struct Setup {
+    storage: Arc<MemoryStorage>,
+    forwarder: Arc<forward::Forwarder>,
 }
 
 #[derive(Default)]
@@ -82,6 +93,64 @@ impl Model {
 
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// What the test sets the app up with (before its first bundle): the
+    /// storage entries it starts with, and what sends its requests to the
+    /// test ([`Model::engine_network`], [`Model::fetch_reply`]).
+    pub fn set_up(&self, storage: Vec<(String, String)>, send: SendOutgoing) {
+        *self.setup.lock().unwrap_or_else(|e| e.into_inner()) = Some(Setup {
+            storage: MemoryStorage::new(storage),
+            forwarder: forward::Forwarder::new(send),
+        });
+    }
+
+    /// The network the app's engine runs on in place of `platform` (the
+    /// host's): its requests go to the test, which answers them or lets
+    /// them through to `platform`. `platform` itself before [`Model::set_up`].
+    pub fn engine_network(
+        &self,
+        platform: Option<Arc<dyn nsh_engine::Network>>,
+    ) -> Option<Arc<dyn nsh_engine::Network>> {
+        let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+        match &*setup {
+            Some(setup) => Some(Arc::new(forward::ForwardNetwork {
+                forwarder: setup.forwarder.clone(),
+                platform,
+            })),
+            None => platform,
+        }
+    }
+
+    /// The storage the app's engine runs on in place of its own (the
+    /// test's), after [`Model::set_up`].
+    pub fn engine_storage(&self) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
+        let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+        setup
+            .as_ref()
+            .map(|s| s.storage.clone() as Arc<dyn nsh_core::storage::StorageBackend>)
+    }
+
+    /// The test's answer to the app's request `id` (one event of it).
+    pub fn fetch_reply(&self, id: u64, reply: nsh_dev::protocol::FetchReply) {
+        let forwarder = self
+            .setup
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|s| s.forwarder.clone());
+        if let Some(forwarder) = forwarder {
+            forwarder.reply(id, reply);
+        }
+    }
+
+    /// The app's storage's entries now (empty before [`Model::set_up`]).
+    fn storage_entries(&self) -> std::collections::BTreeMap<String, String> {
+        let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+        setup
+            .as_ref()
+            .map(|s| s.storage.entries())
+            .unwrap_or_default()
     }
 }
 
@@ -138,6 +207,8 @@ pub trait Scene: Send + Sync {
     fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String>;
     /// The oldest dialog was answered.
     fn answered(&self) -> Result<(), String>;
+    /// The app's storage's entries.
+    fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String>;
 }
 
 impl Scene for Model {
@@ -208,6 +279,9 @@ impl Scene for Model {
         self.lock().screen.answered();
         Ok(())
     }
+    fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
+        Ok(self.storage_entries())
+    }
 }
 
 /// `pick` as a [`SceneQuery::Pick`]'s answer: `{"one": id}`, `"none"`,
@@ -266,6 +340,7 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::Horizontal { id } => model.horizontal(*id).map(Value::from),
             SceneQuery::InputId { selector } => model.input_id(selector).map(Value::from),
             SceneQuery::Answered => model.answered().map(|()| Value::Null),
+            SceneQuery::Storage => json(to_value(model.storage_entries())),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
             | SceneQuery::InputText { .. }
@@ -368,6 +443,9 @@ impl Scene for RemoteScene {
         self.query::<serde_json::Value>(SceneQuery::Answered)
             .map(drop)
     }
+    fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
+        self.query(SceneQuery::Storage)
+    }
 }
 
 /// A key the agent presses.
@@ -469,6 +547,8 @@ pub struct Tester {
     start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
     client: std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>,
     worker: Mutex<Option<Worker>>,
+    /// The model of the session's app, once it started.
+    model: Mutex<Option<std::sync::Arc<Model>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -481,6 +561,7 @@ impl Tester {
             start: Box::new(start),
             client: std::sync::OnceLock::new(),
             worker: Mutex::new(None),
+            model: Mutex::new(None),
         })
     }
 
@@ -495,9 +576,36 @@ impl Tester {
         match event {
             nsh_dev::DevEvent::Testing => self.start(),
             nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
+            nsh_dev::DevEvent::TestSetup { storage } => {
+                if let Some(model) = self.model() {
+                    let client = self.client.clone();
+                    model.set_up(
+                        storage,
+                        Arc::new(move |message| {
+                            let Some(client) = client.get().and_then(std::sync::Weak::upgrade)
+                            else {
+                                return;
+                            };
+                            match message {
+                                Outgoing::Fetch(id, request) => client.fetch(id, request),
+                                Outgoing::Cancel(id) => client.fetch_cancel(id),
+                            }
+                        }),
+                    );
+                }
+            }
+            nsh_dev::DevEvent::Fetch { id, reply } => {
+                if let Some(model) = self.model() {
+                    model.fetch_reply(id, reply);
+                }
+            }
             other => return Some(other),
         }
         None
+    }
+
+    fn model(&self) -> Option<std::sync::Arc<Model>> {
+        self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn start(&self) {
@@ -506,6 +614,7 @@ impl Tester {
             return;
         }
         let model = std::sync::Arc::new(Model::default());
+        *self.model.lock().unwrap_or_else(|e| e.into_inner()) = Some(model.clone());
         let native = (self.start)(model.clone());
         let client = self.client.clone();
         let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
@@ -658,6 +767,7 @@ impl Agent {
             SceneQuery::Horizontal { id } => scene.horizontal(id).map(Value::from),
             SceneQuery::InputId { selector } => scene.input_id(&selector).map(Value::from),
             SceneQuery::Answered => scene.answered().map(|()| Value::Null),
+            SceneQuery::Storage => scene.storage().and_then(|e| json(to_value(e))),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
                     [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
@@ -735,21 +845,28 @@ impl Agent {
         };
         let scrollers = self.scene.scroll_ancestors(id)?;
         let mut before: Option<Point<Points>> = None;
+        // Where in the scroll view the gestures start, along its length: its
+        // middle, else (when what is there scrolls by itself, a text area)
+        // elsewhere, as a user moves the finger.
+        let mut anchors = [0.5f32, 0.25, 0.75].into_iter().peekable();
         for _ in 0..SCROLLS_INTO_VIEW {
             let at = self.native.bounds(id).ok_or_else(not_on_screen)?.center();
             let viewport = self.native.viewport();
             let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
-            // The last gesture moved it no more (its scroll view's end):
-            // pressed where it is when it shows.
             if let Some(b) = before
                 && (b.x.0 - at.x.0).abs() < 1.0
                 && (b.y.0 - at.y.0).abs() < 1.0
             {
-                return if window.contains(&at) {
-                    Ok(at)
-                } else {
-                    Err(not_on_screen())
-                };
+                anchors.next();
+                // No gesture moves it any more (its scroll view's end): it
+                // is pressed where it is when it shows.
+                if anchors.peek().is_none() {
+                    return if window.contains(&at) {
+                        Ok(at)
+                    } else {
+                        Err(not_on_screen())
+                    };
+                }
             }
             // The innermost scroll view whose bounds leave the middle out,
             // or near their edge (where a finger does not press and bars,
@@ -771,14 +888,27 @@ impl Agent {
                 }
                 return Err(not_on_screen());
             };
-            let middle = scroller.center();
+            let along = anchors.peek().copied().unwrap_or(0.5);
+            let middle = if horizontal {
+                point(
+                    scroller.origin.x + scroller.size.width * along,
+                    scroller.center().y,
+                )
+            } else {
+                point(
+                    scroller.center().x,
+                    scroller.origin.y + scroller.size.height * along,
+                )
+            };
             let (distance, extent) = if horizontal {
                 (at.x.0 - middle.x.0, scroller.size.width.0)
             } else {
                 (at.y.0 - middle.y.0, scroller.size.height.0)
             };
-            // From the middle, so a finger dragging it stays inside it.
-            let step = distance.clamp(-extent * 0.4, extent * 0.4);
+            // A finger dragging it stays inside it: as far as the nearer
+            // edge less a tenth.
+            let room = extent * (along.min(1.0 - along) - 0.1).max(0.1);
+            let step = distance.clamp(-room, room);
             let delta = if horizontal {
                 Point::new(Points(step), Points(0.0))
             } else {

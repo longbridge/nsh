@@ -27,17 +27,21 @@ use nsh_core::ui::{ComponentSpec, Registry};
 pub use crate::{
     alert_dialog::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
-        AlertDialogRole,
+        AlertDialogRole, alert_dialog,
     },
-    button::{Button, ButtonEvent, ButtonProps},
-    keyboard::{AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewProps},
+    button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
+    keyboard::{
+        AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
+        KeyboardAvoidingViewProps, keyboard_avoiding_view,
+    },
     navigation::{dialog, nav_page, nav_stack},
-    safe_area::{Edge, SafeAreaView, SafeAreaViewProps},
-    selection_area::{SelectionArea, SelectionAreaProps},
+    safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
+    selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewEvent,
-        TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewStyles,
+        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
+        TextViewEvent, TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewStyles,
+        text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
 };

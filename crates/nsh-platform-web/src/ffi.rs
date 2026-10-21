@@ -27,6 +27,12 @@ unsafe extern "C" {
     fn js_request_pump();
     #[link_name = "report_error"]
     fn js_report_error(message: *const u8, len: usize);
+    /// A message of a test session's app for the dev server (JSON
+    /// `nsh_dev::protocol::ClientMessage`: its requests), sent over the
+    /// page's socket.
+    #[cfg(feature = "dev")]
+    #[link_name = "test_send"]
+    fn js_test_send(json: *const u8, len: usize);
     #[link_name = "log"]
     fn js_log(level: u32, message: *const u8, len: usize);
     #[link_name = "read_asset"]
@@ -142,6 +148,13 @@ pub(crate) fn request_frame() {
 pub(crate) fn request_pump() {
     // SAFETY: no arguments.
     unsafe { js_request_pump() }
+}
+
+/// Sends a test session's app's message to the dev server (JSON).
+#[cfg(feature = "dev")]
+pub(crate) fn test_send(json: &str) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_test_send(json.as_ptr(), json.len()) }
 }
 
 /// Shows an app error.

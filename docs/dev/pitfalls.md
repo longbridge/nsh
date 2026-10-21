@@ -144,6 +144,18 @@ Things that were found the hard way. Read the section of the area you change bef
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
 
+- **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
+  itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
+  modal stays on screen with its content already gone: a blank screen when a sheet and its modal close together.
+  `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
+
+- **iOS, presses near the top of the window**: UIKit attaches tap recognizers to the window that skip `UIControl`s, and a
+  press is a gesture recognizer, not a control. On iOS 26+ the window's `_UIDoubleTapInteraction` (a single-tap
+  recognizer over the top 64 pt, `cancelsTouchesInView`, never simultaneous, action disabled) recognized first and
+  prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
+  real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
+  (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+
 ## Android
 
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in

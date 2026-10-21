@@ -4,10 +4,7 @@
 
 use std::hash::{BuildHasher, RandomState};
 
-use nsh_base::{
-    AvoidBehavior, KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView,
-    SafeAreaViewProps, dialog,
-};
+use nsh_base::{AvoidBehavior, dialog, keyboard_avoiding_view, safe_area_view};
 use nsh_core::ui::{
     AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, prelude::*,
 };
@@ -16,9 +13,8 @@ use crate::{
     nav,
     ui::{
         self, Badge, ButtonVariant as UiVariant, DemoPage, Finish, Finished, IconName, IconTile,
-        Inset, MONO, PressProps, Row, Segment, Segmented, SegmentedEvent, SegmentedProps,
-        SegmentedSize, ToggleEvent, Tone, appear, caption, colors, hint, icon, inset_shadow,
-        press_with, radius, rgb_a, segmented, tints, titled, toggle,
+        Inset, MONO, Row, Segment, SegmentedSize, Tone, appear, caption, colors, hint, icon,
+        inset_shadow, press, radius, rgb_a, segmented, tints, titled, toggle,
     },
 };
 
@@ -49,8 +45,8 @@ fn field(focused: Signal<bool>) -> Input {
         })
         .rounded(px(radius::CONTROL))
         .finish(Finish::Inset)
-        .on_focus(move |_: &()| focused.set(true))
-        .on_blur(move |_: &()| focused.set(false))
+        .on_focus(move || focused.set(true))
+        .on_blur(move || focused.set(false))
 }
 
 /// A cell of a row of equal widths.
@@ -201,12 +197,14 @@ fn PressFeedback() -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .child(cell(caption("Last pressed", Some(move || last.get()))))
-                .child(toggle(disabled, "Disable the third tile").on_event(
-                    move |e: &ToggleEvent| {
-                        let ToggleEvent::Change(on) = *e;
-                        disabled.set(on);
-                    },
-                )),
+                .child(
+                    toggle()
+                        .value(disabled)
+                        .label("Disable the third tile")
+                        .on_change(move |&on: &bool| {
+                            disabled.set(on);
+                        }),
+                ),
         )
 }
 
@@ -216,34 +214,31 @@ fn PressFeedback() -> impl IntoElement {
 fn PressableSheet() -> impl IntoElement {
     let sheet = signal(false);
     let open = move |open: bool| move |_: &()| sheet.set(open);
-    let modal_view = If::new(sheet, move || {
+    let modal_view = when(sheet, move || {
         dialog()
             .presentation(ModalPresentation::PageSheet)
             .animation(ModalAnimation::Slide)
             .on_cancel(open(false))
             .child(
-                SafeAreaView::element(SafeAreaViewProps::default())
-                    .flex_1()
-                    .bg(colors::BACKGROUND)
-                    .child(
-                        view()
-                            .flex_1()
-                            .p_4()
-                            .gap_4()
-                            .child(
-                                title_block("pageSheet", "A sheet").px_1().pt_2().child(
-                                    text(hint(
-                                        "Swipe down (iOS) or press back (Android) to close.",
-                                        "Press Escape or click outside the card to close.",
-                                    ))
-                                    .text_size(px(15.0))
-                                    .line_height(px(21.0))
-                                    .text_color(colors::MUTED),
-                                ),
-                            )
-                            .child(view().flex_1())
-                            .child(ui::Button::new("Close", open(false))),
-                    ),
+                safe_area_view().flex_1().bg(colors::BACKGROUND).child(
+                    view()
+                        .flex_1()
+                        .p_4()
+                        .gap_4()
+                        .child(
+                            title_block("pageSheet", "A sheet").px_1().pt_2().child(
+                                text(hint(
+                                    "Swipe down (iOS) or press back (Android) to close.",
+                                    "Press Escape or click outside the card to close.",
+                                ))
+                                .text_size(px(15.0))
+                                .line_height(px(21.0))
+                                .text_color(colors::MUTED),
+                            ),
+                        )
+                        .child(view().flex_1())
+                        .child(ui::Button::new("Close", open(false))),
+                ),
             )
     });
     let (accent_light, accent_dark) = Finish::Accent.shadows();
@@ -313,7 +308,7 @@ fn LayoutAnimations() -> impl IntoElement {
         }
     };
     let white = 0xffffff;
-    let boxes = Each::new(
+    let boxes = each(
         items,
         |n: &u32| *n,
         move |n, _| {
@@ -345,19 +340,18 @@ fn LayoutAnimations() -> impl IntoElement {
         .subtitle("configureNext, then change the tree")
         .right(Badge::new(move || items.with(Vec::len).to_string()))
         .child(
-            Segmented::element(SegmentedProps {
-                options: PRESETS
-                    .iter()
-                    .map(|(_, label)| Segment::new(*label))
-                    .collect::<Vec<_>>()
-                    .into(),
-                selected: preset.into(),
-                size: SegmentedSize::Small,
-            })
-            .on_event(move |e: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = *e;
-                preset.set(i);
-            }),
+            segmented()
+                .options(
+                    PRESETS
+                        .iter()
+                        .map(|(_, label)| Segment::new(*label))
+                        .collect::<Vec<_>>(),
+                )
+                .selected(preset)
+                .size(SegmentedSize::Small)
+                .on_change(move |&i: &u32| {
+                    preset.set(i);
+                }),
         )
         .child(
             view()
@@ -375,7 +369,7 @@ fn LayoutAnimations() -> impl IntoElement {
                     ui::Button::new(
                         "Add",
                         animate(|items, next| {
-                            items.insert(0, next.with(|n| *n));
+                            items.insert(0, next.get());
                             next.with(|n| *n += 1);
                         }),
                     )
@@ -476,46 +470,40 @@ fn AvoidingPage() -> impl IntoElement {
     let focused = signal(false);
     let picked = move || BEHAVIORS[behavior.get() as usize];
     view().flex_1().child(
-        KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
-            behavior: Prop::bind(move || picked().0),
-            ..KeyboardAvoidingViewProps::default()
-        })
-        .flex_1()
-        .bg(tints::INFO)
-        .child(
-            view()
-                .flex_1()
-                .p_4()
-                .gap_4()
-                .child(
-                    appear(0).child(
-                        ui::Card::new()
-                            .icon(IconName::Form)
-                            .title(move || format!("behavior=\"{}\"", picked().1))
-                            .subtitle("Focus the field at the bottom")
-                            .child(
-                                segmented(
-                                    BEHAVIORS.map(|(_, label, _)| Segment::new(label)),
-                                    behavior,
+        keyboard_avoiding_view()
+            .behavior(move || picked().0)
+            .flex_1()
+            .bg(tints::INFO)
+            .child(
+                view()
+                    .flex_1()
+                    .p_4()
+                    .gap_4()
+                    .child(
+                        appear().index(0).child(
+                            ui::Card::new()
+                                .icon(IconName::Form)
+                                .title(move || format!("behavior=\"{}\"", picked().1))
+                                .subtitle("Focus the field at the bottom")
+                                .child(
+                                    segmented()
+                                        .options(BEHAVIORS.map(|(_, label, _)| Segment::new(label)))
+                                        .selected(behavior)
+                                        .on_change(move |&i: &u32| {
+                                            behavior.set(i);
+                                        }),
                                 )
-                                .on_event(
-                                    move |e: &SegmentedEvent| {
-                                        let SegmentedEvent::Change(i) = *e;
-                                        behavior.set(i);
-                                    },
+                                .child(
+                                    text(move || picked().2)
+                                        .text_size(px(14.0))
+                                        .line_height(px(20.0))
+                                        .text_color(colors::MUTED),
                                 ),
-                            )
-                            .child(
-                                text(move || picked().2)
-                                    .text_size(px(14.0))
-                                    .line_height(px(20.0))
-                                    .text_color(colors::MUTED),
-                            ),
-                    ),
-                )
-                .child(view().flex_1())
-                .child(field(focused).placeholder("Type here")),
-        ),
+                        ),
+                    )
+                    .child(view().flex_1())
+                    .child(field(focused).placeholder("Type here")),
+            ),
     )
 }
 
@@ -525,7 +513,7 @@ fn ModalOptions() -> impl IntoElement {
     let visible = signal(false);
     let translucent = signal(false);
     let show = move |shown: bool| move |_: &()| visible.set(shown);
-    let modal_view = If::new(visible, move || {
+    let modal_view = when(visible, move || {
         dialog()
             .animation(ModalAnimation::Slide)
             .status_bar_translucent(translucent)
@@ -536,7 +524,7 @@ fn ModalOptions() -> impl IntoElement {
                     .flex_1()
                     .bg(AdaptiveColor::new(rgb(0xeef5dc), rgb(0x16200d)))
                     .child(
-                        SafeAreaView::element(SafeAreaViewProps::default())
+                        safe_area_view()
                             .flex_1()
                             .p_4()
                             .gap_3()
@@ -581,10 +569,12 @@ fn ModalOptions() -> impl IntoElement {
         .title("Modal options")
         .subtitle("statusBarTranslucent, orientations")
         .right(
-            toggle(translucent, "statusBarTranslucent").on_event(move |e: &ToggleEvent| {
-                let ToggleEvent::Change(on) = *e;
-                translucent.set(on);
-            }),
+            toggle()
+                .value(translucent)
+                .label("statusBarTranslucent")
+                .on_change(move |&on: &bool| {
+                    translucent.set(on);
+                }),
         )
         .child(note(
             "Android: translucent content reaches under the status bar. iOS: this modal allows \
@@ -715,15 +705,8 @@ fn link_row(
     prop: &'static str,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            scale: 0.98.into(),
-            label: Some(title.into()).into(),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
+    let on_press: Listener<()> = on_press.into();
+    press().scale(0.98).label(title).on_press(on_press).child(
         view()
             .min_h(px(60.0))
             .flex_row()
@@ -750,7 +733,12 @@ fn link_row(
                             .font_family(MONO),
                     ),
             )
-            .child(icon(IconName::Chevron, 14.0, colors::FAINT)),
+            .child(
+                icon()
+                    .name(IconName::Chevron)
+                    .size(14.0)
+                    .tint(colors::FAINT),
+            ),
     )
 }
 
@@ -768,18 +756,18 @@ pub(crate) fn Components() -> impl IntoElement {
                 "padding / height",
                 |_: &()| {
                     nav::push("keyboard-avoiding", || {
-                        titled("KeyboardAvoidingView").child(AvoidingPage::element(()))
+                        titled("KeyboardAvoidingView").child(avoiding_page())
                     });
                 },
             )))
     };
     DemoPage::new()
         .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-        .card(|| PressFeedback::element(()))
-        .card(|| PressableSheet::element(()))
-        .card(|| LayoutAnimations::element(()))
-        .card(|| Accessory::element(()))
+        .card(press_feedback)
+        .card(pressable_sheet)
+        .card(layout_animations)
+        .card(accessory)
         .card(avoiding)
-        .card(|| ModalOptions::element(()))
-        .card(|| PlatformInfo::element(()))
+        .card(modal_options)
+        .card(platform_info)
 }

@@ -415,6 +415,34 @@ define_class!(
                 unsafe { msg_send![super(self), navigationBar: bar, shouldPopItem: item] }
             }
         }
+
+        /// UIKit sizes a pushed controller's view from the navigation view,
+        /// which is still empty when the stack mounts: autoresizing cannot
+        /// grow a zero size, so the view keeps an empty frame even once the
+        /// navigation view has one. The screen's content is not clipped, so
+        /// it draws correctly, but an empty ancestor drops the whole subtree
+        /// from the accessibility snapshot UI tests read: no element inside
+        /// any screen can be found. Give such a view its parent's bounds.
+        #[unsafe(method(viewDidLayoutSubviews))]
+        fn view_did_layout_subviews(&self) {
+            // SAFETY: calling the superclass implementation.
+            let _: () = unsafe { msg_send![super(self), viewDidLayoutSubviews] };
+            for controller in self.viewControllers().iter() {
+                if !controller.isViewLoaded() {
+                    continue;
+                }
+                let Some(view) = controller.view() else { continue };
+                let Some(parent) = view.superview() else { continue };
+                let size = view.bounds().size;
+                let bounds = parent.bounds();
+                if (size.width <= 0.0 || size.height <= 0.0)
+                    && bounds.size.width > 0.0
+                    && bounds.size.height > 0.0
+                {
+                    view.setFrame(bounds);
+                }
+            }
+        }
     }
 );
 
@@ -879,10 +907,20 @@ impl ModalHost {
             return;
         }
         let block = block2::RcBlock::new(done);
-        self.controller.dismissViewControllerAnimated_completion(
-            self.config.animation != ModalAnimation::None,
-            Some(&block),
-        );
+        let animated = self.config.animation != ModalAnimation::None;
+        // Through the presenter: a modal that presents another one (a sheet
+        // over it) would otherwise only dismiss that one, and stay on
+        // screen with its content already gone (closing a sheet and its
+        // modal together). The presenter dismisses this modal and every
+        // controller above it.
+        match self.controller.presentingViewController() {
+            Some(presenter) => {
+                presenter.dismissViewControllerAnimated_completion(animated, Some(&block))
+            }
+            None => self
+                .controller
+                .dismissViewControllerAnimated_completion(animated, Some(&block)),
+        }
     }
 }
 

@@ -408,7 +408,8 @@ impl RootView {
             App::Rust(_) => Policy::default().access(),
         });
         let mounter: SharedMounter = Arc::new(MainThreadBound::new(RefCell::new(None), mtm));
-        let config = EngineConfig {
+        #[allow(unused_mut)]
+        let mut config = EngineConfig {
             app,
             viewport,
             trace: self.ivars().options.trace,
@@ -429,6 +430,19 @@ impl RootView {
             }),
             clock: Default::default(),
         };
+        // A test session's app: the test's storage and network.
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self
+            .ivars()
+            .test_model
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+        {
+            config.network = model.engine_network(config.network.take());
+            if let Some(storage) = model.engine_storage() {
+                config.storage = Some(storage);
+            }
+        }
         let sink = MainThreadSink {
             mounter: mounter.clone(),
             on_error: self.ivars().on_error.clone(),

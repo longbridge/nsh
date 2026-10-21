@@ -1,13 +1,13 @@
 ---
 title: Images and assets
-description: Showing images in Rust and TSX - the app's assets and @2x files, remote URLs, resize modes, placeholders, blur, tint, load events, and reading an image's size or prefetching it.
+description: Showing images in Rust and TSX - the app's assets and @2x files, SVG images, remote URLs, resize modes, placeholders, blur, tint, load events, and reading an image's size or prefetching it.
 order: 36
 group: ui
 ---
 
 # Images and assets
 
-The image element (`image(..)` in Rust, `<Image>` in TSX) shows a bitmap: a file shipped with the app, or an image downloaded from a URL. Images are read and decoded off the main thread, downsampled to the size the view shows them at, and cached; the main thread only displays the decoded result.
+The image element (`image(..)` in Rust, `<Image>` in TSX) shows a bitmap or an SVG drawing: a file shipped with the app, or an image downloaded from a URL. Images are read and decoded off the main thread, downsampled to the size the view shows them at, and cached; the main thread only displays the decoded result.
 
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo@2x.png");
@@ -47,7 +47,7 @@ import logo from "./assets/logo@2x.png";
 logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
 ```
 
-Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`.
+Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` ([SVG images](#svg-images)).
 
 **Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. The file you name is the one that shows: NSH uses `logo@2x.png` and `logo@3x.png` as two separate assets. Export at the highest density you need (`@3x` for the sharpest result on every phone); images are downsampled to the screen when decoded.
 
@@ -57,6 +57,28 @@ In Rust, a missing or broken file fails the build, and a changed one builds the 
 
 > [!TIP]
 > In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server, which serves the whole app directory, and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
+
+## SVG images
+
+Import an `.svg` file like any image. Its size in points is its `width` and `height` (or one of them, with the other from the `viewBox`'s aspect ratio), else its `viewBox`: a CSS pixel of the SVG is a point, and `@2x` suffixes leave SVG files as they are.
+
+```tsx
+import logo from "./assets/logo.svg"; // <svg width="120" height="40" …>
+import star from "./assets/star.svg"; // <svg viewBox="0 0 24 24" …>
+
+logo; // { uri: "asset:/assets/logo.svg", width: 120, height: 40 }
+
+<Image src={logo} />
+<Image src={star} style={{ width: 36, height: 36, tintColor: "#0969da" }} />
+```
+
+An SVG is sharp at the size it is shown. The browser draws it as vectors; iOS, macOS and Android draw it at the size the view shows it, in pixels, when the image loads (as they downsample bitmaps; a view that grows afterwards scales that drawing, until the image loads again); Windows, Linux and GPUI draw it once at four pixels per point (up to 2048 pixels a side) and scale it to each view. Everything else works as for bitmaps: `resizeMode`, `tintColor` (through the SVG's opaque shapes, so one-color icons follow the theme), filters, `blurRadius`, placeholders, the load events, `Image.getSize` and `Image.prefetch`. `onLoad` and `Image.getSize` report an SVG's size in whole points; the image lays out at its exact size. Remote SVG files load the same way, through the same downloads and [capability](./sandbox-and-capabilities.md) checks; NSH recognizes an SVG by its content (also gzip-compressed, `.svgz`), whatever its URL ends with.
+
+**What native platforms draw.** iOS, macOS, Android, Windows, Linux and GPUI draw SVGs with one renderer (resvg), so a drawing looks the same on each: shapes and paths, fills and strokes, gradients and patterns, clip paths and masks, opacity, filters and transforms. Text (`<text>`), animation (SMIL and CSS), embedded images (`<image>`) and HTML (`<foreignObject>`) show in the browser; native platforms draw the rest of the SVG, still, and `nsh build` names the files that use them. Export text as outlines (paths) for the same result everywhere.
+
+**A self-contained picture.** On native platforms an SVG draws only what it holds: files, URLs, `data:` images and other documents it references are left out. Native platforms draw SVGs, remote ones included, within bounds that keep memory in check: a document of up to 16 MiB (a compressed one once inflated), a drawing of up to 8192 pixels a side and 4096 × 4096 pixels in all (64 MiB; a larger one is drawn smaller), and layers (groups with opacity, masks, clip paths and filters, which the renderer draws apart) of up to 256 MiB at once. An SVG over the document or layer bound fails to load, with `onError`.
+
+**Reported sizes on the web.** The browser measures SVGs itself, imported or remote: `onLoad` and `Image.getSize` report an SVG's `width` and `height` when it has them, and otherwise the size the browser gives it, which browsers typically derive from a default of 300 × 150 and the `viewBox`'s aspect ratio. Imported SVGs lay out at the bundler's size on every platform. Give SVGs a `width` and `height` for the same reported size everywhere.
 
 ## Remote images
 
@@ -160,7 +182,7 @@ Animated GIF, WebP and APNG files play automatically, as assets or from URLs. Th
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start(..)` | | Loading starts |
 | `onProgress` | `.on_progress(..)` | `{ loaded, total }` in bytes (`total` 0 when unknown) | During a download, at most every 100 ms |
-| `onLoad` | `.on_load(..)` | `{ width, height }` | The image is ready; the source's size in pixels |
+| `onLoad` | `.on_load(..)` | `{ width, height }` | The image is ready; the source's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)) |
 | `onError` | `.on_error(..)` | `{ message }` (a `&str` in Rust) | Loading or decoding failed |
 | `onLoadEnd` | `.on_load_end(..)` | | After `onLoad` or `onError` |
 
@@ -209,7 +231,7 @@ const ok = await Image.prefetch("https://example.com/next.jpg");      // true on
 
 | Rust | TSX | Returns |
 |---|---|---|
-| `image_size(uri)` | `Image.getSize(source)` | The image's size in pixels; an error when it cannot be loaded |
+| `image_size(uri)` | `Image.getSize(source)` | The image's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)); an error when it cannot be loaded |
 | `prefetch_image(uri)` | `Image.prefetch(source)` | `true` once the image's bytes are loaded |
 
 In TSX, `source` is a URL string or `{ uri }`. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
@@ -249,7 +271,7 @@ Fonts are registered before the first frame in both.
 
 In TSX, `import.meta.url` is the URL of the module it is written in, so `new URL("./data.json", import.meta.url)` names a file beside it. A local or packaged desktop app's modules have `file:` URLs in the app's directory, which `fs/promises` reads under a `${pluginDir}` grant; a web app's are the page's; a packaged mobile app's are `asset:/` URLs like those of imported images. Import an image to ship it: a URL made this way names the file, it does not package it.
 
-Images are also drawn on a canvas with `draw_image` / `drawImage` ([Canvas](./canvas.md)), and gradients replace many decorative images ([Styling](./styling.md#gradients)).
+Bitmap images are also drawn on a canvas with `draw_image` / `drawImage` ([Canvas](./canvas.md)), and gradients replace many decorative images ([Styling](./styling.md#gradients)).
 
 ## Related
 

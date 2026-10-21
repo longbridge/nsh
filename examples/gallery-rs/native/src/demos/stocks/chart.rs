@@ -16,10 +16,7 @@ use super::{
     market::{Candle, OPEN, Quote, SESSION, compact, price, signed, time, tone_of},
     parts::{Calm, GRID, dashed, hatch, pulse, run_pulse},
 };
-use crate::ui::{
-    Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors, legend, lengths, pt,
-    radius, rect,
-};
+use crate::ui::{Segment, SegmentedSize, colors, legend, lengths, pt, radius, rect, segmented};
 
 /// What the chart shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -645,7 +642,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
         }
     });
     let change = computed(move || (focus.get().c - prev_close) / prev_close * 100.0);
-    let readout = If::new(
+    let readout = when(
         move || cursor.get().is_some(),
         move || {
             view()
@@ -684,7 +681,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         ),
                 )
                 .child(
-                    If::new(intraday, move || {
+                    when(intraday, move || {
                         text(move || {
                             let c = focus.get();
                             format!("avg {} · vol {}", p_of(c.a), compact(c.v))
@@ -715,25 +712,24 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
     view()
         .gap(px(10.0))
         .child(
-            Segmented::element(SegmentedProps {
-                options: PERIODS
-                    .iter()
-                    .map(|p| Segment::new(p.1))
-                    .collect::<Vec<_>>()
-                    .into(),
-                selected: Prop::bind(move || {
+            segmented()
+                .options(
+                    PERIODS
+                        .iter()
+                        .map(|p| Segment::new(p.1))
+                        .collect::<Vec<_>>(),
+                )
+                .selected(move || {
                     PERIODS
                         .iter()
                         .position(|p| p.0 == period.get())
                         .unwrap_or(0) as u32
+                })
+                .size(SegmentedSize::Small)
+                .on_change(move |i: &u32| {
+                    scale.with(Calm::reset);
+                    period.set(PERIODS[*i as usize].0);
                 }),
-                size: SegmentedSize::Small,
-            })
-            .on_event(move |e: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = e;
-                scale.with(Calm::reset);
-                period.set(PERIODS[*i as usize].0);
-            }),
         )
         .child(
             view()

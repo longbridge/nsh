@@ -6,7 +6,8 @@
 //! - `#[derive(PropEnum)]` on an enum of unit variants: a string union in
 //!   JS (`"primary" | "plain"`).
 //! - `#[derive(Event)]` on a component's event enum: the `on<Event>`
-//!   handlers and their data types.
+//!   handlers and their data types, and in Rust a listener method per event
+//!   on the component's element (`.on_press(..)`).
 //!
 //! - `#[methods]` on an `impl` block of a component: its functions become
 //!   methods of the component's ref in JS (`ref.setValue(5)`,
@@ -158,6 +159,70 @@ fn camel(name: &str) -> String {
         } else if upper {
             out.push(c.to_ascii_uppercase());
             upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// What makes the methods of a type's derive on the element of a
+/// `#[component]` using it: `defs` (trait impls carrying the field and
+/// variant types, made where they are in scope) and a hidden macro of the
+/// type's name (in the macro namespace, beside the type: imported with it)
+/// whose `rules` the component's `#[component]` expands.
+fn bridge(name: &Ident, what: &str, rules: TokenStream2, defs: TokenStream2) -> TokenStream2 {
+    let mac = format_ident!("__nsh_{}_{}", what, name);
+    quote! {
+        #defs
+
+        #[doc(hidden)]
+        #[allow(unused_macros)]
+        macro_rules! #mac {
+            #rules
+        }
+
+        #[doc(hidden)]
+        #[allow(unused_imports)]
+        pub(crate) use #mac as #name;
+    }
+}
+
+/// A primitive number type (`u32`, `f32`, ...).
+fn is_number(ty: &Type) -> bool {
+    matches!(
+        last_segment(ty),
+        Some((id, None)) if [
+            "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
+            "isize", "f32", "f64",
+        ]
+        .iter()
+        .any(|n| id == n)
+    )
+}
+
+/// Whether `ty` is a style (`nsh_core::ui::Style`), whose setter takes the
+/// typed styles' closure.
+fn is_style(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "Style")
+}
+
+/// `PressDown` -> `press_down`, `HTMLView` -> `html_view`.
+fn snake(name: &str) -> String {
+    let name = name.strip_prefix("r#").unwrap_or(name);
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() {
+            let after_lower =
+                i > 0 && (chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit());
+            let ends_acronym = i > 0
+                && chars[i - 1].is_ascii_uppercase()
+                && chars.get(i + 1).is_some_and(char::is_ascii_lowercase);
+            if (after_lower || ends_acronym) && !out.ends_with('_') {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
         } else {
             out.push(c);
         }
@@ -326,8 +391,13 @@ enum Kind<'a> {
 /// `#[prop(rename = "…")]` sets the JS name. The fields' doc comments
 /// document the props in TypeScript (the component's own is its
 /// `#[component] fn`'s; the struct's stays Rust's). The props
-/// also get `Default` (every field at its default), for Rust views:
-/// `ButtonProps { title: "+1".into(), ..Default::default() }`.
+/// also get `Default` (every field at its default). In Rust each field is
+/// a setter on the element of a `#[component]` taking them
+/// (`button().disabled(..)`: a value, a signal or a closure; an `Option<T>`
+/// takes a `T`; a slot the content to fill it with; the children are the
+/// element's `.child(..)`ren). (The derive makes a hidden macro of the
+/// struct's name, which the component's `#[component]` expands, so the
+/// props and the component are of one crate.)
 #[proc_macro_derive(Props, attributes(prop))]
 pub fn derive_props(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -360,7 +430,11 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut held = Vec::new();
     let mut updates = Vec::new();
     let mut any_held = false;
-    for field in &fields.named {
+    // The setters of the component's element: (the type of the field as
+    // its setter takes it, the method), by the field's index.
+    let mut field_values = Vec::new();
+    let mut setters = Vec::new();
+    for (index, field) in fields.named.iter().enumerate() {
         let ident = field.ident.as_ref().expect("named");
         // A `Prop<T>` is a prop of type `T`, held in a signal.
         let (ty, is_held) = match last_segment(&field.ty) {
@@ -402,6 +476,154 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             (Some(Some(expr)), _) => quote!(#expr),
             _ => quote!(::core::default::Default::default()),
         };
+        {
+            let docs: Vec<_> = field
+                .attrs
+                .iter()
+                .filter(|a| a.path().is_ident("doc"))
+                .collect();
+            let fallback = docs.is_empty().then(|| {
+                let doc = format!(" Sets its prop `{js}`.");
+                quote!(#[doc = #doc])
+            });
+            let value_ty = ty;
+            let method = match (&kind, is_held) {
+                // A style is set as an element's state styles are, with the
+                // typed styles (`.selected_style(|s| s.bg(..))`).
+                (Kind::Value, _) if is_style(value_ty) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    let value = quote! {
+                        <<$props as #ui::__private::PropField<#index>>::Value as ::core::convert::From<#ui::StyleRefinement>>::from(
+                            style(#ui::StyleRefinement::default()),
+                        )
+                    };
+                    let assign = if is_held {
+                        quote!(#ui::Prop::from(#value))
+                    } else {
+                        value
+                    };
+                    Some(quote! {
+                        $($vis)* fn #ident(
+                            mut self,
+                            style: impl ::core::ops::FnOnce(#ui::StyleRefinement) -> #ui::StyleRefinement,
+                        ) -> Self {
+                            self.0.__props_mut().#ident = #assign;
+                            self
+                        }
+                    })
+                }
+                (Kind::Value, true) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    // A number takes what element setters take: a literal
+                    // is then of the field's type (`.index(1)`).
+                    Some(if is_number(value_ty) {
+                        quote! {
+                            $($vis)* fn #ident(
+                                mut self,
+                                value: impl #ui::IntoReactive<<$props as #ui::__private::PropField<#index>>::Value>,
+                            ) -> Self {
+                                self.0.__props_mut().#ident = #ui::Prop::from(#ui::IntoReactive::into_reactive(value));
+                                self
+                            }
+                        }
+                    } else {
+                        quote! {
+                            $($vis)* fn #ident<M>(
+                                mut self,
+                                value: impl #ui::IntoProp<<$props as #ui::__private::PropField<#index>>::Value, M>,
+                            ) -> Self {
+                                self.0.__props_mut().#ident = #ui::Prop::from(#ui::IntoProp::into_prop(value));
+                                self
+                            }
+                        }
+                    })
+                }
+                (Kind::Value, false) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    // A number is taken as it is (a literal is then of the
+                    // field's type), anything else converted.
+                    Some(if is_number(value_ty) {
+                        quote! {
+                            $($vis)* fn #ident(
+                                mut self,
+                                value: <$props as #ui::__private::PropField<#index>>::Value,
+                            ) -> Self {
+                                self.0.__props_mut().#ident = value;
+                                self
+                            }
+                        }
+                    } else {
+                        quote! {
+                            $($vis)* fn #ident(
+                                mut self,
+                                value: impl ::core::convert::Into<<$props as #ui::__private::PropField<#index>>::Value>,
+                            ) -> Self {
+                                self.0.__props_mut().#ident = ::core::convert::Into::into(value);
+                                self
+                            }
+                        }
+                    })
+                }
+                // A render prop takes the Rust closure rendering a value
+                // (`.render_image(|image| ..)`).
+                (Kind::Renderer(_), _) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    let value = quote! {
+                        ::core::option::Option::Some(#ui::Renderer::new(render))
+                    };
+                    let assign = if is_held {
+                        quote!(#ui::Prop::from(#value))
+                    } else {
+                        value
+                    };
+                    Some(quote! {
+                        $($vis)* fn #ident<E: #ui::IntoElement>(
+                            mut self,
+                            render: impl ::core::ops::Fn(
+                                &<<$props as #ui::__private::PropField<#index>>::Value as #ui::__private::RendererOf>::Item,
+                            ) -> E + 'static,
+                        ) -> Self {
+                            self.0.__props_mut().#ident = #assign;
+                            self
+                        }
+                    })
+                }
+                (Kind::Slot, _) => Some(quote! {
+                    $($vis)* fn #ident(self, content: impl #ui::IntoElement) -> Self {
+                        Self(self.0.fill(#js, content))
+                    }
+                }),
+                (Kind::Items, _) => Some(quote! {
+                    $($vis)* fn #ident(self, list: #ui::VirtualList) -> Self {
+                        Self(self.0.items(list))
+                    }
+                }),
+                (Kind::Children, _) => None,
+            };
+            if let Some(method) = method {
+                setters.push(quote! {
+                    #(#docs)*
+                    #fallback
+                    #method
+                });
+            }
+        }
         if is_held && matches!(kind, Kind::Items) {
             return Err(syn::Error::new(
                 field.span(),
@@ -577,7 +799,27 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
         None => quote!(::core::option::Option::None),
     };
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let setters = if input.generics.params.is_empty() {
+        bridge(
+            name,
+            "props",
+            quote! {
+                ([$($vis:tt)*] $element:ty, $props:ty) => {
+                    // Generated names: the fields' and events', not the lints' choices.
+                    #[allow(dead_code, clippy::all, clippy::pedantic)]
+                    impl $element {
+                        #(#setters)*
+                    }
+                };
+            },
+            quote!(#(#field_values)*),
+        )
+    } else {
+        quote!()
+    };
     Ok(quote! {
+        #setters
+
         /// Every prop at its default (`..Default::default()` when a Rust
         /// view makes the component).
         impl #impl_generics ::core::default::Default for #name #ty_generics #where_clause {
@@ -783,6 +1025,15 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
 /// handlers. The handler's argument is `value` (one field) or `event`
 /// (named fields) in TypeScript; `#[args(index)]` on the variant names it
 /// (`onSelect?: (index: number) => void`).
+///
+/// In Rust, the element of a `#[component]` emitting them (`button()`)
+/// gets a listener method per event, named as its handler in snake case
+/// (`onPressDown` is `.on_press_down(..)`, as `view().on_press(..)`): a
+/// unit variant's takes `move || ..`, a one-field variant's
+/// `move |value: &T| ..`, a named-field variant's the event itself. (The
+/// derive makes a hidden macro of the enum's name, which the component's
+/// `#[component]` expands, so the enum and the component are of one
+/// crate.)
 #[proc_macro_derive(Event, attributes(args))]
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -803,9 +1054,17 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut specs = Vec::new();
     let mut name_arms = Vec::new();
     let mut data_arms = Vec::new();
+    // The listener methods: (variant docs, method, data type, pick arm).
+    let mut listeners = Vec::new();
     for v in &data.variants {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
+        let method = format_ident!("on_{}", snake(&ident.to_string()));
+        let variant_docs: Vec<_> = v
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
         let doc = decl(&docs(&v.attrs));
         let named = match args_attr(&v.attrs)? {
             None => None,
@@ -833,6 +1092,12 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 });
                 name_arms.push(quote!(Self::#ident => #js));
                 data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
+                listeners.push((
+                    variant_docs,
+                    method,
+                    quote!(()),
+                    quote!(#name::#ident => ::core::option::Option::Some(&())),
+                ));
             }
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
@@ -841,6 +1106,12 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
+                listeners.push((
+                    variant_docs,
+                    method,
+                    quote!(#ty),
+                    quote!(#name::#ident(v) => ::core::option::Option::Some(v)),
+                ));
             }
             Fields::Named(f) => {
                 let idents: Vec<_> = f
@@ -874,6 +1145,12 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                         ::core::result::Result::Ok(owned)
                     }
                 });
+                listeners.push((
+                    variant_docs,
+                    method,
+                    quote!(#name),
+                    quote!(e @ #name::#ident { .. } => ::core::option::Option::Some(e)),
+                ));
             }
             Fields::Unnamed(f) => {
                 return Err(syn::Error::new(
@@ -884,7 +1161,58 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
     }
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let listeners = if input.generics.params.is_empty() {
+        let impls = listeners.iter().enumerate().map(|(i, (_, _, ty, arm))| {
+            quote! {
+                impl #ui::__private::EventVariant<#i> for #name {
+                    type Data = #ty;
+
+                    #[allow(unreachable_patterns)]
+                    fn pick(event: &Self) -> ::core::option::Option<&#ty> {
+                        match event {
+                            #arm,
+                            _ => ::core::option::Option::None,
+                        }
+                    }
+                }
+            }
+        });
+        let methods = listeners.iter().enumerate().map(|(i, (docs, method, _, _))| {
+            let fallback = docs.is_empty().then(|| {
+                let doc = format!(" Handles its event `{}`.", &method.to_string()[3..]);
+                quote!(#[doc = #doc])
+            });
+            quote! {
+                #(#docs)*
+                #fallback
+                $($vis)* fn #method<M>(
+                    self,
+                    listener: impl #ui::IntoListener<<$event as #ui::__private::EventVariant<#i>>::Data, M>,
+                ) -> Self {
+                    Self(self.0.__on_variant(<$event as #ui::__private::EventVariant<#i>>::pick, listener))
+                }
+            }
+        });
+        bridge(
+            name,
+            "event",
+            quote! {
+                ([$($vis:tt)*] $element:ty, $event:ty) => {
+                    // Generated names: the fields' and events', not the lints' choices.
+                    #[allow(dead_code, clippy::all, clippy::pedantic)]
+                    impl $element {
+                        #(#methods)*
+                    }
+                };
+            },
+            quote!(#(#impls)*),
+        )
+    } else {
+        quote!()
+    };
     Ok(quote! {
+        #listeners
+
         impl #impl_generics #ui::Event for #name #ty_generics #where_clause {
             fn spec(types: &mut #ui::TsTypes) -> ::std::vec::Vec<#ui::EventSpec> {
                 let _ = &types;
@@ -1019,7 +1347,11 @@ pub fn assets(input: TokenStream) -> TokenStream {
 /// ```
 ///
 /// makes `pub struct Stepper;` and its `Component` impl; the body is its
-/// view, run once. Without a `Scope` parameter it emits no
+/// view, run once. Rust views make it as a primitive: `stepper()` (the
+/// name in snake case, of the function's visibility) returns a
+/// `StepperElement` with every prop at its default, a setter per prop and
+/// a listener method per event (`stepper().max(10.0).on_change(..)`:
+/// `ComponentBuilder`). Without a `Scope` parameter it emits no
 /// events (`NoEvent`); without props it has none (`()`). The function's
 /// doc comment documents the component in TypeScript (`Component::DOC`),
 /// and a `#[module] impl` of the same name (its functions on the
@@ -1106,7 +1438,75 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
     let methods =
         methods.map(|api| quote!(const METHODS: #ui::Methods = #ui::Methods::of::<#api>();));
     let doc = decl(&docs(attrs));
+    // Its element, made like a primitive's: `button().disabled(..)`.
+    let element = format_ident!("{}Element", name);
+    let constructor = format_ident!("{}", snake(&name.to_string()));
+    let element_doc = format!(
+        " The element of [`{name}`], as [`{constructor}()`] makes it: a setter per prop \
+         (`.disabled(..)`: a value, a signal or a closure), a listener method per event \
+         (`.on_press(..)`), styles ([`Styled`]({ui_path}::Styled), the states' with \
+         [`ComponentBuilder`]({ui_path}::ComponentBuilder)) and content \
+         ([`ParentElement`]({ui_path}::ParentElement)).",
+        ui_path = "::nsh_core::ui",
+    );
+    let constructor_doc = format!(
+        " A [`{name}`], each prop at its default: its element's setters set them \
+         ([`{element}`])."
+    );
+    // The derives' macros, expanded on the element: a type's path as
+    // written names its macro too.
+    let bridge_of = |ty: &Type| -> Option<syn::Path> {
+        let Type::Path(p) = ty else { return None };
+        if p.qself.is_some() || p.path.segments.iter().any(|s| !s.arguments.is_empty()) {
+            return None;
+        }
+        Some(p.path.clone())
+    };
+    let props_bridge = props
+        .as_ref()
+        .and_then(|(_, ty)| bridge_of(ty))
+        .map(|path| quote!(#path! { [#vis] #element, #props_ty }));
+    let event_bridge = scope
+        .as_ref()
+        .and_then(|(_, _, ty)| bridge_of(ty))
+        .filter(|path| path.segments.last().is_some_and(|s| s.ident != "NoEvent"))
+        .map(|path| quote!(#path! { [#vis] #element, #event }));
     Ok(quote! {
+        #[doc = #element_doc]
+        #[allow(dead_code)]
+        #vis struct #element(#ui::ComponentElement<#name>);
+
+        impl #ui::Element for #element {
+            fn node(&mut self) -> &mut #ui::ElNode {
+                #ui::Element::node(&mut self.0)
+            }
+        }
+
+        impl #ui::ParentElement for #element {}
+
+        impl #ui::IntoElement for #element {
+            fn into_element(self) -> #ui::AnyElement {
+                #ui::IntoElement::into_element(self.0)
+            }
+        }
+
+        impl #ui::ComponentBuilder for #element {
+            type Component = #name;
+
+            fn __element(&mut self) -> &mut #ui::ComponentElement<#name> {
+                &mut self.0
+            }
+        }
+
+        #[doc = #constructor_doc]
+        #[allow(dead_code)]
+        #vis fn #constructor() -> #element {
+            #element(#ui::ComponentElement::__new(<#props_ty as #ui::Props>::initial()))
+        }
+
+        #props_bridge
+        #event_bridge
+
         #(#attrs)*
         #[derive(::core::fmt::Debug, ::core::default::Default, ::core::clone::Clone, ::core::marker::Copy)]
         #vis struct #name;

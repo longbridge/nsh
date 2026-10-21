@@ -215,7 +215,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 .styles
                 .with(|s| s.root.as_ref().map(|s| s.0.clone()).unwrap_or_default())
         })
-        .child(Each::new(
+        .child(each(
             blocks,
             // By position and kind: the block a stream is writing keeps its
             // row, and its row alone is made again.
@@ -1081,7 +1081,7 @@ impl Cx {
         let body = move || cx.blocks(view().flex_col().gap(px(BLOCK_GAP)), &children, &key, tail);
         self.part(view().flex_col().gap(px(ITEM_GAP * 2.0)), Part::Details)
             .child(summary)
-            .child(If::new(move || shown.get(), body))
+            .child(when(move || shown.get(), body))
             .into_element()
     }
 
@@ -1816,5 +1816,22 @@ mod tests {
             inline_image_size(pt(0.0), pt(0.0), None, line),
             size(1.0, 1.0)
         );
+    }
+
+    /// Render props take closures of the value they render, events their
+    /// data, as the setters of other props take their values (built, not
+    /// run: an element is made in a component's reactive scope; the core's
+    /// tests render a render prop set so).
+    #[test]
+    fn builds_with_render_closures_and_listeners() {
+        let _build = || {
+            text_view()
+                .markdown("# Title")
+                .selectable(true)
+                .render_image(|image: &Image| text(image.alt.clone()))
+                .render_code_block(|code: &CodeBlock| text(code.code.clone()))
+                .on_link_press(|_url: &SharedString| {})
+                .into_element()
+        };
     }
 }

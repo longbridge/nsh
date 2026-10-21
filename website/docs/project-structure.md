@@ -143,8 +143,6 @@ error building App.tsx failed
 nsh.json: tailwind: unknown theme key `colours`
 ```
 
-> [!WARNING]
-> `nsh package` and `nsh publish` read `nsh.json` strictly and currently reject keys they do not know, including `theme`. If you set a theme, package from a copy of the app without it until this is fixed.
 
 ### capabilities
 
@@ -282,6 +280,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 | Extension | Import gives |
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. |
+| `.svg` | An `ImageAsset` sized in points by the SVG's `width` and `height` (or `viewBox`). |
 | `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |
 

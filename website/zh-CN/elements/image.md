@@ -51,7 +51,7 @@ import logo from "./assets/logo.png";
 
 | 值 | 示例 | 说明 |
 |---|---|---|
-| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。`.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic` 文件都是资源。 |
+| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
 | `{ uri }` | `{ uri: "https://…" }` | TSX：与字符串形式相同。 |
@@ -75,7 +75,7 @@ import logo from "./assets/logo.png";
 | `tintColor`（样式） | `.tint_color(..)` | `ColorValue` | | 为模板图片（单色绘制的图标）重新着色。 |
 | `onLoadStart` | `.on_load_start(..)` | `() => void` | | 开始加载。 |
 | `onProgress` | `.on_progress(..)` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
-| `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的尺寸（不是解码、降采样后的尺寸）。 |
+| `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。 |
 | `onError` | `.on_error(..)` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `.on_load_end(..)` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
@@ -95,7 +95,7 @@ image(ICON).size(px(24.0)).tint_color(rgb(0x0969da))
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | 无 | 开始加载。 |
 | `onProgress` | `.on_progress` | `{ loaded, total }`（`ImageProgress`） | 收到数据（最多每 100 ms 一次）。 |
-| `onLoad` | `.on_load` | `{ width, height }`（`Size<Points>`） | 图片已显示；给出源图片的尺寸。 |
+| `onLoad` | `.on_load` | `{ width, height }`（`Size<Points>`） | 图片已显示；给出源图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。 |
 | `onError` | `.on_error` | `{ message }`（`&str`） | 加载或解码失败，或主机不在应用的能力范围内。 |
 | `onLoadEnd` | `.on_load_end` | 无 | 在 `onLoad` 或 `onError` 之后。 |
 

@@ -70,8 +70,7 @@ pub(crate) enum PressEvent {
 
 /// A pressable that sinks a little under the finger and springs back (the
 /// spring runs natively; only press in / out reach Rust). Its content is
-/// its children: `Press::element(..).on_event(..).child(..)`, or
-/// [`press_with`].
+/// its children: `press().on_press(..).child(..)`.
 #[component]
 pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElement {
     let scale = animated_value(1.0);
@@ -98,27 +97,17 @@ pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElemen
         .when_some(props.hit_slop, |v, slop| {
             v.hit_slop(EdgeInsets::all(px(slop)))
         })
-        .on_press_down(move |_: &()| {
+        .on_press_down(move || {
             scale.spring(props.scale.get_untracked(), motion::PRESS);
         })
-        .on_press_up(move |_: &()| {
+        .on_press_up(move || {
             scale.spring(1.0, motion::PRESS);
         })
-        .on_press(move |_: &()| cx.emit(PressEvent::Press))
+        .on_press(move || cx.emit(PressEvent::Press))
         .when(props.long_press, |v| {
-            v.on_long_press(move |_: &()| cx.emit(PressEvent::LongPress))
+            v.on_long_press(move || cx.emit(PressEvent::LongPress))
         })
         .child(props.children)
-}
-
-/// A [`Press`] with `props`, calling `on_press` when pressed (and, with
-/// `long_press`, held: [`Press::element`] with `.on_event(..)` tells them
-/// apart).
-pub(crate) fn press_with(
-    props: PressProps,
-    on_press: impl Into<Listener<()>>,
-) -> ComponentElement<Press> {
-    Press::element(props).on_event(on_press.into().map(|_: &PressEvent| ()))
 }
 
 /// The props of [`Appear`].
@@ -152,12 +141,4 @@ pub(crate) fn Appear(props: AppearProps) -> impl IntoElement {
         .bind_opacity(&shown)
         .bind_translate_y(&shown.interpolate(&[0.0, 1.0], &[14.0, 0.0]))
         .child(props.children)
-}
-
-/// [`Appear`] at `index` among its siblings.
-pub(crate) fn appear(index: u32) -> ComponentElement<Appear> {
-    Appear::element(AppearProps {
-        index,
-        ..AppearProps::default()
-    })
 }

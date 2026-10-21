@@ -245,7 +245,7 @@ cargo test --release -p nsh-core bench_ -- --ignored --nocapture                
 cargo +nightly fmt --all                                                        # .rustfmt.toml uses nightly options
 cargo clippy --workspace --all-targets
 cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
-cargo xtask ios-embed                                                           # NativeShell(Dev).xcframework into dist/nsh/embed/ios
+cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask api                                                                 # record the API apps use in api/ (after an additive change)
 cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture, when it differs from the app's newest

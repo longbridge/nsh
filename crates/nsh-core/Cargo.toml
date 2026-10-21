@@ -20,7 +20,14 @@ serde_json.workspace = true
 nsh-macros.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }
 log.workspace = true
+resvg = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
 url.workspace = true
+
+[features]
+# SVG images for the native backends (`svg`: sniffing, sizes and rasters with
+# resvg). The web runtime leaves it off: the browser draws SVG itself.
+svg = ["dep:resvg", "dep:flate2"]
 
 # Native socket/file implementations. Browser WebSockets and files use
 # the host services; their shared checks do not need these dependencies.

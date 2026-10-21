@@ -11,8 +11,9 @@
 //! would, in its order, and fails with what is on screen when it cannot
 //! be taken or when the app throws. An observer ([`Headless::observe`])
 //! sees every batch with the step it came in ([`print_batch`] prints it as
-//! `nsh test --trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
-//! the device's network and storage.
+//! `nsh test --trace` does). [`StubNetwork`] and
+//! [`MemoryStorage`](crate::MemoryStorage) stand in for the device's
+//! network and storage.
 //!
 //! On a manual clock (`EngineConfig::clock`) the app's time moves only as
 //! the driver moves it: display frames come at once, one frame's time
@@ -56,10 +57,7 @@ use self::animation::{Animator, FRAME};
 pub use self::live::UreqNetwork;
 pub use self::{
     net::DirectoryAssets,
-    stub::{
-        MemoryStorage, RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse,
-        StubRoute,
-    },
+    stub::{RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse, StubRoute},
 };
 use crate::{
     screen::{Back, Pick, Screen},

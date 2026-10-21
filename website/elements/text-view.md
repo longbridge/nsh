@@ -1,7 +1,8 @@
 ---
 title: TextView
 description: "The TextView component: Markdown, HTML or a document of blocks shown with native text and views, styled part by part, for AI chat replies, articles and help pages."
-order: 11.5
+order: 26
+group: base
 demo: text-view
 ---
 
@@ -16,9 +17,37 @@ It owns behavior and comes with a reading typography of its own: 15pt text in ge
 headings with room above them, links underlined in the theme's link color, code in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
 alerts as tinted boxes with an icon. Its colors are the theme's tokens (`foreground`, `muted.foreground`, `border`,
 `muted.background`, `link`, `list.head.background` and the status colors), so a theme and the dark appearance reach
-it. `classes` and `styles` restyle each part over these defaults.
+it. Each part takes the app's styles over these defaults: `classes` and `styles` in TSX, typed styles by part
+(`TextViewParts`) in Rust. Rust makes one with `nsh_base::text_view()`, TSX with `<TextView>` from `nsh/base`.
 
-```tsx
+```rust tabs
+use nsh_base::{text_view, theme};
+use nsh_core::ui::prelude::*;
+
+const README: &str = "# Release notes
+
+**Faster lists** and a new `TextView`:
+
+- Markdown and HTML
+- [x] Streaming replies
+- [ ] Your own syntax
+
+> [!TIP]
+> Style every part with `TextViewParts`.";
+
+fn release_notes() -> impl IntoElement {
+    scroll().flex_1().child(
+        text_view()
+            .markdown(README)
+            .on_link_press(|url: &SharedString| log::info!("open {url}"))
+            .p_5()
+            .text_base()
+            .text_color(theme().foreground()),
+    )
+}
+```
+
+```tsx tabs
 import { mount, Scroll } from "nsh";
 import { TextView } from "nsh/base";
 
@@ -54,6 +83,11 @@ function App() {
 mount(App);
 ```
 
+In Rust, `text_view()` makes one as `view()` makes a view: a setter per prop (`.markdown(..)`, `.options(..)`,
+`.selectable(..)`), a closure per render function (`.render_image(|image| ..)`), a listener per event
+(`.on_link_press(..)`) and the typed style methods for its root (`.p_5()`, `.text_color(..)`), whose text styles pass
+to every part.
+
 ## Built on Text
 
 `TextView` is made of [`Text`](./text.md) elements, and its text behaves exactly as the Text page describes. Every
@@ -67,7 +101,7 @@ are its [spans](./text.md#spans); inline code is a span with a [span background]
 
 With `selectable`, the whole document selects as one, as a web page does: a drag (or, on touch screens, a long press
 and the handles) runs from one paragraph, list item, cell or code block to the next, and Copy takes the text of them
-all. A `selectable` `TextView` is a [`SelectionArea`](../modules/nsh-base.md#selectionarea) of its own; inside a
+all. A `selectable` `TextView` is a [`SelectionArea`](./selection-area.md) of its own; inside a
 `SelectionArea`, its selection also runs on into the texts and other `TextView`s around it.
 
 What `TextView` adds is the rest: reading Markdown, HTML or a document into blocks, the views around the texts (lists,
@@ -81,9 +115,27 @@ The content is one of three props, read in this order:
   formulas (`$…$` and `$$…$$`) and HTML inside the Markdown.
 - **`html`**: HTML as a reader shows it. Text, structure and inline formatting come through; scripts, styles, form
   controls and hidden elements stay out. A fragment or a whole page both work (a page shows its body).
-- **`document`**: blocks the app builds or keeps, as plain objects ([The document model](#the-document-model)).
+- **`document`**: blocks the app builds or keeps: plain objects in TSX, `nsh_base::text_view::Document` in Rust
+  ([The document model](#the-document-model)).
 
-```tsx
+```rust tabs
+use nsh_base::text_view;
+use nsh_base::text_view::{Block, Document, Inline};
+use nsh_core::ui::prelude::*;
+
+fn shipping() -> impl IntoElement {
+    text_view().html(r#"<h2>Shipping</h2><p>Orders ship in <b>2 days</b>. <a href="/faq">FAQ</a></p>"#)
+}
+
+fn total() -> impl IntoElement {
+    text_view().document(Document::new(vec![
+        Block::Heading { level: 2, content: vec![Inline::text("Total")], anchor: None },
+        Block::paragraph(vec![Inline::Strong { content: vec![Inline::text("$42.00")] }]),
+    ]))
+}
+```
+
+```tsx tabs
 <TextView html={`<h2>Shipping</h2><p>Orders ship in <b>2 days</b>. <a href="/faq">FAQ</a></p>`} />
 
 <TextView document={{
@@ -102,10 +154,45 @@ documents.
 `class` and `style` style the root, a column of the blocks; text styles set there (color, size, font) pass to every
 part. The root is also the part `root`: `styles.root` takes text styles with their types (`style` is typed as a
 view's), and `classes.root` classes. `classes` takes Tailwind classes by part and `styles` inline styles by part. A part's classes come after its own
-default styles, so they win; its `styles` win over its classes. Line heights in the defaults are set in points: a
+default styles, so they win; its `styles` win over its classes. In Rust, the parts take typed styles: `TextViewParts`
+gives each `TextViewPart` a function refining its style, for every `TextView` below the view that provides it
+([Typed part styles](#typed-part-styles)), and the root takes the style methods. Line heights in the defaults are set in points: a
 class that changes a part's size sets its line height too (Tailwind's `text-*` classes do).
 
-```tsx
+```rust tabs
+use nsh_base::{TextViewPart, TextViewParts, text_view, theme};
+use nsh_core::ui::prelude::*;
+
+fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
+    provide_context(
+        TextViewParts::new()
+            .part(TextViewPart::Heading, |s| s.text_color(rgb(0x0a0a0a)))
+            .part(TextViewPart::Heading2, |s| s.text_xl().mt_2())
+            .part(TextViewPart::Blockquote, |s| {
+                s.border_l(px(2.0)).border_color(rgb(0xd4d4d4)).pl_3().text_color(rgb(0x525252))
+            })
+            .part(TextViewPart::CodeBlock, |s| s.rounded_lg().bg(rgb(0xf5f5f5)))
+            .part(TextViewPart::CodeBlockHeader, |s| s.px_3().pt_2())
+            .part(TextViewPart::CodeBlockCode, |s| s.p_3().text_size(px(13.0)))
+            .part(TextViewPart::Table, |s| s.rounded_lg().border_1().border_color(rgb(0xe5e5e5)))
+            .part(TextViewPart::TableHead, |s| s.bg(rgb(0xfafafa)))
+            .part(TextViewPart::TableCell, |s| {
+                s.px_3().py_2().border_t_1().border_color(rgb(0xe5e5e5))
+            })
+            .part(TextViewPart::TaskMarkerChecked, |s| s.text_color(rgb(0x16a34a)))
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+    );
+    text_view()
+        .markdown(move || markdown.get())
+        .gap_3()
+        .text_size(px(15.0))
+        .line_height(px(24.0))
+        .text_color(rgb(0x262626))
+        .font_family("Inter")
+}
+```
+
+```tsx tabs
 <TextView
   markdown={reply()}
   class="gap-3 text-[15px] leading-6 text-neutral-800"
@@ -130,58 +217,58 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 `taskMarkerChecked` when done; the header row is `tableRow` then `tableHead`, and its cells `tableCell` then
 `tableHeaderCell`.
 
-| Part | What it is |
-|---|---|
-| `root` | The text view itself, a column of its blocks; text styles here pass to every part. |
-| `paragraph` | Every paragraph. |
-| `heading` | Every heading, before its level's part. |
-| `heading1` … `heading6` | Headings of that level (27, 20, 17, then 15pt, semibold). |
-| `blockquote` | Quotations and alerts: a column of their blocks with a line at their side. |
-| `alert` | Every alert (`> [!NOTE]`), after `blockquote`: a tinted box, a row of its icon and its blocks. |
-| `alertNote`, `alertTip`, `alertImportant`, `alertWarning`, `alertCaution` | Alerts of that kind. |
-| `alertIcon` | The icon of an alert: a ring with a glyph in the alert's color. |
-| `list` | Every list: a column of its items. |
-| `orderedList`, `unorderedList` | Numbered and bulleted lists, after `list`. |
-| `listItem` | Every item: a row of its marker and its blocks. |
-| `listMarker` | The marker of an item (`•`, `◦`, `▪` by depth, or `1.`), right-aligned in the indent before the item. |
-| `taskMarker` | The marker of a task item: a box drawn as a view, filled with a `✓` when done; after `listMarker`. |
-| `taskMarkerChecked` | The marker of a done task item, after `taskMarker`. |
-| `listItemContent` | The column of an item's blocks. |
-| `codeBlock` | Code blocks: a bordered, rounded box of the code, with the header over it. |
-| `codeBlockHeader` | The row of a code block's actions (`codeBlockActions`), floating over its top right corner. |
-| `codeBlockScroll` | The horizontal scroll view around a code block's code. |
-| `codeBlockCode` | The code of a code block (monospace, as written). |
-| `code` | Code in text (monospace, on a rounded background). |
-| `keyboard` | Keys (`<kbd>`, as code). |
-| `strong` | Strong text (semibold). |
-| `emphasis` | Emphasized text (italic). |
-| `strikethrough` | Struck-through text. |
-| `underline` | Underlined text (`<u>`, `<ins>`). |
-| `highlight` | Highlighted text (`<mark>`, on a rounded yellow). |
-| `superscript`, `subscript` | Superscript and subscript (smaller). |
-| `link` | Links (in the link color, underlined). |
-| `image` | Images. |
-| `math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
-| `mathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |
-| `table` | Tables: `renderTableActions`' content, then the scroll view of the cells. |
-| `tableScroll` | The horizontal scroll view of a table's cells: columns fit their content when there is room, wrap down to a floor when the view is narrower, and past that the table scrolls. |
-| `tableRow` | Every row of a table: a view behind its cells, for backgrounds and borders (text styles go on `tableCell`). |
-| `tableHead` | The header row, after `tableRow`. |
-| `tableCell` | Every cell. |
-| `tableHeaderCell` | The header row's cells (smaller, muted), after `tableCell`. |
-| `rule` | Thematic breaks: a line drawn as a top border. |
-| `details` | Disclosures (`<details>`). |
-| `summary` | The summary of a disclosure; a press opens and closes it. |
-| `summaryMarker` | The marker of a summary (`▸`, `▾`). |
-| `footnotes` | The footnotes after the blocks: a column. |
-| `footnote` | A footnote: a row of its number and its blocks. |
-| `footnoteLabel` | The number of a footnote. |
-| `footnoteReference` | A reference to a footnote in text (its number, smaller). |
-| `custom` | Custom nodes shown as their content (when no render function shows them). |
+| Part | Rust | What it is |
+|---|---|---|
+| `root` | `Root` | The text view itself, a column of its blocks; text styles here pass to every part. |
+| `paragraph` | `Paragraph` | Every paragraph. |
+| `heading` | `Heading` | Every heading, before its level's part. |
+| `heading1` … `heading6` | `Heading1` … `Heading6` | Headings of that level (27, 20, 17, then 15pt, semibold). |
+| `blockquote` | `Blockquote` | Quotations and alerts: a column of their blocks with a line at their side. |
+| `alert` | `Alert` | Every alert (`> [!NOTE]`), after `blockquote`: a tinted box, a row of its icon and its blocks. |
+| `alertNote`, `alertTip`, `alertImportant`, `alertWarning`, `alertCaution` | `AlertNote`, `AlertTip`, `AlertImportant`, `AlertWarning`, `AlertCaution` | Alerts of that kind. |
+| `alertIcon` | `AlertIcon` | The icon of an alert: a ring with a glyph in the alert's color. |
+| `list` | `List` | Every list: a column of its items. |
+| `orderedList`, `unorderedList` | `OrderedList`, `UnorderedList` | Numbered and bulleted lists, after `list`. |
+| `listItem` | `ListItem` | Every item: a row of its marker and its blocks. |
+| `listMarker` | `ListMarker` | The marker of an item (`•`, `◦`, `▪` by depth, or `1.`), right-aligned in the indent before the item. |
+| `taskMarker` | `TaskMarker` | The marker of a task item: a box drawn as a view, filled with a `✓` when done; after `listMarker`. |
+| `taskMarkerChecked` | `TaskMarkerChecked` | The marker of a done task item, after `taskMarker`. |
+| `listItemContent` | `ListItemContent` | The column of an item's blocks. |
+| `codeBlock` | `CodeBlock` | Code blocks: a bordered, rounded box of the code, with the header over it. |
+| `codeBlockHeader` | `CodeBlockHeader` | The row of a code block's actions (`codeBlockActions`), floating over its top right corner. |
+| `codeBlockScroll` | `CodeBlockScroll` | The horizontal scroll view around a code block's code. |
+| `codeBlockCode` | `CodeBlockCode` | The code of a code block (monospace, as written). |
+| `code` | `Code` | Code in text (monospace, on a rounded background). |
+| `keyboard` | `Keyboard` | Keys (`<kbd>`, as code). |
+| `strong` | `Strong` | Strong text (semibold). |
+| `emphasis` | `Emphasis` | Emphasized text (italic). |
+| `strikethrough` | `Strikethrough` | Struck-through text. |
+| `underline` | `Underline` | Underlined text (`<u>`, `<ins>`). |
+| `highlight` | `Highlight` | Highlighted text (`<mark>`, on a rounded yellow). |
+| `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
+| `link` | `Link` | Links (in the link color, underlined). |
+| `image` | `Image` | Images. |
+| `math` | `Math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
+| `mathBlock` | `MathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |
+| `table` | `Table` | Tables: `renderTableActions`' content, then the scroll view of the cells. |
+| `tableScroll` | `TableScroll` | The horizontal scroll view of a table's cells: columns fit their content when there is room, wrap down to a floor when the view is narrower, and past that the table scrolls. |
+| `tableRow` | `TableRow` | Every row of a table: a view behind its cells, for backgrounds and borders (text styles go on `tableCell`). |
+| `tableHead` | `TableHead` | The header row, after `tableRow`. |
+| `tableCell` | `TableCell` | Every cell. |
+| `tableHeaderCell` | `TableHeaderCell` | The header row's cells (smaller, muted), after `tableCell`. |
+| `rule` | `Rule` | Thematic breaks: a line drawn as a top border. |
+| `details` | `Details` | Disclosures (`<details>`). |
+| `summary` | `Summary` | The summary of a disclosure; a press opens and closes it. |
+| `summaryMarker` | `SummaryMarker` | The marker of a summary (`▸`, `▾`). |
+| `footnotes` | `Footnotes` | The footnotes after the blocks: a column. |
+| `footnote` | `Footnote` | A footnote: a row of its number and its blocks. |
+| `footnoteLabel` | `FootnoteLabel` | The number of a footnote. |
+| `footnoteReference` | `FootnoteReference` | A reference to a footnote in text (its number, smaller). |
+| `custom` | `Custom` | Custom nodes shown as their content (when no render function shows them). |
 
 ## Streaming AI replies
 
-Pass the reply as it grows, with `options={{ streaming: true }}`. The end of a text that is still arriving often leaves
+Pass the reply as it grows, with `options={{ streaming: true }}` (`MarkdownOptions { streaming: true, .. }` in Rust). The end of a text that is still arriving often leaves
 syntax open (`**bold`, `` `code ``, `[a link](htt`, a table whose header just arrived); streaming shows it as it will
 look once closed, so the reader never sees stray `**` or `[`. Blocks are kept by position: the blocks that are complete
 keep their views, and only the block being written is made again, so a long reply stays cheap to update.
@@ -190,7 +277,23 @@ keep their views, and only the block being written is made again, so a long repl
 paragraph, a list item, a code block, a table's last cell), else on a line of its own after the last block (a rule,
 content of a render function). Remove it when the reply is done.
 
-```tsx
+```rust tabs
+use nsh_base::{MarkdownOptions, text_view};
+use nsh_core::ui::prelude::*;
+
+/// A reply the app appends to as chunks arrive, with `done` set at the end.
+fn reply(text: Signal<SharedString>, done: Signal<bool>) -> impl IntoElement {
+    text_view()
+        .markdown(move || text.get())
+        .options(move || MarkdownOptions { streaming: !done.get(), ..Default::default() })
+        .caret(when(
+            move || !done.get(),
+            || view().ml_0p5().h_4().w_2().rounded_sm().bg(rgb(0xa3a3a3)),
+        ))
+}
+```
+
+```tsx tabs
 import { signal, View } from "nsh";
 import { TextView } from "nsh/base";
 
@@ -221,7 +324,21 @@ Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress`
 `#getting-started`), so a link to `#getting-started` arrives as that string, and a footnote reference arrives as
 `#footnote-<label>`.
 
-```tsx
+```rust tabs
+use nsh_base::text_view;
+use nsh_core::ui::prelude::*;
+
+fn doc(markdown: &'static str) -> impl IntoElement {
+    text_view().markdown(markdown).on_link_press(|url: &SharedString| {
+        match url.strip_prefix('#') {
+            Some(anchor) => scroll_to_anchor(anchor),
+            None => open_web(url),
+        }
+    })
+}
+```
+
+```tsx tabs
 <TextView
   markdown={doc}
   onLinkPress={(url) => {
@@ -231,20 +348,22 @@ Links are [pressable spans](./text.md#links). A press on one calls `onLinkPress`
 />
 ```
 
+`scroll_to_anchor` and `open_web` (`scrollToAnchor` and `nav` in TSX) stand for the app's own functions.
+
 ## Render functions
 
-Render functions put the app's own content into the document. Each one takes the value of a part and returns JSX; a
+Render functions put the app's own content into the document. Each one takes the value of a part and returns its content (JSX in TSX, an element in Rust); a
 part keeps what was rendered for it while its value stays the same, so during streaming only the part being written is
 rendered again.
 
-| Prop | Value | Replaces or adds |
-|---|---|---|
-| `renderCodeBlock` | `TextViewCodeBlock` | Replaces a code block (syntax highlighting of your own). |
-| `renderCodeBlockAction` | `TextViewCodeAction` | The icon of a code block action of the app's (`codeBlockActions`); the button around it is `TextView`'s. |
-| `renderTableActions` | `TextViewTable` | Adds content above a table (copy, export). |
-| `renderMath` | `TextViewMath` | Replaces a formula: `{ tex, display }`, `display` for a `$$…$$` block. |
-| `renderImage` | `TextViewImage` | Replaces an image (`{ src, alt, title }`): your own loading, sizing, a viewer on press. |
-| `renderCustom` | `TextViewCustomNode` | Shows a custom node, by its `name` ([Markdown extensions](#markdown-extensions)). |
+| Prop | Rust | Value | Replaces or adds |
+|---|---|---|---|
+| `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `TextViewCodeBlock` (`CodeBlock`) | Replaces a code block (syntax highlighting of your own). |
+| `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `TextViewCodeAction` | The icon of a code block action of the app's (`codeBlockActions`); the button around it is `TextView`'s. |
+| `renderTableActions` | `.render_table_actions(\|table\| ..)` | `TextViewTable` (`Table`) | Adds content above a table (copy, export). |
+| `renderMath` | `.render_math(\|math\| ..)` | `TextViewMath` | Replaces a formula: `{ tex, display }`, `display` for a `$$…$$` block. |
+| `renderImage` | `.render_image(\|image\| ..)` | `TextViewImage` (`Image`) | Replaces an image (`{ src, alt, title }`): your own loading, sizing, a viewer on press. |
+| `renderCustom` | `.render_custom(\|node\| ..)` | `TextViewCustomNode` (`CustomNode`) | Shows a custom node, by its `name` ([Markdown extensions](#markdown-extensions)). |
 
 Code blocks carry actions over their top right corner, all drawn alike: ghost buttons whose background shows while
 hovered or pressed, shown while a pointer is over the block on desktops and always on touch screens. `copy` is built
@@ -252,7 +371,27 @@ in: it copies the code and shows a check for a moment. Other actions are the app
 their icon and `onCodeBlockAction` reports their presses (the built-in `copy` too, after it copied). `copy` writes the
 clipboard as `nsh/clipboard` does, so it needs the app's `clipboard` capability (`nsh.json`).
 
-```tsx
+```rust tabs
+use nsh_base::{TextViewCodeAction, TextViewCodeActionEvent, text_view};
+use nsh_core::ui::prelude::*;
+
+fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
+    text_view()
+        .markdown(move || markdown.get())
+        .code_block_actions(vec![
+            TextViewCodeAction::new("copy").with_label("Copy code"),
+            TextViewCodeAction::new("run").with_label("Run"),
+        ])
+        .render_code_block_action(|_action: &TextViewCodeAction| text("▶").text_xs())
+        .on_code_block_action(|event: &TextViewCodeActionEvent| {
+            if event.id == "run" {
+                run(&event.code.code);
+            }
+        })
+}
+```
+
+```tsx tabs
 import { Text } from "nsh";
 import { TextView } from "nsh/base";
 
@@ -274,9 +413,29 @@ appearance; a block without a language shows plain. An app with highlighting of 
 [`CodeHighlighter`](#syntax-highlighting). Here code with highlighting of the app's own, and an image that fills the
 width:
 
-```tsx
-import { View } from "nsh";
-import { Image } from "nsh/image";
+```rust tabs
+use nsh_base::text_view;
+use nsh_base::text_view::{CodeBlock, Image};
+use nsh_base::TextViewMath;
+use nsh_core::ui::prelude::*;
+
+fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
+    text_view()
+        .markdown(move || markdown.get())
+        .render_code_block(|code: &CodeBlock| highlighted(code.language.clone(), code.code.clone()))
+        .render_image(|img: &Image| {
+            image(img.src.clone())
+                .label(img.alt.clone())
+                .aspect_ratio(16.0 / 9.0)
+                .w_full()
+                .rounded_lg()
+        })
+        .render_math(|math: &TextViewMath| math_view(math.tex.to_string(), math.display))
+}
+```
+
+```tsx tabs
+import { Image, View } from "nsh";
 
 <TextView
   markdown={reply()}
@@ -288,22 +447,80 @@ import { Image } from "nsh/image";
 />
 ```
 
-`Highlighted` and `MathView` stand for the app's own components (a highlighter, a formula renderer, or a component of
-its Rust crate). Without `renderMath` a formula shows as its TeX in monospace (`math` and `mathBlock` parts).
+`Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
+highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` a formula shows as its TeX in monospace (`math` and `mathBlock` parts).
 
 ## Markdown extensions
 
 `extensions` turns syntax of the app's into custom nodes, which `renderCustom` shows. Each extension has a `name`
 (the `name` of the nodes it makes) and one of four kinds of syntax:
 
-| Kind | Matches | The node |
-|---|---|---|
-| `pattern` | A regular expression in text (Rust's `regex` syntax), outside code and links | Inline; `text` is the match, `attributes` its groups: `"1"`, `"2"`, … and named groups by name |
-| `language` | Fenced code blocks of that language (```` ```chart ````) | A block; `text` is the code, `attributes.meta` the rest of the info string |
-| `tag` | HTML or MDX elements of that tag, any case (`<Callout kind="tip">`) | Its attributes, its content parsed: `children` (blocks) for an element on its own lines, `content` (inline) inside text |
-| `container` | Containers `:::name` … `:::` | A block of the Markdown inside (`children`); `:::note[Heads up]` gives `attributes.label`, `{key=value}` the other attributes |
+| Kind | Rust | Matches | The node |
+|---|---|---|---|
+| `pattern` | `MarkdownExtension::pattern(name, regex)` | A regular expression in text (Rust's `regex` syntax), outside code and links | Inline; `text` is the match, `attributes` its groups: `"1"`, `"2"`, … and named groups by name |
+| `language` | `MarkdownExtension::language(name, language)` | Fenced code blocks of that language (```` ```chart ````) | A block; `text` is the code, `attributes.meta` the rest of the info string |
+| `tag` | `MarkdownExtension::tag(name, tag)` | HTML or MDX elements of that tag, any case (`<Callout kind="tip">`) | Its attributes, its content parsed: `children` (blocks) for an element on its own lines, `content` (inline) inside text |
+| `container` | `MarkdownExtension::container(name, container)` | Containers `:::name` … `:::` | A block of the Markdown inside (`children`); `:::note[Heads up]` gives `attributes.label`, `{key=value}` the other attributes |
 
-````tsx
+````rust tabs
+use nsh_base::text_view::{CustomNode, Document};
+use nsh_base::{MarkdownExtension, text_view};
+use nsh_core::ui::prelude::*;
+
+const MESSAGE: &str = r#"Thanks @ada! Here are the numbers:
+
+```chart
+12, 19, 7, 25
+```
+
+<Callout kind="tip">Charts update live.</Callout>
+
+:::note[Heads up]
+Numbers are in thousands.
+:::"#;
+
+fn custom(node: &CustomNode) -> AnyElement {
+    match node.name.as_str() {
+        "mention" => text(node.text.clone())
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(rgb(0x2563eb))
+            .into_element(),
+        "chart" => bar_chart(node.text.split(',').filter_map(|v| v.trim().parse().ok()).collect())
+            .into_element(),
+        "callout" => view()
+            .rounded_lg()
+            .bg(rgb(0xfffbeb))
+            .p_3()
+            .child(text_view().document(Document::new(node.children.clone())))
+            .into_element(),
+        _ => view()
+            .gap_1()
+            .border_l(px(4.0))
+            .border_color(rgb(0x3b82f6))
+            .pl_3()
+            .child(
+                text(node.attributes.get("label").cloned().unwrap_or_else(|| "Note".into()))
+                    .font_weight(FontWeight::SEMIBOLD),
+            )
+            .child(text_view().document(Document::new(node.children.clone())))
+            .into_element(),
+    }
+}
+
+fn message() -> impl IntoElement {
+    text_view()
+        .markdown(MESSAGE)
+        .extensions(vec![
+            MarkdownExtension::pattern("mention", r"@(\w+)"),
+            MarkdownExtension::language("chart", "chart"),
+            MarkdownExtension::tag("callout", "callout"),
+            MarkdownExtension::container("note", "note"),
+        ])
+        .render_custom(custom)
+}
+````
+
+````tsx tabs
 import { Text, View } from "nsh";
 import { TextView } from "nsh/base";
 import type { MarkdownExtension, TextViewCustomNode } from "nsh/base";
@@ -353,12 +570,13 @@ function Custom(props: { node: TextViewCustomNode }) {
 <TextView markdown={message} extensions={extensions} renderCustom={(node) => <Custom node={node} />} />;
 ````
 
-`BarChart` stands for the app's own chart. The mention pattern's group is in `node.attributes?.["1"]` (`ada`) and the
-whole match in `node.text` (`@ada`). A custom node with no render function shows its content.
+`BarChart` (`bar_chart` in Rust) stands for the app's own chart. The mention pattern's group is in
+`node.attributes?.["1"]` (`node.attributes["1"]` in Rust: `ada`) and the whole match in `node.text` (`@ada`). A custom node with no render function shows its content.
 
 ### Options
 
-`options` picks the Markdown syntax read beyond CommonMark and GitHub's:
+`options` picks the Markdown syntax read beyond CommonMark and GitHub's; in Rust it is a `MarkdownOptions` with the
+same fields (`MarkdownOptions { streaming: true, ..Default::default() }`):
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -373,7 +591,10 @@ whole match in `node.text` (`@ada`). A custom node with no render function shows
 
 The `document` prop and the render functions' values are plain objects, each node tagged by its `type`. The types
 come from `nsh/base`: `TextViewDocument`, `TextViewBlock`, `TextViewInline`, `TextViewCodeBlock`, `TextViewTable`,
-`TextViewListItem`, `TextViewImage`, `TextViewFootnote`, `TextViewAlert` and `TextViewCustomNode`.
+`TextViewListItem`, `TextViewImage`, `TextViewFootnote`, `TextViewAlert` and `TextViewCustomNode`. In Rust they are
+the types of `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, `Table`, `ListItem`, `Image`,
+`Footnote`, `Alert`, `CustomNode`): `Block` and `Inline` are enums whose variants are the types below in PascalCase
+(`Block::Heading { level, content, anchor }`, `Inline::Strong { content }`), with the same fields in snake case.
 
 | Block `type` | Fields |
 |---|---|
@@ -409,15 +630,29 @@ reference. An app can store replies as documents, build them from its own data, 
 
 `TextView` also reads documents without showing them, synchronously:
 
-| Function | Returns |
-|---|---|
-| `TextView.parse(markdown, options?, extensions?)` | The `TextViewDocument` the `markdown` prop would show. |
-| `TextView.parseHtml(html, extensions?)` | The `TextViewDocument` the `html` prop would show. |
-| `TextView.plainText(document)` | The document's text without markup: blocks separated by blank lines, list items and table rows by line breaks, cells by tabs. |
+| Function | Rust | Returns |
+|---|---|---|
+| `TextView.parse(markdown, options?, extensions?)` | `TextView::parse(markdown, options, extensions)` | The `TextViewDocument` the `markdown` prop would show. |
+| `TextView.parseHtml(html, extensions?)` | `TextView::parse_html(html, extensions)` | The `TextViewDocument` the `html` prop would show. |
+| `TextView.plainText(document)` | `TextView::plain_text(document)`, `Document::plain_text()` | The document's text without markup: blocks separated by blank lines, list items and table rows by line breaks, cells by tabs. |
 
 A copy button for a whole reply:
 
-```tsx
+```rust tabs
+use nsh_base::{TextView, button};
+use nsh_core::ui::prelude::*;
+
+fn copy_reply(reply: Signal<SharedString>) -> impl IntoElement {
+    button()
+        .on_press(move || {
+            let document = TextView::parse(reply.get().to_string(), None, None);
+            set_clipboard(TextView::plain_text(document));
+        })
+        .child(text("Copy"))
+}
+```
+
+```tsx tabs
 <Button onPress={() => Clipboard.setString(TextView.plainText(TextView.parse(reply())))}>
   <Text>Copy</Text>
 </Button>
@@ -427,47 +662,10 @@ An app can also parse once and keep the document (`document={doc}`), or change i
 
 ## In Rust
 
-Rust components and Rust apps use the same component from the `nsh-base` crate. Props are `TextViewProps`, events
-`TextViewEvent`, and render functions are closures (`Renderer::new`):
-
-```rust
-use nsh_base::{MarkdownOptions, TextView, TextViewClasses, TextViewEvent, TextViewProps};
-use nsh_base::text_view::CodeBlock;
-use nsh_core::ui::{prelude::*, Renderer};
-
-#[derive(Clone, Copy, PartialEq, Props)]
-pub struct ReplyProps {
-    /// The reply so far.
-    pub text: Prop<SharedString>,
-    /// More of it is on its way.
-    pub streaming: Prop<bool>,
-}
-
-#[component]
-pub fn Reply(props: ReplyProps) -> impl IntoElement {
-    TextView::element(TextViewProps {
-        markdown: Prop::bind(move || Some(props.text.get())),
-        options: Prop::bind(move || MarkdownOptions { streaming: props.streaming.get(), ..Default::default() }),
-        classes: TextViewClasses {
-            heading: Some("font-semibold".into()),
-            code_block: Some("rounded-lg bg-muted p-3".into()),
-            ..Default::default()
-        }
-        .into(),
-        selectable: true.into(),
-        code_block_actions: vec![TextViewCodeAction::new("copy").with_label("Copy code")].into(),
-        ..Default::default()
-    })
-    .on_event(|TextViewEvent::LinkPress(url): &TextViewEvent| open_link(url))
-}
-```
-
-Here `open_link` stands for the app's own function. The functions of
-[Parsing and plain text](#parsing-and-plain-text) are associated functions in Rust: `TextView::parse(markdown,
-options, extensions)`, `TextView::parse_html(html, extensions)` and `TextView::plain_text(document)`. The document
-types are under `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, `Table`, `Image`, `CustomNode`,
-...), where `Parser` also reads documents with plugins (`Parser::new().plugin(..).markdown(source)`), and
-`Document::plain_text()` gives a document's text.
+Rust views use the same component from the `nsh-base` crate, with the examples above in their Rust tabs. Three things
+are Rust's own: an app's highlighter, typed styles by part and Markdown plugins, each given to every `TextView` below
+a view with `provide_context`. The document types are under `nsh_base::text_view`, where `Parser` also reads
+documents with plugins (`Parser::new().plugin(..).markdown(source)`).
 
 ### Syntax highlighting
 
@@ -483,7 +681,7 @@ a theme of the app's, ...
 use std::ops::Range;
 
 use nsh_base::{CodeHighlighter, text_view::CodeBlock};
-use nsh_core::ui::prelude::*;
+use nsh_core::ui::{StyleRefinement, prelude::*};
 
 /// The app's highlighter (here with syntect, set up once by the app).
 fn highlight(code: &CodeBlock) -> Vec<(Range<usize>, StyleRefinement)> {
@@ -495,15 +693,14 @@ fn highlight(code: &CodeBlock) -> Vec<(Range<usize>, StyleRefinement)> {
         .collect()
 }
 
-#[component]
-pub fn Chat() -> impl IntoElement {
+fn chat() -> impl IntoElement {
     provide_context(CodeHighlighter::new(highlight));
-    view().child(Messages::element(()))
+    view().child(messages())
 }
 ```
 
-`my_syntect::ranges` stands for the app's glue to its highlighter. `renderCodeBlock`, when given, shows the code block
-in place of all of this.
+`my_syntect::ranges` stands for the app's glue to its highlighter and `messages` for the app's view of the chat.
+`renderCodeBlock`, when given, shows the code block in place of all of this.
 
 ### Typed part styles
 
@@ -516,12 +713,14 @@ follow the light and dark appearance.
 use nsh_base::{TextViewPart, TextViewParts, theme};
 use nsh_core::ui::prelude::*;
 
-provide_context(
-    TextViewParts::new()
-        .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
-        .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0)))
-        .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
-);
+fn chat_parts() {
+    provide_context(
+        TextViewParts::new()
+            .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
+            .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0)))
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+    );
+}
 ```
 
 ### Markdown plugins
@@ -553,10 +752,9 @@ impl MarkdownPlugin for Tickers {
     }
 }
 
-#[component]
-pub fn Chat() -> impl IntoElement {
+fn chat() -> impl IntoElement {
     provide_context(MarkdownPlugins::new().with(Tickers));
-    view().child(Messages::element(()))
+    view().child(messages())
 }
 ```
 
@@ -565,30 +763,38 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 
 ## Props
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `markdown` | `string` | | The document as Markdown. |
-| `html` | `string` | | The document as HTML, when `markdown` is not given. |
-| `document` | `TextViewDocument` | | The document as blocks, when neither `markdown` nor `html` is given. |
-| `options` | `MarkdownOptions` | all defaults | The Markdown syntax read ([Options](#options)). |
-| `extensions` | `MarkdownExtension[]` | `[]` | The app's syntax, as custom nodes ([Markdown extensions](#markdown-extensions)). |
-| `classes` | `TextViewClasses` | `{}` | Tailwind classes by part. |
-| `styles` | `TextViewStyles` | `{}` | Inline styles by part (each a `StyleProp<TextStyle>`), over the classes. |
-| `selectable` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([SelectionArea](../modules/nsh-base.md#selectionarea)). |
-| `codeBlockScrollIndicator` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
-| `tableScrollIndicator` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
-| `caret` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
-| `renderCustom` | `(node: TextViewCustomNode) => JSX.Element` | | Shows custom nodes. |
-| `renderCodeBlock` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows code blocks. |
-| `codeBlockActions` | `TextViewCodeAction[]` | `[]` | The actions over each code block's top right corner: `{ id: "copy" }` built in, others the app's. |
-| `renderCodeBlockAction` | `(action: TextViewCodeAction) => JSX.Element` | | The icon of an action of the app's. |
-| `renderTableActions` | `(table: TextViewTable) => JSX.Element` | | Content above each table. |
-| `renderMath` | `(math: TextViewMath) => JSX.Element` | | Shows formulas. |
-| `renderImage` | `(image: TextViewImage) => JSX.Element` | | Shows images. |
-| `onLinkPress` | `(url: string) => void` | | A link was pressed: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
-| `onCodeBlockAction` | `(event: { id: string; code: TextViewCodeBlock }) => void` | | A code block's action was pressed (after `copy` copied). |
-| `onImagePress` | `(image: TextViewImage) => void` | | An image not in a link was pressed: the image, for the app to show it larger (a zoomable viewer of its own). |
-| `class`, `style` | `string`, `StyleProp<ViewStyle>` | | The root, a column of the blocks; its text styles pass to every part (typed text styles: `styles.root`). |
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `markdown` | `.markdown(..)` | `string` | | The document as Markdown. |
+| `html` | `.html(..)` | `string` | | The document as HTML, when `markdown` is not given. |
+| `document` | `.document(..)` | `TextViewDocument` | | The document as blocks, when neither `markdown` nor `html` is given. |
+| `options` | `.options(..)` | `MarkdownOptions` | all defaults | The Markdown syntax read ([Options](#options)). |
+| `extensions` | `.extensions(..)` | `MarkdownExtension[]` | `[]` | The app's syntax, as custom nodes ([Markdown extensions](#markdown-extensions)). |
+| `classes` | `.classes(..)` | `TextViewClasses` | `{}` | Tailwind classes by part. |
+| `styles` | `.styles(..)` | `TextViewStyles` | `{}` | Inline styles by part (each a `StyleProp<TextStyle>`), over the classes. |
+| `selectable` | `.selectable(..)` | `boolean` | `false` | The document is selectable as one: a selection runs across its paragraphs, headings, cells and code blocks ([SelectionArea](./selection-area.md)). |
+| `codeBlockScrollIndicator` | `.code_block_scroll_indicator(..)` | `boolean` | `true` | Code blocks show their horizontal scroll indicator. |
+| `tableScrollIndicator` | `.table_scroll_indicator(..)` | `boolean` | `true` | Tables show their horizontal scroll indicator. |
+| `caret` | `.caret(..)` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
+| `renderCustom` | `.render_custom(\|node\| ..)` | `(node: TextViewCustomNode) => JSX.Element` | | Shows custom nodes. |
+| `renderCodeBlock` | `.render_code_block(\|code\| ..)` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows code blocks. |
+| `codeBlockActions` | `.code_block_actions(..)` | `TextViewCodeAction[]` | `[]` | The actions over each code block's top right corner: `{ id: "copy" }` built in, others the app's. |
+| `renderCodeBlockAction` | `.render_code_block_action(\|action\| ..)` | `(action: TextViewCodeAction) => JSX.Element` | | The icon of an action of the app's. |
+| `renderTableActions` | `.render_table_actions(\|table\| ..)` | `(table: TextViewTable) => JSX.Element` | | Content above each table. |
+| `renderMath` | `.render_math(\|math\| ..)` | `(math: TextViewMath) => JSX.Element` | | Shows formulas. |
+| `renderImage` | `.render_image(\|image\| ..)` | `(image: TextViewImage) => JSX.Element` | | Shows images. |
+| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | | The root, a column of the blocks; its text styles pass to every part (typed text styles: `styles.root`). |
+
+In Rust the classes and styles by part are `TextViewClasses` and `TextViewStyles`; a Rust view usually styles the
+parts with [`TextViewParts`](#typed-part-styles).
+
+## Events
+
+| Event | Rust | Description |
+|---|---|---|
+| `onLinkPress` | `.on_link_press(\|url: &SharedString\| ..)` | A link was pressed: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
+| `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | A code block's action was pressed (after `copy` copied). |
+| `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | An image not in a link was pressed: the image, for the app to show it larger (a zoomable viewer of its own). |
 
 ## Accessibility
 
@@ -599,6 +805,6 @@ disclosure's summary is a button that says whether it is expanded, and images ar
 ## Related
 
 - [Text](./text.md): the element every text of `TextView` is, with its spans, links, inline attachments and selection.
-- [SelectionArea](../modules/nsh-base.md#selectionarea): one selection across several `TextView`s and texts.
+- [SelectionArea](./selection-area.md): one selection across several `TextView`s and texts.
 - [`nsh/base`](../modules/nsh-base.md): the other base components.
 - [Styling](../docs/styling.md) and [Tailwind](../docs/tailwind.md).

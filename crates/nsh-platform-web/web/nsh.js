@@ -558,6 +558,7 @@ class Player {
         request_frame: () => this.requestFrame(),
         request_pump: () => this.requestPump(),
         report_error: (p, l) => this.showError(this.str(p, l)),
+        test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
           const message = this.str(p, l);
           (level <= 1 ? console.error : level === 2 ? console.warn : console.log)("[nsh]", message);
@@ -679,6 +680,22 @@ class Player {
    */
   testStart() {
     this.wasm.nsh_test_start?.();
+  }
+
+  /**
+   * What the test sets the app up with (`ServerMessage::TestSetup`): the
+   * storage it starts with. Its requests then go to the test through
+   * `onTestSend` (`{type: "fetch", id, request}`, `{type: "fetch_cancel", id}`).
+   */
+  testSetup(storage) {
+    if (!this.wasm.nsh_test_setup) return;
+    this.withStrings([JSON.stringify(storage ?? [])], (p, l) => this.wasm.nsh_test_setup(p, l));
+  }
+
+  /** The test's answer to the app's request `id` (`ServerMessage::Fetch`). */
+  testFetchReply(id, reply) {
+    if (!this.wasm.nsh_test_fetch_reply) return;
+    this.withStrings([JSON.stringify({ id, reply })], (p, l) => this.wasm.nsh_test_fetch_reply(p, l));
   }
 
   /** Whether this runtime answers test steps (the development host's). */
@@ -1920,9 +1937,16 @@ class Player {
     const viewport = el._frame[2 + axis];
     const max = Math.max(0, el._content[axis] - viewport);
     let points = [];
-    if (b.snapInterval > 0) for (let p = 0; p <= max + 0.5; p += b.snapInterval) points.push(p);
-    else if (b.snapOffsets.length) points = b.snapOffsets;
-    else if (b.paging && viewport > 0) for (let p = 0; p <= max + 0.5; p += viewport) points.push(p);
+    if (b.snapInterval > 0) {
+      const interval = b.snapInterval;
+      const shift = b.snapAlignment === "center" ? (viewport - interval) / 2
+        : b.snapAlignment === "end" ? viewport - interval : 0;
+      const count = Math.max(0, Math.ceil((max + shift) / interval));
+      for (let i = 0; i <= count; i++) points.push(Math.min(max, Math.max(0, i * interval - shift)));
+    } else if (b.snapOffsets.length) points = b.snapOffsets.map(p => Math.min(max, Math.max(0, p)));
+    else if (b.paging && viewport > 0) {
+      for (let i = 0; i <= Math.ceil(max / viewport); i++) points.push(Math.min(max, i * viewport));
+    }
     if (!points.length) return;
     el._snapPoints = [...points].sort((a, b) => a - b);
     el.classList.add(el._horizontal ? "nsh-snap-x" : "nsh-snap-y");

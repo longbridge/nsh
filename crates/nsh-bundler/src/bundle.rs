@@ -847,6 +847,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// An app importing `files` (name, contents) as images.
+    fn svg_app(name: &str, files: &[(&str, &str)]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-svg-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = String::from(
+            "import { mount, View } from \"nsh\";\nimport { Image } from \"nsh/image\";\n",
+        );
+        for (i, (file, svg)) in files.iter().enumerate() {
+            std::fs::write(dir.join(file), svg).unwrap();
+            app.push_str(&format!(
+                "import a{i} from \"./{file}\";\nconsole.log(JSON.stringify(a{i}));\n"
+            ));
+        }
+        app.push_str("mount(() => <View />);\n");
+        std::fs::write(dir.join("App.tsx"), app).unwrap();
+        dir
+    }
+
+    fn bundle_dev(dir: &std::path::Path) -> Result<Bundle, BundleError> {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn svg_import_is_sized_in_points() {
+        let icon = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20z"/></svg>"#;
+        let logo = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="96" viewBox="0 0 48 24"/>"#;
+        let odd = r#"<svg xmlns="http://www.w3.org/2000/svg" width="9.6" height="4.8"/>"#;
+        let dir = svg_app(
+            "size",
+            &[("icon.svg", icon), ("logo@2x.svg", logo), ("odd.svg", odd)],
+        );
+        let bundle = bundle_dev(&dir).unwrap();
+        let code: String = bundle.code.split_whitespace().collect();
+        assert!(
+            code.contains("uri:\"asset:/icon.svg\",width:24,height:24"),
+            "{code}"
+        );
+        // One side and the viewBox's ratio; `@2x` does not apply to SVG.
+        assert!(
+            code.contains("uri:\"asset:/logo@2x.svg\",width:96,height:48"),
+            "{code}"
+        );
+        // The shortest number of the size they lay out at.
+        assert!(
+            code.contains("uri:\"asset:/odd.svg\",width:9.6,height:4.8"),
+            "{code}"
+        );
+        assert_eq!(bundle.assets.len(), 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn svg_import_of_an_invalid_svg_fails_naming_it() {
+        let dir = svg_app(
+            "invalid",
+            &[(
+                "broken.svg",
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect",
+            )],
+        );
+        let error = bundle_dev(&dir).unwrap_err();
+        assert!(error.plain.contains("broken.svg"), "{error}");
+        assert!(error.plain.contains("invalid SVG: "), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn only_code_gets_its_import_meta_url_and_plain_js_keeps_its_imports() {
         let dir = std::env::temp_dir().join(format!("nsh-meta-{}", std::process::id()));

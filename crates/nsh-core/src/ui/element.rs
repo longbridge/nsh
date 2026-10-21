@@ -254,11 +254,16 @@ impl Attrs {
 /// A nested component's props, with their type erased.
 pub(crate) trait AnyProps {
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn clone_box(&self) -> Box<dyn AnyProps>;
 }
 
 impl<P: Clone + 'static> AnyProps for P {
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
@@ -771,7 +776,9 @@ pub trait Element: IntoElement + Sized {
     /// An inline style the app passed (a prop of type `Style`, React
     /// Native's names), over the element's styles.
     fn inline_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        self.node().bind_attr(style, |a, style| a.inline = style.0);
+        Style::apply(self.node(), style, Variant::default(), |a, patch| {
+            a.inline = patch
+        });
         self
     }
 
@@ -798,13 +805,22 @@ pub trait Element: IntoElement + Sized {
 /// object, an array of them, or nothing), decoded when JS sets it as a host
 /// element's `style` is (transforms, shadow offsets, native animated
 /// values included), and applied with [`Element::inline_style`]. Rust
-/// makes one from declarations ([`Style::from_decls`], [`Style::with`]).
+/// makes one with the typed styles (`From<StyleRefinement>`: what a style
+/// prop's setter does with its closure, `.selected_style(|s| s.bg(..))`),
+/// theme colors following the appearance and bound parts their signals,
+/// as in `.active(|s| ..)`; or from declarations ([`Style::from_decls`],
+/// [`Style::with`]).
 /// Its native animated values are node ids, valid while the style is the
 /// prop's current value (JS keeps the values alive with it, as a host
 /// element's `style` does); a component that keeps an older `Style`
 /// beyond that may hold ids of values JS has collected.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Style(pub(crate) Option<Arc<crate::StylePatch>>);
+pub struct Style(
+    pub(crate) Option<Arc<crate::StylePatch>>,
+    /// The typed styles it was made of (Rust's), applied as the element's
+    /// own are.
+    pub(crate) StyleRefinement,
+);
 
 impl Style {
     /// A style of `decls`, applied in order; one that does not apply (a
@@ -824,25 +840,65 @@ impl Style {
                 log::warn!("invalid value for style `{}`", key.name());
             }
         }
-        Self(Some(Arc::new(patch)))
+        Self(Some(Arc::new(patch)), StyleRefinement::default())
     }
 
     /// This style with property `key` set to `value` after the rest
     /// (`Style::default().with(StyleKey::Flex, PatchValue::Number(1.0))`).
     pub fn with(self, key: crate::StyleKey, value: crate::PatchValue) -> Self {
         let decls = self.0.iter().flat_map(|p| p.decls().iter().cloned());
-        Self::from_decls(decls.chain([crate::StyleDecl::Set(key, value)]))
+        let mut style = Self::from_decls(decls.chain([crate::StyleDecl::Set(key, value)]));
+        style.1 = self.1;
+        style
     }
 
-    /// Its declarations, in order.
+    /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
+    }
+
+    /// Applies it to `node` in `variant`: the declarations with `attr`, the
+    /// typed styles as part of the node's own. A bound style adds its
+    /// typed styles as a bound part only when it has some as the element
+    /// is made (they are set with the element; JS's styles have none), so
+    /// a style prop left unset costs what a style of declarations does.
+    pub(crate) fn apply(
+        node: &mut ElNode,
+        style: impl IntoReactive<Style>,
+        variant: Variant,
+        attr: impl Fn(&mut Attrs, Option<Arc<crate::StylePatch>>) + 'static,
+    ) {
+        match style.into_reactive() {
+            Reactive::Static(Style(patch, typed)) => {
+                attr(&mut node.attrs, patch);
+                if !typed.is_empty() {
+                    node.style.extend_as(variant, typed);
+                }
+            }
+            Reactive::Bound(f) => {
+                let typed = super::untracked(|| !f().1.is_empty());
+                let patch = f.clone();
+                node.bind_attr(move || patch().0, attr);
+                if typed {
+                    // Resolved here: the bound parts of what it adds would
+                    // not run in this resolution.
+                    node.style
+                        .bind(move |s| s.extend_as(variant, f().1.resolved()));
+                }
+            }
+        }
     }
 }
 
 impl From<crate::StylePatch> for Style {
     fn from(patch: crate::StylePatch) -> Self {
-        Self(Some(Arc::new(patch)))
+        Self(Some(Arc::new(patch)), StyleRefinement::default())
+    }
+}
+
+impl From<StyleRefinement> for Style {
+    fn from(style: StyleRefinement) -> Self {
+        Self(None, style)
     }
 }
 
@@ -855,9 +911,9 @@ impl JsValue for Style {
     /// what it does not take is logged, as there.
     fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
         if value.is_nullish() {
-            return Ok(Self(None));
+            return Ok(Self::default());
         }
-        Ok(Self(Some(Arc::new(value.host().style(value.raw())?))))
+        Ok(Self::from(value.host().style(value.raw())?))
     }
 
     /// A style is JS's to give, not to get back.
@@ -1393,7 +1449,9 @@ pub trait Interactive: Element {
     /// An app's style while selected (`accessibility_state` `selected`;
     /// TS: a `Button`'s `selectedStyle`), as `selected:` classes apply.
     fn selected_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        super::host::bind_prop(self.node(), style, |s: Style| Prop::SelectedStyle(s.0));
+        Style::apply(self.node(), style, Variant::SELECTED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::SelectedStyle(patch))
+        });
         self
     }
 
@@ -1401,7 +1459,9 @@ pub trait Interactive: Element {
     /// mixed: a checkbox's, a switch's, a radio's), as `checked:` classes
     /// apply.
     fn checked_style(mut self, style: impl IntoReactive<Style>) -> Self {
-        super::host::bind_prop(self.node(), style, |s: Style| Prop::CheckedStyle(s.0));
+        Style::apply(self.node(), style, Variant::CHECKED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::CheckedStyle(patch))
+        });
         self
     }
 }
@@ -1501,80 +1561,76 @@ fn span(mut el: ElNode) -> ElNode {
 
 impl Text {
     /// At most `lines` lines (0: no limit), the last one truncated.
-    pub fn number_of_lines(mut self, lines: u32) -> Self {
-        self.0.attrs.number_of_lines = lines;
+    pub fn number_of_lines(mut self, lines: impl IntoReactive<u32>) -> Self {
+        self.0
+            .bind_attr(lines, |a, lines| a.number_of_lines = lines);
         self
     }
 
     /// Where a truncated line is cut.
-    pub fn ellipsize_mode(mut self, mode: crate::EllipsizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::EllipsizeMode(mode));
+    pub fn ellipsize_mode(mut self, mode: impl IntoReactive<crate::EllipsizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::EllipsizeMode);
         self
     }
 
     /// The user can select and copy it.
-    pub fn selectable(mut self, selectable: bool) -> Self {
-        super::host::set(&mut self.0, Prop::Selectable(Some(selectable)));
+    pub fn selectable(mut self, selectable: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, selectable, |s| Prop::Selectable(Some(s)));
         self
     }
 
     /// The highlight of its selection, when it is selectable.
-    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::SelectionColor(Some(Color::from(color.into()))),
-        );
+    pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(&mut self.0, color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
         self
     }
 
     /// Shrinks the font, down to `min_scale` of it, to fit its lines.
-    pub fn shrink_to_fit(mut self, min_scale: f32) -> Self {
+    pub fn shrink_to_fit(mut self, min_scale: impl IntoReactive<f32>) -> Self {
         super::host::set(&mut self.0, Prop::AdjustsFontSizeToFit(true));
-        super::host::set(&mut self.0, Prop::MinimumFontScale(min_scale));
+        super::host::bind_prop(&mut self.0, min_scale, Prop::MinimumFontScale);
         self
     }
 
     /// Whether its fonts follow the system's text size (true by default;
     /// TS: `allowFontScaling`).
-    pub fn allow_font_scaling(mut self, allow: bool) -> Self {
-        super::host::set(&mut self.0, Prop::AllowFontScaling(allow));
+    pub fn allow_font_scaling(mut self, allow: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, allow, Prop::AllowFontScaling);
         self
     }
 
     /// At most this multiple of its fonts' sizes with the system's text
     /// size (TS: `maxFontSizeMultiplier`; 0: no limit).
-    pub fn max_font_size_multiplier(mut self, multiplier: f32) -> Self {
-        super::host::set(&mut self.0, Prop::MaxFontSizeMultiplier(multiplier));
+    pub fn max_font_size_multiplier(mut self, multiplier: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, multiplier, Prop::MaxFontSizeMultiplier);
         self
     }
 }
 
 impl Image {
     /// How it fits its box (default: cover).
-    pub fn resize_mode(mut self, mode: crate::ResizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::ResizeMode(mode));
+    pub fn resize_mode(mut self, mode: impl IntoReactive<crate::ResizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::ResizeMode);
         self
     }
 
     /// Shown until it loads (a URL, an `asset:/` URI or an
     /// [`super::ImageAsset`]).
-    pub fn placeholder(mut self, src: impl Into<super::ImageSrc>) -> Self {
-        let src = src.into();
-        super::host::set(
-            &mut self.0,
+    pub fn placeholder(mut self, src: impl IntoReactive<super::ImageSrc>) -> Self {
+        super::host::bind_prop(&mut self.0, src, |src: super::ImageSrc| {
             Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
-            }))),
-        );
+            })))
+        });
         self
     }
 
     /// Draws its opaque pixels in `color` (a template image, an icon).
-    pub fn tint_color(mut self, color: impl Into<super::AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[crate::StyleKey::TintColor], color.into());
-        self
+    pub fn tint_color(self, color: impl IntoReactive<super::AdaptiveColor>) -> Self {
+        Styled::tint_color(self, color)
     }
 
     /// Blurs it.
@@ -1587,11 +1643,10 @@ impl Image {
     }
 
     /// Fades it in over `ms` milliseconds once loaded.
-    pub fn fade_duration(mut self, ms: f32) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::Image(crate::ImageProp::FadeDuration(Some(ms))),
-        );
+    pub fn fade_duration(mut self, ms: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, ms, |ms| {
+            Prop::Image(crate::ImageProp::FadeDuration(Some(ms)))
+        });
         self
     }
 
@@ -1782,14 +1837,40 @@ impl IntoElement for Children {
 /// Another component in a view ([`Component::element`]). Its styles go
 /// after the component's own, like an app's classes, and so do its inline
 /// style, animated values and insets ([`Element`]'s), on the component's
-/// root. It hears and is to assistive technologies what the component says
-/// (its events and props): it is not [`Interactive`] or [`Accessible`].
+/// root; its state styles ([`Self::active`], [`Self::hover`],
+/// [`Self::focus`], [`Self::disabled_style`], [`Styled::selected`],
+/// [`Styled::checked`]) follow the states of that root, as an app's
+/// `active:` / `hover:` classes on a TSX component do. It hears and is to
+/// assistive technologies what the component says (its events and props):
+/// it is not [`Interactive`] or [`Accessible`]. The element a
+/// `#[component]`'s constructor makes (`button()`) wraps one
+/// ([`ComponentBuilder`]).
 pub struct ComponentElement<C: Component> {
     node: ElNode,
     _component: PhantomData<fn() -> C>,
 }
 
 impl<C: Component> ComponentElement<C> {
+    /// The element of `C` given `props`: what a component's constructor
+    /// (`button()`) and [`Component::element`] start from.
+    #[doc(hidden)]
+    pub fn __new(props: C::Props) -> Self {
+        Self::new(props)
+    }
+
+    /// Its props, for the setters a `#[component]` makes on its element.
+    #[doc(hidden)]
+    pub fn __props_mut(&mut self) -> &mut C::Props {
+        match &mut self.node.kind {
+            ElKind::Component(c) => c
+                .props
+                .as_any_mut()
+                .downcast_mut::<C::Props>()
+                .expect("a component element holds its component's props"),
+            _ => unreachable!("a component element is a component's"),
+        }
+    }
+
     pub(crate) fn new(props: C::Props) -> Self {
         let mut node = ElNode::new(Tag::View);
         node.kind = ElKind::Component(ComponentEl {
@@ -1837,6 +1918,38 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root is pressed (Tailwind's `active:`; TS: an
+    /// `active:` class or `activeStyle` given the component), applied
+    /// natively. The root follows presses when it handles them (a
+    /// [`Interactive::on_press`] of the component's view).
+    pub fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::ACTIVE, s);
+        self
+    }
+
+    /// Styles while a pointer hovers its root (`hover:`).
+    pub fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::HOVER, s);
+        self
+    }
+
+    /// Styles while its root has focus (`focus:`).
+    pub fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root is disabled (`disabled:`): the component's
+    /// view disables it ([`Interactive::disabled`], a `disabled` prop).
+    pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::DISABLED, s);
+        self
+    }
+
     /// Puts `handle` on this component: its updates go to it.
     pub fn component_ref(mut self, handle: &super::ComponentRef<C>) -> Self {
         self.node.attrs.element_ref = handle.element().target();
@@ -1844,7 +1957,10 @@ impl<C: Component> ComponentElement<C> {
     }
 
     /// Handles its events (they then do not reach the app). Given several
-    /// times, every listener hears them, in order.
+    /// times, every listener hears them, in order. The element a
+    /// `#[component]`'s constructor makes has a listener method per event
+    /// instead (`.on_press(..)`: [`ComponentBuilder`]); this stays for
+    /// components implemented by hand.
     pub fn on_event<M>(mut self, listener: impl IntoListener<C::Event, M>) -> Self {
         let listener = listener.into_listener();
         if let ElKind::Component(c) = &mut self.node.kind {
@@ -1854,6 +1970,141 @@ impl<C: Component> ComponentElement<C> {
                 }
             }));
         }
+        self
+    }
+
+    /// Handles the events `pick` picks, with the data it gives: the listener
+    /// method of one event (`on_press`) that `#[derive(Event)]` generates
+    /// calls it.
+    #[doc(hidden)]
+    pub fn __on_variant<T: ?Sized + 'static, M>(
+        self,
+        pick: fn(&C::Event) -> Option<&T>,
+        listener: impl IntoListener<T, M>,
+    ) -> Self {
+        let listener = listener.into_listener();
+        self.on_event(listener.wrap(move |inner, event: &C::Event| {
+            if let Some(data) = pick(event) {
+                inner(data);
+            }
+        }))
+    }
+}
+
+/// The element of a `#[component]`, as its constructor makes it: a
+/// component is made and set up in Rust as a primitive is (`view()`),
+/// as JSX does in TSX. `#[component] fn Picker` makes `picker()` (the
+/// function's name in snake case), which returns a `PickerElement` with
+/// each prop at its default and
+///
+/// - a setter per prop, named as its field (`.disabled(..)`): a value, a
+///   signal, a memo or a prop of the field's type, or a closure returning
+///   one (bound); an `Option<T>` prop takes a `T` (`.label("Pick one")`),
+///   a slot the content to fill it with (`.header(text(..))`), the
+///   children are its [`ParentElement::child`]ren;
+/// - a listener method per event, named as its TSX handler in snake case
+///   (`onSelect` is `.on_select(..)`): a unit variant's takes
+///   `move || ..`, a one-field variant's `move |value: &T| ..`, a
+///   named-field variant's the event itself;
+/// - styles ([`Styled`]: they go on the component's root), with this
+///   trait's for the root's states, and a
+///   [`ComponentRef`](super::ComponentRef).
+///
+/// A prop's setter comes before an element method of the same name (a
+/// component's `selected` prop before [`Styled::selected`], its `size`
+/// before [`Styled::size`]; call those as `Styled::selected(element, ..)`).
+///
+/// ```
+/// use nsh_core::ui::prelude::*;
+///
+/// /// The props of [`Picker`].
+/// #[derive(Clone, PartialEq, Props)]
+/// pub struct PickerProps {
+///     /// The options.
+///     pub options: Prop<Vec<SharedString>>,
+///     /// No presses.
+///     #[prop(default)]
+///     pub disabled: Prop<bool>,
+///     /// What screen readers say.
+///     pub label: Prop<Option<SharedString>>,
+/// }
+///
+/// /// What a [`Picker`] reports.
+/// #[derive(Event)]
+/// pub enum PickerEvent {
+///     /// Pressed.
+///     Press,
+///     /// An option was picked: its index.
+///     Select(u32),
+/// }
+///
+/// /// Picks an option.
+/// #[component]
+/// pub fn Picker(props: PickerProps, cx: Scope<PickerEvent>) -> impl IntoElement {
+///     view()
+///         .disabled(props.disabled)
+///         .on_press(move || cx.emit(PickerEvent::Select(0)))
+/// }
+///
+/// #[component]
+/// pub fn Form() -> impl IntoElement {
+///     let busy = signal(false);
+///     let picked = signal(None::<u32>);
+///     view().child(
+///         picker()
+///             .options(vec![SharedString::from("Tea"), "Coffee".into()])
+///             .disabled(move || busy.get())
+///             .label("Drink")
+///             .on_press(move || log::info!("pressed"))
+///             .on_select(move |&index: &u32| picked.set(Some(index)))
+///             .px_4()
+///             .active(|s| s.opacity(0.6)),
+///     )
+/// }
+/// ```
+pub trait ComponentBuilder: Element {
+    /// Its component.
+    type Component: Component;
+
+    /// The element it builds.
+    #[doc(hidden)]
+    fn __element(&mut self) -> &mut ComponentElement<Self::Component>;
+
+    /// Styles while its root is pressed (Tailwind's `active:`; TS: an
+    /// `active:` class or `activeStyle` given the component), applied
+    /// natively. The root follows presses when it handles them (a
+    /// [`Interactive::on_press`] of the component's view).
+    fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::ACTIVE, s);
+        self
+    }
+
+    /// Styles while a pointer hovers its root (`hover:`).
+    fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::HOVER, s);
+        self
+    }
+
+    /// Styles while its root has focus (`focus:`).
+    fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root is disabled (`disabled:`): the component's
+    /// view disables it ([`Interactive::disabled`], a `disabled` prop).
+    fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::DISABLED, s);
+        self
+    }
+
+    /// Puts `handle` on this component: its updates go to it.
+    fn component_ref(mut self, handle: &super::ComponentRef<Self::Component>) -> Self {
+        self.__element().node.attrs.element_ref = handle.element().target();
         self
     }
 }
