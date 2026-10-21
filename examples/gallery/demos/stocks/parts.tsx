@@ -1,6 +1,5 @@
-import { effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
+import { type CanvasRenderingContext2D, effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, type AnimatedNode } from "nsh/animated";
-import type { CanvasRenderingContext2D } from "nsh/canvas";
 import { PanResponder } from "nsh/gesture";
 import { alpha, colors, isDark } from "../../ui";
 import type { Quote } from "./market";

@@ -1,9 +1,9 @@
 # Elements and interaction
 
-Every tag is a component in scope, imported from its one home (`native-pipeline.md`): `View`, `Text`, `Scroll`,
-`Input` from `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from
-`nsh/webview`, `Video` from `nsh/video`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`, `InputAccessoryView` from
-`nsh/ios`; only `If` and `Each` are globals.
+Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Image`,
+`List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
+`InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals. (`nsh/image`, `nsh/list`, `nsh/canvas`,
+`nsh/webview` and `nsh/video`, where some primitives were first, still export them, deprecated.)
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|

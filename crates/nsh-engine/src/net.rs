@@ -1,7 +1,8 @@
 //! The HTTP stack behind `fetch`, on ureq (rustls with the webpki roots):
 //! one thread per request, streaming both ways.
 //!
-//! Adapted from the stack of headless runs (`nsh-testing`'s
+//! Feature `net`; the Windows, Linux and GPUI backends hand it to their
+//! engines. Adapted from the stack of headless runs (`nsh-testing`'s
 //! `headless/net.rs`), which platforms do not build. The
 //! differences: no events at all after `cancel` (the engine would ignore
 //! them anyway), `redirected` compares normalized URLs, and only connecting
@@ -21,8 +22,9 @@ use std::{
     time::Duration,
 };
 
-use nsh_engine::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
 use ureq::{Agent, ResponseExt, SendBody, http};
+
+use crate::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
 
 /// Bytes read from the response per chunk.
 const CHUNK: usize = 64 << 10;
@@ -32,7 +34,7 @@ const MAX_REDIRECTS: u32 = 20;
 
 /// The network of every engine: one connection pool for the process, as a
 /// system HTTP stack would share it.
-pub(crate) fn network() -> Arc<dyn Network> {
+pub fn network() -> Arc<dyn Network> {
     static NETWORK: OnceLock<Arc<UreqNetwork>> = OnceLock::new();
     NETWORK.get_or_init(|| Arc::new(UreqNetwork::new())).clone()
 }

@@ -3776,8 +3776,7 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { mount, signal, View, Text } from "nsh";
-            import { Image } from "nsh/image";
+            import { mount, signal, View, Text, Image } from "nsh";
             import { component } from "nsh:rt";
             const show = signal(true);
             globalThis.toggle = () => show.update((s) => !s);

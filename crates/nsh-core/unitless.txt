@@ -1,6 +1,12 @@
 # Public API of nsh-core with bare floats that have no unit (geometry::unit_types,
 # docs/dev/geometry.md): one item path per line, then the reason.
 
+animation::animator::AnimValues.opacity                          # an opacity factor
+animation::animator::AnimValues.shadow_opacity                   # an opacity factor
+animation::animator::AnimValues.transform                        # transform operands (any of their kinds' units)
+animation::animator::Animator::pan_values ->                     # a generic animated value (any prop: opacity, a color channel, a length)
+animation::animator::Animator::tick(now)                         # time
+animation::animator::Animator::transform_moved(amount)           # a gesture amount fed to a generic animated value (a pinch scale, a rotation in degrees)
 animation::driver::sample_driver ->                              # generic animated values, sampled
 animation::driver::sample_driver(from)                           # a generic animated value (any prop: opacity, a color channel, a length)
 animation::driver::sample_driver(step)                           # time
@@ -72,6 +78,23 @@ effects::compose_color_matrices ->                               # color compone
 filesystem::FileMetadata.atime_ms                                # time (milliseconds since the epoch)
 filesystem::FileMetadata.birthtime_ms                            # time (milliseconds since the epoch)
 filesystem::FileMetadata.mtime_ms                                # time (milliseconds since the epoch)
+input::LONG_PRESS                                                # time (milliseconds)
+input::Pinch::at ->                                              # a scale factor (the rotation is typed)
+input::Press.long_delay                                          # time (milliseconds)
+input::Press::new(long_delay)                                    # time (milliseconds)
+input::TOUCHPAD_IDLE                                             # time (milliseconds)
+input::VELOCITY_WINDOW                                           # time (milliseconds)
+input::VelocityTracker::add(time)                                # time (milliseconds)
+input::VelocityTracker::velocity ->                              # a rate or a physical constant of an animation
+input::WHEEL_LATCH                                               # time (milliseconds)
+input::ZOOM_STEP                                                 # a scale factor
+input::latch_holds(last)                                         # time (milliseconds)
+input::latch_holds(time)                                         # time (milliseconds)
+input::touchpad_wait ->                                          # time (milliseconds)
+input::touchpad_wait(last)                                       # time (milliseconds)
+input::touchpad_wait(now)                                        # time (milliseconds)
+input::zoom_factor ->                                            # a scale factor
+input::zoom_factor(notches)                                      # a count of wheel notches
 js::host::Clamped::clamped(max)                                  # a generic number (a JS value, a recorded slot)
 js::host::Clamped::clamped(min)                                  # a generic number (a JS value, a recorded slot)
 js::host::HostInput::as_number ->                                # a generic number (a JS value, a recorded slot)
@@ -83,6 +106,16 @@ mount::ScrollBehavior::snap_target(velocity)                     # a rate or a p
 mount::VideoProps.progress_interval_ms                           # time
 mount::VideoProps.rate                                           # a playback rate multiplier
 mount::VideoProps.volume                                         # audio volume, 0..1
+navigation::Tick::At.1                                           # eased transition progress (easing curve coordinates, unit square)
+navigation::Transitions::tick(now)                               # time
+navigation::dim ->                                               # an opacity, 0..1
+navigation::dim(amount)                                          # eased transition progress (easing curve coordinates, unit square)
+navigation::ease ->                                              # eased transition progress (easing curve coordinates, unit square)
+navigation::ease(t)                                              # transition progress (easing curve coordinates, unit square)
+navigation::modal_in_offset(e)                                   # eased transition progress (easing curve coordinates, unit square)
+navigation::modal_out_offset(e)                                  # eased transition progress (easing curve coordinates, unit square)
+navigation::pop_offsets(e)                                       # eased transition progress (easing curve coordinates, unit square)
+navigation::push_offsets(e)                                      # eased transition progress (easing curve coordinates, unit square)
 ops::Command::Seek.0                                             # time
 ops::Command::ZoomTo.scale                                       # a zoom scale factor
 ops::EventPayload::Pan.velocity_x                                # a rate or a physical constant of an animation
@@ -116,6 +149,25 @@ props::LayoutTransition.delay_ms                                 # time
 props::LayoutTransition.duration_ms                              # time
 props::LayoutTransition::new(duration_ms)                        # time
 props::ViewProps.long_press_delay                                # time
+scroll::KeyMove::Pages.0                                         # a number of viewports
+scroll::KeyMove::sign ->                                         # a direction, -1 or 1
+scroll::Live.alpha                                               # an opacity, 0..1
+scroll::ScrollHost::now ->                                       # time
+scroll::drag_end(vx)                                             # a velocity, points per second
+scroll::drag_end(vy)                                             # a velocity, points per second
+scroll::ease_out ->                                              # easing curve coordinates (unit square)
+scroll::ease_out(t)                                              # easing curve coordinates (unit square)
+scroll::frame(now)                                               # time
+scroll::indicator_alpha ->                                       # an opacity, 0..1
+scroll::indicator_alpha(since)                                   # time
+scroll::projected(rate)                                          # a deceleration factor (velocity kept per millisecond)
+scroll::projected(velocity)                                      # a velocity, points per millisecond
+scroll::rate ->                                                  # a deceleration factor (velocity kept per millisecond)
+scroll::snap_duration ->                                         # time
+scroll::snap_duration(velocity)                                  # a velocity, points per millisecond
+scroll::spokes ->                                                # an opacity per spoke, 0..1
+scroll::wheel_end(vx)                                            # a velocity, points per second
+scroll::wheel_end(vy)                                            # a velocity, points per second
 shape::SMOOTHING                                                 # a corner smoothing factor
 style::Color::to_f64 ->                                          # color components
 style::PatchValue::Number.0                                      # a generic number (a JS value, a recorded slot)
@@ -137,6 +189,9 @@ transform::Transform::matrix(value)                              # a transform o
 transform::Transform::push(value)                                # a transform operand (any of its kinds' units)
 transform::TransformKind::identity ->                            # a transform operand (any of its kinds' units)
 transform::TransformOp.value                                     # a transform operand (any of its kinds' units)
+transition::Extra.scale                                          # a scale factor
+transition::Live::opacity ->                                     # an opacity factor
+transition::Live::step(now)                                      # time
 ui::ambient::animated_value(value)                               # an animated value (any quantity)
 ui::ambient::font_scale ->                                       # a font scale factor
 ui::ambient::keyboard_duration ->                                # time

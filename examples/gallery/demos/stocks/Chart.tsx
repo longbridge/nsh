@@ -1,6 +1,5 @@
-import { computed, effect, signal, Text, View } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, computed, effect, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { colors, Legend, radius, Segmented } from "../../ui";
 import { type Candle, compact, OPEN, price, SESSION, type Stock, signed, time, toneOf } from "./market";
 import { alpha, calm, dashed, grid, hatch, pulse, scrub } from "./parts";

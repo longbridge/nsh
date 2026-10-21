@@ -1,6 +1,5 @@
-import { type JSX, Text, View } from "nsh";
+import { Image, type JSX, Text, View } from "nsh";
 import { isAvailable as hasWindow, titleBar } from "nsh/desktop";
-import { Image } from "nsh/image";
 import logo from "./logo@2x.png";
 import { colors } from "./ui";
 

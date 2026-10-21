@@ -1,6 +1,5 @@
-import { cleanup, Scroll, signal, Text, View } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
 import { Animated, type CompositeAnimation, createAnimatedValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type AnimatedNode } from "nsh/animated";
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, Press, radius, Segmented, tints } from "../ui";
 

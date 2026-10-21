@@ -87,6 +87,11 @@ public class NshView extends FrameLayout {
      * @param trace log per-commit timings
      */
     public NshView(Context context, boolean trace) {
+        this(context, trace, new File(context.getFilesDir(), "nsh"));
+    }
+
+    /** As {@link #NshView(Context, boolean)}, the apps keeping their data in {@code dataDir}. */
+    NshView(Context context, boolean trace, File dataDir) {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
@@ -106,8 +111,9 @@ public class NshView extends FrameLayout {
         // sets no soft input mode, this makes the system resize (and report
         // the keyboard as insets) instead of panning the window.
         setScrollContainer(true);
-        // Apps keep their data in nsh/<app id> in the files directory.
-        handle = Native.create(this, density, trace, new File(context.getFilesDir(), "nsh").getPath());
+        // Apps keep their data in <dataDir>/<app id>: nsh in the files
+        // directory unless the development host's test session says.
+        handle = Native.create(this, density, trace, dataDir.getPath());
     }
 
     /**
@@ -473,6 +479,11 @@ public class NshView extends FrameLayout {
     private Object backCallback;
     private boolean backRegistered;
     private boolean exiting;
+
+    /** The mounter, for the test agent ({@link TestAgent}). */
+    Mounter mounter() {
+        return mounter;
+    }
 
     /**
      * Handles the back button for the app: closes modals, pops screens, runs

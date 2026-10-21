@@ -1,10 +1,9 @@
 // What a platform does besides drawing, as headless runs play it: going
 // back, dialogs, the clipboard, native animations, a dialog, and images
 // that never load.
-import { mount, signal, Text, View } from "nsh";
+import { Image, mount, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
-import { Image } from "nsh/image";
 import { AlertDialog, createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 
 type Route = { name: "home" } | { name: "detail" } | { name: "draft" };

@@ -38,15 +38,14 @@ pub(crate) fn starter(
     match target {
         Target::Web => return crate::test_web::starter(browser),
         Target::Ios => return crate::test_ios::starter(work),
+        Target::Android => return crate::test_android::starter(work),
         _ => {}
     }
     if !matches!(
         target,
         Target::Macos | Target::Linux | Target::Windows | Target::Gpui
     ) {
-        anyhow::bail!(
-            "nsh test --target runs on macos, linux, windows, gpui, web and ios for now (Android's test agent follows)"
-        );
+        anyhow::bail!("nsh test --target takes macos, linux, windows, gpui, web, ios or android");
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::file(target.platform(), false)?;

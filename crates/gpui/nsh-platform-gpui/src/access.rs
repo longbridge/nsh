@@ -490,11 +490,12 @@ fn describe(
     }
     let mut actions = vec![Action::ScrollIntoView];
     if let Some(sc) = &s.scroll {
-        let (mx, my) = sc.max((s.frame.size.width.0, s.frame.size.height.0));
-        node.set_scroll_x(sc.x as f64);
+        let max = sc.max(s.frame.size);
+        let (mx, my) = (max.x.0, max.y.0);
+        node.set_scroll_x(sc.x.0 as f64);
         node.set_scroll_x_min(0.0);
         node.set_scroll_x_max(mx as f64);
-        node.set_scroll_y(sc.y as f64);
+        node.set_scroll_y(sc.y.0 as f64);
         node.set_scroll_y_min(0.0);
         node.set_scroll_y_max(my as f64);
         if my > 0.0 {
@@ -1101,14 +1102,15 @@ fn perform(
                 let s = view.state();
                 s.scroll.as_ref().map(|sc| {
                     let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
-                    let (mx, my) = sc.max((w, h));
+                    let max = sc.max(s.frame.size);
+                    let (mx, my) = (max.x.0, max.y.0);
                     let (dx, dy) = match action {
                         Action::ScrollUp => (0.0, -scroll_step(data, h)),
                         Action::ScrollDown => (0.0, scroll_step(data, h)),
                         Action::ScrollLeft => (-scroll_step(data, w), 0.0),
                         _ => (scroll_step(data, w), 0.0),
                     };
-                    ((sc.x + dx).clamp(0.0, mx), (sc.y + dy).clamp(0.0, my))
+                    ((sc.x.0 + dx).clamp(0.0, mx), (sc.y.0 + dy).clamp(0.0, my))
                 })
             };
             if let Some((x, y)) = target {

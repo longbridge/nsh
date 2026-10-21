@@ -22,6 +22,8 @@ export interface ImageModule {
  * An image (a URL or `import logo from "./logo.png"`), decoded and cached
  * natively; `Image.getSize(uri)` and `Image.prefetch(uri)` ask about one
  * without showing it.
+ *
+ * @deprecated Import from "nsh".
  */
 export declare const Image: ((props: ImageProps) => YNode) & ImageModule;
 

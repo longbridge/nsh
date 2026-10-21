@@ -20,27 +20,32 @@ host elements' props and events, the easings and the canvas methods from the cor
 element and JSX types `nsh` exports), `nsh/jsx-runtime.d.ts` and `nsh/globals.d.ts`, and tests check every module's
 exports against its declarations; the CLI writes them into `.nsh/types` (`tooling.md`).
 `nsh` itself only has the reactive API, `mount`, the primitives every UI is made of (`View`, `Text`, `Scroll`,
-`Input`) and the types; there is no catch-all module. A released API that moves keeps its old place as a deprecated
-alias (`compatibility.md`), so apps built before keep running. Each primitive
-has one home, which is where apps import its tag from (`native-pipeline.md`): the table below. `If` and `Each` are
-globals.
+`Input`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`) and the types; there is no catch-all module.
+TSX imports mirror the Rust crates' layers: the primitives from `nsh`, as Rust takes them from
+`nsh_core::ui::prelude`, the base components from `nsh/base` (`nsh-base`). A released API that moves keeps its old
+place as a deprecated alias (`compatibility.md`), so apps built before keep running: `nsh/image`, `nsh/list`,
+`nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, export them still, the same values
+(`NativeModule::also` / `moved_to`: `nsh` serves those modules' exports, made once per VM whichever is imported
+first; their declarations are `@deprecated`, the canvas classes and the modules' types declared there once and
+re-exported by `nsh`). Apps import a primitive's tag from `nsh` (`native-pipeline.md`): the table below. `If` and
+`Each` are globals.
 
 | Module | Exports | Implemented in (`crates/nsh-js/src`) |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs` |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `Image`, `List`, `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`, `WebView`, `Video` (the modules' below, the same values); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs`, `modules.rs` |
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
 | `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `locale()`, `Platform`, `PixelRatio`, `I18nManager` | `env.rs` |
 | `nsh/accessibility` | `AccessibilityInfo`, `screenReaderEnabled()`, `reduceMotion()` | `env.rs` + its registry (`nsh_core::runtime`) |
-| `nsh/list` | `List` | `list.rs` |
-| `nsh/canvas` | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | `canvas.rs` |
-| `nsh/image` | `Image`: the image element's component, with `Image.getSize`, `Image.prefetch` (promises the core resolves from the root's `ImageInfo` event) | `modules.rs` + its registry (`components.rs`) |
+| `nsh/list` (deprecated: `nsh`) | `List` | `list.rs` |
+| `nsh/canvas` (deprecated: `nsh`) | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | `canvas.rs` |
+| `nsh/image` (deprecated: `nsh`) | `Image`: the image element's component, with `Image.getSize`, `Image.prefetch` (promises the core resolves from the root's `ImageInfo` event) | `modules.rs` + its registry (`components.rs`) |
 | `nsh/gesture` | `PanResponder` | `touch.rs` |
 | `nsh/clipboard` | `Clipboard.setString(text)`, `Clipboard.getString()` / `hasString()`, `setImage(uri)`, `getImage()` / `hasImage()`, `getFiles()` (promises the core resolves from the root's `Clipboard` event; the `has*` reads do not read the content, so iOS shows no paste notice). Images cross as base64 `data:` URIs (an image source and a `fetch` URL, so bytes stay native until JS asks for them), files as `file:` URLs one per line; the backends build both with `nsh_core::platform::clipboard`. UIPasteboard, ClipboardManager (text only), NSPasteboard, GDK, Win32, `navigator.clipboard`; the `clipboard` capability | its registry (`nsh_core::runtime`) |
 | `nsh/storage` | `Storage.getItem` / `setItem` / `removeItem` / `getAllKeys` / `clear` (async functions of the core; the entries live in memory in `nsh_core::storage`, loaded once from the platform's `StorageBackend` (`EngineConfig::storage`: `nsh_engine::FileStorage::open` in `<EngineConfig::data_dir>/<app id>` (the id travels with the app: `app.json`, the dev server, packages, `Root::app_id`), one per file in the process so a reload reads unflushed writes; a damaged file is set aside as `storage.json.corrupt`, an unreadable one leaves the changes in memory, never replacing it; `localStorage` under `nsh:<app id>:` on the web) and every change handed to it; 5 MB quota; no capability: the app's own data, kept where the host says) | its registry (`nsh_core::runtime`) |
 | `nsh/keymap` | `keymap.bind(keystroke, handler, { when, repeat })` / `keymap.bind({ keystroke: handler })`: keyboard shortcuts. Keystrokes are parsed and checked in Rust (`nsh_core::keymap`: syntax, `mod`, reserved keystrokes, which ones text inputs keep); the whole table goes to the platform as the root's `Prop::Keymap` → `MountItem::Keymap`, which matches keys on the spot and reports the root's `KeyCommand` event (the binding's id). Bindings made under an owner go with it; a module's top-level ones are undone when hot module replacement runs it again (`hot::undo_on_rerun`) | `keymap.rs` |
-| `nsh/webview`, `nsh/video` | `WebView`, `Video` | `platform_modules.rs` |
+| `nsh/webview`, `nsh/video` (deprecated: `nsh`) | `WebView`, `Video` | `platform_modules.rs` |
 | `nsh/native` | `nativeComponent(name, { props, events })`: a component for a native component the embedding app registered; `nativeModule(specifier)`: the exports of a UI set the embedding app gave its engines (`EngineConfig::ui_sets`), as one object made by the loader's code (`modules::host_module`, the same values an import of the set gets) and kept per specifier; only the host's sets, never nsh's own modules or the runtime's registries | `platform_modules.rs`, `modules.rs` |
 | `nsh/ios` | `isAvailable`, `InputAccessoryView` | `platform_modules.rs` |
 | `nsh/android` | `isAvailable`, `Toast.show(message, "short" \| "long")`, `BackHandler` (`addEventListener` native, `exitApp` Rust) | `platform_modules.rs` + its registry |

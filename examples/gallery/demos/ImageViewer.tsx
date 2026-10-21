@@ -1,7 +1,6 @@
-import { effect, signal, Text, View } from "nsh";
+import { effect, Image, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 import { Dialog, safeArea, type TextViewImage } from "nsh/base";
-import { Image } from "nsh/image";
 import { motion, Press } from "../ui";
 
 /** The deepest zoom, and where a double tap zooms in to. */

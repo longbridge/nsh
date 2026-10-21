@@ -1,6 +1,5 @@
-import { type GestureResponderEvent, signal, Text, View } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, type GestureResponderEvent, Path2D, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, type AnimatedValue } from "nsh/animated";
-import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh/canvas";
 import logo from "../logo@2x.png";
 import { alpha, Button, Caption, Card, colors, DemoPage, Figure, finish, hint, isDark, Legend, type Palette, Segmented, Stat } from "../ui";
 
