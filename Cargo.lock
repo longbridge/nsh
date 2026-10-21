@@ -2970,6 +2970,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-testing",
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",

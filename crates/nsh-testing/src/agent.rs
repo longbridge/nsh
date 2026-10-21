@@ -537,6 +537,19 @@ impl Tester {
     }
 }
 
+/// Whether `at` is inside `bounds` clear of its edges: of the outer tenth
+/// of each side, 48 points at most.
+fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
+    let margin_x = (bounds.size.width.0 * 0.1).min(48.0);
+    let margin_y = (bounds.size.height.0 * 0.1).min(48.0);
+    let (x0, y0) = (bounds.origin.x.0 + margin_x, bounds.origin.y.0 + margin_y);
+    let (x1, y1) = (
+        bounds.origin.x.0 + bounds.size.width.0 - margin_x,
+        bounds.origin.y.0 + bounds.size.height.0 - margin_y,
+    );
+    (x0..=x1).contains(&at.x.0) && (y0..=y1).contains(&at.y.0)
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
@@ -721,18 +734,33 @@ impl Agent {
             )
         };
         let scrollers = self.scene.scroll_ancestors(id)?;
+        let mut before: Option<Point<Points>> = None;
         for _ in 0..SCROLLS_INTO_VIEW {
             let at = self.native.bounds(id).ok_or_else(not_on_screen)?.center();
             let viewport = self.native.viewport();
             let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
+            // The last gesture moved it no more (its scroll view's end):
+            // pressed where it is when it shows.
+            if let Some(b) = before
+                && (b.x.0 - at.x.0).abs() < 1.0
+                && (b.y.0 - at.y.0).abs() < 1.0
+            {
+                return if window.contains(&at) {
+                    Ok(at)
+                } else {
+                    Err(not_on_screen())
+                };
+            }
             // The innermost scroll view whose bounds leave the middle out,
-            // else the outermost one when the window does.
+            // or near their edge (where a finger does not press and bars,
+            // the home indicator and fades sit), else the outermost one
+            // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
                 let b = self.native.bounds(scroller)?;
-                (!b.contains(&at)).then_some((scroller, horizontal, b))
+                (!well_inside(&b, at)).then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
-                (!window.contains(&at))
+                (!well_inside(&window, at))
                     .then(|| scrollers.last())
                     .flatten()
                     .and_then(|&(s, h)| Some((s, h, self.native.bounds(s)?)))
@@ -749,7 +777,8 @@ impl Agent {
             } else {
                 (at.y.0 - middle.y.0, scroller.size.height.0)
             };
-            let step = distance.clamp(-extent * 0.8, extent * 0.8);
+            // From the middle, so a finger dragging it stays inside it.
+            let step = distance.clamp(-extent * 0.4, extent * 0.4);
             let delta = if horizontal {
                 Point::new(Points(step), Points(0.0))
             } else {
@@ -757,6 +786,7 @@ impl Agent {
             };
             self.native.scroll(middle, delta);
             self.settled()?;
+            before = Some(at);
         }
         Err(format!(
             "`{selector}` did not come into view; {}",

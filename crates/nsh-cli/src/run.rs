@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::{dev::DevSession, runtime::Platform, ui};
 
 const APP_NAME: &str = "NshDev";
-const BUNDLE_ID: &str = "com.longbridge.nsh.host";
+pub(crate) const BUNDLE_ID: &str = "com.longbridge.nsh.host";
 
 /// Where `nsh dev` and `nsh run` run the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -700,7 +700,7 @@ fn package_catalyst(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
 /// signed ad hoc (the simulator requires a signature).
-fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
     let app = work.join("ios").join(format!("{APP_NAME}.app"));
     fs::create_dir_all(&app)?;
     fs::write(app.join("Info.plist"), info_plist(Target::Ios))?;

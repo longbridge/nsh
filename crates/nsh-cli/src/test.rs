@@ -83,7 +83,7 @@ pub(crate) fn test(
         bail!("--browser goes with --target web");
     }
     let host = target
-        .map(|target| crate::test_host::starter(target, browser))
+        .map(|target| crate::test_host::starter(target, browser, &work_dir))
         .transpose()?;
     match crate::rust_app::current() {
         Some(app) => {

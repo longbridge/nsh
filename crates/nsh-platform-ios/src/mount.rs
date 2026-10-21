@@ -466,6 +466,27 @@ impl Mounter {
         self.start_image_loads();
     }
 
+    /// Node `id`'s view (`nsh test --target ios`).
+    #[cfg(feature = "dev")]
+    pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
+        Some(self.slot(id)?.native.view().retain())
+    }
+
+    /// The text input `id` holds (`None`: it is no input).
+    #[cfg(feature = "dev")]
+    pub(crate) fn input_text(&self, id: NodeId) -> Option<String> {
+        match &self.slot(id)?.native {
+            Native::Input(input) => Some(input.text()),
+            _ => None,
+        }
+    }
+
+    /// Whether a native animation runs.
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.animator.animating()
+    }
+
     #[inline]
     fn slot(&self, id: NodeId) -> Option<&Slot> {
         self.views.get(id as usize).and_then(Option::as_ref)

@@ -330,7 +330,7 @@ failures and log records come back as `RunnerMessage`s; batches of `--trace` go 
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
-`windows`, `gpui`, `web`). `App` drives either kind
+`windows`, `gpui`, `web`, `ios`). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
 `nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
 For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
@@ -361,8 +361,22 @@ input goes through (`synth.rs`), back the mouse's back button, dialogs pressed a
 (`docs/dev/gpui.md`). Linux (`nsh-platform-linux`, feature `dev`): input through `input::simulate` and the focused
 GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s clicked, screenshots rendered
 offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
-points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). All four use
-`nsh_testing::agent::Tester`, which turns the dev client's test events into an agent's steps on a `Worker` thread.
+points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
+feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
+iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
+and files). Touches are IOHID digitizer events handed to UIKit (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's
+and BackBoardServices' functions looked up at run time, `synth.rs`), so UIKit makes the `UITouch`es and runs hit
+testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
+inside the scroll view that rests (still reporting where it is) before it lifts, so it ends without a fling; a tap
+that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
+tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
+a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
+Back taps the header's back button (the bar button carrying the back chevron's mask) or swipes a presented sheet
+down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
+`drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
+The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
+app; the screen keeps its device's size. All of them use `nsh_testing::agent::Tester`, which turns the dev client's
+test events into an agent's steps on a `Worker` thread.
 These hosts are also how a change to a platform is checked by hand: `nsh test <entry> --target <platform>` with steps
 on standard input (`app.screenshot("a.png")`, `app.press(…)`) opens the app in the platform's window, takes them and
 closes it.
