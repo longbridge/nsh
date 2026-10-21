@@ -35,6 +35,7 @@ nsh init my-app --template rust
 | `src/main.rs` | 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件 |
 | `Cargo.toml` | crate 清单，依赖与 CLI 同版本的 `nsh-core` 和 `nsh-base` |
 | `nsh.json` | 应用的名称、id、版本和构建号，它的 crate（`"rust": "."`）和根组件（`"root": "App"`）（[项目结构](./project-structure.md#nshjson)） |
+| `App.test.tsx` | 根组件的测试，用 TypeScript 编写（`nsh test`），附带供编辑器使用的 `tsconfig.json` 和 `.nsh/types` |
 | `README.md` | 如何运行、测试和打包应用，以及之后如何添加 TSX 入口 |
 | `.gitignore` | 忽略 `.nsh/` 和 `target/` |
 
@@ -414,8 +415,8 @@ nsh test my-app/nsh.json --trace     # Rust 应用的根组件
 nsh test my-app/App.tsx --trace      # TSX 应用的入口
 ```
 
-给它一个目录时，它运行应用的测试：TSX 模板的 `App.test.tsx` 会打开应用、按下按钮并检查显示的内容（`nsh test my-app`）。Rust
-应用可以用同样的方式测试它的根组件，也可以在 `cargo test` 中用 `nsh_testing::Headless` 测试（[用 Rust 开发](./rust.md#测试)）。
+给它一个目录时，它运行应用的测试：每个模板的 `App.test.tsx` 都会打开应用、按下按钮并检查显示的内容（`nsh test my-app`）。Rust
+应用的测试用 `open(".")` 打开它的根组件；它也可以在 `cargo test` 中用 `nsh_testing::Headless` 测试（[用 Rust 开发](./rust.md#测试)）。
 
 ## 下一步
 

@@ -38,6 +38,7 @@ nsh init my-app --template rust
 | `src/main.rs` | Mounts the same root on macOS, Windows or Linux for `cargo run` |
 | `Cargo.toml` | The crate, depending on `nsh-core` and `nsh-base` at the CLI's version |
 | `nsh.json` | The app's name, id, version and build number, its crate (`"rust": "."`) and root component (`"root": "App"`) ([Project structure](./project-structure.md#nshjson)) |
+| `App.test.tsx` | The root's test, in TypeScript (`nsh test`), with `tsconfig.json` and `.nsh/types` for your editor |
 | `README.md` | How to run, test and package the app, and how to add a TSX entry later |
 | `.gitignore` | Ignores `.nsh/` and `target/` |
 
@@ -453,8 +454,8 @@ nsh test my-app/nsh.json --trace     # a Rust app's root
 nsh test my-app/App.tsx --trace      # a TSX app's entry
 ```
 
-Given a directory, it runs the app's tests: the TSX template's `App.test.tsx` opens the app, presses its button and
-checks what it shows (`nsh test my-app`). A Rust app tests its root the same way, or in `cargo test` with
+Given a directory, it runs the app's tests: each template's `App.test.tsx` opens the app, presses its button and
+checks what it shows (`nsh test my-app`). A Rust app's opens its root (`open(".")`); it can also be tested in `cargo test` with
 `nsh_testing::Headless` ([Building with Rust](./rust.md#testing)).
 
 ## Next steps
