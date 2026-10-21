@@ -45,7 +45,7 @@ type Source = keyof typeof sources;
 const modes = ["cover", "contain", "stretch", "center"] as const;
 type Mode = (typeof modes)[number];
 
-function Segmented<T extends string>(props: { options: readonly T[]; value: T; onChange: (v: T) => void }) {
+function Segments<T extends string>(props: { options: readonly T[]; value: T; onChange: (v: T) => void }) {
   return (
     <View style={{ ...ui().inset, flexDirection: "row", padding: 3, borderRadius: 10 }}>
       <Each of={props.options}>
@@ -99,9 +99,9 @@ function App() {
         />
         <View style={{ gap: 12, width: wide() ? 320 : undefined }}>
           <Text style={{ color: ui().muted }}>src</Text>
-          <Segmented options={Object.keys(sources) as Source[]} value={source()} onChange={(s) => source.set(s)} />
+          <Segments options={Object.keys(sources) as Source[]} value={source()} onChange={(s) => source.set(s)} />
           <Text style={{ color: ui().muted }}>resizeMode</Text>
-          <Segmented options={modes} value={mode()} onChange={(m) => mode.set(m)} />
+          <Segments options={modes} value={mode()} onChange={(m) => mode.set(m)} />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View
               onPress={() => blur.set(!blur())}

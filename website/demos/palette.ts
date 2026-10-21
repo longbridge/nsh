@@ -1,8 +1,12 @@
 // The website's palette for its demos (website/DESIGN.md), in both
-// appearances. `ui()` reads `colorScheme()`, so a demo that reads it in its
-// JSX follows the page's theme live. The playground inlines this file into a
-// demo that imports it (it compiles one file).
-import { colorScheme as __scheme } from "nsh/device";
+// appearances, and the layout they share: one column on a phone, the subject
+// on a stage beside an inspector in a wide window. `ui()` reads
+// `colorScheme()`, so a demo that reads it in its JSX follows the page's
+// theme live. The playground inlines this file into a demo that imports it
+// (it compiles one file), so it has no JSX and renames what it imports.
+import type { JSX as __JSX } from "nsh";
+import { Text as __Text, View as __View } from "nsh";
+import { colorScheme as __scheme, platform as __platform, windowSize as __windowSize } from "nsh/device";
 
 const __dark = {
   page: "#101113",
@@ -130,3 +134,177 @@ export const tint = (color: string, alpha: number) => {
   const n = parseInt(color.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 };
+
+/** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
+ * and press Space"); touch density and copy ("Tap") otherwise. */
+export const desktop = __platform.idiom === "desktop";
+
+/** A window wide enough for the desktop layout (the site's Desktop frame is
+ * 1024 points): the subject on a stage, its state and options beside it. */
+export const wide = () => __windowSize().width >= 700;
+
+/** Heights and type of the idiom (Design Guides, "Density tiers"): compact
+ * with a pointer, 44-point targets on a touch screen. */
+export const size = desktop
+  ? { control: 32, controlSm: 28, row: 40, rowSm: 32, label: 14, detail: 12 }
+  : { control: 44, controlSm: 44, row: 52, rowSm: 44, label: 15, detail: 12 };
+
+/** The subject in a wide window: a bordered stage that takes the room and
+ * centers its content, at most `width` across (440). */
+export function Stage(props: { children?: __JSX.Element; width?: number; gap?: number }) {
+  return __View({
+    get style() {
+      return {
+        flex: 1,
+        minWidth: 0,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: ui().line,
+        backgroundColor: tint(ui().text, 0.02),
+        padding: 24,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      };
+    },
+    get children() {
+      return __View({
+        get style() {
+          return { width: "100%" as const, maxWidth: props.width ?? 440, gap: props.gap ?? 14 };
+        },
+        get children() {
+          return props.children;
+        },
+      });
+    },
+  });
+}
+
+/** The column beside a stage: the subject's state, its event log and the
+ * options that tune it. */
+export function Inspector(props: { children?: __JSX.Element }) {
+  return __View({
+    style: { width: 300, gap: 12 },
+    get children() {
+      return props.children;
+    },
+  });
+}
+
+/** The subject and its inspector: a stage beside an inspector column in a
+ * wide window, one column `gap` apart otherwise (`grow`: the column fills
+ * the page's height). */
+export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Element; gap?: number; width?: number; grow?: boolean }) {
+  return __View({
+    get style() {
+      return wide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : 0, gap: props.gap ?? 14 };
+    },
+    get children() {
+      if (!wide()) return [props.children, props.inspector];
+      return [
+        Stage({
+          get width() {
+            return props.width;
+          },
+          get gap() {
+            return props.gap;
+          },
+          get children() {
+            return props.children;
+          },
+        }),
+        Inspector({
+          get children() {
+            return props.inspector;
+          },
+        }),
+      ];
+    },
+  });
+}
+
+/** A recessed panel of state under a small title (`grow`: it takes the
+ * column's free height). */
+export function Panel(props: { title: string; children?: __JSX.Element; minHeight?: number; grow?: boolean }) {
+  const title = __Text({
+    get style() {
+      return { fontSize: 12, color: ui().muted };
+    },
+    get children() {
+      return props.title;
+    },
+  });
+  return __View({
+    get style() {
+      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : 0 };
+    },
+    get children() {
+      return [title, props.children];
+    },
+  });
+}
+
+/** An event log, newest first: the newest line in the text color, older
+ * ones faint. In a wide window it takes the inspector's free height. */
+export function Log(props: { title: string; lines: string[]; minHeight?: number; grow?: boolean }) {
+  return Panel({
+    get title() {
+      return props.title;
+    },
+    get minHeight() {
+      return props.minHeight;
+    },
+    get grow() {
+      return props.grow ?? wide();
+    },
+    get children() {
+      return props.lines.map((line, i) =>
+        __Text({
+          get style() {
+            return { fontSize: 12, color: i === 0 ? ui().text : ui().faint };
+          },
+          children: line,
+        }),
+      );
+    },
+  });
+}
+
+/** A labelled row of choices, one of them on: a demo's options. */
+export function Segmented<T extends string | number>(props: { label?: string; options: readonly T[]; value: T; onChange: (value: T) => void }) {
+  const option = (o: T) =>
+    __View({
+      onPress: () => props.onChange(o),
+      activeStyle: { opacity: 0.6 },
+      get style() {
+        return {
+          flex: 1,
+          height: 30,
+          borderRadius: 7,
+          alignItems: "center" as const,
+          justifyContent: "center" as const,
+          ...(props.value === o ? ui().raised : {}),
+        };
+      },
+      children: __Text({
+        get style() {
+          return { fontSize: 13, fontWeight: "500" as const, color: props.value === o ? ui().text : ui().muted };
+        },
+        children: String(o),
+      }),
+    });
+  const label = props.label
+    ? __Text({
+        get style() {
+          return { fontSize: 12, color: ui().muted };
+        },
+        children: props.label,
+      })
+    : null;
+  const options = __View({
+    get style() {
+      return { flexDirection: "row" as const, gap: 4, padding: 3, borderRadius: 10, ...ui().inset };
+    },
+    children: props.options.map(option),
+  });
+  return __View({ style: { gap: 6 }, children: [label, options] });
+}
