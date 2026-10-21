@@ -806,7 +806,12 @@ export function Segmented<T extends string>(props: {
   const width = signal(0);
   const x = createAnimatedValue(0);
   const index = () => Math.max(0, props.options.findIndex((o) => o.value === props.value));
-  const segment = () => (width() - 6) / Math.max(1, props.options.length);
+  // The track's border and padding: the indicator is placed inside the
+  // border (an absolute child's containing block is the padding box), so
+  // the segments share what is left of the measured width after both.
+  const border = 1;
+  const inset = 3;
+  const segment = () => (width() - 2 * (border + inset)) / Math.max(1, props.options.length);
   const height = props.size === "small" ? 32 : 40;
   // The first placement jumps; later ones spring.
   let placed = false;
@@ -824,12 +829,12 @@ export function Segmented<T extends string>(props: {
       style={{
         height,
         flexDirection: "row",
-        padding: 3,
+        padding: inset,
         borderRadius: height / 2,
         backgroundColor: colors.inset,
         // The track's glass: the sunk shadow plus a lit lower rim.
         boxShadow: `${finish.track.boxShadow}, inset 0 -1px 0 ${isDark() ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.85)"}`,
-        borderWidth: 1,
+        borderWidth: border,
         borderColor: colors.border,
       }}
     >
@@ -837,11 +842,11 @@ export function Segmented<T extends string>(props: {
         pointerEvents="none"
         style={{
           position: "absolute",
-          top: 3,
-          left: 3,
-          bottom: 3,
+          top: inset,
+          left: inset,
+          bottom: inset,
           width: segment(),
-          borderRadius: (height - 6) / 2,
+          borderRadius: (height - 2 * (border + inset)) / 2,
           ...finish.pill,
           borderWidth: 1,
           transform: [{ translateX: x }],
