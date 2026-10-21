@@ -257,13 +257,13 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 
 ### On a real platform
 
-`nsh test --target macos` (or `gpui`, `web`) runs the same tests on the platform's development host instead of headless:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`) runs the same tests on the platform's development host instead of headless:
 each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
 own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
-  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS, the mouse's back
-  button in GPUI, the browser's back button on the web);
+  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
+  back button on Windows and in GPUI, the browser's back button on the web);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
@@ -273,6 +273,8 @@ own input at the views their selectors name, as Playwright does in a browser:
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
+nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
+nsh test --target windows                     # in Win32 windows
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test tests/form.test.tsx --target macos   # one file

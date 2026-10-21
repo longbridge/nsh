@@ -153,7 +153,7 @@ per frame). Other platforms need only call `record_work` / `vsync` / `record_lat
 draw a panel.
 
 - macOS (release, Apple silicon, 1200×800 window, 120 Hz ProMotion screen; `nsh-macos-host --fps --trace` with
-  `--script`, two alternating runs of each; main-thread ms per shown frame as p50 / p95). The display link delivers
+  scripted input (the then `--script` steps), two alternating runs of each; main-thread ms per shown frame as p50 / p95). The display link delivers
   120 Hz in every case (refresh gaps p50 8.33 ms). Before = the backend without the two drawing fixes below:
 
   | Scenario | Before: main p50 / p95, CPU | After: main p50 / p95, CPU |

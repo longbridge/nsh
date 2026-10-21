@@ -90,20 +90,20 @@ crates/
                        (docs/dev/web.md)
   nsh-platform-linux/  GTK 4 backend (Linux): one `NshView` widget per node drawn with GSK, Pango text engine (typeset on the engine
                        thread, glyph runs drawn on the main thread), input, scroll views, navigation, video, native
-                       components, AppView, standalone app; feature `dev`: dev server client, log forwarding, error overlay;
-                       `--script` steps (screenshots, simulated input) for checking changes (docs/dev/linux.md)
+                       components, AppView, standalone app; feature `dev`: dev server client, log forwarding, error overlay,
+                       the test agent's platform part (`agent.rs`: `nsh test --target linux`) (docs/dev/linux.md)
   nsh-linux-host/      Development host on Linux (`nsh run --target linux`): connects to a dev server or runs a bundle
   nsh-linux-app/       Release runner on Linux: the executable of apps built by `nsh package --target linux`
   nsh-platform-macos/  AppKit backend (macOS): one flipped, layer-backed `NSView` per node decorated by Core Animation, CoreText text
                        (typeset on the engine thread), desktop input and scroll views as on Linux, navigation, video, web views,
-                       native components, AppView, standalone app; feature `dev` as above; `--script` steps (docs/dev/macos.md)
+                       native components, AppView, standalone app; feature `dev` as above (docs/dev/macos.md)
   nsh-macos-host/      Development host on macOS (`nsh run --target macos`): connects to a dev server or runs a bundle
   nsh-macos-app/       Release runner on macOS: the executable of apps built by `nsh package --target macos`
   nsh-platform-windows/ Win32 backend (Windows): one retained `NshView` per node, the tree drawn with Direct2D into a swap chain,
                        DirectWrite text engine (typeset on the engine thread, glyph runs drawn on the main thread), input
                        (mouse, touch, pen, wheel, precision touchpads), scroll views, NSH's own text editor (IMM32 IME),
                        navigation, video (Media Foundation), web views (WebView2), native components, UI Automation,
-                       AppView, standalone app; feature `dev` as above; `--script` steps (docs/dev/windows.md)
+                       AppView, standalone app; feature `dev` as above (docs/dev/windows.md)
   nsh-windows-host/    Development host on Windows (`nsh run --target windows`): connects to a dev server or runs a bundle
   nsh-windows-app/     Release runner on Windows: the executable of apps built by `nsh package --target windows`
   gpui/                The GPUI backend: a workspace of its own (`crates/gpui/Cargo.toml`, its own `Cargo.lock` and GPUI's dependencies),
@@ -113,7 +113,7 @@ crates/
                        `DrawCx` with the transform and opacity GPUI lacks), text shaped by GPUI's text system on the engine
                        thread, the main-thread queue (`rt.rs`), GPUI events (`events.rs`, keys as Windows VK codes);
                        `AppView` is a GPUI view for GPUI / GPUI Kit apps; features `webview` (wry), `video` (GStreamer),
-                       `dev` as above, `shot` (`--script` shots on macOS / Windows: GPUI's test support); it is the
+                       `dev` as above, `shot` (screenshots on macOS / Windows: GPUI's test support); it is the
                        backend for embedding, standalone apps run on each OS's own backend (docs/dev/gpui.md)
   gpui/nsh-gpui-host/  Development host on GPUI (`nsh run --target gpui`): shows a TSX app as GPUI apps that embed it
                        show it; connects to a dev server or runs a bundle
@@ -209,14 +209,14 @@ echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh t
 ./target/debug/nsh test examples/gallery                                   # the app's tests (`*.test.tsx`, `nsh/test`), headless; --trace prints batches
 ./target/debug/nsh test examples/gallery --target macos                    # the same tests in macOS windows: native input at the views (`nsh_testing::agent`)
 ./target/debug/nsh test examples/gallery --target web                      # in a headless Chrome / Edge / Chromium (found, or --browser <PATH>): trusted input over CDP
+xvfb-run -a ./target/debug/nsh test examples/gallery --target linux        # in GTK windows (a virtual display here); also windows, gpui
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # check a platform change: steps from stdin in its window
 ./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
 ./target/debug/nsh run examples/counter --trace                            # dev server + Catalyst host (390×844), hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)
 ./target/debug/nsh run examples/gallery --target android                   # on an emulator / device (needs `cargo xtask android --dev`)
 ./target/debug/nsh run examples/gallery --target linux                     # in a GTK window (the default on Linux)
-./target/debug/nsh-linux-host --script "wait 800; shot a.png; quit"        # Linux host, scripted: screenshots and simulated input
 ./target/debug/nsh run examples/gallery --target windows                   # in a Win32 window, 1200×800 (the default on Windows)
-./target/debug/nsh-windows-host --bundle build/bundle.nshc --script "wait 800; shot a.png; quit"   # Windows host, scripted (connects to `nsh dev` without --bundle)
 ./target/debug/nsh run examples/gallery --target gpui                      # in a GPUI window (macOS, Windows, Linux), as GPUI apps embed it
 ./target/debug/nsh run examples/gallery --target web                       # in the browser (the dev server serves the page)
 ./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served on this machine
@@ -444,10 +444,10 @@ release. Files a crate reads from outside its directory (`include_bytes!`, test 
    Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
    screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.
    Android: `adb exec-out screencap -p`, `adb shell input tap|swipe|text|keyevent` (all work with the screen locked).
-   Linux: `nsh-linux-host --script "wait 800; shot a.png; tap 100 200; …; quit"` renders screenshots offscreen and
-   simulates input (taps, drags, wheels, typing, keys, dark / light), without touching the screen (`docs/dev/linux.md`).
-   Windows: `nsh-windows-host --script "…"` does the same (also `touch` drags, precision touchpad `pad` scrolls,
-   `resize`); web views are child windows and missing from its screenshots (`docs/dev/windows.md`).
-   GPUI on Linux: `nsh-gpui-host --bundle … --script "…"` (the same steps) on a rootful Xwayland display of its own
-   started with `-shm` (`DISPLAY=:N WAYLAND_DISPLAY=`, `WEBKIT_DISABLE_DMABUF_RENDERER=1` for web views); shots are read
-   from the X server (`docs/dev/gpui.md`).
+   The desktops: `nsh test <entry> --target macos|linux|windows|gpui` with steps on standard input
+   (`await app.screenshot("a.png"); await app.press("label:Plan")`) opens the app in the platform's window, acts with
+   its input at the views the selectors name and takes screenshots, without touching the screen; the app's tests run
+   there the same way (`docs/dev/tooling.md` "On a real platform"). Linux: under Xvfb (`xvfb-run -a`) on a machine
+   without a display (`docs/dev/linux.md`). GPUI on Linux: on a rootful Xwayland display of its own started with
+   `-shm` (`DISPLAY=:N`, `WEBKIT_DISABLE_DMABUF_RENDERER=1` for web views); screenshots are read from the X server
+   (`docs/dev/gpui.md`).

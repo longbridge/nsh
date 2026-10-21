@@ -214,9 +214,26 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
-        tests: false,
+        tests: true,
     };
+    // A test session (`nsh test --target windows`): the surface keeps the
+    // model the agent's steps see, from the first bundle on (posted
+    // messages keep their order, so it comes before the bundle).
+    let key_of_surface = surface.key();
+    let tester = nsh_testing::agent::Tester::new(move |model| {
+        crate::window::invoke(move || {
+            if let Some(surface) = crate::surface::Surface::by_key(key_of_surface) {
+                surface.set_test_model(Some(model));
+            }
+        });
+        Box::new(crate::agent::WindowsNative::new(key_of_surface))
+    });
+    let tests = tester.clone();
     let started = DevClient::start(url, host, move |event| {
+        // Taken off the main thread: a step waits for what it does there.
+        let Some(event) = tests.event(event) else {
+            return;
+        };
         match event {
             DevEvent::Connected => CONNECTED.store(true, Ordering::Relaxed),
             DevEvent::Disconnected => CONNECTED.store(false, Ordering::Relaxed),
@@ -233,6 +250,7 @@ pub(crate) fn start(view: &Rc<AppView>, url: String) {
     match started {
         Ok(client) => {
             let client = Arc::new(client);
+            tester.set_client(&client);
             *CLIENT.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&client);
             *view.dev.borrow_mut() = Some(DevSession {
                 key,
@@ -314,7 +332,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
     match event {
         DevEvent::Connected => hide_status(ui),
         DevEvent::Disconnected => show_status(ui, Status::Reconnecting),
-        // No test agent here (`HostInfo::tests` is false): no steps come.
+        // The client's thread hands them to the test agent.
         DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => show_status(ui, Status::Building),
         DevEvent::BuildFailed(message) => {

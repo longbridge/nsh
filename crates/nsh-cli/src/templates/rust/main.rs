@@ -19,7 +19,6 @@ fn main() -> impl std::process::Termination {
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             app_id: __APP_ID__.to_owned(),
             size: (480, 640),
-            script: std::env::var("NSH_SCRIPT").ok(),
             ..Default::default()
         },
     )

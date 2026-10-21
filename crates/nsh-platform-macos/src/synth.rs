@@ -1,8 +1,7 @@
 //! Input as a user's hands give it, made in process: mouse and trackpad
-//! events posted to the app as the system posts them, keys, an input
-//! method's marked text, and pictures of the window. The agent of `nsh
-//! test --target` acts with them ([`crate::agent`]), and so do `--script`
-//! steps ([`crate::script`]).
+//! events posted to the app as the system posts them, keys, and pictures
+//! of the window. The agent of `nsh test --target macos` acts with them
+//! ([`crate::agent`]).
 
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
@@ -54,13 +53,9 @@ pub(crate) fn timestamp() -> f64 {
 }
 
 /// A scroll of `(dx, dy)`: points of a trackpad gesture in `phase` (a
-/// `CGScrollPhase`), or lines of a mouse wheel (`None`).
-pub(crate) fn wheel(window: &NSWindow, x: f64, y: f64, dx: i32, dy: i32, phase: Option<i64>) {
-    wheel_with(window, x, y, dx, dy, phase, 0, timestamp());
-}
-
-/// [`wheel`], in a `CGMomentumScrollPhase` (`0`: none), stamped `at`
-/// (seconds since the system started).
+/// `CGScrollPhase`), or lines of a mouse wheel (`None`), in a
+/// `CGMomentumScrollPhase` (`0`: none), stamped `at` (seconds since the
+/// system started).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wheel_with(
     window: &NSWindow,
@@ -139,30 +134,6 @@ pub(crate) fn type_text(window: &NSWindow, text: &str) {
     }
 }
 
-/// Sets `text` as the focused text view's marked text, as an input method
-/// composing it would (empty: unmarks it).
-pub(crate) fn mark(window: &NSWindow, text: &str) {
-    use objc2_app_kit::{NSTextInputClient, NSTextView};
-    use objc2_foundation::NSRange;
-    let Some(responder) = window.firstResponder() else {
-        return;
-    };
-    let Some(view) = responder.downcast_ref::<NSTextView>() else {
-        return log::error!("script: mark needs a focused text field");
-    };
-    let s = NSString::from_str(text);
-    let len = s.length();
-    // SAFETY: an NSString, as the protocol takes; the ranges are within it
-    // and NSNotFound replaces the current marked text or selection.
-    unsafe {
-        view.setMarkedText_selectedRange_replacementRange(
-            &s,
-            NSRange::new(len, 0),
-            NSRange::new(objc2_foundation::NSNotFound as usize, 0),
-        )
-    };
-}
-
 /// One modifier's flag.
 pub(crate) fn modifier(name: &str) -> Option<NSEventModifierFlags> {
     Some(match name {
@@ -172,15 +143,6 @@ pub(crate) fn modifier(name: &str) -> Option<NSEventModifierFlags> {
         "ctrl" => NSEventModifierFlags::Control,
         _ => return None,
     })
-}
-
-/// Modifiers alone, `+`-separated (`cmd+shift`).
-pub(crate) fn modifiers(names: &str) -> Option<NSEventModifierFlags> {
-    names
-        .split('+')
-        .try_fold(NSEventModifierFlags::empty(), |flags, m| {
-            Some(flags | modifier(m)?)
-        })
 }
 
 pub(crate) fn key(window: &NSWindow, name: &str) {

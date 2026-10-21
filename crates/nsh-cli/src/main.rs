@@ -248,13 +248,6 @@ enum Command {
         /// `windows`, `gpui`).
         #[arg(long = "window-size", value_name = "WIDTHxHEIGHT")]
         size: Option<String>,
-        /// Script steps to run once the window shows (`wait`, `shot`,
-        /// `tap`, `quit`, ...; the desktop hosts: `--target macos`,
-        /// `linux`, `windows`, `gpui`; an app of Rust only: `macos`,
-        /// `linux`, `windows`, as GPUI has no runner of its own). With `quit` the command exits when the
-        /// script does — snapshots without a window staying open.
-        #[arg(long)]
-        script: Option<String>,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -676,7 +669,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             name,
             size,
-            script,
         } => {
             no_limits_for_rust(&entry, limits)?;
             run::run(
@@ -689,7 +681,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run::HostWindow {
                     name: name.as_deref(),
                     size: size.as_deref(),
-                    script: script.as_deref(),
                 },
             )
         }

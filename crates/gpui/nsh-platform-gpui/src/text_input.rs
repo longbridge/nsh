@@ -102,8 +102,6 @@ enum Drag {
     Line(usize, usize),
 }
 
-/// The native side of an input view ([`crate::view::ViewState::input`]),
-/// and the editor it hosts.
 /// The text input `view` holds now (`None`: it is no input).
 #[cfg(feature = "dev")]
 pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
@@ -112,6 +110,8 @@ pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
     Some(text)
 }
 
+/// The native side of an input view ([`crate::view::ViewState::input`]),
+/// and the editor it hosts.
 pub(crate) struct InputState {
     /// The surface's key ([`Surface::by_key`]): `focus()` and `blur()`
     /// come with the view only.
@@ -1425,17 +1425,16 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
     view.changed();
 }
 
-/// Characters typed into the focused field (the script's `type`), as the
+/// Characters typed into the focused field (the test agent's), as the
 /// input handler's `replace_text_in_range` brings them.
-#[allow(dead_code)] // For `crate::script`'s `type`.
+#[cfg(feature = "dev")]
 pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
     ime::replace_text_in_range(surface, None, text);
 }
 
-/// An input method's composition in the focused field (the script's
-/// `mark`), as `replace_and_mark_text_in_range` makes it; empty text ends
-/// it.
-#[allow(dead_code)] // For `crate::script`'s `mark`.
+/// An input method's composition in the focused field, as
+/// `replace_and_mark_text_in_range` makes it; empty text ends it.
+#[cfg(all(test, feature = "shot"))]
 pub(crate) fn mark(surface: &Rc<Surface>, text: &str) {
     ime::replace_and_mark_text_in_range(surface, None, text, None);
 }

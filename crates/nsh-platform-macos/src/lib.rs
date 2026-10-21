@@ -41,9 +41,9 @@ mod mount;
 mod native;
 mod navigation;
 mod net;
-mod script;
 mod scroll;
 mod surface;
+#[cfg(feature = "dev")]
 mod synth;
 mod system;
 mod text;

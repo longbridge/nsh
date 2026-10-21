@@ -144,6 +144,10 @@ enum OverlayKind {
         sized: gtk::Widget,
         max: f32,
         gutter: f32,
+        /// What closing it without a button does: `None` when it cannot
+        /// be closed so.
+        #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+        dismiss: Option<Rc<DialogAnswer>>,
     },
 }
 
@@ -298,7 +302,7 @@ fn update(surface: &Surface, appearance: Appearance) {
     surface.set_environment(env);
 }
 
-/// The surface's environment changed (from the system or a script): GTK's
+/// The surface's environment changed (from the system or a test): GTK's
 /// theme and the root's background follow its scheme.
 pub(crate) fn environment_applied(surface: &Surface) {
     let dark = surface.environment.get().color_scheme == ColorScheme::Dark;
@@ -560,7 +564,9 @@ pub(crate) fn clear(surface: &Surface) {
 
 fn place(overlay: &Overlay, width: f32, height: f32) {
     match &overlay.kind {
-        OverlayKind::Dialog { sized, max, gutter } => {
+        OverlayKind::Dialog {
+            sized, max, gutter, ..
+        } => {
             sized.set_width_request((width - gutter).min(*max).max(0.0) as i32);
             overlay.root.set_native(
                 &overlay.widget,
@@ -940,11 +946,66 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     add_overlay(
         surface,
         backdrop.upcast(),
-        OverlayKind::Dialog { sized, max, gutter },
+        OverlayKind::Dialog {
+            sized,
+            max,
+            gutter,
+            dismiss: cancelable.then(|| answer.clone()),
+        },
     );
     if let Some(focus) = focus {
         focus.grab_focus();
     }
+}
+
+/// Answers the newest dialog on `surface` as a user does: presses its
+/// button titled `button`, or closes it without one (`None`; only a dialog
+/// that can be closed so).
+#[cfg(feature = "dev")]
+pub(crate) fn answer_dialog(surface: &Surface, button: Option<&str>) -> Result<(), String> {
+    let (widget, dismiss) = SYSTEM
+        .with(|s| {
+            s.borrow()
+                .overlays
+                .iter()
+                .rev()
+                .find_map(|o| match &o.kind {
+                    OverlayKind::Dialog { dismiss, .. }
+                        if o.root == surface.root && o.widget.can_target() =>
+                    {
+                        Some((o.widget.clone(), dismiss.clone()))
+                    }
+                    _ => None,
+                })
+        })
+        .ok_or("no dialog is shown")?;
+    let Some(text) = button else {
+        let dismiss = dismiss.ok_or("the dialog can only be answered with a button")?;
+        dismiss.answer(-1);
+        return Ok(());
+    };
+    let found = descendants(&widget).find_map(|w| {
+        let button = w.downcast::<gtk::Button>().ok()?;
+        (button.label().as_deref() == Some(text)).then_some(button)
+    });
+    let button = found.ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+    button.emit_clicked();
+    Ok(())
+}
+
+/// `widget` and every widget inside it, depth first.
+#[cfg(feature = "dev")]
+fn descendants(widget: &gtk::Widget) -> impl Iterator<Item = gtk::Widget> {
+    let mut stack = vec![widget.clone()];
+    std::iter::from_fn(move || {
+        let w = stack.pop()?;
+        let mut child = w.last_child();
+        while let Some(c) = child {
+            child = c.prev_sibling();
+            stack.push(c);
+        }
+        Some(w)
+    })
 }
 
 /// Shows `text` at the bottom of the surface for a while (one at a time:
@@ -1126,8 +1187,9 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
     }
 }
 
-/// Scripts: the system's color scheme is now dark (or light), as the
+/// Tests: the system's color scheme is now dark (or light), as the
 /// portal would say.
+#[cfg(any(feature = "dev", test))]
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SYSTEM.with(|s| s.borrow_mut().portal_dark = Some(dark));
     system_changed();

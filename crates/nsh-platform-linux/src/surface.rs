@@ -116,6 +116,9 @@ pub(crate) struct Surface {
     ticking: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
+    /// The model of a test session's app (`nsh test --target linux`).
+    #[cfg(feature = "dev")]
+    test_model: RefCell<Option<Arc<nsh_testing::agent::Model>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// What the running app may reach (checked for image redirects).
@@ -154,6 +157,8 @@ impl Surface {
             ticking: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
+            #[cfg(feature = "dev")]
+            test_model: RefCell::default(),
             asset_base: RefCell::new(None),
             access: RefCell::new(Arc::default()),
             native: Default::default(),
@@ -170,6 +175,37 @@ impl Surface {
         crate::input::install(&surface);
         crate::scroll::install_keyboard(&surface);
         surface
+    }
+
+    /// Its key ([`Surface::by_key`]).
+    #[cfg(feature = "dev")]
+    pub(crate) fn key(&self) -> u64 {
+        self.key
+    }
+
+    /// The surface `key` names, while it exists.
+    #[cfg(feature = "dev")]
+    pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
+        SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
+    }
+
+    /// Whether a native animation runs: the graph's, or a navigation
+    /// transition.
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.anim.borrow().animating()
+            || self
+                .nav
+                .try_borrow()
+                .map_or(true, |nav| nav.transitioning())
+    }
+
+    /// Keeps the model `nsh test --target` steps see of the app
+    /// ([`nsh_testing::agent::Model`]): every batch applied and every error
+    /// go to it from now on.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: Option<Arc<nsh_testing::agent::Model>>) {
+        *self.test_model.borrow_mut() = model;
     }
 
     /// Starts `config`'s app, replacing what ran.
@@ -287,6 +323,10 @@ impl Surface {
                 }
                 Message::Error(message) => {
                     log::error!("{message}");
+                    #[cfg(feature = "dev")]
+                    if let Some(model) = &*self.test_model.borrow() {
+                        model.error(message.clone());
+                    }
                     if let Some(f) = &*self.on_error.borrow() {
                         f(&message);
                     }
@@ -317,6 +357,10 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.borrow() {
+            model.apply(batch);
+        }
     }
 
     /// Writes the animated values to the views and reports finished

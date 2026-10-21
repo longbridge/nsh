@@ -22,7 +22,8 @@ on:
       - "crates/nsh-windows-app/**"
       - "crates/nsh-windows-host/**"
       - "crates/xtask/**"
-      - "examples/gallery/fonts/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -44,7 +45,8 @@ on:
       - "crates/nsh-windows-app/**"
       - "crates/nsh-windows-host/**"
       - "crates/xtask/**"
-      - "examples/gallery/fonts/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -100,3 +102,17 @@ jobs:
       # Tests need no display: they open no window.
       - name: Test
         run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask
+
+      # The examples' tests in Win32 windows, with the platform's input
+      # (`nsh test --target windows`): those a real platform runs (no
+      # stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in Win32 windows
+        shell: bash
+        run: |
+          cargo build -p nsh-cli
+          run() { ./target/debug/nsh test "$@" --target windows; }
+          run examples/counter
+          for file in form navigation photos; do
+            run "examples/gallery/tests/$file.test.tsx"
+          done
+          run examples/gallery/tests/environment.test.tsx --filter appearance

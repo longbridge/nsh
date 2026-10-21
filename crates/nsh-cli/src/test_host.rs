@@ -34,9 +34,12 @@ pub(crate) fn starter(target: Target, browser: Option<&Path>) -> anyhow::Result<
     if target == Target::Web {
         return crate::test_web::starter(browser);
     }
-    if !matches!(target, Target::Macos | Target::Gpui) {
+    if !matches!(
+        target,
+        Target::Macos | Target::Linux | Target::Windows | Target::Gpui
+    ) {
         anyhow::bail!(
-            "nsh test --target runs on macos, gpui and web for now (the other platforms' test agents follow)"
+            "nsh test --target runs on macos, linux, windows, gpui and web for now (the mobile platforms' test agents follow)"
         );
     }
     // Built (in a checkout) or found once, before the first test.
@@ -108,6 +111,12 @@ fn start(
     if target == Target::Macos {
         // A window AppKit restored from an earlier run would not be this one.
         command.args(["-ApplePersistenceIgnoreState", "YES"]);
+    }
+    if target == Target::Gpui && cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some()
+    {
+        // Screenshots read the window from the X server: under X11
+        // (Xwayland on a Wayland desktop).
+        command.env_remove("WAYLAND_DISPLAY");
     }
     if let Some(size) = options.size {
         command.args([
