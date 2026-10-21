@@ -93,43 +93,7 @@ fn keystroke(event: &KeyEvent) -> Option<Keystroke> {
 
 /// The key of virtual key code `vk` (`VK_*`).
 fn key_of(vk: u16) -> Option<Key> {
-    Some(match vk {
-        0x08 => Key::Backspace,
-        0x09 => Key::Tab,
-        0x0D => Key::Enter,
-        0x1B => Key::Escape,
-        0x20 => Key::Char(' '),
-        0x21 => Key::PageUp,
-        0x22 => Key::PageDown,
-        0x23 => Key::End,
-        0x24 => Key::Home,
-        0x25 => Key::Left,
-        0x26 => Key::Up,
-        0x27 => Key::Right,
-        0x28 => Key::Down,
-        0x2D => Key::Insert,
-        0x2E => Key::Delete,
-        // `0`-`9`, `A`-`Z`.
-        0x30..=0x39 => Key::Char(char::from(vk as u8)),
-        0x41..=0x5A => Key::Char(char::from(vk as u8).to_ascii_lowercase()),
-        // The keypad's digits.
-        0x60..=0x69 => Key::Char(char::from(b'0' + (vk - 0x60) as u8)),
-        // F1 to F24.
-        0x70..=0x87 => Key::F((vk - 0x6F) as u8),
-        // `VK_OEM_*`: the US layout's punctuation keys.
-        0xBA => Key::Char(';'),
-        0xBB => Key::Char('='),
-        0xBC => Key::Char(','),
-        0xBD => Key::Char('-'),
-        0xBE => Key::Char('.'),
-        0xBF => Key::Char('/'),
-        0xC0 => Key::Char('`'),
-        0xDB => Key::Char('['),
-        0xDC => Key::Char('\\'),
-        0xDD => Key::Char(']'),
-        0xDE => Key::Char('\''),
-        _ => return None,
-    })
+    Key::from_virtual_key(vk)
 }
 
 #[cfg(test)]

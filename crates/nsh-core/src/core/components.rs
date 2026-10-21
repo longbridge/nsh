@@ -597,7 +597,7 @@ impl Components {
         components
     }
 
-    fn alloc(&mut self) -> NodeId {
+    pub(super) fn alloc(&mut self) -> NodeId {
         let id = self.next_id;
         self.next_id += 2;
         id
@@ -760,7 +760,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
         let changed = self.components.environment != environment;
+        let ratio = self.components.environment.pixel_ratio;
         self.components.environment = environment;
+        if ratio != environment.pixel_ratio {
+            self.repick_images(ratio, environment.pixel_ratio);
+        }
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
@@ -4132,9 +4136,14 @@ impl<M: TextEngine> Core<M> {
         // finger: the components hear theirs, JS its own.
         if kind == EventKind::Touch && id == ROOT_ID {
             if let EventPayload::Touch(touch) = payload {
+                self.overlay_touches(touch);
                 self.touches(payload, touch);
             }
             return false;
+        }
+        // Hints follow the pointer on their anchors, whoever else listens.
+        if matches!(kind, EventKind::HoverIn | EventKind::HoverOut) {
+            self.overlay_hover(id, kind);
         }
         if self.platform_event(id, kind, payload) {
             return true;
@@ -4338,6 +4347,7 @@ impl<M: TextEngine> Core<M> {
                 }));
             }
             Action::ReportViewable(list) => self.report_viewable(list),
+            Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Direction(change) => self.change_direction(change),
             Action::Appearance(appearance) => self.set_appearance(appearance),
@@ -4526,6 +4536,10 @@ impl<M: TextEngine> Core<M> {
                 if binding < crate::ui::keys::FIRST_ID {
                     return false;
                 }
+                if binding == super::overlay::ESCAPE_BINDING {
+                    self.overlay_cancel();
+                    return true;
+                }
                 let found = self.components.executor.keys.borrow().handler(binding);
                 // A binding removed since the platform matched it.
                 if let Some((text, handler)) = found {
@@ -4538,6 +4552,10 @@ impl<M: TextEngine> Core<M> {
                 true
             }
             EventKind::BackPress if id == crate::ROOT_ID => {
+                // The top overlay listening takes it first.
+                if self.overlay_cancel() {
+                    return true;
+                }
                 let listeners = self.components.executor.back.borrow().newest_first();
                 for listener in listeners {
                     if self.back_pressed(&listener) {
@@ -4623,7 +4641,7 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::BackPress,
-            enabled: rust || self.components.js_back,
+            enabled: rust || self.components.js_back || self.overlay_state.cancel,
         });
     }
 
@@ -4645,7 +4663,7 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::KeyCommand,
-            enabled: rust || self.components.js_keys,
+            enabled: rust || self.components.js_keys || self.overlay_state.cancel,
         });
     }
 
@@ -4653,7 +4671,8 @@ impl<M: TextEngine> Core<M> {
     /// may fire wins, so a view's wins over JS's of the same keystroke).
     fn keymap(&self) -> Arc<crate::keymap::Keymap> {
         let keys = self.components.executor.keys.borrow();
-        if keys.list.is_empty() {
+        let overlay = self.overlay_key_binding();
+        if keys.list.is_empty() && overlay.is_none() {
             return self.components.js_keymap.clone();
         }
         let bindings = self
@@ -4663,6 +4682,7 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .copied()
             .chain(keys.list.iter().map(|k| k.binding))
+            .chain(overlay)
             .collect();
         Arc::new(crate::keymap::Keymap::new(bindings))
     }

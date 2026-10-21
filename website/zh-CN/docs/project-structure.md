@@ -255,7 +255,7 @@ declare module "node-polyfill";
 
 ## 资源
 
-图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布；TSX 像模块一样导入它们，打包器会记录每个被导入的文件。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
+图片和字体随应用一起发布。Rust crate 在编译时用 `asset!` 读取它的 `assets/` 目录中的每个文件，并在它的 `#[native_module]` 函数中用 `registry.assets(assets!())` 把它们全部发布；TSX 像模块一样导入它们，打包器会记录每个被导入的文件（以及图片的像素密度变体）。`nsh build` 把它们复制到 `.nsh/out/assets/`，`nsh package` 把它们放进应用，开发期间则提供给应用。
 
 ```rust tabs
 use nsh_core::ui::{FontAsset, ImageAsset, asset};
@@ -278,7 +278,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 
 | 扩展名 | 导入得到 |
 |---|---|
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ uri, width, height }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。 |
+| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ uri, width, height, scales? }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。不带后缀的文件还会发布它的 `@1.5x`–`@4x` 同名文件（列在 `scales` 中），并加载适合屏幕的变体（[像素密度](./images-and-assets.md#像素密度)）。 |
 | `.svg` | 一个 `ImageAsset`，尺寸取自 SVG 的 `width` 和 `height`（或 `viewBox`），单位为点。 |
 | `.ttf`, `.otf` | 字体的族名，一个字符串。字体会在第一帧之前注册。 |
 | `.json` | 解析后的 JSON |

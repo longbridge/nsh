@@ -1327,12 +1327,22 @@ opt-level = 3
     ) -> anyhow::Result<Option<crate::runtime::WebRuntime>> {
         const WASM: &str = "wasm32-unknown-unknown";
         let out = self.workspace.join("web-runtime");
-        let runtime = crate::runtime::WebRuntime {
-            wasm: if rust {
-                out.join("nsh-rust.wasm")
-            } else {
-                out.join(kind.file())
-            },
+        let wasm = if rust {
+            out.join("nsh-rust.wasm")
+        } else {
+            out.join(kind.file())
+        };
+        // The module's wasm-bindgen glue, when the app's crates call JS
+        // through wasm-bindgen (`crate::bindgen`).
+        let stem = wasm
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("nsh")
+            .to_owned();
+        let glue = out.join(format!("{stem}-bindgen.js"));
+        let mut runtime = crate::runtime::WebRuntime {
+            glue: glue.exists().then_some(glue),
+            wasm,
             // A checkout's own, so edits to it apply; from crates.io the
             // published crate's, copied next to the module when it is built.
             js: match &self.nsh {
@@ -1379,9 +1389,9 @@ opt-level = 3
         };
         let built = self.build_with(cmd, &build)?;
         fs::create_dir_all(&out)?;
-        // Both kinds build to the same file: each keeps a copy of its own.
-        fs::copy(&built, &runtime.wasm)
-            .with_context(|| format!("copy {} to {}", built.display(), runtime.wasm.display()))?;
+        // Both kinds build to the same file: each keeps a copy of its own,
+        // through wasm-bindgen when the app's crates call JS through it.
+        runtime.glue = crate::bindgen::install(&built, &out, &stem)?;
         if self.nsh == Nsh::Registry {
             let js = self.registry_crate("nsh-platform-web")?.join("web/nsh.js");
             fs::copy(&js, &runtime.js)

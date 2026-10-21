@@ -90,6 +90,11 @@ pub struct Screen {
     /// The JS responder's grants since a drag looked (`SetJsResponder`'s
     /// `block`, in order).
     js_grants: Vec<bool>,
+    /// The app's keyboard shortcuts (`nsh/keymap`, the root's `Keymap`).
+    keymap: Option<Arc<nsh_core::keymap::Keymap>>,
+    /// The views under the mouse that care (`input::hoverable`), innermost
+    /// first.
+    hovered: Vec<NodeId>,
 }
 
 #[derive(Debug, Default)]
@@ -119,6 +124,8 @@ struct View {
     selection_area: bool,
     /// The interaction states it tracks (`TrackStates`: pressed, hovered).
     tracked: u8,
+    /// The interaction states it is in (of those it tracks).
+    states: u8,
     /// The values its drags, pinches and rotations drive natively.
     gestures: GestureValues,
     /// When a drag on it activates its JS responder (`panActivation`).
@@ -228,6 +235,7 @@ impl Screen {
                 view.selection_area = props.selection_area;
                 view.pan_activation = props.pan_activation;
             }
+            MountItem::Keymap(keymap) => self.keymap = Some(keymap.clone()),
             MountItem::TrackStates { id, states } => {
                 self.nodes.entry(*id).or_default().tracked = *states;
             }
@@ -778,8 +786,12 @@ impl Screen {
     /// ancestor that hears long presses or presses.
     pub(crate) fn long_pressable(&self, selector: &Selector) -> Pick {
         self.pick(selector, |id| {
+            // A view watching touches hears a held finger too (a context
+            // menu's trigger).
             let target = self.up_to(id, |v| {
-                v.events.contains(EventKind::LongPress) || v.events.contains(EventKind::Press)
+                v.events.contains(EventKind::LongPress)
+                    || v.events.contains(EventKind::Press)
+                    || v.events.contains(EventKind::Touch)
             })?;
             (!self.disabled_from(id, Some(target))).then_some(target)
         })
@@ -851,6 +863,21 @@ impl Screen {
         None
     }
 
+    /// The views around `id` (it included, the root too) that listen to
+    /// touches, innermost first: the path a platform reports a finger with.
+    pub(crate) fn touch_path(&self, mut id: NodeId) -> Vec<NodeId> {
+        let mut path = Vec::new();
+        loop {
+            if self.hears(id, EventKind::Touch) {
+                path.push(id);
+            }
+            match self.nodes.get(&id).and_then(|v| v.parent) {
+                Some(parent) => id = parent,
+                None => return path,
+            }
+        }
+    }
+
     /// `id` and the views around it, innermost first: what a finger on it
     /// lands on.
     #[cfg(not(target_arch = "wasm32"))]
@@ -917,6 +944,43 @@ impl Screen {
             at = p.parent;
         }
         Some(Bounds::new(origin, view.frame.size))
+    }
+
+    /// The views of `chain` (innermost first) that hovering matters to:
+    /// their `hover:` styles or hover events (`input::hoverable`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn hoverable(&self, chain: &[NodeId]) -> Vec<NodeId> {
+        chain
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.nodes
+                    .get(id)
+                    .is_some_and(|v| nsh_core::input::hoverable(v.tracked, v.events))
+            })
+            .collect()
+    }
+
+    /// The views under the mouse are now `views`: the ones it was over.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_hovered(&mut self, views: Vec<NodeId>) -> Vec<NodeId> {
+        std::mem::replace(&mut self.hovered, views)
+    }
+
+    /// View `id`'s interaction states with `bit` set (or cleared), when it
+    /// tracks it and they change.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_state(&mut self, id: NodeId, bit: u8, on: bool) -> Option<u8> {
+        let view = self.nodes.get_mut(&id)?;
+        let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
+        view.states = next;
+        Some(next)
+    }
+
+    /// The app's keyboard shortcuts (`nsh/keymap`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn keymap(&self) -> Option<&nsh_core::keymap::Keymap> {
+        self.keymap.as_deref()
     }
 
     /// Whether a JS responder keeps native drags from starting.

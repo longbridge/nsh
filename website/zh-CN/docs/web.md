@@ -70,6 +70,55 @@ crate，不含 QuickJS；站点里没有 `app.nshc` 和 `harden.nshc`；运行�
 以及 `clang` 和 `llvm-ar`（macOS 上使用 LLVM 工具链，例如 Homebrew 的 `llvm`，通过 `CC_wasm32_unknown_unknown` 和
 `AR_wasm32_unknown_unknown` 指定）。
 
+### 在 Rust 中使用浏览器 API
+
+crate 可以通过 [wasm-bindgen](https://wasm-bindgen.github.io/wasm-bindgen/) 及其 `web-sys`、`js-sys` crate，在
+`#[cfg(target_arch = "wasm32")]` 下调用浏览器自身的 API：WebSocket、`IndexedDB`、剪贴板以及任何 Web API，还有 crate 自己的
+JS（`#[wasm_bindgen(inline_js = …)]`、`module = "/js/…"`）。当应用的 Web 运行时以这种方式调用 JS 时（包括 `JsValue` 转换），`nsh` 会对它运行
+`wasm-bindgen` CLI，并把胶水代码和 crate 的 JS 放在运行时旁边，开发时和发布的站点都是如此。CLI 的版本就是运行时链接的
+`wasm-bindgen` crate 的版本，`nsh` 会指出这个版本：用 `cargo install wasm-bindgen-cli --version <version> --locked` 安装
+（`NSH_WASM_BINDGEN` 可以指定 `PATH` 以外的 CLI）。链接了 wasm-bindgen 但不通过它调用 JS 的运行时
+（例如经由某个依赖的默认特性）与其他运行时一样构建。
+
+crate 以 `web-sys` 特性列出它用到的 API；固定 `wasm-bindgen` 的版本，可以让它的版本以及 CLI 的版本在每次构建中保持一致：
+
+```toml
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent"] }
+futures-channel = "0.3"
+```
+
+浏览器的回调（收到消息、页面的定时器）会唤醒应用的任务，任务随即运行：
+
+```rust
+#[cfg(target_arch = "wasm32")]
+async fn echo(url: &str, text: String) -> Result<String, String> {
+    use wasm_bindgen::{JsCast, prelude::*};
+    let ws = web_sys::WebSocket::new(url).map_err(|e| format!("{e:?}"))?;
+    let (tx, rx) = futures_channel::oneshot::channel();
+    let tx = std::cell::RefCell::new(Some(tx));
+    let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
+        if let (Some(tx), Some(data)) = (tx.borrow_mut().take(), e.data().as_string()) {
+            let _ = tx.send(data);
+        }
+    });
+    ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+    on_message.forget();
+    let open = ws.clone();
+    let on_open = Closure::<dyn FnMut()>::new(move || {
+        let _ = open.send_with_str(&text);
+    });
+    ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+    on_open.forget();
+    rx.await.map_err(|_| "closed".to_owned())
+}
+```
+
+crate 对浏览器 API 的调用以页面自身的权限运行，正如 crate 的原生代码在其他平台上以应用的权限运行：
+`nsh.json` 的能力管理经由引擎的内容（`fetch`、应用的 JS），浏览器的规则（CORS、页面的 Content-Security-Policy）
+管理页面发出的每个请求。
+
 ## 发布应用
 
 ```sh
@@ -90,6 +139,8 @@ nsh package App.tsx --target web --run
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
 | `nsh.<digest>.wasm` | Rust 应用：引擎、组件和你的 crate（整个 Rust gallery 为 3.3 MB，brotli 后 0.75 MB）。TSX 应用：引擎、核心、运行时的模块和不含编译器的 QuickJS（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB） |
+| `nsh-bindgen.<digest>.js` | 应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时所需的 wasm-bindgen 胶水代码，已压缩 |
+| `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
 | `app.<digest>.nshc` | TSX 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
 | `harden.<digest>.nshc` | TSX 应用的[沙箱](./sandbox-and-capabilities.md)的加固脚本，同样编译成字节码（1.4 KB） |
 | `chunks/<name>.<digest>.nshc` | TSX 应用中 `import()` 加载的代码，同样是字节码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
@@ -174,7 +225,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
 player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
 
-`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）；运行字节码时，发布模式还要传入加固脚本的字节码（`harden`，即 `harden.<digest>.nshc` 的字节）。`nsh package --target web` 写出的页面都用到了。
+`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`，`glue` 是 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 的运行时的 wasm-bindgen 胶水代码的 URL（`nsh-bindgen.<digest>.js`），播放器会随运行时一起加载它；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）；运行字节码时，发布模式还要传入加固脚本的字节码（`harden`，即 `harden.<digest>.nshc` 的字节）。`nsh package --target web` 写出的页面都用到了。
 
 `run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
 

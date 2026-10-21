@@ -3,6 +3,7 @@ title: Button
 description: "The Button component: a press target that owns presses, the disabled and selected states and its role for screen readers, styled by the app."
 order: 20
 group: base
+demo: el-button
 ---
 
 # Button

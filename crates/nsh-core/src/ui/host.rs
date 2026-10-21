@@ -10,12 +10,15 @@ use std::sync::Arc;
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
-    events::{self, Composition, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
+    events::{
+        self, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo, VideoProgress,
+        WebNavigation,
+    },
 };
 use crate::{
     AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Points, Prop,
-    ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
+    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, OverlayProp, Points,
+    Prop, ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
     StatusBarSetting, SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
@@ -23,6 +26,7 @@ use crate::{
     },
     geometry::{Bounds, Corners, Point, Radians, ScaledPixels},
     js::host::HostProps,
+    overlay::{Align, OverlayAnchor, Placement},
 };
 
 /// Whether `a` and `b` set the same property (their values aside).
@@ -64,6 +68,8 @@ crate::static_reactive!(SubmitBehavior: SubmitBehavior);
 crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
 crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
+crate::static_reactive!(Placement: Placement);
+crate::static_reactive!(Align: Align);
 
 /// Sets `prop` among `props`, replacing one of its kind.
 pub(crate) fn set_in(props: &mut Vec<Prop>, prop: Prop) {
@@ -113,6 +119,12 @@ macro_rules! host_element {
 
         impl Accessible for $name {}
         impl Interactive for $name {}
+
+        impl super::element::IntoTooltip for $name {
+            fn apply_tooltip(self, node: &mut ElNode) {
+                self.into_element().apply_tooltip(node);
+            }
+        }
 
         // Not every element has props of its own and events.
         #[allow(dead_code)]
@@ -207,6 +219,15 @@ host_element! {
     NativeView
 }
 
+host_element! {
+    /// Its children on top of the root view it is in (`<overlay>`, TS:
+    /// `Overlay` of `nsh`), made by [`overlay`]: the surface, or the dialog
+    /// around it; outside its parent's layout and clipping, while it stays
+    /// where it is for everything else (context, events, lifetime).
+    Overlay
+}
+
+impl ParentElement for Overlay {}
 impl ParentElement for Scroll {}
 impl ParentElement for Stack {}
 impl ParentElement for Screen {}
@@ -229,6 +250,17 @@ impl ParentElement for InputAccessoryView {
         }
         self
     }
+}
+
+/// An overlay: its children shown on top of the root view it is in (the
+/// surface, or the dialog around it), above what that root view shows and
+/// the overlays shown before it, while it is in the view (in a region:
+/// [`super::If`]). Without an anchor it is laid out as a `position: fixed`
+/// box of the root view (`.absolute().inset_0()` covers it); with one
+/// ([`Overlay::anchor`], [`Overlay::anchor_point`]) it goes on a side of it
+/// and follows it ([`crate::overlay`]).
+pub fn overlay() -> Overlay {
+    Overlay(ElNode::new(Tag::Overlay))
 }
 
 /// A text field.
@@ -708,6 +740,122 @@ impl Screen {
             EventKind::BackRequest,
             listener.into_listener(),
             events::unit,
+        )
+    }
+}
+
+impl Overlay {
+    /// Places it against the element carrying `anchor` (rendered before
+    /// it), following it as it moves: on the [`Self::placement`] side, on
+    /// the other when only that one has room, kept inside the safe area.
+    pub fn anchor(self, anchor: &super::ElementRef) -> Self {
+        let anchor = *anchor;
+        self.bind_prop(
+            move || match anchor.node() {
+                Some(id) => OverlayAnchor::Node(id),
+                None => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
+    /// Places it against what the element carrying `anchor` draws: the box
+    /// around its children, so a trigger in a wrapper its parent stretches
+    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
+        let anchor = *anchor;
+        self.bind_prop(
+            move || match anchor.node() {
+                Some(id) => OverlayAnchor::Content(id),
+                None => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
+    /// Places it against a point of the root view (a touch's `page`: a
+    /// menu where the pointer is).
+    pub fn anchor_point(self, point: impl IntoReactive<Point<Points>>) -> Self {
+        self.bind_prop(point, |p| {
+            Prop::Overlay(OverlayProp::Anchor(OverlayAnchor::Point(p)))
+        })
+    }
+
+    /// The side of the anchor it goes on (default below).
+    pub fn placement(self, placement: impl IntoReactive<Placement>) -> Self {
+        self.bind_prop(placement, |p| Prop::Overlay(OverlayProp::Placement(p)))
+    }
+
+    /// How it lines up with the anchor along that side (default centered).
+    pub fn align(self, align: impl IntoReactive<Align>) -> Self {
+        self.bind_prop(align, |a| Prop::Overlay(OverlayProp::Align(a)))
+    }
+
+    /// The gap between the anchor and it.
+    pub fn offset(self, offset: impl IntoReactive<Points>) -> Self {
+        self.bind_prop(offset, |o| Prop::Overlay(OverlayProp::Offset(o)))
+    }
+
+    /// The distance it keeps from the edges of the safe area.
+    pub fn margin(self, margin: impl IntoReactive<Points>) -> Self {
+        self.bind_prop(margin, |m| Prop::Overlay(OverlayProp::Margin(m)))
+    }
+
+    /// A press went down outside it, its anchor and the overlays inside it
+    /// (where, in the root view). Closing is the listener's: leave it out
+    /// of the view.
+    pub fn on_press_outside<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
+        self.listen(
+            EventKind::PressOutside,
+            listener.into_listener(),
+            events::page_point,
+        )
+    }
+
+    /// Escape or the Android back button, while it is the top overlay
+    /// listening (it takes them from those below, the pages and
+    /// [`super::on_back_press`]).
+    pub fn on_cancel<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Cancel, listener.into_listener(), events::unit)
+    }
+
+    /// Makes it a hint (a tooltip): shown once the pointer rested on its
+    /// anchor (its parent without one) for `delay`, until the pointer
+    /// leaves or presses the anchor, on the desktops only; it is placed
+    /// against the anchor and should not take the pointer
+    /// ([`Interactive::pointer_events`] none). [`Self::hint_open`] decides
+    /// instead of the pointer.
+    pub fn hint(self, delay: impl IntoReactive<std::time::Duration>) -> Self {
+        self.bind_prop(delay, |d| Prop::Overlay(OverlayProp::Hint(Some(d))))
+    }
+
+    /// A hint shown (`Some(true)`) or hidden (`Some(false)`) whatever the
+    /// pointer does: its owner follows [`Self::on_hint_show`] /
+    /// [`Self::on_hint_hide`] (a `Tooltip` controlled by the app). `None`:
+    /// the pointer decides.
+    pub fn hint_open(self, open: impl IntoReactive<Option<bool>>) -> Self {
+        self.bind_prop(open, |o| Prop::Overlay(OverlayProp::Open(o)))
+    }
+
+    /// The pointer rested on a hint's anchor for its delay: it asks to
+    /// show (and shows, unless [`Self::hint_open`] decides).
+    pub fn on_hint_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Show, listener.into_listener(), events::unit)
+    }
+
+    /// The pointer left or pressed a hint's anchor, or the hint left the
+    /// view, after it asked to show: it asks to hide.
+    pub fn on_hint_hide<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
+    }
+
+    /// The core placed it against its anchor: the side it went on, its
+    /// frame and the room on that side.
+    pub fn on_position<M>(self, listener: impl IntoListener<OverlayPosition, M>) -> Self {
+        self.listen(
+            EventKind::Position,
+            listener.into_listener(),
+            events::overlay_position,
         )
     }
 }

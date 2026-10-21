@@ -72,6 +72,7 @@ pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "Text", Compiled::Host("text")),
     ("nsh", "Scroll", Compiled::Host("scroll")),
     ("nsh", "Input", Compiled::Host("input")),
+    ("nsh", "Overlay", Compiled::Host("overlay")),
     ("nsh", "Image", Compiled::Host("image")),
     ("nsh", "WebView", Compiled::Host("webview")),
     ("nsh", "Video", Compiled::Host("video")),

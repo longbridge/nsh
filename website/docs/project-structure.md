@@ -256,7 +256,7 @@ declare module "node-polyfill";
 
 ## Assets
 
-Images and fonts ship with the app. A Rust crate reads each file of its `assets/` directory at compile time with `asset!`, and ships them all with `registry.assets(assets!())` in its `#[native_module]` function; TSX imports them like modules, and the bundler records each imported file. `nsh build` copies them to `.nsh/out/assets/`, `nsh package` puts them in the app, and during development they are served to the app.
+Images and fonts ship with the app. A Rust crate reads each file of its `assets/` directory at compile time with `asset!`, and ships them all with `registry.assets(assets!())` in its `#[native_module]` function; TSX imports them like modules, and the bundler records each imported file (and an image's pixel-density variants). `nsh build` copies them to `.nsh/out/assets/`, `nsh package` puts them in the app, and during development they are served to the app.
 
 ```rust tabs
 use nsh_core::ui::{FontAsset, ImageAsset, asset};
@@ -279,7 +279,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 
 | Extension | Import gives |
 |---|---|
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. |
+| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height, scales? }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. A file without a suffix also ships its `@1.5x`–`@4x` siblings, listed in `scales`, and the screen's variant is loaded ([pixel densities](./images-and-assets.md#pixel-densities)). |
 | `.svg` | An `ImageAsset` sized in points by the SVG's `width` and `height` (or `viewBox`). |
 | `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |

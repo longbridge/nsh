@@ -551,52 +551,196 @@ noprop text:"Inner text" selectable
 prop text:"Own selection" selectable true
 noprop text:"Outside text" selectable
 covers [nsh/base] SelectionArea
-# base-switch
-tap id:case-base-switch
-# The switch role and its value for screen readers, on the switch alone;
-# the track (2 + 20 + 2 wide, a margin of 8) puts the label at 32.
-expect Changes: 0
-prop id:wifi role switch
-prop id:wifi accessibilityState checked=false
-nostyle id:wifi backgroundColor
-frame id:wifi 0 20 390 24
-frame text:Wi-Fi 32 4 39 17
-listens id:wifi onPress
-# A press reports the next value; the app sets it: `checkedStyle`, and
-# `checked:` of the track (12 on the left) and thumb (30 wide).
-tap text:Wi-Fi
-expect Changes: 1
-prop id:wifi accessibilityState checked=true
-style id:wifi backgroundColor #00ff00ff
-frame text:Wi-Fi 52 4 39 17
-tap id:wifi
-expect Changes: 2
-prop id:wifi accessibilityState checked=false
-frame text:Wi-Fi 32 4 39 17
-# The app owns the value: a switch it keeps on asks for off and stays on.
-prop id:lights accessibilityLabel Lights
-prop id:lights accessibilityState checked=true
-tap label:Lights
-expect Asked: false
-prop id:lights accessibilityState checked=true
-# `disabled`: dimmed for screen readers, `disabled:` on the thumb (10
-# wide), presses do nothing (the platform gets no press to report).
-prop id:locked accessibilityState disabled=true checked=false
-frame text:Locked 22 4 47 17
-expect Changes: 2
-tap id:enable
-prop id:locked accessibilityState checked=false
-frame text:Locked 32 4 47 17
-listens id:locked onPress
-tap text:Locked
-expect Changes: 12
-covers [nsh/base] Switch
-covers [props] Switch.checked
-covers [props] disabled
-covers [props] checkedStyle
-covers [props] accessibilityLabel
-covers [props] Switch.trackClass
-covers [props] Switch.trackStyle
-covers [props] Switch.thumbClass
-covers [props] Switch.thumbStyle
-covers [events] onChange
+# base-popups
+tap id:case-base-popups
+# Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
+# with `defaultOpen`, a sheet and a menu with `defaultOpen`.
+expect PopoverBody
+expect OwnBody
+expect ShownTip
+expect StuckSheet
+expect OpenAtStart
+expect Life: popover open
+# The popover: above its trigger (20, 85, 350 × 30), 6 points away, its end
+# at the trigger's but kept 30 points from the edge; 80 wide; the app's
+# class.
+frame parent:text:PopoverBody 280 45 80 34
+style parent:text:PopoverBody backgroundColor #123456ff
+# Escape or back: heard, and with `closeOnEscape={false}` it stays.
+event text:PopoverBody onCancel
+expect Log: popover cancel
+expect PopoverBody
+# The trigger closes it.
+tap text:PopTrigger
+expect Log: popover false triggerPress
+absent PopoverBody
+expect Life: popover closed
+covers [nsh/base] Popover
+covers [props] Popover.open
+covers [props] Popover.defaultOpen
+covers [props] Popover.placement
+covers [props] Popover.align
+covers [props] Popover.offset
+covers [props] Popover.margin
+covers [props] Popover.popupClass
+covers [props] Popover.popupStyle
+covers [props] Popover.trigger
+covers [events] Popover.onOpenChange
+covers [events] Popover.onCancel
+# The menu, a sheet on a phone: its items, a separator, submenus.
+tap text:MenuTrigger
+expect NewItem
+expect Log: menu true triggerPress
+expect Life: menu open
+style parent:parent:text:NewItem backgroundColor #00ff00ff
+frame parent:text:NewItem 4 4 382 17
+style below:parent:parent:text:NewItem backgroundColor #000000ff
+style below:parent:parent:text:NewItem opacity 0.5
+frame id:separator 4 55 382 1
+prop parent:text:OffItem accessibilityState disabled=true
+prop parent:text:KeepItem accessibilityLabel Keep the menu
+tap text:KeepItem
+expect Log: chose Keep
+expect KeepItem
+# A submenu shows its items in place of the menu's, its back row first.
+tap text:ShareItem
+expect MailItem
+expect BackRow
+absent NewItem
+tap text:BackRow
+expect NewItem
+absent MailItem
+# A disabled one does not open.
+tap text:LockedItem
+absent HiddenItem
+expect NewItem
+# Choosing an item closes the menu.
+tap text:NewItem
+expect Log: menu false select
+absent NewItem
+expect Life: menu closed
+# The app opens it; Escape or back is heard, and closes it.
+tap text:ShowMenu
+expect NewItem
+event text:NewItem onCancel
+expect Heard: menu cancel
+expect Log: menu false cancel
+absent NewItem
+covers [nsh/base] Menu
+covers [nsh/base] MenuItem
+covers [nsh/base] MenuSeparator
+covers [nsh/base] Submenu
+covers [props] Menu.open
+covers [props] Menu.defaultOpen
+covers [props] Menu.popupClass
+covers [props] Menu.popupStyle
+covers [props] Menu.backdropClass
+covers [props] Menu.backdropStyle
+covers [props] Menu.trigger
+covers [events] Menu.onOpenChange
+covers [props] MenuItem.closeOnSelect
+covers [events] MenuItem.onSelect
+covers [props] Submenu.trigger
+covers [props] Submenu.back
+# The context menu: a finger held on its trigger.
+touch start text:HoldArea 5 5
+wait 600
+touch end
+expect CopyItem
+expect Log: context true longPress
+expect Life: context open
+style parent:parent:text:CopyItem backgroundColor #ff0000ff
+frame parent:text:CopyItem 2 2 386 17
+style below:parent:parent:text:CopyItem backgroundColor #0000ffff
+style below:parent:parent:text:CopyItem opacity 0.25
+tap text:CopyItem
+expect Log: context false select
+absent CopyItem
+expect Life: context closed
+# Disabled, a held finger does nothing; the app still opens it.
+tap text:ToggleContext
+touch start text:HoldArea 5 5
+wait 600
+touch end
+absent CopyItem
+tap text:ShowContext
+expect CopyItem
+event text:CopyItem onCancel
+expect Heard: context cancel
+expect Log: context false cancel
+absent CopyItem
+covers [nsh/base] ContextMenu
+covers [props] ContextMenu.open
+covers [props] ContextMenu.popupClass
+covers [props] ContextMenu.popupStyle
+covers [props] ContextMenu.backdropClass
+covers [props] ContextMenu.backdropStyle
+covers [props] ContextMenu.trigger
+covers [events] ContextMenu.onOpenChange
+# The tooltips: a touch screen shows none of its own, nor an element's
+# `tooltip`; one the app opens shows below its trigger (20, 287, 350 × 30),
+# 4 points away, from its start but 30 points from the edge; 60 wide; the
+# app's class.
+touch start text:TipTrigger 5 5
+wait 1000
+touch end
+absent PropTip
+tap text:TipTrigger
+expect TipText
+frame parent:text:TipText 30 321 60 17
+style parent:text:TipText backgroundColor #333333ff
+tap text:TipTrigger
+absent TipText
+touch start text:PropTrigger 5 5
+wait 1000
+touch end
+absent PropTip
+# Disabled: never shown.
+absent NeverTip
+tap text:ShowTip
+expect AskedTip
+covers [nsh/base] Tooltip
+covers [events] Popover.onOpen
+covers [events] Popover.onClose
+covers [events] Menu.onOpen
+covers [events] Menu.onClose
+covers [events] Menu.onCancel
+covers [events] ContextMenu.onOpen
+covers [events] ContextMenu.onClose
+covers [events] ContextMenu.onCancel
+covers [events] Sheet.onOpen
+covers [events] Sheet.onClose
+covers [props] Tooltip.open
+covers [props] Tooltip.defaultOpen
+covers [props] Tooltip.placement
+covers [props] Tooltip.align
+covers [props] Tooltip.offset
+covers [props] Tooltip.margin
+# The sheet: at the top, 50 tall, over a backdrop.
+tap text:OpenSheet
+expect SheetBody
+expect Life: sheet open
+frame parent:text:SheetBody 0 0 390 50
+style parent:text:SheetBody backgroundColor #abcdefff
+style below:parent:text:SheetBody backgroundColor #111111ff
+style below:parent:text:SheetBody opacity 0.75
+event text:SheetBody onCancel
+expect Log: sheet cancel
+expect SheetBody
+tap below:parent:text:SheetBody
+expect Log: sheet false backdropPress
+absent SheetBody
+expect Life: sheet closed
+# `closeOnBackdropPress={false}`: its backdrop keeps it.
+tap below:parent:text:StuckSheet
+expect StuckSheet
+covers [nsh/base] Sheet
+covers [props] Sheet.open
+covers [props] Sheet.defaultOpen
+covers [props] Sheet.side
+covers [props] Sheet.popupClass
+covers [props] Sheet.popupStyle
+covers [props] Sheet.backdropClass
+covers [props] Sheet.backdropStyle
+covers [events] Sheet.onOpenChange
+covers [events] Sheet.onCancel

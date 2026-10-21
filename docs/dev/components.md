@@ -11,8 +11,9 @@ come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
   `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `Switch`, `SelectionArea` (texts that select
-  together, `text.md` "Selection areas"), `TextView` (`text-view.md`) and the modules `AlertDialog`,
-  `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
+  together, `text.md` "Selection areas"), `TextView` (`text-view.md`), the popups on the core's overlays (`Popover`,
+  `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below) and the
+  modules `AlertDialog`, `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{SafeAreaView, …}`, and make navigation and
@@ -149,7 +150,10 @@ reasons: `reactive-components.md`.
   its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
   any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
   event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
-  variant names it (`onSelect?: (index: number) => void`). Value types
+  variant names it (`onSelect?: (index: number) => void`). A variant of several unnamed fields names each
+  (`#[args(open, reason)] OpenChange(bool, OpenChangeReason)`): the handler takes them as its arguments
+  (`onOpenChange?: (open: boolean, reason: OpenChangeReason) => void`; `Event::spread`, the data a JS array the JS face
+  spreads). Value types
   implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
@@ -289,7 +293,7 @@ reasons: `reactive-components.md`.
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
   | a function returning its value (`checksum(bytes)`) | a `#[module]` function without `cx` (not `async`): it runs in the call |
   | a callback TS passes (`items.sort((a, b) => ..)`, a listener) | a `Callback<A, R>` parameter: `call(args)` inside a synchronous call, `post(args)` / `call_async(args).await` from tasks; kept in a class's field, it is collected with a cycle through the object |
-  | a portal | none (TS has none either); overlays are `nsh_base::dialog()` (a transparent layer over the window, the look the app's) |
+  | `<Overlay anchor={ref} placement="bottom" onPressOutside onCancel>` (`nsh`) | `overlay().anchor(&r).placement(Placement::Bottom).on_press_outside(\|p: &Point<Points>\| ..).on_cancel(..)` (`.anchor_point(p)` for a point, `.align`, `.offset`, `.margin`, `.on_position(\|p: &OverlayPosition\| ..)`): on top of the root view, outside the parent's layout and clipping (`elements.md` "Overlays"); a whole-window layer is `.inset_0()`, a dialog `nsh_base::dialog()` |
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (`frame: Bounds<Points>`, `page: Point<Points>`) to await in a task |
   | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(px(10.0), px(10.0)))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
@@ -547,9 +551,11 @@ the core sets the root's direction from it and the language (in an app whose JS 
 ## Assets
 
 A crate ships files in its `assets/` directory, as TS imports them: `asset!("logo@2x.png")` (`nsh-macros`, the path
-relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size }` (the natural size
-in points, `Size<Points>`: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the
-font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
+relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size, scales }` (the natural size in
+points, `Size<Points>`: `@2x` / `@3x` divide the pixels; `scales` lists the `@1.5x`–`@4x` siblings of a file named
+without a density, which `assets!()` ships and images pick from by the screen's pixel ratio, as for TS imports), a
+`FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the font's name table) or a `FileAsset { uri }`; a missing
+or unreadable file fails the build (a variant too, and one whose pixels are off its scale), a changed one builds the
 crate again (`include_bytes!`). An `.svg` is a `FileAsset`, where TS's import gives an `ImageAsset` (the macro reads
 no SVG: sizing one takes usvg): `image(ICON.uri)` shows it, laid out by its style.
 The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
@@ -789,3 +795,55 @@ blocked last wins while both do, and the other's block comes back when it lets g
 `nsh/native`'s `nativeComponent` is the other kind: a platform view the embedding app registered (Swift / Java
 `NshComponent`, `docs/dev/embedding.md`). Those are views of their own on the main thread; Rust components are
 compositions of primitives in the core.
+
+## Popups
+
+`nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`) are made of
+the core's overlays (`elements.md` "Overlays"), which place them and report presses outside, Escape and back; the
+components decide to close. They draw nothing: the app styles each part (`popupClass` / `popupStyle`,
+`backdropClass` / `backdropStyle`) and its content.
+
+Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`):
+
+- **`open` / `defaultOpen`**: the open state is controlled when the app sets `open` (`Prop<Option<bool>>`), the
+  popup's own (`OpenState`'s signal, from `defaultOpen`) otherwise. A user's request changes the own state at once
+  when there is one; a controlled popup waits for the app to change `open`.
+- **`onOpenChange(open, reason)`**: every request to open or close (`OpenState::request`; not a request for what it
+  already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
+  `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
+  `"contextMenu"`. The app changing `open` itself is not reported here.
+- **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
+  motion is over; a popup at once), whoever opened or closed it, the app's `open` included (`lifecycle`, an effect on
+  what is shown). `Tooltip` has these two and `onOpenChange`.
+- **`onCancel`**: each attempt of the user to close it without choosing: Escape or back, a press outside, a press on
+  the backdrop. It is emitted before `onOpenChange`, whether or not a `closeOn<Trigger>` flag (`closeOnEscape`,
+  `closeOnPressOutside`, `closeOnBackdropPress`, read natively when the user acts) let it close, so an app with a flag
+  set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
+  sheet's submenu goes back a level and is none either.
+
+How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
+is for, never by replacing one popup with another everywhere:
+
+| | Desktops (and desktop browsers) | Phones and tablets |
+|---|---|---|
+| `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
+| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
+| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `Sheet` | an edge panel (`side`) over a backdrop | the same |
+
+The menus' items reach their menu through context (`MenuContext`: the close function, the sheet's path of submenus,
+the level's open submenu), so the app arranges them freely. Every item of a sheet's hidden levels is out of the tree
+(its content is not placed), so screen readers and tests see only the shown level. `Dialog` stays the modal
+presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s menus stay the system's.
+
+`Tooltip` is a hint overlay of the core (`elements.md` "Overlays": `overlay().hint(delay).hint_open(..)`) as its
+view's root, so the component's host is the overlay. It is given as an element's `tooltip` (as GPUI's
+`.tooltip(..)`), never placed among children: the core takes such an element as the hint overlay itself, in the
+element (`Core::adopt_hint_tooltips` once its view made it one; Rust: `IntoTooltip for TooltipElement`), so the
+element is what the pointer rests on and what it is placed against. The core follows the pointer on it and asks
+(`on_hint_show` / `on_hint_hide`); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
+the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app's `class` / `style`), its children
+what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
+`Prop::Tooltip`) takes a text too, in a minimal bubble of the theme's tokens, or any other element as it is, in a
+hint overlay the core makes itself (`Core::set_tooltip`).

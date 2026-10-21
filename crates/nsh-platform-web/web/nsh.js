@@ -9,15 +9,18 @@
 //   const player = await createPlayer(container, { wasm: "nsh.wasm" });
 //   player.run(await (await fetch("app.js")).text());
 //
-// Options: `wasm` (its URL, or a `Response` promise), `assetBase` (where
-// `asset:/<path>` is served) or `assets` (a map from `<path>` to its URL,
-// as `nsh package --target web` writes it), `readAsset(uri)` (the bytes
-// of an asset the engine needs at once, a font: a `Uint8Array` or null),
-// `chunks` / `chunkBase` (see `run`), `prepareChunk(id)` (a promise for
-// what chunk `id` needs once it runs, such as fonts for `readAsset`;
-// awaited with the chunk's download), `dark`, `idiom` ("phone", "pad" or
-// "desktop" instead of the one the pointer and the viewport suggest),
-// `overlay` (false: no error box), `onError`, `onLog`.
+// Options: `wasm` (its URL, or a `Response` promise), `glue` (the URL of
+// the wasm-bindgen glue of a runtime whose crates call JS through
+// wasm-bindgen, which the CLI writes next to it; each player imports an
+// instance of its own), `assetBase` (where `asset:/<path>` is served) or
+// `assets` (a map from `<path>` to its URL, as `nsh package --target web`
+// writes it), `readAsset(uri)` (the bytes of an asset the engine needs at
+// once, a font: a `Uint8Array` or null), `chunks` / `chunkBase` (see
+// `run`), `prepareChunk(id)` (a promise for what chunk `id` needs once it
+// runs, such as fonts for `readAsset`; awaited with the chunk's download),
+// `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
+// pointer and the viewport suggest), `overlay` (false: no error box),
+// `onError`, `onLog`.
 //
 // A split bundle (`nsh build --split`) loads its chunks on demand: from
 // `chunks[id]` when given (`app.<digest>.js` on a CDN), else `id` relative
@@ -382,6 +385,23 @@ function swapClass(el, slot, name) {
 
 let players = 0;
 
+/** How many players imported each wasm-bindgen glue, by URL. */
+const glueImports = new Map();
+
+/**
+ * Imports the wasm-bindgen glue at `url` for one player. The glue keeps its
+ * module's state (memory views, wasm-bindgen's heap) at its top level, so
+ * every player after the first imports it under a URL of its own: another
+ * instance of the module. The first keeps the URL the page preloads.
+ */
+function importGlue(url) {
+  const href = new URL(String(url), document.baseURI);
+  const imported = glueImports.get(href.href) ?? 0;
+  glueImports.set(href.href, imported + 1);
+  if (imported > 0) href.searchParams.set("player", String(imported));
+  return import(href.href);
+}
+
 /**
  * The script a web view's HTML starts with: the first message from the
  * player carrying `token` hands it the port `ReactNativeWebView.postMessage`
@@ -463,6 +483,8 @@ class Player {
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
+    // An `nsh_pump` is queued (`requestPump`).
+    this.pumpRequested = false;
     this.frame = 0;
     this.measure = measureContext();
     this.measureUses = 0;
@@ -488,6 +510,12 @@ class Player {
   }
 
   async load(url) {
+    // An app's crates that call JS through wasm-bindgen (web-sys, js-sys):
+    // the CLI ran `wasm-bindgen --target web` on the runtime, and its glue
+    // provides the module's other imports. It loads while the module
+    // compiles; a failed compile does not leave its rejection unhandled.
+    const glueLoad = this.options.glue ? importGlue(this.options.glue) : null;
+    glueLoad?.catch(() => {});
     const imports = {
       env: {
         __rquickjs_host_now_us: () => Date.now() * 1000,
@@ -534,6 +562,7 @@ class Player {
           this.apply(batch);
         },
         request_frame: () => this.requestFrame(),
+        request_pump: () => this.requestPump(),
         report_error: (p, l) => this.showError(this.str(p, l)),
         test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
@@ -605,8 +634,20 @@ class Player {
     const module = type === "application/wasm" && WebAssembly.compileStreaming
       ? await WebAssembly.compileStreaming(response)
       : await WebAssembly.compile(await response.arrayBuffer());
-    // The compiler's dependencies link wasm-bindgen glue they never call
-    // here (oxc-browserslist's dates): stubs that say so if they are.
+    const glue = glueLoad && (await glueLoad);
+    if (glue) {
+      if (typeof glue.__nsh_imports !== "function" || typeof glue.__nsh_finalize !== "function") {
+        throw new Error(`the glue ${this.options.glue} exports no __nsh_imports / __nsh_finalize: it must be the glue the nsh CLI adapts (nsh-bindgen.js), not wasm-bindgen's own output`);
+      }
+      // NSH's own imports (`nsh`, `env`) stay these.
+      for (const [name, fields] of Object.entries(glue.__nsh_imports())) {
+        imports[name] = name in imports ? { ...fields, ...imports[name] } : fields;
+      }
+    }
+    // A module that links wasm-bindgen without calling JS through it (the
+    // compiler's dependencies, oxc-browserslist's dates; a crate's default
+    // features) imports intrinsics it never calls here: stubs that say so
+    // if they are.
     for (const { module: name, name: field, kind } of WebAssembly.Module.imports(module)) {
       if (kind !== "function" || imports[name]?.[field]) continue;
       imports[name] ??= {};
@@ -615,7 +656,11 @@ class Player {
       };
     }
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
-    this.wasm = (await WebAssembly.instantiate(module, imports)).exports;
+    const instance = await WebAssembly.instantiate(module, imports);
+    this.wasm = instance.exports;
+    // The glue's own setup (its view of the memory, wasm-bindgen's tables)
+    // before any of the app's code runs.
+    glue?.__nsh_finalize(instance, module);
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
     this.wasm.nsh_app_init?.();
@@ -975,6 +1020,21 @@ class Player {
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     this.wasm?.nsh_stop();
+  }
+
+  /**
+   * The engine has work that came outside a call into it (`request_pump`:
+   * a task a browser callback woke, or what a pump left for the next): one
+   * `nsh_pump` in a task of its own, however many ask before it runs;
+   * `call` defers it if the engine runs.
+   */
+  requestPump() {
+    if (this.pumpRequested) return;
+    this.pumpRequested = true;
+    setTimeout(() => {
+      this.pumpRequested = false;
+      this.call((w) => w.nsh_pump());
+    }, 0);
   }
 
   /** The engine is due again in `delay` ms (-1: only for input). */
@@ -2946,6 +3006,13 @@ class Player {
     if (!el) return;
     el._modal = { animation, closeOnEscape };
     if (el.isConnected && !el._leaving) this.placeModal(el);
+    // Its config comes after its insert in the batch that presents it: it
+    // starts out of sight the way it now comes in.
+    if (el._entering) {
+      el.style.transform = "";
+      el.style.opacity = "";
+      this.hideModal(el, this.modalMotion(el));
+    }
   }
 
   /** Sizes presented modal `el` to the root (a transparent layer over it,
@@ -2993,9 +3060,11 @@ class Player {
     this.placeModal(el);
     el.style.transition = "none";
     this.hideModal(el, motion);
+    el._entering = true;
     this.scopeFocus();
     this.syncHistorySoon();
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      el._entering = false;
       el.style.transition = "";
       el.style.transform = "";
       el.style.opacity = "";

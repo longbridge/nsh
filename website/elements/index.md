@@ -70,8 +70,8 @@ could not infer their item types. The compiler recognizes the elements through t
 views in place, so importing them costs nothing at run time. See [JSX and components](../docs/jsx-and-components.md).
 
 ```tsx
-import { Canvas, Image, Input, List, Scroll, Text, Video, View, WebView } from "nsh";
-import { Button, Dialog, NavPage, NavStack, SafeAreaView } from "nsh/base";
+import { Canvas, Image, Input, List, Overlay, Scroll, Text, Video, View, WebView } from "nsh";
+import { Button, Dialog, Menu, NavPage, NavStack, Popover, SafeAreaView, Sheet, Tooltip } from "nsh/base";
 ```
 
 > [!NOTE]
@@ -93,6 +93,7 @@ Imported from `nsh` in TSX, from `nsh_core::ui::prelude` in Rust.
 | `<Canvas>` | `canvas(painter)` | a view replaying a 2D drawing | [Canvas](./canvas.md) |
 | `<WebView>` | `web_view(url)`, `web_view_html(html, base)` | WKWebView / android.webkit.WebView | [WebView](./web-view.md) |
 | `<Video>` | `video(url)` | AVPlayerLayer / MediaPlayer on a TextureView | [Video](./video.md) |
+| `<Overlay>` | `overlay()` | a view on top of the window (or the dialog it is in), placed against an anchor | [Overlay](./overlay.md) |
 | `<If>`, `<Each>` | `when(..)`, `each(..)`, `dynamic(..)` | control flow: the elements they choose | [Control flow](./control-flow.md) |
 | `<InputAccessoryView>` (`nsh/ios`) | `input_accessory_view(id)` | a bar over the keyboard on iOS | [nsh/ios](../modules/nsh-ios.md) |
 
@@ -112,6 +113,10 @@ and take their look from the app.
 | `AlertDialog` | `nsh_base::alert_dialog()` | The system's alert and action sheet | [AlertDialog](./alert-dialog.md) |
 | `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
 | `<SelectionArea>` | `nsh_base::selection_area()` | Makes the texts inside it select together | [SelectionArea](./selection-area.md) |
+| `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
+| `<Menu>`, `<ContextMenu>`, `<MenuItem>`, `<MenuSeparator>`, `<Submenu>` | `nsh_base::menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones | [Menu](./menu.md) |
+| `<Tooltip>` | `nsh_base::tooltip()` | A hint next to its trigger, on hover or a held finger | [Tooltip](./tooltip.md) |
+| `<Sheet>` | `nsh_base::sheet()` | A panel at an edge of the screen over a backdrop | [Sheet](./sheet.md) |
 
 > [!NOTE]
 > A string is only drawn inside a `Text`. A string child of a `View` creates no native view and takes no part in
@@ -235,6 +240,29 @@ const at = signal<number | null>(null);
   </If>
 </View>
 ```
+
+### Tooltips
+
+`tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it. Phones
+and tablets show none. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `tooltip` | `.tooltip(..)` | `string \| JSX.Element` | A text, in a small bubble drawn with the theme's `popover` tokens (`bg-popover`, `text-popover-foreground`, `border-border`: the theme decides how it looks), or an element, shown as it is (a `Tooltip` of `nsh/base` is the tooltip itself). |
+
+```rust tabs
+view().on_press(save).tooltip("Save the document").child(text("💾"))
+```
+
+```tsx tabs
+<View onPress={save} tooltip="Save the document">
+  <Text>💾</Text>
+</View>
+```
+
+For a tooltip of its own look, placement, delay or events, give a [`Tooltip`](tooltip.md) of `nsh/base` as the
+`tooltip`, as GPUI's `.tooltip(..)` takes one.
 
 ### Context menus
 

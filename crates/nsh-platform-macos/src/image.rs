@@ -1468,6 +1468,7 @@ mod tests {
         let source = ImageSource {
             uri: "asset:/logo@2x.svg".into(),
             size: None,
+            scales: nsh_core::ImageScales::NONE,
         };
         let logo = decode(SVG_LOGO, Decoding::default()).unwrap();
         assert_eq!(natural(&logo, Some(&source)), (48.0, 24.0));

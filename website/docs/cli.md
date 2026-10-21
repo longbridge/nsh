@@ -315,4 +315,5 @@ Signs a revocation list: release keys and packages that must not load any more.
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | The keystore password. |
 | `NSH_RUNTIME` | `run`, `package` | A runtime directory to use instead of the one next to the CLI. |
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |
+| `NSH_WASM_BINDGEN` | `run`, `package` (`--target web`) | The `wasm-bindgen` CLI for an app whose crates [call browser APIs](./web.md#browser-apis-from-rust). Default: the one on `PATH`. |
 | `NO_COLOR` | every command | Set: no colors on terminals. |

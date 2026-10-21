@@ -335,6 +335,10 @@ impl<'js> HostInput for Js<'js> {
     fn truthy(&self) -> bool {
         truthy(&self.0)
     }
+
+    fn node(&self) -> Option<NodeId> {
+        crate::dom::node_id(self.0.ctx().as_raw().as_ptr(), self.0.as_raw())
+    }
 }
 
 /// The op setting prop `name` to `value`: a style, a registered native

@@ -3,6 +3,7 @@ title: SafeAreaView
 description: SafeAreaView 组件以及 safeArea 和 safeAreaInsets 访问器：让内容避开刘海、状态栏、主屏幕指示条和标题栏。
 order: 23
 group: base
+demo: el-safe-area-view
 ---
 
 # SafeAreaView
@@ -107,9 +108,8 @@ import { Text, View } from "nsh";
 import { safeArea } from "nsh/base";
 
 function BottomBar() {
-  const insets = safeArea();
   return (
-    <View style={{ flexDirection: "row", padding: 8, paddingBottom: 8 + insets().bottom }}>
+    <View style={{ flexDirection: "row", padding: 8, paddingBottom: 8 + safeArea().bottom }}>
       <Text>Bottom bar</Text>
     </View>
   );

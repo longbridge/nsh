@@ -91,6 +91,11 @@ export interface ImageAsset {
   uri: string;
   width: number;
   height: number;
+  /** The pixel densities it ships in, 1 being the imported file:
+   * `[1, 2, 3]` when `logo@2x.png` and `logo@3x.png` sit next to
+   * `logo.png`. The image loads the one for the screen's pixel ratio.
+   * Absent when the imported file is the only one. */
+  scales?: number[];
 }
 
 /** `<Image>` */
@@ -120,10 +125,18 @@ export interface InputProps extends CommonProps, InputHostProps {
 /** iOS-only props of `<Input>`. */
 export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
 
+/** `<Overlay>`: its children shown on top of the root view it is in (the
+ * surface, or the dialog around it), outside its parent's layout and
+ * clipping; laid out as a `position: fixed` box of that root view, or
+ * placed against `anchor`. */
+export interface OverlayProps extends CommonProps, OverlayHostProps {
+  style?: StyleProp<ViewStyle>;
+}
+
 /** What JS sets on a Rust component's host itself: the app's classes
- * (appended to the component's own), its inline and state styles, its test id, layout
- * events and the ref (`ref.command(name, args)`). */
-export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "onLayout" | "ref">;
+ * (appended to the component's own), its inline and state styles, its test id, its
+ * tooltip, layout events and the ref (`ref.command(name, args)`). */
+export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
 export interface Insets {
   top: number;
@@ -737,6 +750,21 @@ fn member_names(members: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variant_types_image_asset_lists_its_scales() {
+        let files = type_definitions(&[]);
+        let (_, types) = files
+            .iter()
+            .find(|(path, _)| path == "nsh/types.d.ts")
+            .expect("nsh/types.d.ts");
+        let at = types
+            .find("export interface ImageAsset {")
+            .expect("ImageAsset");
+        let asset = &types[at..at + types[at..].find("\n}").unwrap()];
+        assert!(asset.contains("  scales?: number[];"), "{asset}");
+        assert!(asset.contains("The image loads the one for the screen's pixel ratio."));
+    }
 
     #[test]
     fn default_export_statements_name_the_default_namespace_value() {

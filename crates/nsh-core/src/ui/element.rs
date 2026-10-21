@@ -139,6 +139,10 @@ impl<E: Event> super::EventToJs for E {
     fn data_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
         Event::data_js(self, host)
     }
+
+    fn spread(&self) -> bool {
+        Event::spread(self)
+    }
 }
 
 impl<E: Event> AnyEvent for E {
@@ -226,6 +230,7 @@ impl Attrs {
             out.push(Prop::Source(self.src.as_ref().map(|src| ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
+                scales: src.scales,
             })));
         }
         if self.inset_padding != old.inset_padding {
@@ -644,7 +649,9 @@ where
     }
 }
 
-/// Conditional building.
+/// Conditional building, as GPUI's `FluentBuilder` (`gpui::prelude`): decided
+/// once, as the element is made. What must follow a signal is a region
+/// ([`super::when`], [`super::dynamic`]).
 pub trait FluentBuilder: Sized {
     /// `then(self)` when `condition` holds.
     fn when(self, condition: bool, then: impl FnOnce(Self) -> Self) -> Self {
@@ -1046,8 +1053,87 @@ pub trait Accessible: Element {
     }
 }
 
+/// What an element's tooltip can be ([`Interactive::tooltip`]): a text,
+/// in a minimal bubble drawn with the theme's `popover` tokens, or an
+/// element, shown as it is.
+pub trait IntoTooltip {
+    #[doc(hidden)]
+    fn apply_tooltip(self, node: &mut ElNode);
+}
+
+impl IntoTooltip for &'static str {
+    fn apply_tooltip(self, node: &mut ElNode) {
+        SharedString::from(self).apply_tooltip(node);
+    }
+}
+
+impl IntoTooltip for String {
+    fn apply_tooltip(self, node: &mut ElNode) {
+        SharedString::from(self).apply_tooltip(node);
+    }
+}
+
+impl IntoTooltip for SharedString {
+    fn apply_tooltip(self, node: &mut ElNode) {
+        let content = if self.is_empty() {
+            crate::overlay::TooltipContent::None
+        } else {
+            crate::overlay::TooltipContent::Text(Arc::from(self.as_str()))
+        };
+        super::host::set(node, Prop::Tooltip(content));
+    }
+}
+
+impl IntoTooltip for AnyElement {
+    fn apply_tooltip(self, node: &mut ElNode) {
+        // A hint overlay inside the element, as the core makes for a text.
+        let mut hint = ElNode::new(Tag::Overlay);
+        hint.key = Some("tooltip".into());
+        hint.attrs.pointer_events = PointerEvents::None;
+        let gap = Points(4.0);
+        for prop in [
+            crate::OverlayProp::Hint(Some(crate::overlay::HINT_DELAY)),
+            crate::OverlayProp::Placement(crate::overlay::Placement::Top),
+            crate::OverlayProp::Offset(gap),
+            crate::OverlayProp::Margin(gap),
+        ] {
+            super::host::set(&mut hint, Prop::Overlay(prop));
+        }
+        hint.children.push(self.0);
+        node.children.push(hint);
+    }
+}
+
+impl<C: Component> IntoTooltip for ComponentElement<C> {
+    fn apply_tooltip(self, node: &mut ElNode) {
+        self.into_element().apply_tooltip(node);
+    }
+}
+
+/// Makes `hint`, an element whose root is a hint overlay
+/// ([`super::Overlay::hint`]: `nsh_base`'s `Tooltip`), the tooltip of
+/// `node` as it is, with no overlay of the core's around it (its
+/// [`IntoTooltip`]).
+#[doc(hidden)]
+pub fn __hint_tooltip(node: &mut ElNode, hint: AnyElement) {
+    let mut hint = hint.0;
+    hint.key = Some("tooltip".into());
+    node.children.push(hint);
+}
+
 /// Elements that take touches.
 pub trait Interactive: Element {
+    /// A hint about it, shown above it on the desktops while the pointer
+    /// rests on it (after half a second), until the pointer leaves or
+    /// presses it; never on touch screens, and it never takes the pointer.
+    /// A text shows in a minimal bubble drawn with the theme's `popover`
+    /// tokens; an element is shown as it is. `nsh_base`'s `Tooltip` places
+    /// one, delays it and reports it.
+    fn tooltip(mut self, tooltip: impl IntoTooltip) -> Self {
+        tooltip.apply_tooltip(self.node());
+        self
+    }
+
     /// A local file drag entered this desktop drop destination.
     fn on_file_drag_enter<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
@@ -1523,6 +1609,12 @@ macro_rules! element {
         }
 
         impl Accessible for $name {}
+
+        impl IntoTooltip for $name {
+            fn apply_tooltip(self, node: &mut ElNode) {
+                self.into_element().apply_tooltip(node);
+            }
+        }
     };
 }
 
@@ -1661,6 +1753,7 @@ impl Image {
             Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
+                scales: src.scales,
             })))
         });
         self

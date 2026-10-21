@@ -95,6 +95,9 @@ pub(crate) enum Action {
     /// A component's own list reports the rows viewable now (they stayed
     /// so for its minimum view time).
     ReportViewable(NodeId),
+    /// A hint overlay's delay is over with the pointer on its anchor: it
+    /// shows.
+    Hint(NodeId),
     /// The start of the next display frame resolves the slot.
     Frame(AnswerSlot<Instant>),
     /// Changes the layout direction's policy.
@@ -518,10 +521,12 @@ pub(crate) fn act_after(
 ) -> Task<()> {
     let weak = Rc::downgrade(executor);
     let acting = weak.clone();
+    // From now, not from when the task is first polled.
+    let at = crate::time::now() + delay;
     let id = executor.spawn(
         host,
         Box::pin(async move {
-            super::ambient::timer(delay).await;
+            super::ambient::timer_until(at).await;
             if let Some(executor) = acting.upgrade() {
                 executor.act(action);
             }

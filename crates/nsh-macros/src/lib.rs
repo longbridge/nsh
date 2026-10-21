@@ -1056,6 +1056,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut data_arms = Vec::new();
     // The listener methods: (variant docs, method, data type, pick arm).
     let mut listeners = Vec::new();
+    let mut spread_arms = Vec::new();
     for v in &data.variants {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
@@ -1066,7 +1067,55 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             .filter(|a| a.path().is_ident("doc"))
             .collect();
         let doc = decl(&docs(&v.attrs));
-        let named = match args_attr(&v.attrs)? {
+        let args = args_attr(&v.attrs)?;
+        // Several unnamed fields: the handler's arguments, one name each.
+        if let (Fields::Unnamed(f), Some((names, span))) = (&v.fields, &args)
+            && f.unnamed.len() > 1
+        {
+            if names.len() != f.unnamed.len() {
+                return Err(syn::Error::new(
+                    *span,
+                    "`#[args(..)]` names each argument of an event of several fields",
+                ));
+            }
+            let tys: Vec<_> = f.unnamed.iter().map(|f| &f.ty).collect();
+            let vars: Vec<_> = (0..tys.len())
+                .map(|i| syn::Ident::new(&format!("a{i}"), Span::call_site()))
+                .collect();
+            specs.push(quote! {
+                #ui::EventSpec {
+                    name: #js,
+                    arg: "",
+                    data: if #ui::DECLARATIONS {
+                        let params: ::std::vec::Vec<::std::string::String> = ::std::vec![
+                            #(::std::format!("{}: {}", #names, <#tys as #ui::JsValue>::ts_type(types))),*
+                        ];
+                        params.join(", ")
+                    } else {
+                        ::std::string::String::new()
+                    },
+                    doc: #doc,
+                    spread: true,
+                }
+            });
+            name_arms.push(quote!(Self::#ident(..) => #js));
+            data_arms.push(quote! {
+                Self::#ident(#(#vars),*) => {
+                    let items = ::std::vec![#(#ui::JsValue::to_js(#vars, host)?.into_raw()),*];
+                    ::core::result::Result::Ok(#ui::JsOwned::new(host, host.new_array(items)?))
+                }
+            });
+            spread_arms.push(quote!(Self::#ident(..) => true));
+            // Its listener gets the event, as one of named fields does.
+            listeners.push((
+                variant_docs,
+                method,
+                quote!(#name),
+                quote!(e @ #name::#ident(..) => ::core::option::Option::Some(e)),
+            ));
+            continue;
+        }
+        let named = match args {
             None => None,
             Some((names, _)) if names.len() == 1 && !matches!(v.fields, Fields::Unit) => {
                 Some(names[0].clone())
@@ -1088,7 +1137,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
         match &v.fields {
             Fields::Unit => {
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc, spread: false }
                 });
                 name_arms.push(quote!(Self::#ident => #js));
                 data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
@@ -1102,7 +1151,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, arg: #arg, data: #ui::ts_of::<#ty>()(types), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: #ui::ts_of::<#ty>()(types), doc: #doc, spread: false }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
@@ -1134,6 +1183,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                             ::std::string::String::new()
                         },
                         doc: #doc,
+                        spread: false,
                     }
                 });
                 name_arms.push(quote!(Self::#ident { .. } => #js));
@@ -1155,7 +1205,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             Fields::Unnamed(f) => {
                 return Err(syn::Error::new(
                     f.span(),
-                    "an event variant has at most one unnamed field",
+                    "an event variant of several unnamed fields names them: `#[args(open, reason)]`",
                 ));
             }
         }
@@ -1233,6 +1283,14 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                     #(#data_arms,)*
                 }
             }
+
+            fn spread(&self) -> bool {
+                #[allow(unreachable_patterns)]
+                match self {
+                    #(#spread_arms,)*
+                    _ => false,
+                }
+            }
         }
     })
 }
@@ -1303,10 +1361,13 @@ const STEPS: &[(&str, f32)] = &[
 /// A file of the crate's `assets/` directory (`asset!("logo@2x.png")`, the
 /// path relative to it), as TS imports one: an image is an `ImageAsset`
 /// with its natural size in points (`@2x` / `@3x` in the name divide its
-/// pixels), a font (`.ttf`, `.otf`) a `FontAsset` with its family name,
-/// anything else a `FileAsset`. Read at compile time: a missing or broken
-/// file fails the build, and a changed one builds the crate again. The
-/// registry ships the files (`Registry::assets(assets!())`).
+/// pixels; an image named without a density lists the scales of its
+/// `@1.5x`–`@4x` siblings, and images load the one for the screen), a font
+/// (`.ttf`, `.otf`) a `FontAsset` with its family name, anything else a
+/// `FileAsset`. Read at compile time: a missing or broken file fails the
+/// build (a variant too, and one whose pixels are not the file's size times
+/// its scale), and a changed one builds the crate again. The registry ships
+/// the files (`Registry::assets(assets!())`).
 #[proc_macro]
 pub fn asset(input: TokenStream) -> TokenStream {
     let lit = parse_macro_input!(input as LitStr);

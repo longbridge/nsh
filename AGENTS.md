@@ -28,7 +28,9 @@ crates/
   nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
-                       resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it); the native animation graph (`animation/`: value / interpolate /
+                       resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it);
+                       overlays (`overlay.rs`: anchors and their placement; `core/overlay.rs`: shown in the root view, outside presses,
+                       Escape / back; docs/dev/elements.md "Overlays"); the native animation graph (`animation/`: value / interpolate /
                        math nodes, timing / spring / decay drivers; the platforms evaluate it every frame; `Animator`: its
                        bindings to views, gestures and scroll views); what the desktop backends share, free of any toolkit:
                        pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching),
@@ -44,7 +46,9 @@ crates/
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
                        app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Switch`, safe areas, the keyboard, the status
-                       bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
+                       bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md),
+                       the popups on the core's overlays (`Popover`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
+                       `Tooltip`, `Sheet`; presented per device: docs/dev/components.md "Popups"), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
                        the theme (`theme.rs`, as `gpui-base`'s: gpui-kit's theme files, semantic tokens and their defaults, which
                        the core keeps as design tokens and no component of `nsh-base` draws with)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
@@ -288,8 +292,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
-  button, a switch, safe areas, system alerts and the keyboard today, with the status bar a prop of pages and dialogs; controls
-  such as toggles, sliders, selects, popovers and sheets as their behavior is written). Names follow `gpui-base`'s
+  button, a switch, popovers, menus, tooltips and sheets, safe areas, system alerts and the keyboard today, with the status bar a
+  prop of pages and dialogs; controls such as toggles, sliders and selects as their behavior is written). Names follow `gpui-base`'s
   (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two
   registries exporting one name panic, `Registry::merged`). Platform-only APIs go to `nsh/ios` / `nsh/android`,
@@ -351,7 +355,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `INTERNAL_EVENTS`) (`docs/dev/elements.md`).
 - **Keep in sync**: the handler types of `host::EVENTS` ↔ the payloads of `nsh-js`'s `dispatch_event`; the order of `EventKind` ↔ `Native.java`; `encode.rs`
   opcodes ↔ `Mounter.java`; new event payload keys ↔ the JNI event map's key list; `BUNDLE_NAME` /
-  `BYTECODE_VERSION` ↔ the linked QuickJS.
+  `BYTECODE_VERSION` ↔ the linked QuickJS; `nsh-macros`' `VARIANT_SCALES` ↔ `IMAGE_SCALES` above 1.
 
 ## Code conventions
 
@@ -367,7 +371,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   (legacy, to migrate) does not list (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
-  (`View`, `Text`, `Scroll`, `Input`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`), as
+  (`View`, `Text`, `Scroll`, `Input`, `Overlay`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`), as
   `nsh_core::ui::prelude` holds them, every base component from `nsh/base` (`Dialog`, `Button`, `NavStack`, ...), and
   `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
   `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same

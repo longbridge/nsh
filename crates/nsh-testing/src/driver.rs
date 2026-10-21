@@ -26,6 +26,8 @@ pub(crate) trait Driver: Send {
     fn clear(&mut self, selector: &str) -> Result<(), String>;
     fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String>;
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String>;
+    fn press_key(&mut self, keys: &str) -> Result<(), String>;
+    fn hover(&mut self, selector: &str) -> Result<(), String>;
     fn back(&mut self) -> Result<(), String>;
     fn wait(&mut self, time: Duration) -> Result<(), String>;
     fn wait_for_within(&mut self, selector: &str, timeout: Duration) -> Result<(), String>;
@@ -79,6 +81,12 @@ impl Driver for Headless {
     }
     fn drag(&mut self, selector: &str, by: Point<Points>) -> Result<(), String> {
         Headless::drag(self, selector, by)
+    }
+    fn press_key(&mut self, keys: &str) -> Result<(), String> {
+        Headless::press_key(self, keys)
+    }
+    fn hover(&mut self, selector: &str) -> Result<(), String> {
+        Headless::hover(self, selector)
     }
     fn back(&mut self) -> Result<(), String> {
         Headless::back(self)
@@ -223,6 +231,8 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::Drag { selector, x, y } => {
             format!("drag({selector}, {}, {})", Points(*x), Points(*y))
         }
+        TestStep::PressKey { keys } => format!("keyboard.press({keys})"),
+        TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::Back => "back".to_owned(),
         TestStep::Wait { ms } => format!("wait({ms})"),
         TestStep::WaitFor {
@@ -291,6 +301,14 @@ impl Driver for Remote {
             selector: selector.into(),
             x: by.x.0,
             y: by.y.0,
+        })
+    }
+    fn press_key(&mut self, keys: &str) -> Result<(), String> {
+        self.action(TestStep::PressKey { keys: keys.into() })
+    }
+    fn hover(&mut self, selector: &str) -> Result<(), String> {
+        self.action(TestStep::Hover {
+            selector: selector.into(),
         })
     }
     fn back(&mut self) -> Result<(), String> {

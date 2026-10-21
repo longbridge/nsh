@@ -508,6 +508,11 @@ crate 会导出给 TSX。列出的每个 crate 都有自己的包名和导入名
 `"root"` 是列出的第一个 crate 中的组件。`nsh run` 和 `nsh dev` 期间，修改其中任何一个 crate，或它们通过路径依赖的
 crate，都会重新构建并重启应用。
 
+## 在 Web 上使用浏览器 API
+
+在 Web 上，crate 可以通过 wasm-bindgen 和 `web-sys` 调用浏览器的 API（WebSocket、`IndexedDB` 等）；`nsh`
+会随运行时一起构建它们所需的胶水代码。见 [Web](./web.md#在-rust-中使用浏览器-api)。
+
 ## 另请参阅
 
 - [项目结构](./project-structure.md)：`nsh.json` 的每个键。

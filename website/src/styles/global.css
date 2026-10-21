@@ -95,7 +95,8 @@
   --shadow-panel: 0 20px 50px -24px rgb(0 0 0 / 70%);
   --shadow-dialog: 0 25px 60px -12px rgb(0 0 0 / 70%);
 
-  /* The demo frame's screen; demos run in the dark appearance. */
+  /* The demo frame's screen, behind the app: the demos' own background,
+     as they follow the page's theme. */
   --screen: #101113;
 
   --nav-shadow: 0 1px 0 rgb(0 0 0 / 35%);
@@ -145,7 +146,7 @@
 }
 
 /* The light variant: warm-neutral surfaces, the same finishes, the accent
-   darkened so it reads as text; demos keep running dark (`--screen`). */
+   darkened so it reads as text. */
 html.light {
   --background: #f3f3ef;
   --foreground: #15161a;
@@ -164,6 +165,7 @@ html.light {
   --ring: #4a6a0a;
   --sidebar: #efefea;
   --sidebar-accent: #ebebe6;
+  --screen: #f3f3ef;
 
   --citrus: #4a6a0a;
   --on-citrus: #1b2207;
@@ -996,7 +998,11 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   th, td { padding: 0.55rem 0.85rem; line-height: 1.55; text-align: left; vertical-align: top; }
   thead th { border-bottom: 1px solid var(--line); }
   tbody tr + tr td { border-top: 1px solid var(--line); }
-  td:first-child code { white-space: nowrap; overflow-wrap: normal; }
+  /* Code in a cell keeps to one line and prose keeps a readable width: a
+     table wider than the page scrolls sideways instead of breaking
+     `boolean` into `boole an`. */
+  td code { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+  td:last-child { min-width: 16rem; }
 
   blockquote { padding: 0.1rem 0 0.1rem 1.1rem; border-left: 2px solid var(--citrus); color: var(--muted-foreground); }
   blockquote > p { margin-block: 0.5rem; }
@@ -1162,16 +1168,6 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   background: var(--screen);
   box-shadow: 0 0 0 1px var(--line);
 }
-/* The inset's inner shadow, over the running app too. */
-.phone__screen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 1px 3px rgb(0 0 0 / 45%);
-  pointer-events: none;
-}
-
 .phone__screen iframe {
   display: block;
   width: calc(var(--phone-w) * 1px);
@@ -1254,6 +1250,26 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 }
 .demo__open:hover { background: var(--secondary); color: var(--foreground) !important; }
 
+/* The panel's actions, icons in one group: edit in the playground, open in
+   a new tab (their names in `title` and `aria-label`). */
+.demo__actions {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.demo__action {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  color: var(--muted-foreground) !important;
+  text-decoration: none !important;
+}
+.demo__action + .demo__action { border-left: 1px solid var(--border); }
+.demo__action:hover { background: var(--secondary); color: var(--foreground) !important; }
+
 /* Segmented controls: a glassy track, the selected item a lit glass pill. */
 .segmented {
   display: inline-flex;
@@ -1275,7 +1291,7 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   transition: background 140ms ease, color 140ms ease;
 }
 .segmented button:hover { color: var(--foreground); }
-.segmented button[aria-selected="true"] { background: var(--glass-thumb); color: var(--foreground); box-shadow: var(--glass-thumb-edge); }
+.segmented button:is([aria-selected="true"], [aria-checked="true"]) { background: var(--glass-thumb); color: var(--foreground); box-shadow: var(--glass-thumb-edge); }
 
 .demo__stage {
   display: flex;
@@ -1306,10 +1322,17 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   .demo__body .demo__stage .phone { --phone-scale: 0.64; }
   .demo .demo__body > .demo__code { display: block; max-height: none; contain: size; }
   .demo__body .demo__code pre { min-height: 100%; font-size: 0.8rem; }
-  .demo__bar .segmented { display: none; }
+  .demo__bar .demo__views { display: none; }
   .demo__bar .demo__file { margin-left: 0; }
   .demo .demo__body > .demo__stage { display: flex; }
 }
+
+/* The Desktop layout: a 1024×640 window scaled to the stage's width
+   (`demo-client.ts`), the source below it. */
+.demo[data-layout="desktop"] .demo__body { display: block; }
+.demo[data-layout="desktop"] .demo__body > .demo__stage { display: flex; border-right: 0; }
+.demo[data-layout="desktop"] .demo__body > .demo__code { display: block; max-height: 28rem; contain: none; border-top: 1px solid var(--line); }
+.demo[data-layout="desktop"] .demo__bar .demo__views { display: none; }
 
 .demo--missing { padding: 1rem; color: var(--destructive); font-size: 0.875rem; }
 

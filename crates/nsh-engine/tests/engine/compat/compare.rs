@@ -10,7 +10,8 @@
 //!   optional, a function's or method's `void` result becomes a value (a
 //!   callback an app passes in keeps its `void`);
 //! - what apps pass in (an interface named `…Props`, `…Style`, `…Options`
-//!   or `…Config`) gains optional members only.
+//!   or `…Config`) gains optional members only, and a `Pick` of one gains
+//!   keys that are optional in it only.
 //!
 //! Parameter names are not part of a declaration: TypeScript compares
 //! function types by structure, so `(data: number) => void` and
@@ -71,6 +72,7 @@ pub(crate) fn types(base: &[(String, String)], now: &[(String, String)]) -> Vec<
         };
         let old = declarations(text);
         let new = declarations(current);
+        let all = &new;
         for (name, old) in &old {
             let at = format!("{path}: {name}");
             let Some(new) = new.get(name) else {
@@ -90,7 +92,10 @@ pub(crate) fn types(base: &[(String, String)], now: &[(String, String)]) -> Vec<
                     continue;
                 };
                 for text in texts {
-                    if !now.iter().any(|n| compatible(text, n)) {
+                    if !now
+                        .iter()
+                        .any(|n| compatible(text, n) || pick_widened(text, n, all))
+                    {
                         out.push(format!(
                             "{at}.{member}: was `{text}`, now `{}`",
                             now.join("` / `")
@@ -108,6 +113,50 @@ pub(crate) fn types(base: &[(String, String)], now: &[(String, String)]) -> Vec<
         }
     }
     out
+}
+
+/// `type X = Pick<T, "a" | "b">` → `type X = Pick<T, "a" | "b" | "c">`:
+/// the keys it picks gain ones that are optional in `T` (an interface of
+/// `decls`, or one of its bases), so what apps passed or read stays valid.
+fn pick_widened(old: &str, new: &str, decls: &BTreeMap<String, Declaration>) -> bool {
+    let pick = |text: &str| -> Option<(String, String, String)> {
+        let at = text.find(" = Pick<")?;
+        let inner = text[at + " = Pick<".len()..].strip_suffix('>')?;
+        let parts = split_top(inner, ',');
+        let [base, keys] = parts[..] else {
+            return None;
+        };
+        Some((text[..at].to_owned(), base.to_owned(), keys.to_owned()))
+    };
+    let (Some((old_head, old_base, old_keys)), Some((new_head, new_base, new_keys))) =
+        (pick(old), pick(new))
+    else {
+        return false;
+    };
+    if old_head != new_head || old_base != new_base || !type_widened(&old_keys, &new_keys) {
+        return false;
+    }
+    let old_keys = split_top(&old_keys, '|');
+    split_top(&new_keys, '|')
+        .into_iter()
+        .filter(|k| !old_keys.contains(k))
+        .all(|k| optional_member(decls, &new_base, k.trim_matches(['"', '\''])))
+}
+
+/// Whether interface `name` of `decls` (or one of its bases) has `key` as
+/// an optional property.
+fn optional_member(decls: &BTreeMap<String, Declaration>, name: &str, key: &str) -> bool {
+    let Some(decl) = decls.get(name).filter(|d| d.kind == "interface") else {
+        return false;
+    };
+    if let Some(texts) = decl.members.get(key) {
+        return texts.iter().all(|t| !required(t));
+    }
+    let bases = decl.header.split_once(" extends ").map_or("", |(_, b)| b);
+    split_top(bases, ',').into_iter().any(|base| {
+        let base = base.split('<').next().unwrap_or(base).trim();
+        optional_member(decls, base, key)
+    })
 }
 
 /// An interface whose objects apps make and pass in.
@@ -782,6 +831,48 @@ mod tests {
             "onPress?: ((e: X) => void) | null",
             "onPress?: ((e: X) => void) | null | string"
         ));
+    }
+
+    #[test]
+    fn picks_gain_optional_keys_only() {
+        let decls = declarations(
+            "export interface Base { a?: string; b: number }\n\
+             export interface Props extends Base { c?: boolean }",
+        );
+        let old = "export type P = Pick<Props, \"a\">";
+        // Optional, in the interface or a base.
+        assert!(pick_widened(
+            old,
+            "export type P = Pick<Props, \"a\" | \"c\">",
+            &decls
+        ));
+        // Required: an app's object lacks it.
+        assert!(!pick_widened(
+            old,
+            "export type P = Pick<Props, \"a\" | \"b\">",
+            &decls
+        ));
+        // Unknown, another base, a key gone.
+        assert!(!pick_widened(
+            old,
+            "export type P = Pick<Props, \"a\" | \"z\">",
+            &decls
+        ));
+        assert!(!pick_widened(
+            old,
+            "export type P = Pick<Base, \"a\">",
+            &decls
+        ));
+        assert!(!pick_widened(
+            "export type P = Pick<Props, \"a\" | \"c\">",
+            "export type P = Pick<Props, \"a\">",
+            &decls
+        ));
+        let breaks = types(
+            &[("t.d.ts".into(), "export interface Props { a?: string; c?: boolean }\nexport type P = Pick<Props, \"a\">;".into())],
+            &[("t.d.ts".into(), "export interface Props { a?: string; c?: boolean }\nexport type P = Pick<Props, \"a\" | \"c\">;".into())],
+        );
+        assert!(breaks.is_empty(), "{breaks:?}");
     }
 
     #[test]

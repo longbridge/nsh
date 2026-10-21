@@ -1042,6 +1042,7 @@ unsafe extern "C" fn modal_run(
                 &[
                     "children",
                     "open",
+                    "animation",
                     "class",
                     "style",
                     "backdropClass",
@@ -1054,6 +1055,20 @@ unsafe extern "C" fn modal_run(
                     "onOpenChange",
                 ],
             )?;
+            // A dialog with a backdrop slides its popup itself and fades
+            // the rest: the platforms slide the whole layer, the backdrop
+            // with it.
+            let slide = slides_popup(cx, props);
+            if slide {
+                // SAFETY: a new string the prop takes.
+                let fade = unsafe { qjs::JS_NewStringLen(cx, c"fade".as_ptr(), 4) };
+                dom::set_prop_value(cx, node, "animation", fade)?;
+            } else {
+                let read = reader(cx, props, "animation");
+                let r = dom::bind_prop_with(cx, node, "animation", read);
+                free(cx, read);
+                r?;
+            }
             let (insets, on_insets) = native_insets(cx, false);
             let id = dom::node_id(cx, node).expect("a node");
             let r = dom::set_handler(cx, id, EventKind::Insets, on_insets);
@@ -1076,7 +1091,7 @@ unsafe extern "C" fn modal_run(
                 free(cx, insets);
                 return Err(backdrop);
             }
-            let popup = popup_part(cx, props, insets);
+            let popup = popup_part(cx, props, insets, slide);
             free(cx, insets);
             let popup = match popup {
                 Ok(popup) => popup,
@@ -1102,14 +1117,60 @@ unsafe extern "C" fn modal_run(
     })
 }
 
+/// Whether dialog `props` slides its popup itself: it has a backdrop, it
+/// slides (the default), the user did not ask for less motion, and its
+/// `style` has no transform of its own (the slide's would replace it).
+fn slides_popup(cx: *mut JsContext, props: JsValue) -> bool {
+    // SAFETY: the props borrowed as the function's one data value; it
+    // returns a boolean.
+    let has = unsafe { has_backdrop(cx, UNDEFINED, 0, ptr::null_mut(), 0, [props].as_mut_ptr()) };
+    // SAFETY: an inline read of a boolean.
+    if unsafe { !qjs::JS_VALUE_GET_BOOL(has) } {
+        return false;
+    }
+    let animation = get(cx, props, c"animation");
+    // SAFETY: an inline check of a live value.
+    let unset = unsafe { qjs::JS_IsUndefined(animation) || qjs::JS_IsNull(animation) };
+    let slides = unset || dom::string_arg(cx, animation).is_some_and(|a| a == "slide");
+    free(cx, animation);
+    let style = get(cx, props, c"style");
+    let transform = get(cx, style, c"transform");
+    // SAFETY: inline checks of live values.
+    let own = unsafe { !qjs::JS_IsUndefined(transform) && !qjs::JS_IsNull(transform) };
+    free(cx, transform);
+    free(cx, style);
+    slides && !own && !crate::env::current(cx).reduce_motion
+}
+
 /// The popup: a view with the dialog's `class` and `style` holding its
-/// children (with the dialog's `insets`, borrowed); owned.
-fn popup_part(cx: *mut JsContext, props: JsValue, insets: JsValue) -> Result<JsValue, JsValue> {
+/// children (with the dialog's `insets`, borrowed); owned. `slide`: it
+/// comes up from the window's bottom edge (the layer fades).
+fn popup_part(
+    cx: *mut JsContext,
+    props: JsValue,
+    insets: JsValue,
+    slide: bool,
+) -> Result<JsValue, JsValue> {
     let popup = dom::create_element(cx, Tag::View)?;
     let result = (|| -> Result<(), JsValue> {
-        for (prop, key) in [("class", "class"), ("style", "style")] {
-            let read = reader(cx, props, key);
-            let r = dom::bind_prop_with(cx, popup, prop, read);
+        let read = reader(cx, props, "class");
+        let r = dom::bind_prop_with(cx, popup, "class", read);
+        free(cx, read);
+        r?;
+        if slide {
+            let height = crate::env::current(cx).window.height.0 as f64;
+            let offset = crate::animated::new_value(cx, height.max(1.0))?;
+            let read = native(cx, slid_style, 0, &mut [props, offset]);
+            let r = dom::bind_prop_with(cx, popup, "style", read);
+            free(cx, read);
+            if r.is_ok() {
+                crate::animated::run_timing(cx, offset, 0.0, 320.0, [0.2, 0.8, 0.2, 1.0]);
+            }
+            free(cx, offset);
+            r?;
+        } else {
+            let read = reader(cx, props, "style");
+            let r = dom::bind_prop_with(cx, popup, "style", read);
             free(cx, read);
             r?;
         }
@@ -1130,6 +1191,36 @@ fn popup_part(cx: *mut JsContext, props: JsValue, insets: JsValue) -> Result<JsV
             free(cx, popup);
             Err(e)
         }
+    }
+}
+
+/// The popup's style while it slides: the dialog's `style`, then a
+/// `translateY` of the offset, which runs to 0.
+unsafe extern "C" fn slid_style(
+    cx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: two data values (the props, the offset), borrowed; new
+    // values owned by the arrays and objects that take them.
+    unsafe {
+        let (props, offset) = (*data, *data.add(1));
+        let translate = qjs::JS_NewObject(cx);
+        qjs::JS_SetPropertyStr(
+            cx,
+            translate,
+            c"translateY".as_ptr(),
+            qjs::JS_DupValue(cx, offset),
+        );
+        let mut one = [translate];
+        let transform = qjs::JS_NewArrayFrom(cx, 1, one.as_mut_ptr());
+        let motion = qjs::JS_NewObject(cx);
+        qjs::JS_SetPropertyStr(cx, motion, c"transform".as_ptr(), transform);
+        let mut both = [get(cx, props, c"style"), motion];
+        qjs::JS_NewArrayFrom(cx, 2, both.as_mut_ptr())
     }
 }
 

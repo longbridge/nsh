@@ -417,6 +417,27 @@ function PointerEvents() {
   );
 }
 
+/** The mouse over a view: it comes in, moves and leaves (desktops). */
+function Hover() {
+  const over = signal(false);
+  const at = signal({ x: 0, y: 0 });
+  return (
+    <Card icon="gestures" title="Hover" subtitle={hint("A pointer over a view: iPad, desktops", "The mouse over a view")} right={<Badge label={over() ? "Over" : "Away"} tone={over() ? "accent" : "neutral"} />}>
+      <View
+        testID="hover-pad"
+        onHoverIn={() => over.set(true)}
+        onHoverOut={() => over.set(false)}
+        onHoverMove={(e) => at.set({ x: Math.round(e.locationX), y: Math.round(e.locationY) })}
+        class="hover:bg-paper-card dark:hover:bg-graphite-card"
+        style={{ ...stage(), height: 100, alignItems: "center", justifyContent: "center" }}
+      >
+        <Text style={{ fontSize: 14, color: colors.muted }}>{over() ? `Pointer at ${at().x}, ${at().y}` : "Pointer away"}</Text>
+      </View>
+      <Api label="In, move and out" api="onHoverIn · onHoverMove · onHoverOut" />
+    </Card>
+  );
+}
+
 /** Elements labelled for VoiceOver / TalkBack. */
 function Accessibility() {
   const last = signal("");
@@ -452,5 +473,5 @@ function Accessibility() {
 }
 
 export function Gestures() {
-  return <DemoPage cards={[Transformable, Ball, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
+  return <DemoPage cards={[Transformable, Ball, Hover, TouchPad, PressEvents, HitSlop, PointerEvents, Accessibility]} />;
 }

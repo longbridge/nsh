@@ -7,7 +7,7 @@ demo: ui-navigation
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Switch`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Switch`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, safe_area_view, …}`）。
 
@@ -20,8 +20,9 @@ use nsh_base::{
 
 ```tsx tabs
 import {
-  AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Switch, TextView,
+  AlertDialog, Button, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
+  MenuItem, MenuSeparator, NavPage, NavStack, Popover, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
+  Submenu, Switch, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
@@ -45,6 +46,10 @@ import type {
 | [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | 平台的警告框或操作表。 |
 | [`TextView`](../elements/text-view.md) | `text_view()` | 用文字和视图绘制的 Markdown、HTML 或文档块组成的文档，适用于流式输出的 AI 回复。 |
 | [`SelectionArea`](../elements/selection-area.md) | `selection_area()` | 让其中的文字共用一个选区。 |
+| [`Popover`](../elements/popover.md) | `popover()` | 锚定在触发元素上、显示在一切之上的内容。 |
+| [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet。 |
+| [`Tooltip`](../elements/tooltip.md) | `tooltip()` | 显示在触发元素旁的提示。 |
+| [`Sheet`](../elements/sheet.md) | `sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板。 |
 | 页面和对话框的 `statusBar` | `.status_bar(..)` | 页面或对话框显示期间的状态栏。见[状态栏](#status-bar)。 |
 
 在 Rust 中，`theme()` 以设计 token 的形式读取应用的主题（`theme().primary()`、`theme().radius()`），与 TSX 的[主题类](../docs/tailwind.md#主题-token)使用同样的 token。

@@ -557,9 +557,12 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         }
     });
     let text = Rc::new(WebTextEngine::default());
-    let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {
+    let Some(mut engine) = LocalEngine::start(config, text.clone(), Sink) else {
         return -1.0;
     };
+    // A task woken by a browser callback (a WebSocket message in an app's
+    // crate, through wasm-bindgen) asks the page to pump, as input does.
+    engine.set_wake(std::sync::Arc::new(ffi::request_pump));
     let control = engine.control();
     APP.with(|a| {
         *a.borrow_mut() = Some(Running {

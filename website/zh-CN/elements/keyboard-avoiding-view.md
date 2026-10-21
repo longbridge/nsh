@@ -3,6 +3,7 @@ title: KeyboardAvoidingView
 description: KeyboardAvoidingView 组件、Keyboard.dismiss 与键盘高度：让内容保持在软键盘上方，并随键盘移动。
 order: 24
 group: base
+demo: el-keyboard-avoiding-view
 ---
 
 # KeyboardAvoidingView

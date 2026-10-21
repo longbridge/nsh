@@ -163,7 +163,7 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as: `"ios"` or `"android"` (`Platform.OS`, `ios={{…}}` / `android={{…}}` props). |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`Platform.OS`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 
 ### Stubbing the network
@@ -297,12 +297,14 @@ one: a selector matching several fails the step, and the error says how to narro
 
 | Step | Description |
 |---|---|
-| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`. Rejects when it is disabled. |
-| `await app.longPress(selector)` | Holds a finger on it for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. |
+| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`, inside a finger going down and lifting, which the views around it that listen to touches hear (an overlay's `onPressOutside`). Rejects when it is disabled. |
+| `await app.longPress(selector)` | Holds a finger on it (or the nearest view around it that hears presses or touches) for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. The touches' handlers hear the finger (a `ContextMenu` or `Tooltip` opens). |
 | `await app.clear(selector)` | Empties the input, as selecting all and deleting does. |
 | `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) at the end of what it holds, key by key: it takes the focus, then each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
 | `await app.submit(selector)` | The return key in the input, as its `submitBehavior` says: `onSubmit` (and the focus leaves a single-line input), or a line break in a multiline one. |
 | `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content. Negative scrolls back. |
+| `await app.hover(selector)` | Moves the mouse over the middle of the view: the views under it that it left hear `onHoverOut`, those it came over `onHoverIn` and take their `hover:` styles, and those listening hear `onHoverMove` with where it is. The desktops and the web (headless: a desktop `platform`); a phone has no mouse: there it rejects. |
+| `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `nsh/keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard: the app's shortcut of it hears it on a desktop or the web (`keymap.bind`, `onKeyCommand`), else the focused input takes a character, Backspace or the return key, else Escape goes back. The phones have no app shortcuts: there it rejects. |
 | `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
 | `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |

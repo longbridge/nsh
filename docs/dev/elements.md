@@ -1,6 +1,6 @@
 # Elements and interaction
 
-Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Image`,
+Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Overlay`, `Image`,
 `List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
 `InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals. (`nsh/image`, `nsh/list`, `nsh/canvas`,
 `nsh/webview` and `nsh/video`, where some primitives were first, still export them, deprecated.)
@@ -16,6 +16,7 @@ Every tag is a component in scope (`native-pipeline.md`): the primitives `View`,
 | `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caretHidden`, `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
 | `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerShown`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`, in Rust `header_style_with(|s| ..)`: typed styles in `headerClass`'s place); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange(open, reason)` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange(false, reason)` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
+| `<Overlay>` | a `NshView` in the root view (the surface's, or the dialog's around it) | its children on top of that root view, outside the parent's layout and clipping; `anchor` (a ref or `{ x, y }`), `placement`, `align`, `offset`, `margin`, `onPosition`, `onPressOutside`, `onCancel` ("Overlays" below) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
 | `<WebView>` | WKWebView (WebKit loaded on first use) | `source` (`uri` / `html` + `baseUrl`), `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.ReactNativeWebView.postMessage`), `onLoad*`, `onNavigationStateChange`; ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)` |
 | `nativeComponent` (`nsh/native`) | a `NshView` box filled by the registered component's view | see [embedding.md](embedding.md) |
@@ -48,7 +49,7 @@ the app's own: drawn in TSX with views, classes, canvases and native animations,
 (UISwitch / SeekBar wrappers and the like), and do not add styled widgets or compositions of existing primitives to
 the runtime (buttons, section lists, touchables, drawers, ...). React Native is a reference for which capabilities
 exist, not an API to be compatible with. Components that need core or native support are primitives of their own
-(`List`, `Canvas`, `WebView`, `Video`; in `nsh/base` `NavStack`, `Dialog`, `SafeAreaView`,
+(`List`, `Canvas`, `WebView`, `Video`, `Overlay`; in `nsh/base` `NavStack`, `Dialog`, `SafeAreaView`,
 `KeyboardAvoidingView`; `InputAccessoryView` in `nsh/ios`). Tags are PascalCase names
 of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
 in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
@@ -151,8 +152,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (and the rest of the gesture) to the child whose area holds it, which passes it on to its children only, and the touch
   tracker's hit test (`TouchTracker.deepest`) descends the same way. `pointerEvents` keeps its meaning (`box-only` and
   `none` views are not entered). Views whose children stay inside pay nothing; transforms that move a child out are
-  not covered. There is no portal / overlay primitive yet: a popover renders inside its anchor's parent (give the
-  anchor a `zIndex` over its later siblings) or at the screen's root. Nested `<Text>` spans with press handlers
+  not covered. What must show above everything whatever clips it (a popover, a menu) is an `<Overlay>` (below). Nested `<Text>` spans with press handlers
   are links: the core lists them in `AttributedText::links` (UTF-16 ranges) and the block's press recognizer routes a press to
   the span under the finger (CoreText `CTLineGetStringIndexForPosition` / `Layout.getOffsetForHorizontal`).
 - **Raw touches and the responder system**: `onTouchStart/Move/End/Cancel` (+ `Capture`), `onStartShouldSetResponder`,
@@ -189,8 +189,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
   `MountItem::AccessibilityLabel`.
 - **Frames**: `requestAnimationFrame` / `cancelAnimationFrame` follow the display (CADisplayLink / Choreographer).
-- **Back button** (`nsh/android`): `BackHandler.addEventListener("hardwareBackPress", ...)`, after modals and stacks; the app exits
-  when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
+- **Back button** (`nsh/android`): `BackHandler.addEventListener("hardwareBackPress", ...)`, after modals, the top
+  overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
   the button while either side listens (`docs/dev/components.md`).
 - **Keyboard shortcuts** (`nsh/keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
@@ -232,3 +232,59 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   value would otherwise commit the pinyin as typed (#170).
 
 Text, styles, scrolling and lists, animation, canvases and images have their own pages.
+
+## Overlays
+
+`<Overlay>` (`nsh`; Rust `overlay()`) shows its children on top of the root view it is in: the surface, or the
+dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/base`'s `Popover`, `Menu`,
+`ContextMenu`, `Tooltip`, `Sheet`: `components.md`); it draws nothing and closes nothing itself.
+
+- **Where it stays and where it shows** (`core/overlay.rs`): the node stays its parent's child for everything but its
+  native view: the reactive owner and context, inherited text styles, events and its lifetime (released with the
+  parent's subtree, hidden while a view around it is out of the tree, not made natively or `display: none`). Its
+  native view is a plain view (`ViewKind::View`), inserted into the root view by the core, above that root view's own
+  children (`native_before` puts them below the first overlay) and the overlays shown before it: one shown later is on
+  top (nested overlays above the ones around them). Each commit `sync_overlays` works out which overlays are shown and
+  where, and moves their views (`Insert` / `Remove`), so the platforms need nothing of their own: they draw and
+  hit-test it as any view of the root, with the views' own z order.
+- **Layout**: a layout root of its own, laid out in a box the size of its root view (`position: fixed`: its insets,
+  size and margins are against that box; `inset-0` covers the root view). With `anchor` (a ref of a view, or
+  `{ x, y }` in the root view's coordinates, touches' `pageX` / `pageY`) the core places it on a side of the anchor's
+  frame (`nsh_core::overlay::place`): `placement` (`"top"`, `"bottom"` (default), `"left"`, `"right"`), on the other
+  side when only that one has room, the side with more room when neither has; `align` along it (`"start"`,
+  `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
+  moved along the side to stay inside the root view's safe area less `margin`. The anchor's frame is
+  `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
+  `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
+  the platform reported). `onPosition` reports where it went (`placement`, the frame, `availableWidth` /
+  `availableHeight`: the room on that side, what a menu may grow to). A view inside an overlay measures in the root
+  view's coordinates.
+- **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
+  anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
+  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape or the Android back button,
+  to the top overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
+  the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
+- **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
+  JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),
+  its anchor (its parent, the nearest node with a layout, when it has none) listens to `onHoverIn` / `onHoverOut` and
+  touches (`Node::overlay_watched`'s `watch::HINT` bit, mounted with the events JS asked for, hover also while the view
+  is disabled). `onHoverIn` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
+  engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
+  for out of its root view). `onHoverOut`, a touch down whose path holds the anchor, or the hint leaving the view hide
+  it. The overlay hears what the pointer asks for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`), and
+  `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
+  is controlled or not). Touch screens never watch: a hint shows there only when `open` says so. The overlay should
+  not take the pointer (`pointerEvents: "none"`).
+- **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
+  overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
+  placement never moves it), placed on top with a 4 pt gap: a text in a bubble of the theme's tokens
+  (`bg-popover`, `text-popover-foreground`, `border-border`, `rounded-md`, `px-2 py-1`, `text-xs`; NSH's one default
+  look of this kind, all the theme's), or the element JS made (retained by the node, moved into the overlay, detached
+  again when the prop changes). An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
+  made its root one) replaces the core's overlay, with its own placement, delay, look and events
+  (`adopt_hint_tooltips`, each commit before the overlays are shown). Released with the element. It counts for nothing else: text skips overlays, and
+  positional classes (`first:`, `last:`) skip a tooltip's overlay. Rust's element tooltips are an overlay child of the
+  element (`IntoTooltip for AnyElement`), `nsh_base`'s `TooltipElement` the hint overlay itself.
+- **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
+  surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
+  is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.

@@ -1261,10 +1261,18 @@ fn set_prop(
     {
         return set_event(cx, p, event, value);
     }
-    // Native animation nodes these props use stay alive with the view.
-    if let Some(&key) = ["style", "pan", "pinch", "rotation", "scrollValue"]
-        .iter()
-        .find(|k| **k == name)
+    // Native animation nodes these props use, and a `tooltip`'s element,
+    // stay alive with the view.
+    if let Some(&key) = [
+        "style",
+        "pan",
+        "pinch",
+        "rotation",
+        "scrollValue",
+        "tooltip",
+    ]
+    .iter()
+    .find(|k| **k == name)
     {
         retain_in(cx, p, key, value);
     }

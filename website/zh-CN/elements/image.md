@@ -3,6 +3,7 @@ title: Image
 description: 显示打包资源或远程图片的元素，支持占位图、模糊、淡入、着色和加载事件。
 order: 4
 group: primitives
+demo: el-image
 ---
 
 # Image
@@ -51,7 +52,7 @@ import logo from "./assets/logo.png";
 
 | 值 | 示例 | 说明 |
 |---|---|---|
-| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
+| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
 | `{ uri }` | `{ uri: "https://…" }` | TSX：与字符串形式相同。 |
@@ -75,7 +76,7 @@ import logo from "./assets/logo.png";
 | `tintColor`（样式） | `.tint_color(..)` | `ColorValue` | | 为模板图片（单色绘制的图标）重新着色。 |
 | `onLoadStart` | `.on_load_start(..)` | `() => void` | | 开始加载。 |
 | `onProgress` | `.on_progress(..)` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
-| `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。 |
+| `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）；带有变体的图片给出所加载变体的尺寸。 |
 | `onError` | `.on_error(..)` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `.on_load_end(..)` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
@@ -119,7 +120,10 @@ const state = signal("加载中");
 />;
 ```
 
+带有[像素密度变体](../docs/images-and-assets.md#像素密度)的图片会加载其中一个文件，`onLoad` 报告的是该文件的像素尺寸：对于 64×64 点的 `logo.png`，在 3× 屏幕上报告 `logo@3x.png` 的 192×192。像素比变化、图片加载另一个变体时，这次加载同样会触发事件：先是 `onLoadStart`，然后是带有新文件尺寸的 `onLoad`（或 `onError`），最后是 `onLoadEnd`。
+
 如果需要在显示前获取图片尺寸或预先加载，TSX 调用 `Image.getSize(uri)` 和 `Image.prefetch(uri)`（它们就挂在渲染这个元素的同一个 `Image` 上；参见 [Image API](../modules/nsh-image.md)），Rust 在任务中 await `image_size(uri)` 和 `prefetch_image(uri)`。
+传入带有变体的导入图片时，`Image.getSize` 和 `Image.prefetch` 加载当前屏幕显示的那个变体，`getSize` resolve 为导入文件的尺寸（`logo.png` 为 64×64）。
 
 ## ref 方法
 

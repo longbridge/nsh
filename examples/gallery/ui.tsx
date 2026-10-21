@@ -3,7 +3,7 @@ import { computed, effect, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, Platform, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Dialog, safeArea } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 
@@ -806,7 +806,12 @@ export function Segmented<T extends string>(props: {
   const width = signal(0);
   const x = createAnimatedValue(0);
   const index = () => Math.max(0, props.options.findIndex((o) => o.value === props.value));
-  const segment = () => (width() - 6) / Math.max(1, props.options.length);
+  // The track's border and padding: the indicator is placed inside the
+  // border (an absolute child's containing block is the padding box), so
+  // the segments share what is left of the measured width after both.
+  const border = 1;
+  const inset = 3;
+  const segment = () => (width() - 2 * (border + inset)) / Math.max(1, props.options.length);
   const height = props.size === "small" ? 32 : 40;
   // The first placement jumps; later ones spring.
   let placed = false;
@@ -824,12 +829,12 @@ export function Segmented<T extends string>(props: {
       style={{
         height,
         flexDirection: "row",
-        padding: 3,
+        padding: inset,
         borderRadius: height / 2,
         backgroundColor: colors.inset,
         // The track's glass: the sunk shadow plus a lit lower rim.
         boxShadow: `${finish.track.boxShadow}, inset 0 -1px 0 ${isDark() ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.85)"}`,
-        borderWidth: 1,
+        borderWidth: border,
         borderColor: colors.border,
       }}
     >
@@ -837,11 +842,11 @@ export function Segmented<T extends string>(props: {
         pointerEvents="none"
         style={{
           position: "absolute",
-          top: 3,
-          left: 3,
-          bottom: 3,
+          top: inset,
+          left: inset,
+          bottom: inset,
           width: segment(),
-          borderRadius: (height - 6) / 2,
+          borderRadius: (height - 2 * (border + inset)) / 2,
           ...finish.pill,
           borderWidth: 1,
           transform: [{ translateX: x }],
@@ -1004,34 +1009,28 @@ function Loading(props: { failed: string }) {
 }
 
 /**
- * A panel that slides up from the bottom over a dimmed backdrop while
- * `open`; a tap on the backdrop, Escape or the back button closes it (`onClose`:
- * set `open` to false).
+ * A panel at the bottom over a dimmed backdrop while `open` (`nsh/base`'s
+ * `Sheet`, in the gallery's look); a press on the backdrop, Escape or the
+ * back button closes it (`onClose`: set `open` to false).
  */
 export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
   return (
-    <Dialog open={props.open} animation="slide" onOpenChange={(open) => !open && props.onClose()}>
-      <View style={{ flex: 1, justifyContent: "flex-end" }}>
-        <View
-          accessibilityLabel="Close"
-          onPress={props.onClose}
-          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }}
-        />
-        <View
-          style={{
-            gap: 12,
-            paddingTop: 8,
-            paddingHorizontal: 16,
-            paddingBottom: safeArea().bottom + 16,
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-            backgroundColor: colors.surface,
-          }}
-        >
-          <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
-          {props.children}
-        </View>
-      </View>
-    </Dialog>
+    <BaseSheet
+      open={props.open}
+      onOpenChange={(open) => !open && props.onClose()}
+      backdropStyle={{ backgroundColor: "rgba(0,0,0,0.4)" }}
+      popupStyle={{
+        gap: 12,
+        paddingTop: 8,
+        paddingHorizontal: 16,
+        paddingBottom: safeArea().bottom + 16,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        backgroundColor: colors.surface,
+      }}
+    >
+      <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
+      {props.children}
+    </BaseSheet>
   );
 }

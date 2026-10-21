@@ -27,6 +27,7 @@ pub mod keymap;
 mod mount;
 pub mod navigation;
 mod ops;
+pub mod overlay;
 pub mod platform;
 mod props;
 pub mod reactive;
@@ -70,12 +71,13 @@ pub use crate::{
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
-        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent, ImageProp,
-        ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
-        ListContentStyle, ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op,
-        PayloadValue, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp,
-        ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
+        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent,
+        IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
+        KeyboardTaps, KeyboardType, ListContentStyle, ModalAnimation, ModalPresentation, ModalProp,
+        NativeProp, NodeId, Op, OverlayProp, PayloadValue, Prop, ROOT_ID, ResizeMode, ReturnKeyType,
+        ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting,
+        StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability,
+        WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,

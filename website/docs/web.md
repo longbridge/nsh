@@ -74,6 +74,57 @@ The build needs the Rust target and a clang that compiles to WebAssembly, as the
 `rustup target add wasm32-unknown-unknown`, plus `clang` and `llvm-ar` (on macOS, an LLVM toolchain such as
 Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown`).
 
+### Browser APIs from Rust
+
+A crate can call the browser's own APIs through [wasm-bindgen](https://wasm-bindgen.github.io/wasm-bindgen/) and
+its `web-sys` and `js-sys` crates, behind `#[cfg(target_arch = "wasm32")]`: a WebSocket, `IndexedDB`, the
+clipboard, any Web API, and JS of the crate's own (`#[wasm_bindgen(inline_js = …)]`, `module = "/js/…"`). When the
+app's web runtime calls JS this way (including `JsValue` conversions), `nsh` runs the `wasm-bindgen` CLI on it and
+ships its glue and the crate's JS next to the runtime, in development and in published sites alike. The CLI's version is the one of the `wasm-bindgen`
+crate the runtime links, which `nsh` names: `cargo install wasm-bindgen-cli --version <version> --locked` installs it
+(`NSH_WASM_BINDGEN` names a CLI elsewhere than on `PATH`). A runtime that links wasm-bindgen and calls no JS through
+it (through a dependency's default features) builds as every other runtime does.
+
+The crate names the APIs it uses as `web-sys` features, and pinning `wasm-bindgen` keeps its version, and so the
+CLI's, the same from build to build:
+
+```toml
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent"] }
+futures-channel = "0.3"
+```
+
+The browser's callbacks (a message arriving, a timer of the page's) wake the app's tasks, which run at once:
+
+```rust
+#[cfg(target_arch = "wasm32")]
+async fn echo(url: &str, text: String) -> Result<String, String> {
+    use wasm_bindgen::{JsCast, prelude::*};
+    let ws = web_sys::WebSocket::new(url).map_err(|e| format!("{e:?}"))?;
+    let (tx, rx) = futures_channel::oneshot::channel();
+    let tx = std::cell::RefCell::new(Some(tx));
+    let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
+        if let (Some(tx), Some(data)) = (tx.borrow_mut().take(), e.data().as_string()) {
+            let _ = tx.send(data);
+        }
+    });
+    ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+    on_message.forget();
+    let open = ws.clone();
+    let on_open = Closure::<dyn FnMut()>::new(move || {
+        let _ = open.send_with_str(&text);
+    });
+    ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+    on_open.forget();
+    rx.await.map_err(|_| "closed".to_owned())
+}
+```
+
+A crate's calls of browser APIs run with the page's own permissions, as a crate's native code runs with the app's
+on the other platforms: the capabilities of `nsh.json` govern what goes through the engine (`fetch`, the app's JS),
+and the browser's rules (CORS, the page's Content-Security-Policy) govern every request the page makes.
+
 ## Publish an app
 
 ```sh
@@ -95,6 +146,8 @@ page and files named after their content.
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
 | `nsh.<digest>.wasm` | A Rust app: the engine, the components and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli). A TSX app: the engine, the core, the runtime's modules and QuickJS without its compiler (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli) |
+| `nsh-bindgen.<digest>.js` | The wasm-bindgen glue of an app whose crates call [browser APIs from Rust](#browser-apis-from-rust), minified |
+| `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
 | `app.<digest>.nshc` | A TSX app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
 | `harden.<digest>.nshc` | With a TSX app, the [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
 | `chunks/<name>.<digest>.nshc` | With a TSX app, what `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
@@ -194,7 +247,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
 player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
 
-`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, and `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings); with bytecode, a release also takes the hardening's bytecode (`harden`, the bytes of `harden.<digest>.nshc`). The page `nsh package --target web` writes uses all of them.
+`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`, and `glue` is the URL of the wasm-bindgen glue of a runtime whose crates call [browser APIs from Rust](#browser-apis-from-rust) (`nsh-bindgen.<digest>.js`), which the player loads with the runtime; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings); with bytecode, a release also takes the hardening's bytecode (`harden`, the bytes of `harden.<digest>.nshc`). The page `nsh package --target web` writes uses all of them.
 
 `run(code, { chunks, chunkBase })` also takes where the chunks of a [split bundle](#split-bundles) are.
 

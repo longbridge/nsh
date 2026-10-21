@@ -107,6 +107,10 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     }
     // `open -a <App> --args --fps` shows the performance monitor.
     options.fps = std::env::args().any(|arg| arg == "--fps");
+    // NSH_CHUNK_DIR: the directory `import()` loads chunks from — the
+    // app's own runtime-delivered modules (the bundle's resources are
+    // read-only).
+    options.chunks = std::env::var_os("NSH_CHUNK_DIR").map(std::path::PathBuf::from);
     (dir, options)
 }
 

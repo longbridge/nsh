@@ -1830,6 +1830,7 @@ mod tests {
         let source = ImageSource {
             uri: "asset:/logo@2x.svg".into(),
             size: None,
+            scales: nsh_core::ImageScales::NONE,
         };
         let picture = Picture::new(decode(SVG_LOGO.to_vec()).unwrap()).unwrap();
         assert_eq!(picture.size, (48, 24));
@@ -1869,6 +1870,7 @@ mod tests {
         let source = ImageSource {
             uri: "asset:/logo@2x.png".into(),
             size: None,
+            scales: Default::default(),
         };
         assert_eq!(natural((200, 100), None, Some(&source)), (100.0, 50.0));
     }

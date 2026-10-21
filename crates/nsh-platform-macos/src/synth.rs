@@ -19,15 +19,16 @@ pub(crate) fn mouse(window: &NSWindow, kind: NSEventType, x: f64, y: f64, clicks
     mouse_with(window, kind, x, y, clicks, NSEventModifierFlags::empty());
 }
 
-pub(crate) fn mouse_with(
+/// A mouse event of `window` at `(x, y)` (content points).
+pub(crate) fn mouse_event(
     window: &NSWindow,
     kind: NSEventType,
     x: f64,
     y: f64,
     clicks: isize,
     mods: NSEventModifierFlags,
-) {
-    let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+) -> Option<Retained<NSEvent>> {
+    NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
         kind,
         to_window(window, x, y),
         mods,
@@ -37,8 +38,18 @@ pub(crate) fn mouse_with(
         0,
         clicks,
         if clicks > 0 { 1.0 } else { 0.0 },
-    );
-    if let Some(event) = event {
+    )
+}
+
+pub(crate) fn mouse_with(
+    window: &NSWindow,
+    kind: NSEventType,
+    x: f64,
+    y: f64,
+    clicks: isize,
+    mods: NSEventModifierFlags,
+) {
+    if let Some(event) = mouse_event(window, kind, x, y, clicks, mods) {
         // Through the event queue, as real clicks come: the event becomes
         // `NSApp.currentEvent` while it is handled (responders look at it).
         // The run loop handles it before the next step's timer.

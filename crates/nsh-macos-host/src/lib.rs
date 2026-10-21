@@ -56,6 +56,9 @@ pub fn main() -> std::process::ExitCode {
                 options.asset_base = path
                     .parent()
                     .map(|dir| AssetBase::Directory(dir.join("assets")));
+                // `nsh build --split` writes the chunks `import()` loads
+                // next to the bundle.
+                options.chunks = path.parent().map(std::path::Path::to_path_buf);
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,

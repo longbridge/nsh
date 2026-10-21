@@ -257,6 +257,10 @@ pub struct EventSpec {
     pub data: String,
     /// Documentation.
     pub doc: &'static str,
+    /// The handler takes several arguments (`#[args(open, reason)]` on a
+    /// variant of as many fields): `data` is their list (`open: boolean,
+    /// reason: …`), the data a JS array of them.
+    pub spread: bool,
 }
 
 /// A component's props. Derive it: `#[derive(Props)]`.
@@ -342,6 +346,12 @@ pub trait Event: 'static {
 
     /// Its data as a JS value of `host` (converted when JS hears it).
     fn data_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
+
+    /// The handler takes the items of the data (an array) as its
+    /// arguments ([`EventSpec::spread`]).
+    fn spread(&self) -> bool {
+        false
+    }
 }
 
 /// The events of a component that has none.
@@ -1205,6 +1215,8 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let handler = handler_name(e.name);
             let arg = if e.data == "void" {
                 String::new()
+            } else if e.spread {
+                e.data.clone()
             } else {
                 format!("{}: {}", e.arg, e.data)
             };

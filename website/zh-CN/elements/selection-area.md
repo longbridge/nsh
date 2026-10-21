@@ -3,6 +3,7 @@ title: SelectionArea
 description: SelectionArea 组件：让其中的文字共用一个选区，跨越视图、Text 元素和 TextView，就像网页上的文字一样选择。
 order: 27
 group: base
+demo: el-selection-area
 ---
 
 # SelectionArea

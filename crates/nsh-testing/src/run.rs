@@ -22,7 +22,7 @@ use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, MountBatch,
     geometry::{Points, Size},
-    platform::{Locale, Os},
+    platform::{Idiom, Locale, Os},
     ui::{Callback, Registry, Root, prelude::timer},
 };
 use nsh_engine::{
@@ -35,7 +35,7 @@ use crate::{
     headless::{
         DirectoryAssets, Headless, RecordingNetwork, StubNetwork, UreqNetwork, WAIT, print_batch,
     },
-    module::{Case, Hook, Item, Launch, MobilePlatform, Mode, NetworkSetup, SafeArea, Suite},
+    module::{Case, Hook, Item, Launch, Mode, NetworkSetup, Platform, SafeArea, Suite},
 };
 
 /// Builds an entry ([`Entry`]; an app's may be its directory).
@@ -470,8 +470,16 @@ impl Session {
                 locale: locale.unwrap_or(Locale::EN_US),
                 reduce_motion: launch.reduced_motion,
                 os: match launch.platform {
-                    MobilePlatform::Ios => Os::Ios,
-                    MobilePlatform::Android => Os::Android,
+                    Platform::Ios => Os::Ios,
+                    Platform::Android => Os::Android,
+                    Platform::Macos => Os::MacOs,
+                    Platform::Windows => Os::Windows,
+                    Platform::Linux => Os::Linux,
+                    Platform::Web => Os::Web,
+                },
+                idiom: match launch.platform {
+                    Platform::Ios | Platform::Android => Idiom::default(),
+                    _ => Idiom::Desktop,
                 },
                 ..Default::default()
             },

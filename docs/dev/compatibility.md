@@ -188,7 +188,9 @@ platform and settings are, and where they change nothing its neighbors check.
 
 `script.txt` is one step per line (`compat/apps.rs` has the full list): `expect <text>` waits for a text on screen,
 `absent <text>` checks one is gone, `tap id:<testID>` / `label:<label>` / `text:<text>` presses a view (or its nearest
-pressable ancestor; `span:<text>` the link or pressable span where `<text>` starts), `wait <ms>` runs timers, and `viewport <w> <h>` and `platform <os>` (first) size the screen and
+pressable ancestor; `span:<text>` the link or pressable span where `<text>` starts; `parent:<selector>` the view
+around the one it names, a component's popup by the app's content in it, and `below:<selector>` its sibling below
+it, a popup's backdrop), `wait <ms>` runs timers, and `viewport <w> <h>` and `platform <os>` (first) size the screen and
 pick the platform whose `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}` props apply, and `fontscale <scale>` sets the user's text size. What a view looks
 like is checked as the platform receives it: `frame <selector> <x> <y> <width> <height>` (its layout, in points
 relative to its parent), `prop` / `noprop` (a host prop), `style` / `nostyle` (a paint or text style key), `listens`
@@ -199,9 +201,10 @@ its payload keys as the handler reads them (`event id:video onProgress currentTi
 `touch start <selector> <x> <y>` / `touch move|end|cancel [<x> <y>]` move one finger through the touch handlers and
 the responder system, `type <selector> <text>` types into an input (`onKeyPress`, `onChange` and
 `onSelectionChange` per character), `key <selector> <key>` presses a key, `scroll <selector> <x> <y>` scrolls a
-scroll view (`onScroll`), `keyboard <height> <duration>` shows the software keyboard (at height 0, hides it), and
-`state <selector> pressed|hovered|focused|none...` reports a view's interaction states as a platform does
-(`activeStyle`, `hover:`, ...), failing when the core did not ask the platform to track them.
+scroll view (`onScroll`), `keyboard <height> <duration>` shows the software keyboard (at height 0, hides it),
+`pixelratio <ratio>` moves the surface to a screen of that pixel ratio (1 at the start) as a window moved to another
+screen does, and `state <selector> pressed|hovered|focused|none...` reports a view's interaction states as a platform
+does (`activeStyle`, `hover:`, ...), failing when the core did not ask the platform to track them.
 Props and style keys are named and written as apps write them (`style id:card backgroundColor #3366ffff`,
 `prop id:field ios.keyboardAppearance dark`), in the stable text forms `compat/values.rs` defines, never from the
 core's types, so the scripts stay valid while those change. A script should open every screen of its app and check

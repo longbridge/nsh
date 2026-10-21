@@ -555,6 +555,11 @@ name and a specifier of its own; `nsh` reports a repeated one with the two paths
 `"root"` is a component of the first crate listed. During `nsh run` and `nsh dev`, a change to any of them, or to a
 crate they depend on by path, rebuilds the app and restarts it.
 
+## Browser APIs on the web
+
+On the web, a crate can call the browser's APIs (a WebSocket, `IndexedDB`, …) through wasm-bindgen and `web-sys`;
+`nsh` builds the glue they need with the runtime. See [Web](./web.md#browser-apis-from-rust).
+
 ## See also
 
 - [Project structure](./project-structure.md): every key of `nsh.json`.

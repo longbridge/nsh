@@ -1,7 +1,8 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, `Switch`), navigation (stacks and pages), dialogs, safe areas,
-//! selection areas,
+//! controls (`Button`, `Switch`), navigation (stacks and pages), dialogs, popups on
+//! the core's overlays (`Popover`, `Menu`, `ContextMenu`, `Tooltip`,
+//! `Sheet`), safe areas, selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
 //! tokens (`Theme`, as `gpui-base`'s).
 //!
@@ -14,12 +15,17 @@
 mod alert_dialog;
 mod button;
 mod keyboard;
+mod menu;
 mod navigation;
+mod popover;
+mod popup;
 mod safe_area;
 mod selection_area;
+mod sheet;
 mod switch;
 pub mod text_view;
 mod theme;
+mod tooltip;
 
 use std::sync::Arc;
 
@@ -35,9 +41,18 @@ pub use crate::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
         KeyboardAvoidingViewProps, keyboard_avoiding_view,
     },
+    menu::{
+        ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
+        MenuItemElement, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator,
+        MenuSeparatorElement, MenuSeparatorProps, Submenu, SubmenuElement, SubmenuProps,
+        context_menu, menu, menu_item, menu_separator, submenu,
+    },
     navigation::{dialog, nav_page, nav_stack},
+    popover::{Popover, PopoverElement, PopoverEvent, PopoverProps, popover},
+    popup::OpenChangeReason,
     safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
+    sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
     switch::{Switch, SwitchElement, SwitchEvent, SwitchProps, switch},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
@@ -46,6 +61,7 @@ pub use crate::{
         text_view,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
+    tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
 };
 
 /// The JS module apps import the foundation as.
@@ -56,6 +72,14 @@ pub fn registry() -> Registry {
     let mut registry = Registry::ui_set(SPECIFIER);
     registry
         .register::<Button>()
+        .register::<ContextMenu>()
+        .register::<Menu>()
+        .register::<MenuItem>()
+        .register::<MenuSeparator>()
+        .register::<Submenu>()
+        .register::<Popover>()
+        .register::<Sheet>()
+        .register::<Tooltip>()
         .register::<SafeAreaView>()
         .register::<KeyboardAvoidingView>()
         .register::<SelectionArea>()
@@ -94,11 +118,19 @@ mod tests {
             components,
             [
                 "Button",
+                "ContextMenu",
                 "KeyboardAvoidingView",
+                "Menu",
+                "MenuItem",
+                "MenuSeparator",
+                "Popover",
                 "SafeAreaView",
                 "SelectionArea",
+                "Sheet",
+                "Submenu",
                 "Switch",
-                "TextView"
+                "TextView",
+                "Tooltip"
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();

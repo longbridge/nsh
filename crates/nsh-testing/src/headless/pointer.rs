@@ -1,6 +1,7 @@
-//! The step `drag(<selector>, <x>, <y>)`: a finger lands on a view, moves
-//! and lifts, and the app hears what a platform's pointer input makes of
-//! it. The decisions are nsh-core's `input`, the desktop backends' own:
+//! The pointer's steps: `drag(<selector>, <x>, <y>)`, a finger that lands
+//! on a view, moves and lifts, and `hover(<selector>)`, the mouse coming
+//! over a view; the app hears what a platform's pointer input makes of
+//! them. The decisions are nsh-core's `input`, the desktop backends' own:
 //! the views listening to touches hear them (the JS responder), a pan or a
 //! scroll view takes the drag once it passes the slop, unless the
 //! responder holds it, and the press under the finger is cancelled once
@@ -403,5 +404,65 @@ impl Headless {
         let (x, y, applied) = (scroll.x, scroll.y, scroll.applied);
         self.engine.control().scroll(view, point(x, y), applied);
         self.animator.scrolled(view, point(x, y));
+    }
+
+    /// The step `hover(<selector>)`: the mouse comes over the middle of the
+    /// view `selector` names, as on a desktop (`open`'s `platform`): the
+    /// views under it that it left hear `onHoverOut` (from the inside out),
+    /// those it came over `onHoverIn` (from the outside in) and take their
+    /// `hover:` styles, and the ones listening to `onHoverMove` hear where
+    /// it is. A phone has no mouse: there it fails.
+    pub fn hover(&mut self, selector: &str) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("hover({selector})"));
+        if !self.environment.desktop() {
+            return Err(
+                "a phone has no mouse to hover with: open the app as a desktop (`platform`)".into(),
+            );
+        }
+        let pick = self.screen.view(&parsed);
+        let target = self.picked(pick, selector, "view")?;
+        let bounds = self
+            .screen
+            .bounds_in_root(target)
+            .ok_or_else(|| format!("`{selector}` is not on screen"))?;
+        let at = bounds.center();
+        let views = self.screen.hoverable(&self.screen.chain(target));
+        let old = self.screen.set_hovered(views.clone());
+        let (left, entered) = input::hover_changes(&old, &views);
+        let (left, entered): (Vec<NodeId>, Vec<NodeId>) =
+            (left.copied().collect(), entered.copied().collect());
+        let control = self.engine.control();
+        for id in left {
+            if let Some(states) =
+                self.screen
+                    .set_state(id, nsh_core::tailwind::state::HOVERED, false)
+            {
+                control.set_states(id, states);
+            }
+            self.send(id, EventKind::HoverOut, EventPayload::None);
+        }
+        for id in entered {
+            if let Some(states) =
+                self.screen
+                    .set_state(id, nsh_core::tailwind::state::HOVERED, true)
+            {
+                control.set_states(id, states);
+            }
+            self.send(id, EventKind::HoverIn, EventPayload::None);
+        }
+        for id in views {
+            let origin = self
+                .screen
+                .bounds_in_root(id)
+                .map_or(Point::default(), |b| b.origin);
+            let event = nsh_core::HoverEvent {
+                location: point(at.x - origin.x, at.y - origin.y),
+                page: at,
+                modifiers: nsh_core::keymap::Modifiers::default(),
+            };
+            self.send(id, EventKind::HoverMove, EventPayload::Hover(event));
+        }
+        self.done()
     }
 }

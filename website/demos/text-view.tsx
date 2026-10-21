@@ -1,5 +1,6 @@
 import { cleanup, mount, signal, Scroll, Text, View } from "nsh";
 import { TextView } from "nsh/base";
+import { Platform } from "nsh/device";
 import { ui } from "./palette";
 
 const REPLY = `## Moving to offline sync
@@ -20,7 +21,7 @@ nsh export --out backup.json
 \`\`\`
 
 > [!TIP]
-> Long-press a paragraph to copy it.`;
+> ${Platform.isDesktop ? "Drag across the paragraphs to select them, then copy." : "Long-press a paragraph to copy it."}`;
 
 function App() {
   const text = signal(REPLY);
@@ -43,7 +44,7 @@ function App() {
   };
   return (
     <Scroll style={{ flex: 1, backgroundColor: ui().page }}>
-      <View style={{ padding: 20, gap: 16 }}>
+      <View style={{ width: "100%", maxWidth: 680, alignSelf: "center", padding: 20, gap: 16 }}>
         <TextView
           markdown={text()}
           options={{ streaming: streaming() }}
