@@ -5,7 +5,11 @@
 use nsh_core::desktop::{MenuAction, MenuItem};
 
 /// One action of a menu, as `app.menu()` lists it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    any(feature = "agent", feature = "js"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct Entry {
     /// Its label; a submenu's actions after the submenu's (`"Share > Mail"`).
     pub label: String,
@@ -42,6 +46,7 @@ fn collect(items: &[MenuItem], prefix: &str, enabled: bool, out: &mut Vec<Entry>
 
 /// The labels along the way to an item (`"Share > Mail"`: the submenu's,
 /// then the action's).
+#[cfg(feature = "agent")]
 pub(crate) fn path(label: &str) -> Vec<String> {
     label.split(" > ").map(str::to_owned).collect()
 }
