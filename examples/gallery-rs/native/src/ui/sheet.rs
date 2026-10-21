@@ -109,7 +109,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
                     .pb(move || px(safe_area().bottom.0 + 16.0))
                     .px_4()
                     .gap_3()
-                    .rounded_t(move || theme().radius().max(px(16.0)))
+                    .rounded_t(move || theme().radius.max(px(16.0)))
                     .bg(colors::SURFACE)
                     .shadow_lg()
                     .bind_translate_y(&offset)
@@ -128,7 +128,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
                             .h(px(5.0))
                             .self_center()
                             .rounded_full()
-                            .bg(move || theme().muted()),
+                            .bg(move || theme().muted),
                     )
                     .child(children),
             )

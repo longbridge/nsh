@@ -75,11 +75,11 @@ pub fn App() -> impl IntoElement {
             button()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || theme().radius())
-                .bg(move || theme().primary())
-                .active(|s| s.bg(move || theme().primary().opacity(0.9)))
+                .rounded(move || theme().radius)
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary.opacity(0.9)))
                 .on_press(move || count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground())),
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -187,7 +187,7 @@ pub enum ChartEvent {
 pub fn Chart(props: ChartProps, cx: Scope<ChartEvent>) -> impl IntoElement {
     view()
         .h(px(160.0))
-        .bg(move || theme().muted())
+        .bg(move || theme().muted)
         .on_press(move || cx.emit(ChartEvent::Select(101.5)))
         .child(text(move || format!("{} · {}", props.symbol.get(), props.range.get())))
 }
@@ -416,7 +416,7 @@ fn the_module_formats_money() {
 
 应用的外观由应用自己决定：NSH 提供基础元素和 `nsh_base` 中无样式的基础组件，你的 crate 是其上带样式的一层，即应用自己的组件库（[三层结构](./architecture.md#three-layers)）。Rust 组件的颜色、圆角和字体取自主题，即
 `nsh_base` 的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
-`.bg(move || theme().primary())` 这样的绑定会原生地改变颜色，不需要重新渲染。
+`.bg(move || theme().primary)` 这样的绑定会原生地改变颜色，不需要重新渲染。
 
 主题采用 [shadcn/ui](https://ui.shadcn.com/docs/theming) 的设计令牌，默认主题是 shadcn 的 `neutral` 主题：黑白配色，圆角 10 点。
 要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径（相对于 `nsh.json`），或者直接写入主题内容：
@@ -467,22 +467,22 @@ fn the_module_formats_money() {
 
 | 令牌 | `theme()` | 浅色 | 深色 | 用途 |
 |---|---|---|---|---|
-| `background` / `foreground` | `background()` / `foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | 应用的背景，以及其上的文字 |
-| `card` / `card-foreground` | `card()` / `card_foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 卡片等分组表面，以及其上的文字 |
-| `popover` / `popover-foreground` | `popover()` / `popover_foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 弹出框、菜单和提示，以及其上的文字 |
-| `primary` / `primary-foreground` | `primary()` / `primary_foreground()` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | 主要操作（主按钮），以及其上的文字 |
-| `secondary` / `secondary-foreground` | `secondary()` / `secondary_foreground()` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 次要操作，以及其上的文字 |
-| `muted` / `muted-foreground` | `muted()` / `muted_foreground()` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | 低调的表面；次要文字：说明、标签、占位符 |
-| `accent` / `accent-foreground` | `accent()` / `accent_foreground()` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 悬停或高亮的项，例如菜单项、列表行，以及其文字 |
-| `destructive` | `destructive()` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | 破坏性操作和错误 |
-| `border` | `border()` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | 分隔线和边框 |
-| `input` | `input()` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | 输入框的边框 |
-| `ring` | `ring()` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | 焦点环 |
-| `chart-1` … `chart-5` | `chart_1()` … `chart_5()` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | 同浅色 | 图表的各个系列 |
-| `sidebar`、`sidebar-foreground`、`sidebar-primary`、`sidebar-primary-foreground`、`sidebar-accent`、`sidebar-accent-foreground`、`sidebar-border`、`sidebar-ring` | `sidebar()`、`sidebar_foreground()` 等 | `sidebar` `oklch(0.985 0 0)`，`sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`，`sidebar-primary` `oklch(0.488 0.243 264.376)` | 侧边栏的表面、主要操作、高亮项、边框和焦点环 |
-| `radius` | `radius()` | `0.625rem`（10 点） | | 圆角 |
-| `font-sans` | `font_sans()` | 系统字体 | | 应用的字体：没有设置自己字体族的文字都使用它 |
-| `font-mono` | `font_mono()` | 系统等宽字体 | | 等宽字体：`font-mono`、`TextView` 中的代码 |
+| `background` / `foreground` | `background` / `foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | 应用的背景，以及其上的文字 |
+| `card` / `card-foreground` | `card` / `card_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 卡片等分组表面，以及其上的文字 |
+| `popover` / `popover-foreground` | `popover` / `popover_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 弹出框、菜单和提示，以及其上的文字 |
+| `primary` / `primary-foreground` | `primary` / `primary_foreground` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | 主要操作（主按钮），以及其上的文字 |
+| `secondary` / `secondary-foreground` | `secondary` / `secondary_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 次要操作，以及其上的文字 |
+| `muted` / `muted-foreground` | `muted` / `muted_foreground` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | 低调的表面；次要文字：说明、标签、占位符 |
+| `accent` / `accent-foreground` | `accent` / `accent_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 悬停或高亮的项，例如菜单项、列表行，以及其文字 |
+| `destructive` | `destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | 破坏性操作和错误 |
+| `border` | `border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | 分隔线和边框 |
+| `input` | `input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | 输入框的边框 |
+| `ring` | `ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | 焦点环 |
+| `chart-1` … `chart-5` | `chart_1` … `chart_5` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | 同浅色 | 图表的各个系列 |
+| `sidebar`、`sidebar-foreground`、`sidebar-primary`、`sidebar-primary-foreground`、`sidebar-accent`、`sidebar-accent-foreground`、`sidebar-border`、`sidebar-ring` | `sidebar`、`sidebar_foreground` 等 | `sidebar` `oklch(0.985 0 0)`，`sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`，`sidebar-primary` `oklch(0.488 0.243 264.376)` | 侧边栏的表面、主要操作、高亮项、边框和焦点环 |
+| `radius` | `radius` | `0.625rem`（10 点） | | 圆角 |
+| `font-sans` | `font_sans` | 系统字体 | | 应用的字体：没有设置自己字体族的文字都使用它 |
+| `font-mono` | `font_mono` | 系统等宽字体 | | 等宽字体：`font-mono`、`TextView` 中的代码 |
 
 ## 多个 crate
 

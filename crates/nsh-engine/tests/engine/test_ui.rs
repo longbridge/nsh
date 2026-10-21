@@ -72,25 +72,21 @@ fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColo
     match variant {
         // shadcn's buttons: the role's color, 90% (80%) of it pressed.
         ButtonVariant::Primary => (
-            theme.primary(),
-            theme.primary().opacity(0.9),
-            theme.primary_foreground(),
+            theme.primary,
+            theme.primary.opacity(0.9),
+            theme.primary_foreground,
         ),
         ButtonVariant::Secondary => (
-            theme.secondary(),
-            theme.secondary().opacity(0.8),
-            theme.secondary_foreground(),
+            theme.secondary,
+            theme.secondary.opacity(0.8),
+            theme.secondary_foreground,
         ),
         ButtonVariant::Danger => (
-            theme.destructive(),
-            theme.destructive().opacity(0.9),
+            theme.destructive,
+            theme.destructive.opacity(0.9),
             AdaptiveColor::rgb(0xffffff, 0xffffff),
         ),
-        ButtonVariant::Plain => (
-            AdaptiveColor::TRANSPARENT,
-            theme.accent(),
-            theme.foreground(),
-        ),
+        ButtonVariant::Plain => (AdaptiveColor::TRANSPARENT, theme.accent, theme.foreground),
     }
 }
 
@@ -104,7 +100,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .justify_center()
         .px_4()
         .py_3()
-        .rounded(move || theme().radius())
+        .rounded(move || theme().radius)
         .bg(move || colors.get().0)
         .active(|s| s.bg(move || colors.get().1))
         .style_when(props.disabled, |v| v.opacity(0.5))
@@ -172,7 +168,7 @@ pub(crate) fn Group(props: GroupProps) -> impl IntoElement {
             .py_3()
             .style_when(
                 move || !at.is_first(),
-                |s| s.border_t_1().border_color(move || theme().border()),
+                |s| s.border_t_1().border_color(move || theme().border),
             )
             .child(row)
     })
@@ -221,7 +217,7 @@ pub(crate) fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoEl
                 .min_h(px(48.0))
                 .style_when(
                     move || !at.is_first(),
-                    |v| v.border_t_1().border_color(move || theme().border()),
+                    |v| v.border_t_1().border_color(move || theme().border),
                 )
                 .style_when(
                     move || inset.get() && at.is_first(),

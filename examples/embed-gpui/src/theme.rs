@@ -79,8 +79,8 @@ pub fn nsh_theme(theme: &Theme) -> nsh_platform_gpui::Theme {
         nsh.set_color(name, AdaptiveColor::from(color(c)));
     }
     nsh.set_number("radius", f32::from(theme.radius));
-    nsh.set_font("font-sans", theme.font_family.to_string());
-    nsh.set_font("font-mono", theme.mono_font_family.to_string());
+    nsh.set_font(nsh_core::ui::FONT_SANS, theme.font_family.to_string());
+    nsh.set_font(nsh_core::ui::FONT_MONO, theme.mono_font_family.to_string());
     nsh
 }
 
@@ -111,9 +111,9 @@ mod tests {
         };
         theme.colors.primary = gpui_kit::rgb(0x7c3aed).into();
         let nsh = nsh_theme(&theme);
-        assert_eq!(Color::from(nsh.primary().dark), Color(0x7c3aedff));
+        assert_eq!(Color::from(nsh.primary.dark), Color(0x7c3aedff));
         // Both appearances: the host's current mode.
-        assert_eq!(Color::from(nsh.primary().light), Color(0x7c3aedff));
-        assert_eq!(nsh.radius(), nsh_core::Points(6.0));
+        assert_eq!(Color::from(nsh.primary.light), Color(0x7c3aedff));
+        assert_eq!(nsh.radius, nsh_core::Points(6.0));
     }
 }

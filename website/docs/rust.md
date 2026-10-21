@@ -80,11 +80,11 @@ pub fn App() -> impl IntoElement {
             button()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || theme().radius())
-                .bg(move || theme().primary())
-                .active(|s| s.bg(move || theme().primary().opacity(0.9)))
+                .rounded(move || theme().radius)
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary.opacity(0.9)))
                 .on_press(move || count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground())),
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -202,7 +202,7 @@ pub enum ChartEvent {
 pub fn Chart(props: ChartProps, cx: Scope<ChartEvent>) -> impl IntoElement {
     view()
         .h(px(160.0))
-        .bg(move || theme().muted())
+        .bg(move || theme().muted)
         .on_press(move || cx.emit(ChartEvent::Select(101.5)))
         .child(text(move || format!("{} · {}", props.symbol.get(), props.range.get())))
 }
@@ -456,7 +456,7 @@ batches to a test that keeps its own model of the screen. `examples/rust-exports
 The look of an app is the app's own: NSH provides the primitives and the unstyled base components of `nsh_base`, and
 your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radius and fonts from a theme, `theme()` from
 `nsh_base`, so one file restyles every component of the app. Each color has a light and a dark value;
-when the system switches appearance, a binding such as `.bg(move || theme().primary())` changes color natively, with no
+when the system switches appearance, a binding such as `.bg(move || theme().primary)` changes color natively, with no
 render.
 
 The theme has the design tokens of [shadcn/ui](https://ui.shadcn.com/docs/theming), and its default is shadcn's
@@ -515,22 +515,22 @@ The tokens, with their default light and dark values (shadcn's `neutral`):
 
 | Token | `theme()` | Light | Dark | Role |
 |---|---|---|---|---|
-| `background` / `foreground` | `background()` / `foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | The app's background, and the text on it |
-| `card` / `card-foreground` | `card()` / `card_foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Cards and grouped surfaces, and the text on them |
-| `popover` / `popover-foreground` | `popover()` / `popover_foreground()` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Popovers, menus and tooltips, and the text on them |
-| `primary` / `primary-foreground` | `primary()` / `primary_foreground()` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | The main action (a primary button), and the text on it |
-| `secondary` / `secondary-foreground` | `secondary()` / `secondary_foreground()` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | Secondary actions, and the text on them |
-| `muted` / `muted-foreground` | `muted()` / `muted_foreground()` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | Quiet surfaces; secondary text: captions, labels, placeholders |
-| `accent` / `accent-foreground` | `accent()` / `accent_foreground()` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | A hovered or highlighted item, such as a menu item or list row, and its text |
-| `destructive` | `destructive()` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | Destructive actions and errors |
-| `border` | `border()` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | Dividers and borders |
-| `input` | `input()` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | The border of inputs |
-| `ring` | `ring()` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | Focus rings |
-| `chart-1` … `chart-5` | `chart_1()` … `chart_5()` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | the same | The series of a chart |
-| `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-border`, `sidebar-ring` | `sidebar()`, `sidebar_foreground()`, ... | `sidebar` `oklch(0.985 0 0)`, `sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`, `sidebar-primary` `oklch(0.488 0.243 264.376)` | A sidebar's surface, its main action, its highlighted item, borders and focus ring |
-| `radius` | `radius()` | `0.625rem` (10 pt) | | The corner radius |
-| `font-sans` | `font_sans()` | the system font | | The app's font: every text that sets no family of its own |
-| `font-mono` | `font_mono()` | the system monospace font | | The monospaced font: `font-mono`, code in `TextView` |
+| `background` / `foreground` | `background` / `foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | The app's background, and the text on it |
+| `card` / `card-foreground` | `card` / `card_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Cards and grouped surfaces, and the text on them |
+| `popover` / `popover-foreground` | `popover` / `popover_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Popovers, menus and tooltips, and the text on them |
+| `primary` / `primary-foreground` | `primary` / `primary_foreground` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | The main action (a primary button), and the text on it |
+| `secondary` / `secondary-foreground` | `secondary` / `secondary_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | Secondary actions, and the text on them |
+| `muted` / `muted-foreground` | `muted` / `muted_foreground` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | Quiet surfaces; secondary text: captions, labels, placeholders |
+| `accent` / `accent-foreground` | `accent` / `accent_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | A hovered or highlighted item, such as a menu item or list row, and its text |
+| `destructive` | `destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | Destructive actions and errors |
+| `border` | `border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | Dividers and borders |
+| `input` | `input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | The border of inputs |
+| `ring` | `ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | Focus rings |
+| `chart-1` … `chart-5` | `chart_1` … `chart_5` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | the same | The series of a chart |
+| `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-border`, `sidebar-ring` | `sidebar`, `sidebar_foreground`, ... | `sidebar` `oklch(0.985 0 0)`, `sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`, `sidebar-primary` `oklch(0.488 0.243 264.376)` | A sidebar's surface, its main action, its highlighted item, borders and focus ring |
+| `radius` | `radius` | `0.625rem` (10 pt) | | The corner radius |
+| `font-sans` | `font_sans` | the system font | | The app's font: every text that sets no family of its own |
+| `font-mono` | `font_mono` | the system monospace font | | The monospaced font: `font-mono`, code in `TextView` |
 
 ## Several crates
 

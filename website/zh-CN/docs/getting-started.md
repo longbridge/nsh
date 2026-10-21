@@ -84,8 +84,8 @@ pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
     view()
         .flex_1()
-        .bg(move || theme().background())
-        .text_color(move || theme().foreground())
+        .bg(move || theme().background)
+        .text_color(move || theme().foreground)
         .child(
             safe_area_view()
                 .flex_1()
@@ -101,13 +101,13 @@ pub fn App() -> impl IntoElement {
                                 .px_5()
                                 .py_3()
                                 .rounded(px(10.0))
-                                .bg(move || theme().primary())
+                                .bg(move || theme().primary)
                                 .active(|s| s.opacity(0.6))
                                 .on_press(move || count.update(|value| *value += 1))
                                 .child(
                                     text("Tap")
                                         .text_size(px(17.0))
-                                        .text_color(move || theme().primary_foreground()),
+                                        .text_color(move || theme().primary_foreground),
                                 ),
                         ),
                 ),
@@ -147,7 +147,7 @@ Rust 版：
 - **`#[component] pub fn App()`** 是一个组件：只运行**一次**、返回自己元素的函数。`nsh.json` 中的 `"root": "App"` 指向它，`nsh run`
   挂载它。`signal(0_u32)` 创建一个会随时间变化的值。
 - **`text(move || format!(…, count.get()))`** 把文本绑定到 signal：`count` 变化时，NSH 重新运行这个闭包，只更新这一段文本，其他什么都不动。样式同样接受闭包：
-  `.bg(move || theme().primary())` 会随主题进入深色模式。
+  `.bg(move || theme().primary)` 会随主题进入深色模式。
 - **`.on_press(..)`** 让视图响应按压；`.active(|s| s.opacity(0.6))` 是它按下时的样式，由原生应用。这个按钮属于应用自己：NSH
   提供基本元素和各项能力，应用用它们绘制自己的界面。
 - **`.px_5()`、`.rounded(px(10.0))`、`.gap_4()`** 是带类型的样式方法，与 Tailwind 的工具类同名，单位是点（`px`）。布局是
@@ -264,7 +264,7 @@ nsh run my-app --target catalyst
 ```rust tabs
 text("Add one")
     .text_size(px(17.0))
-    .text_color(move || theme().primary_foreground())
+    .text_color(move || theme().primary_foreground)
 ```
 
 ```tsx tabs
@@ -282,10 +282,10 @@ fn tap_button(on_press: impl Fn() + 'static) -> impl IntoElement {
     view()
         .p_3()
         .rounded(px(10.0))
-        .bg(move || theme().primary())
+        .bg(move || theme().primary)
         .active(|s| s.opacity(0.6))
         .on_press(on_press)
-        .child(text("Tap").text_size(px(17.0)).text_color(move || theme().primary_foreground()))
+        .child(text("Tap").text_size(px(17.0)).text_color(move || theme().primary_foreground))
 }
 
 // 在 App 中：.child(tap_button(move || count.update(|value| *value += 1)))

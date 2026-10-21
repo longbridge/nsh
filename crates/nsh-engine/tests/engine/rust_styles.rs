@@ -434,15 +434,15 @@ fn Sections() -> impl IntoElement {
         nsh_base::tab()
             .selected(selected)
             .on_press(move |_: &()| current.set(value))
-            .rounded(move || nsh_base::theme().radius())
+            .rounded(move || nsh_base::theme().radius)
             .px_3()
             .py_2()
             .selected_style(|s| s.bg(rgb(0x2563eb)))
             .child(text(label).text_sm().text_color(move || {
                 if selected() {
-                    nsh_base::theme().foreground()
+                    nsh_base::theme().foreground
                 } else {
-                    nsh_base::theme().muted_foreground()
+                    nsh_base::theme().muted_foreground
                 }
             }))
     };
@@ -454,8 +454,8 @@ fn Sections() -> impl IntoElement {
                 .self_start()
                 .gap_1()
                 .p_1()
-                .rounded(move || nsh_base::theme().radius())
-                .bg(move || nsh_base::theme().muted())
+                .rounded(move || nsh_base::theme().radius)
+                .bg(move || nsh_base::theme().muted)
                 .child(section("overview", "Overview"))
                 .child(section("activity", "Activity")),
         )
@@ -467,7 +467,7 @@ fn Sections() -> impl IntoElement {
                     "Deploys, invoices and new members, newest first."
                 }
             })
-            .text_color(move || nsh_base::theme().foreground()),
+            .text_color(move || nsh_base::theme().foreground),
         )
 }
 

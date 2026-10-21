@@ -212,21 +212,21 @@ The app's theme (`"theme"` in `nsh.json`) holds its design tokens: shadcn/ui's c
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius())
+    .rounded(move || theme().radius)
     .border_1()
-    .border_color(move || theme().border())
-    .bg(move || theme().card())
+    .border_color(move || theme().border)
+    .bg(move || theme().card)
     .p_4()
-    .child(text("Balance").text_color(move || theme().card_foreground()))
-    .child(text("Updated just now").text_color(move || theme().muted_foreground()))
+    .child(text("Balance").text_color(move || theme().card_foreground))
+    .child(text("Updated just now").text_color(move || theme().muted_foreground))
     .child(
         view()
-            .rounded(move || theme().radius())
-            .bg(move || theme().primary())
+            .rounded(move || theme().radius)
+            .bg(move || theme().primary)
             .px_4()
             .py_2()
-            .active(|s| s.bg(move || theme().primary().opacity(0.9)))
-            .child(text("Continue").text_color(move || theme().primary_foreground())),
+            .active(|s| s.bg(move || theme().primary.opacity(0.9)))
+            .child(text("Continue").text_color(move || theme().primary_foreground)),
     )
 ```
 
@@ -251,7 +251,7 @@ A token's name is its CSS variable's without `--`, as the theme file writes it: 
 
 - **Your own tokens.** Every name in the theme file is a token, as every variable of a CSS `@theme` is: `"up": "#16a34a"` makes `bg-up`, `text-up` and `bg-up/30`; `"radius-card": "14px"` makes `rounded-(--radius-card)`; `"font-display": "Pacifico"` makes `font-(family-name:--font-display)`. Lengths are in points; `(number:--name)` passes the plain number.
 - **Fonts.** `font-sans` is the app's font: every text that sets no family of its own is drawn with it, as a page is with Tailwind's `--font-sans`. `font-mono` is the font of `font-mono` and of code in `TextView`. Unset, both are the system's fonts.
-- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary`, `theme().primary()` and `token("primary")` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one appearance only is used in both.
+- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary`, `theme().primary` and `token("primary")` switch with the appearance by themselves, with no `dark:` class. A color the theme sets in one appearance only is used in both.
 - **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token when the Tailwind theme has no color `primary`.
 - **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens, the Rust bindings reading `theme()` and the TSX code reading `token()` are updated, the classes and bindings natively. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's).
 - **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.

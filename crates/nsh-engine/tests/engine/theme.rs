@@ -17,12 +17,12 @@ use crate::ChannelSink;
 /// A square of the theme's primary color.
 #[component]
 fn Swatch() -> impl IntoElement {
-    view().size_10().bg(move || theme().primary())
+    view().size_10().bg(move || theme().primary)
 }
 
 /// The primary color of a theme that sets none: `nsh-base`'s default.
 fn default_primary() -> Color {
-    Color::from(Theme::default().primary().light)
+    Color::from(Theme::default().primary.light)
 }
 
 fn themed(hex: &str) -> Theme {

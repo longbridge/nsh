@@ -144,7 +144,7 @@ pub fn App() -> impl IntoElement {
     provide_context(Workspace::new());
     view()
         .flex_1()
-        .bg(move || theme().background())
+        .bg(move || theme().background)
         .child(inbox())
 }
 ```
@@ -206,7 +206,7 @@ fn empty_state(title: impl Into<SharedString>) -> impl IntoElement {
     view()
         .gap_2()
         .items_center()
-        .child(text(title.into()).text_color(move || theme().muted_foreground()))
+        .child(text(title.into()).text_color(move || theme().muted_foreground))
 }
 ```
 
@@ -371,7 +371,7 @@ pub fn QuantityStepper(props: QuantityStepperProps, cx: Scope<QuantityStepperEve
             move || props.value.get() <= props.min.get(),
             move || step(-1),
         ))
-        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground()))
+        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground))
         .child(step_button(
             "+",
             move || props.increment_label.get(),
@@ -394,11 +394,11 @@ fn step_button(
         .h(px(32.0))
         .items_center()
         .justify_center()
-        .rounded(move || theme().radius())
-        .bg(move || theme().muted())
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted)
         .active(|s| s.opacity(0.6))
         .disabled_style(|s| s.opacity(0.4))
-        .child(text(symbol).text_color(move || theme().foreground()))
+        .child(text(symbol).text_color(move || theme().foreground))
 }
 
 // The owner:
@@ -606,11 +606,11 @@ Read semantic values from the theme and apply layout with the typed style method
 
 ```rust tabs
 view()
-    .bg(move || theme().background())
-    .text_color(move || theme().foreground())
+    .bg(move || theme().background)
+    .text_color(move || theme().foreground)
     .border_1()
-    .border_color(move || theme().border())
-    .rounded(move || theme().radius())
+    .border_color(move || theme().border)
+    .rounded(move || theme().radius)
 ```
 
 ```tsx tabs

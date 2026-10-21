@@ -3,8 +3,9 @@
 //! `secondary`, `muted`, `accent`), each with the color of what is drawn on
 //! it (`-foreground`), `destructive`, `border`, `input`, `ring`, the charts'
 //! colors (`chart-1` to `chart-5`), the sidebar's (`sidebar`, ...), each
-//! with a light and a dark value; the corner radius (`radius`) and the
-//! fonts (`font-sans`, `font-mono`, Tailwind's).
+//! with a light and a dark value, and the corner radius (`radius`): the
+//! fields of [`Theme`], with its fonts, Tailwind's `font-sans` and
+//! `font-mono`, which the default leaves to the system.
 //!
 //! A theme file is shadcn's `cssVars`, as a registry item has them (what
 //! tweakcn and shadcn's themes export): `{ "cssVars": { "theme": { … },
@@ -28,32 +29,17 @@ use nsh_core::{
     Color, JsonValue,
     color::Hsla,
     geometry::{Points, px},
-    ui::{AdaptiveColor, FONT_MONO, FONT_SANS, Tokens},
+    ui::{AdaptiveColor, FONT_MONO, FONT_SANS, SharedString, Tokens},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The default theme file: shadcn/ui's `neutral` theme.
 pub const DEFAULT_THEME: &str = include_str!("default-theme.json");
 
-static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
-    let mut tokens = Tokens::default();
-    apply(&mut tokens, DEFAULT_THEME).expect("the default theme parses");
-    Theme(Arc::new(tokens))
-});
+static DEFAULT: LazyLock<Theme> = LazyLock::new(|| Theme::of(Arc::new(DEFAULT_TOKENS.clone())));
 
 /// Points per `rem`, as Tailwind's theme has them.
 const REM: f32 = 16.0;
-
-/// A theme: design tokens with shadcn's named. Cheap to clone.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Theme(Arc<Tokens>);
-
-impl Default for Theme {
-    /// The default theme ([`DEFAULT_THEME`]).
-    fn default() -> Self {
-        DEFAULT.clone()
-    }
-}
 
 /// A theme file that does not parse.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,10 +53,20 @@ impl std::fmt::Display for ThemeError {
 
 impl std::error::Error for ThemeError {}
 
+thread_local! {
+    /// The theme of the tokens last read: `theme()` makes one only when
+    /// the tokens change.
+    static CURRENT: std::cell::RefCell<Option<Arc<Theme>>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The theme the app is drawn with (reading it subscribes: a new theme
 /// reaches what read it).
-pub fn theme() -> Theme {
-    Theme(nsh_core::ui::ambient::tokens())
+pub fn theme() -> Arc<Theme> {
+    let tokens = nsh_core::ui::ambient::tokens();
+    CURRENT.with_borrow_mut(|current| match current {
+        Some(theme) if Arc::ptr_eq(&theme.tokens, &tokens) => theme.clone(),
+        _ => current.insert(Arc::new(Theme::of(tokens))).clone(),
+    })
 }
 
 /// The tokens of theme file `json` over the default's (`None`: the
@@ -85,21 +81,72 @@ pub fn tokens_of(json: Option<&str>) -> Result<Tokens, String> {
     }
 }
 
-macro_rules! semantic {
+macro_rules! theme {
     ($( $(#[doc = $doc:literal])* $name:ident = $key:literal ),* $(,)?) => {
-        impl Theme {
+        /// A theme: shadcn/ui's tokens, each a field, and the app's own
+        /// ones by name ([`Theme::color`], [`Theme::number`],
+        /// [`Theme::font`]).
+        #[derive(Debug, Clone, PartialEq)]
+        #[non_exhaustive]
+        pub struct Theme {
             $(
                 $(#[doc = $doc])*
                 #[doc = concat!("\n\nToken `", $key, "`.")]
-                pub fn $name(&self) -> AdaptiveColor {
-                    self.semantic($key)
-                }
+                pub $name: AdaptiveColor,
             )*
+            /// The corner radius.
+            ///
+            /// Token `radius`.
+            pub radius: Points,
+            /// The app's font family, which text is drawn with unless it
+            /// sets its own (`None`: the system's): Tailwind's `--font-sans`,
+            /// which a theme may set.
+            ///
+            /// Token `font-sans`.
+            pub font_sans: Option<SharedString>,
+            /// The monospaced font family (`None`: the system's): Tailwind's
+            /// `--font-mono`.
+            ///
+            /// Token `font-mono`.
+            pub font_mono: Option<SharedString>,
+            tokens: Arc<Tokens>,
+        }
+
+        impl Theme {
+            /// The theme of `tokens`: shadcn's tokens they leave out
+            /// (an embedding app's may) are the default's.
+            fn of(tokens: Arc<Tokens>) -> Self {
+                let default = |name: &str| DEFAULT_TOKENS.color(name);
+                let color = |name: &str| {
+                    tokens
+                        .color(name)
+                        .or_else(|| default(name))
+                        .unwrap_or(AdaptiveColor::TRANSPARENT)
+                };
+                Theme {
+                    $( $name: color($key), )*
+                    radius: px(tokens
+                        .number("radius")
+                        .or_else(|| DEFAULT_TOKENS.number("radius"))
+                        .unwrap_or(0.0)),
+                    font_sans: tokens.font(FONT_SANS).cloned().map(SharedString::from),
+                    font_mono: tokens.font(FONT_MONO).cloned().map(SharedString::from),
+                    tokens,
+                }
+            }
         }
     };
 }
 
-semantic! {
+/// The default theme's tokens, which [`Theme::of`] falls back on (the
+/// default [`Theme`] is made of them).
+static DEFAULT_TOKENS: LazyLock<Tokens> = LazyLock::new(|| {
+    let mut tokens = Tokens::default();
+    apply(&mut tokens, DEFAULT_THEME).expect("the default theme parses");
+    tokens
+});
+
+theme! {
     /// The app's background.
     background = "background",
     /// Text and icons on [`Theme::background`].
@@ -164,81 +211,68 @@ semantic! {
     sidebar_ring = "sidebar-ring",
 }
 
+impl Default for Theme {
+    /// The default theme ([`DEFAULT_THEME`]).
+    fn default() -> Self {
+        DEFAULT.clone()
+    }
+}
+
 impl Theme {
     /// The default theme with theme file `json` over it.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
-        let mut tokens = (*DEFAULT.0).clone();
+        let mut tokens = DEFAULT_TOKENS.clone();
         apply(&mut tokens, json)?;
-        Ok(Self(Arc::new(tokens)))
+        Ok(Self::of(Arc::new(tokens)))
     }
 
-    /// The corner radius. Token `radius`.
-    pub fn radius(&self) -> Points {
-        px(self
-            .number("radius")
-            .or_else(|| DEFAULT.number("radius"))
-            .unwrap_or(0.0))
-    }
-
-    /// The app's font family, which text is drawn with unless it sets
-    /// its own (`None`: the system's). Token `font-sans`.
-    pub fn font_sans(&self) -> Option<Arc<str>> {
-        self.0.font(FONT_SANS).cloned()
-    }
-
-    /// The monospaced font family (`None`: the system's). Token
-    /// `font-mono`.
-    pub fn font_mono(&self) -> Option<Arc<str>> {
-        self.0.font(FONT_MONO).cloned()
-    }
-
-    /// The color named `name` (any the theme sets).
+    /// The color named `name` (any the theme sets: shadcn's, the app's).
     pub fn color(&self, name: &str) -> Option<AdaptiveColor> {
-        self.0.color(name)
+        self.tokens.color(name)
     }
 
     /// The number named `name` (any the theme sets).
     pub fn number(&self, name: &str) -> Option<f32> {
-        self.0.number(name)
+        self.tokens.number(name)
     }
 
-    /// The font family named `name` (any the theme sets).
+    /// The font family named `name` (any the theme sets; its sans and mono
+    /// ones are [`Theme::font_sans`] and [`Theme::font_mono`]).
     pub fn font(&self, name: &str) -> Option<Arc<str>> {
-        self.0.font(name).cloned()
+        self.tokens.font(name).cloned()
     }
 
-    /// Sets the color named `name`.
+    /// Sets the color named `name` (one of shadcn's sets its field).
     pub fn set_color(&mut self, name: &str, color: AdaptiveColor) {
-        Arc::make_mut(&mut self.0).set_color(name, color);
+        self.edit(|t| t.set_color(name, color));
     }
 
-    /// Sets the number named `name`.
+    /// Sets the number named `name` (`radius` sets its field).
     pub fn set_number(&mut self, name: &str, value: f32) {
-        Arc::make_mut(&mut self.0).set_number(name, value);
+        self.edit(|t| t.set_number(name, value));
     }
 
     /// Sets the font family named `name`.
     pub fn set_font(&mut self, name: &str, family: impl Into<Arc<str>>) {
-        Arc::make_mut(&mut self.0).set_font(name, family);
+        self.edit(|t| t.set_font(name, family));
     }
 
     /// Its design tokens.
     pub fn tokens(&self) -> &Tokens {
-        &self.0
+        &self.tokens
     }
 
     /// Its design tokens, for the core ([`nsh_core::ui::Root::tokens`],
     /// an engine's host theme).
     pub fn into_tokens(self) -> Tokens {
-        Arc::unwrap_or_clone(self.0)
+        Arc::unwrap_or_clone(self.tokens)
     }
 
-    /// One of shadcn's colors: the theme's, else the default's (tokens an
-    /// embedding app gives may leave it out).
-    fn semantic(&self, name: &str) -> AdaptiveColor {
-        self.color(name)
-            .or_else(|| DEFAULT.color(name))
-            .unwrap_or(AdaptiveColor::TRANSPARENT)
+    /// Changes the tokens with `f`, and the fields with them.
+    fn edit(&mut self, f: impl FnOnce(&mut Tokens)) {
+        let mut tokens = std::mem::take(&mut self.tokens);
+        f(Arc::make_mut(&mut tokens));
+        *self = Self::of(tokens);
     }
 }
 
@@ -488,14 +522,14 @@ mod tests {
         assert_eq!(numbers, [("radius", 10.0)]);
         assert_eq!(theme.tokens().fonts().count(), 0);
         // oklch(0.205 0 0) / oklch(0.922 0 0).
-        assert_eq!(hex(theme.primary().light), 0x171717);
-        assert_eq!(hex(theme.primary().dark), 0xe5e5e5);
-        assert_eq!(theme.radius(), px(10.0));
+        assert_eq!(hex(theme.primary.light), 0x171717);
+        assert_eq!(hex(theme.primary.dark), 0xe5e5e5);
+        assert_eq!(theme.radius, px(10.0));
         // oklch(1 0 0 / 10%).
-        assert!((theme.border().dark.a - 0.1).abs() < 0.01);
+        assert!((theme.border.dark.a - 0.1).abs() < 0.01);
         // Tokens without them read the defaults.
-        assert_eq!(Theme(Arc::default()).ring(), theme.ring());
-        assert_eq!(theme.font_sans(), None);
+        assert_eq!(Theme::of(Arc::default()).ring, theme.ring);
+        assert_eq!(theme.font_sans, None);
     }
 
     #[test]
@@ -511,23 +545,23 @@ mod tests {
             } }"##,
         )
         .unwrap();
-        assert_eq!(hex(theme.primary().light), 0x7c3aed);
+        assert_eq!(hex(theme.primary.light), 0x7c3aed);
         // Only light: both.
-        assert_eq!(hex(theme.primary().dark), 0x7c3aed);
+        assert_eq!(hex(theme.primary.dark), 0x7c3aed);
         let surface = theme.color("surface").unwrap();
         assert_eq!(
             (hex(surface.light), hex(surface.dark)),
             (0xffffff, 0x18191c)
         );
-        assert_eq!(hex(theme.sidebar_ring().light), 0x7c3aed);
-        assert_eq!(theme.radius(), px(8.0));
+        assert_eq!(hex(theme.sidebar_ring.light), 0x7c3aed);
+        assert_eq!(theme.radius, px(8.0));
         assert_eq!(theme.number("radius-card"), Some(14.0));
-        assert_eq!(theme.font_sans().as_deref(), Some("Inter"));
-        assert_eq!(theme.font_mono().as_deref(), Some("JetBrains Mono"));
+        assert_eq!(theme.font_sans.as_deref(), Some("Inter"));
+        assert_eq!(theme.font_mono.as_deref(), Some("JetBrains Mono"));
         // Of no kind a token has.
         assert_eq!(theme.tokens().get("shadow-sm"), None);
         // Keys left out keep the default.
-        assert_eq!(theme.muted(), Theme::default().muted());
+        assert_eq!(theme.muted, Theme::default().muted);
         assert!(
             Theme::from_json(r#"{ "cssVars": { "light": { "a": "var(--b)", "b": "var(--a)" } } }"#)
                 .is_err()
@@ -543,6 +577,6 @@ mod tests {
         .unwrap();
         assert_eq!(hex(theme.color("edge").unwrap().light), 0xff0000);
         // The default's, in each appearance.
-        assert_eq!(theme.color("line").unwrap(), Theme::default().border());
+        assert_eq!(theme.color("line").unwrap(), Theme::default().border);
     }
 }

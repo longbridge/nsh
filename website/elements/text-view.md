@@ -42,7 +42,7 @@ fn release_notes() -> impl IntoElement {
             .on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| log::info!("open {url}"))
             .p_5()
             .text_base()
-            .text_color(theme().foreground()),
+            .text_color(theme().foreground),
     )
 }
 ```
@@ -180,7 +180,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
                 s.px_3().py_2().border_t_1().border_color(rgb(0xe5e5e5))
             })
             .part(TextViewPart::TaskMarkerChecked, |s| s.text_color(rgb(0x16a34a)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
     text_view()
         .markdown(move || markdown.get())
@@ -717,8 +717,8 @@ fn chat_parts() {
     provide_context(
         TextViewParts::new()
             .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
-            .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Code, |s| s.bg(theme().muted).rounded(px(4.0)))
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
 }
 ```

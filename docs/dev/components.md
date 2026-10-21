@@ -60,7 +60,7 @@ come from two places:
 - **A component runs once** and makes its view with `view()`, `text()`, `image()` and other components
   (`safe_area_view()`, `chip().label("New")`), styled with GPUI-style methods (`.px_4()`, `.rounded(px(16.0))`, `.active(|s|
   s.bg(..))`). What changes is a **binding**: a closure or a signal where the value goes (`text(props.label)`,
-  `.bg(move || theme().primary())`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
+  `.bg(move || theme().primary)`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
   is updated. A prop is read with `props.x.get()` in a binding and `get_untracked()` in a listener. The root can be
   any element; the app's `class` (merged last, it wins) and `style` apply to it.
 - **Colors come from the theme** (`nsh_base::theme()`: shadcn/ui's tokens, a light and a dark value each),
@@ -117,11 +117,11 @@ pub fn Chip(props: ChipProps, cx: Scope<ChipEvent>) -> impl IntoElement {
     view()
         .px_3()
         .py_1()
-        .rounded(move || theme().radius())
-        .bg(move || theme().muted())
-        .active(|s| s.bg(move || theme().border()))
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted)
+        .active(|s| s.bg(move || theme().border))
         .on_press(move || cx.emit(ChipEvent::Press))
-        .child(text(props.label).text_color(move || theme().foreground()))
+        .child(text(props.label).text_color(move || theme().foreground))
 }
 ```
 
@@ -258,7 +258,7 @@ reasons: `reactive-components.md`.
   animated values take `f32`, `Points` or `Radians` too.
   `canvas(move || draw(..))` draws in a binding: again when what it read changes (a size kept from `on_layout`, the
   appearance through `color(..)`); a new drawing replaces the old one. Props that take a plain color (an input's
-  placeholder color) take `move || color(theme().muted_foreground())`: the theme color for the appearance now.
+  placeholder color) take `move || color(theme().muted_foreground)`: the theme color for the appearance now.
 - **What TS does, in Rust**:
 
   | TS | Rust component |
@@ -621,9 +621,10 @@ page's; `font-mono` is the monospaced one) and has none of its own. The theme is
 (`crates/nsh-base/src/theme.rs`) has shadcn/ui's tokens, exactly: `background` / `foreground`, `card`, `popover`,
 `primary`, `secondary`, `muted`, `accent` (each with its `-foreground`), `destructive`, `border`, `input`, `ring`,
 `chart-1` to `chart-5`, `sidebar`, `sidebar-foreground`, `sidebar-primary` / `-foreground`, `sidebar-accent` /
-`-foreground`, `sidebar-border`, `sidebar-ring` and `radius` (one accessor each: `primary()`, `chart_1()`,
-`sidebar_ring()`, `radius()`), plus `font-sans` / `font-mono` (`font_sans()`, `font_mono()`; unset, the system's
-fonts). The defaults are shadcn's `neutral` theme (`default-theme.json`, `radius` 0.625rem = 10 pt); no component of
+`-foreground`, `sidebar-border`, `sidebar-ring` and `radius`, one field each (`theme().primary`, `theme().chart_1`,
+`theme().sidebar_ring`, `theme().radius`), plus Tailwind's fonts `font-sans` / `font-mono` (`theme().font_sans`,
+`theme().font_mono`; `None`, the system's fonts). `theme()` returns the theme of the tokens drawn with now, made once
+per change of them; an app's own tokens are read by name (`theme().color("up")`). The defaults are shadcn's `neutral` theme (`default-theme.json`, `radius` 0.625rem = 10 pt); no component of
 `nsh/base` draws with them but `TextView`'s reading typography.
 
 A theme file is shadcn's registry `cssVars`, as shadcn and tweakcn export them: `{ "cssVars": { "theme": {…},

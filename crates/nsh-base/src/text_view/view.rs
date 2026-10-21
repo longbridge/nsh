@@ -214,7 +214,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
         .gap(px(BLOCK_GAP))
         .text_size(px(BODY_SIZE))
         .line_height(px(BODY_SIZE * BODY_LINE))
-        .text_color(move || theme().foreground())
+        .text_color(move || theme().foreground)
         // Selectable: its texts share one selection, block to block (inside
         // a `SelectionArea`, the outer area's).
         .selection_area(props.selectable)
@@ -260,7 +260,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 .gap(px(4.0))
                 .text_size(px(SMALL_SIZE))
                 .line_height(px(SMALL_SIZE * 1.6))
-                .text_color(move || theme().muted_foreground());
+                .text_color(move || theme().muted_foreground);
             Some(
                 cx.part(footnotes, Part::Footnotes)
                     .children(notes.iter().map(|note| {
@@ -535,7 +535,7 @@ impl Cx {
                     .border_l(px(2.0))
                     .border_color(strong_border)
                     .ps(px(BODY_SIZE * 0.9))
-                    .text_color(move || theme().foreground().opacity(0.8));
+                    .text_color(move || theme().foreground.opacity(0.8));
                 self.part(self.blocks(column, children, key, tail), Part::Blockquote)
                     .into_element()
             }
@@ -569,8 +569,8 @@ impl Cx {
                             .px(px(16.0))
                             .rounded(px(8.0))
                             .border_1()
-                            .border_color(move || theme().border())
-                            .bg(move || theme().muted())
+                            .border_color(move || theme().border)
+                            .bg(move || theme().muted)
                             .child(
                                 text(tex.clone())
                                     .font_family(mono_font)
@@ -646,17 +646,17 @@ impl Cx {
                         });
                     let marker = if checked {
                         marker
-                            .bg(move || theme().primary())
-                            .border_color(move || theme().primary())
+                            .bg(move || theme().primary)
+                            .border_color(move || theme().primary)
                             .child(
                                 text("✓")
                                     .text_size(px(11.0))
                                     .line_height(px(13.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(move || theme().primary_foreground()),
+                                    .text_color(move || theme().primary_foreground),
                             )
                     } else {
-                        marker.border_color(move || theme().muted_foreground())
+                        marker.border_color(move || theme().muted_foreground)
                     };
                     self.parts(marker, &parts).into_element()
                 }
@@ -682,7 +682,7 @@ impl Cx {
                         .w(px(MARKER_BOX))
                         .pe(px(6.0))
                         .text_right()
-                        .text_color(move || theme().muted_foreground());
+                        .text_color(move || theme().muted_foreground);
                     self.part(marker, Part::ListMarker).into_element()
                 }
             };
@@ -693,9 +693,9 @@ impl Cx {
                 .flex_1()
                 .gap(px(if loose { BLOCK_GAP } else { ITEM_GAP }))
                 .when(done, |v| {
-                    v.text_color(move || theme().muted_foreground())
+                    v.text_color(move || theme().muted_foreground)
                         .line_through()
-                        .text_decoration_color(move || theme().muted_foreground().opacity(0.6))
+                        .text_decoration_color(move || theme().muted_foreground.opacity(0.6))
                 });
             let row = view().flex_row().map(|v| {
                 if task {
@@ -825,8 +825,8 @@ impl Cx {
             .when(hover, |b| b.group())
             .rounded(px(8.0))
             .border_1()
-            .border_color(move || theme().border())
-            .bg(move || theme().muted())
+            .border_color(move || theme().border)
+            .bg(move || theme().muted)
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
         // The actions last, so they are drawn over the code.
@@ -874,15 +874,15 @@ impl Cx {
         } else {
             text(label.clone())
                 .text_size(px(11.0))
-                .text_color(move || theme().muted_foreground())
+                .text_color(move || theme().muted_foreground)
                 .into_element()
         };
         let event = TextViewCodeActionEvent {
             id: action.id.clone(),
             code: code.clone(),
         };
-        let hovered = theme().foreground().opacity(0.08);
-        let pressed = theme().foreground().opacity(0.14);
+        let hovered = theme().foreground.opacity(0.08);
+        let pressed = theme().foreground.opacity(0.14);
         view()
             .min_w(px(24.0))
             .h(px(24.0))
@@ -965,7 +965,7 @@ impl Cx {
             let row = view()
                 .row_start(line)
                 .col_span_full()
-                .when(head, |v| v.bg(move || theme().muted()));
+                .when(head, |v| v.bg(move || theme().muted));
             grid.push(self.parts(row, row_parts).into_element());
             // Each cell where it starts, as wide as it spans; the columns no
             // cell covers (a short row) are empty cells.
@@ -1016,10 +1016,10 @@ impl Cx {
                     .px(px(12.0))
                     .border_r_1()
                     .border_b_1()
-                    .border_color(move || theme().border())
+                    .border_color(move || theme().border)
                     .when(head, |v| {
                         v.text_size(px(CODE_SIZE))
-                            .text_color(move || theme().muted_foreground())
+                            .text_color(move || theme().muted_foreground)
                     });
                 self.parts(cell, cell_parts).child(t).into_element()
             }));
@@ -1037,7 +1037,7 @@ impl Cx {
             .min_w(rems(floors.iter().sum()))
             .border_t_1()
             .border_l_1()
-            .border_color(move || theme().border())
+            .border_color(move || theme().border)
             .children(grid);
         let table = view()
             .flex_col()
@@ -1065,7 +1065,7 @@ impl Cx {
     ) -> AnyElement {
         let shown = signal(open);
         let marker = text(move || SharedString::from(if shown.get() { "▾ " } else { "▸ " }))
-            .text_color(move || theme().muted_foreground());
+            .text_color(move || theme().muted_foreground);
         let summary = self.part(
             view()
                 .flex_row()
@@ -1200,9 +1200,9 @@ impl Cx {
                 let span = self.span(content, key);
                 self.link.replace(outer);
                 let el = span
-                    .text_color(move || theme().primary())
+                    .text_color(move || theme().primary)
                     .underline()
-                    .text_decoration_color(move || theme().primary().opacity(0.4))
+                    .text_decoration_color(move || theme().primary.opacity(0.4))
                     .text_decoration_thickness(px(1.0))
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
@@ -1239,7 +1239,7 @@ impl Cx {
                 self.part(
                     text(index.to_string())
                         .text_size(rems(0.75))
-                        .text_color(move || theme().primary())
+                        .text_color(move || theme().primary)
                         .role(AccessibilityRole::Link)
                         .on_press(move || {
                             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
@@ -1504,7 +1504,7 @@ impl TextView {
 /// Lines that stand out more than the theme's borders (quotes' and
 /// rules'): the text's color, faint.
 fn strong_border() -> AdaptiveColor {
-    theme().foreground().opacity(0.15)
+    theme().foreground.opacity(0.15)
 }
 
 /// Code in text: monospace, smaller, on a rounded background (the text's
@@ -1512,7 +1512,7 @@ fn strong_border() -> AdaptiveColor {
 fn code_span(span: Text) -> Text {
     span.font_family(mono_font)
         .text_size(px(CODE_SIZE))
-        .bg(move || theme().foreground().opacity(0.06))
+        .bg(move || theme().foreground.opacity(0.06))
         .rounded(px(4.0))
 }
 
@@ -1524,7 +1524,7 @@ fn alert_color(alert: Alert) -> AdaptiveColor {
         Alert::Tip => AdaptiveColor::rgb(0x1a7f37, 0x3fb950),
         Alert::Important => AdaptiveColor::rgb(0x8250df, 0xab7df8),
         Alert::Warning => AdaptiveColor::rgb(0x9a6700, 0xd29922),
-        Alert::Caution => theme().destructive(),
+        Alert::Caution => theme().destructive,
     }
 }
 
@@ -1535,8 +1535,9 @@ const HIGHLIGHT: AdaptiveColor = AdaptiveColor::rgb(0xfde047, 0xca8a04);
 /// The theme's monospaced font (`font-mono`), else the system's.
 fn mono_font() -> SharedString {
     theme()
-        .font_mono()
-        .map_or_else(|| SharedString::from("monospace"), SharedString::from)
+        .font_mono
+        .clone()
+        .unwrap_or_else(|| SharedString::from("monospace"))
 }
 
 // The reading typography (sizes in points), after Allsum's documents.
@@ -1687,8 +1688,8 @@ fn text_width(line: &str) -> f32 {
 /// The built-in copy action's icon (the gallery's copy glyph), which fades
 /// and shrinks away as a check springs in once `done` goes to 1.
 fn copy_icon(done: &AnimatedValue) -> AnyElement {
-    let muted = theme().muted_foreground();
-    let ok = theme().foreground();
+    let muted = theme().muted_foreground;
+    let ok = theme().foreground;
     // The gallery's copy and check glyphs, drawn on a 20 unit grid scaled
     // to the icon's 14 pt.
     const K: f32 = 14.0 / 20.0;

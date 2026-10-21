@@ -140,14 +140,14 @@ Read colors from the theme (`theme()` in Rust, token classes in TSX) and use the
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius())
+    .rounded(move || theme().radius)
     .border_1()
-    .border_color(move || theme().border())
-    .bg(move || theme().background())
+    .border_color(move || theme().border)
+    .bg(move || theme().background)
     .p_4()
     .gap_1()
-    .child(text("Balance").text_color(move || theme().foreground()))
-    .child(text("Updated just now").text_sm().text_color(move || theme().muted_foreground()))
+    .child(text("Balance").text_color(move || theme().foreground))
+    .child(text("Updated just now").text_sm().text_color(move || theme().muted_foreground))
 ```
 
 ```tsx tabs
@@ -469,19 +469,19 @@ fn setting_switch(label: &'static str, on: Signal<bool>) -> impl IntoElement {
             s.w(px(44.0))
                 .p(px(2.0))
                 .rounded_full()
-                .bg(move || theme().muted())
+                .bg(move || theme().muted)
                 .transition_colors()
-                .checked(|s| s.bg(move || theme().primary()))
+                .checked(|s| s.bg(move || theme().primary))
         })
         .thumb_style(|s| {
             s.size(px(20.0))
                 .rounded_full()
-                .bg(move || theme().background())
+                .bg(move || theme().background)
                 .shadow_sm()
                 .transition_transform()
                 .checked(|s| s.translate_x(px(20.0)))
         })
-        .child(text(label).text_color(move || theme().foreground()))
+        .child(text(label).text_color(move || theme().foreground))
 }
 ```
 
@@ -521,14 +521,14 @@ fn select_all(selected: Signal<usize>, total: usize) -> impl IntoElement {
             s.size(px(20.0))
                 .items_center()
                 .justify_center()
-                .rounded(move || theme().radius())
+                .rounded(move || theme().radius)
                 .border_2()
-                .border_color(move || theme().border())
-                .checked(|s| s.bg(move || theme().primary()).border_color(move || theme().primary()))
-                .indeterminate(|s| s.bg(move || theme().primary()).border_color(move || theme().primary()))
+                .border_color(move || theme().border)
+                .checked(|s| s.bg(move || theme().primary).border_color(move || theme().primary))
+                .indeterminate(|s| s.bg(move || theme().primary).border_color(move || theme().primary))
         })
-        .indicator(text(move || mark(selected.get(), total)).text_color(move || theme().primary_foreground()))
-        .child(text("Select all").text_color(move || theme().foreground()))
+        .indicator(text(move || mark(selected.get(), total)).text_color(move || theme().primary_foreground))
+        .child(text("Select all").text_color(move || theme().foreground))
 }
 
 fn mark(selected: usize, total: usize) -> &'static str {
@@ -603,23 +603,23 @@ fn form_actions(cancel: impl Fn() + 'static, create: impl Fn() + 'static) -> imp
         .child(
             button()
                 .on_press(cancel)
-                .rounded(move || theme().radius())
+                .rounded(move || theme().radius)
                 .border_1()
-                .border_color(move || theme().border())
+                .border_color(move || theme().border)
                 .px_4()
                 .py_2()
-                .active(|s| s.bg(move || theme().muted()))
-                .child(text("Cancel").text_color(move || theme().foreground())),
+                .active(|s| s.bg(move || theme().muted))
+                .child(text("Cancel").text_color(move || theme().foreground)),
         )
         .child(
             button()
                 .on_press(create)
-                .rounded(move || theme().radius())
-                .bg(move || theme().primary())
+                .rounded(move || theme().radius)
+                .bg(move || theme().primary)
                 .px_4()
                 .py_2()
-                .active(|s| s.bg(move || theme().primary().opacity(0.9)))
-                .child(text("Create").text_color(move || theme().primary_foreground())),
+                .active(|s| s.bg(move || theme().primary.opacity(0.9)))
+                .child(text("Create").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -687,12 +687,12 @@ fn section_tab(label: &'static str, id: Section, current: Signal<Section>) -> im
     tab()
         .selected(selected)
         .on_press(move || current.set(id))
-        .rounded(move || theme().radius())
+        .rounded(move || theme().radius)
         .px_3()
         .py_2()
-        .selected_style(|s| s.bg(move || theme().muted()))
+        .selected_style(|s| s.bg(move || theme().muted))
         .child(text(label).text_color(move || {
-            if selected() { theme().foreground() } else { theme().muted_foreground() }
+            if selected() { theme().foreground } else { theme().muted_foreground }
         }))
 }
 ```
@@ -763,10 +763,10 @@ use nsh_core::{color::black, ui::StyleRefinement};
 fn popup(s: StyleRefinement) -> StyleRefinement {
     s.min_w(px(192.0))
         .p_1()
-        .rounded(move || theme().radius())
+        .rounded(move || theme().radius)
         .border_1()
-        .border_color(move || theme().border())
-        .bg(move || theme().popover())
+        .border_color(move || theme().border)
+        .bg(move || theme().popover)
         .shadow_lg()
 }
 
@@ -775,10 +775,10 @@ fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement
         .on_select(on_select)
         .px_3()
         .py_2()
-        .rounded(move || theme().radius())
-        .hover(|s| s.bg(move || theme().muted()))
-        .active(|s| s.bg(move || theme().muted()))
-        .child(text(label).text_color(move || theme().foreground()))
+        .rounded(move || theme().radius)
+        .hover(|s| s.bg(move || theme().muted))
+        .active(|s| s.bg(move || theme().muted))
+        .child(text(label).text_color(move || theme().foreground))
 }
 
 fn more_menu(rename: impl Fn() + 'static, duplicate: impl Fn() + 'static, delete: impl Fn() + 'static) -> impl IntoElement {
@@ -793,12 +793,12 @@ fn more_menu(rename: impl Fn() + 'static, duplicate: impl Fn() + 'static, delete
                 .items_center()
                 .justify_center()
                 .rounded_full()
-                .active(|s| s.bg(move || theme().muted()))
-                .child(text("⋯").text_color(move || theme().foreground())),
+                .active(|s| s.bg(move || theme().muted))
+                .child(text("⋯").text_color(move || theme().foreground)),
         )
         .child(item("Rename…", rename))
         .child(item("Duplicate", duplicate))
-        .child(menu_separator().h(px(1.0)).my_1().bg(move || theme().border()))
+        .child(menu_separator().h(px(1.0)).my_1().bg(move || theme().border))
         .child(item("Delete…", delete))
 }
 ```
