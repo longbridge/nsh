@@ -75,9 +75,10 @@ function Field(
             left: -1,
             right: -1,
             bottom: -1,
-            borderRadius: radius.control,
+            // Around the field's border: its radius plus the 1pt it reaches out.
+            borderRadius: radius.control + 1,
             borderCurve: "continuous",
-            borderWidth: 1.5,
+            borderWidth: 2,
             borderColor: own.error ? colors.danger : colors.accent,
             opacity: focus,
           }}
