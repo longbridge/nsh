@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: 在 Linux 上用 GTK 4 窗口运行 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
+description: 在 Linux 上用 GTK 4 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
 order: 15
 group: platforms
 ---
@@ -8,13 +8,14 @@ group: platforms
 # Linux
 
 NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局以及
-原生模块与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Linux 上，`Platform.OS` 为
-`"linux"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
-菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
+原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 Linux 上，`os()` 为 `Os::Linux`（TSX 中
+`Platform.OS` 为 `"linux"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
+[`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 ## 环境要求
 
-- **GTK 4.14** 及以上。构建 NSH 的 Linux 运行时（从源码构建，或在 Linux 上运行 `cargo xtask dist`）
+- **GTK 4.14** 及以上。构建 Rust 应用的 runner 或 NSH 的 Linux 运行时（从源码构建，或在 Linux 上运行 `cargo xtask dist`）
   还需要它们的开发包和 clang：Debian 与 Ubuntu（24.04 及以上）为 `libgtk-4-dev clang`，Arch 为 `gtk4 clang`，Fedora 为
   `gtk4-devel clang`。
 - Web 视图需要 **WebKitGTK 6.0**（2.40 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
@@ -25,10 +26,20 @@ NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用�
 
 ## 运行应用
 
-在 Linux 上，`nsh run` 会在一个 GTK 窗口（默认 390×844）中打开应用，和其他目标一样支持热重载、在终端显示日志并提供错误浮层：
+在 Linux 上，`nsh run` 会在一个 GTK 窗口中打开应用。Rust 应用在自己的目录里运行：
 
 ```sh
-nsh run my-app                 # 在 Linux 上默认就是 --target linux
+nsh run                        # 在 Linux 上默认就是 --target linux
+```
+
+`nsh` 用你的 crate 构建一个 debug runner 并打开应用，在终端显示它的日志（`log::info!` 等）；修改 crate 的 Rust 代码会重新构建
+runner 并重启应用。`cargo run` 从 crate 的 `src/main.rs`（由 `nsh init --template rust` 生成）启动同一个根组件：用
+`AppSource::Rust` 调用 [`run_app`](#嵌入-gtk-应用)。
+
+TSX 应用需写明入口，默认在 390×844 的窗口中打开，和其他目标一样支持热重载、在终端显示日志并提供错误浮层：
+
+```sh
+nsh run App.tsx
 ```
 
 在源码仓库中，`nsh run` 会先构建开发宿主（`nsh-linux-host`）；在 Linux 上制作的发行版把它放在 `runtime/linux/` 中。
@@ -39,25 +50,26 @@ nsh build my-app --release -o build
 dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # 源码仓库中：target/debug/nsh-linux-host
 ```
 
-`--window-size` 是窗口的默认尺寸；平铺式窗口管理器可能会给窗口另一个尺寸。
+`--window-size` 是窗口的默认尺寸（TSX 应用）；平铺式窗口管理器可能会给窗口另一个尺寸。
 
 ## 打包
 
 ```sh
-nsh package my-app --target linux [--run]
+nsh package --target linux [--run]           # Rust 应用，在它的目录里
+nsh package App.tsx --target linux [--run]   # TSX 应用
 ```
 
 会写出一个目录，以及同样内容的压缩包：
 
 ```text
-out/<Name>/
-  <Name>                 可执行文件（nsh 的发布版运行器）
-  nsh/bundle.nshc        编译后的应用
-  nsh/assets/…           应用导入的资源
+.nsh/out/<Name>/
+  <Name>                 可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
+  nsh/bundle.nshc        编译后的 TSX 应用
+  nsh/assets/…           应用导入的资源（也包括 Rust crate 的 `assets!()`）
   nsh/app.json           窗口标题和应用 id
   <id>.desktop           桌面条目（StartupWMClass 为应用 id）
   <id>.png               图标（nsh.json 指定了图标时）
-out/<Name>.tar.gz
+.nsh/out/<Name>.tar.gz
 ```
 
 可执行文件会在自身旁边找到 `nsh/`（指向它的符号链接也可以，例如放在 `~/.local/bin` 中）。运行应用的机器上必须装有 GTK 4、
@@ -67,24 +79,22 @@ Pango 和 WebKitGTK 6.0。要让应用出现在桌面的启动器中，把可执
 ## 嵌入 GTK 应用
 
 `nsh-platform-linux` crate（位于 NSH 仓库中）为 Rust 编写的 GTK 应用提供 `AppView`：一个作为 GTK 控件的 NSH 引擎。每个
-`AppView` 相互独立，可以同时运行多个。
+`AppView` 相互独立，可以同时运行多个。它运行一个 Rust 根组件，即你的 crate 的根组件：
 
 ```rust
 use std::rc::Rc;
-use nsh_platform_linux::{gtk4 as gtk, AppOptions, AppView, AssetBase, Bundle};
+use nsh_platform_linux::{gtk4 as gtk, set_ui_sets, AppOptions, AppView, Root};
 use gtk::prelude::*;
 
 fn main() -> gtk::glib::ExitCode {
+    // 在第一个视图之前设置一次：应用导入的 UI 集合（NSH 的和你的 crate 的）。
+    set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
     let app = gtk::Application::builder().application_id("com.example.host").build();
     app.connect_activate(|app| {
         let window = gtk::ApplicationWindow::builder().application(app).default_width(390).default_height(844).build();
-        let view = AppView::new(AppOptions {
-            asset_base: Some(AssetBase::Directory("app/assets".into())),
-            ..AppOptions::default()
-        });
+        let view = AppView::new(AppOptions::default());
         // 在加载之前注册原生组件
-        let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-        view.load(Bundle::source(code).into());
+        view.load(Root::of::<my_app::App>().into());
         window.set_child(Some(&view.widget()));
         // 窗口持有视图；关闭窗口即停止应用。
         let keep = std::cell::RefCell::new(Some(Rc::clone(&view)));
@@ -95,17 +105,34 @@ fn main() -> gtk::glib::ExitCode {
 }
 ```
 
+`Root::tokens` 为根组件设置[主题](./rust.md#主题)，`Root::app_id` 设置保存其数据所用的 id。`nsh build` 写出的 TSX bundle
+也加载到同一种视图中，`asset_base` 设为它的 `assets` 目录：
+
+```rust
+use nsh_platform_linux::{AppOptions, AppView, AssetBase, Bundle};
+
+let view = AppView::new(AppOptions {
+    asset_base: Some(AssetBase::Directory("app/assets".into())),
+    ..AppOptions::default()
+});
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(Bundle::source(code).into());
+```
+
 `AppView::load` 会替换正在运行的内容；`stop` 结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory`
 或 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }` 加载：字节码是受信任的输入，
-只能从你自己应用的文件中加载。
+只能从你自己应用的文件中加载。独立窗口用 `nsh_platform_linux::run_app(source, options)`，传入 `AppSource::Rust(root)` 或
+`AppSource::Bundle(bundle)`。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-linux-上注册rust)。
+`set_ui_sets(sets)` 设置每个引擎提供的 UI 集合：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，
+由 `#[native_module]` 生成），这样视图加载的 TSX 也能导入你的 Rust 组件和模块。
 
 ## Linux 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`Platform.constants.interfaceIdiom` 为 `"desktop"`，`Platform.Version` 为内核的主、次版本号，
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为内核的主、次版本号，
 深色模式实时跟随桌面的设置（通过 XDG 设置门户）。见[设备与环境](./device-and-environment.md)。
 
 ### 键盘

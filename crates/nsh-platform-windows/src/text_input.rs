@@ -119,6 +119,14 @@ enum Drag {
     Line(usize, usize),
 }
 
+/// The text input `view` holds now (`None`: it is no input).
+#[cfg(feature = "dev")]
+pub(crate) fn current_text(view: &crate::view::NshView) -> Option<String> {
+    let input = view.state().input.clone()?;
+    let text = input.model.borrow().text().to_owned();
+    Some(text)
+}
+
 /// The native side of an input view ([`crate::view::ViewState::input`]),
 /// and the editor it hosts.
 pub(crate) struct InputState {
@@ -1467,37 +1475,6 @@ pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
         return;
     }
     insert(surface, &view, &input, &text, true);
-}
-
-/// An input method's composition in the focused field (the script's
-/// `mark`), as `WM_IME_STARTCOMPOSITION` and `WM_IME_COMPOSITION` make it;
-/// empty text ends it.
-pub(crate) fn mark(surface: &Rc<Surface>, text: &str) {
-    let Some(view) = focused(surface) else { return };
-    let Some(input) = input_of(&view) else {
-        return;
-    };
-    if !input.config.borrow().editable {
-        return;
-    }
-    let starts = input.model.borrow().composition.is_none();
-    if text.is_empty() {
-        input.model.borrow_mut().composition = None;
-    } else {
-        if starts && input.model.borrow().has_selection() {
-            let deleted = input.model.borrow_mut().delete(Unit::Char, false);
-            after_edit(surface, &view, &input, deleted);
-        }
-        input.model.borrow_mut().composition = Some(Composition {
-            text: text.to_owned(),
-            cursor: text.len(),
-            target: None,
-        });
-    }
-    input.relayout();
-    input.reveal();
-    view.changed();
-    report_composition(surface, &view, &input);
 }
 
 /// The window got (or lost) the keyboard focus: the focused field keeps

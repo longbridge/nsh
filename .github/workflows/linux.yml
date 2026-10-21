@@ -21,7 +21,8 @@ on:
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
       - "crates/xtask/**"
-      - "examples/gallery/fonts/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -43,7 +44,8 @@ on:
       - "crates/nsh-testing/**"
       - "crates/nsh-base/**"
       - "crates/xtask/**"
-      - "examples/gallery/fonts/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -74,9 +76,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # QuickJS is C (bindgen needs libclang); the backend links GTK 4 and
-      # Pango, and WebKitGTK 6.0 for web views (the hosts' default).
+      # Pango, and WebKitGTK 6.0 for web views (the hosts' default); Xvfb
+      # is the display the examples' tests open their windows on.
       - name: Install clang, GTK 4 and WebKitGTK
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -106,3 +109,18 @@ jobs:
         run: >
           cargo test -p nsh-platform-linux -p nsh-cli -p nsh-dev
           && cargo test -p nsh-platform-linux --features webview
+
+      # The examples' tests in GTK windows on a virtual display, with the
+      # platform's input (`nsh test --target linux`): those a real platform
+      # runs (no stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in GTK windows
+        run: |
+          cargo build -p nsh-cli
+          # A session bus of its own: without one, GTK's portal and
+          # accessibility lookups wait for D-Bus autolaunch on each display.
+          run() { dbus-run-session -- xvfb-run -a ./target/debug/nsh test "$@" --target linux; }
+          run examples/counter
+          for file in form navigation photos; do
+            run "examples/gallery/tests/$file.test.tsx"
+          done
+          run examples/gallery/tests/environment.test.tsx --filter appearance

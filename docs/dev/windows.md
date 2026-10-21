@@ -159,36 +159,36 @@ the root's `KeyCommand`; an auto-repeat (`KeyEvent::repeat`) of a binding withou
 Keys are matched by virtual key code (letters and digits on every layout, punctuation by the US `VK_OEM_*` keys); a
 focused text field counts as editing (`when`). With feature `dev`, Ctrl+R is never matched (the dev host reloads).
 
-## Checking a change: `--script`
+## Checking a change: `nsh test --target windows`
 
-`nsh-windows-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or
-new lines (`script.rs`), so a change can be checked without touching the screen. Steps run on a thread of their own and
-each one on the main thread; input is synthesized at the input module's entry points, so it works while the window is
-in the background or covered (and goes through NSH's hit testing to web views, as real input does).
+The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
+implements `nsh_testing::agent::Native`, each call on the main thread (`window::invoke`), with the input `synth.rs`
+makes at the input module's entry points, so it works while the window is in the background or covered (and goes
+through NSH's hit testing to web views, as real input does):
 
-| Step | Does |
-|---|---|
-| `wait <ms>` | Waits. |
-| `shot <file.png>` | Draws the window's content offscreen at scale 1 into a PNG, whatever covers the window. Web views (composed by the system) and component windows (child windows) are not in it. |
-| `screen <file.png>` | Captures what the window shows, web views and their layers included, at the window's scale: `PrintWindow` with `PW_RENDERFULLCONTENT`, which composes the window's swap chain and DirectComposition content as DWM does, whatever covers the window. |
-| `tap <x> <y>` | Presses and releases the mouse at a point (points, root coordinates); over a web view the page gets it. |
-| `drag <x0> <y0> <x1> <y1> [ms]` | Presses, moves in steps over `ms` (default 300), releases; `touch` the same with a finger. |
-| `wheel <x> <y> <dx> <dy>` | A wheel scroll (points, positive toward the end); `pad` a precision touchpad's. |
-| `hover <x> <y>` | Moves the pointer. |
-| `mark <text>` | An IME's composition in the focused field, as the IME messages make it (`mark` alone ends it), reported with `onCompositionChange`. |
-| `type <text>` | Types into the focused field, or into the page of a web view that has the focus (posted to its window as `WM_CHAR`s). |
-| `key <name>` | Presses a key (`Return`, `BackSpace`, `Tab`, `Escape`, `Left`, `Home`, `Page_Down`, `F5`, a letter; `ctrl+` / `shift+` / `alt+` prefixes); `selectall` is Ctrl+A. Keys without modifiers go to a focused page. |
-| `dark` / `light` | Switches the system's appearance (an app that forces one keeps it). |
-| `resize <w> <h>` | Resizes the window's client area (points). |
-| `quit` | Closes the window. |
+- a press is the mouse's down and up at the view's middle (after a move there); back is the mouse's back button
+  (XBUTTON1), which goes back from wherever the focus is;
+- typing goes into the focused field key by key (`text_input::char_input`), or into the page of a focused web view
+  (posted to its window as `WM_CHAR`s); Return, Backspace and select all (Ctrl+A) go through `input::key`, and keys
+  without modifiers to a focused page;
+- a scroll is precision touchpad events of at most 20 points, a frame apart;
+- a dialog's button is pressed at its laid-out middle (`system::dialog_point`), or outside the card to close it;
+- a screenshot is what the window shows, web views and their layers included, at the window's scale: `PrintWindow`
+  with `PW_RENDERFULLCONTENT`, which composes the window's swap chain and DirectComposition content as DWM does,
+  whatever covers the window (drawn offscreen with Direct2D when the window cannot be captured: no pages then); the
+  appearance is the system's, simulated; the size is the client area's.
+
+`dev.rs` hands the model to the surface on the server's test session (posted messages keep their order, so it comes
+before the first bundle).
 
 ```sh
-nsh build examples/gallery -o build
-target\debug\nsh-windows-host --bundle build\bundle.nshc --window-size 1200x800 --script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png; quit"
+target\debug\nsh test examples\gallery --target windows
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | target\debug\nsh test examples\gallery\App.tsx --target windows
 ```
 
-Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings. Timers are Win32's (~15.6 ms granularity): leave `wait`s some slack.
+The host takes `--bundle <path>` to run a build (`nsh build`) without a dev server; without it it connects to the dev
+server on this machine (`--dev-server ws://…/ws` names another); `--trace` logs per-commit timings; `--data-dir <dir>`
+keeps the apps' data there (`nsh test` gives each app a fresh one). Timers are Win32's (~15.6 ms granularity).
 
 ## Not implemented, or different
 
@@ -200,11 +200,11 @@ Without `--bundle` the host connects to the dev server on this machine (`--dev-s
   unsynchronized with the window's swap chain, so for a frame NSH content above and below a page may come from
   consecutive frames while both animate. `source.baseUrl` answers only the document's request: other requests
   (images, scripts, links) go to the network, and `http(s)` base URLs are the ones WebView2 lets the app answer.
-  Touch and pen input reaches pages as pointer input when it comes from the system (swipe navigation needs it);
-  `--script`'s `touch` drags reach them as the mouse. `shot` has no pages (`screen` does). Without the WebView2
+  Touch and pen input reaches pages as pointer input when it comes from the system (swipe navigation needs it). An
+  offscreen drawing of the window has no pages (`PrintWindow`'s capture does). Without the WebView2
   Runtime (it comes with Windows 11; Windows 10 gets it with Edge) a web view shows a neutral placeholder.
 - **Native components with a window of their own** (`NativeComponent::window`) stay child windows: they cover NSH
-  content drawn over them and are not in `shot` screenshots. Hosting an arbitrary `HWND` in a composition is not
+  content drawn over them and are not in offscreen drawings of the window. Hosting an arbitrary `HWND` in a composition is not
   possible (only content made for it, such as a swap chain or a WebView2 composition controller, can be a visual).
 - **Video**: which formats play depends on the installed Media Foundation codecs; there is no poster; the control bar
   always shows while `controls` is on. Unlike GTK, `rate` works.

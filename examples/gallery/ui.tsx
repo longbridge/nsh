@@ -369,8 +369,12 @@ export const SIDEBAR = 264;
  */
 export const desktop = computed(() => windowSize().width >= (Platform.isDesktop ? 700 : 900));
 
+/** Whether the desktop layout shows its sidebar (the toggle in the demo's
+ * toolbar and Ctrl+B / Cmd+B hide and show it; kept while the app runs). */
+export const sidebarOpen = signal(true);
+
 /** The width of the desktop layout's content pane, right of the sidebar. */
-export const paneWidth = () => windowSize().width - SIDEBAR;
+export const paneWidth = () => windowSize().width - (sidebarOpen() ? SIDEBAR : 0);
 
 /** How many columns at least `min` pt wide fit in `width` (the content
  * pane by default), with `gap` between them and 24 pt gutters: 1 to `max`. */

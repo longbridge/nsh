@@ -9,8 +9,8 @@ group: platforms
 
 A native component is a view the **embedding app** registers by name: a map, a camera preview, a chart library, any
 `UIView` on iOS, `android.view.View` on Android, `NSView` on macOS, `gtk::Widget` on Linux, or Direct2D drawing or a
-child `HWND` on Windows. The NSH app declares it with `nativeComponent()` from
-[`nsh/native`](../modules/nsh-native.md) and uses it like any other component. NSH lays it out with the rest of the
+child `HWND` on Windows. The NSH app uses it like any other element: a Rust app makes it with `native(name)` from
+`nsh_core::ui::prelude`, a TSX app declares it with `nativeComponent()` from [`nsh/native`](../modules/nsh-native.md). NSH lays it out with the rest of the
 app, sends it props, delivers its events to handlers and forwards commands from a `ref`.
 
 Because NSH renders with the system's own views, a native component is just one more subview in the same hierarchy:
@@ -31,11 +31,56 @@ there is no layering problem, it clips, scrolls and receives touches like a `<Vi
 3. When the element is created, NSH creates a container view (decorated, framed and hit-tested like any view), then
    asks the factory for a component and puts the component's view inside the container, filling it.
 4. The component receives every prop right after it is made, then each prop again when it changes.
-5. The component emits events and may report its own size; JS calls its commands through a `ref`.
+5. The component emits events and may report its own size; the app calls its commands through a `ref`.
 
-## Declaring the component in JS
+## Using the component in the app
 
-```tsx
+In Rust, `native(name)` makes the element: `.prop(name, value)` gives it a prop (a `serde_json::Value`, or a signal or a
+closure of one, sent again when it changes), `.on_native_event(..)` hears its events as `NativeEvent { name, data }`, and the methods of an
+`element_ref()` put on it with `.element_ref(&r)` send its commands. In TSX, `nativeComponent()` declares a component
+for the name with the props and events it uses.
+
+```rust tabs
+use nsh_base::safe_area_view;
+use nsh_core::ui::prelude::*;
+use serde_json::json;
+
+const COLORS: [&str; 4] = ["#8250df", "#0969da", "#1a7f37", "#cf222e"];
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let taps = signal(0_u64);
+    let badge = element_ref();
+    safe_area_view()
+        .flex_1()
+        .p(px(20.0))
+        .gap(px(16.0))
+        .bg(rgb(0xf6f8fa))
+        .child(text("Rendered by nsh").text_size(px(22.0)).font_weight(FontWeight::BOLD))
+        .child(
+            // The host app's badge: a label it draws, sized to its text.
+            native("embed.badge")
+                .element_ref(&badge)
+                .prop("text", move || match taps.get() {
+                    0 => json!("Tap the native badge"),
+                    n => json!(format!("Tapped {n}×")),
+                })
+                .prop("color", move || json!(COLORS[taps.get() as usize % COLORS.len()]))
+                .on_native_event(move |e: &NativeEvent| {
+                    if &*e.name == "tap" {
+                        taps.set(e.data["count"].as_u64().unwrap_or(0));
+                        badge.command("pulse", json!(null));
+                    }
+                })
+                .self_start()
+                .rounded(px(8.0))
+                .overflow_hidden(),
+        )
+        .child(text(move || format!("Rust saw {} taps", taps.get())))
+}
+```
+
+```tsx tabs
 import { mount, signal, Text, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
 import { SafeAreaView } from "nsh/base";
@@ -72,7 +117,7 @@ function App() {
 mount(App);
 ```
 
-This is `examples/embedded/App.tsx`, which both embedding samples in the repository run.
+The TSX version is `examples/embedded/App.tsx`, which both embedding samples in the repository run.
 
 ### `nativeComponent(name, spec)`
 
@@ -102,23 +147,40 @@ A native component is a leaf: it takes no children.
 ## Props
 
 Each own prop is sent as JSON, so its value can be any JSON value: strings, numbers, booleans, `null`, arrays and
-plain objects. Props are reactive like any other: when `text={label()}` reads a signal, the new value is sent when the
-signal changes, and only then.
+plain objects. Props are reactive like any other: when a Rust prop's closure (`.prop("text", move || json!(label.get()))`)
+or a TSX `text={label()}` reads a signal, the new value is sent when the signal changes, and only then.
 
-| What happens in JS | What the component receives |
+| What happens in the app | What the component receives |
 |---|---|
 | The element is created | Every own prop that is set, right after the component is made |
 | A prop's value changes | That prop with its new value |
 | A prop becomes `undefined` | That prop with no value (`nil` in Swift, `null` in Java) |
 
-Values that are not JSON (functions, class instances, `AnimatedValue`s) cannot cross; keep the interface to data.
+Props carry JSON values; keep the interface to data (functions, class instances and `AnimatedValue`s stay in the app).
 
 ## Events
 
 The component emits an event by name with an optional JSON payload. NSH delivers it to the engine thread and calls the
-matching handler with the payload:
+matching handler with the payload (in Rust, the one `on_native_event` listener with the event's `name` and `data`):
 
-```tsx
+```rust tabs
+use serde_json::json;
+
+native("acme.map")
+    .prop("latitude", json!(52.52))
+    .prop("longitude", json!(13.405))
+    .on_native_event(move |e: &NativeEvent| match &*e.name {
+        "regionChange" => center.set((
+            e.data["latitude"].as_f64().unwrap_or_default(),
+            e.data["longitude"].as_f64().unwrap_or_default(),
+        )),
+        "markerPress" => open(e.data["id"].as_str().unwrap_or_default()),
+        _ => {}
+    })
+    .flex_1()
+```
+
+```tsx tabs
 const MapView = nativeComponent<
   { latitude: number; longitude: number; zoom?: number },
   { regionChange: { latitude: number; longitude: number }; markerPress: { id: string } }
@@ -136,14 +198,26 @@ const MapView = nativeComponent<
 />;
 ```
 
-Events are asynchronous: the main thread never waits for JS. A component that must decide something on the spot (may
+Events are asynchronous: the main thread never waits for the app's code. A component that must decide something on the spot (may
 this gesture start, may this region change) has to decide it natively, from props it received earlier.
 
 ## Commands
 
-Imperative calls (zoom to a point, start playback, pulse an animation) go through the element's `ref`:
+Imperative calls (zoom to a point, start playback, pulse an animation) go through the element's ref (`element_ref()` in Rust, `ref` in TSX):
 
-```tsx
+```rust tabs
+let map = element_ref();
+
+native("acme.map")
+    .element_ref(&map)
+    .prop("latitude", json!(52.52))
+    .prop("longitude", json!(13.405))
+    .flex_1()
+
+map.command("zoomTo", json!({ "level": 3 }));
+```
+
+```tsx tabs
 let map: YNode | undefined;
 
 <MapView ref={(node) => (map = node)} latitude={52.52} longitude={13.405} style={{ flex: 1 }} />;
@@ -151,7 +225,7 @@ let map: YNode | undefined;
 map?.command("zoomTo", { level: 3 });
 ```
 
-`command(name, args?)` sends the name and the arguments (any JSON value) to the component's `command` method. Commands
+`command(name, args)` (TSX: `command(name, args?)`) sends the name and the arguments (any JSON value) to the component's `command` method. Commands
 are applied in order with the changes made before them, so a command issued right after a prop change sees the new prop.
 
 ## Sizing

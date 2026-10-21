@@ -4,8 +4,8 @@
 its workspace), on macOS, Windows and Linux alike. Its purpose is embedding: an `AppView` is a GPUI view, so GPUI and
 GPUI Kit apps (`gpui_component`) show NSH modules anywhere in their element tree. Standalone apps run and are packaged
 with each OS's own backend (AppKit, Win32, GTK 4). `crates/gpui/nsh-gpui-host` is the development host (`nsh run
---target gpui`): it shows a TSX app in a GPUI window as the apps that embed it show it, with hot reload, `--script`
-steps and screenshots for checking the backend. The crate started as a port of the Windows backend (`windows.md`): one
+--target gpui`): it shows a TSX app in a GPUI window as the apps that embed it show it, with hot reload, and takes
+the steps of `nsh test --target gpui` for checking the backend. The crate started as a port of the Windows backend (`windows.md`): one
 retained view per node, NSH draws every view itself, and the input, scrolling, transition, keymap and editing logic is
 the Windows backend's, platform-free. Only drawing, text, the main-thread queue, events and the window are GPUI's.
 User-facing page: `website/docs/gpui.md`.
@@ -74,7 +74,7 @@ Features:
 | `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes |
 | `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux |
 | `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes |
-| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows |
+| `shot` | screenshots on macOS and Windows (`nsh test --target gpui`'s) through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows |
 | `runtime-shaders` | GPUI's Metal shaders compiled when the app starts, not by the build (`gpui_platform/runtime_shaders`): builds on a Mac without the Metal Toolchain; nothing elsewhere | the CLI's, where `xcrun metal` fails; never the distribution's |
 
 `shot` turns on GPUI's test support, for the host and the tests; apps that embed the crate leave it off. With it, the
@@ -84,27 +84,25 @@ component; CI runs them on Linux.
 
 ### Looking at a change on Linux
 
-Run the host on a rootful Xwayland display of its own, so nothing touches the desktop, and take screenshots with
-`--script` (`shot`) or ImageMagick:
+Run the tests on a rootful Xwayland display of its own, so nothing touches the desktop, and take screenshots with
+`app.screenshot` or ImageMagick:
 
 ```sh
 Xwayland :170 -noreset -shm -geometry 1400x1000 & sleep 1.5
-nsh build examples/gallery -o build
-DISPLAY=:170 WAYLAND_DISPLAY= WEBKIT_DISABLE_DMABUF_RENDERER=1 target/debug/nsh-gpui-host --bundle build/bundle.nshc \
-  --window-size 700x500 --script "wait 800; shot a.png; tap 100 200; shot b.png; quit"
-import -window root -display :170 whole.png        # the display, if the window's own shot is not enough
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' \
+  | DISPLAY=:170 WEBKIT_DISABLE_DMABUF_RENDERER=1 nsh test examples/gallery/App.tsx --target gpui
+import -window root -display :170 whole.png        # the display, if the window's own screenshot is not enough
 ```
 
-- `WAYLAND_DISPLAY=` empty makes GPUI use X11: `shot` reads the window back from the X server (`GetImage`), and web
-  views only embed in X11 windows.
-- `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a shot waits for the blanks the last frame
+- With `DISPLAY` set, `nsh test` starts the host without `WAYLAND_DISPLAY`, which makes GPUI use X11: screenshots
+  read the window back from the X server (`GetImage`), and web views only embed in X11 windows.
+- `-shm`: a hidden rootful Xwayland has one vertical blank a second, and a screenshot waits for the blanks the last frame
   waits for (about 3 s each); with `-shm` frames are copied in as GPUI presents them.
 - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: where WebKit cannot allocate GBM buffers ("Failed to create GBM buffer" in the
   log, common under Xwayland), pages stay black without it.
 - A tiling window manager tiles the rootful Xwayland window and its root shrinks with it: make it float at its full
   size (Hyprland: `hyprctl dispatch` float, resize and move it to a special workspace).
-- GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take
-  (`shot a.png 2` keeps them).
+- GPUI draws at the display's scale: on a scale 2 display screenshot pixels are twice the points the steps take.
 
 ## Architecture
 
@@ -197,32 +195,23 @@ viewport-sized MSAA pass for GPUI), the animation frames requested and the notif
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
 real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
 
-## Tests in GPUI windows: `nsh test --target gpui`
+## Checking a change: `nsh test --target gpui`
 
 The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
 implements `nsh_testing::agent::Native`. Each call goes to the main thread (`rt::invoke`, then `rt::on_app` for the
 app), finds the window whose `AppView` shows the surface, and acts through the handlers real input goes through
-(`synth.rs`, which `--script` steps use too): a press is a mouse down and up at the view's middle (the window's view
-focused first), a scroll precise touchpad events a frame apart, typing `text_input::char_input`, select all the
-platform's command key with A, back the mouse's back button (it goes back from wherever the focus is), a dialog's
-answer a click at its button's laid-out middle (`system::dialog_point`), a screenshot `synth::frame` (what `shot`
-takes) as a PNG. A view's bounds are its frame's corners through `NshView::to_root`. `dev.rs` hands the test
-session's model to the surface through the session's own messages, so it comes before the first bundle.
+(`synth.rs`): a press is a mouse down and up at the view's middle (the window's view focused first), a scroll precise
+touchpad events a frame apart, typing `text_input::char_input`, select all the platform's command key with A, back
+the mouse's back button (it goes back from wherever the focus is), a dialog's answer a click at its button's laid-out
+middle (`system::dialog_point`), a screenshot `synth::frame` as a PNG. A view's bounds are its frame's corners through
+`NshView::to_root`. `dev.rs` hands the test session's model to the surface through the session's own messages, so it
+comes before the first bundle.
 
-## Checking a change: `--script`
-
-`nsh-gpui-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or
-new lines: `wait`, `shot <file.png> [scale]`, `tap`, `rightclick`, `drag`, `touch`, `wheel`, `pad`, `hover`, `type`, `mark`, `key`,
-`selectall`, `dark` / `light`, `resize`, `quit`, as on Windows (`windows.md`; the reference is `script.rs`). The whole
-script is parsed first; a step that fails, an app that shows nothing or an error the app reports makes the host exit
-with a failure. Input and shots first wait for the app to settle (no batch for 100 ms, at most 2 s), so a shot after
-a tap shows the response; timers, animations and network images still need a `wait`.
-
-Shots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen again,
-whatever covers it (not yet tried on those systems). On Linux GPUI cannot read a frame back, so the window is read
-from the X server: scripts run under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a
-window covering this one shows in the shot. Under Wayland proper there are no shots. Web views are not in the offscreen
-shots of macOS and Windows.
+Screenshots: on macOS and Windows with feature `shot` (the host's), GPUI renders the window's last frame offscreen
+again, whatever covers it. On Linux GPUI cannot read a frame back, so the window is read from the X server: the host
+runs under X11 or Xwayland (see "Looking at a change on Linux"), and on a bare X server a window covering this one
+shows in the screenshot. Under Wayland proper there are none. Web views are not in the offscreen screenshots of macOS
+and Windows.
 
 ## Not implemented, or different
 
@@ -242,7 +231,7 @@ shots of macOS and Windows.
 - **Video** needs feature `video`, which is built on Linux only (GStreamer); on macOS and Windows a video is a neutral
   placeholder reporting `onError`. Rounded clips do not cut the picture; audio-only sources show nothing.
 - **Web views** sit above everything GPUI draws at their place (NSH content drawn over one is under it) and are
-  missing from the offscreen shots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
+  missing from the offscreen screenshots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `source.baseUrl` for HTML, `scrollEnabled` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
@@ -252,8 +241,8 @@ shots of macOS and Windows.
 - **Text inputs**: input accessory views are never shown (no software keyboard).
 - **No desktop equivalent**: the status bar; the safe area and the keyboard height are 0.
 - **Not yet tried** on macOS and Windows: the backend was built and checked on Linux (X11 / Xwayland); CI builds
-  and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but `shot`'s
-  offscreen rendering, wry's macOS / Windows web views and the chrome's macOS / Windows title bars have not run there.
+  and tests it on macOS and Windows (the text tests need the main thread on macOS and are skipped there), but the offscreen
+  screenshots, wry's macOS / Windows web views and the chrome's macOS / Windows title bars have not run there.
   Windows CI machines list no fonts through DirectWrite, so font weights and registered fonts are untested on Windows
   (the tests that check them skip where no fonts are listed); the text threads initialize COM, which DirectWrite
   wants off the main thread.

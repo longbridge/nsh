@@ -165,6 +165,14 @@ img.nsh-fill { pointer-events: none; }
 .nsh-desktop .nsh-press .nsh-autoselect, .nsh-desktop .nsh-press .nsh-autoselect *,
 .nsh-desktop .nsh-autoselect.nsh-press, .nsh-desktop .nsh-autoselect.nsh-press * { -webkit-user-select: none; user-select: none; }
 .nsh-autoselect ::selection { background: var(--nsh-selection, Highlight); }
+/* A selection area (nsh-area) is selectable as a whole, with every idiom
+   and inside views that take presses too: one browser selection spans its
+   texts, and a drag may start between them. Texts set off (nsh-noselect),
+   images and videos are not. Repeated classes outweigh the rules above. */
+.nsh-root .nsh-area.nsh-area, .nsh-root .nsh-area.nsh-area * {
+  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.nsh-root .nsh-area .nsh-noselect.nsh-noselect, .nsh-root .nsh-area .nsh-noselect.nsh-noselect *,
+.nsh-root .nsh-area.nsh-area img, .nsh-root .nsh-area.nsh-area video { -webkit-user-select: none; user-select: none; }
 /* A page's header (the app's view): above the page's content. */
 .nsh-page-header { z-index: 1; }
 .nsh-screen { isolation: isolate; }
@@ -616,6 +624,89 @@ class Player {
     });
     this.installEnvironment();
     this.installInput();
+  }
+
+  // Tests ---------------------------------------------------------------
+
+  /**
+   * A test session runs (`nsh test --target web`): the module keeps the
+   * model of the app its agent asks about, from the next bundle on.
+   */
+  testStart() {
+    this.wasm.nsh_test_start?.();
+  }
+
+  /** Whether this runtime answers test steps (the development host's). */
+  get takesTests() {
+    return typeof this.wasm?.nsh_test_answer === "function";
+  }
+
+  /**
+   * Answers a test step (`nsh_dev::protocol::TestStep`) as an
+   * `nsh_dev::protocol::StepOutcome`: the module's model answers what it
+   * knows of the app, the page's views where they are.
+   */
+  testStep(step) {
+    if (!this.takesTests) return { outcome: "failed", message: "this runtime takes no test steps" };
+    const len = this.withStrings([JSON.stringify(step)], (p, l) => this.wasm.nsh_test_answer(p, l));
+    const answer = JSON.parse(this.str(this.wasm.nsh_test_answer_ptr(), len));
+    if (step.query?.query === "animating" && "done" in answer) {
+      // The native graph's, or the page's own (a screen sliding in, a
+      // dialog fading): a finite animation still running.
+      return { outcome: "done", value: answer.done === true || this.pageAnimating() };
+    }
+    if ("done" in answer) return { outcome: "done", value: answer.done ?? null };
+    if ("failed" in answer) return { outcome: "failed", message: answer.failed };
+    try {
+      return { outcome: "done", value: this.testPage(step.query ?? {}) };
+    } catch (e) {
+      return { outcome: "failed", message: String(e?.message ?? e) };
+    }
+  }
+
+  /** Whether a finite CSS or Web Animations animation of the app runs. */
+  pageAnimating() {
+    return this.root.getAnimations({ subtree: true }).some((a) => {
+      if (a.playState !== "running") return false;
+      const end = a.effect?.getComputedTiming().endTime;
+      return end != null && Number.isFinite(Number(end));
+    });
+  }
+
+  /** What only the page's views answer of a test agent's question. */
+  testPage(query) {
+    switch (query.query) {
+      case "bounds": {
+        // CSS pixels from the viewport's top left: what the browser's input
+        // (the DevTools protocol's) takes.
+        const el = this.views.get(query.id);
+        if (!el?.isConnected) return null;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return null;
+        return [r.left, r.top, r.width, r.height];
+      }
+      case "viewport":
+        return [window.innerWidth, window.innerHeight];
+      case "input_text": {
+        const field = this.views.get(query.id)?._field;
+        return field ? field.value : null;
+      }
+      case "dialog_point": {
+        const backdrops = this.root.querySelectorAll(".nsh-dialog-backdrop");
+        const backdrop = backdrops[backdrops.length - 1];
+        if (!backdrop) throw new Error("no dialog is shown");
+        if (query.button == null) {
+          // Outside its card: the backdrop's corner.
+          const r = backdrop.getBoundingClientRect();
+          return [r.left + 2, r.top + 2];
+        }
+        const button = [...backdrop.querySelectorAll("button")].find((b) => b.textContent.trim() === query.button);
+        if (!button) throw new Error(`the dialog has no button ${JSON.stringify(query.button)}`);
+        const r = button.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+      }
+    }
+    throw new Error(`the page cannot answer ${JSON.stringify(query)}`);
   }
 
   // Memory --------------------------------------------------------------
@@ -1339,6 +1430,7 @@ class Player {
     el.insertBefore(frag, el.firstChild);
     el.classList.toggle("nsh-selectable", !!selectable);
     el.classList.toggle("nsh-autoselect", selectable == null);
+    el.classList.toggle("nsh-noselect", selectable === false);
     // Its `--nsh-selection`.
     swapClass(el, "_selection", this.styleClass(selection));
     el._textLabel = runs.map((r) => r[2]).join("");
@@ -1423,6 +1515,7 @@ class Player {
     const pe = props.pointerEvents;
     el.classList.toggle("nsh-inert", pe === "none" || pe === "box-none");
     if (pe === "box-none") el._boxNone = true;
+    el.classList.toggle("nsh-area", !!props.selectionArea);
     this.updateFocusable(el);
     this.updateTouchAction(el);
   }
@@ -3798,15 +3891,36 @@ class Player {
   /** Whether the browser handles presses at `target` itself: fields,
    * selectable text, hosted pages and videos. */
   editable(target) {
-    return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video") || !!this.textAt(target);
+    return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video") || !!this.textAt(target) || this.areaGap(target);
   }
 
-  /** The text at `target` that is selectable by default (desktop idiom:
-   * not set off, in nothing that takes presses or touches). */
+  /** Whether `target` is in a selection area outside its texts, where a
+   * drag starts a selection as between a web page's paragraphs: not in a
+   * view inside the area that takes presses (they keep theirs) nor in a
+   * text set off. */
+  areaGap(target) {
+    const area = target?.closest?.(".nsh-area");
+    if (!area || target.closest(".nsh-noselect")) return false;
+    const press = target.closest(".nsh-press");
+    return !press || !area.contains(press);
+  }
+
+  /** The text at `target` that is selectable by default: not set off, and
+   * in a selection area, or (desktop idiom) in nothing that takes presses
+   * or touches. */
   textAt(target) {
-    if (!this.desktopUI) return null;
     const text = target?.closest?.(".nsh-autoselect");
-    return text && !text.closest(".nsh-press") ? text : null;
+    if (!text) return null;
+    if (text.closest(".nsh-area")) return text;
+    return this.desktopUI && !text.closest(".nsh-press") ? text : null;
+  }
+
+  /** The selection area `el` is in: the outermost, as an area inside
+   * another is part of it. */
+  areaOf(el) {
+    let area = null;
+    for (let a = el?.closest?.(".nsh-area"); a; a = a.parentElement?.closest(".nsh-area")) area = a;
+    return area;
   }
 
   /** This player takes the keys: the focus is in it, or it was the last
@@ -3894,7 +4008,10 @@ class Player {
 
   /** What copying the selection in text gives: its runs in order, each
    * line's break after its last run (`_after`) and a newline between
-   * texts; absolutely placed runs would each be a line of their own. */
+   * texts; absolutely placed runs would each be a line of their own. In a
+   * selection area, texts on one row (their boxes overlap vertically: a
+   * table's cells) are joined by a tab instead, and attachments (U+FFFC)
+   * are left out, as the native platforms copy. */
   copyText(e) {
     const sel = getSelection();
     if (e.target.closest?.(".nsh-field")) return;
@@ -3902,6 +4019,8 @@ class Player {
     const range = sel.getRangeAt(0);
     let out = "";
     let last = null;
+    let lastArea = null;
+    let lastBox = null;
     let found = false;
     for (const run of this.root.querySelectorAll(".nsh-run")) {
       // Text that cannot be selected is not copied, as by the browser.
@@ -3913,9 +4032,18 @@ class Player {
       const to = range.endContainer === node ? range.endOffset : text.length;
       if (from >= to) continue;
       found = true;
-      if (last && last !== run.parentNode && !out.endsWith("\n")) out += "\n";
-      last = run.parentNode;
-      out += text.slice(from, to);
+      const area = this.areaOf(run.parentNode);
+      if (last !== run.parentNode) {
+        const box = area ? run.parentNode.getBoundingClientRect() : null;
+        if (last && area && area === lastArea && box.top < lastBox.bottom && lastBox.top < box.bottom) {
+          out = out.replace(/\n$/, "") + "\t";
+        } else if (last && !out.endsWith("\n")) out += "\n";
+        last = run.parentNode;
+        lastArea = area;
+        lastBox = box;
+      }
+      const part = text.slice(from, to);
+      out += area ? part.replaceAll("\uFFFC", "") : part;
       if (to === text.length && run._after) out += run._after;
     }
     if (!found) return;
@@ -3933,7 +4061,8 @@ class Player {
     if (!text) return false;
     if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
       e.preventDefault();
-      sel.selectAllChildren(text);
+      // In a selection area: all of its texts.
+      sel.selectAllChildren(this.areaOf(text) ?? text);
       return true;
     }
     if (e.key === "Escape") {

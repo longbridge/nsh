@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::{Core, Key, Kind, NO_KEY, dirty, pressable};
+use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
     mount::MountItem,
     ops::NodeId,
@@ -191,7 +191,7 @@ impl<M: TextEngine> Core<M> {
             node.states &= !state::DISABLED;
         }
         if node.states != before {
-            if pressable(node.events) {
+            if disabling_changes(node.events) {
                 self.mark(key, dirty::EVENTS);
             }
             // Its accessibility state says it.
@@ -534,6 +534,24 @@ impl<M: TextEngine> Core<M> {
             .collect();
         for host in hosts {
             self.update_user_class(host);
+        }
+        // The app's classes on the views' elements (`app_class`).
+        let nodes: Vec<_> = self
+            .components
+            .app_classes
+            .iter()
+            .map(|(&id, entry)| (id, entry.clone()))
+            .collect();
+        for (id, (own, class, outer)) in nodes {
+            let app = self.app_class_list(&class);
+            let user = self.merge_user(Some(app), outer);
+            let list = match (own, user) {
+                (Some(a), Some(b)) => Some(Arc::new(a.merged(&b))),
+                (a, b) => a.or(b),
+            };
+            if let Ok(key) = self.key(id) {
+                self.set_class_list(key, list);
+            }
         }
     }
 

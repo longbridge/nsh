@@ -1,18 +1,44 @@
 ---
 title: Canvas
-description: "The Canvas component: custom drawing with an HTML Canvas 2D context, replayed natively."
+description: "The Canvas element: custom drawing with a 2D context, replayed natively."
 order: 8
+group: primitives
 ---
 
 # Canvas
 
-A canvas is a view you draw yourself with the HTML Canvas 2D API: charts, gauges, rings, signatures, custom shapes.
-The drawing function only records operations; the platform replays them natively (Core Graphics on iOS and Mac
-Catalyst, `android.graphics.Canvas` on Android) at the screen's resolution.
+A canvas is a view you draw yourself with a 2D drawing API, the HTML Canvas 2D API's: charts, gauges, rings,
+signatures, custom shapes. The drawing code records operations; the platform replays them natively (Core Graphics on
+iOS and Mac Catalyst, `android.graphics.Canvas` on Android) at the screen's resolution. Rust makes one with
+`canvas(painter)`, a `Painter` recording the drawing; TSX with `<Canvas>` from `nsh` and its `draw` function.
 
-```tsx
-import { mount } from "nsh";
-import { Canvas } from "nsh/canvas";
+```rust tabs
+use std::f32::consts::{FRAC_PI_2, TAU};
+
+use nsh_core::{canvas::LineCap, ui::prelude::*};
+
+/// A progress ring, 120 points square.
+fn ring(progress: f32) -> impl IntoElement {
+    let (center, radius) = (60.0, 50.0);
+    canvas(
+        Painter::new()
+            .line_width(12.0)
+            .line_cap(LineCap::Round)
+            .stroke_color(rgb(0xe5e7eb))
+            .begin_path()
+            .arc(center, center, radius, 0.0, TAU)
+            .stroke()
+            .stroke_color(rgb(0x6366f1))
+            .begin_path()
+            .arc(center, center, radius, -FRAC_PI_2, -FRAC_PI_2 + progress * TAU)
+            .stroke(),
+    )
+    .size(px(120.0))
+}
+```
+
+```tsx tabs
+import { Canvas, mount } from "nsh";
 
 function Ring(props: { progress: number }) {
   return (
@@ -38,25 +64,44 @@ function Ring(props: { progress: number }) {
 mount(() => <Ring progress={0.7} />);
 ```
 
-`Canvas` comes from [`nsh/canvas`](../modules/nsh-canvas.md). It creates the native canvas view, measures it, and runs
-your `draw` function with a context and the canvas's size.
+In TSX, `Canvas` creates the native canvas view, measures it, and runs your `draw` function with a context and the
+canvas's size (see the [Canvas API](../modules/nsh-canvas.md)). In Rust, `canvas(..)` takes a `Painter`, or a closure
+returning one: the closure draws again when what it reads changes, and the size comes from `on_layout` when the
+drawing depends on it.
 
 ## Props
 
-`Canvas` takes the props of a [view](./view.md) (`style`, `class`, press and gesture props, `onLayout`, accessibility,
-`ref`, …) plus:
+A canvas takes the props of a [view](./view.md) (styles, press and gesture props, `onLayout`, accessibility, `ref`, …)
+plus:
 
-| Prop | Type | Description |
-|---|---|---|
-| `draw` | `(cx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | Draws the canvas. Runs once the size is known, again when the canvas resizes, and again when signals it reads change. |
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `draw` | `canvas(painter)` | `(cx: CanvasRenderingContext2D, size: { width: number; height: number }) => void` | Draws the canvas. Runs once the size is known, again when the canvas resizes, and again when signals it reads change. |
 
-Give the canvas a size through its style (`width` / `height`, `flex`, `aspectRatio`): it has no content size of its own.
+Give the canvas a size through its styles (width / height, `flex`, an aspect ratio): its size is the one its styles
+give it.
 
 ## When it redraws
 
-`draw` is tracked like an effect: reading a signal inside it subscribes the drawing to that signal.
+The drawing is tracked like an effect: reading a signal inside it subscribes the drawing to that signal.
 
-```tsx
+```rust tabs
+let values = signal(vec![12.0_f32, 40.0, 28.0, 64.0]);
+let width = signal(0.0_f32);
+let height = 160.0;
+
+canvas(move || {
+    let data = values.get(); // a change of values redraws
+    let step = width.get() / data.len() as f32;
+    data.iter().enumerate().fold(Painter::new().fill_color(rgb(0x0969da)), |p, (i, v)| {
+        p.fill_rect(i as f32 * step + 4.0, height - v, step - 8.0, *v)
+    })
+})
+.h(px(height))
+.on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
+```
+
+```tsx tabs
 const values = signal([12, 40, 28, 64]);
 
 <Canvas
@@ -70,12 +115,29 @@ const values = signal([12, 40, 28, 64]);
 />;
 ```
 
-Numbers and colors may also be [native animated values](../modules/nsh-animated.md) (`CanvasNumber`,
-`CanvasPaint`): the platform then redraws on its own while they animate, without running `draw` or any JS per frame.
+Numbers and colors may also be [native animated values](../modules/nsh-animated.md) (`CanvasNumber`, `CanvasPaint`;
+in Rust a `&AnimatedValue` wherever a number goes): the platform then redraws on its own while they animate, with no
+work in the app's code per frame.
 
-```tsx
+```rust tabs
+use std::f32::consts::TAU;
+
+let angle = animated_value(0.0);
+angle.timing(TAU, 1000.0, Easing::Linear);
+
+canvas(
+    Painter::new()
+        .translate(40.0, 40.0)
+        .rotate(&angle) // animates natively
+        .fill_color(rgb(0xcf222e))
+        .fill_rect(-20.0, -4.0, 40.0, 8.0),
+)
+.size(px(80.0))
+```
+
+```tsx tabs
+import { Canvas } from "nsh";
 import { Animated, createAnimatedValue } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
 
 const angle = createAnimatedValue(0);
 Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
@@ -93,21 +155,26 @@ Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 
 ## The context
 
-`CanvasRenderingContext2D` is a subset of the browser's: the state stack (`save`, `restore`), transforms, paths
-(`moveTo`, `lineTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect`, Bézier curves), `fill` / `stroke` / `clip` (also of
-a `Path2D`, which accepts SVG path data), rectangles, text (`fillText`, `strokeText`, `measureText`), linear / radial /
-conic gradients, line dashes, shadows, `globalAlpha`, `globalCompositeOperation` and `drawImage` (images by URL or
-imported asset). Every member is listed in the [`nsh/canvas` reference](../modules/nsh-canvas.md); the
-[canvas guide](../docs/canvas.md) walks through drawing charts and animated graphics.
+`CanvasRenderingContext2D` is a subset of the browser's, and `Painter` has the same operations as methods in snake case
+(`move_to`, `line_to`, `fill_rect`, `fill_text`, `stroke_color`, …): the state stack (`save`, `restore`), transforms,
+paths (`moveTo`, `lineTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect`, Bézier curves), `fill` / `stroke` / `clip`
+(also of a `Path2D`, which accepts SVG path data; `fill_svg` / `stroke_svg` in Rust), rectangles, text (`fillText`,
+`strokeText`, `measureText`), linear / radial / conic gradients, line dashes, shadows, `globalAlpha`,
+`globalCompositeOperation` and `drawImage` (images by URL or asset). Every member is listed in the
+[Canvas API reference](../modules/nsh-canvas.md); the [canvas guide](../docs/canvas.md) walks through drawing
+charts and animated graphics.
 
-Coordinates are in points with the origin at the top left. `measureText` is synchronous and returns only `width`.
+Coordinates are in points with the origin at the top left. `measureText` is synchronous and returns `width`. Rust's
+`Painter` answers hit tests too (`is_point_in_path`, `is_point_in_stroke`).
 
-Not supported: `getImageData` / `putImageData`, `filter`, `isPointInPath` and SVG images.
+The context draws vector operations and images: pixel access (`getImageData` / `putImageData`), `filter` and SVG
+images are outside it.
 
 ## Events
 
 The [view events](./view.md#events): `onPress`, `onLayout`, gestures and touches. To handle drawing-relative taps, read
-`locationX` / `locationY` in `onTouchEnd`, or track a drag with `onResponderMove`.
+`locationX` / `locationY` in `onTouchEnd`, or track a drag with `onResponderMove` (`.on_responder_move(..)` in Rust,
+with `e.location`).
 
 ## Ref methods
 

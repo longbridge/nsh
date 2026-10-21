@@ -37,6 +37,10 @@ use crate::{
 type ErrorHandler = Box<dyn Fn(&str)>;
 type SharedErrorHandler = Arc<MainThreadBound<RefCell<Option<ErrorHandler>>>>;
 type SharedHandler = Arc<MainThreadBound<RefCell<Option<Box<dyn Fn()>>>>>;
+/// A test session's model of the app (`nsh test --target ios`): every
+/// batch and error goes to it.
+#[cfg(feature = "dev")]
+type TestModel = Arc<std::sync::Mutex<Option<Arc<nsh_testing::agent::Model>>>>;
 
 /// Forwards mount batches and errors from the engine thread to the main
 /// thread.
@@ -44,10 +48,16 @@ struct MainThreadSink {
     mounter: SharedMounter,
     on_error: SharedErrorHandler,
     on_hot_failed: SharedHandler,
+    #[cfg(feature = "dev")]
+    test_model: TestModel,
 }
 
 impl MountSink for MainThreadSink {
     fn submit(&self, batch: MountBatch) {
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+            model.apply(&batch);
+        }
         let mounter = self.mounter.clone();
         DispatchQueue::main().exec_async(move || {
             let mtm = MainThreadMarker::new().expect("main queue runs on the main thread");
@@ -78,6 +88,10 @@ impl MountSink for MainThreadSink {
     }
 
     fn report_error(&self, message: &str) {
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+            model.error(message);
+        }
         let on_error = self.on_error.clone();
         let message = message.to_owned();
         DispatchQueue::main().exec_async(move || {
@@ -113,6 +127,8 @@ pub(crate) struct RootViewIvars {
     host: Cell<nsh_engine::HostEnvironment>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+    #[cfg(feature = "dev")]
+    test_model: TestModel,
 }
 
 define_class!(
@@ -179,6 +195,8 @@ impl RootView {
             environment: Cell::new(None),
             host: Cell::default(),
             observers: RefCell::new(Vec::new()),
+            #[cfg(feature = "dev")]
+            test_model: TestModel::default(),
         });
         // SAFETY: UIView's designated initializer.
         unsafe { msg_send![super(this), initWithFrame: frame] }
@@ -415,6 +433,8 @@ impl RootView {
             mounter: mounter.clone(),
             on_error: self.ivars().on_error.clone(),
             on_hot_failed: self.ivars().on_hot_failed.clone(),
+            #[cfg(feature = "dev")]
+            test_model: self.ivars().test_model.clone(),
         };
         let engine = match Engine::start(config, CoreTextEngine::default, sink) {
             Ok(engine) => engine,
@@ -544,6 +564,29 @@ impl Surface {
     /// exceptions) on the main thread. Errors are logged either way.
     pub fn set_error_handler(&self, handler: impl Fn(&str) + 'static) {
         *self.view.ivars().on_error.get(self.view.mtm()).borrow_mut() = Some(Box::new(handler));
+    }
+
+    /// Keeps the model `nsh test --target ios` steps see of the app
+    /// ([`nsh_testing::agent::Model`]): every batch and error goes to it
+    /// from now on.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: Option<Arc<nsh_testing::agent::Model>>) {
+        *self
+            .view
+            .ivars()
+            .test_model
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = model;
+    }
+
+    /// `f` with the running app's mounter (`None` before the app starts).
+    #[cfg(feature = "dev")]
+    pub(crate) fn with_mounter<R>(&self, f: impl FnOnce(&Mounter) -> R) -> Option<R> {
+        let running = self.view.ivars().running.borrow();
+        let shared = running.as_ref()?.mounter.clone();
+        drop(running);
+        let mounter = shared.get(self.view.mtm()).borrow();
+        mounter.as_ref().map(f)
     }
 
     /// Applies a development update to the running app in place. Returns

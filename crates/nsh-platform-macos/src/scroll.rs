@@ -1209,6 +1209,34 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
     report(surface, view);
 }
 
+/// Scrolls `view` at rest by `(dx, dy)` along its axis, within its rest
+/// limits: a selection dragged past its edge. False if it did not move.
+pub(crate) fn autoscroll(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) -> bool {
+    let (from, to) = {
+        let state = view.state();
+        let Some(s) = &state.scroll else {
+            return false;
+        };
+        if !matches!(s.live.phase, Phase::Idle) {
+            return false;
+        }
+        let (min, max) = limits(&state);
+        let from = main(s);
+        // Mirrored lists keep left-to-right offsets.
+        let d = match (s.horizontal, s.mirrored) {
+            (true, true) => -dx,
+            (true, false) => dx,
+            _ => dy,
+        };
+        (from, (from + d).clamp(min, max.max(min)))
+    };
+    if to == from {
+        return false;
+    }
+    moved_to(surface, view, to);
+    true
+}
+
 /// `StickyCells`.
 pub(crate) fn sticky(surface: &Rc<Surface>, view: &NshView, cells: Vec<StickyCell>) {
     let old = {

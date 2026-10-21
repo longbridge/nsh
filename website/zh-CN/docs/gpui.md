@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: 用 AppView 把 NSH 应用嵌入 GPUI 或 GPUI Kit 应用，在 macOS、Windows 和 Linux 上由 GPUI 绘制，在 GPUI 开发宿主中试用，以及 GPUI 后端的不同之处。
+description: 用 AppView 把 Rust 和 TSX 编写的 NSH 应用嵌入 GPUI 或 GPUI Kit 应用，在 macOS、Windows 和 Linux 上由 GPUI 绘制，在 GPUI 开发宿主中试用 TSX 应用，以及 GPUI 后端的不同之处。
 order: 15.5
 group: platforms
 ---
@@ -9,9 +9,9 @@ group: platforms
 
 GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
 Windows 和 Linux 上表现一致。它是嵌入 GPUI 和 GPUI Kit 应用的后端：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在
-自己元素树的任意位置显示 NSH 模块。独立应用用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
-[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个 bundle 可以在所有
-平台上运行。`Platform.OS` 是它所运行的操作系统（`"macos"`、`"windows"` 或 `"linux"`），并会应用 `desktop={{…}}` 属性。
+自己元素树的任意位置显示 NSH 应用：它自己的 Rust 根组件，或它加载的 TSX。独立应用用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
+[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个应用可以在所有
+平台上运行。`os()`（TSX 中的 `Platform.OS`）是它所运行的操作系统（macOS、Windows 或 Linux），并会应用 TSX 的 `desktop={{…}}` 属性。
 
 [macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
 GPUI 用自己方式绘制的地方，见[差异](#差异)。
@@ -27,7 +27,7 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 ## 环境要求
 
 - macOS、Windows 或 Linux，以及 GPUI 能使用的 GPU（macOS 上是 Metal，Windows 上是 DirectX，Linux 上是 Vulkan）。
-- macOS 上：从源码构建运行时会用到 Xcode 的 Metal Toolchain（`xcodebuild -downloadComponent MetalToolchain`），由它提前编译
+- macOS 上：构建你的 GPUI 应用或从源码构建运行时会用到 Xcode 的 Metal Toolchain（`xcodebuild -downloadComponent MetalToolchain`），由它提前编译
   GPUI 的着色器。在没有它的 Mac 上，`nsh run` 会打开 GPUI 的 `runtime-shaders` feature 构建运行时并给出提示：
   着色器在应用启动时编译（第一次不到一秒，之后由 macOS 缓存）。
 - Linux 上：Vulkan 驱动、带 `libxkbcommon` 的 Wayland 或 X11、GTK 3 和 WebKitGTK 4.1（Web 视图），以及 GStreamer 1.20
@@ -42,11 +42,17 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 
 ## 运行应用
 
+Rust 应用运行在你的 GPUI 应用里：用 `AppView` 嵌入它的根组件（[嵌入 GPUI 应用](#嵌入-gpui-应用)），然后 `cargo run` 这个 GPUI
+应用；你的 crate 和这个应用是同一次 Cargo 构建。单独运行时，Rust 应用使用本机操作系统自己的后端（`nsh run --target macos`、
+`windows` 或 `linux`）。
+
+TSX 应用在 GPUI 开发宿主中运行：
+
 ```sh
-nsh run my-app --target gpui
+nsh run App.tsx --target gpui
 ```
 
-在一个 GPUI 窗口（默认 1200×800）中打开应用，显示效果与嵌入它的 GPUI 应用相同，和其他目标一样支持热重载、在终端显示日志并提供错误浮层。开发宿主
+它在一个 GPUI 窗口（默认 1200×800）中打开应用，显示效果与嵌入它的 GPUI 应用相同，和其他目标一样支持热重载、在终端显示日志并提供错误浮层。开发宿主
 （`nsh-gpui-host`）在每个操作系统上都直接运行，不需要外面包一层应用包。在源码仓库中，`nsh run` 会先构建它；发行版把它放在
 `runtime/gpui/` 中。宿主也可以单独运行一个构建好的 bundle：
 
@@ -57,12 +63,9 @@ dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --window-size 390
 
 `--window-size` 是窗口的尺寸，单位为点（`<宽>x<高>`）。
 
-宿主运行 TSX 和 JavaScript 应用。Rust 应用（`nsh.json` 的 `"root"`）在本机操作系统自己的后端上运行（`--target macos`、
-`windows` 或 `linux`），GPUI 应用则用 `AppView`（`App::Rust`）嵌入它的根组件。
-
 ## 打包
 
-GPUI 应用把 NSH 放在自己的可执行文件里：它用 `AppView` 嵌入应用的 bundle（[嵌入 GPUI 应用](#嵌入-gpui-应用)），并作为
+GPUI 应用把 NSH 放在自己的可执行文件里：它用 `AppView` 嵌入应用的 Rust 根组件或 TSX bundle（[嵌入 GPUI 应用](#嵌入-gpui-应用)），并作为
 GPUI 应用本身构建和分发。独立的 NSH 应用用本机操作系统自己的目标打包：[`--target macos`](./macos.md#打包)、
 [`--target windows`](./windows.md#打包) 或 [`--target linux`](./linux.md#打包)（[打包](./packaging.md)）。
 
@@ -73,23 +76,34 @@ GStreamer 的 base、good 插件（Debian / Ubuntu：`libwebkit2gtk-4.1-0`、`li
 ## 嵌入 GPUI 应用
 
 `nsh-platform-gpui` crate（来自 NSH 仓库）为 Rust GPUI 应用提供 `AppView`：一个以 GPUI 视图（`Entity<AppView>`）形式存在的
-NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。
+NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。它运行一个 Rust 根组件，即你的 crate 的根组件：
 
 ```rust
-use gpui::{AppContext, Application, WindowOptions};
-use nsh_platform_gpui::{App, AppOptions, AppView, Bundle};
+use gpui::{AppContext, WindowOptions};
+use nsh_platform_gpui::{set_ui_sets, App, AppOptions, AppView, Root};
 
+// 在第一个视图之前设置一次：应用导入的 UI 集合（NSH 的和你的 crate 的）。
+set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
 gpui_platform::application().run(|cx| {
     cx.open_window(WindowOptions::default(), |window, cx| {
         cx.new(|cx| {
             let view = AppView::new(AppOptions::default(), window, cx);
-            let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-            view.load(App::Js(Bundle::source(code)));
+            view.load(App::Rust(Root::of::<my_app::App>()));
             view
         })
     })
     .unwrap();
 });
+```
+
+`Root::tokens` 为根组件设置[主题](./rust.md#主题)（`nsh_base::Theme::from_json(json)?.into_tokens()`，这里也重新导出了
+`Theme`），`Root::app_id` 设置保存其数据所用的 id。`nsh build` 写出的 TSX bundle 也加载到同一种视图中：
+
+```rust
+use nsh_platform_gpui::{App, Bundle};
+
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(App::Js(Bundle::source(code)));
 ```
 
 像其他视图一样把这个 entity 放进元素树（GPUI Kit 的 `Root`、一个面板、一个停靠区）。`AppView::load` 替换正在运行的内容；
@@ -105,7 +119,8 @@ gpui_platform::application().run(|cx| {
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 - `AppView::run_package(&package)` 运行来自 `verify_package` 或 `load_package` 的[签名包](./signed-packages.md)；你的应用判定它健康之后，用 `accept_package` 记录它。
-- `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件，用于带有自己 Rust 组件的应用（[Rust](./rust.md)），也用来提供你的应用自己的套件：应用通过
+- `set_ui_sets(sets)` 设置每个引擎提供的 UI 套件：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，由
+  `#[native_module]` 生成；[用 Rust 开发](./rust.md)），也用来提供你的应用自己的套件：应用通过
   [`nativeModule`](../modules/nsh-native.md#nativemodule) 按名称使用其中的函数和类，并用标准的 `nsh build` 构建。仓库中的
   `examples/embed-gpui` 就这样在宿主中维护一个交易台，由两个嵌入的下单面板和宿主自己的控件共享。
 
@@ -135,6 +150,7 @@ gpui_platform::application().run(|cx| {
 
 ## 另见
 
+- [用 Rust 开发](./rust.md)：GPUI 应用嵌入其根组件的 crate
 - [命令行](./cli.md)：`nsh run --target gpui`
 - [打包](./packaging.md)：独立应用，用各操作系统自己的目标
 - [平台概览](./platforms.md)

@@ -601,7 +601,12 @@ fn layers() -> Card {
                         (move || format!("Front: {} of 3 · tap", front.get() + 1)).into_reactive(),
                     ),
                     Some(next.into()),
-                    view().w(px(130.0)).h(px(84.0)).children(squares),
+                    // Its squares have no text: tests find it by id.
+                    view()
+                        .w(px(130.0))
+                        .h(px(84.0))
+                        .test_id("stacking")
+                        .children(squares),
                 )),
         )
         .child(

@@ -238,6 +238,9 @@ impl Mounted {
         if let Some(v) = p.focusable {
             out.put("focusable", v.to_string());
         }
+        if p.selection_area {
+            out.put("selectionArea", "true".into());
+        }
         let style = self.style.as_deref().cloned().unwrap_or_default();
         out.put("elevation", num(style.elevation));
 

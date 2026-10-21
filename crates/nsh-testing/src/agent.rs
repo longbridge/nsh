@@ -10,22 +10,26 @@
 //! [`Agent`] on a thread of its own, which resolves the selector on the
 //! model, asks the platform ([`Native`]) where the view is on screen and
 //! acts there (a click or a tap, a drag, typed keys), then waits until the
-//! app is quiet: no batch for 100 ms and no native animation running, 2 s
-//! at most. [`Native`]'s calls come from that thread; implementations do
+//! app is quiet: no batch and no native animation for 100 ms, 2 s at
+//! most. [`Native`]'s calls come from that thread; implementations do
 //! their work on the main thread and return when it is done.
 
 use std::{
     sync::{Condvar, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+// The core's: std's panics in WebAssembly, where the web's page keeps the
+// model.
+use nsh_core::time::Instant;
 use nsh_core::{
     MountBatch, NodeId,
     geometry::{Bounds, Point, Points, Size},
 };
-use nsh_dev::protocol::{StepOutcome, TestStep};
+use nsh_dev::protocol::{PickTarget, SceneQuery, StepOutcome, TestStep};
 
-use crate::headless::{Screen, screen::Pick, selector::Selector};
+pub use crate::screen::Pick;
+use crate::{screen::Screen, selector::Selector};
 
 /// How long after the last batch the app is quiet.
 const QUIET: Duration = Duration::from_millis(100);
@@ -79,15 +83,290 @@ impl Model {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
 
-    /// Waits until a batch after the `seen`th came, `timeout` at most.
-    fn wait_for_batch(&self, seen: u64, timeout: Duration) -> MutexGuard<'_, State> {
+/// How busy the app is: what [`Agent`]'s waits look at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Activity {
+    /// Batches applied so far.
+    pub batches: u64,
+    /// How long ago the last one was (`None`: none yet).
+    pub since_last: Option<Duration>,
+}
+
+/// The app as an [`Agent`] sees it: the host's [`Model`] (the agent runs on
+/// the host), or one asked about through the host ([`RemoteScene`]: the
+/// web, whose agent runs in `nsh`).
+pub trait Scene: Send + Sync {
+    /// How busy the app is.
+    fn activity(&self) -> Result<Activity, String>;
+    /// Waits until a batch after the `seen`th came or the app threw,
+    /// `timeout` at most.
+    fn wait_for_batch(&self, seen: u64, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            match self.activity() {
+                Ok(a) if a.batches <= seen => std::thread::sleep(POLL.min(timeout)),
+                _ => return,
+            }
+        }
+    }
+    /// The app's errors since the last time, taken.
+    fn take_errors(&self) -> Result<Vec<String>, String>;
+    /// The one view `selector` names for a step on `target`.
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String>;
+    /// The scroll views around `id`, innermost first, and whether each
+    /// scrolls horizontally.
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String>;
+    /// `id`'s long press delay in milliseconds, if it says.
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String>;
+    /// Whether scroll view `id` scrolls horizontally.
+    fn horizontal(&self, id: NodeId) -> Result<bool, String>;
+    /// The texts on screen, in order.
+    fn texts(&self) -> Result<Vec<String>, String>;
+    /// How many views `selector` matches.
+    fn count(&self, selector: &str) -> Result<usize, String>;
+    /// Whether a view matches `selector`.
+    fn matches(&self, selector: &str) -> Result<bool, String>;
+    /// Whether the view `selector` names takes input.
+    fn enabled(&self, selector: &str) -> Result<bool, String>;
+    /// The input `selector` names.
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
+    /// The dialogs the app showed.
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String>;
+    /// The oldest dialog not answered yet.
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String>;
+    /// The oldest dialog was answered.
+    fn answered(&self) -> Result<(), String>;
+}
+
+impl Scene for Model {
+    fn activity(&self) -> Result<Activity, String> {
         let state = self.lock();
-        let (state, _) = self
+        Ok(Activity {
+            batches: state.batches,
+            since_last: state.last.map(|t| t.elapsed()),
+        })
+    }
+    fn wait_for_batch(&self, seen: u64, timeout: Duration) {
+        let state = self.lock();
+        let _ = self
             .changed
-            .wait_timeout_while(state, timeout, |s| s.batches <= seen && s.errors.is_empty())
-            .unwrap_or_else(|e| e.into_inner());
-        state
+            .wait_timeout_while(state, timeout, |s| s.batches <= seen && s.errors.is_empty());
+    }
+    fn take_errors(&self) -> Result<Vec<String>, String> {
+        Ok(std::mem::take(&mut self.lock().errors))
+    }
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String> {
+        let parsed = Selector::parse(selector)?;
+        let state = self.lock();
+        let screen = &state.screen;
+        Ok(match target {
+            PickTarget::Pressable => screen.pressable(&parsed),
+            PickTarget::LongPressable => screen.long_pressable(&parsed),
+            PickTarget::Input => screen.input_view(&parsed),
+            PickTarget::ScrollView => screen.scroll_view(&parsed),
+        })
+    }
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
+        Ok(self.lock().screen.scroll_ancestors(id))
+    }
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
+        Ok(self.lock().screen.long_press_delay(id))
+    }
+    fn horizontal(&self, id: NodeId) -> Result<bool, String> {
+        Ok(self.lock().screen.scroll(id).is_some_and(|s| s.horizontal))
+    }
+    fn texts(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .lock()
+            .screen
+            .texts()
+            .into_iter()
+            .map(str::to_owned)
+            .collect())
+    }
+    fn count(&self, selector: &str) -> Result<usize, String> {
+        self.lock().screen.count(selector)
+    }
+    fn matches(&self, selector: &str) -> Result<bool, String> {
+        self.lock().screen.matches(selector)
+    }
+    fn enabled(&self, selector: &str) -> Result<bool, String> {
+        self.lock().screen.enabled(selector)
+    }
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        self.lock().screen.input_id(selector)
+    }
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
+        Ok(self.lock().screen.dialogs().to_vec())
+    }
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String> {
+        Ok(self.lock().screen.pending_dialog().cloned())
+    }
+    fn answered(&self) -> Result<(), String> {
+        self.lock().screen.answered();
+        Ok(())
+    }
+}
+
+/// `pick` as a [`SceneQuery::Pick`]'s answer: `{"one": id}`, `"none"`,
+/// `{"many": n}` or `"disabled"`.
+fn pick_value(pick: Pick) -> serde_json::Value {
+    match pick {
+        Pick::One(id) => serde_json::json!({ "one": id }),
+        Pick::None => serde_json::json!("none"),
+        Pick::Many(n) => serde_json::json!({ "many": n }),
+        Pick::Disabled => serde_json::json!("disabled"),
+    }
+}
+
+fn pick_of(value: &serde_json::Value) -> Result<Pick, String> {
+    if let Some(id) = value.get("one").and_then(serde_json::Value::as_u64) {
+        return Ok(Pick::One(id as NodeId));
+    }
+    if let Some(n) = value.get("many").and_then(serde_json::Value::as_u64) {
+        return Ok(Pick::Many(n as usize));
+    }
+    match value.as_str() {
+        Some("none") => Ok(Pick::None),
+        Some("disabled") => Ok(Pick::Disabled),
+        _ => Err(format!("the host answered oddly: {value}")),
+    }
+}
+
+/// What `model` answers of a host's part of `step` (a query
+/// [`TestStep`], or a [`TestStep::Scene`] question about the model):
+/// `None` for what only the platform's views answer (where a view is, the
+/// viewport, an input's text, animations, a dialog's buttons). The web's
+/// page answers its agent's questions so.
+pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value, String>> {
+    use serde_json::{Value, to_value};
+    let json = |r: Result<Value, serde_json::Error>| r.map_err(|e| e.to_string());
+    Some(match step {
+        TestStep::Texts => model.texts().map(Value::from),
+        TestStep::Count { selector } => model.count(selector).map(Value::from),
+        TestStep::Shows { selector } => model.matches(selector).map(Value::from),
+        TestStep::Enabled { selector } => model.enabled(selector).map(Value::from),
+        TestStep::Dialogs => model.dialogs().and_then(|d| json(to_value(d))),
+        TestStep::PendingDialog => model.pending_dialog().and_then(|d| json(to_value(d))),
+        TestStep::Scene { query } => match query {
+            SceneQuery::Activity => model.activity().map(|a| {
+                serde_json::json!({
+                    "batches": a.batches,
+                    "since_last_ms": a.since_last.map(|d| d.as_secs_f64() * 1000.0),
+                })
+            }),
+            SceneQuery::TakeErrors => model.take_errors().map(Value::from),
+            SceneQuery::Pick { selector, target } => model.pick(selector, *target).map(pick_value),
+            SceneQuery::ScrollAncestors { id } => {
+                model.scroll_ancestors(*id).and_then(|a| json(to_value(a)))
+            }
+            SceneQuery::LongPressDelay { id } => model.long_press_delay(*id).map(Value::from),
+            SceneQuery::Horizontal { id } => model.horizontal(*id).map(Value::from),
+            SceneQuery::InputId { selector } => model.input_id(selector).map(Value::from),
+            SceneQuery::Answered => model.answered().map(|()| Value::Null),
+            SceneQuery::Bounds { .. }
+            | SceneQuery::Viewport
+            | SceneQuery::InputText { .. }
+            | SceneQuery::Animating
+            | SceneQuery::DialogPoint { .. } => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// A host's model asked about through the host ([`SceneQuery`]): the web's
+/// agent, which runs in `nsh`, sees the page's app so.
+pub struct RemoteScene {
+    ask: Box<dyn Fn(TestStep) -> Result<serde_json::Value, String> + Send + Sync>,
+}
+
+impl RemoteScene {
+    /// Asks through `ask`, which takes a step on the host and gives its
+    /// value.
+    pub fn new(
+        ask: impl Fn(TestStep) -> Result<serde_json::Value, String> + Send + Sync + 'static,
+    ) -> Self {
+        RemoteScene { ask: Box::new(ask) }
+    }
+
+    fn query<T: serde::de::DeserializeOwned>(&self, query: SceneQuery) -> Result<T, String> {
+        self.get(TestStep::Scene { query })
+    }
+
+    fn get<T: serde::de::DeserializeOwned>(&self, step: TestStep) -> Result<T, String> {
+        let value = (self.ask)(step)?;
+        serde_json::from_value(value).map_err(|e| format!("the host answered oddly: {e}"))
+    }
+}
+
+impl Scene for RemoteScene {
+    fn activity(&self) -> Result<Activity, String> {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            batches: u64,
+            since_last_ms: Option<f64>,
+        }
+        let wire: Wire = self.query(SceneQuery::Activity)?;
+        Ok(Activity {
+            batches: wire.batches,
+            since_last: wire
+                .since_last_ms
+                .map(|ms| Duration::from_secs_f64(ms.max(0.0) / 1000.0)),
+        })
+    }
+    fn take_errors(&self) -> Result<Vec<String>, String> {
+        self.query(SceneQuery::TakeErrors)
+    }
+    fn pick(&self, selector: &str, target: PickTarget) -> Result<Pick, String> {
+        let value: serde_json::Value = self.query(SceneQuery::Pick {
+            selector: selector.into(),
+            target,
+        })?;
+        pick_of(&value)
+    }
+    fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
+        self.query(SceneQuery::ScrollAncestors { id })
+    }
+    fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
+        self.query(SceneQuery::LongPressDelay { id })
+    }
+    fn horizontal(&self, id: NodeId) -> Result<bool, String> {
+        self.query(SceneQuery::Horizontal { id })
+    }
+    fn texts(&self) -> Result<Vec<String>, String> {
+        self.get(TestStep::Texts)
+    }
+    fn count(&self, selector: &str) -> Result<usize, String> {
+        self.get(TestStep::Count {
+            selector: selector.into(),
+        })
+    }
+    fn matches(&self, selector: &str) -> Result<bool, String> {
+        self.get(TestStep::Shows {
+            selector: selector.into(),
+        })
+    }
+    fn enabled(&self, selector: &str) -> Result<bool, String> {
+        self.get(TestStep::Enabled {
+            selector: selector.into(),
+        })
+    }
+    fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        self.query(SceneQuery::InputId {
+            selector: selector.into(),
+        })
+    }
+    fn dialogs(&self) -> Result<Vec<nsh_core::Dialog>, String> {
+        self.get(TestStep::Dialogs)
+    }
+    fn pending_dialog(&self) -> Result<Option<nsh_core::Dialog>, String> {
+        self.get(TestStep::PendingDialog)
+    }
+    fn answered(&self) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::Answered)
+            .map(drop)
     }
 }
 
@@ -142,12 +421,14 @@ pub trait Native: Send + Sync {
     fn quit(&self);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// An [`Agent`] on a thread of its own, taking the steps handed to it one
 /// after the other: what a host's dev client feeds the steps it gets.
 pub struct Worker {
     steps: Mutex<std::sync::mpsc::Sender<(u64, TestStep)>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Worker {
     /// Starts `agent`'s thread; each step's outcome goes to `done` with the
     /// step's id.
@@ -178,6 +459,7 @@ impl Worker {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A dev host's test session: when the server says it runs one
 /// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
 /// platform's [`Native`] (`start`, which attaches the model to the surface
@@ -189,6 +471,7 @@ pub struct Tester {
     worker: Mutex<Option<Worker>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Tester {
     /// A host's tester; `start` runs on the dev client's thread.
     pub fn new(
@@ -254,16 +537,29 @@ impl Tester {
     }
 }
 
+/// Whether `at` is inside `bounds` clear of its edges: of the outer tenth
+/// of each side, 48 points at most.
+fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
+    let margin_x = (bounds.size.width.0 * 0.1).min(48.0);
+    let margin_y = (bounds.size.height.0 * 0.1).min(48.0);
+    let (x0, y0) = (bounds.origin.x.0 + margin_x, bounds.origin.y.0 + margin_y);
+    let (x1, y1) = (
+        bounds.origin.x.0 + bounds.size.width.0 - margin_x,
+        bounds.origin.y.0 + bounds.size.height.0 - margin_y,
+    );
+    (x0..=x1).contains(&at.x.0) && (y0..=y1).contains(&at.y.0)
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
-    model: std::sync::Arc<Model>,
+    scene: std::sync::Arc<dyn Scene>,
     native: Box<dyn Native>,
 }
 
 impl Agent {
-    /// An agent on the app `model` sees, acting through `native`.
-    pub fn new(model: std::sync::Arc<Model>, native: Box<dyn Native>) -> Agent {
-        Agent { model, native }
+    /// An agent on the app `scene` sees, acting through `native`.
+    pub fn new(scene: std::sync::Arc<dyn Scene>, native: Box<dyn Native>) -> Agent {
+        Agent { scene, native }
     }
 
     /// Takes `step`; blocks until it is done and the app is quiet.
@@ -296,43 +592,26 @@ impl Agent {
                 gone,
             } => done(self.wait_for(&selector, Duration::from_millis(timeout_ms), gone)),
             TestStep::NextChange { timeout_ms } => {
-                let seen = self.model.lock().batches;
-                drop(
-                    self.model
-                        .wait_for_batch(seen, Duration::from_millis(timeout_ms)),
-                );
+                let seen = self.scene.activity()?.batches;
+                self.scene
+                    .wait_for_batch(seen, Duration::from_millis(timeout_ms));
                 done(self.check())
             }
-            TestStep::Texts => Ok(Value::from(
-                self.model
-                    .lock()
-                    .screen
-                    .texts()
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>(),
-            )),
-            TestStep::Count { selector } => {
-                Ok(Value::from(self.model.lock().screen.count(&selector)?))
-            }
-            TestStep::Shows { selector } => {
-                Ok(Value::from(self.model.lock().screen.matches(&selector)?))
-            }
-            TestStep::Enabled { selector } => {
-                Ok(Value::from(self.model.lock().screen.enabled(&selector)?))
-            }
+            TestStep::Texts => Ok(Value::from(self.scene.texts()?)),
+            TestStep::Count { selector } => Ok(Value::from(self.scene.count(&selector)?)),
+            TestStep::Shows { selector } => Ok(Value::from(self.scene.matches(&selector)?)),
+            TestStep::Enabled { selector } => Ok(Value::from(self.scene.enabled(&selector)?)),
             TestStep::Value { selector } => {
-                let id = self.model.lock().screen.input_id(&selector)?;
+                let id = self.scene.input_id(&selector)?;
                 Ok(id
                     .and_then(|id| self.native.input_text(id))
                     .map_or(Value::Null, Value::from))
             }
             TestStep::Dialogs => {
-                serde_json::to_value(self.model.lock().screen.dialogs()).map_err(|e| e.to_string())
+                serde_json::to_value(self.scene.dialogs()?).map_err(|e| e.to_string())
             }
             TestStep::PendingDialog => {
-                serde_json::to_value(self.model.lock().screen.pending_dialog())
-                    .map_err(|e| e.to_string())
+                serde_json::to_value(self.scene.pending_dialog()?).map_err(|e| e.to_string())
             }
             TestStep::AnswerDialog { button } => done(self.answer_dialog(button.as_deref())),
             TestStep::Screenshot => {
@@ -354,15 +633,55 @@ impl Agent {
                 self.native.quit();
                 Ok(Value::Null)
             }
+            TestStep::Scene { query } => self.scene_query(query),
+        }
+    }
+
+    /// Answers an agent elsewhere with this one's scene and platform.
+    fn scene_query(&self, query: SceneQuery) -> Result<serde_json::Value, String> {
+        use serde_json::{Value, to_value};
+        let json = |r: Result<Value, serde_json::Error>| r.map_err(|e| e.to_string());
+        let scene = &*self.scene;
+        match query {
+            SceneQuery::Activity => scene.activity().map(|a| {
+                serde_json::json!({
+                    "batches": a.batches,
+                    "since_last_ms": a.since_last.map(|d| d.as_secs_f64() * 1000.0),
+                })
+            }),
+            SceneQuery::TakeErrors => scene.take_errors().map(Value::from),
+            SceneQuery::Pick { selector, target } => scene.pick(&selector, target).map(pick_value),
+            SceneQuery::ScrollAncestors { id } => {
+                scene.scroll_ancestors(id).and_then(|a| json(to_value(a)))
+            }
+            SceneQuery::LongPressDelay { id } => scene.long_press_delay(id).map(Value::from),
+            SceneQuery::Horizontal { id } => scene.horizontal(id).map(Value::from),
+            SceneQuery::InputId { selector } => scene.input_id(&selector).map(Value::from),
+            SceneQuery::Answered => scene.answered().map(|()| Value::Null),
+            SceneQuery::Bounds { id } => {
+                json(to_value(self.native.bounds(id).map(|b| {
+                    [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
+                })))
+            }
+            SceneQuery::Viewport => {
+                let v = self.native.viewport();
+                json(to_value([v.width.0, v.height.0]))
+            }
+            SceneQuery::InputText { id } => {
+                Ok(self.native.input_text(id).map_or(Value::Null, Value::from))
+            }
+            SceneQuery::Animating => Ok(Value::from(self.native.animating())),
+            SceneQuery::DialogPoint { .. } => {
+                Err("this host answers dialogs itself (`AnswerDialog`)".into())
+            }
         }
     }
 
     /// Waits for the first render, `timeout` at most, then until the app
     /// is quiet.
     fn ready(&self, timeout: Duration) -> Result<(), String> {
-        let state = self.model.wait_for_batch(0, timeout);
-        let rendered = state.batches > 0;
-        drop(state);
+        self.scene.wait_for_batch(0, timeout);
+        let rendered = self.scene.activity()?.batches > 0;
         self.check()?;
         if !rendered {
             return Err(format!(
@@ -395,11 +714,11 @@ impl Agent {
         &self,
         selector: &str,
         what: &str,
-        pick: impl FnOnce(&Screen, &Selector) -> Pick,
+        target: PickTarget,
     ) -> Result<(NodeId, Point<Points>), String> {
-        let parsed = Selector::parse(selector)?;
+        Selector::parse(selector)?;
         self.settled()?;
-        let picked = pick(&self.model.lock().screen, &parsed);
+        let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
         Ok((id, self.scroll_into_view(id, selector)?))
     }
@@ -414,19 +733,34 @@ impl Agent {
                 self.on_screen()
             )
         };
-        let scrollers = self.model.lock().screen.scroll_ancestors(id);
+        let scrollers = self.scene.scroll_ancestors(id)?;
+        let mut before: Option<Point<Points>> = None;
         for _ in 0..SCROLLS_INTO_VIEW {
             let at = self.native.bounds(id).ok_or_else(not_on_screen)?.center();
             let viewport = self.native.viewport();
             let window = Bounds::new(Point::new(Points(0.0), Points(0.0)), viewport);
+            // The last gesture moved it no more (its scroll view's end):
+            // pressed where it is when it shows.
+            if let Some(b) = before
+                && (b.x.0 - at.x.0).abs() < 1.0
+                && (b.y.0 - at.y.0).abs() < 1.0
+            {
+                return if window.contains(&at) {
+                    Ok(at)
+                } else {
+                    Err(not_on_screen())
+                };
+            }
             // The innermost scroll view whose bounds leave the middle out,
-            // else the outermost one when the window does.
+            // or near their edge (where a finger does not press and bars,
+            // the home indicator and fades sit), else the outermost one
+            // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
                 let b = self.native.bounds(scroller)?;
-                (!b.contains(&at)).then_some((scroller, horizontal, b))
+                (!well_inside(&b, at)).then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
-                (!window.contains(&at))
+                (!well_inside(&window, at))
                     .then(|| scrollers.last())
                     .flatten()
                     .and_then(|&(s, h)| Some((s, h, self.native.bounds(s)?)))
@@ -443,7 +777,8 @@ impl Agent {
             } else {
                 (at.y.0 - middle.y.0, scroller.size.height.0)
             };
-            let step = distance.clamp(-extent * 0.8, extent * 0.8);
+            // From the middle, so a finger dragging it stays inside it.
+            let step = distance.clamp(-extent * 0.4, extent * 0.4);
             let delta = if horizontal {
                 Point::new(Points(step), Points(0.0))
             } else {
@@ -451,6 +786,7 @@ impl Agent {
             };
             self.native.scroll(middle, delta);
             self.settled()?;
+            before = Some(at);
         }
         Err(format!(
             "`{selector}` did not come into view; {}",
@@ -459,21 +795,16 @@ impl Agent {
     }
 
     fn press(&self, selector: &str) -> Result<(), String> {
-        let (_, at) = self.find(selector, "pressable view", |s, p| s.pressable(p))?;
+        let (_, at) = self.find(selector, "pressable view", PickTarget::Pressable)?;
         self.native.press(at);
         self.settled()
     }
 
     fn long_press(&self, selector: &str) -> Result<(), String> {
-        let (id, at) = self.find(selector, "pressable view", |s, p| s.long_pressable(p))?;
-        let hold = self
-            .model
-            .lock()
-            .screen
-            .long_press_delay(id)
-            .map_or(LONG_PRESS, |ms| {
-                Duration::from_secs_f64(f64::from(ms.max(0.0)) / 1000.0)
-            });
+        let (id, at) = self.find(selector, "pressable view", PickTarget::LongPressable)?;
+        let hold = self.scene.long_press_delay(id)?.map_or(LONG_PRESS, |ms| {
+            Duration::from_secs_f64(f64::from(ms.max(0.0)) / 1000.0)
+        });
         // A little past the delay, as a finger holds on.
         self.native
             .long_press(at, hold + Duration::from_millis(100));
@@ -482,7 +813,7 @@ impl Agent {
 
     /// Focuses the input `selector` names by pressing it.
     fn focus(&self, selector: &str) -> Result<(), String> {
-        let (_, at) = self.find(selector, "input", |s, p| s.input_view(p))?;
+        let (_, at) = self.find(selector, "input", PickTarget::Input)?;
         self.native.press(at);
         self.settled()
     }
@@ -515,13 +846,8 @@ impl Agent {
     }
 
     fn scroll(&self, selector: &str, distance: f32) -> Result<(), String> {
-        let (id, at) = self.find(selector, "scroll view", |s, p| s.scroll_view(p))?;
-        let horizontal = self
-            .model
-            .lock()
-            .screen
-            .scroll(id)
-            .is_some_and(|s| s.horizontal);
+        let (id, at) = self.find(selector, "scroll view", PickTarget::ScrollView)?;
+        let horizontal = self.scene.horizontal(id)?;
         let delta = if horizontal {
             Point::new(Points(distance), Points(0.0))
         } else {
@@ -532,11 +858,11 @@ impl Agent {
     }
 
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String> {
-        if self.model.lock().screen.pending_dialog().is_none() {
+        if self.scene.pending_dialog()?.is_none() {
             return Err("no dialog to answer".into());
         }
         self.native.answer_dialog(button)?;
-        self.model.lock().screen.answered();
+        self.scene.answered()?;
         self.settled()
     }
 
@@ -544,10 +870,8 @@ impl Agent {
         Selector::parse(selector)?;
         let deadline = Instant::now() + timeout;
         loop {
-            let (holds, seen) = {
-                let state = self.model.lock();
-                (state.screen.matches(selector)? != gone, state.batches)
-            };
+            let seen = self.scene.activity()?.batches;
+            let holds = self.scene.matches(selector)? != gone;
             self.check()?;
             if holds {
                 return Ok(());
@@ -561,40 +885,59 @@ impl Agent {
                     self.on_screen()
                 ));
             }
-            drop(self.model.wait_for_batch(seen, left.min(POLL * 5)));
+            self.scene.wait_for_batch(seen, left.min(POLL * 5));
         }
     }
 
     /// Waits until the app is quiet ([`QUIET`], no native animation),
     /// [`SETTLE`] at most, then fails if it threw meanwhile.
     fn settled(&self) -> Result<(), String> {
-        let end = Instant::now() + SETTLE;
         let start = Instant::now();
+        // When an animation last ran: what it ends with (a screen popped
+        // once it slid out) comes after it.
+        let mut moved = start;
+        let mut first = None;
         loop {
-            let (last, seen) = {
-                let state = self.model.lock();
-                (state.last.unwrap_or(start).max(start), state.batches)
-            };
-            let now = Instant::now();
-            if now >= last + QUIET && !self.native.animating() || now >= end {
+            let activity = self.scene.activity()?;
+            let first = *first.get_or_insert(activity.batches);
+            if self.native.animating() {
+                moved = Instant::now();
+            }
+            // Quiet since the step began, the last batch and the last
+            // animation.
+            let since = activity
+                .since_last
+                .map_or(start.elapsed(), |d| d.min(start.elapsed()))
+                .min(moved.elapsed());
+            if since >= QUIET {
                 break;
             }
-            drop(self.model.wait_for_batch(seen, POLL));
+            if start.elapsed() >= SETTLE {
+                // The step goes on all the same; why it waited this long
+                // tells why a run is slow.
+                log::info!(
+                    "test agent: the app did not settle in {} s: {} batches came, an animation ran {} ms ago",
+                    SETTLE.as_secs(),
+                    activity.batches - first,
+                    moved.elapsed().as_millis()
+                );
+                break;
+            }
+            self.scene.wait_for_batch(activity.batches, POLL);
         }
         self.check()
     }
 
     /// Fails with the app's first error since the last look.
     fn check(&self) -> Result<(), String> {
-        let errors = std::mem::take(&mut self.model.lock().errors);
-        match errors.into_iter().next() {
+        match self.scene.take_errors()?.into_iter().next() {
             Some(error) => Err(format!("the app threw: {error}")),
             None => Ok(()),
         }
     }
 
     fn on_screen(&self) -> String {
-        format!("on screen: {:?}", self.model.lock().screen.texts())
+        format!("on screen: {:?}", self.scene.texts().unwrap_or_default())
     }
 }
 

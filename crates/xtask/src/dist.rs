@@ -135,7 +135,7 @@ pub(crate) fn dist() -> anyhow::Result<()> {
     // source and hot updates). Both build to the same file, copied in turn.
     for (features, file) in [
         (&["--features", "bytecode-only"][..], "nsh.wasm"),
-        (&[][..], "nsh-dev.wasm"),
+        (&["--features", "dev"][..], "nsh-dev.wasm"),
     ] {
         let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         web.current_dir(&root)

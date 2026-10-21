@@ -296,6 +296,88 @@ pub enum TestStep {
     },
     /// Closes the app: the host exits.
     Quit,
+    /// A question about the host's model of the app or about its views,
+    /// from a test agent that runs elsewhere (the web: `nsh` acts through
+    /// the browser, the page knows the app).
+    Scene {
+        /// The question.
+        query: SceneQuery,
+    },
+}
+
+/// What a test agent that runs outside the host asks of it
+/// ([`TestStep::Scene`]); the answers' shapes are `nsh_testing::agent`'s.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "query", rename_all = "snake_case")]
+pub enum SceneQuery {
+    /// How many batches the app applied and how long ago the last was.
+    Activity,
+    /// The app's errors since the last time, taken.
+    TakeErrors,
+    /// The one view `selector` names for a step on `target`.
+    Pick {
+        /// The selector.
+        selector: String,
+        /// What the step acts on.
+        target: PickTarget,
+    },
+    /// The scroll views around view `id`, innermost first.
+    ScrollAncestors {
+        /// The view.
+        id: u32,
+    },
+    /// View `id`'s long press delay in milliseconds, if it says.
+    LongPressDelay {
+        /// The view.
+        id: u32,
+    },
+    /// Whether scroll view `id` scrolls horizontally.
+    Horizontal {
+        /// The view.
+        id: u32,
+    },
+    /// The input `selector` names.
+    InputId {
+        /// The selector.
+        selector: String,
+    },
+    /// The oldest dialog was answered.
+    Answered,
+    /// View `id`'s bounds on screen, in points from the viewport's top left.
+    Bounds {
+        /// The view.
+        id: u32,
+    },
+    /// The viewport's size in points.
+    Viewport,
+    /// The text input `id` holds.
+    InputText {
+        /// The view.
+        id: u32,
+    },
+    /// Whether a native animation runs.
+    Animating,
+    /// Where to press to answer the dialog shown: its button `button`, or
+    /// outside it (`None`).
+    DialogPoint {
+        /// The button's text.
+        button: Option<String>,
+    },
+}
+
+/// What a step acts on, which decides the view a selector names
+/// ([`SceneQuery::Pick`]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PickTarget {
+    /// A press: the view, or the nearest around it that hears presses.
+    Pressable,
+    /// A long press.
+    LongPressable,
+    /// An input.
+    Input,
+    /// A scroll view.
+    ScrollView,
 }
 
 /// How a [`TestStep`] ended.

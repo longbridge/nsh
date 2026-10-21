@@ -107,9 +107,6 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     }
     // `open -a <App> --args --fps` shows the performance monitor.
     options.fps = std::env::args().any(|arg| arg == "--fps");
-    // `--script` steps (screenshots, simulated input) for checks
-    // (`nsh run --script`).
-    options.script = std::env::var("NSH_SCRIPT").ok();
     (dir, options)
 }
 

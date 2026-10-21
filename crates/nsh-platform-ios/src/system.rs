@@ -218,6 +218,48 @@ pub(crate) fn show_dialog(dialog: &Dialog, view: &UIView, control: &EngineContro
     top.presentViewController_animated_completion(&alert, true, None);
 }
 
+/// Where a user taps to answer the alert shown over `window`: the middle
+/// of its button titled `button` (window points), or `None`'s: an action
+/// sheet's popover closes with a tap outside it.
+#[cfg(feature = "dev")]
+pub(crate) fn dialog_point(
+    window: &objc2_ui_kit::UIWindow,
+    button: Option<&str>,
+) -> Result<(f64, f64), String> {
+    let mut top = window.rootViewController().ok_or("no dialog is shown")?;
+    while let Some(next) = top.presentedViewController() {
+        top = next;
+    }
+    let alert = top
+        .downcast::<UIAlertController>()
+        .map_err(|_| "no dialog is shown")?;
+    let Some(text) = button else {
+        if alert.popoverPresentationController().is_some() {
+            return Ok((2.0, 2.0));
+        }
+        return Err("the dialog can only be answered with a button".into());
+    };
+    let view = alert.view().ok_or("the dialog shows nothing")?;
+    let label =
+        find_label(&view, text).ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+    let r = label.convertRect_toView(label.bounds(), Some(window));
+    Ok((
+        r.origin.x + r.size.width / 2.0,
+        r.origin.y + r.size.height / 2.0,
+    ))
+}
+
+/// The label showing `text` in `view`'s subtree.
+#[cfg(feature = "dev")]
+fn find_label(view: &UIView, text: &str) -> Option<Retained<objc2_ui_kit::UILabel>> {
+    if let Some(label) = view.downcast_ref::<objc2_ui_kit::UILabel>()
+        && label.text().is_some_and(|t| t.to_string() == text)
+    {
+        return Some(objc2::Message::retain(label));
+    }
+    view.subviews().iter().find_map(|v| find_label(&v, text))
+}
+
 /// `Clipboard.setString`: puts `text` on the general pasteboard.
 pub(crate) fn set_clipboard(text: &str) {
     // SAFETY: a plain setter of the general pasteboard.

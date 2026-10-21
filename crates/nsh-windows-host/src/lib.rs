@@ -5,12 +5,10 @@
 //! - `nsh-windows-host --bundle <path> [--trace]` runs a built bundle (`.nshc`
 //!   is QuickJS bytecode, anything else JS source).
 //!
-//! - `--script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png;
-//!   quit"` runs steps once the window shows: screenshots rendered
-//!   offscreen and simulated input, to check the backend without touching
-//!   the screen.
 //! - `--window-size 390x844` sets the window size in points (default 1200x800,
 //!   wide enough for desktop layouts such as the gallery's sidebar).
+//! - `--data-dir <dir>` keeps the apps' data there instead of the system's
+//!   data directory (`nsh test --target` gives each app a fresh one).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
 //!   is kept under the id its bundle carries, in the system's data
@@ -63,9 +61,9 @@ pub fn main() -> std::process::ExitCode {
                     options.app_id = id;
                 }
             }
-            // Steps run once the window shows (`nsh_platform_windows`'s
-            // `script` module): offscreen screenshots and simulated input.
-            "--script" => options.script = args.next(),
+            // Where apps keep their data (`nsh test --target` gives each app
+            // a fresh one); the system's data directory otherwise.
+            "--data-dir" => options.data_dir = args.next().map(PathBuf::from),
             "--window-size" => match args.next().as_deref().and_then(parse_size) {
                 Some(size) => options.size = size,
                 None => log::warn!("--window-size takes <width>x<height> in points, as 390x844"),

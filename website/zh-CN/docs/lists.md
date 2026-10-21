@@ -1,6 +1,6 @@
 ---
 title: 列表
-description: 用 nsh/list 的 List 渲染长列表和无限列表：复用、条目标识、多列、吸顶标题、倒置的聊天列表、横向列表、加载更多、可见性，以及滚动到指定条目。
+description: 用 Rust 和 TSX 渲染长列表和无限列表：复用、行标识、多列、吸顶标题、倒置的聊天列表、横向列表、加载更多、可见性，以及滚动到指定条目。
 order: 40
 group: ui
 demo: guide-lists
@@ -8,11 +8,32 @@ demo: guide-lists
 
 # 列表
 
-`nsh/list` 中的 `List` 在原生滚动视图上渲染长数据，但只创建屏幕附近的行。哪些行存在、放在哪里、多列布局、吸顶标题以及哪些条目可见，全部由原生计算；只有当原生端要一个单元格时，你的 JS 才去填充内容。一百万条的列表，开销和三十条的差不多。
+列表（Rust 中的 `virtual_list(..)`，TSX 中 `nsh` 的 `List`）在原生滚动视图上渲染长数据，但只创建屏幕附近的行。哪些行存在、放在哪里、多列布局、吸顶标题以及哪些条目可见，全部由原生计算；只有当原生端要一个单元格时，你的代码才去填充内容。一百万条的列表，开销和三十条的差不多。
 
-```tsx
-import { mount, Text, View } from "nsh";
-import { List } from "nsh/list";
+```rust tabs
+use std::rc::Rc;
+
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let titles: Rc<Vec<String>> = Rc::new((1..=10_000).map(|i| format!("Item {i}")).collect());
+    virtual_list(titles.len(), move |at| {
+        let titles = titles.clone();
+        view()
+            .p_4()
+            .border_b_1()
+            .border_b_color(rgb(0xeaeef2))
+            .child(text(move || titles[at.index()].clone()).text_size(px(16.0)))
+    })
+    .estimated_item_size(px(52.0))
+    .flex_1()
+    .bg(white())
+}
+```
+
+```tsx tabs
+import { List, mount, Text, View } from "nsh";
 
 const items = Array.from({ length: 10_000 }, (_, i) => ({ id: i, title: `Item ${i + 1}` }));
 
@@ -31,17 +52,31 @@ function App() {
 mount(App);
 ```
 
-和 [`<Scroll>`](./scrolling.md) 一样，列表本身是视口，需要父元素给出尺寸（`flex: 1` 或一个高度）。
+在 Rust 中，`virtual_list(count, row)` 接收行数（一个值、一个 signal 或一个闭包）和一个根据位置（`at.index()`）构建行的函数；行按这个索引读取你的数据。在 TSX 中，`each` 接收条目，行函数拿到条目。和[滚动视图](./scrolling.md)一样，列表本身是视口，需要父元素给出尺寸（`.flex_1()`、`flex: 1` 或一个高度）。
 
 ## 复用是如何工作的
 
-行函数不是每个条目调用一次，而是**每个单元格**调用一次，并且单元格会被复用：某一行滚出屏幕足够远后，它的单元格会被分配给另一个条目，`item()` 和 `index()` 随之改变。行中读取它们的地方都会原地更新，就像其他任何 [signal](./reactivity.md) 一样。
+行函数不是每个条目调用一次，而是**每个单元格**调用一次，并且单元格会被复用：某一行滚出屏幕足够远后，它的单元格会被分配给另一行，它的位置（Rust 中的 `at.index()`，TSX 中的 `item()` 和 `index()`）随之改变。行中读取位置的地方都会原地更新，就像其他任何 [signal](./reactivity.md) 一样。
 
 由此得出两条规则：
 
-**在用到的地方读取 `item()`。** 在行函数开头复制出来的值，只属于这个单元格第一次显示的那个条目。
+**在用到的地方读取位置。** 在行函数开头复制出来的值，只属于这个单元格第一次显示的那一行。
 
-```tsx
+```rust tabs
+// 错误：单元格被复用后，`title` 仍是第一行的标题。
+virtual_list(count, move |at| {
+    let title = titles[at.index()].clone();
+    text(title)
+})
+
+// 正确：文本跟随单元格当前的行。
+virtual_list(count, move |at| {
+    let titles = titles.clone();
+    text(move || titles[at.index()].clone())
+})
+```
+
+```tsx tabs
 // 错误：单元格被复用后，`title` 仍是第一个条目的标题。
 {(item) => {
   const title = item().title;
@@ -52,9 +87,34 @@ mount(App);
 {(item) => <Text>{item().title}</Text>}
 ```
 
-**把每个条目的状态放在数据里，而不是行里。** 在行内创建的 signal 属于单元格，会跟着它去到下一个条目。"这一行是否展开 / 选中 / 点赞" 应该存放在条目中，或存放在以 id 为键的映射里：
+**把每个条目的状态放在数据里，而不是行里。** 在行内创建的 signal 属于单元格，会跟着它去到下一个条目。"这一行是否展开 / 选中 / 点赞" 应该存放在条目中，或存放在以 id 为键的集合里：
 
-```tsx
+```rust tabs
+let liked = signal(HashSet::<u32>::new());
+let toggle = move |id: u32| {
+    liked.update(|s| {
+        if !s.remove(&id) {
+            s.insert(id);
+        }
+    })
+};
+
+virtual_list(move || posts.with(Vec::len), move |at| {
+    let post = computed(move || posts.with(|p| p[at.index()].clone()));
+    view()
+        .flex_row()
+        .p_4()
+        .child(text(move || post.with(|p| p.title.clone())).flex_1())
+        .child(
+            text(move || if liked.with(|s| s.contains(&post.with(|p| p.id))) { "♥" } else { "♡" })
+                .on_press(move || toggle(post.with(|p| p.id))),
+        )
+})
+.estimated_item_size(px(64.0))
+.flex_1()
+```
+
+```tsx tabs
 const liked = signal<Set<number>>(new Set());
 const toggle = (id: number) =>
   liked.update((s) => {
@@ -73,54 +133,73 @@ const toggle = (id: number) =>
 </List>
 ```
 
-各行可以高度不同。在测量之前，列表假定行高为 `estimatedItemSize`（默认 50 点）；传入接近典型行高的值，滚动条和跳转到远处条目从一开始就会比较准确。
+各行可以高度不同。在测量之前，列表假定行高为预估尺寸（默认 50 点）；传入接近典型行高的值，滚动条和跳转到远处条目从一开始就会比较准确。
 
 ## 修改数据
 
-传入新数组即可改变条目：`posts.set([...posts(), ...more])`。列表会**按条目标识**（`===`）比较新旧数组，保留相同的开头和结尾，中间部分视为删除和插入。测量结果跟随各自的条目；在屏幕上可见的行之上插入条目时，可见行保持原位，不会跳动。
+在 Rust 中，把行数写成 signal 或闭包（`move || posts.with(Vec::len)`）：列表会原地增长和收缩。只在末尾增删的行不需要做别的；在其他位置增删行时，用 `.keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))` 给出各行的标识，列表会保留相同的开头和结尾，中间部分视为删除和插入。
 
-- 用不可变的方式更新：新数组，未改变的条目对象原样复用。原地修改数组（`push`）不会被察觉。
+在 TSX 中，传入新数组即可改变条目：`posts.set([...posts(), ...more])`。列表会**按条目标识**（`===`）比较新旧数组，保留相同的开头和结尾，中间部分视为删除和插入。
+
+两种方式下，测量结果都跟随各自的行；在屏幕上可见的行之上插入行时，可见行保持原位，不会跳动。
+
+- 在 TSX 中用不可变的方式更新：新数组，未改变的条目对象原样复用。原地修改数组（`push`）不会被察觉。
 - 改动过的条目应是一个新对象（`{ ...post, title }`），这样它的行才会显示变化。
 - 在前面插入（新消息、刷新后的信息流）会保留用户的阅读位置。
 
-`keyExtractor` 为可见性回调中的条目命名（见下文）；默认依次取 `item.key`、`item.id`、索引。它不影响改动的匹配方式，匹配总是按标识进行。
+`keyExtractor` 为可见性回调中的条目命名（见下文）；默认依次取 `item.key`、`item.id`、索引。在 TSX 中它不影响改动的匹配方式，匹配总是按标识进行。
 
 ## 属性
 
-`List` 接受 `<Scroll>` 中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollEnabled`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollBeginDrag`、`onScrollEndDrag`、`onMomentumScrollBegin`、`onMomentumScrollEnd`、`onScrollEnd`、`scrollValue`），说明见[滚动](./scrolling.md)。列表不能缩放。它自己的属性：
+列表接受滚动视图中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollEnabled`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollBeginDrag`、`onScrollEndDrag`、`onMomentumScrollBegin`、`onMomentumScrollEnd`、`onScrollEnd`、`scrollValue`；在 Rust 中是与滚动视图相同的方法），说明见[滚动](./scrolling.md)。列表保持 1 倍缩放。它自己的属性：
 
-| 属性 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `each` | `readonly T[]` | | 条目。 |
-| `children` | `(item: () => T, index: () => number) => JSX.Element` | | 渲染一个单元格；每个单元格调用一次，见[复用](#复用是如何工作的)。 |
-| `estimatedItemSize` | `number` | `50` | 尚未测量的行的尺寸，单位为点。 |
-| `horizontal` | `boolean` | `false` | 横向滚动。 |
-| `numColumns` | `number` | `1` | 每行的条目数（纵向列表）。 |
-| `inverted` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
-| `stickyHeaderIndices` | `number[]` | | 滚过时吸附在顶部的条目（单列且非倒置）。 |
-| `contentStyle` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
-| `contentClass` | `string` | | 同上，写成类名（`p-*`、`gap-*`）；`contentStyle` 优先。 |
-| `header` | 组件或元素 | | 在条目之前。 |
-| `footer` | 组件或元素 | | 在条目之后。 |
-| `empty` | 组件或元素 | | `each` 为空时代替条目显示。 |
-| `separator` | 组件或元素 | | 条目之间（单列）。 |
-| `initialScrollIndex` | `number` | | 第一帧之前滚动到该条目。 |
-| `onEndReached` | `() => void` | | 接近末尾（见下文）。 |
-| `onEndReachedThreshold` | `number` | `1` | 距离末尾多少个视口时触发 `onEndReached`。 |
-| `onViewableItemsChanged` | `(info) => void` | | 有条目变为可见或不再可见。 |
-| `viewabilityConfig` | `ViewabilityConfig` | | 什么情况下条目算作可见。 |
-| `keyExtractor` | `(item, index) => string` | | 可见性回调中的键。 |
-| `refreshing` / `onRefresh` | `boolean` / `() => void` | | 下拉刷新。 |
-| `showsIndicator` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
-| `ref` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `each` | `virtual_list(count, ..)` | `readonly T[]` | | 条目；在 Rust 中是行数。 |
+| `children` | `virtual_list(.., row)` | `(item: () => T, index: () => number) => JSX.Element` | | 渲染一个单元格；每个单元格调用一次，见[复用](#复用是如何工作的)。 |
+| `estimatedItemSize` | `.estimated_item_size(px(..))` | `number` | `50` | 尚未测量的行的尺寸，单位为点。 |
+| `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
+| `numColumns` | `.columns(n)` | `number` | `1` | 每行的条目数（纵向列表）。 |
+| `inverted` | `.inverted()` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
+| `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | 非倒置列表在距离末尾不超过该点数时，随内容增长停留在末尾（见下文）。 |
+| `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | 滚过时吸附在顶部的条目（单列且非倒置）。 |
+| `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)` 等、`.row_gap(..)`、`.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | 内容的内边距和间距，只接受数字。 |
+| `contentClass` | | `string` | | 同上，写成类名（`p-*`、`gap-*`）；`contentStyle` 优先。 |
+| `header` | `.header(..)` | 组件或元素 | | 在条目之前。 |
+| `footer` | `.footer(..)` | 组件或元素 | | 在条目之后。 |
+| `empty` | `.empty(..)` | 组件或元素 | | 没有条目时代替条目显示。 |
+| `separator` | `.separator(\|\| ..)` | 组件或元素 | | 条目之间（单列）。 |
+| `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前滚动到该条目。 |
+| `onEndReached` | `.on_end_reached(..)` | `() => void` | | 接近末尾（见下文）。 |
+| `onEndReachedThreshold` | `.end_reached_threshold(..)` | `number` | `1` | 距离末尾多少个视口时触发 `onEndReached`。 |
+| `onViewableItemsChanged` | `.on_viewable_items_changed(..)` | `(info) => void` | | 有条目变为可见或不再可见。 |
+| `viewabilityConfig` | `.viewability(..)`、`.minimum_view_time(..)` | `ViewabilityConfig` | | 什么情况下条目算作可见。 |
+| `keyExtractor` | `.keys(..)` | `(item, index) => string` | | 可见性回调中的键；在 Rust 中是各行的标识。 |
+| `refreshing` / `onRefresh` | `.refreshing(..)` / `.on_refresh(..)` | `boolean` / `() => void` | | 下拉刷新。 |
+| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
+| `ref` | `.element_ref(&list)` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
-头部、尾部和空状态插槽接受组件（`header={Header}`）或元素（`header={<Header />}`）。它们是独立的单元格，从不被复用，并且和其他 JSX 一样是响应式的。
+头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的。
 
 ## 多列与网格
 
-`numColumns` 把条目排成每行若干列；`contentStyle` 为内容四周添加内边距，并设置行间距（`rowGap`）、列间距（`columnGap`）或两者（`gap`）。网格中各行的高度可以不同：每行与其中最高的条目一样高。
+`numColumns`（`.columns(n)`）把条目排成每行若干列；内容内边距添加在内容四周，并设置行间距和列间距。网格中各行的高度可以不同：每行与其中最高的条目一样高。
 
-```tsx
+```rust tabs
+let count = photos.len();
+virtual_list(count, move |at| {
+    let photos = photos.clone();
+    image(move || photos[at.index()].thumb.clone()).aspect_square().rounded(px(8.0))
+})
+.columns(3)
+.estimated_item_size(px(120.0))
+.content_padding(px(12.0))
+.row_gap(px(8.0))
+.column_gap(px(8.0))
+.flex_1()
+```
+
+```tsx tabs
 <List
   each={photos}
   numColumns={3}
@@ -136,7 +215,41 @@ const toggle = (id: number) =>
 
 `stickyHeaderIndices` 列出的条目在内容滚过时吸附在视口顶部，直到下一个吸顶条目把它推出去。分组列表就是一个由标题条目和普通行组成的列表，标题的索引设为吸顶。吸附在每一帧滚动时由原生完成。
 
-```tsx
+```rust tabs
+#[derive(Clone, PartialEq)]
+enum Row {
+    Header(String),
+    Name(String),
+}
+
+let mut rows = Vec::new();
+let mut headers = Vec::new();
+for (letter, names) in groups {
+    headers.push(rows.len());
+    rows.push(Row::Header(letter));
+    rows.extend(names.into_iter().map(Row::Name));
+}
+let count = rows.len();
+let rows = Rc::new(rows);
+
+virtual_list(count, move |at| {
+    let rows = rows.clone();
+    let row = computed(move || rows[at.index()].clone());
+    let is_header = computed(move || matches!(row.get(), Row::Header(_)));
+    let label = move || match row.get() {
+        Row::Header(s) | Row::Name(s) => s,
+    };
+    when(is_header, move || {
+        text(label).p(px(6.0)).bg(rgb(0xeaeef2)).font_weight(FontWeight::BOLD)
+    })
+    .otherwise(move || text(label).p_3())
+})
+.sticky_header_indices(headers)
+.estimated_item_size(px(44.0))
+.flex_1()
+```
+
+```tsx tabs
 type Row = { header: string } | { name: string };
 
 const rows: Row[] = [];
@@ -159,15 +272,105 @@ for (const [letter, names] of groups) {
 </List>
 ```
 
-同一个单元格可能这会儿显示标题、过一会儿显示名字，所以行用 [`<If>`](../elements/control-flow.md) 决定渲染什么，它会在条目改变时切换。吸顶标题要求单列且列表不倒置。
+同一个单元格可能这会儿显示标题、过一会儿显示名字，所以行用 [`when` / `<If>`](../elements/control-flow.md) 决定渲染什么，它会在行改变时切换。吸顶标题要求单列且列表不倒置。
 
 ## 聊天：倒置列表
 
-`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在数组最前面；添加消息时插到前面，用 `onEndReached` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。
+`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面；添加消息时插到前面，用 `onEndReached` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。
 
-```tsx
-import { Input, mount, signal, Text, View } from "nsh";
-import { List } from "nsh/list";
+```rust tabs
+use nsh_base::keyboard_avoiding_view;
+
+#[derive(Clone, PartialEq)]
+struct Message {
+    id: u32,
+    text: String,
+    mine: bool,
+}
+
+pub fn chat() -> impl IntoElement {
+    let next = stored(0_u32);
+    let message = move |text: String, mine: bool| Message {
+        id: next.with(|n| {
+            *n += 1;
+            *n
+        }),
+        text,
+        mine,
+    };
+    // 最新的在最前。
+    let messages = signal(
+        (0..30)
+            .map(|i| message(format!("Message {}", 30 - i), i % 3 == 0))
+            .collect::<Vec<_>>(),
+    );
+    let draft = signal(String::new());
+    let send = move || {
+        let text = draft.get_untracked();
+        if text.trim().is_empty() {
+            return;
+        }
+        let sent = message(text, true);
+        messages.update(|m| m.insert(0, sent));
+        draft.set(String::new());
+    };
+    let load_older = move || {
+        let older: Vec<_> = (0..20).map(|i| message(format!("Older {i}"), false)).collect();
+        messages.update(|m| m.extend(older));
+    };
+    let list = virtual_list(
+        move || messages.with(Vec::len),
+        move |at| {
+            let mine = computed(move || messages.with(|m| m[at.index()].mine));
+            view()
+                .style_when(mine, |s| s.self_end().bg(rgb(0x0969da)))
+                .style_when(move || !mine.get(), |s| s.self_start().bg(rgb(0xeaeef2)))
+                .max_w(relative(0.75))
+                .px_3()
+                .py_2()
+                .rounded(px(14.0))
+                .child(
+                    text(move || messages.with(|m| m[at.index()].text.clone()))
+                        .text_color(move || if mine.get() { rgb(0xffffff) } else { rgb(0x1f2328) }),
+                )
+        },
+    )
+    .keys(move || messages.with(|m| m.iter().map(|m| m.id).collect::<Vec<_>>()))
+    .inverted()
+    .estimated_item_size(px(44.0))
+    .content_padding(px(12.0))
+    .row_gap(px(6.0))
+    .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+    .on_end_reached(load_older)
+    .end_reached_threshold(0.5)
+    .flex_1();
+    keyboard_avoiding_view()
+        .flex_1()
+        .child(list)
+        .child(
+            view().flex_row().gap_2().p_2().child(
+                input()
+                    .value(move || draft.get())
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |_: &str| send())
+                    .multiline(true)
+                    .submit_behavior(SubmitBehavior::Submit)
+                    .return_key_type(ReturnKeyType::Send)
+                    .placeholder("Message")
+                    .flex_1()
+                    .max_h(px(120.0))
+                    .border_1()
+                    .border_color(rgb(0xd0d7de))
+                    .rounded(px(18.0))
+                    .px_3()
+                    .py_2(),
+            ),
+        )
+}
+```
+
+```tsx tabs
+import { Input, List, mount, signal, Text, View } from "nsh";
 import { KeyboardAvoidingView } from "nsh/base";
 
 type Message = { id: number; text: string; mine: boolean };
@@ -229,13 +432,50 @@ function Chat() {
 mount(Chat);
 ```
 
-在倒置列表上调用 `scrollToEnd()` 会滚动到它的开头，也就是最新的消息。
+在倒置列表上调用 `scroll_to_end(..)` / `scrollToEnd()` 会滚动到它的开头，也就是最新的消息。
+
+### 让非倒置列表跟随末尾
+
+按阅读顺序排列（最早的在前）的列表也可以跟随末尾：在 Rust 中用 `.follow_end(px(40.0))`，在 TSX 中用 `maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}`，当用户停在末尾（或距离末尾不超过 40 点）时，列表会随内容增长停留在末尾：流式写入最后一项的回复、追加的新消息、键盘让列表变矮。用户往上滚得更远时，可见内容保持不动，新内容在其下方增长。在可见条目之上插入的条目从不会移动它们，无论是否设置该选项。
+
+```rust tabs
+virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))
+    .keys(move || messages.with(|m| m.iter().map(|m| m.id).collect::<Vec<_>>()))
+    .follow_end(px(40.0))
+    .flex_1()
+```
+
+```tsx tabs
+<List each={messages()} keyExtractor={(m) => m.id} maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }} style={{ flex: 1 }}>
+  {(m) => <Bubble message={m()} />}
+</List>
+```
 
 ## 横向列表
 
 `horizontal` 让列表横向排列；单元格按列表的高度排版。配合吸附可以做出任意长度的轮播：
 
-```tsx
+```rust tabs
+let count = cards.len();
+virtual_list(count, move |at| {
+    let cards = cards.clone();
+    view()
+        .w(px(220.0))
+        .h(px(140.0))
+        .rounded(px(14.0))
+        .bg(move || cards[at.index()].color)
+})
+.horizontal()
+.estimated_item_size(px(232.0))
+.snap_interval(px(232.0))
+.deceleration(0.99)
+.shows_indicator(false)
+.content_padding_x(px(16.0))
+.column_gap(px(12.0))
+.h(px(140.0))
+```
+
+```tsx tabs
 <List
   each={cards}
   horizontal
@@ -254,9 +494,40 @@ mount(Chat);
 
 ## 加载更多：onEndReached
 
-当视口距离末尾不到 `onEndReachedThreshold` 个视口时（默认 1：提前一屏），触发 `onEndReached`。追加下一页数据；新的末尾临近时会再次触发。
+当视口距离末尾不到 `onEndReachedThreshold` 个视口时（默认 1：提前一屏），触发 `onEndReached`（`.on_end_reached(..)`）。追加下一页数据；新的末尾临近时会再次触发。
 
-```tsx
+```rust tabs
+let posts = signal(Vec::<Post>::new());
+let page = stored(0_u32);
+let loading = stored(false);
+
+let load_more = move || {
+    if loading.replace(true) {
+        return;
+    }
+    let next = page.with(|p| {
+        *p += 1;
+        *p
+    });
+    spawn(async move {
+        if let Ok(response) = fetch(format!("https://api.example.com/posts?page={next}")).await {
+            let more = parse_posts(&response.text());
+            posts.update(|p| p.extend(more));
+        }
+        loading.replace(false);
+    });
+};
+load_more();
+
+virtual_list(move || posts.with(Vec::len), move |at| post_row(posts, at))
+    .estimated_item_size(px(72.0))
+    .on_end_reached(load_more)
+    .end_reached_threshold(0.5)
+    .footer(text("Loading…").p_4().text_center().text_color(rgb(0x8c959f)))
+    .flex_1()
+```
+
+```tsx tabs
 const posts = signal<Post[]>([]);
 let loading = false;
 let page = 0;
@@ -289,17 +560,33 @@ loadMore();
 
 ## 可见性
 
-`onViewableItemsChanged` 报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组。可见性由原生计算，JS 只在变化时收到通知。
+`onViewableItemsChanged`（`.on_viewable_items_changed(..)`）报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。在 TSX 中它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组；在 Rust 中它收到 `ViewableItems`，包含第一个和最后一个可见行（`viewable`）以及状态发生变化的行（`changed()`）。可见性由原生计算，你的代码只在变化时收到通知。
 
-| `viewabilityConfig` | 说明 |
-|---|---|
-| `itemVisiblePercentThreshold` | 条目必须可见的百分比。 |
-| `viewAreaCoveragePercentThreshold` | 条目必须覆盖视口的百分比。 |
-| `minimumViewTime` | 条目保持可见多少毫秒后才被报告。 |
+| `viewabilityConfig` | Rust | 说明 |
+|---|---|---|
+| `itemVisiblePercentThreshold` | `Viewability { item_visible_percent, .. }` | 条目必须可见的百分比。 |
+| `viewAreaCoveragePercentThreshold` | `Viewability { view_area_percent, .. }` | 条目必须覆盖视口的百分比。 |
+| `minimumViewTime` | `.minimum_view_time(Duration)` | 条目保持可见多少毫秒后才被报告。 |
 
 不设阈值时，只要有一个像素可见就算可见。
 
-```tsx
+```rust tabs
+let playing = signal(None::<usize>);
+
+virtual_list(count, move |at| video_card(videos.clone(), at))
+    .estimated_item_size(px(300.0))
+    .viewability(Viewability {
+        item_visible_percent: Some(60.0),
+        ..Viewability::default()
+    })
+    .minimum_view_time(Duration::from_millis(250))
+    .on_viewable_items_changed(move |rows: &ViewableItems| {
+        playing.set(rows.viewable.map(|(first, _)| first))
+    })
+    .flex_1()
+```
+
+```tsx tabs
 <List
   each={videos}
   estimatedItemSize={300}
@@ -314,18 +601,25 @@ loadMore();
 
 ## 从代码滚动
 
-给列表设置 `ref`：
+给列表设置 ref（Rust 中用 `element_ref()` 和 `.element_ref(&list)`，TSX 中用 `ref`）：
 
-| 方法 | 说明 |
-|---|---|
-| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | 把第 `index` 项滚动到可见。`viewPosition` 决定位置：0 在视口开头（默认），0.5 在中间，1 在末尾；`viewOffset` 再额外偏移。 |
-| `scrollToOffset({ offset, animated? })` | 沿列表主轴滚动到内容偏移处。 |
-| `scrollToEnd({ animated? })` | 滚动到内容末尾（倒置列表则是开头）。 |
-| `scrollTo({ x?, y?, animated? })` | 滚动到某个偏移，与 `<Scroll>` 相同。 |
+| Rust | TSX | 说明 |
+|---|---|---|
+| `scroll_to_index(index, view_position, view_offset, animated)` | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | 把第 `index` 项滚动到可见。视图位置决定它在哪里：0 在视口开头（默认），0.5 在中间，1 在末尾；视图偏移再额外偏移。 |
+| `scroll_to_offset(offset, animated)` | `scrollToOffset({ offset, animated? })` | 沿列表主轴滚动到内容偏移处。 |
+| `scroll_to_end(animated)` | `scrollToEnd({ animated? })` | 滚动到内容末尾（倒置列表则是开头）。 |
+| `scroll_to(point, animated)` | `scrollTo({ x?, y?, animated? })` | 滚动到某个偏移，与滚动视图相同。 |
 
-```tsx
-import { type YNode } from "nsh";
-import { List } from "nsh/list";
+```rust tabs
+let list = element_ref();
+
+virtual_list(count, row).estimated_item_size(px(48.0)).flex_1().element_ref(&list)
+
+list.scroll_to_index(120, percentage(0.5), px(0.0), true);
+```
+
+```tsx tabs
+import { List, type YNode } from "nsh";
 
 let list!: YNode;
 
@@ -334,17 +628,57 @@ let list!: YNode;
 list.scrollToIndex({ index: 120, viewPosition: 0.5 });
 ```
 
-`scrollToIndex`（以及 `scrollToEnd`）由原生根据当时已知的尺寸计算：已测量的行用实测值，其余用 `estimatedItemSize`。之后在目标附近的行被测量时，列表会持续跟随目标，因此能准确落位，直到用户自己滚动或数据变化为止。要让列表一打开就停在某个条目，请用 `initialScrollIndex`，而不是在第一帧之后再滚动。
+滚动到索引（以及滚动到末尾）由原生根据当时已知的尺寸计算：已测量的行用实测值，其余用预估尺寸。之后在目标附近的行被测量时，列表会持续跟随目标，因此能准确落位，直到用户自己滚动或数据变化为止。要让列表一打开就停在某个条目，请用 `initialScrollIndex`（`.initial_scroll_index(..)`），而不是在第一帧之后再滚动。
 
 <a id="a-settings-style-list"></a>
 
 ## 设置风格的列表
 
-列表的外观属于应用自己：`List` 负责摆放和复用行，行、分隔线和表面都是你的视图。分组的设置风格列表就是一个带内边距、分隔线、首尾行圆角的 `List`。把它写成自己的组件，在应用中需要列出设置的地方使用：
+列表的外观属于应用自己：列表负责摆放和复用行，行、分隔线和表面都是你的视图。分组的设置风格列表就是一个带内边距、分隔线、首尾行圆角的列表。把它写成自己的组件，在应用中需要列出设置的地方使用：
 
-```tsx
-import { Text, View } from "nsh";
-import { List } from "nsh/list";
+```rust tabs
+use std::rc::Rc;
+
+use nsh_core::ui::{palette::NEUTRAL, prelude::*};
+
+pub struct Setting {
+    pub id: &'static str,
+    pub label: &'static str,
+}
+
+pub fn settings_list(settings: Rc<Vec<Setting>>, on_select: impl Fn(&Setting) + 'static) -> impl IntoElement {
+    let surface = AdaptiveColor::new(white(), NEUTRAL.shade(900));
+    let on_select = Rc::new(on_select);
+    let count = settings.len();
+    view().flex_1().bg(AdaptiveColor::new(NEUTRAL.shade(100), NEUTRAL.shade(950))).child(
+        virtual_list(count, move |at| {
+            let (pressed, shown, on_select) = (settings.clone(), settings.clone(), on_select.clone());
+            view()
+                .on_press(move || on_select(&pressed[at.index()]))
+                .role(AccessibilityRole::Button)
+                .h_12()
+                .justify_center()
+                .bg(surface)
+                .px_4()
+                .active(|s| s.bg(NEUTRAL.shade(200)))
+                .rounded_t(move || px(if at.is_first() { 12.0 } else { 0.0 }))
+                .rounded_b(move || px(if at.is_last() { 12.0 } else { 0.0 }))
+                .child(text(move || shown[at.index()].label))
+        })
+        .estimated_item_size(px(48.0))
+        .content_padding(px(16.0))
+        .separator(move || {
+            view()
+                .bg(surface)
+                .child(view().ml_4().h(px(1.0)).bg(AdaptiveColor::new(NEUTRAL.shade(200), NEUTRAL.shade(800))))
+        })
+        .flex_1(),
+    )
+}
+```
+
+```tsx tabs
+import { List, Text, View } from "nsh";
 
 type Setting = { id: string; label: string };
 
@@ -381,12 +715,12 @@ function SettingsList(props: { each: Setting[]; onSelect: (s: Setting) => void }
 ## 性能提示
 
 - 每个单元格单独排版，滚动时只重新排版有变化的单元格。行的层级保持浅一些，避免在行里读取每帧都会变化的 signal。
-- 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新；快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次 JS。
+- 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新；快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次你的代码。Rust 的行由核心自己在需要它们的那次提交中绑定。
 - 用 [`nsh test --trace` 加上 `scroll` 步骤](./testing-and-trace.md#滚动)测量行在每一帧的开销。
 
 ## 相关内容
 
-- [`List` 元素](../elements/list.md) 与 [`nsh/list`](../modules/nsh-list.md)：参考。
-- [滚动](./scrolling.md)：列表与 `<Scroll>` 共用的滚动属性。
-- [响应式](./reactivity.md)：为什么 `item()` 是一个函数。
+- [`List` 元素](../elements/list.md)：参考。
+- [滚动](./scrolling.md)：列表与滚动视图共用的滚动属性。
+- [响应式](./reactivity.md)：为什么行要在绑定中读取位置。
 - [性能](./performance.md)：测量列表。

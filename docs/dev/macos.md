@@ -42,7 +42,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   it. AppKit's input and in-process rendering do not follow the layers: the root's `hitTest:` decides with NSH's
   picking (Input, below), a page under a transformed ancestor is drawn transformed but gets mouse positions as if it
   were not, and `renderInContext:` leaves pages and videos out (leaving pages and dialogs take the live views
-  along; `--script`'s `shot` shows pages, which WebKit draws for `cacheDisplayInRect:`, but not videos). `NSAlert` sheets are windows of their own, above everything.
+  along; the test agent's screenshots show pages, which WebKit draws for `cacheDisplayInRect:`, but not videos). `NSAlert` sheets are windows of their own, above everything.
 - **Drawing**: Core Animation draws backgrounds, borders, corners, shadows, gradients and images (`decor.rs`,
   `visual.rs`, `image.rs`, the iOS backend's design). Text and canvas views draw into a **content layer** of their own
   (`NshView::redraw`: a plain `CALayer` sublayer whose delegate draws in `drawLayer:inContext:`, above the decoration
@@ -117,7 +117,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 | Area | Module | AppKit |
 |---|---|---|
-| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn in `drawRect:`; decorations CoreText lacks drawn by hand (iOS); `selectable` text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears |
+| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn in `drawRect:`; decorations CoreText lacks drawn by hand (iOS); `selectable` text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selection areas (`selection_area.rs`, `ViewProps::selection_area`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame |
 | Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`); backdrop blur as an `NSVisualEffectView` subview, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | ImageIO decoding off the main thread, downsampled to the view; an LRU cache (128 MB); `asset:/`, http(s) (`NSURLSession`), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
@@ -162,8 +162,7 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   followed after each change, selection change and unmark, and reported as `onCompositionChange` (as it starts and
   changes, and as it ends, after the `onChangeText` of the committed text; leaving the field ends it too). A value
   from JS that arrives during a composition is held and applied when the composition ends, if JS has seen every edit
-  by then, so the input method's session continues undisturbed. The script's `mark <text>` drives it, and a
-  `key Return` commits the marked text.
+  by then, so the input method's session continues undisturbed.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;
   also the root's `selectAll:` / `copy:` for the menu), going back (`navigation::key_pressed`: Escape, Option+Left,
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
@@ -200,56 +199,44 @@ it reads is `nsh_engine::perf` (`docs/dev/performance.md`):
 - Batches carry when the sink got them (only while measuring), for `HOP`.
 - The engine records its commits (`EngineControl::set_perf_monitor`).
 
-For checking a change: run a release host with `--fps --trace` and `--script` (`wait`, `wheel`, `fling`, `tap`); the
-host logs the readings once a second (`nsh::perf fps …`, milliseconds as mean/p50/p95/max: `tick` the delivered
-refresh gaps, `frame-gap` the gaps between shown frames, `main` the main-thread time per frame). The script's `wheel`
-sends an event every 16 ms; `fling` sends them as a ProMotion trackpad does, every 8.33 ms from a timer thread with
-the system's momentum after, stamped when they happen. A frame rate of 120 does not mean a smooth scroll: check how
-far each frame moves (fling a few times with starting times a millisecond apart, as event and display phases differ
-from gesture to gesture). For where the time goes, `sample <pid> 5` the host (Instruments' Time Profiler: `xctrace
+For checking a change: run a release host with `--fps --trace` (`nsh run --release --target macos --fps --trace`) and
+scroll it; the host logs the readings once a second (`nsh::perf fps …`, milliseconds as mean/p50/p95/max: `tick` the
+delivered refresh gaps, `frame-gap` the gaps between shown frames, `main` the main-thread time per frame). A frame
+rate of 120 does not mean a smooth scroll: check how far each frame moves (fling a few times, as event and display
+phases differ from gesture to gesture). For where the time goes, `sample <pid> 5` the host (Instruments' Time Profiler: `xctrace
 record --template 'Time Profiler' --attach <pid>`).
 
 
-## Tests on macOS: `nsh test --target macos`
+## Checking a change: `nsh test --target macos`
 
 The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
 implements `nsh_testing::agent::Native` on the main queue (`exec_sync`). A view's bounds are its `NSView`'s frame in
 window coordinates, turned into points from the content's top left; a press is a mouse move, down and up posted to the
-app (`synth.rs`, the app made active first); a scroll is a trackpad gesture (began, changed events 16 ms apart of at
-most 20 points, ended); typing posts key events; back is Escape, twice when a text field is focused (the first only
-leaves it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet; a screenshot is the
-content view cached into a PNG. `dev.rs`'s `Tester` attaches the agent's model to the surface when the server says it
-runs a test session, before the first bundle.
-
-## Checking a change: `--script`
-
-`nsh-macos-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or new
-lines (`script.rs`, whose module doc lists them all): `wait <ms>`, `shot <file.png>`, `tap [mods] <x> <y> [count]`
-(`tap shift 10 20`: a shift-click), `down` / `up` (a held press, for pressed states), `rtap`,
-`drag <x0> <y0> <x1> <y1> [ms]`, `wheel <x> <y> <dx> <dy> [ms]` (a trackpad gesture), `fling <x> <y> <dx> <dy> [ms]`
-(a 120 Hz trackpad flick with momentum), `notch` (a mouse wheel), `hover`, `type <text>`, `mark <text>` (an input
-method's marked text; empty removes it), `key <name>` (with modifiers: `cmd+a`, `shift+Tab`; `Escape`, `F5`, ...: through the
-application, as real keys, so key monitors see them), `dark` / `light`, `resize <w> <h>`,
-`zoom` (AppKit's animated zoom), `fullscreen` (enter or leave), `quit`. Mouse events are posted to the application's
-queue, so they take the path real ones take (and become `NSApp.currentEvent`); wheels are handed to the window, and the root's
-`hitTest:` sees them as the current event (it keeps them from pages with `scrollEnabled={false}`). Presses make the app
-active first: WebKit takes left clicks only in the active app (in another, a click into a page only activates it).
+application's queue (`synth.rs`), so it takes the path real ones take (and becomes `NSApp.currentEvent`), with the app
+made active first (WebKit takes left clicks only in the active app); a scroll is a trackpad gesture (began, changed
+events 16 ms apart of at most 20 points, ended), handed to the window, and the root's `hitTest:` sees it as the
+current event (it keeps it from pages with `scrollEnabled={false}`); typing posts key events through the application,
+as real keys, so key monitors see them; back is Escape, twice when a text field is focused (the first only leaves
+it); a dialog's answer presses the `NSAlert`'s button with that title or ends the sheet. `dev.rs`'s `Tester` attaches
+the agent's model to the surface when the server says it runs a test session, before the first bundle.
 
 ```sh
-nsh build examples/gallery -o /tmp/gallery
-./target/debug/nsh-macos-host --bundle /tmp/gallery/bundle.nshc --window-size 1200x800 \
-  --script "wait 1000; shot /tmp/a.png; tap 83 350; wait 500; shot /tmp/b.png; quit"
+./target/debug/nsh test examples/gallery --target macos
+echo 'await app.screenshot("/tmp/a.png"); await app.press("label:Navigation"); await app.screenshot("/tmp/b.png")' \
+  | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # steps from stdin
 ```
 
-`shot` renders the window's content in process (`cacheDisplayInRect:`), so it needs no Screen Recording permission and
-works while the screen is locked. `cacheDisplayInRect:` draws sublayers in their order and ignores `zPosition`, so `shot` first orders every
-layer's sublayers by `zPosition` (as Core Animation composites them; the window does not change): without that, a
-decoration added before a layer it sits above (a border's stroke before a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts masks at
-their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective, `rotateX`,
-`rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show: WebKit draws
-them for `cacheDisplayInRect:`, as of macOS 27). `decor.rs` avoids the first three (shape layers for differing corners, masked holders for box
-shadows), so screenshots match the window closely, except that spread rings of box shadows are missing from them, and
-so are outer box shadows under an opaque background (unmasked `shadowPath` casters, `visual.rs`).
+A screenshot renders the window's content in process (`cacheDisplayInRect:`), so it needs no Screen Recording
+permission and works while the screen is locked. `cacheDisplayInRect:` draws sublayers in their order and ignores
+`zPosition`, so the screenshot first orders every layer's sublayers by `zPosition` (as Core Animation composites them;
+the window does not change): without that, a decoration added before a layer it sits above (a border's stroke before
+a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts
+masks at their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective,
+`rotateX`, `rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show:
+WebKit draws them for `cacheDisplayInRect:`, as of macOS 27). `decor.rs` avoids the first three (shape layers for
+differing corners, masked holders for box shadows), so screenshots match the window closely, except that spread
+rings of box shadows are missing from them, and so are outer box shadows under an opaque background (unmasked
+`shadowPath` casters, `visual.rs`).
 
 ## Not implemented, or different
 
@@ -275,7 +262,7 @@ event after `stop:` so a dispatch-driven close wakes the event loop.
 This lets a Rust host perform final cleanup or execute an installed update after
 `run_app` returns. Embedded `AppView` instances continue to use their host's
 delegate and event loop. This change still needs native close, minimized-close,
-Command-Q, script quit, process-exit status and relaunch validation. No tests
+Command-Q, a test's quit, process-exit status and relaunch validation. No tests
 were run for this change at the user's request.
 
 ### Retained standalone session design
@@ -294,7 +281,7 @@ request, so hosts using retention must use `quit_app()` for Exit/relaunch.
 
 Acceptance requires visible/hidden/minimized close, Dock reopen preserving
 state and transfers, repeated reopen without duplicate windows, Quit while
-hidden, scripted quit, and cleanup after run_app returns. Source implementation
+hidden, a test's quit, and cleanup after run_app returns. Source implementation
 and CI compilation alone do not prove those runtime behaviors.
 
 ## Keyboard focus for pressable views
@@ -331,8 +318,8 @@ resolve its surface through ancestors; pointer and drawing callbacks keep their
 existing root-only lookup. This avoids attaching per-button monitors or changing
 the public event protocol.
 
-Checked with `--script` (`key Tab`, `key Return`, `key space`, `key Escape`,
-`tap`): Tab between pressables, Return and Space pressing the focused one, Tab
+Checked with synthesized keys and clicks (Tab, Return, Space, Escape, a
+click): Tab between pressables, Return and Space pressing the focused one, Tab
 staying in a transparent modal, and the focus returning to the trigger after
 Escape or a click outside; a single-line and a secure field getting it back
 with the caret at the end (a character typed after Escape is appended); a

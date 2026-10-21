@@ -2,7 +2,7 @@
 //! pointers through the handlers real input goes through
 //! ([`crate::input`]), keys and text ([`crate::text_input`]), and pictures
 //! of the window. The agent of `nsh test --target gpui` acts with them
-//! ([`crate::agent`]), and so do `--script` steps ([`crate::script`]).
+//! ([`crate::agent`]).
 
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -10,7 +10,7 @@ use gpui::{App, AsyncApp, Window, WindowHandle};
 
 use crate::{
     app::AppView,
-    input::{KeyEvent, Modifiers, PointerEvent, PointerKind},
+    input::{KeyEvent, Modifiers},
     surface::Surface,
 };
 
@@ -56,49 +56,12 @@ pub(crate) async fn drawn(window: WindowHandle<AppView>, cx: &mut AsyncApp) -> b
     let start = std::time::Instant::now();
     while !done.get() {
         if start.elapsed() > Duration::from_secs(1) {
-            log::warn!("script: the window draws no frames");
+            log::warn!("test: the window draws no frames");
             break;
         }
         sleep(cx, 4).await;
     }
     true
-}
-
-pub(crate) fn pointer(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32, touch: bool) {
-    crate::input::pointer(
-        surface,
-        PointerEvent {
-            kind,
-            x,
-            y,
-            button: 0,
-            pointer: if touch { 100 } else { 1 },
-            touch,
-            pen: false,
-            time: surface.clock(),
-            modifiers: Modifiers::default(),
-            clicks: 1,
-        },
-    );
-}
-
-/// The mouse's secondary button.
-pub(crate) fn secondary(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32) {
-    crate::input::pointer(
-        surface,
-        PointerEvent {
-            kind,
-            x,
-            y,
-            button: 1,
-            pointer: 1,
-            touch: false,
-            pen: false,
-            time: surface.clock(),
-            modifiers: Modifiers::default(),
-            clicks: 1,
-        },
-    );
 }
 
 pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
@@ -258,7 +221,7 @@ pub(crate) mod x11 {
             }
             if start.elapsed() > Duration::from_secs(1) {
                 log::warn!(
-                    "script: the X server shows frames slowly (a hidden Xwayland? start it with -shm)"
+                    "test: the X server shows frames slowly (a hidden Xwayland? start it with -shm)"
                 );
             }
         }
@@ -283,7 +246,7 @@ pub(crate) mod x11 {
                     }
                 }
                 if start.elapsed() > Duration::from_secs(5) {
-                    log::warn!("script: the X server reports no vertical blanks");
+                    log::warn!("test: the X server reports no vertical blanks");
                     return None;
                 }
                 super::sleep(cx, 2).await;

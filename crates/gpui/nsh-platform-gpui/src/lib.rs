@@ -47,10 +47,11 @@ mod navigation;
 mod net;
 mod render;
 mod rt;
-mod script;
 mod scroll;
+mod selection_area;
 mod stats;
 mod surface;
+#[cfg(feature = "dev")]
 mod synth;
 mod system;
 mod text;

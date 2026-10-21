@@ -1,26 +1,45 @@
 ---
 title: Testing
-description: Write tests in TypeScript and run them headless with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings --trace prints; testID for UI tests.
+description: Test apps headless, in Rust with cargo test and nsh_testing or in TypeScript with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings --trace prints; testID for UI tests.
 order: 61
 group: tools
 ---
 
 # Testing
 
-`nsh test` runs apps **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components,
-layout and list virtualization as on a device), but no simulator, no device and no window. It runs anywhere the CLI
-runs, including Linux CI machines, and does two jobs:
+NSH runs apps **headless**: the real engine (the same reactive graph, renderer, components, layout and list
+virtualization as on a device, and QuickJS for TSX), with display frames at 60 Hz, but no simulator, no device and no
+window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and does two jobs:
 
-- it runs tests written in TypeScript: each opens the app, takes the steps a user would (press, type, scroll), and
-  checks what is on screen;
+- it runs tests: each opens the app, takes the steps a user would (press, type, scroll), and checks what is on screen.
+  A Rust app's tests are Rust, run by `cargo test` with the `nsh-testing` crate; tests written in TypeScript run with
+  `nsh test`, for TSX apps and Rust apps alike;
 - with `--trace`, it prints every operation the runtime sends to the native views, with timings: what the first
   frame, a tap or a frame of scrolling costs.
 
-## Tests with nsh test
+## Writing tests
 
-A test file is a `*.test.tsx` or `*.test.ts` file next to your code. It imports `nsh/test`:
+The same test, in Rust and in TypeScript: it opens the app with an empty todo list in its storage, types, presses and
+checks what the screen shows.
 
-```tsx
+```rust tabs
+// tests/app/main.rs
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, MemoryStorage};
+
+#[test]
+fn adds_a_todo() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.storage = Some(MemoryStorage::new([("todos".to_owned(), "[]".to_owned())]));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("id:new-todo", "Buy milk").unwrap();
+    app.press("text:Add").unwrap();
+    app.wait_for("text:Buy milk").unwrap();
+    assert!(app.screen().texts().contains(&"1 item left"));
+}
+```
+
+```tsx tabs
 // App.test.tsx
 import { expect, open, test } from "nsh/test";
 
@@ -32,6 +51,41 @@ test("adds a todo", async () => {
   expect(app.texts()).toContain("1 item left");
 });
 ```
+
+## Tests in Rust with cargo test
+
+A Rust app's tests are integration tests of its crate, with `nsh-engine` and `nsh-testing` (its default features,
+without QuickJS) as dev-dependencies:
+
+```toml
+[dev-dependencies]
+nsh-engine = "0.1"
+nsh-testing = "0.1"
+```
+
+```sh
+cargo test                    # every test of the crate
+cargo test adds_a_todo        # the tests whose name contains "adds_a_todo"
+```
+
+`EngineConfig::new(root)` is a phone-sized engine (390×844 points) with nothing else set; its fields set what `open`'s
+options set below: `storage` (`MemoryStorage::new(entries)`), `network` (`StubNetwork`, below), `viewport`,
+`environment` (the appearance, the locale, reduced motion), `clock` (`Clock::manual(time)`, below).
+`nsh_testing::Headless::start(config)` starts the app and keeps a model of the views it shows. Its steps are those of
+`nsh test` below, with the same selectors, in Rust: `press`, `long_press`, `clear`, `type_text`, `submit`,
+`scroll(selector, px(3000.0))`, `back`, `wait`, `wait_for`, `wait_for_gone`, `wait_until`, `run_for`, `fast_forward`,
+`set_system_time`, `set_viewport`, `set_clipboard` and `on_dialog`; `app.shows(text)` and `app.screen()` (`texts()`,
+`count(selector)`, `enabled(selector)`, `dialogs()`, `clipboard()`, `commands()`) read what is on screen. A step
+returns an error with the texts on screen when it cannot be taken.
+
+`nsh_testing::tsx(entry, sets)` (feature `bundle`) opens an app's TSX entry the same way, built against NSH's and the
+crate's UI sets ([Building with Rust](./rust.md#testing)). `examples/gallery-rs` tests its Rust root this way, one
+module per demo; `examples/rust-exports` tests its TSX entry from Rust.
+
+## Tests with nsh test
+
+A test file is a `*.test.tsx` or `*.test.ts` file next to your code. It imports `nsh/test`, as `App.test.tsx` above
+does:
 
 ```sh
 nsh test                      # every test file of the app in the current directory
@@ -116,9 +170,39 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 
 `network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
 matches fails, so tests never reach the network unasked. A route is a response, or a function of the request that
-returns one (or a promise of one):
+returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
+a `StubRoute::Handler`:
 
-```tsx
+```rust tabs
+use std::sync::Arc;
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, StubNetwork, StubResponse};
+
+#[test]
+fn adds_a_todo_on_the_server() {
+    let mut todos = StubResponse::default();
+    todos.status = 200;
+    todos.headers = vec![("content-type".to_owned(), "application/json".to_owned())];
+    todos.body = br#"[{ "id": 1, "title": "Walk" }]"#.to_vec();
+    let mut created = StubResponse::default();
+    created.status = 201;
+    let mut offline = StubResponse::default();
+    offline.error = Some("offline".to_owned());
+    let network = Arc::new(StubNetwork::new([
+        ("GET https://api.example.com/todos".to_owned(), todos),
+        ("POST https://api.example.com/todos".to_owned(), created),
+        ("GET https://api.example.com/sync".to_owned(), offline),
+    ]));
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.network = Some(network.clone());
+    let mut app = Headless::start(config).unwrap();
+    app.press("Add").unwrap();
+    let methods: Vec<String> = network.requests().iter().map(|r| r.method.clone()).collect();
+    assert_eq!(methods, ["GET", "POST"]);
+}
+```
+
+```tsx tabs
 const app = await open("./App.tsx", {
   network: {
     "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
@@ -147,15 +231,36 @@ it. `app.requests()` lists the requests the app made, in order, the same way.
 ### Controlling time
 
 On the system's clock, an app's timers and native animations take as long as on a device, and so do the tests that
-wait for them. With `open`'s `clock`, the app runs on a manual clock instead, as with Jest's fake timers or
-Playwright's `page.clock`. Its time moves only as the test moves it, and at once:
+wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clock` in TypeScript), the app runs on a
+clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
+`page.clock`:
 
-```tsx
+```rust tabs
+use std::time::{Duration, SystemTime};
+use nsh_engine::{Clock, EngineConfig, Root};
+use nsh_testing::Headless;
+
+#[test]
+fn autosaves() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    // 2026-01-01T09:00:00Z
+    config.clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_258_000));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("label:Note", "Milk").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap(); // the autosave, ten seconds later
+    assert!(app.shows("Saved at 09:00:10"));
+}
+```
+
+```tsx tabs
 const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
 await app.type("label:Note", "Milk");
 await app.clock.runFor(10_000);            // the autosave, ten seconds later
 expect(app.texts()).toContain("Saved at 09:00:10");
 ```
+
+A `StubNetwork` whose responses have a `delay` follows a manual clock with `.with_clock(clock.clone())`. The steps below
+are `nsh test`'s; `Headless` has each of them (`run_for`, `fast_forward`, `set_system_time`).
 
 | Step | Description |
 |---|---|
@@ -234,9 +339,8 @@ that only a real platform can do:
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
 - **Modals show at once**: `onShow` comes when one is presented.
-- **Images are not loaded**: no `onLoad` or `onError` comes.
-- **What only a real platform answers fails the step**: an image's size (`Image.getSize`, `Image.prefetch`), an image
-  or files on the clipboard.
+- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
+- **What only a real platform answers fails the step**: an image or files on the clipboard.
 
 ### Expectations
 
@@ -257,13 +361,14 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 
 ### On a real platform
 
-`nsh test --target macos` (or `gpui`) runs the same tests on the platform's development host instead of headless: each `open`
-starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's own input
-at the views their selectors name, as Playwright does in a browser:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`) runs the same tests on the platform's development host instead of headless:
+each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
+own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
-  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS, the mouse's back
-  button in GPUI);
+  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
+  back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
+  swiped down on iOS);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
@@ -273,7 +378,11 @@ at the views their selectors name, as Playwright does in a browser:
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
+nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
+nsh test --target windows                     # in Win32 windows
+nsh test --target ios                         # in an iOS simulator
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
+nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
@@ -283,6 +392,16 @@ real time cannot do, reject. What a real platform cannot be given yet makes `ope
 out: stubbed `network` routes, `storage`, `clipboard`, `locale`, `reducedMotion` and `safeArea`; requests go to the
 network. `app.storage()` and `app.requests()` are headless only. An app with Rust crates of its own runs its tests
 headless for now.
+
+On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
+on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked
+when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
+the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
+
+On iOS, the apps run in the development host in an iOS simulator: the booted one, else the newest iPhone, which
+`nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
+device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
+has the simulated device's size.
 
 ### Steps from standard input
 
@@ -296,14 +415,25 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 The 1.2 s let the engine's idle garbage collection run before the first step, so an app that lets go of what it still
 uses shows it: its handlers stop working.
 
-The examples have tests to start from: `examples/counter` and `examples/gallery/tests` (storage, inputs, a long list,
-stubbed requests, dark mode, a manual clock) for TSX apps, `examples/rust-exports` for an app with a Rust crate, `examples/gallery-rs` for a Rust
-app.
+The examples have tests to start from: `examples/gallery-rs` for a Rust app (`cargo test`, one module per demo, and
+`App.test.tsx`), `examples/rust-exports` for an app with a Rust crate, `examples/counter` and `examples/gallery/tests`
+(storage, inputs, a long list, stubbed requests, dark mode, a manual clock) for TSX apps.
 
 ## Tracing with --trace
 
 `--trace` prints every mount batch of the apps the tests open, under the step it came in, and the time of every
-commit. Run it on a test file, or on the app's entry with the steps on standard input:
+commit. In Rust, a test prints the same: `observe` hands it each batch with its step, and `EngineConfig::trace` logs
+the `perf` lines through the `log` crate (target `nsh::perf`; install a logger such as `env_logger` in the test):
+
+```rust
+let mut config = EngineConfig::new(Root::of::<my_app::App>());
+config.trace = true;
+let mut app = Headless::start(config).unwrap();
+app.observe(|step, batch| nsh_testing::print_batch(&mut std::io::stdout(), step, batch));
+app.press("Add").unwrap();
+```
+
+`nsh test` takes `--trace` on a test file, or on the app's entry with the steps on standard input:
 
 ```sh
 nsh test App.test.tsx --trace
@@ -391,6 +521,10 @@ the same machine, look at the minimum of several runs, and trust the op and item
 
 ### Scrolling
 
+```rust
+app.scroll("id:photos", px(3000.0)).unwrap();
+```
+
 ```sh
 echo 'await app.scroll("id:photos", 3000)' | nsh test examples/gallery/Bench.tsx --trace
 ```
@@ -406,13 +540,14 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
-costs, and that frames revealing no new row produce nothing. Use it with a release build of the CLI
-(`./target/release/nsh` in a checkout) for meaningful timings.
+costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`, or `./target/release/nsh` in a checkout) for meaningful
+timings.
 
 ### In CI
 
-`nsh test` needs nothing but the CLI, so it runs on Linux runners, and any failing test makes it exit with a non-zero
-code: a test that fails, an app that does not build or renders nothing, an exception the app throws during a step.
+Headless tests need no device or display, so they run on Linux runners: `cargo test` for a Rust app's tests, and
+`nsh test`, which needs nothing but the CLI. Any failing test makes either exit with a non-zero code: a test that
+fails, an app that does not build or renders nothing, an exception the app throws during a step.
 
 ```yaml
 # .github/workflows/test.yml
@@ -421,7 +556,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: nsh test --junit test-results.xml
+      - run: cargo test                            # a Rust app's tests
+      - run: nsh test --junit test-results.xml     # its TypeScript tests, or a TSX app's
 ```
 
 (Install the `nsh` CLI on the runner the way you install it locally; see [Installation](./installation.md).)
@@ -440,10 +576,19 @@ are not.
 
 ## `testID` for UI tests
 
-`nsh test` checks what the runtime renders, and its `id:` selectors find views by `testID`. To drive the real native UI with the platform's test tools (XCUITest,
-Espresso / UI Automator, Appium, Maestro), give views a `testID`:
+Headless tests check what the runtime renders, and their `id:` selectors find views by test id. To drive the real
+native UI with the platform's test tools (XCUITest, Espresso / UI Automator, Appium, Maestro), give views a test id:
+`.test_id(…)` in Rust, `testID` in TSX:
 
-```tsx
+```rust tabs
+view()
+    .test_id("add-to-cart")
+    .p_3()
+    .on_press(add)
+    .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
+```
+
+```tsx tabs
 <View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
   <Text testID="cart-count">{`${count()} items`}</Text>
 </View>
@@ -454,7 +599,7 @@ Espresso / UI Automator, Appium, Maestro), give views a `testID`:
 | iOS | The view's `accessibilityIdentifier` (`app.otherElements["add-to-cart"]` in XCUITest). |
 | Android | The accessibility node's view id resource name (`By.res("add-to-cart")` in UI Automator). |
 
-`testID` is a prop of every element and of every Rust component (`SafeAreaView`, `KeyboardAvoidingView`, ...). It does not change what screen readers
+The test id is a method of every element in Rust, and `testID` a prop of every element and of every Rust component (`SafeAreaView`, `KeyboardAvoidingView`, ...). It does not change what screen readers
 say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 

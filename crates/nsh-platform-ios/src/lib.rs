@@ -15,6 +15,8 @@
 
 #![cfg(target_os = "ios")]
 
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod blur;
@@ -33,7 +35,10 @@ mod native_view;
 mod navigation;
 mod net;
 mod press;
+mod selection_area;
 mod surface;
+#[cfg(feature = "dev")]
+mod synth;
 mod system;
 mod target;
 mod text;

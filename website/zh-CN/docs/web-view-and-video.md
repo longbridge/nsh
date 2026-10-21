@@ -7,14 +7,14 @@ group: ui
 
 # 网页视图与视频
 
-`nsh/webview` 中的 `WebView` 和 `nsh/video` 中的 `Video` 把平台自己的网页引擎和媒体播放器作为普通视图嵌入。由于 NSH 用原生视图渲染，它们在布局中与其他元素无异：随父视图滚动、支持圆角和裁剪，其他视图可以覆盖在它们上面而不会出现层级问题。
+Web 视图和视频播放器把平台自己的网页引擎和媒体播放器作为普通视图嵌入：Rust 中是 `web_view` 和 `video`（`nsh_core::ui::prelude`），TSX 中是 `nsh` 的 `WebView` 和 `Video`。由于 NSH 用原生视图渲染，它们在布局中与其他元素无异：随父视图滚动、支持圆角和裁剪，其他视图可以覆盖在它们上面而不会出现层级问题。
 
 | 组件 | iOS | Android | macOS | Linux | Windows |
 |---|---|---|---|---|---|
 | `WebView` | WKWebView | `android.webkit.WebView` | WKWebView | WebKitGTK 6.0 的 `WebKitWebView` | WebView2，位于子窗口中 |
 | `Video` | AVPlayerLayer；设置 `controls` 时为 AVPlayerViewController | TextureView 上的 MediaPlayer；设置 `controls` 时为 MediaController | AVPlayerLayer；设置 `controls` 时为 AVKit 的 AVPlayerView | `GtkPicture` 中的 GTK 媒体流（GStreamer）；设置 `controls` 时为 `GtkVideo` | Media Foundation 媒体引擎，画面用 Direct2D 绘制；设置 `controls` 时为 NSH 自己的控制栏 |
 
-它们背后的框架（WebKit、AVFoundation）在应用第一次用到时才加载，所以从不显示网页或视频的应用不会在启动时为它们付出代价。请从 `nsh/webview` 和 `nsh/video` 导入它们。
+它们背后的框架（WebKit、AVFoundation）在应用第一次用到时才加载，所以从不显示网页或视频的应用不会在启动时为它们付出代价。
 
 在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollEnabled={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
 而不是页面；页面仍可用键盘和它自己的脚本滚动。
@@ -31,9 +31,17 @@ NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（
 
 ## WebView
 
-```tsx
-import { mount } from "nsh";
-import { WebView } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    web_view("https://en.m.wikipedia.org/wiki/Swift_(programming_language)").flex_1()
+}
+```
+
+```tsx tabs
+import { mount, WebView } from "nsh";
 
 function App() {
   return <WebView source="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
@@ -50,9 +58,11 @@ mount(App);
 | `{ html: "<!doctype html>…" }` | 字符串形式的 HTML。 |
 | `{ html, baseUrl: "https://example.com/" }` | 相对 URL 以 `baseUrl` 为基准解析的 HTML。 |
 
-改变 `source` 会加载新的页面。
+在 Rust 中，`web_view(url)` 显示网页，`web_view_html(html, base_url)` 显示 HTML（`base_url` 是 `Option<&str>`）；URL 和 HTML 都可以是 signal 或闭包，它读取的值变化时页面会重新加载。改变 `source` 会加载新的页面。
 
 ### 属性
+
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scroll_enabled`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -79,11 +89,57 @@ mount(App);
 
 ### 带前进后退的浏览器
 
-ref 提供 `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)` 和 `postMessage(data)`：
+Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)` 和 `post_message` / `postMessage(data)`：
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView, type WebViewNavigation } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+pub fn browser() -> impl IntoElement {
+    let web = element_ref();
+    let nav = signal(None::<WebNavigation>);
+    let button = move |label: &'static str, enabled: fn(&WebNavigation) -> bool, action: fn(&ElementRef)| {
+        let enabled = move || nav.with(|n| n.as_ref().is_some_and(enabled));
+        text(label)
+            .p(px(12.0))
+            .text_color(move || if enabled() { rgb(0x0969da) } else { rgb(0x8c959f) })
+            .disabled(move || !enabled())
+            .on_press(move || action(&web))
+    };
+    view()
+        .flex_1()
+        .pt(px(50.0))
+        .child(
+            text(move || {
+                nav.with(|n| match n {
+                    Some(n) if n.loading => "Loading…".to_owned(),
+                    Some(n) => n.title.clone(),
+                    None => String::new(),
+                })
+            })
+            .number_of_lines(1)
+            .px(px(12.0))
+            .text_color(rgb(0x57606a)),
+        )
+        .child(
+            web_view("https://developer.mozilla.org/")
+                .element_ref(&web)
+                .flex_1()
+                .on_navigation_state_change(move |n: &WebNavigation| nav.set(Some(n.clone())))
+                .back_forward_gestures(true),
+        )
+        .child(
+            view()
+                .flex_row()
+                .justify_around()
+                .child(button("Back", |n| n.can_go_back, |web| web.go_back()))
+                .child(button("Forward", |n| n.can_go_forward, |web| web.go_forward()))
+                .child(button("Reload", |_| true, |web| web.reload())),
+        )
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
 
 function Browser() {
   let web!: YNode;
@@ -119,11 +175,54 @@ mount(Browser);
 
 ### 页面与应用之间的消息
 
-页面通过 `window.ReactNativeWebView.postMessage(string)` 向应用发消息，应用收到 `onMessage`。应用通过 ref 的 `postMessage(string)` 向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。
+页面通过 `window.ReactNativeWebView.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+const PAGE: &str = r#"<!doctype html>
+<html><head><meta name="viewport" content="width=device-width"></head>
+<body style="font-family: -apple-system, sans-serif; margin: 16px">
+  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+    Post to the app
+  </button>
+  <p id="got">Nothing from the app yet.</p>
+  <script>
+    window.addEventListener("message", (e) => {
+      document.getElementById("got").textContent = "The app says: " + e.data;
+    });
+  </script>
+</body></html>"#;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let web = element_ref();
+    let last = signal(String::new());
+    view()
+        .flex_1()
+        .pt(px(50.0))
+        .gap(px(12.0))
+        .child(
+            web_view_html(PAGE, None)
+                .element_ref(&web)
+                .h(px(240.0))
+                .on_message(move |data: &str| {
+                    let message: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+                    last.set(message["type"].as_str().unwrap_or_default().to_owned());
+                }),
+        )
+        .child(
+            text("Post to the page")
+                .p(px(16.0))
+                .text_color(rgb(0x0969da))
+                .on_press(move || web.post_message("hi from nsh")),
+        )
+        .child(text(move || format!("Last message: {}", last.get())).px(px(16.0)))
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, View, WebView, type YNode } from "nsh";
 
 const page = `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
@@ -161,9 +260,16 @@ function App() {
 mount(App);
 ```
 
-`injectJavaScript(script)` 可以随时在当前页面中运行代码；`injectedJavaScript` 和 `injectedJavaScriptBeforeContentLoaded` 在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
+ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当前页面中运行代码；`injected_java_script` 和 `injected_java_script_before_content`（`injectedJavaScript`、`injectedJavaScriptBeforeContentLoaded`）在每次页面加载时运行，分别在页面自己的脚本之后或之前，适合用来安装钩子：
 
-```tsx
+```rust tabs
+web_view("https://example.com")
+    .injected_java_script_before_content("window.isNativeApp = true;")
+    .injected_java_script("window.ReactNativeWebView.postMessage(document.title);")
+    .on_message(|title: &str| log::info!("title {title}"))
+```
+
+```tsx tabs
 <WebView
   source="https://example.com"
   injectedJavaScriptBeforeContentLoaded={`window.isNativeApp = true;`}
@@ -188,9 +294,53 @@ mount(App);
 
 ## Video
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+pub fn player() -> impl IntoElement {
+    let player = element_ref();
+    let paused = signal(true);
+    let time = signal(String::new());
+    let link = |label: &'static str| text(label).text_color(rgb(0x0969da));
+    view()
+        .flex_1()
+        .justify_center()
+        .p(px(16.0))
+        .gap(px(12.0))
+        .child(
+            video("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
+                .element_ref(&player)
+                .paused(paused)
+                .repeat(true)
+                .resize_mode(ResizeMode::Contain)
+                .h(px(220.0))
+                .rounded(px(12.0))
+                .overflow_hidden()
+                .bg(rgb(0x000000))
+                .on_progress(move |e: &VideoProgress| {
+                    time.set(format!("{:.1} / {:.1} s", e.current_time, e.duration))
+                })
+                .on_end(move || paused.set(true)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .gap(px(16.0))
+                .items_center()
+                .child(
+                    text(move || if paused.get() { "Play" } else { "Pause" })
+                        .text_color(rgb(0x0969da))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .on_press(move || paused.update(|p| *p = !*p)),
+                )
+                .child(link("Restart").on_press(move || player.seek(0.0)))
+                .child(text(move || time.get()).text_color(rgb(0x57606a))),
+        )
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, Video, View, type YNode } from "nsh";
 
 function Player() {
   let video!: YNode;
@@ -226,6 +376,8 @@ mount(Player);
 
 播放由属性控制：用 signal 设置 `paused`、`muted`、`volume` 和 `rate`，播放器随之变化。ref 提供 `seek(seconds)`。
 
+在 Rust 中，`video(url)` 创建播放器（URL 可以是值、signal 或闭包），每个属性是一个蛇形命名的构建方法（`paused`、`repeat(true)`、`resize_mode(ResizeMode::Contain)`，`progressUpdateInterval` 对应 `progress_interval`）；`on_load` 收到 `VideoInfo`（`duration`、`size`），`on_progress` 收到 `VideoProgress`（`current_time`、`duration`），`on_buffer` 收到 `bool`。
+
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `source` | `string \| { uri }` | | 视频的 URL。 |
@@ -249,7 +401,24 @@ mount(Player);
 
 设置 `controls` 时，平台会绘制自己的播放按钮、进度条和全屏按钮。不设置时，用视图在视频上方或下方画你自己的控件；由于视频是布局中的原生视图，覆盖层可以自然地叠在上面：
 
-```tsx
+```rust tabs
+view()
+    .h(px(220.0))
+    .child(video(url).paused(paused).flex_1())
+    .child(
+        view()
+            .absolute()
+            .inset_0()
+            .items_center()
+            .justify_center()
+            .on_press(move || paused.update(|p| *p = !*p))
+            .child(when(move || paused.get(), || {
+                text("▶").text_size(px(48.0)).text_color(rgb(0xffffff))
+            })),
+    )
+```
+
+```tsx tabs
 <View style={{ height: 220 }}>
   <Video source={url} paused={paused()} style={{ flex: 1 }} />
   <View
@@ -268,6 +437,5 @@ mount(Player);
 ## 相关内容
 
 - [`WebView`](../elements/web-view.md) 与 [`Video`](../elements/video.md)：元素参考。
-- [`nsh/webview`](../modules/nsh-webview.md) 与 [`nsh/video`](../modules/nsh-video.md)。
 - [沙箱与能力声明](./sandbox-and-capabilities.md)：`webview` 与 `network` 授权。
 - [原生组件](./native-components.md)：嵌入宿主应用提供的其他原生视图。

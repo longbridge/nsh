@@ -1094,6 +1094,19 @@ impl IntoReactive<String> for &str {
 }
 static_reactive!(super::SharedString: super::SharedString, String, &'static str);
 
+/// A string where an optional one goes (`.app_class("text-sm")`).
+macro_rules! some_shared_string {
+    ($($source:ty),*) => {$(
+        impl IntoReactive<Option<super::SharedString>> for $source {
+            fn into_reactive(self) -> Reactive<Option<super::SharedString>> {
+                Reactive::Static(Some(self.into()))
+            }
+        }
+    )*};
+}
+
+some_shared_string!(super::SharedString, String, &'static str);
+
 impl<T: 'static> IntoReactive<Option<T>> for Option<T> {
     fn into_reactive(self) -> Reactive<Option<T>> {
         Reactive::Static(self)

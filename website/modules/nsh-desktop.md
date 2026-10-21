@@ -6,9 +6,19 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether you are on a desktop.
+`nsh/desktop` holds what only desktops have: the window and its title bar, the application menu and context menus. It works on macOS, Windows and Linux. Rust code draws a title bar of its own and closes the window with `nsh_core::ui::desktop` (`set_title_bar`, `title_bar`, `close_window`) and marks draggable views with `.window_drag(true)`; TSX imports `nsh/desktop`, which holds the window's other functions and the menus too. The module can be imported on every platform, so one bundle runs everywhere: on iOS and Android its functions do nothing, and `isAvailable` tells you whether you are on a desktop.
 
-```ts
+```rust tabs
+use nsh_core::{
+    desktop::TitleBarStyle,
+    ui::{
+        desktop::{close_window, set_title_bar, title_bar},
+        prelude::*,
+    },
+};
+```
+
+```tsx tabs
 import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 ```
 
@@ -18,7 +28,7 @@ import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 const isAvailable: boolean;
 ```
 
-`true` on macOS, Windows and Linux; `false` elsewhere.
+`true` on macOS, Windows and Linux; `false` elsewhere. Rust: `os().is_desktop()`.
 
 ## Window
 
@@ -43,17 +53,19 @@ const Window: {
 };
 ```
 
-| Member | Description |
-|---|---|
-| `setTitle(title)` | The window's title: the title bar, the taskbar or Dock, the window switcher. |
-| `setTitleBar(style, height?)` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `"default"` brings the system's title bar back. |
-| `minimize()` | Minimizes the window. |
-| `toggleMaximize()` | Maximizes the window, or restores it when it is maximized. |
-| `toggleFullScreen()` | Enters or leaves full screen. |
-| `setFrame(frame)` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `width` and `height` include window decorations; on Linux they set GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
-| `setLevel(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
-| `orderFront()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
-| `close()` | Closes the window; the app ends with it. |
+The Rust column names the functions of `nsh_core::ui::desktop`.
+
+| Member | Rust | Description |
+|---|---|---|
+| `setTitle(title)` | | The window's title: the title bar, the taskbar or Dock, the window switcher. |
+| `setTitleBar(style, height?)` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `"default"` brings the system's title bar back (Rust: `set_title_bar(TitleBarStyle::Default, None)`). |
+| `minimize()` | | Minimizes the window. |
+| `toggleMaximize()` | | Maximizes the window, or restores it when it is maximized. |
+| `toggleFullScreen()` | | Enters or leaves full screen. |
+| `setFrame(frame)` | | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `width` and `height` include window decorations; on Linux they set GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
+| `setLevel(level)` | | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
+| `orderFront()` | | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
+| `close()` | `close_window()` | Closes the window; the app ends with it. |
 
 Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. GPUI's host configures window bounds and level when opening the window.
 
@@ -61,9 +73,37 @@ When sizing a window from content measured with `onLayout`, allow room for windo
 
 ## A title bar of your own
 
-With the title bar hidden, the app draws its own bar and says which parts of it move the window with `desktop={{ windowDrag: true }}`:
+With the title bar hidden, the app draws its own bar and says which parts of it move the window, with `.window_drag(true)` in Rust and `desktop={{ windowDrag: true }}` in TSX:
 
-```tsx
+```rust tabs
+use nsh_core::{
+    desktop::TitleBarStyle,
+    ui::{
+        desktop::{set_title_bar, title_bar},
+        prelude::*,
+    },
+};
+
+#[component]
+fn TitleBar() -> impl IntoElement {
+    set_title_bar(TitleBarStyle::Hidden, Some(px(40.0))); // a bar 40 points tall
+    view()
+        .window_drag(true)
+        .h(move || match title_bar().top {
+            top if top > px(0.0) => top,
+            _ => px(40.0),
+        })
+        .pl(move || title_bar().left + px(8.0)) // macOS's traffic lights
+        .pr(move || title_bar().right + px(8.0)) // the caption buttons on Windows, GTK's buttons
+        .flex_row()
+        .items_center()
+        .child(text("My App"))
+        .child(view().flex_1())
+        .child(input().placeholder("Search").w(px(180.0)))
+}
+```
+
+```tsx tabs
 import { Input, Text, View } from "nsh";
 import { titleBar, Window } from "nsh/desktop";
 
@@ -91,7 +131,7 @@ function TitleBar() {
 
 Pressing a view with `windowDrag` drags the window as the system's title bar would: a double click maximizes it (or does what the user set: on macOS, "Double-click a window's title bar to"), and on Windows and Linux a right click opens the window menu.
 
-- The nearest view that sets `windowDrag` decides: `desktop={{ windowDrag: false }}` keeps a part of a draggable view clickable.
+- The nearest view that sets `windowDrag` decides: `.window_drag(false)` (`desktop={{ windowDrag: false }}`) keeps a part of a draggable view clickable.
 - Text fields and views with press or touch handlers (`onPress`, `onTouch*`, responders) inside a draggable view stay clickable without it: the search field and any buttons in the example above work as usual.
 - `windowDrag` also works with the system's title bar: a sidebar or toolbar can move the window too.
 
@@ -101,7 +141,7 @@ Pressing a view with `windowDrag` drags the window as the system's title bar wou
 const titleBar: Accessor<{ height: number; left: number; right: number }>;
 ```
 
-The hidden title bar's area, in points (reactive): its `height`, and the widths the system's window controls take at its `left` and `right` ends. Lay your bar out with it so that nothing goes under the controls. All three are 0 while the system shows its title bar (and in full screen, and off desktops).
+The hidden title bar's area, in points (reactive): its `height`, and the widths the system's window controls take at its `left` and `right` ends. Lay your bar out with it so that nothing goes under the controls. All three are 0 while the system shows its title bar (and in full screen, and off desktops). Rust: `title_bar() -> Edges<Points>`, whose `top` is the height and `left` and `right` the controls' widths; reading it subscribes to changes.
 
 | | `height` | `left` | `right` |
 |---|---|---|---|

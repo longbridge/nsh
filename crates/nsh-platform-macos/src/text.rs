@@ -949,6 +949,9 @@ pub(crate) struct DrawnText {
     pub(crate) content: nsh_core::Bounds<nsh_core::Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Selection>,
+    /// The part of a selection area's selection in this text
+    /// ([`crate::selection_area`]).
+    area_range: std::cell::Cell<Option<(u32, u32)>>,
 }
 
 /// A text view got new text or a new layout.
@@ -960,6 +963,12 @@ pub(crate) fn set(
 ) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
+    // The area's selection is set again at the end of the batch; the same
+    // content keeps its part until then.
+    let area_range = old
+        .as_ref()
+        .filter(|o| o.text.text == text.text)
+        .and_then(|o| o.area_range.get());
     let selection = match old {
         Some(DrawnText {
             text: old,
@@ -980,6 +989,7 @@ pub(crate) fn set(
         layout: layout.clone(),
         content,
         selection,
+        area_range: std::cell::Cell::new(area_range),
     });
     if was != text.is_selectable() {
         // The I-beam.
@@ -1008,7 +1018,8 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
     if drawn.text.has_backgrounds() {
         draw_backgrounds(cx, &drawn.text, text, content);
     }
-    if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
+    let range = drawn.selection.as_ref().and_then(|s| s.range.get());
+    if let Some(range) = range.or(drawn.area_range.get()) {
         // iOS tints the selection with the view's tint at about 30%.
         let tint = drawn.text.selection_color.unwrap_or(SYSTEM_BLUE);
         let alpha = (tint.0 & 0xff) as f32 / 255.0 * 0.3;
@@ -1271,7 +1282,7 @@ pub(crate) fn link_at(
 
 /// The caret offset nearest `(x, y)` (view coordinates): on the nearest
 /// line, at the caret position nearest x.
-fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
+pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
     let Some(drawn) = state.text.as_ref() else {
         return 0;
     };
@@ -1351,11 +1362,13 @@ pub(crate) struct Selection {
 
 /// The text selection of a surface: the view whose text was last pressed
 /// to select (it takes Cmd+A, and Cmd+C and Escape while it has a
-/// selection). Only one view has a selection at a time, as a window has
-/// one focus.
+/// selection), or the selection area last pressed (`area`). Only one view
+/// or area has a selection at a time, as a window has one focus.
 #[derive(Default)]
 pub(crate) struct Selected {
     view: RefCell<Option<objc2::rc::Weak<crate::view::ViewObj>>>,
+    /// The selection of the selection area last pressed.
+    pub(crate) area: crate::selection_area::AreaSelection,
 }
 
 impl Selected {
@@ -1393,12 +1406,27 @@ fn select(view: &crate::view::NshView, range: Option<(u32, u32)>) {
     }
 }
 
-/// Clears the surface's selection.
+/// Sets the part of a selection area's selection `view`'s text shows
+/// (`None` or empty clears it).
+pub(crate) fn set_area_range(view: &crate::view::NshView, range: Option<(u32, u32)>) {
+    let range = range.filter(|(a, b)| a < b);
+    let changed = view
+        .state()
+        .text
+        .as_ref()
+        .is_some_and(|t| t.area_range.replace(range) != range);
+    if changed {
+        crate::surface::quiet(|| view.redraw());
+    }
+}
+
+/// Clears the surface's selection (a text's or an area's).
 pub(crate) fn clear(surface: &crate::surface::Surface) {
     if let Some(view) = surface.selection.get() {
         select(&view, None);
     }
     surface.selection.set(None);
+    surface.selection.area.clear();
 }
 
 /// The primary button went down: on `view`'s selectable text at `(x, y)`
@@ -1417,6 +1445,8 @@ pub(crate) fn selection_down(
     over_press: bool,
 ) {
     let view = view.filter(|v| selectable(&v.state()));
+    // A press outside the area that has the selection.
+    surface.selection.area.clear();
     if surface.selection.get().as_ref() != view {
         clear(surface);
     }
@@ -1526,7 +1556,10 @@ pub(crate) fn selection_key(
         Some('c') if command => copy(surface),
         Some('a') if command => select_all(surface),
         // Escape.
-        _ if event.keyCode() == 53 && surface.selection.with_range().is_some() => {
+        _ if event.keyCode() == 53
+            && (surface.selection.with_range().is_some()
+                || surface.selection.area.has_selection()) =>
+        {
             clear(surface);
             true
         }
@@ -1537,11 +1570,12 @@ pub(crate) fn selection_key(
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).
 /// False if there is none.
 pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
-    let Some(text) = surface
-        .selection
-        .with_range()
-        .and_then(|v| selected_text(&v))
-    else {
+    let Some(text) = surface.selection.area.text().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+    }) else {
         return false;
     };
     let board = objc2_app_kit::NSPasteboard::generalPasteboard();
@@ -1552,9 +1586,12 @@ pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
     true
 }
 
-/// Selects all of the last pressed selectable text (the Edit menu's
-/// Select All). False if there is none.
+/// Selects all of the last pressed selectable text or selection area (the
+/// Edit menu's Select All). False if there is none.
 pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {
+    if surface.selection.area.select_all() {
+        return true;
+    }
     let Some(view) = surface.selection.get() else {
         return false;
     };

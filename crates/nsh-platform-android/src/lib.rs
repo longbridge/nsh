@@ -10,6 +10,8 @@
 //! - Native animations (nsh-core's `animation` graph) run on the UI thread in Rust:
 //!   `Choreographer` ticks call in, and changed values come back as a
 //!   compact array.
+//! - Selections across the texts of a selection area use nsh-core's model
+//!   on the UI thread too (`selection_area.rs`, `SelectionArea.java`).
 //!
 //! On non-Android targets this crate is empty.
 
@@ -25,6 +27,7 @@ mod logger;
 mod net;
 #[cfg(feature = "js")]
 mod package;
+mod selection_area;
 mod svg;
 mod text;
 

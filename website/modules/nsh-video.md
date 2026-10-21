@@ -1,15 +1,15 @@
 ---
-title: nsh/video
+title: Video
 description: Video, a native video player (AVPlayer, MediaPlayer), with its props, events and ref methods.
-order: 14
+order: 2.4
 ---
 
-# nsh/video
+# Video
 
-`nsh/video` exports `Video`: a video player built on the platform's player (`AVPlayer` on iOS and Mac Catalyst, `MediaPlayer` on Android). Playback is controlled with props, so pausing is a signal away.
+`nsh` exports `Video`: a video player built on the platform's player (`AVPlayer` on iOS and Mac Catalyst, `MediaPlayer` on Android). Playback is controlled with props, so pausing is a signal away.
 
 ```ts
-import { Video, type VideoProps } from "nsh/video";
+import { Video, type VideoProps } from "nsh";
 ```
 
 See [Web view and video](../docs/web-view-and-video.md) for the guide and [`<Video>`](../elements/video.md) for its props.
@@ -25,8 +25,7 @@ interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
 ```
 
 ```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
+import { mount, signal, Text, Video, View, type YNode } from "nsh";
 
 function Player() {
   const paused = signal(true);

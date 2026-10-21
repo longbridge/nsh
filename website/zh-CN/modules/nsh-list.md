@@ -1,15 +1,15 @@
 ---
-title: nsh/list
+title: List
 description: List：基于原生滚动视图、虚拟化并复用单元格的列表，以及它的全部属性、事件和 ref 方法。
-order: 4
+order: 2.1
 ---
 
-# nsh/list
+# List
 
-`nsh/list` 导出 `List`：一个基于原生滚动视图的虚拟化列表。只有视口附近的行才真正存在，滚动时单元格会被复用。哪些行存在、它们的位置、多列布局、吸顶标题和可见性都在原生侧计算，因此滚动一个上万条目的列表时，除了单元格被复用时变化的行绑定之外，不会运行任何 JS。
+`nsh` 导出 `List`：一个基于原生滚动视图的虚拟化列表。只有视口附近的行才真正存在，滚动时单元格会被复用。哪些行存在、它们的位置、多列布局、吸顶标题和可见性都在原生侧计算，因此滚动一个上万条目的列表时，除了单元格被复用时变化的行绑定之外，不会运行任何 JS。
 
 ```ts
-import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh/list";
+import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh";
 ```
 
 教程见[列表](../docs/lists.md)，元素的属性见 [`<List>`](../elements/list.md)。
@@ -21,8 +21,7 @@ function List<T>(props: ListProps<T>): YNode;
 ```
 
 ```tsx
-import { mount, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { List, mount, Text, View } from "nsh";
 
 const contacts = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), name: `Contact ${i}` }));
 
@@ -151,8 +150,7 @@ interface ViewabilityConfig {
 | `scrollTo({ x?, y?, animated? })` | 滚动到某个偏移。 |
 
 ```tsx
-import { Text, View, type YNode } from "nsh";
-import { List } from "nsh/list";
+import { List, Text, View, type YNode } from "nsh";
 
 let list!: YNode;
 

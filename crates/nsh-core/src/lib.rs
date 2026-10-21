@@ -30,6 +30,7 @@ mod props;
 pub mod reactive;
 pub mod resource;
 pub mod runtime;
+pub mod selection;
 pub mod shape;
 pub mod storage;
 mod style;

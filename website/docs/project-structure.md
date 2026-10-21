@@ -1,13 +1,31 @@
 ---
 title: Project structure
-description: The files of an NSH app, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
+description: The files of an NSH app in Rust or TSX, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
 order: 5
 group: start
 ---
 
 # Project structure
 
-An NSH app is a directory with an entry module and an optional `nsh.json`. Everything else (more modules, images, fonts, JSON files) is found by following the entry's imports, so there is no file list to maintain.
+An NSH app is a directory with an `nsh.json` and its code: a Rust crate whose root component `nsh.json` names, or a TSX entry module, or both. Everything else (more modules, images, fonts, JSON files) is found from there: a crate's modules and its `assets/` directory, or the files the TSX entry imports, so there is no file list to maintain.
+
+An app written in Rust is a Cargo project:
+
+```text
+my-app/
+├── nsh.json           name, id, version, icon, the crate ("rust") and its root component ("root"), theme
+├── Cargo.toml         the crate: nsh-core, nsh-base and your dependencies
+├── src/
+│   ├── lib.rs         the root component and the crate's UI set (#[native_module])
+│   ├── main.rs        cargo run: the root on this machine's desktop backend
+│   └── screens/       your own modules (any layout you like)
+├── assets/            files the crate ships: asset!("logo@2x.png"), fonts
+├── .gitignore         .nsh/ and target/
+├── .nsh/              generated: the runners' sources, test entries, build output (.nsh/out)
+└── target/            Cargo's build directory
+```
+
+A TSX app is an entry and the modules it imports:
 
 ```text
 my-app/
@@ -15,23 +33,43 @@ my-app/
 ├── App.test.tsx       its tests (nsh test)
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
-├── .gitignore         .nsh/ and out/
+├── .gitignore         .nsh/ and target/
 ├── components/        your own modules (any layout you like)
 │   └── Header.tsx
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
-├── .nsh/              generated: type declarations, development host builds, test entries
-└── out/               generated: nsh build / nsh package output
+└── .nsh/              generated: type declarations, development host builds, test entries, build output (.nsh/out)
 ```
 
-Every command takes the entry as its argument (`nsh run my-app/App.tsx`). The directory that contains the entry is the app's root: `nsh.json` is read from there, asset paths are relative to it, and `.nsh/` is written there.
+An app with both lists its crates in `"rust"` and has a TSX entry that imports them ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)).
 
-## The entry module
+Every command takes the app's directory or its entry as its argument (`nsh run my-app`, `nsh run my-app/App.tsx`). The directory of `nsh.json` and the entry is the app's root: `nsh.json` is read from there, asset paths are relative to it, and `.nsh/` is written there. In a Rust app (`nsh.json` `"root"`), the directory runs the root component; naming a TSX entry runs that instead.
 
-The entry is a normal module that ends by rendering the root component:
+## The root component
 
-```tsx
+A Rust app's root is a component of its crate, which `nsh.json`'s `"root"` names by its path in the crate (`App`, `shell::Gallery`). A TSX entry is a normal module that ends by rendering the root component:
+
+```rust tabs
+// src/lib.rs; nsh.json: { "rust": ".", "root": "App" }
+mod screens;
+
+use nsh_core::ui::prelude::*;
+
+/// What a TSX entry may import from the crate.
+#[native_module("my-app/native")]
+fn native(registry: &mut Registry) {
+    registry.register::<App>().assets(assets!());
+}
+
+#[component]
+pub fn App() -> impl IntoElement {
+    screens::home()
+}
+```
+
+```tsx tabs
+// App.tsx
 import { mount } from "nsh";
 import { Home } from "./components/Home";
 
@@ -42,11 +80,25 @@ function App() {
 mount(App);
 ```
 
-`mount(component, props?)` renders the component into the app's surface and returns a function that removes it again. An app calls it once. Code at the top level of the entry runs when the bundle loads, before the first frame.
+`nsh run` and `nsh package` mount a Rust root on every platform, with no QuickJS. In TSX, `mount(component, props?)` renders the component into the app's surface and returns a function that removes it again; an app calls it once. Code at the top level of the entry runs when the bundle loads, before the first frame.
 
 ## nsh.json
 
-`nsh.json` sits next to the entry. Every key is optional; `nsh init` writes the first four.
+`nsh.json` sits in the app's root. `nsh init` writes `name`, `id`, `version` and `build`, and for a Rust app the crate and its root component:
+
+```json
+{
+  "name": "Gallery",
+  "id": "com.example.gallery",
+  "version": "1.0.0",
+  "build": 1,
+  "rust": ".",
+  "root": "App",
+  "theme": "theme.json"
+}
+```
+
+Every other key is optional; a TSX app may also leave out the four. A TSX app's `nsh.json` might read:
 
 ```json
 {
@@ -131,7 +183,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `jsx-runtime.d.ts` | The JSX runtime TypeScript resolves through `jsxImportSource` (the `JSX` namespace) |
 | `globals.d.ts` | `If` and `Each`; `console`, timers, `requestAnimationFrame`, `fetch` and the other [global APIs](../modules/globals.md) |
 | `assets.d.ts` | What importing an image or font gives |
-| `list.d.ts`, `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/list`, `nsh/animated`, `nsh/device`, ...) |
+| `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/animated`, `nsh/device`, ...) |
 | `base.d.ts` | `nsh/base` |
 
 `lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh check`.
@@ -142,7 +194,9 @@ An app made by an earlier `nsh init` gets the new `tsconfig.json` with its next 
 
 ## Modules
 
-Split the app into as many `.ts` and `.tsx` modules as you like and import them with relative paths; the extension may be left out:
+A Rust app's code is its crate's modules (`mod screens;`), and its dependencies come from crates.io like any crate's; NSH's own crates are `nsh-core` (the primitives, signals and typed styles, `use nsh_core::ui::prelude::*`) and `nsh-base` (the base components and the theme).
+
+In TSX, split the app into as many `.ts` and `.tsx` modules as you like and import them with relative paths; the extension may be left out:
 
 ```tsx
 import { Header } from "./components/Header";
@@ -171,16 +225,12 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 
 | Module | What it has |
 |---|---|
-| `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; `View`, `Text`, `Scroll`, `Input` ([reference](../modules/nsh.md)) |
+| `nsh` | Reactivity (`signal`, `computed`, `effect`, ...), `mount`, `split`, `context`; the primitives `View`, `Text`, `Scroll`, `Input`, `Image`, `List`, `Canvas`, `WebView`, `Video` ([reference](../modules/nsh.md)) |
 | `nsh/base` | The unstyled foundation of an app's UI: navigation stacks and their pages (`NavStack`, `NavPage`, `createNavStack`), dialogs (`Dialog`), a press target (`Button`), safe areas (`SafeAreaView`, `safeArea`, `safeAreaInsets`), the system's alert dialog (`AlertDialog`), the software keyboard (`Keyboard`, `keyboardFrame`, `KeyboardAvoidingView`); pages and dialogs set the status bar (`statusBar`) ([reference](../modules/nsh-base.md)) |
-| `nsh/list` | `List`: virtualized, recycling lists |
 | `nsh/animated` | Native animations |
-| `nsh/canvas` | 2D drawing |
 | `nsh/gesture` | `PanResponder` |
 | `nsh/device` | `Platform`, `windowSize`, `colorScheme`, `fontScale`, `PixelRatio`, `I18nManager` |
 | `nsh/accessibility` | Screen reader and reduce motion state, announcements |
-| `nsh/image` | `Image` (the element), `Image.getSize`, `Image.prefetch` |
-| `nsh/webview`, `nsh/video` | `WebView`, `Video` |
 | `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
@@ -208,11 +258,20 @@ declare module "node-polyfill";
 
 ## Assets
 
-Images and fonts are imported like modules. The bundler records each imported file and ships it with the app: `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
+Images and fonts ship with the app. A Rust crate reads each file of its `assets/` directory at compile time with `asset!`, and ships them all with `registry.assets(assets!())` in its `#[native_module]` function; TSX imports them like modules, and the bundler records each imported file. `nsh build` copies them to `.nsh/out/assets/`, `nsh package` puts them in the app, and during development they are served to the app.
 
-```tsx
-import { Text } from "nsh";
-import { Image } from "nsh/image";
+```rust tabs
+use nsh_core::ui::{FontAsset, ImageAsset, asset};
+
+const LOGO: ImageAsset = asset!("logo@2x.png");      // its uri, and its size: 64×64 points
+const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family: "Inter"
+
+image(LOGO)
+text("Hello").font_family(INTER.family)
+```
+
+```tsx tabs
+import { Image, Text } from "nsh";
 import logo from "./assets/logo@2x.png";   // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
 import Inter from "./assets/Inter.ttf";     // "Inter"
 
@@ -231,5 +290,5 @@ See [Images and assets](./images-and-assets.md) and [Fonts](./fonts.md).
 
 ## Generated directories
 
-- **`.nsh/`**: the type declarations (`.nsh/types`) and what `nsh run` installs on simulators and devices (the Catalyst host app, the Android development APK). Safe to delete; it is recreated.
-- **`out/`**: the default output of `nsh build` (`bundle.js`, `bundle.js.map`, `bundle.nshc`, `capabilities.json`, `assets/`) and `nsh package` (`.app`, `.ipa`, `.apk`). Change it with `-o`.
+- **`.nsh/`**: everything NSH generates: the type declarations (`.nsh/types`), the sources of a Rust app's runners (`.nsh/rust`), what `nsh run` installs on simulators and devices (the Catalyst host app, the Android development APK), and `.nsh/out`, the default output of `nsh build` (`bundle.js`, `bundle.js.map`, `bundle.nshc`, `capabilities.json`, `assets/`; for a Rust app, `app.json` and `assets/`) and `nsh package` (`.app`, `.ipa`, `.apk`, a site); `-o` writes elsewhere. Safe to delete; it is recreated.
+- **`target/`**: Cargo's build directory for an app's crates and runners (or `CARGO_TARGET_DIR`).

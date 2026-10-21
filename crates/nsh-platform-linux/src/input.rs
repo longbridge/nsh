@@ -91,8 +91,6 @@ enum Key {
     Mouse,
     /// A touchscreen finger, by its event sequence.
     Touch(usize),
-    /// A scripted finger ([`simulate`]).
-    Simulated,
 }
 
 /// Pointer state of one surface.
@@ -512,9 +510,13 @@ fn has_press(events: EventMask) -> bool {
 fn update_cursor(view: &NshView) {
     let name = {
         let s = view.state();
-        // Selectable text shows the I-beam (a press target its pointer).
-        cursor_name(s.style.cursor, has_press(s.events))
-            .or_else(|| crate::text::selectable(&s).then_some("text"))
+        // Selectable text and the texts of selection areas show the
+        // I-beam (a press target its pointer).
+        cursor_name(s.style.cursor, has_press(s.events)).or_else(|| {
+            let selects = crate::text::selectable(&s)
+                || (s.text.is_some() && crate::selection_area::takes_part(view));
+            selects.then_some("text")
+        })
     };
     let current = view.cursor().and_then(|c| c.name());
     if current.as_deref() != name {
@@ -620,7 +622,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
-            down(surface, Key::Mouse, x, y, time)
+            down(surface, Key::Mouse, x, y, time, event.modifier_state())
         }
         T::ButtonPress
             if button() == Some(gdk::BUTTON_SECONDARY)
@@ -641,7 +643,14 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                 hover_moved(surface, x, y, state);
             }
         }
-        T::TouchBegin => down(surface, touch_key(event), x, y, time),
+        T::TouchBegin => down(
+            surface,
+            touch_key(event),
+            x,
+            y,
+            time,
+            event.modifier_state(),
+        ),
         T::TouchUpdate => motion(surface, touch_key(event), x, y, time),
         T::TouchEnd => up(surface, touch_key(event), x, y, time, false),
         T::TouchCancel => up(surface, touch_key(event), x, y, time, true),
@@ -786,15 +795,15 @@ fn scroll_event(
 
 // --- Simulation ---------------------------------------------------------------------
 
-/// A simulated pointer action ([`crate::script`]), in root coordinates.
+/// A simulated pointer action of the mouse ([`crate::synth`]), in root
+/// coordinates.
+#[cfg(feature = "dev")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Simulated {
-    /// Press at `(x, y)`, with the mouse when `true`, else a finger.
-    Down(f32, f32, bool),
-    /// Move to `(x, y)` while pressed.
-    Move(f32, f32, bool),
-    /// Release at `(x, y)`.
-    Up(f32, f32, bool),
+    /// A press at `(x, y)`.
+    Down(f32, f32),
+    /// A release at `(x, y)`.
+    Up(f32, f32),
     /// A wheel / touchpad scroll at `(x, y)` by `(dx, dy)` points.
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
@@ -802,15 +811,15 @@ pub(crate) enum Simulated {
 }
 
 /// Feeds a simulated pointer action through the same path as real input.
-/// A simulated finger's drags scroll, the mouse's do not.
+#[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
-    let key = |mouse| if mouse { Key::Mouse } else { Key::Simulated };
     match action {
-        Simulated::Down(x, y, mouse) => down(surface, key(mouse), x, y, time),
-        Simulated::Move(x, y, mouse) => motion(surface, key(mouse), x, y, time),
-        Simulated::Up(x, y, mouse) => {
-            up(surface, key(mouse), x, y, time, false);
+        Simulated::Down(x, y) => {
+            down(surface, Key::Mouse, x, y, time, gdk::ModifierType::empty())
+        }
+        Simulated::Up(x, y) => {
+            up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
             if let Some(native) = pick(&surface.root, x, y).and_then(|hit| hit.native) {
@@ -829,6 +838,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
 }
 
 /// Focuses `widget` or the first focusable widget inside it.
+#[cfg(feature = "dev")]
 fn focus_native(widget: &gtk::Widget) {
     if widget.grab_focus() {
         return;
@@ -1023,7 +1033,7 @@ fn put(surface: &Surface, p: Pointer) {
     surface.input.pointers.borrow_mut().push(p);
 }
 
-fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
+fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: gdk::ModifierType) {
     // A release we never saw (the window lost the grab).
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
@@ -1037,9 +1047,6 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     }
     let touch = key != Key::Mouse;
     let native = hit.native.is_some();
-    // Mouse drags over selectable text select it (`text.rs`) rather than
-    // pan.
-    let selects = !touch && !native && crate::text::selectable(&hit.view.state());
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
     // pointer, where a drag on the content moves the content with it.
@@ -1079,6 +1086,13 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
         put(surface, p);
         return;
     }
+    // A press clears a selection anywhere else; the mouse selects in the
+    // selection area it presses in (`selection_area.rs`).
+    let area = crate::selection_area::pressed(surface, &hit.view, !touch, native);
+    // Mouse drags over selectable text or in a selection area select it
+    // (`text.rs`) rather than pan.
+    let selects =
+        area.is_some() || (!touch && !native && crate::text::selectable(&hit.view.state()));
     let mut path = Vec::new();
     let mut candidates = Vec::new();
     let mut pinch = None;
@@ -1142,6 +1156,14 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     } else {
         find_press(surface, &hit.view, &views, x, y)
     };
+    if let Some(area) = &area {
+        // Over a press target in the area a drag selects only once the
+        // press is over.
+        let over_press = press
+            .as_ref()
+            .is_some_and(|p| p.view == *area || p.view.is_ancestor(area));
+        crate::selection_area::begin(surface, area, (x, y), time, modifiers, over_press);
+    }
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
     let mut p = Pointer {
@@ -1221,6 +1243,10 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     p.time = time;
     p.velocity.add(time, x, y);
     let moved = std::mem::replace(&mut p.moved, true);
+    if key == Key::Mouse && crate::selection_area::dragged(surface, x, y) {
+        cancel_press(surface, &mut p);
+        release_pressed(surface, &mut p);
+    }
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     let mut activated = None;
     if let Some(gate) = p.gate.take() {
@@ -1327,6 +1353,9 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         report(surface, phase, &p, None);
     }
     release_pressed(surface, &mut p);
+    if p.key == Key::Mouse {
+        crate::selection_area::released(surface);
+    }
     let mode = std::mem::replace(&mut p.mode, Mode::Free);
     match mode {
         Mode::TwoFinger => end_two_finger(surface),

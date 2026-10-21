@@ -1,6 +1,6 @@
 ---
 title: Performance
-description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh test --trace.
+description: How NSH keeps apps fast (Rust apps, a native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure headless and on screen.
 order: 62
 group: tools
 ---
@@ -8,15 +8,20 @@ group: tools
 # Performance
 
 Performance is NSH's first priority, and most of it is decided by the framework rather than by your app: the runtime
-is native, each update crosses threads once, animations and list virtualization run without JS. This page explains the
-rules NSH follows, what they mean for the code you write, and how to measure.
+is native, each update crosses threads once, animations and list virtualization run without JS, and an app written in
+Rust runs no JS at all. This page explains the rules NSH follows, what they mean for the code you write, in Rust and in
+TSX, and how to measure.
 
 ## The rules
 
 ### 1. JS does as little as possible
 
-QuickJS is an interpreter: small, quick to start, and much slower than native code for heavy work. So in NSH, **only
-your app's code is JS**. The reactive graph (signals, computed values, effects), the renderer your compiled JSX calls,
+**An app written in Rust is native code from start to end**: its components, state and handlers are compiled with
+NSH's engine, and no interpreter runs ([Building with Rust](./rust.md)). That is the fastest way to write an app, and
+the one to choose for demanding business logic.
+
+In a TSX app, QuickJS is an interpreter: small, quick to start, and much slower than native code for heavy work. So in
+NSH, **only your app's code is JS**. The reactive graph (signals, computed values, effects), the renderer your compiled JSX calls,
 the layout engine, list virtualization, animation and every module you import are
 Rust. Parsing, diffing, layout and string processing happen natively.
 
@@ -45,21 +50,39 @@ Do it once, cache it in a `computed`, or move it off the interaction path.
 
 ### 2. Cross threads in batches
 
-Your app's JS runs on an engine thread, never on the main thread. One JS turn, for example one event handler with
-everything it changes, becomes **one commit**: the runtime renders components, lays out, diffs and produces one batch
+Your app's code, Rust or JS, runs on an engine thread, never on the main thread. One turn, for example one event
+handler with everything it changes, becomes **one commit**: the runtime renders components, lays out, diffs and produces one batch
 of native view operations, which reaches the main thread in **one hop**. There is no bridge message per view and no
 serialization per prop.
 
 **For your code:** you do not need to coalesce writes for performance; ten `set` calls in one handler still produce one
-commit. Use `batch` when you want effects and computed values to see all the writes at once instead of running after
+commit, in Rust and in TSX. Use `batch` when you want effects and computed values to see all the writes at once instead of running after
 each one.
 
 ### 3. Fine-grained updates
 
-Components run **once**. Afterwards, only the bindings that read a signal run again when it changes: a text, a style
-property, a branch of `<If>`, the rows of `<Each>`. Nothing re-renders a whole subtree to find out what changed.
+Components run **once**, in Rust and in TSX alike. Afterwards, only the bindings that read a signal run again when it
+changes: a text, a style property, a branch of `when` (`<If>`), the rows of `each` (`<Each>`). Nothing re-renders a whole
+subtree to find out what changed.
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[derive(Clone, PartialEq)]
+struct Quote {
+    price: f64,
+    change: f64,
+}
+
+fn price(quote: Signal<Quote>) -> impl IntoElement {
+    // Runs once. When the quote changes, only the text and the color update.
+    text(move || format!("{:.2}", quote.with(|q| q.price))).text_color(move || {
+        if quote.with(|q| q.change < 0.0) { rgb(0xcf222e) } else { rgb(0x1a7f37) }
+    })
+}
+```
+
+```tsx tabs
 import type { Accessor } from "nsh";
 import { Text } from "nsh";
 
@@ -77,15 +100,22 @@ function Price(props: { quote: Accessor<Quote> }) {
 
 **For your code:**
 
-- Read signals where they are used (inside JSX expressions, `computed`, `effect`), not at the top of a component, so
-  the narrowest binding updates.
-- Use `<Each>` (rows kept by key) or [`List`](./lists.md) for collections; a plain `.map()` in JSX creates every row
-  again on each change.
+- Read signals where they are used (inside bindings, `move ||` closures in Rust and JSX expressions in TSX, and in
+  `computed` and `effect`), not at the top of a component, so the narrowest binding updates.
+- Use `each` / `<Each>` (rows kept by key) or a [virtual list](./lists.md) for collections; rows made again from the whole
+  collection (`dynamic` in Rust, a plain `.map()` in JSX) are all created again on each change.
 - Derive values with `computed` when several bindings use them, so they are computed once per change.
 
 Appending a fourth item to a three-item list, as `nsh test --trace` shows it:
 
-```tsx
+```rust tabs
+// 22 mount items: 3 views removed, 4 created
+dynamic(move || items.get().into_iter().map(|n| text(format!("row {n}"))).collect::<Vec<_>>())
+// 4 mount items: 1 view created
+each(move || items.get(), |n: &u32| *n, |n, _| text(move || format!("row {}", n.get())))
+```
+
+```tsx tabs
 {items().map((n) => <Text>{`row ${n}`}</Text>)}                   // 22 mount items: 3 views removed, 4 created
 <Each of={items()}>{(n) => <Text>{`row ${n()}`}</Text>}</Each>      // 4 mount items: 1 view created
 ```
@@ -100,13 +130,27 @@ item. You can see this in `nsh test --trace` output (below).
 
 ### 5. Animate natively
 
-An animation driven from JS (a signal written in `requestAnimationFrame`) costs a JS call and a commit per frame, and
-stutters when the engine thread is busy. [`nsh/animated`](./animation.md) runs animations natively instead:
+An animation driven from the engine thread (a signal written on every frame) costs a commit per frame, and a JS call
+in TSX, and stutters when the engine thread is busy. Animated values ([Animation](./animation.md): `animated_value` in
+Rust, [`nsh/animated`](../modules/nsh-animated.md) in TSX) run animations natively instead:
 
-```tsx
-import { View } from "nsh";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+let scroll_y = animated_value(0.0);
+
+view()
+    .bind_opacity(&scroll_y.interpolate(&[0.0, 120.0], &[1.0, 0.35]))
+    .bind_translate_y(&scroll_y.interpolate(&[0.0, 120.0], &[0.0, -6.0]));
+virtual_list(move || photos.with(Vec::len), move |at| photo_row(photos, at))
+    .scroll_value(&scroll_y)
+    .estimated_item_size(px(64.0))
+    .flex_1();
+```
+
+```tsx tabs
+import { List, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { List } from "nsh/list";
 
 const scrollY = createAnimatedValue(0);
 
@@ -121,9 +165,11 @@ const scrollY = createAnimatedValue(0);
 </List>;
 ```
 
-- `timing`, `spring` and `decay` run on the platform's UI thread, frame by frame, with no JS per frame.
-- `scrollValue` writes a scroll offset into an animated value in the same frame; `pan={{ x, y }}` lets drags move a view
-  directly. JS hears about the end (the promise resolves, `onPanEnd` gets the velocity).
+- `timing`, `spring` and `decay` run on the platform's UI thread, frame by frame, with no work on the engine thread
+  per frame.
+- `scroll_value` (`scrollValue`) writes a scroll offset into an animated value in the same frame; a pan
+  (`pan={{ x, y }}`) lets drags move a view directly. Your code hears about the end (the animation completes, the pan's
+  end gets the velocity).
 - `Animated.sequence` / `parallel` / `stagger` / `loop` run as one native tree: each step starts the moment the
   previous one ends, with no gap waiting for JS.
 - `LayoutAnimation.configureNext` animates the next commit's frames, insertions and removals natively.
@@ -131,21 +177,24 @@ const scrollY = createAnimatedValue(0);
 ### 6. Virtualize long lists
 
 [`List`](./lists.md) keeps only the rows near the viewport, recycles their cells, and computes positions, columns,
-sticky headers and viewability natively. Scrolling frames that reveal no new row call no JS and produce no batch; a
+sticky headers and viewability natively. Scrolling frames that reveal no new row run none of your code and produce no batch; a
 frame that binds one new row of the gallery's photo list is 4 operations and 4 mount items.
 
 **For your code:**
 
-- Give `estimatedItemSize` close to the real row height.
+- Give `estimated_item_size` (`estimatedItemSize`) close to the real row height.
 - Keep per-item state in your data (keyed by id), not in signals created inside the row: cells are reused for other
-  items, and `item()` / `index()` change when they are.
-- Keep rows cheap: a row binds once per recycle, so its JS runs while the user scrolls.
-- Use `scrollValue` instead of `onScroll` for effects that follow the scroll position. `onScroll` delivers at most one
-  event per engine turn, but each is still a call into JS.
+  items, and the row's position (`at.index()`; `item()` / `index()` in TSX) changes when they are.
+- Keep rows cheap: a row binds once per recycle, so its code runs while the user scrolls.
+- Use `scroll_value` (`scrollValue`) instead of `on_scroll` (`onScroll`) for effects that follow the scroll position.
+  A scroll listener gets at most one event per engine turn, but each is still a call into your code (into JS, in TSX).
 
 ## Measuring
 
-### Headless: `nsh test --trace`
+### Headless: `--trace`
+
+In a Rust test, `EngineConfig::trace` logs the same `perf` lines and `Headless::observe` sees every batch
+([Testing](./testing-and-trace.md#tracing-with-trace)). `nsh test --trace` prints them for TSX:
 
 ```sh
 echo 'await app.press("Add")' | nsh test App.tsx --trace                 # first frame + a press
@@ -176,7 +225,7 @@ nsh run App.tsx --trace
 nsh run App.tsx --target android --trace --release
 ```
 
-logs the same commit lines from the real host, with the platform's own text engine. `NshAppView(trace: true)` and
+logs the same commit lines from a TSX app's real host, with the platform's own text engine. `NshAppView(trace: true)` and
 `new NshView(context, true)` do the same in an embedding app.
 
 ### On screen: `--fps`
@@ -185,7 +234,7 @@ logs the same commit lines from the real host, with the platform's own text engi
 nsh run App.tsx --target macos --fps --release
 ```
 
-shows the frame rate and what frames and commits cost over the running app, with CPU, GPU and memory
+(`AppOptions { fps: true, .. }` in a Rust app's `run_app`) shows the frame rate and what frames and commits cost over the running app, with CPU, GPU and memory
 ([macOS: performance monitor](./macos.md#performance-monitor)).
 
 > [!TIP]
@@ -208,13 +257,13 @@ From NSH's own baselines (Apple silicon unless noted):
 
 ## Checklist
 
+- Language: write the app, or the parts it uses most, in Rust ([Building with Rust](./rust.md)); keep TSX for what
+  changes often or is delivered at run time.
 - Interactions: a tap changes a handful of mount items, not dozens.
-- Lists: `List` for anything long, with `estimatedItemSize`; per-item state in data.
+- Lists: a virtual list (`virtual_list`, `List`) for anything long, with an estimated item size; per-item state in data.
 - Animations: animated values, not signals written every frame.
-- Scroll effects: `scrollValue`, not `onScroll`.
+- Scroll effects: `scroll_value` (`scrollValue`), not a scroll listener.
 - Handlers: no heavy work per keystroke or per scroll event; cache in `computed`.
-- Components: write the components an app uses most in Rust, in the app's own crate ([Building with Rust](./rust.md)); they cost
-  less JS than equivalents written in TSX.
 
 ## See also
 

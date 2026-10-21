@@ -128,10 +128,27 @@ final class Mounter {
     final java.util.ArrayList<TouchTracker> touchTrackers = new java.util.ArrayList<>();
     /** The text with a selection (one at a time, as in TextView). */
     TextBox selectedText;
+    /** The selection area with a selection (one per surface, a text's or an area's). */
+    SelectionArea selectedArea;
+    /** Selection areas (`ViewProps.selection_area`), by view. */
+    private final SparseArray<SelectionArea> selectionAreas = new SparseArray<>();
 
     /** A finger went down at the screen point: a selection elsewhere ends. */
     void touchDown(float rawX, float rawY) {
         if (selectedText != null && !selectedText.selectionContains(rawX, rawY)) selectedText.clearSelection();
+        if (selectedArea != null && !selectedArea.selectionContains(rawX, rawY)) selectedArea.clear();
+    }
+
+    /** The outermost selection area {@code text} is in (an area inside another is part of it), or null. */
+    SelectionArea selectionAreaOf(TextBox text) {
+        if (selectionAreas.size() == 0) return null;
+        SelectionArea outer = null;
+        for (Object v = text; v instanceof View; v = ((View) v).getParent()) {
+            if (!(v instanceof Node)) continue;
+            SelectionArea area = selectionAreas.get(((Node) v).nodeId());
+            if (area != null && area.view == v) outer = area;
+        }
+        return outer;
     }
     /** Scroll views a JS responder keeps from scrolling. */
     private final java.util.ArrayList<ScrollBox> blockedScrolls = new java.util.ArrayList<>();
@@ -222,11 +239,12 @@ final class Mounter {
                         linkData[i * 3 + 2] = b.getInt();
                         linkEvents[i] = (b.getInt() & 0xffffffffL) | ((long) b.getInt() << 32);
                     }
-                    boolean selectable = b.getInt() != 0;
+                    // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
+                    int selectable = b.getInt();
                     Integer selectionColor = optColor(b);
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
-                        t.setSelectable(selectable, selectionColor);
+                        t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
                         t.setLinks(linkData, linkEvents);
                         if (links > 0 && t.press == null) t.press = new Pressable(t, this, t.id);
@@ -683,6 +701,11 @@ final class Mounter {
         }
         View v = views.get(id);
         if (v instanceof StackBox) stacks.remove(v);
+        SelectionArea area = selectionAreas.get(id);
+        if (area != null) {
+            area.clear();
+            selectionAreas.remove(id);
+        }
         screenOptions.remove(id);
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
@@ -1282,7 +1305,16 @@ final class Mounter {
         } else {
             panActivations.remove(id);
         }
+        boolean selectionArea = b.getInt() != 0;
         if (v == null) return;
+        SelectionArea area = selectionAreas.get(id);
+        if (selectionArea && (area == null || area.view != v)) {
+            if (area != null) area.clear();
+            selectionAreas.put(id, new SelectionArea(this, v));
+        } else if (!selectionArea && area != null) {
+            area.clear();
+            selectionAreas.remove(id);
+        }
         Feedback f = feedback.get(id);
         if (f == null) feedback.put(id, f = new Feedback());
         f.longPressDelay = longPressDelay >= 0 ? Math.round(longPressDelay) : -1;

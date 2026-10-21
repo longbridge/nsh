@@ -648,7 +648,8 @@ define_class!(
             }
         }
 
-        /// The Edit menu's Select All (Cmd+A): a selectable text's.
+        /// The Edit menu's Select All (Cmd+A): a selectable text's or a
+        /// selection area's.
         #[unsafe(method(selectAll:))]
         fn select_all(&self, _sender: Option<&AnyObject>) {
             if let Some(surface) = self.surface() {
@@ -880,19 +881,20 @@ fn scrolling(mtm: MainThreadMarker) -> bool {
 }
 
 thread_local! {
-    /// The event `--script` hands its window (`crate::script`) while the
-    /// window handles it: `sendEvent:` does not make it
+    /// The event the test agent hands its window (`crate::synth`) while
+    /// the window handles it: `sendEvent:` does not make it
     /// `NSApp.currentEvent`, which the root's `hitTest:` looks at.
     static SCRIPTED: RefCell<Option<Retained<NSEvent>>> = const { RefCell::new(None) };
 }
 
-/// The type of the event `--script` hands its window now.
+/// The type of the event the test agent hands its window now.
 fn scripted_type() -> Option<NSEventType> {
     SCRIPTED.with_borrow(|e| e.as_ref().map(|e| e.r#type()))
 }
 
 /// Runs `f` (which hands `event` to a window) with `event` as the one
 /// AppKit handles, for the root's `hitTest:`.
+#[cfg(any(feature = "dev", test))]
 pub(crate) fn scripted<R>(event: &NSEvent, f: impl FnOnce() -> R) -> R {
     let old = SCRIPTED.replace(Some(event.retain()));
     let r = f();

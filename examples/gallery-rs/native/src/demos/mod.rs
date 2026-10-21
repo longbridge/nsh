@@ -23,6 +23,7 @@ mod typed_styles;
 
 use std::rc::Rc;
 
+use nsh_base::nav_page;
 use nsh_core::ui::{AnyElement, Screen, prelude::*};
 
 use crate::{
@@ -317,9 +318,10 @@ pub(crate) fn index() -> Screen {
                 .into_element()
         })
         .collect();
-    with_header(header(screen().key("index").title("Rust Gallery")), || {
-        PageHeader::new("Rust Gallery").back(false)
-    })
+    with_header(
+        header(nav_page().key("index").title("Rust Gallery")),
+        || PageHeader::new("Rust Gallery").back(false),
+    )
     .child(
         scroll()
             .flex_1()

@@ -2028,6 +2028,9 @@ pub(crate) struct DrawnText {
     pub(crate) content: nsh_core::Bounds<Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Rc<Selection>>,
+    /// The part of the selection of the selection area around it that is
+    /// this text's ([`crate::selection_area`]).
+    pub(crate) area_range: Option<(u32, u32)>,
 }
 
 /// `Text`: a text view's content changed.
@@ -2039,6 +2042,12 @@ pub(crate) fn set(
 ) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
+    // The area's selection is checked against the new content once the
+    // batch is applied (`selection_area::batch_applied`).
+    let area_range = old
+        .as_ref()
+        .filter(|o| o.text.text == text.text)
+        .and_then(|o| o.area_range);
     let selection = match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
         Some((s, old)) if text.is_selectable() => {
             // Offsets into other text mean nothing.
@@ -2059,6 +2068,7 @@ pub(crate) fn set(
         layout: layout.clone(),
         content,
         selection,
+        area_range,
     });
     if was != text.is_selectable() {
         // The I-beam.
@@ -2183,7 +2193,12 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
             cx.fill_rect(crate::geom::rect(ox + x, oy + y, w, h), [r; 4], color);
         });
     }
-    if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
+    if let Some(range) = drawn
+        .selection
+        .as_ref()
+        .and_then(|s| s.range.get())
+        .or(drawn.area_range)
+    {
         let tint = selection_tint(text);
         layout.selection_rects(range, |x, y, w, h| {
             cx.fill_rect(crate::geom::rect(ox + x, oy + y, w, h), [0.0; 4], tint);
@@ -2408,14 +2423,22 @@ pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     layout.char_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0)
 }
 
+/// The caret position (UTF-16 offset) nearest `(x, y)` (view
+/// coordinates): where a click there puts it.
+pub(crate) fn caret_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<GpuiLayout>()?;
+    Some(layout.caret_at(x - drawn.content.origin.x.0, y - drawn.content.origin.y.0))
+}
+
 // --- Selection ----------------------------------------------------------------------
 
 /// How far (points) the mouse moves on selectable text before a drag
 /// selects: past input's press slop where the press would fire (a link, an
 /// `onPress`), so a click never does both.
-const SELECT_SLOP: f32 = 3.0;
+pub(crate) const SELECT_SLOP: f32 = 3.0;
 /// The same over a press target.
-const SELECT_SLOP_PRESS: f32 = 10.0;
+pub(crate) const SELECT_SLOP_PRESS: f32 = 10.0;
 
 /// What a drag extends the selection by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -2477,6 +2500,9 @@ fn select(surface: u64, view: &NshView, range: Option<(u32, u32)>) {
         return;
     }
     view.changed();
+    if range.is_some() {
+        crate::selection_area::clear_all();
+    }
     let previous = SELECTED.with_borrow_mut(|selected| match range {
         Some(_) => selected.replace((surface, view.clone())),
         None => {
@@ -2493,6 +2519,19 @@ fn select(surface: u64, view: &NshView, range: Option<(u32, u32)>) {
         && s.range.take().is_some()
     {
         other.changed();
+    }
+}
+
+/// Clears the selection of a single text, if there is one (a selection
+/// area selects: one selection at a time).
+pub(crate) fn clear_selection() {
+    let Some((_, view)) = SELECTED.with_borrow_mut(Option::take) else {
+        return;
+    };
+    if let Some(s) = view_selection(&view)
+        && s.range.take().is_some()
+    {
+        view.changed();
     }
 }
 
