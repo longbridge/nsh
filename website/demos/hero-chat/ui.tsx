@@ -160,20 +160,20 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
   {
     card: {
       backgroundImage: "linear-gradient(180deg, #1b1c20 0%, #191a1d 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.38)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 36px -20px rgba(0,0,0,0.75)",
     },
     inset: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.55)" },
     raised: {
-      backgroundImage: "linear-gradient(180deg, #292b30 0%, #26282c 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.45)",
+      backgroundImage: "linear-gradient(180deg, #2b2d32 0%, #24262a 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 1px rgba(0,0,0,0.4), 0 6px 14px -7px rgba(0,0,0,0.7)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 1px 0 rgba(0,0,0,0.5), 0 2px 6px -1px rgba(0,0,0,0.45)",
+      backgroundImage: "linear-gradient(180deg, #fbfbfc 0%, #e3e5e8 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(0,0,0,0.4), 0 8px 18px -8px rgba(0,0,0,0.75)",
     },
     accent: {
-      backgroundImage: "linear-gradient(180deg, #ceef7d 0%, #c0e664 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 3px 12px rgba(200,242,109,0.22)",
+      backgroundImage: "linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 1px rgba(0,0,0,0.4), 0 8px 20px -9px rgba(200,242,109,0.4)",
     },
     track: { boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)" },
     /** A knob or handle over a track. */
@@ -183,10 +183,10 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
      * small round button), a specular top, a faint inner edge, a lower rim.
      */
     pill: {
-      backgroundColor: "#2c2e33",
-      backgroundImage: "linear-gradient(180deg, #313338 0%, #2c2e33 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.2)",
-      borderColor: "rgba(255,255,255,0.07)",
+      backgroundColor: "#2b2d32",
+      backgroundImage: "linear-gradient(180deg, #2f3136 0%, #2a2c30 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 1px rgba(0,0,0,0.4), 0 6px 14px -7px rgba(0,0,0,0.7)",
+      borderColor: "rgba(255,255,255,0.08)",
     },
     /** A tinted capsule's rim and highlight (badges). */
     chip: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(0,0,0,0.18)" },
@@ -209,29 +209,29 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
   },
   {
     card: {
-      backgroundImage: "linear-gradient(180deg, #fdfdfd 0%, #fcfcfa 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, 0 6px 20px rgba(20,20,10,0.08)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.04), 0 14px 32px -18px rgba(20,20,10,0.2)",
     },
     inset: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.07)" },
     raised: {
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f6f6f2 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.06), 0 5px 12px -6px rgba(20,20,10,0.18)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #34363c 0%, #1c1d21 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.05), 0 1px 0 rgba(20,20,10,0.35), 0 2px 5px -1px rgba(20,20,10,0.30)",
+      backgroundImage: "linear-gradient(180deg, #2e3035 0%, #1b1c20 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 1px rgba(20,20,10,0.2), 0 7px 14px -7px rgba(20,20,10,0.5)",
     },
     accent: {
-      backgroundImage: "linear-gradient(180deg, #cff27e 0%, #c6ec6b 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 3px 10px rgba(110,150,20,0.25)",
+      backgroundImage: "linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 1px rgba(80,110,10,0.2), 0 7px 14px -7px rgba(110,150,20,0.55)",
     },
-    track: { boxShadow: "inset 0 1px 1px rgba(20,20,10,0.08)" },
+    track: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.08)" },
     knob: { boxShadow: "inset 0 1px 0 #ffffff, 0 1px 4px rgba(20,20,10,0.28)" },
     pill: {
       backgroundColor: "#ffffff",
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
-      borderColor: "rgba(20,20,10,0.10)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f6f6f2 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.06), 0 5px 12px -6px rgba(20,20,10,0.18)",
+      borderColor: "rgba(20,20,10,0.14)",
     },
     chip: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(20,20,10,0.04)" },
     glass: {

@@ -57,16 +57,16 @@
   /* Finishes (`finish` in ui.tsx): gentle top-to-bottom gradients, a
      highlight along the top edge, soft shadows. */
   --finish-card-bg: linear-gradient(180deg, #1b1c20 0%, #191a1d 100%);
-  --finish-card: 0 10px 28px rgb(0 0 0 / 38%);
+  --finish-card: inset 0 1px 0 rgb(255 255 255 / 4%), 0 16px 36px -20px rgb(0 0 0 / 75%);
   --finish-flat: 0 1px 2px rgb(0 0 0 / 30%);
   --finish-inset: inset 0 1px 3px rgb(0 0 0 / 55%);
-  --finish-raised-bg: linear-gradient(180deg, #292b30 0%, #26282c 100%);
-  --finish-raised: 0 1px 2px rgb(0 0 0 / 45%);
-  --finish-primary-bg: linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #fcfcfd 0%, #e7e9eb 100%);
-  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(0 0 0 / 12%), 0 1px 0 rgb(0 0 0 / 50%), 0 2px 6px -1px rgb(0 0 0 / 45%);
-  --finish-accent-bg: linear-gradient(180deg, #ceef7d 0%, #c0e664 100%);
-  --finish-accent: inset 0 1px 0 rgb(255 255 255 / 45%), 0 3px 12px rgb(200 242 109 / 22%);
+  --finish-raised-bg: linear-gradient(180deg, #2b2d32 0%, #24262a 100%);
+  --finish-raised: inset 0 1px 0 rgb(255 255 255 / 7%), 0 1px 1px rgb(0 0 0 / 40%), 0 6px 14px -7px rgb(0 0 0 / 70%);
+  --finish-primary-bg: linear-gradient(180deg, #fbfbfc 0%, #e3e5e8 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #ffffff 0%, #eaecee 100%);
+  --finish-primary: inset 0 1px 0 #ffffff, 0 1px 1px rgb(0 0 0 / 40%), 0 8px 18px -8px rgb(0 0 0 / 75%);
+  --finish-accent-bg: linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%);
+  --finish-accent: inset 0 1px 0 rgb(255 255 255 / 55%), 0 1px 1px rgb(0 0 0 / 40%), 0 8px 20px -9px rgb(200 242 109 / 40%);
 
   /* Code: Shiki emits the allsum-light colours (src/light.theme.json, the
      palette of TextView's built-in highlighting); the rules below map them
@@ -186,17 +186,17 @@ html.light {
   --destructive: #d43345;
   --important: #4a6a0a;
 
-  --finish-card-bg: linear-gradient(180deg, #fdfdfc 0%, #fcfcfa 100%);
-  --finish-card: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 3%), 0 1px 2px rgb(20 20 10 / 6%), 0 8px 24px rgb(20 20 10 / 7%);
+  --finish-card-bg: linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%);
+  --finish-card: inset 0 1px 0 #ffffff, 0 1px 1px rgb(20 20 10 / 4%), 0 14px 32px -18px rgb(20 20 10 / 20%);
   --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
   --finish-inset: inset 0 1px 2px rgb(0 0 0 / 6%), inset 0 0 0 1px rgb(0 0 0 / 2%);
-  --finish-raised-bg: linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%);
-  --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(20 20 10 / 4%), 0 1px 0 rgb(20 20 10 / 10%), 0 2px 4px -1px rgb(20 20 10 / 10%);
-  --finish-primary-bg: linear-gradient(180deg, #34363c 0%, #1c1d21 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #3c3e44 0%, #232529 100%);
-  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 18%), inset 0 0 0 1px rgb(255 255 255 / 5%), 0 1px 0 rgb(20 20 10 / 35%), 0 2px 5px -1px rgb(20 20 10 / 30%);
-  --finish-accent-bg: linear-gradient(180deg, #cdf276 0%, #c6ed69 100%);
-  --finish-accent: inset 0 1px 0 rgb(255 255 255 / 55%), 0 1px 3px rgb(80 110 10 / 18%);
+  --finish-raised-bg: linear-gradient(180deg, #ffffff 0%, #f6f6f2 100%);
+  --finish-raised: inset 0 1px 0 #ffffff, 0 1px 1px rgb(20 20 10 / 6%), 0 5px 12px -6px rgb(20 20 10 / 18%);
+  --finish-primary-bg: linear-gradient(180deg, #2e3035 0%, #1b1c20 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #36383e 0%, #222327 100%);
+  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 16%), 0 1px 1px rgb(20 20 10 / 20%), 0 7px 14px -7px rgb(20 20 10 / 50%);
+  --finish-accent-bg: linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%);
+  --finish-accent: inset 0 1px 0 rgb(255 255 255 / 60%), 0 1px 1px rgb(80 110 10 / 20%), 0 7px 14px -7px rgb(110 150 20 / 55%);
   --accent-border: #a7cf3f;
 
   --code-bg: #f0f0eb;

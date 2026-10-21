@@ -29,7 +29,7 @@ const __dark = {
     backgroundImage: "linear-gradient(180deg, #1b1c20, #191a1d)",
     borderWidth: 1,
     borderColor: "#2c2e33",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.38)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 36px -20px rgba(0,0,0,0.75)",
   },
   row: {
     backgroundColor: "#18191c",
@@ -46,22 +46,22 @@ const __dark = {
   },
   raised: {
     backgroundColor: "#24262a",
-    backgroundImage: "linear-gradient(180deg, #292b30, #26282c)",
+    backgroundImage: "linear-gradient(180deg, #2b2d32, #24262a)",
     borderWidth: 1,
     borderColor: "#2c2e33",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.45)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 1px rgba(0,0,0,0.4), 0 6px 14px -7px rgba(0,0,0,0.7)",
   },
   primary: {
     backgroundColor: "#eceef1",
-    backgroundImage: "linear-gradient(180deg, #f7f8f9, #dfe1e4)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 1px 0 rgba(0,0,0,0.5), 0 2px 6px -1px rgba(0,0,0,0.45)",
+    backgroundImage: "linear-gradient(180deg, #fbfbfc, #e3e5e8)",
+    boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(0,0,0,0.4), 0 8px 18px -8px rgba(0,0,0,0.75)",
   },
   accentFill: {
     backgroundColor: "#c8f26d",
-    backgroundImage: "linear-gradient(180deg, #ceef7d, #c0e664)",
+    backgroundImage: "linear-gradient(180deg, #d6f78a, #c1ea5c)",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 3px 12px rgba(200,242,109,0.22)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 1px rgba(0,0,0,0.4), 0 8px 20px -9px rgba(200,242,109,0.4)",
   },
 };
 
@@ -82,10 +82,10 @@ const __light: typeof __dark = {
   violet: "#6e56c4",
   card: {
     backgroundColor: "#ffffff",
-    backgroundImage: "linear-gradient(180deg, #fdfdfc, #fcfcfa)",
+    backgroundImage: "linear-gradient(180deg, #ffffff, #fdfdfc)",
     borderWidth: 1,
     borderColor: "rgba(17,17,10,0.08)",
-    boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(0,0,0,0.03), 0 1px 2px rgba(20,20,10,0.06), 0 8px 24px rgba(20,20,10,0.07)",
+    boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.04), 0 14px 32px -18px rgba(20,20,10,0.2)",
   },
   row: {
     backgroundColor: "#ffffff",
@@ -102,22 +102,22 @@ const __light: typeof __dark = {
   },
   raised: {
     backgroundColor: "#f7f7f3",
-    backgroundImage: "linear-gradient(180deg, #ffffff, #f3f3ef)",
+    backgroundImage: "linear-gradient(180deg, #ffffff, #f6f6f2)",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.10)",
-    boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
+    boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.06), 0 5px 12px -6px rgba(20,20,10,0.18)",
   },
   primary: {
     backgroundColor: "#1d1e22",
-    backgroundImage: "linear-gradient(180deg, #34363c, #1c1d21)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.05), 0 1px 0 rgba(20,20,10,0.35), 0 2px 5px -1px rgba(20,20,10,0.30)",
+    backgroundImage: "linear-gradient(180deg, #2e3035, #1b1c20)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 1px rgba(20,20,10,0.2), 0 7px 14px -7px rgba(20,20,10,0.5)",
   },
   accentFill: {
     backgroundColor: "#c8f26d",
-    backgroundImage: "linear-gradient(180deg, #cdf276, #c6ed69)",
+    backgroundImage: "linear-gradient(180deg, #d6f78a, #c1ea5c)",
     borderWidth: 1,
     borderColor: "#a7cf3f",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 3px rgba(80,110,10,0.18)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 1px rgba(80,110,10,0.2), 0 7px 14px -7px rgba(110,150,20,0.55)",
   },
 };
 
