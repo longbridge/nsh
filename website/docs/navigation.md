@@ -553,22 +553,26 @@ pub fn editor() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup, signal } from "nsh";
+import { effect, signal } from "nsh";
 import { BackHandler } from "nsh/android";
 
 function Editor() {
   const selecting = signal(false);
-  const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-    if (!selecting()) return false; // let the stack pop
-    selecting.set(false);
-    return true;
+  // Listening only while selecting: otherwise the stack pops, with the gesture's preview.
+  effect(() => {
+    if (selecting()) {
+      BackHandler.onBackPress(() => {
+        selecting.set(false);
+        return true;
+      });
+    }
   });
-  cleanup(() => sub.remove());
   // …
 }
 ```
 
-A listener made in an effect lasts until the effect runs again or its component goes. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/android` can be imported on iOS too, where its calls do nothing, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
+A listener made in an effect lasts until the effect runs again or its component goes; in TSX, the function
+`BackHandler.onBackPress` returns also stops it. In TSX, `BackHandler.exitApp()` leaves the app; `nsh/android` can be imported on iOS too, where its calls do nothing, so the same code runs on both platforms. See [Platform-specific code](./platform-specific.md).
 
 ## Tabs and other layouts
 

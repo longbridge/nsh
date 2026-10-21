@@ -41,7 +41,7 @@ requestAnimationFrame ───────────┘                      
 - **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（焦点环和 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`nsh/keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
 - **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会关闭最上层的对话框或弹出最内层的栈，和 Android 返回键一样；`popOnBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，每个压入的页面和打开的对话框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。
 - **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。
-- **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`AccessibilityInfo.announceForAccessibility` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
+- **无障碍**：`role`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`announce` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。对话框或提示框下面的视图不可交互。
 - **选择和菜单**：在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素里的文字（带按压或触摸处理的视图：按钮、可按压的列表行、标签栏）以及设置了 `selectable={false}` 或 `select-none` 的文字除外；在上面拖动鼠标会选择文字，Ctrl/Cmd+C 按行复制，Ctrl/Cmd+A 全选选区所在的这段文字。在手机和平板浏览器中，只有 `selectable` 文字可以选择，和原生应用一样。浏览器的右键菜单只在可选文字和输入框里出现。
 
 
@@ -238,27 +238,27 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 > [!NOTE]
 ## 浏览器作为平台
 
-`Platform.OS` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `Platform.constants.interfaceIdiom`：
+`platform.os` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `platform.idiom`：
 
-- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `Platform.isDesktop` 为 `true`，`Platform.select` 选 `desktop`，`desktop={{…}}` 属性生效。
-- `"pad"`：短边至少 600 点的触摸屏；其余为 `"phone"`。两者都属于移动端：`Platform.select` 选 `mobile`。
+- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `platform.select` 选 `desktop`，`desktop={{…}}` 属性生效。
+- `"pad"`：短边至少 600 点的触摸屏；其余为 `"phone"`。两者都属于移动端：`platform.select` 选 `mobile`。
 
-界面风格在应用启动时确定，运行期间不变，与其他平台一致；变窄的桌面窗口仍是桌面，按自己的 `windowSize()` 布局。`web={{…}}` 属性、`Platform.select({ web })` 和 `web:` 类只在浏览器中生效；`ios={{…}}`、`native` 和 `ios:` 在浏览器中不生效。
+界面风格在应用启动时确定，运行期间不变，与其他平台一致；变窄的桌面窗口仍是桌面，按自己的 `windowSize()` 布局。`web={{…}}` 属性、`platform.select({ web })` 和 `web:` 类只在浏览器中生效；`ios={{…}}`、`native` 和 `ios:` 在浏览器中不生效。
 
 环境的其余部分由页面报告，并随时更新：
 
 | 值 | 来自浏览器的 |
 |---|---|
 | 区域设置（`Intl` 的默认值） | `navigator.languages[0]` |
-| `I18nManager.isRTL` | 设置了 `<html dir>` 时取它，否则取区域设置的书写方向 |
+| 布局方向（`rtl:` / `ltr:`） | 设置了 `<html dir>` 时取它，否则取区域设置的书写方向 |
 | `reduceMotion()` | `prefers-reduced-motion` |
 | `fontScale()` | 根元素字号 / 16 px（浏览器的文字大小设置） |
-| `PixelRatio.get()` | `devicePixelRatio`（随缩放和屏幕变化） |
+| `pixelRatio()` | `devicePixelRatio`（随缩放和屏幕变化） |
 | `colorScheme()` | `prefers-color-scheme` |
 | `safeArea()` | 与容器重叠部分的 `env(safe-area-inset-*)`（手机上 `viewport-fit=cover` 的页面） |
 | `keyboardFrame()` | 屏幕键盘遮住容器的高度（`visualViewport`） |
 
-`Platform.Version` 为 `"0.0"`，`screenReaderEnabled()` 始终为 `false`（浏览器不提供这一信息）。页面周围的栏属于浏览器；页面的 [`statusBar`](../modules/nsh-base.md#status-bar) 用于手机。
+`platform.version` 为 `"0.0"`，`screenReaderEnabled()` 始终为 `false`（浏览器不提供这一信息）。页面周围的栏属于浏览器；页面的 [`statusBar`](../modules/nsh-base.md#status-bar) 用于手机。
 
 ## 网络
 
@@ -304,7 +304,7 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 - **其他网站的 Web 视图**：`WebView` 是一个 `<iframe>`。内联 HTML（`source={{ html }}`）功能完整：`onMessage`、`postMessage`、`injectJavaScript`、注入脚本和加载事件都可用（它在独立的源中运行，与所在页面隔离）。其他网站的页面只有 `postMessage` 和加载事件，事件中的 URL 是传入的那个：浏览器不向外层页面透露它的导航、标题、历史和错误，`userAgent` 也无法设置。
 - **自动播放的有声视频**：`Video` 是一个 `<video>`，支持全部属性和事件，但浏览器只在用户操作之后才允许有声视频开始播放（静音视频可以自动播放）。
 - **原生组件**：注册的原生组件属于嵌入 NSH 的原生应用；在 Web 上它的视图保持为空，并在控制台给出警告。
-- **平台服务**：读取剪贴板（`Clipboard.getString`，`hasString` 也一样）需要安全上下文（HTTPS），并可能询问用户。图片不报告 `onProgress`。
+- **平台服务**：读取剪贴板（`Clipboard.readText`，`hasText` 也一样）需要安全上下文（HTTPS），并可能询问用户。图片不报告 `onProgress`。
 - **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符），没有自动断词，除段落方向外也不做双向重排。
 
 播放器和开发服务器以开发模式运行应用（不做加固），发布的应用经过加固。两者都使用默认的[资源限制](./sandbox-and-capabilities.md)。

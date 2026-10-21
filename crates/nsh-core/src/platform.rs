@@ -40,7 +40,7 @@ impl Appearance {
     }
 }
 
-/// The operating system (`Platform.OS`).
+/// The operating system (`platform.os`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
     /// iOS, iPadOS, Mac Catalyst.
@@ -59,7 +59,7 @@ pub enum Os {
 }
 
 impl Os {
-    /// Its `Platform.OS` name.
+    /// Its `platform.os` name.
     pub fn name(self) -> &'static str {
         match self {
             Os::Ios => "ios",
@@ -73,7 +73,7 @@ impl Os {
 
     /// The OS of a desktop backend (macOS, Windows, Linux): it has windows
     /// and menus (`nsh/desktop`). Desktop behavior (`desktop={{…}}` props,
-    /// `Platform.select({ desktop })`) also covers desktop-class browsers:
+    /// `platform.select({ desktop })`) also covers desktop-class browsers:
     /// [`Environment::desktop`].
     pub fn is_desktop(self) -> bool {
         matches!(self, Os::MacOs | Os::Windows | Os::Linux)
@@ -92,7 +92,7 @@ impl Default for Os {
     }
 }
 
-/// The kind of device (React Native's `Platform.isPad`, `isTV`).
+/// The kind of device (`platform.idiom`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Idiom {
     /// A phone.
@@ -111,7 +111,7 @@ pub enum Idiom {
 
 impl Idiom {
     /// Whether desktop behavior applies on `os` in this idiom: a desktop
-    /// OS, or a browser in the desktop idiom (TS: `Platform.isDesktop`).
+    /// OS, or a browser in the desktop idiom (TS: `platform.idiom` `"desktop"`).
     pub fn desktop_on(self, os: Os) -> bool {
         os.is_desktop() || (os == Os::Web && self == Idiom::Desktop)
     }
@@ -165,8 +165,8 @@ pub struct Environment {
 
 impl Environment {
     /// Desktop behavior applies: a desktop OS, or a browser in the desktop
-    /// idiom (`desktop={{…}}` props, `Platform.select({ desktop })`,
-    /// `Platform.isDesktop`).
+    /// idiom (`desktop={{…}}` props, `platform.select({ desktop })`,
+    /// `platform.idiom` `"desktop"`).
     pub fn desktop(&self) -> bool {
         self.idiom.desktop_on(self.os)
     }

@@ -1,6 +1,6 @@
 import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { NavPage, NavStack } from "nsh/base";
 import { keymap } from "nsh/keymap";
@@ -244,7 +244,7 @@ function Sidebar() {
           <Logo size={32} />
           <View style={{ flex: 1, gap: 1 }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-            <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {Platform.OS}</Text>
+            <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
           </View>
           <ThemeToggle />
         </View>

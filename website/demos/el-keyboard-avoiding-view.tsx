@@ -1,6 +1,6 @@
 import { Input, mount, Scroll, signal, Text, View } from "nsh";
 import { Button, Keyboard, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 function App() {
@@ -29,7 +29,7 @@ function App() {
       <View style={{ padding: 20, paddingTop: 24, paddingBottom: 8, gap: 8 }}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>keyboard-avoiding-view</Text>
         <Text style={{ color: ui().muted }}>
-          {Platform.isDesktop
+          {platform.idiom === "desktop"
             ? "Desktops type with a hardware keyboard: its height stays 0 and the view keeps its layout. Open this on a phone to see it move."
             : "Tap the message field: the bar moves up with the keyboard."}
         </Text>

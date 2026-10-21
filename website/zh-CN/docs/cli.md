@@ -127,7 +127,7 @@ nsh dev [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--
 nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>]
 ```
 
-以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`Platform.OS` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
+以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`；Rust 应用为 `nsh test nsh.json`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。TSX 应用在 CLI 自己的进程里运行；带有自己 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，由 CLI 为它构建入口。除非测试以 Android 打开应用（`open` 的 `platform`），无界面运行按 iOS 处理：`platform.os` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
 
 ```text
 ✓ App.test.tsx › counts taps (321ms)

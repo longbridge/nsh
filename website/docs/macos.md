@@ -9,7 +9,7 @@ group: platforms
 
 NSH apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
 text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the native modules are the
-same as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`Platform.OS` is `"macos"`
+same as on iOS and Android, so one app runs everywhere. On macOS, `os()` is `Os::MacOs` (`platform.os` is `"macos"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
 context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
@@ -168,7 +168,7 @@ makes), so the TSX a view loads imports your Rust components and modules too.
 ## What differs on macOS
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
-(`Platform.constants.interfaceIdiom` is `"desktop"`), `os_version()` (`Platform.Version`) is the macOS version, and dark mode follows the system's appearance live. See
+(`platform.idiom` is `"desktop"`), `os_version()` (`platform.version`) is the macOS version, and dark mode follows the system's appearance live. See
 [Device and environment](./device-and-environment.md).
 
 Input is a desktop's: the mouse, the trackpad (scrolling with momentum, pinch and rotation) and the keyboard.

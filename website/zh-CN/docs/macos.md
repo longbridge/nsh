@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 macOS 上，
-`os()` 为 `Os::MacOs`（TSX 中 `Platform.OS` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+`os()` 为 `Os::MacOs`（TSX 中 `platform.os` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -149,7 +149,7 @@ view.load(Bundle::source(code).into());
 
 ## macOS 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为 macOS 的版本号，
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
 输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。`selectable` 文本通过拖动、双击和三击选择，用 Cmd+C 复制。

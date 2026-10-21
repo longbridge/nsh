@@ -1,6 +1,5 @@
 import { Image, type JSX, List, Scroll, signal, Text, View, type ViewStyle } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { I18nManager } from "nsh/device";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, hint, isDark, mono, Press, radius, Segmented, tints, Toggle } from "../ui";
 
 /** The stage every specimen stands on: the card's light, without its drop shadow. */
@@ -468,17 +467,20 @@ function Numerals() {
   );
 }
 
-/** Rows, `marginStart` and text under a right-to-left layout. */
+/** Rows, `marginStart` and text under a right-to-left layout: the app's
+ * language decides it, and `direction` sets a view's own. */
 function RightToLeft() {
+  const rtl = signal(false);
   const tones = ["danger", "info", "up"] as const;
   const chip = { width: 40, height: 40, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" } as const;
   return (
     <Card
       icon="nav"
       title="Right to left"
-      subtitle={I18nManager.isRTL ? "isRTL: true" : "isRTL: false"}
-      right={<Button label="Flip" variant="secondary" onPress={() => I18nManager.forceRTL(!I18nManager.isRTL)} />}
+      subtitle={rtl() ? "direction: rtl" : "direction: ltr"}
+      right={<Button label="Flip" variant="secondary" onPress={() => rtl.set(!rtl())} />}
     >
+      <View style={{ direction: rtl() ? "rtl" : "ltr", gap: 12 }}>
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Each of={["1", "2", "3"]}>
           {(n, i) => (
@@ -525,6 +527,7 @@ function RightToLeft() {
       <View style={{ height: 1, backgroundColor: colors.line }} />
       <Text style={{ fontSize: 13, textAlign: "left", color: colors.muted }}>textAlign left (the start side right to left)</Text>
       <Text style={{ fontSize: 13, writingDirection: "rtl", color: colors.muted }}>مرحبا بالعالم — writingDirection rtl</Text>
+      </View>
     </Card>
   );
 }

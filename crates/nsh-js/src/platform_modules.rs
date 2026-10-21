@@ -1,5 +1,5 @@
 //! The small runtime modules: `nsh/android`
-//! (`isAvailable`, `BackHandler`'s listeners over the registry's module),
+//! (`isAvailable`, `BackHandler.onBackPress` over the registry's module),
 //! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/webview` and
 //! `nsh/video` (their host elements as components, which the compiler
 //! makes in place for their tags), and `nsh/native` (`nativeComponent`: the
@@ -30,7 +30,7 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 /// The modules' part of a context's state.
 #[derive(Default)]
 pub(crate) struct PlatformModules {
-    /// `BackHandler.addEventListener` listeners, in order (id, owned
+    /// `BackHandler.onBackPress` listeners, in order (id, owned
     /// function).
     back: RefCell<Vec<(u32, JsValue)>>,
     next: std::cell::Cell<u32>,
@@ -107,23 +107,26 @@ fn back_handler(cx: *mut JsContext) -> JsValue {
     let handler = crate::components::runtime_module(cx, "nsh/android", "BackHandler")
         // SAFETY: a new object when the runtime has none.
         .unwrap_or_else(|| unsafe { qjs::JS_NewObject(cx) });
-    let add = reactive::new_function(cx, c"addEventListener", add_back_listener, 2);
+    let add = reactive::new_function(cx, c"onBackPress", add_back_listener, 1);
     // SAFETY: the object takes the function.
-    unsafe { qjs::JS_SetPropertyStr(cx, handler, c"addEventListener".as_ptr(), add) };
+    unsafe { qjs::JS_SetPropertyStr(cx, handler, c"onBackPress".as_ptr(), add) };
     handler
 }
 
-/// `BackHandler.addEventListener("hardwareBackPress", f)`: `{ remove() }`.
+/// `BackHandler.onBackPress(f)`: a function that removes the listener,
+/// which goes by itself with the owner it was added under (the component
+/// rendering), or when hot module replacement runs the module that added
+/// it again.
 unsafe extern "C" fn add_back_listener(
     cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let f = arg(argc, argv, 1);
+    let f = arg(argc, argv, 0);
     // SAFETY: an inline check.
     if !unsafe { qjs::JS_IsFunction(cx, f) } {
-        return unsafe { qjs::JS_ThrowTypeError(cx, c"addEventListener: a function".as_ptr()) };
+        return unsafe { qjs::JS_ThrowTypeError(cx, c"onBackPress: a function".as_ptr()) };
     }
     let m = modules(cx);
     let id = m.next.get() + 1;
@@ -149,12 +152,9 @@ unsafe extern "C" fn add_back_listener(
         0,
         &mut [qjs::JS_NewFloat64(id as f64)],
     );
-    // SAFETY: a new object taking the function.
-    unsafe {
-        let o = qjs::JS_NewObject(cx);
-        qjs::JS_SetPropertyStr(cx, o, c"remove".as_ptr(), remove);
-        o
-    }
+    let remove = crate::web::js::V::own(cx, remove);
+    crate::keymap::undo_with_owner(cx, &remove);
+    remove.take()
 }
 
 unsafe extern "C" fn remove_back_listener(
@@ -247,7 +247,7 @@ pub(crate) const ANDROID_EXPORTS: &[Item] = &[
         "BackHandler",
         Export::Value(back_handler),
         Ts::value(
-            "The back button, after modals and stacks had their turn.",
+            "The Android back button: its listeners run after modals and before\nstacks.",
             "BackHandlerModule & BackListeners",
         ),
     ),
@@ -256,10 +256,12 @@ pub(crate) const ANDROID_EXPORTS: &[Item] = &[
 /// `nsh/android`'s types (with the runtime registry's modules).
 pub(crate) const ANDROID_TYPES: &str = r#"/** The back button's listeners. */
 export interface BackListeners {
-  /** `listener` returns true when it handled the press; the most recently
-   * added listener runs first, after modals and before stacks. Without a
-   * listener that handles it, the top stack pops, else the app exits. */
-  addEventListener(event: "hardwareBackPress", listener: () => boolean | void): { remove(): void };
+  /** Listens to the back button: `listener` returns true when it handled
+   * the press; the most recently added listener runs first, after modals
+   * and before stacks. Without a listener that handles it, the top stack
+   * pops, else the app exits. The returned function stops listening; a
+   * listener added while a component renders stops with the component. */
+  onBackPress(listener: () => boolean | void): () => void;
 }
 "#;
 

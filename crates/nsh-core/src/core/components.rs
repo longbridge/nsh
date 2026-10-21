@@ -408,10 +408,9 @@ impl ClipboardAnswer {
         // can hold (the web's player encodes its own).
         answer.image = uri
             .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
-            .map(|uri| crate::ui::ClipboardImage {
-                uri,
-                width: pixels(width),
-                height: pixels(height),
+            .map(|url| crate::ui::ClipboardImage {
+                url,
+                size: crate::geometry::Size::new(pixels(width), pixels(height)),
             });
         answer
     }
@@ -469,7 +468,7 @@ pub(super) struct Components {
     /// Image sizes asked for (`Image.getSize`), by request id: their answers.
     image_infos: FxHashMap<u32, AnswerSlot<Result<ImageSize, String>>>,
     next_image_info: u32,
-    /// Clipboard reads (`Clipboard.getString` / `hasString`), by request
+    /// Clipboard reads (`Clipboard.readText` / `hasText`), by request
     /// id: their answers.
     clipboard_reads: FxHashMap<u32, ClipboardRead>,
     next_clipboard_read: u32,
@@ -4348,7 +4347,6 @@ impl<M: TextEngine> Core<M> {
             Action::ReportViewable(list) => self.report_viewable(list),
             Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
-            Action::Direction(change) => self.change_direction(change),
             Action::Appearance(appearance) => self.set_appearance(appearance),
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
             Action::ImageInfo(uri, answer) => {
@@ -4497,7 +4495,7 @@ impl<M: TextEngine> Core<M> {
             }
             Some(ClipboardRead::Image(slot)) => slot
                 .borrow_mut()
-                .deliver(image.filter(|i| !i.uri.is_empty())),
+                .deliver(image.filter(|i| !i.url.is_empty())),
             Some(ClipboardRead::Files(slot)) => slot.borrow_mut().deliver(files),
             None => {}
         }

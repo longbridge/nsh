@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { type Edge, SafeAreaView, safeArea, safeAreaInsets } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 const EDGES: Edge[] = ["top", "right", "bottom", "left"];
@@ -40,12 +40,12 @@ function App() {
       >
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>safe area view</Text>
         <Text style={{ color: ui().muted, lineHeight: 20 }}>
-          {Platform.isDesktop
+          {platform.idiom === "desktop"
             ? "A desktop window or a browser page has no system UI over it: the insets are 0, so SafeAreaView pads only by its own 16 pt (the tinted band)."
             : "On a phone the insets are the status bar or notch on top and the home indicator below; SafeAreaView adds them to its own 16 pt. This browser frame has none, so they are 0 here."}
         </Text>
 
-        <Text style={label()}>edges ({Platform.isDesktop ? "click" : "tap"} to toggle)</Text>
+        <Text style={label()}>edges ({platform.idiom === "desktop" ? "click" : "tap"} to toggle)</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Each of={EDGES}>
             {(edge) => {

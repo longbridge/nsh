@@ -559,22 +559,25 @@ pub fn editor() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup, signal } from "nsh";
+import { effect, signal } from "nsh";
 import { BackHandler } from "nsh/android";
 
 function Editor() {
   const selecting = signal(false);
-  const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-    if (!selecting()) return false; // 交给栈去返回
-    selecting.set(false);
-    return true;
+  // 只在选择时监听：其他时候由栈返回，并带有手势的预览。
+  effect(() => {
+    if (selecting()) {
+      BackHandler.onBackPress(() => {
+        selecting.set(false);
+        return true;
+      });
+    }
   });
-  cleanup(() => sub.remove());
   // …
 }
 ```
 
-在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/android`，它的调用什么都不做，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
+在 effect 中创建的监听器一直有效，直到 effect 再次运行或它的组件消失；在 TSX 中，调用 `BackHandler.onBackPress` 返回的函数也会停止它。在 TSX 中，`BackHandler.exitApp()` 退出应用；在 iOS 上也可以导入 `nsh/android`，它的调用什么都不做，所以同一份代码可以在两个平台上运行。见[平台特定代码](./platform-specific.md)。
 
 ## 标签页与其他布局
 

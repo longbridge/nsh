@@ -33,7 +33,7 @@ impl Storage {
     }
 
     /// Every key, in order.
-    pub(crate) async fn get_all_keys() -> Vec<String> {
+    pub(crate) async fn keys() -> Vec<String> {
         with_storage(|s| s.keys())
     }
 

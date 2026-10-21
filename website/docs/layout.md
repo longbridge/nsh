@@ -248,7 +248,7 @@ The root view covers the whole screen, under the status bar and the home indicat
 
 ## Right to left
 
-The app's layout direction follows the system language and can be forced: `force_rtl(true)` in Rust, `I18nManager.forceRTL(true)` from `nsh/device` in TSX. When the app lays out right to left:
+The app's layout direction follows the system language, and a view's `direction` style (`"ltr"`, `"rtl"` or `"inherit"`; `.direction(LayoutDirection::Rtl)` in Rust) sets the direction of its subtree. When the app lays out right to left:
 
 - rows run from the right;
 - `left` and `right` properties (margins, paddings, positions, borders, corners) swap sides;
@@ -261,25 +261,29 @@ view()
     .gap_2()
     .child(view().ms_4().rounded_ss(px(12.0)).size(px(44.0)).bg(rgb(0x54aeff)))
 
+let rtl = signal(false);
 view()
-    .on_press(|| force_rtl(!rtl()))
-    .child(text(|| if rtl() { "Right to left" } else { "Left to right" }))
+    .direction(move || if rtl.get() { LayoutDirection::Rtl } else { LayoutDirection::Ltr })
+    .on_press(move |_: &()| rtl.set(!rtl.get()))
+    .child(text(move || if rtl.get() { "Right to left" } else { "Left to right" }))
 ```
 
 ```tsx tabs
-import { Text, View } from "nsh";
-import { I18nManager } from "nsh/device";
+import { signal, Text, View } from "nsh";
 
-<View style={{ flexDirection: "row", gap: 8 }}>
-  <View style={{ marginStart: 16, borderTopStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
-</View>
+const rtl = signal(false);
 
-<View onPress={() => I18nManager.forceRTL(!I18nManager.isRTL)}>
-  <Text>{I18nManager.isRTL ? "Right to left" : "Left to right"}</Text>
+<View style={{ direction: rtl() ? "rtl" : "ltr" }}>
+  <View style={{ flexDirection: "row", gap: 8 }}>
+    <View style={{ marginStart: 16, borderTopStartRadius: 12, width: 44, height: 44, backgroundColor: "#54aeff" }} />
+  </View>
+  <View onPress={() => rtl.set(!rtl())}>
+    <Text>{rtl() ? "Right to left" : "Left to right"}</Text>
+  </View>
 </View>
 ```
 
-`rtl()` and `I18nManager.isRTL` are reactive and changes apply at once, without a restart. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for one view and its children. On Android, apps that embed NSH need `android:supportsRtl="true"` in their manifest for native controls to mirror.
+Changes to the direction, the language's or a view's, apply at once, without a restart. The `direction` style also keeps one view and its children in a direction of their own, for example a phone number left to right. On Android, apps that embed NSH need `android:supportsRtl="true"` in their manifest for native controls to mirror.
 
 ## Related
 

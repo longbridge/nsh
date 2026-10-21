@@ -340,19 +340,19 @@ impl ModuleCx {
     }
 
     /// The screen reader reads `message` (TS:
-    /// `AccessibilityInfo.announceForAccessibility`).
+    /// `announce`).
     pub fn announce_for_accessibility(&mut self, message: impl Into<String>) {
         self.actions.push(super::services::announce(message.into()));
     }
 
-    /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).
+    /// Puts `text` on the system clipboard (TS: `Clipboard.writeText`).
     pub fn set_clipboard(&mut self, text: impl Into<String>) {
         self.actions
             .push(super::services::set_clipboard(text.into()));
     }
 
     /// Puts the image of a `data:` URI on the system clipboard (TS:
-    /// `Clipboard.setImage`).
+    /// `Clipboard.writeImage`).
     pub fn set_clipboard_image(&mut self, uri: impl Into<String>) {
         self.actions
             .push(super::services::set_clipboard_image(uri.into()));
@@ -371,20 +371,6 @@ impl ModuleCx {
     /// [`crate::platform::Appearance::System`] follows the system again.
     pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {
         self.actions.push(Action::Appearance(appearance));
-    }
-
-    /// Lays the surface out right to left whatever the user's language
-    /// (TS: `I18nManager.forceRTL`); `false` follows the language again.
-    pub fn force_rtl(&mut self, force: bool) {
-        self.actions
-            .push(Action::Direction(super::services::Direction::Force(force)));
-    }
-
-    /// Whether a right-to-left language lays the surface out right to left
-    /// (TS: `I18nManager.allowRTL`; true by default).
-    pub fn allow_rtl(&mut self, allow: bool) {
-        self.actions
-            .push(Action::Direction(super::services::Direction::Allow(allow)));
     }
 
     /// Asks the platform for `action` (the runtime's own modules).

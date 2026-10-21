@@ -260,7 +260,7 @@ fn find_label(view: &UIView, text: &str) -> Option<Retained<objc2_ui_kit::UILabe
     view.subviews().iter().find_map(|v| find_label(&v, text))
 }
 
-/// `Clipboard.setString`: puts `text` on the general pasteboard.
+/// `Clipboard.writeText`: puts `text` on the general pasteboard.
 pub(crate) fn set_clipboard(text: &str) {
     // SAFETY: a plain setter of the general pasteboard.
     unsafe {
@@ -268,7 +268,7 @@ pub(crate) fn set_clipboard(text: &str) {
     };
 }
 
-/// `Clipboard.getString` / `hasString`: whether the general pasteboard
+/// `Clipboard.readText` / `hasText`: whether the general pasteboard
 /// holds text and, unless `has_only`, the text. `hasStrings` does not read
 /// it, so it shows no paste notice.
 pub(crate) fn read_clipboard(has_only: bool) -> (bool, Option<String>) {
@@ -290,18 +290,18 @@ const IMAGE_TYPES: [(&str, &str); 3] = [
     ("image/gif", "com.compuserve.gif"),
 ];
 
-/// `Clipboard.setImage`: the image of a `data:` URI on the general
+/// `Clipboard.writeImage`: the image of a `data:` URI on the general
 /// pasteboard, under its own type.
 pub(crate) fn set_clipboard_image(uri: &str) {
     let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        log::warn!("Clipboard.writeImage: not a base64 data: URI");
         return;
     };
     let kind = match IMAGE_TYPES.iter().find(|(m, _)| *m == mime) {
         Some((_, kind)) => *kind,
         None if mime.starts_with("image/") => "public.image",
         None => {
-            log::warn!("Clipboard.setImage: unsupported image type {mime}");
+            log::warn!("Clipboard.writeImage: unsupported image type {mime}");
             return;
         }
     };
@@ -309,7 +309,7 @@ pub(crate) fn set_clipboard_image(uri: &str) {
     board.setData_forPasteboardType(&NSData::with_bytes(&bytes), &NSString::from_str(kind));
 }
 
-/// `Clipboard.getImage` / `hasImage`: the answer to read `id`. `hasImages`
+/// `Clipboard.readImage` / `hasImage`: the answer to read `id`. `hasImages`
 /// does not read the pasteboard, so it shows no paste notice.
 pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
@@ -327,7 +327,7 @@ pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
     clipboard::image_answer(id, true, clipboard::Image::sniff(&bytes))
 }
 
-/// `Clipboard.getFiles`: the `file:` URLs on the general pasteboard
+/// `Clipboard.readFiles`: the `file:` URLs on the general pasteboard
 /// (files copied in the Finder, on Mac Catalyst).
 pub(crate) fn read_clipboard_files(id: u32) -> EventPayload {
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
@@ -345,7 +345,7 @@ pub(crate) fn read_clipboard_files(id: u32) -> EventPayload {
     clipboard::files_answer(id, &files)
 }
 
-/// `AccessibilityInfo.announceForAccessibility`: VoiceOver reads `text`.
+/// `announce`: VoiceOver reads `text`.
 pub(crate) fn announce(text: &str) {
     let text = NSString::from_str(text);
     // SAFETY: announcements take the message as an NSString.
@@ -357,7 +357,7 @@ pub(crate) fn announce(text: &str) {
     };
 }
 
-/// `AccessibilityInfo.setAccessibilityFocus`: VoiceOver moves to `view`.
+/// `setAccessibilityFocus`: VoiceOver moves to `view`.
 pub(crate) fn accessibility_focus(view: &UIView) {
     // SAFETY: layout changes take the element to focus.
     unsafe {

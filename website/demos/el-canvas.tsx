@@ -1,6 +1,6 @@
 import { Canvas, mount, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { tint, ui } from "./palette";
 
 const TAU = Math.PI * 2;
@@ -42,7 +42,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>canvas</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Drag across the chart with the mouse" : "Drag your finger across the chart"} · {months[picked()]}{" "}
+        {platform.idiom === "desktop" ? "Drag across the chart with the mouse" : "Drag your finger across the chart"} · {months[picked()]}{" "}
         = {values[picked()]}
       </Text>
 

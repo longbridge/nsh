@@ -767,7 +767,7 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     }
 }
 
-/// Has assistive technologies read `text` (`announceForAccessibility`).
+/// Has assistive technologies read `text` (`announce`).
 #[allow(dead_code, reason = "system.rs calls it for `Command::Announce`")]
 pub(crate) fn announce(surface: &Rc<Surface>, text: &str) {
     if clients_listening() {

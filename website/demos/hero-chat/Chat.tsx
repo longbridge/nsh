@@ -287,7 +287,7 @@ export function Chat(props: { autoplay?: string } = {}) {
     void reply(retried, m.id);
   };
   const copy = (key: string, text: string) => {
-    Clipboard.setString(text);
+    Clipboard.writeText(text);
     copied.set(key);
     setTimeout(() => copied() === key && copied.set(null), 1600);
   };

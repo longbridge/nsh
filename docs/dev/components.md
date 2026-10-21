@@ -76,7 +76,7 @@ come from two places:
   write them and emit with `cx.emit(..)`; timers and async work are tasks owned by the component (`set_interval(..)`,
   `spawn(async move { .. })`) and end with it. Methods a ref calls in JS are an API type (`#[methods]`, below).
 - **The surface is free functions** whose reads subscribe: `window()`, `safe_area()`, `keyboard_height()`, `dark()`,
-  `font_scale()`, `rtl()`, `locale()`, `cx.insets()`, `global::<G>()`, `provide_context(v)` / `use_context::<T>()`.
+  `font_scale()`, `locale()`, `cx.insets()`, `global::<G>()`, `provide_context(v)` / `use_context::<T>()`.
 - **Modules are functions without a component**: `#[module] impl AlertDialog { pub async fn show(options:
   AlertDialogOptions) -> Result<Option<SharedString>, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
@@ -272,15 +272,15 @@ reasons: `reactive-components.md`.
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
   | `Window.setTitleBar(style, height)`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `ui::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `ui::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
-  | `PixelRatio.get()`, `roundToNearestPixel`, `Platform.OS` / `Version` / `isPad` / `isDesktop` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
+  | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` (`"desktop"`) | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
   | `requestAnimationFrame(cb)`, `cancelAnimationFrame` | `request_animation_frame(\|at\| ..)` returns a `Spawned`; in a task `next_frame().await` (an `Instant`), once per frame in a loop |
-  | `I18nManager.forceRTL` / `allowRTL` | `force_rtl(bool)` / `allow_rtl(bool)`: the root's direction at once, `rtl()` readers follow |
+  | a view's `direction` style | `.direction(LayoutDirection::Rtl)` (`Styled`); the surface's direction follows the user's language |
   | `import logo from "./logo@2x.png"`, `import font from "./a.ttf"` | `const LOGO: ImageAsset = asset!("logo@2x.png");` (`image(LOGO)` lays out at its natural size), `const A: FontAsset = asset!("a.ttf");` (`.font_family(A.family)`), with `registry.assets(assets!())` (below) |
   | `Image.getSize(uri)`, `Image.prefetch(uri)` | `image_size(uri)` / `prefetch_image(uri)`: answers to await in a task |
-  | `Clipboard.setString(text)`, `await Clipboard.getString()` / `hasString()`, `setImage(uri)`, `getImage()` / `hasImage()`, `getFiles()` (`nsh/clipboard`) | `set_clipboard(text)`, `clipboard_string()` / `clipboard_has_string()`, `set_clipboard_image(uri)`, `clipboard_image()` (an `Option<ClipboardImage>`) / `clipboard_has_image()`, `clipboard_files()`: answers to await in a task (the app's `capabilities.clipboard` applies as for JS) |
-  | `await Storage.getItem(k)`, `setItem(k, v)`, `removeItem(k)`, `getAllKeys()`, `clear()` (`nsh/storage`) | `nsh_core::storage::Storage::get_item(k)`, `set_item(k, v)` (`Err(StorageFull)` past the quota), `remove_item(k)`, `get_all_keys()`, `clear()`: synchronous (the entries are in memory on the engine thread), and the same entries the app's JS uses, so a TSX entry and a Rust entry of one app read each other's data |
-  | `AccessibilityInfo.announceForAccessibility`, `setAccessibilityFocus(ref)` | `announce_for_accessibility(msg)`, `note.set_accessibility_focus()` (an `ElementRef`) |
+  | `Clipboard.writeText(text)`, `await Clipboard.readText()` / `hasText()`, `writeImage(src)`, `readImage()` / `hasImage()`, `readFiles()` (`nsh/clipboard`) | `set_clipboard(text)`, `clipboard_string()` / `clipboard_has_string()`, `set_clipboard_image(uri)`, `clipboard_image()` (an `Option<ClipboardImage>`) / `clipboard_has_image()`, `clipboard_files()`: answers to await in a task (the app's `capabilities.clipboard` applies as for JS) |
+  | `await Storage.getItem(k)`, `setItem(k, v)`, `removeItem(k)`, `keys()`, `clear()` (`nsh/storage`) | `nsh_core::storage::Storage::get_item(k)`, `set_item(k, v)` (`Err(StorageFull)` past the quota), `remove_item(k)`, `get_all_keys()`, `clear()`: synchronous (the entries are in memory on the engine thread), and the same entries the app's JS uses, so a TSX entry and a Rust entry of one app read each other's data |
+  | `announce(message)`, `setAccessibilityFocus(ref)` (`nsh/accessibility`) | `announce_for_accessibility(msg)`, `note.set_accessibility_focus()` (an `ElementRef`) |
   | `Toast.show(msg, "long")` (`nsh/android`) | `toast(msg, ToastDuration::Long)` (nothing happens off Android) |
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
@@ -288,7 +288,7 @@ reasons: `reactive-components.md`.
   | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `ui::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh/keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`ui/keys.rs`) |
-  | `BackHandler.addEventListener("hardwareBackPress", f)`, `.remove()` | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`ui/back.rs`) |
+  | `BackHandler.onBackPress(f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`ui/back.rs`) |
   | `<ErrorBoundary fallback>` | `catch_error(\|\| view, \|error, reset\| fallback)` |
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
   | a function returning its value (`checksum(bytes)`) | a `#[module]` function without `cx` (not `async`): it runs in the call |
@@ -347,7 +347,7 @@ reasons: `reactive-components.md`.
 - **Platform services** are free functions (`ui/ambient.rs`): `dialog(Dialog)` (deprecated for apps in favor of
   `nsh_base::alert_dialog()`, which calls it) shows an alert or action sheet and returns a future of the index
   chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
-  `toast(..)`, `force_rtl` / `allow_rtl`, `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
+  `toast(..)`, `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
   `clipboard_has_string`), the image information (`image_size`, `prefetch_image`), display frames
   (`request_animation_frame`, `next_frame`: the core keeps the waiting tasks' answers, the engine asks the platform
   for a frame while one waits, `MountSink::request_frame`, and delivers it at `EngineControl::frame`), and the status
@@ -543,10 +543,10 @@ The engine hands the core what views may read (`ui::Environment`: window, safe a
 font scale, reduced motion, screen reader, direction, pixel ratio, OS, its version, idiom, locale). The core keeps
 each part in a signal of the surface (`ui/ambient.rs`), as it does the theme, the globals and each screen's or modal's
 insets: `window()` and the like read them, so a binding that read a part runs again when it changes and nothing else
-does. The direction views read is the surface's: its root's (`Prop::LayoutDirection`, which JS's `I18nManager`
-sets), else the platform's; once a view sets a policy (`force_rtl` / `allow_rtl`), and from the start in a Rust app,
-the core sets the root's direction from it and the language (in an app whose JS sets it too, the last one wins; JS's
-`isRTL` does not hear Rust's).
+does. The surface's direction follows the user's language: its root's (`Prop::LayoutDirection`, which JS sets from
+the language), else the platform's; in a Rust app the core sets the root's direction from the language from the start
+and again when it changes. A view's `direction` style sets its subtree's, and each node's resolved direction is what
+layout, text and overlay placement read.
 
 ## Assets
 

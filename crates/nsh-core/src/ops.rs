@@ -1208,7 +1208,7 @@ pub enum Command {
         /// The call to answer.
         call: u32,
     },
-    /// Put `text` on the system clipboard (on the root; `Clipboard.setString`).
+    /// Put `text` on the system clipboard (on the root; `Clipboard.writeText`).
     SetClipboard(String),
     /// Read the system clipboard and report it as [`EventKind::Clipboard`]
     /// `id` (on the root): `has` and, unless `has_only`, `text`. Asking
@@ -1216,11 +1216,11 @@ pub enum Command {
     ReadClipboard {
         /// The request.
         id: u32,
-        /// Only whether it holds text (`Clipboard.hasString`).
+        /// Only whether it holds text (`Clipboard.hasText`).
         has_only: bool,
     },
     /// Put the image of a `data:` URI on the system clipboard, replacing
-    /// what it holds (on the root; `Clipboard.setImage`).
+    /// what it holds (on the root; `Clipboard.writeImage`).
     SetClipboardImage(String),
     /// Read the image on the system clipboard and report it as
     /// [`EventKind::Clipboard`] `id` (on the root): `has` and, unless
@@ -1645,8 +1645,8 @@ pub enum Prop {
     /// `Screen::header_style_with`), in place of `headerClass`;
     /// `headerStyle` wins over them. Set by components, never by JS.
     HeaderClassList(Option<Arc<crate::tailwind::ClassList>>),
-    /// The surface lays out right to left (on the root, from
-    /// `I18nManager`).
+    /// The surface lays out right to left (on the root, from the user's
+    /// language).
     #[prop(js = "layoutDirectionRtl", internal)]
     LayoutDirection(bool),
     /// The app's appearance (on the root, from `nsh.json` and

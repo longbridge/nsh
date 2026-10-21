@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { AlertDialog, Button } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 function App() {
@@ -81,7 +81,7 @@ function App() {
           <Text style={{ color: ui().accent, fontSize: 16, fontWeight: "600" }}>{answer()}</Text>
         </View>
         <Text style={{ color: ui().faint, fontSize: 13 }}>
-          {Platform.isDesktop
+          {platform.idiom === "desktop"
             ? "Escape or a click outside the action sheet closes it with null."
             : "A tap outside the action sheet closes it with null."}
         </Text>

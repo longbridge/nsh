@@ -653,7 +653,7 @@ fn copy_reply(reply: Signal<SharedString>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-<Button onPress={() => Clipboard.setString(TextView.plainText(TextView.parse(reply())))}>
+<Button onPress={() => Clipboard.writeText(TextView.plainText(TextView.parse(reply())))}>
   <Text>Copy</Text>
 </Button>
 ```

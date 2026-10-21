@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 function App() {
@@ -17,7 +17,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 12 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>button</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Click, hover, or Tab to a button and press Space" : "Tap; move your finger away to cancel"}
+        {platform.idiom === "desktop" ? "Click, hover, or Tab to a button and press Space" : "Tap; move your finger away to cancel"}
       </Text>
 
       <View style={{ maxWidth: 390, gap: 12 }}>

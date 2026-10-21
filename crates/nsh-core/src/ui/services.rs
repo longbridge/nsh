@@ -101,15 +101,6 @@ pub(crate) fn fetch(request: HttpRequest) -> (Fetch, Action) {
     (Fetch(answer), Action::Fetch(Box::new(request), slot))
 }
 
-/// A change of the layout direction's policy (TS: `I18nManager`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Direction {
-    /// `forceRTL`: right to left whatever the language.
-    Force(bool),
-    /// `allowRTL`: right to left when the language is (default true).
-    Allow(bool),
-}
-
 /// The screen reader reads `message`.
 pub(crate) fn announce(message: String) -> Action {
     Action::Command(ROOT_ID, Command::Announce(message))

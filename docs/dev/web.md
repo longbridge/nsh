@@ -2,7 +2,7 @@
 
 `crates/nsh-platform-web` runs NSH apps in a browser page, rendering to the DOM: apps published with `NSH package
 --target web`, the web development host (`NSH run --target web`) and the website's live demos (`website/demos/*.tsx`).
-`Platform.OS` is `"web"` (`Os::Web`).
+`platform.os` is `"web"` (`Os::Web`).
 User-facing page: `website/docs/web.md`.
 
 ## Two runtimes
@@ -301,8 +301,8 @@ calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium has no pointer: it measures as a tablet or phone), `pad` for a screen
 whose short side is at least 600, else `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `Platform.select`'s `desktop` key and
-`Platform.isDesktop`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
+(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key and
+`platform.idiom`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
 there is at its top. The browser's bars are the browser's: the web ignores `Command::StatusBar` (pages' and dialogs' `statusBar`).
 
@@ -573,7 +573,7 @@ animation already running on the cell, so its content coordinates cannot overrid
 - **Toasts** (`Toast.show` from `nsh/android`, which the desktop backends also show) are a pill at the bottom of the
   root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
-  `hasString`, since browsers cannot tell without reading) needs a secure context and may ask the user.
+  `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `defaultSource` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden

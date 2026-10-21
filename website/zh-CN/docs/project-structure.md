@@ -226,7 +226,7 @@ const open = async () => {
 | `nsh/base` | 应用界面的无样式基础：导航栈及其页面（`NavStack`、`NavPage`、`createNavStack`）、对话框（`Dialog`）、按压目标（`Button`）、安全区域（`SafeAreaView`、`safeArea`、`safeAreaInsets`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame`、`KeyboardAvoidingView`）；页面和对话框设置状态栏（`statusBar`）（[参考](../modules/nsh-base.md)） |
 | `nsh/animated` | 原生动画 |
 | `nsh/gesture` | `PanResponder` |
-| `nsh/device` | `Platform`、`windowSize`、`colorScheme`、`fontScale`、`PixelRatio`、`I18nManager` |
+| `nsh/device` | `platform`、`windowSize`、`colorScheme`、`fontScale`、`pixelRatio`、`locale` |
 | `nsh/accessibility` | 读屏与减少动态效果的状态、朗读通知 |
 | `nsh/native` | 嵌入应用注册的组件和函数 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |

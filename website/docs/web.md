@@ -41,7 +41,7 @@ Published apps behave as desktop apps in desktop browsers and as phone apps in p
 - **Keyboard**: Tab and Shift+Tab move between pressables and inputs (a focus ring and `focus:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `nsh/keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
 - **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button close the newest dialog or pop the innermost stack, as the Android back button does; `popOnBack` and `onBackPress` work as there. When the app is the whole page, every pushed page and open dialog is a browser history entry, so the browser's back button goes back in the app.
 - **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
-- **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `AccessibilityInfo.announceForAccessibility` speaks through a live region and `setAccessibilityFocus` moves the focus. Views under a dialog or alert are inert.
+- **Accessibility**: `role`, `accessibilityLabel`, `accessibilityHint`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `announce` speaks through a live region and `setAccessibilityFocus` moves the focus. Views under a dialog or alert are inert.
 - **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `selectable={false}` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only `selectable` text is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
 
 
@@ -259,27 +259,27 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 
 ## The browser as a platform
 
-`Platform.OS` is `"web"`. What kind of device the browser is on decides how the app behaves, as `Platform.constants.interfaceIdiom`:
+`platform.os` is `"web"`. What kind of device the browser is on decides how the app behaves, as `platform.idiom`:
 
-- `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `Platform.isDesktop` is `true`, `Platform.select` picks `desktop` and `desktop={{…}}` props apply.
-- `"pad"`: a touch screen whose short side is at least 600 points; `"phone"` otherwise. These are mobile: `Platform.select` picks `mobile`.
+- `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `platform.select` picks `desktop` and `desktop={{…}}` props apply.
+- `"pad"`: a touch screen whose short side is at least 600 points; `"phone"` otherwise. These are mobile: `platform.select` picks `mobile`.
 
-The idiom is decided when the app starts and stays the same while it runs, as on every platform; a narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `Platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
+The idiom is decided when the app starts and stays the same while it runs, as on every platform; a narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
 
 The page reports the rest of the environment, and keeps it current:
 
 | Value | From the browser |
 |---|---|
 | Locale (`Intl`'s default) | `navigator.languages[0]` |
-| `I18nManager.isRTL` | `<html dir>` when set, else the locale's script |
+| The layout direction (`rtl:` / `ltr:`) | `<html dir>` when set, else the locale's script |
 | `reduceMotion()` | `prefers-reduced-motion` |
 | `fontScale()` | the root element's font size / 16 px (the browser's text size setting) |
-| `PixelRatio.get()` | `devicePixelRatio` (it changes with zoom and screens) |
+| `pixelRatio()` | `devicePixelRatio` (it changes with zoom and screens) |
 | `colorScheme()` | `prefers-color-scheme` |
 | `safeArea()` | `env(safe-area-inset-*)` where it overlaps the container (`viewport-fit=cover` pages on phones) |
 | `keyboardFrame()` | how much of the container the on-screen keyboard covers (`visualViewport`) |
 
-`Platform.Version` is `"0.0"`, and `screenReaderEnabled()` stays `false` (browsers do not tell). The browser's bars around the page are the browser's; a page's [`statusBar`](../modules/nsh-base.md#status-bar) is for the phones.
+`platform.version` is `"0.0"`, and `screenReaderEnabled()` stays `false` (browsers do not tell). The browser's bars around the page are the browser's; a page's [`statusBar`](../modules/nsh-base.md#status-bar) is for the phones.
 
 ## Networking
 
@@ -326,7 +326,7 @@ The browser decides these, and the web backend follows it:
 - **Web views of other sites**: `WebView` is an `<iframe>`. Inline HTML (`source={{ html }}`) gets everything: `onMessage`, `postMessage`, `injectJavaScript`, the injected scripts and load events (it runs with an origin of its own, apart from the page). A page of another site only gets `postMessage` and load events with the URL it was given: browsers hide its navigations, title, history and errors from the page around it, and `userAgent` cannot be set.
 - **Videos with sound that start on their own**: `Video` is a `<video>` with every prop and event, but browsers only start a video with sound after a user gesture (muted videos play).
 - **Native components**: registered native components belong to the native apps that embed NSH; on the web their view stays empty, with a warning in the console.
-- **Platform services**: reading the clipboard (`Clipboard.getString`, also `hasString`) needs a secure context (HTTPS) and may ask the user. Images do not report `onProgress`.
+- **Platform services**: reading the clipboard (`Clipboard.readText`, also `hasText`) needs a secure context (HTTPS) and may ask the user. Images do not report `onProgress`.
 - **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 
 The player and the dev server run apps with development settings (no hardening); published apps run hardened. Both use the default [limits](./sandbox-and-capabilities.md).

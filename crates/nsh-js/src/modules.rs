@@ -348,7 +348,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
         exports: env::ACCESSIBILITY_EXPORTS,
         also: &[],
         moved_to: None,
-        types: decl!(env::ACCESSIBILITY_TYPES),
+        types: "",
     },
     NativeModule {
         name: "nsh/android",
@@ -715,7 +715,7 @@ impl ModuleTable {
             registry_exports(registry, &mut out);
         }
         // nsh's own export wins over a registry's of the same name (it
-        // builds on it: `AccessibilityInfo`).
+        // builds on it: `BackHandler`).
         let mut seen = std::collections::HashSet::new();
         out.retain(|(name, _)| seen.insert(name.clone()));
         found.then_some(out)

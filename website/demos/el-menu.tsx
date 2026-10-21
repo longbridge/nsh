@@ -1,16 +1,16 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 /** A popup at the trigger on desktops, a sheet at the bottom on phones. */
 const surface = () =>
-  Platform.isDesktop
+  platform.idiom === "desktop"
     ? { ...ui().card, borderRadius: 12, padding: 5, minWidth: 210 }
     : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30 };
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
-const rowHeight = () => (Platform.isDesktop ? 32 : 46);
+const rowHeight = () => (platform.idiom === "desktop" ? 32 : 46);
 const row = () => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 8, height: rowHeight(), paddingHorizontal: 10, borderRadius: 8 });
 
 function Item(props: { label: string; onSelect?: () => void; checked?: boolean; disabled?: boolean; keepOpen?: boolean; danger?: boolean }) {
@@ -79,7 +79,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>menu</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Click File; hover Share to open its submenu" : "Tap File: a sheet; Share shows its items in place"}
+        {platform.idiom === "desktop" ? "Click File; hover Share to open its submenu" : "Tap File: a sheet; Share shows its items in place"}
       </Text>
 
       <Menu
@@ -127,7 +127,7 @@ function App() {
             }}
           >
             <Text style={{ fontSize: 15, fontWeight: "600", color: ui().text }}>ContextMenu</Text>
-            <Text style={{ fontSize: 13, color: ui().muted }}>{Platform.isDesktop ? "Right click here" : "Hold a finger here"}</Text>
+            <Text style={{ fontSize: 13, color: ui().muted }}>{platform.idiom === "desktop" ? "Right click here" : "Hold a finger here"}</Text>
           </View>
         }
       >

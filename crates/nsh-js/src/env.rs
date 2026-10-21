@@ -1,8 +1,9 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, layout direction, locale) written when the platform reports a
-//! change, read through read-only accessors; `nsh/device` (`Platform`,
-//! `PixelRatio`, `I18nManager`) and `nsh/accessibility`; the insets
+//! reduced motion, pixel ratio, locale) written when the platform reports a
+//! change, read through read-only accessors; `nsh/device` (`platform`) and
+//! `nsh/accessibility`; the layout direction, which follows the user's
+//! language; the insets
 //! context screens and modals provide (`safeAreaInsets`).
 
 use std::{
@@ -16,7 +17,7 @@ use rquickjs::qjs;
 
 use crate::{
     modules::{Export, Item, Ts},
-    reactive::{self, Native, arg},
+    reactive::{self, arg},
 };
 
 type JsValue = qjs::JSValue;
@@ -34,7 +35,7 @@ enum Part {
     FontScale,
     ScreenReader,
     ReduceMotion,
-    Rtl,
+    PixelRatio,
     TitleBar,
     Locale,
 }
@@ -49,17 +50,10 @@ pub(crate) struct Env {
     signals: [Cell<JsValue>; PARTS],
     /// Read-only accessors of the signals (owned memos).
     accessors: [Cell<JsValue>; PARTS],
-    /// `I18nManager.allowRTL` / `forceRTL`.
-    allow_rtl: Cell<bool>,
-    force_rtl: Cell<bool>,
     /// The app's appearance (`nsh.json`, `setColorScheme`).
     appearance: Cell<Appearance>,
     /// The insets context (owned): screens and modals provide theirs.
     insets: Cell<JsValue>,
-    /// `AccessibilityInfo.addEventListener` listeners: (id, screen reader
-    /// (else reduced motion), function owned).
-    listeners: RefCell<Vec<(u32, bool, JsValue)>>,
-    next_listener: Cell<u32>,
 }
 
 impl Default for Env {
@@ -68,12 +62,8 @@ impl Default for Env {
             current: RefCell::new(None),
             signals: std::array::from_fn(|_| Cell::new(UNDEFINED)),
             accessors: std::array::from_fn(|_| Cell::new(UNDEFINED)),
-            allow_rtl: Cell::new(true),
-            force_rtl: Cell::new(false),
             appearance: Cell::new(Appearance::System),
             insets: Cell::new(UNDEFINED),
-            listeners: RefCell::new(Vec::new()),
-            next_listener: Cell::new(1),
         }
     }
 }
@@ -93,9 +83,6 @@ impl Env {
                 qjs::JS_FreeValue(raw, c.replace(UNDEFINED));
             }
             qjs::JS_FreeValue(raw, self.insets.replace(UNDEFINED));
-            for (_, _, f) in self.listeners.borrow_mut().drain(..) {
-                qjs::JS_FreeValue(raw, f);
-            }
         }
     }
 }
@@ -158,12 +145,6 @@ fn boolean(v: bool) -> JsValue {
 fn string(cx: *mut JsContext, s: &str) -> JsValue {
     // SAFETY: a new string.
     unsafe { qjs::JS_NewStringLen(cx, s.as_ptr().cast(), s.len() as _) }
-}
-
-/// The layout direction: the user's language, unless the app turned it
-/// off or forced it.
-fn rtl(e: &Env, env: &Environment) -> bool {
-    (e.allow_rtl.get() && env.rtl) || e.force_rtl.get()
 }
 
 /// The color scheme shown: the app's, else the system's.
@@ -287,55 +268,24 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.locale == next.locale) {
         writes.push((Part::Locale, string(cx, next.locale.as_str())));
     }
-    let screen_reader = changed(&|p| p.screen_reader == next.screen_reader);
-    if screen_reader {
+    if changed(&|p| p.screen_reader == next.screen_reader) {
         writes.push((Part::ScreenReader, boolean(next.screen_reader)));
     }
-    let reduce_motion = changed(&|p| p.reduce_motion == next.reduce_motion);
-    if reduce_motion {
+    if changed(&|p| p.reduce_motion == next.reduce_motion) {
         writes.push((Part::ReduceMotion, boolean(next.reduce_motion)));
     }
-    if changed(&|p| rtl(e, p) == rtl(e, next)) {
-        writes.push((Part::Rtl, boolean(rtl(e, next))));
+    if changed(&|p| p.pixel_ratio == next.pixel_ratio) {
+        writes.push((Part::PixelRatio, number(next.pixel_ratio)));
     }
+    // The layout direction follows the user's language.
     // SAFETY: the state's renderer, by shared reference.
-    unsafe { &(*crate::state::state(cx)).dom }.set_direction(rtl(e, next));
+    unsafe { &(*crate::state::state(cx)).dom }.set_direction(next.rtl);
     reactive::batch_with(cx, || {
         for (part, value) in writes {
             reactive::set_signal(cx, e.signals[part as usize].get(), value);
         }
     });
-    let mut failed = reactive::finish_value(cx, UNDEFINED);
-    // Settings listeners hear about changes after the first report.
-    if previous.is_some() {
-        for (screen, now) in [
-            (true, screen_reader.then_some(next.screen_reader)),
-            (false, reduce_motion.then_some(next.reduce_motion)),
-        ] {
-            let Some(now) = now else { continue };
-            let listeners: Vec<JsValue> = e
-                .listeners
-                .borrow()
-                .iter()
-                .filter(|(_, s, _)| *s == screen)
-                // SAFETY: dups for the calls below.
-                .map(|&(_, _, f)| unsafe { qjs::JS_DupValue(cx, f) })
-                .collect();
-            for f in listeners {
-                let mut args = [boolean(now)];
-                // SAFETY: an owned function, freed after the call.
-                let r = unsafe { qjs::JS_Call(cx, f, UNDEFINED, 1, args.as_mut_ptr()) };
-                unsafe {
-                    qjs::JS_FreeValue(cx, f);
-                    if qjs::JS_IsException(r) {
-                        failed = r;
-                    } else {
-                        qjs::JS_FreeValue(cx, r);
-                    }
-                }
-            }
-        }
-    }
+    let failed = reactive::finish_value(cx, UNDEFINED);
     // SAFETY: an inline tag check.
     if unsafe { qjs::JS_IsException(failed) } {
         Err(())
@@ -444,13 +394,14 @@ pub(crate) fn reexport(cx: *mut JsContext, name: &str) -> JsValue {
 
 // --- nsh/device ---------------------------------------------------------------------
 
-fn os_version(cx: *mut JsContext, env: &Environment) -> JsValue {
+/// The OS version as a string: `"17.5"` (iOS, desktops), the API level on
+/// Android (`"35"`), `"0.0"` on the web.
+fn os_version(env: &Environment) -> String {
     let (major, minor) = env.os_version;
-    // React Native: a string on iOS ("17.5"), the API level on Android.
     if env.os == Os::Android {
-        qjs::JS_NewFloat64(major as f64)
+        major.to_string()
     } else {
-        string(cx, &format!("{major}.{minor}"))
+        format!("{major}.{minor}")
     }
 }
 
@@ -464,34 +415,24 @@ fn idiom(env: &Environment) -> &'static str {
     }
 }
 
-/// `Platform`: the OS and form factor, constant while the app runs.
+/// `platform`: the OS and form factor, constant while the app runs.
 fn platform(cx: *mut JsContext) -> JsValue {
     let e = current(cx);
-    let constants = object(
-        cx,
-        &[
-            (c"osVersion", os_version(cx, &e)),
-            (c"interfaceIdiom", string(cx, idiom(&e))),
-        ],
-    );
     let select = reactive::new_function(cx, c"select", platform_select, 1);
     object(
         cx,
         &[
-            (c"OS", string(cx, e.os.name())),
-            (c"isDesktop", boolean(e.desktop())),
-            (c"Version", os_version(cx, &e)),
-            (c"isPad", boolean(e.idiom == Idiom::Pad)),
-            (c"isTV", boolean(e.idiom == Idiom::Tv)),
-            (c"isMacCatalyst", boolean(e.idiom == Idiom::Mac)),
-            (c"constants", constants),
+            (c"os", string(cx, e.os.name())),
+            (c"version", string(cx, &os_version(&e))),
+            (c"idiom", string(cx, idiom(&e))),
+            (c"catalyst", boolean(e.idiom == Idiom::Mac)),
             (c"select", select),
         ],
     )
 }
 
-/// `Platform.select(spec)`: this OS's value, else `mobile` / `desktop`,
-/// else `native` (not on the web, as in React Native), else `default`.
+/// `platform.select(spec)`: this OS's value, else `mobile` / `desktop`,
+/// else `native` (not on the web), else `default`.
 unsafe extern "C" fn platform_select(
     cx: *mut JsContext,
     _this: JsValue,
@@ -517,166 +458,6 @@ unsafe extern "C" fn platform_select(
         }
     }
     UNDEFINED
-}
-
-/// `PixelRatio`.
-fn pixel_ratio(cx: *mut JsContext) -> JsValue {
-    let natives: [(&CStr, Native, c_int); 4] = [
-        (c"get", pixel_ratio_get, 0),
-        (c"getFontScale", pixel_ratio_font_scale, 0),
-        (c"getPixelSizeForLayoutSize", pixel_size_for_layout_size, 1),
-        (c"roundToNearestPixel", round_to_nearest_pixel, 1),
-    ];
-    let fields: Vec<(&CStr, JsValue)> = natives
-        .iter()
-        .map(|&(name, f, length)| (name, reactive::new_function(cx, name, f, length)))
-        .collect();
-    object(cx, &fields)
-}
-
-unsafe extern "C" fn pixel_ratio_get(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-) -> JsValue {
-    number(current(cx).pixel_ratio)
-}
-
-unsafe extern "C" fn pixel_ratio_font_scale(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-) -> JsValue {
-    number(current(cx).font_scale)
-}
-
-fn number_arg(cx: *mut JsContext, argc: c_int, argv: *mut JsValue) -> f64 {
-    let mut v = 0f64;
-    // SAFETY: converting a live value.
-    unsafe { qjs::JS_ToFloat64(cx, &mut v, arg(argc, argv, 0)) };
-    v
-}
-
-unsafe extern "C" fn pixel_size_for_layout_size(
-    cx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    let ratio = current(cx).pixel_ratio as f64;
-    qjs::JS_NewFloat64((number_arg(cx, argc, argv) * ratio).round())
-}
-
-unsafe extern "C" fn round_to_nearest_pixel(
-    cx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    let ratio = (current(cx).pixel_ratio as f64).max(f64::MIN_POSITIVE);
-    qjs::JS_NewFloat64((number_arg(cx, argc, argv) * ratio).round() / ratio)
-}
-
-/// `I18nManager`: the layout direction.
-fn i18n_manager(cx: *mut JsContext) -> JsValue {
-    // SAFETY: a new object with a getter and functions it takes.
-    unsafe {
-        let o = object(
-            cx,
-            &[
-                (c"doLeftAndRightSwapInRTL", qjs::JS_TRUE),
-                (
-                    c"allowRTL",
-                    reactive::new_function(cx, c"allowRTL", allow_rtl, 1),
-                ),
-                (
-                    c"forceRTL",
-                    reactive::new_function(cx, c"forceRTL", force_rtl, 1),
-                ),
-                (
-                    c"getConstants",
-                    reactive::new_function(cx, c"getConstants", i18n_constants, 0),
-                ),
-            ],
-        );
-        let getter = reactive::new_function(cx, c"isRTL", is_rtl, 0);
-        let atom = qjs::JS_NewAtom(cx, c"isRTL".as_ptr());
-        qjs::JS_DefineProperty(
-            cx,
-            o,
-            atom,
-            UNDEFINED,
-            getter,
-            UNDEFINED,
-            (qjs::JS_PROP_HAS_GET | qjs::JS_PROP_HAS_ENUMERABLE | qjs::JS_PROP_ENUMERABLE) as c_int,
-        );
-        qjs::JS_FreeAtom(cx, atom);
-        qjs::JS_FreeValue(cx, getter);
-        o
-    }
-}
-
-/// The layout direction (tracked).
-unsafe extern "C" fn is_rtl(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-) -> JsValue {
-    let rtl = env(cx).accessors[Part::Rtl as usize].get();
-    // SAFETY: calling an accessor the environment owns.
-    unsafe { qjs::JS_Call(cx, rtl, UNDEFINED, 0, ptr::null_mut()) }
-}
-
-unsafe extern "C" fn i18n_constants(
-    cx: *mut JsContext,
-    this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    // SAFETY: as `is_rtl`.
-    let rtl = unsafe { is_rtl(cx, this, argc, argv) };
-    object(
-        cx,
-        &[(c"isRTL", rtl), (c"doLeftAndRightSwapInRTL", qjs::JS_TRUE)],
-    )
-}
-
-fn set_rtl_flag(cx: *mut JsContext, argc: c_int, argv: *mut JsValue, force: bool) -> JsValue {
-    // SAFETY: converting a live value.
-    let on = unsafe { qjs::JS_ToBool(cx, arg(argc, argv, 0)) } == 1;
-    let e = env(cx);
-    if force {
-        e.force_rtl.set(on);
-    } else {
-        e.allow_rtl.set(on);
-    }
-    let now = current(cx);
-    let value = rtl(e, &now);
-    // SAFETY: the state's renderer, by shared reference.
-    unsafe { &(*crate::state::state(cx)).dom }.set_direction(value);
-    reactive::set_signal(cx, e.signals[Part::Rtl as usize].get(), boolean(value));
-    reactive::finish_value(cx, UNDEFINED)
-}
-
-unsafe extern "C" fn allow_rtl(
-    cx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    set_rtl_flag(cx, argc, argv, false)
-}
-
-unsafe extern "C" fn force_rtl(
-    cx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    set_rtl_flag(cx, argc, argv, true)
 }
 
 /// The exports of `nsh/device`.
@@ -714,6 +495,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
+        "pixelRatio",
+        Export::Value(|cx| accessor(cx, Part::PixelRatio)),
+        Ts::value(
+            "Device pixels per point (reactive): it changes when the window moves to\na screen of another density. A length on whole device pixels is\n`Math.round(x * pixelRatio()) / pixelRatio()`.",
+            "Accessor<number>",
+        ),
+    ),
+    (
         "locale",
         Export::Value(|cx| accessor(cx, Part::Locale)),
         Ts::value(
@@ -722,27 +511,11 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
-        "Platform",
+        "platform",
         Export::Value(platform),
         Ts::value(
-            "The platform the app runs on (React Native's `Platform`).",
-            "PlatformStatic",
-        ),
-    ),
-    (
-        "PixelRatio",
-        Export::Value(pixel_ratio),
-        Ts::value(
-            "Device pixels per point (React Native's `PixelRatio`). Not reactive:\nread in components that also read `windowSize()` to follow a window\nmoving to another screen.",
-            "PixelRatioStatic",
-        ),
-    ),
-    (
-        "I18nManager",
-        Export::Value(i18n_manager),
-        Ts::value(
-            "Right-to-left layout (React Native's `I18nManager`). Right to left,\nrows run from the right and `left` / `right` style properties mean start\nand end. Changes apply at once (no restart).",
-            "I18nManagerStatic",
+            "The platform the app runs on, constant while it runs.",
+            "PlatformInfo",
         ),
     ),
 ];
@@ -764,167 +537,27 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   default?: T;
 }
 
-export interface PlatformStatic {
-  readonly OS: OS;
-  /** Desktop behavior applies: macOS, Windows, Linux, and browsers with a
-   * mouse and a wide viewport (`interfaceIdiom` `"desktop"`). */
-  readonly isDesktop: boolean;
-  /** iOS and desktops: the version string (`"17.5"`); Android: the API
-   * level; the web: `"0.0"`. */
-  readonly Version: string | number;
-  readonly isPad: boolean;
-  readonly isTV: boolean;
+export interface PlatformInfo {
+  /** The operating system (`"ios"`, `"android"`, `"macos"`, `"windows"`,
+   * `"linux"`, `"web"`). */
+  readonly os: OS;
+  /** iOS and desktops: the OS version (`"17.5"`); Android: the API level
+   * (`"35"`); the web: `"0.0"`. */
+  readonly version: string;
+  /** The kind of device. `"desktop"`: desktop behavior applies (macOS,
+   * Windows, Linux, and browsers with a mouse and a wide viewport); Mac
+   * Catalyst in the Mac idiom is `"mac"`. */
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
   /** Mac Catalyst in the Mac idiom. */
-  readonly isMacCatalyst: boolean;
-  readonly constants: {
-    readonly osVersion: string | number;
-    readonly interfaceIdiom: "phone" | "pad" | "mac" | "tv" | "desktop";
-  };
+  readonly catalyst: boolean;
   /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),
    * else `mobile` / `desktop`, else `native` (not on the web), else
    * `default`. */
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
-
-export interface PixelRatioStatic {
-  get(): number;
-  getFontScale(): number;
-  getPixelSizeForLayoutSize(size: number): number;
-  roundToNearestPixel(size: number): number;
-}
-
-export interface I18nManagerStatic {
-  /** Whether the app lays out right to left (reactive). */
-  isRTL: boolean;
-  /** `left` and `right` swap right to left (always, as React Native's default). */
-  doLeftAndRightSwapInRTL: true;
-  /** Follow right-to-left languages (default true). */
-  allowRTL(allow: boolean): void;
-  /** Lay out right to left whatever the language. */
-  forceRTL(force: boolean): void;
-  getConstants(): { isRTL: boolean; doLeftAndRightSwapInRTL: boolean };
-}
 "#;
 
 // --- nsh/accessibility --------------------------------------------------------------
-
-/// `AccessibilityInfo`: the runtime module's commands, and the settings.
-fn accessibility_info(cx: *mut JsContext) -> JsValue {
-    let info = crate::components::runtime_module(cx, "nsh/accessibility", "AccessibilityInfo")
-        // SAFETY: a new object.
-        .unwrap_or_else(|| unsafe { qjs::JS_NewObject(cx) });
-    let natives: [(&CStr, Native, c_int); 3] = [
-        (c"isScreenReaderEnabled", is_screen_reader_enabled, 0),
-        (c"isReduceMotionEnabled", is_reduce_motion_enabled, 0),
-        (c"addEventListener", add_event_listener, 2),
-    ];
-    for (name, f, length) in natives {
-        let func = reactive::new_function(cx, name, f, length);
-        // SAFETY: the object takes the function.
-        unsafe { qjs::JS_SetPropertyStr(cx, info, name.as_ptr(), func) };
-    }
-    info
-}
-
-/// A promise resolved with `value` (owned).
-fn resolved(cx: *mut JsContext, value: JsValue) -> JsValue {
-    let mut funcs = [UNDEFINED; 2];
-    // SAFETY: a new promise; its functions and `value` are freed after the
-    // call.
-    unsafe {
-        let promise = qjs::JS_NewPromiseCapability(cx, funcs.as_mut_ptr());
-        let mut args = [value];
-        let r = qjs::JS_Call(cx, funcs[0], UNDEFINED, 1, args.as_mut_ptr());
-        qjs::JS_FreeValue(cx, r);
-        qjs::JS_FreeValue(cx, value);
-        qjs::JS_FreeValue(cx, funcs[0]);
-        qjs::JS_FreeValue(cx, funcs[1]);
-        promise
-    }
-}
-
-unsafe extern "C" fn is_screen_reader_enabled(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-) -> JsValue {
-    resolved(cx, boolean(current(cx).screen_reader))
-}
-
-unsafe extern "C" fn is_reduce_motion_enabled(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-) -> JsValue {
-    resolved(cx, boolean(current(cx).reduce_motion))
-}
-
-/// `addEventListener("screenReaderChanged" | "reduceMotionChanged", f)`:
-/// `{ remove() }`.
-unsafe extern "C" fn add_event_listener(
-    cx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    let screen = match crate::dom::string_arg(cx, arg(argc, argv, 0)).as_deref() {
-        Some("screenReaderChanged") => true,
-        Some("reduceMotionChanged") => false,
-        _ => {
-            // SAFETY: throws on a live context.
-            return unsafe {
-                qjs::JS_ThrowTypeError(
-                    cx,
-                    c"addEventListener: \"screenReaderChanged\" or \"reduceMotionChanged\""
-                        .as_ptr(),
-                )
-            };
-        }
-    };
-    let f = arg(argc, argv, 1);
-    // SAFETY: an inline check, then a dup the environment owns.
-    if !unsafe { qjs::JS_IsFunction(cx, f) } {
-        return unsafe { qjs::JS_ThrowTypeError(cx, c"addEventListener: a function".as_ptr()) };
-    }
-    let e = env(cx);
-    let id = e.next_listener.get();
-    e.next_listener.set(id + 1);
-    e.listeners
-        .borrow_mut()
-        .push((id, screen, unsafe { qjs::JS_DupValue(cx, f) }));
-    let mut data = [qjs::JS_NewFloat64(id as f64)];
-    // SAFETY: the function keeps a dup of `data`.
-    let remove =
-        unsafe { qjs::JS_NewCFunctionData(cx, Some(remove_listener), 0, 0, 1, data.as_mut_ptr()) };
-    object(cx, &[(c"remove", remove)])
-}
-
-unsafe extern "C" fn remove_listener(
-    cx: *mut JsContext,
-    _this: JsValue,
-    _argc: c_int,
-    _argv: *mut JsValue,
-    _magic: c_int,
-    data: *mut JsValue,
-) -> JsValue {
-    let mut id = 0f64;
-    // SAFETY: one data value, a number.
-    unsafe { qjs::JS_ToFloat64(cx, &mut id, *data) };
-    let removed: Vec<JsValue> = {
-        let mut listeners = env(cx).listeners.borrow_mut();
-        let (gone, kept): (Vec<_>, Vec<_>) =
-            listeners.drain(..).partition(|(i, ..)| *i == id as u32);
-        *listeners = kept;
-        gone.into_iter().map(|(.., f)| f).collect()
-    };
-    for f in removed {
-        // SAFETY: values the environment owned.
-        unsafe { qjs::JS_FreeValue(cx, f) };
-    }
-    UNDEFINED
-}
 
 /// The exports of `nsh/accessibility` (with the runtime registry's).
 pub(crate) const ACCESSIBILITY_EXPORTS: &[Item] = &[
@@ -944,23 +577,4 @@ pub(crate) const ACCESSIBILITY_EXPORTS: &[Item] = &[
             "Accessor<boolean>",
         ),
     ),
-    (
-        "AccessibilityInfo",
-        Export::Value(accessibility_info),
-        Ts::value(
-            "Screen reader and motion settings. `screenReaderEnabled()` and\n`reduceMotion()` are the reactive forms.",
-            "AccessibilityInfoModule & AccessibilitySettings",
-        ),
-    ),
 ];
-
-/// `nsh/accessibility`'s types (with the runtime registry's module).
-pub(crate) const ACCESSIBILITY_TYPES: &str = r#"export type AccessibilityChangeEvent = "screenReaderChanged" | "reduceMotionChanged";
-
-/** The settings, at once, and their changes. */
-export interface AccessibilitySettings {
-  isScreenReaderEnabled(): Promise<boolean>;
-  isReduceMotionEnabled(): Promise<boolean>;
-  addEventListener(event: AccessibilityChangeEvent, listener: (enabled: boolean) => void): { remove(): void };
-}
-"#;

@@ -736,8 +736,8 @@ fn safe_area_and_keyboard_avoiding_views() {
 }
 
 const RUNTIME_MODULES: &str = r#"import { mount, signal, Text } from "nsh";
-import { AccessibilityInfo } from "nsh/accessibility";
-import { Platform } from "nsh/device";
+import { reduceMotion, setAccessibilityFocus } from "nsh/accessibility";
+import { platform } from "nsh/device";
 import { Toast } from "nsh/android";
 import { Image } from "nsh";
 
@@ -745,7 +745,7 @@ const shown = signal("waiting");
 let note: unknown;
 setTimeout(async () => {
   Toast.show("hello", "long");
-  AccessibilityInfo.setAccessibilityFocus(note);
+  setAccessibilityFocus(note);
   const size = await Image.getSize({ uri: "https://example.com/a.png" });
   let failed = "no";
   try {
@@ -753,7 +753,7 @@ setTimeout(async () => {
   } catch (e) {
     failed = String((e as Error).message);
   }
-  shown.set(`${size.width}x${size.height} ${failed} ${Platform.OS} ${await AccessibilityInfo.isReduceMotionEnabled()}`);
+  shown.set(`${size.width}x${size.height} ${failed} ${platform.os} ${reduceMotion()}`);
 }, 0);
 
 mount(() => <Text ref={note}>{shown()}</Text>);
@@ -893,10 +893,10 @@ import { Clipboard } from "nsh/clipboard";
 
 const shown = signal("waiting");
 setTimeout(async () => {
-  const before = await Clipboard.hasString();
-  Clipboard.setString("copied");
-  const has = await Clipboard.hasString();
-  const text = await Clipboard.getString();
+  const before = await Clipboard.hasText();
+  Clipboard.writeText("copied");
+  const has = await Clipboard.hasText();
+  const text = await Clipboard.readText();
   shown.set(`${before} ${has} ${text}`);
 }, 0);
 
@@ -987,11 +987,11 @@ import { Clipboard } from "nsh/clipboard";
 const shown = signal("waiting");
 setTimeout(async () => {
   const before = await Clipboard.hasImage();
-  Clipboard.setImage("data:image/png;base64,aGk=");
-  const image = await Clipboard.getImage();
-  const bytes = new Uint8Array(await (await fetch(image!.uri)).arrayBuffer());
-  const files = await Clipboard.getFiles();
-  shown.set(`${before} ${image!.width}x${image!.height} ${bytes.join(",")} ${files.join(" ")}`);
+  Clipboard.writeImage("data:image/png;base64,aGk=");
+  const image = await Clipboard.readImage();
+  const bytes = new Uint8Array(await (await fetch(image!.url)).arrayBuffer());
+  const files = await Clipboard.readFiles();
+  shown.set(`${before} ${image!.size.width}x${image!.size.height} ${bytes.join(",")} ${files.join(" ")}`);
 }, 0);
 
 mount(() => <Text>{shown()}</Text>);
@@ -1260,7 +1260,7 @@ const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/android";
 
 const presses = signal(0);
-BackHandler.addEventListener("hardwareBackPress", () => {
+BackHandler.onBackPress(() => {
   presses.update((p) => p + 1);
   // The first press is handled, the second one leaves the app.
   return presses() === 1;

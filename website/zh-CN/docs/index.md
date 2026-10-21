@@ -134,7 +134,7 @@ Rust 应用从第 2 步起走同样的路径，只是由它的组件以原生方
 - **原生视图。** 嵌入原生地图、WebView 或视频播放器没有层级问题，无障碍使用平台自己的树，文本输入是系统的输入。
 - **细粒度响应式。** 与 Solid 类似的[信号](./reactivity.md)，在原生层实现。组件只运行一次，只有读取了变化信号的表达式会重新执行。
 - **样式与 Tailwind**，在原生层解析：flexbox、CSS grid、阴影、渐变、滤镜、过渡（[样式](./styling.md)、[Tailwind](./tailwind.md)）。
-- **基础元素与基础组件，外观由应用决定。** 应用用基础元素（`View`、`Text`、`Input`、`List` 等）配合样式和 Tailwind 类绘制界面，并以 [`nsh/base`](../modules/nsh-base.md) 为依托，这些无样式的基础组件负责行为、状态和无障碍：导航栈和 modal、安全区域、系统提示框、键盘和状态栏。其上带样式的组件库由应用自己或社区提供（[三层结构](./architecture.md#three-layers)）。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)）。
+- **基础元素与基础组件，外观由应用决定。** 应用用基础元素（`View`、`Text`、`Input`、`List` 等）配合样式和 Tailwind 类绘制界面，并以 [`nsh/base`](../modules/nsh-base.md) 为依托，这些无样式的基础组件负责行为、状态和无障碍：导航栈和 modal、安全区域、系统提示框、键盘和状态栏。其上带样式的组件库由应用自己或社区提供（[三层结构](./architecture.md#three-layers)）。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `platform.select` 搭建（[平台特定代码](./platform-specific.md)）。
 - **单一可执行文件的工具链。** 一个 `nsh` 可执行文件负责构建模块、生成类型声明、以热模块替换的方式提供开发服务、打包和签名。
 
 ## 运行平台

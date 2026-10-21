@@ -1,5 +1,5 @@
 import { mount, Scroll, signal, Text, View, type YNode } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 // The page colors, read when they render: they follow the theme.
@@ -16,7 +16,7 @@ function App() {
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text, paddingHorizontal: 20 }}>scroll</Text>
 
       <Text style={{ color: ui().muted, paddingHorizontal: 20 }}>
-        Horizontal, pagingEnabled · page {page() + 1} · {Platform.isDesktop ? "Shift+wheel or swipe the trackpad" : "swipe"}
+        Horizontal, pagingEnabled · page {page() + 1} · {platform.idiom === "desktop" ? "Shift+wheel or swipe the trackpad" : "swipe"}
       </Text>
       <Scroll
         horizontal

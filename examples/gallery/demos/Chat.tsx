@@ -1,7 +1,7 @@
 import { batch, cleanup, computed, effect, Input, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, SelectionArea } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
@@ -50,7 +50,7 @@ export function Chat() {
 
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
-  const native = Platform.isDesktop && Platform.OS !== "web";
+  const native = platform.idiom === "desktop" && platform.os !== "web";
   const provider = signal<Provider>("Codex");
   let cancelLocal: (() => void) | undefined;
   const draft = signal("");
@@ -323,7 +323,7 @@ export function Chat() {
     else void reply(retried, m.id);
   };
   const copy = (key: string, text: string) => {
-    Clipboard.setString(text);
+    Clipboard.writeText(text);
     copied.set(key);
     setTimeout(() => copied() === key && copied.set(null), 1600);
   };
@@ -750,7 +750,7 @@ export function Chat() {
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
-              submitBehavior={Platform.isDesktop ? "submit" : "newline"}
+              submitBehavior={platform.idiom === "desktop" ? "submit" : "newline"}
               onSubmit={() => {
                 if (!streaming()) send();
               }}

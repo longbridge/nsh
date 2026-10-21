@@ -1,5 +1,5 @@
 import { List, mount, signal, Text, View, type YNode } from "nsh";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { tint, ui } from "./palette";
 
 type Trade = { id: string; symbol: string; shares: number; change: number };
@@ -71,7 +71,7 @@ function App() {
         header={
           <View style={{ ...ui().card, borderRadius: 14, padding: 14, gap: 10, marginBottom: 4 }}>
             <Text style={{ color: ui().muted }}>
-              {Platform.isDesktop ? "Scroll with the wheel or trackpad" : "Swipe up; pull down to refresh"}: more rows load near the end, up to {LIMIT}.
+              {platform.idiom === "desktop" ? "Scroll with the wheel or trackpad" : "Swipe up; pull down to refresh"}: more rows load near the end, up to {LIMIT}.
             </Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
               <Chip label="scrollToIndex 100" onPress={() => list.scrollToIndex({ index: Math.min(100, trades().length - 1), viewPosition: 0.5 })} />

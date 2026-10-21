@@ -906,6 +906,21 @@ pub enum WritingDirection {
     Rtl,
 }
 
+/// The layout direction of a view and its subtree (`direction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum LayoutDirection {
+    /// Its parent's (the default): the surface's follows the user's
+    /// language.
+    #[default]
+    Inherit,
+    /// Left to right.
+    Ltr,
+    /// Right to left: rows run from the right, and left / right
+    /// properties mean start and end.
+    Rtl,
+}
+crate::static_reactive!(LayoutDirection: LayoutDirection);
+
 /// The shape of rounded corners (`borderCurve`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BorderCurve {
@@ -2860,6 +2875,23 @@ pub trait Styled: Sized {
     /// No number or letter forms (undoes the ones set before).
     fn normal_nums(self) -> Self {
         font_variant(self, 0, 0xff)
+    }
+
+    /// The layout direction of the view and its subtree (by default its
+    /// parent's; the surface's follows the user's language).
+    fn direction(mut self, direction: impl IntoReactive<LayoutDirection>) -> Self {
+        self.style()
+            .bind_value(direction, |s, direction: LayoutDirection| {
+                s.keyword(
+                    StyleKey::Direction,
+                    match direction {
+                        LayoutDirection::Inherit => "inherit",
+                        LayoutDirection::Ltr => "ltr",
+                        LayoutDirection::Rtl => "rtl",
+                    },
+                );
+            });
+        self
     }
 
     /// The text's base direction (by default its content's).

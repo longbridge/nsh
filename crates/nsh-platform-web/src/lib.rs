@@ -1,6 +1,6 @@
 //! WebAssembly backend for nsh: runs an app in a browser page and renders
 //! it to the DOM: apps published with `nsh package --target web`, the web
-//! development host and the website's live demos. `Platform.OS` is `"web"`;
+//! development host and the website's live demos. `platform.os` is `"web"`;
 //! the page reports the idiom (phone, tablet or desktop browser), locale
 //! and the user's settings ([`nsh_environment`]).
 //!

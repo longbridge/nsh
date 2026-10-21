@@ -52,7 +52,7 @@
   components: `SafeAreaView`, `KeyboardAvoidingView`) are added to the resolved padding / margin, so classes and
   styles keep their own.
 - **Effects** (styles and classes; `effects.rs`): `boxShadow` (CSS syntax, several, `inset`; also `shadow-*` / `ring-*`),
-  `experimental_backgroundImage` / `backgroundImage` (linear / radial / conic gradients and their `repeating-` forms,
+  `backgroundImage` (linear / radial / conic gradients and their `repeating-` forms,
   drawn over `backgroundColor` as in CSS; stops at percentages, at lengths along linear and radial gradients
   (a `DefiniteLength::Absolute` position: `Gradient::resolve_stops` places them against `Gradient::line_length` of the box when it is
   drawn, so every native backend passes the view's size; Android's `Decor.Gradient.resolve` does the same for the

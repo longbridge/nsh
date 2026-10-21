@@ -208,7 +208,6 @@ view()
 |---|---|---|---|
 | `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`、`.bind_background(&node)` | 填充色。接受原生动画颜色。 |
 | `backgroundImage` | `string` | `.bg_linear(angle)`、`.bg_radial()`、`.bg_conic()` 配合 `.gradient_from` / `_via` / `_to` | 画在背景色之上的 CSS 渐变：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`，多个用逗号分隔。 |
-| `experimental_backgroundImage` | `string` | | `backgroundImage` 的别名。 |
 
 ```rust tabs
 view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))

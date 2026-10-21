@@ -1,7 +1,7 @@
 import type { JSX, ScrollProps, ViewStyle } from "nsh";
 import { computed, effect, Image, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { colorScheme, Platform, setColorScheme, windowSize } from "nsh/device";
+import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
 import { nav } from "./nav";
@@ -354,7 +354,7 @@ export function PageHeader(props: {
  * Instructions for the device's input: `touch` on phones and tablets,
  * `pointer` on desktops (a mouse, a touchpad, a keyboard).
  */
-export const hint = (touch: string, pointer: string) => (Platform.isDesktop ? pointer : touch);
+export const hint = (touch: string, pointer: string) => (platform.idiom === "desktop" ? pointer : touch);
 
 /**
  * Desktops' way to refresh what phones pull down (the mouse does not drag
@@ -364,7 +364,7 @@ export const hint = (touch: string, pointer: string) => (Platform.isDesktop ? po
  * key's label for the hint, or null where it is not bound.
  */
 export function bindRefresh(refresh: () => void): string | null {
-  if (!Platform.isDesktop || Platform.OS === "web") return null;
+  if (platform.idiom !== "desktop" || platform.os === "web") return null;
   keymap.bind("mod+r", refresh);
   return keymap.label("mod+r");
 }
@@ -379,7 +379,7 @@ export const SIDEBAR = 264;
  * Mac Catalyst window); phones never do. Below that it is the phone layout,
  * unchanged. The shell remounts when it changes, so demos read it once.
  */
-export const desktop = computed(() => windowSize().width >= (Platform.isDesktop ? 700 : 900));
+export const desktop = computed(() => windowSize().width >= (platform.idiom === "desktop" ? 700 : 900));
 
 /** Whether the desktop layout shows its sidebar (the toggle in the demo's
  * toolbar and Ctrl+B / Cmd+B hide and show it; kept while the app runs). */

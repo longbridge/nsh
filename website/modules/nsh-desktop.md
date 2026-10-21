@@ -220,10 +220,10 @@ Menu shortcuts come first, as in native apps: a key an item takes never reaches 
 
 ```tsx
 import { effect, signal } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Menu } from "nsh/desktop";
 
-const mac = Platform.OS === "macos";
+const mac = platform.os === "macos";
 const wrap = signal(true);
 
 effect(() => {

@@ -312,7 +312,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
   (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
   (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt` (beside three pre-release changes: an alignment with Tailwind CSS, the fixtures merged by domain and the theme moved to `nsh-base`). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
+  `api/closed.txt` (beside the pre-release changes: an alignment with Tailwind CSS, the fixtures merged by domain, the theme moved to `nsh-base` and the renames of `docs/dev/api-naming.md`). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
   --keep`); fixtures and their steps never change, and while they pass, old apps keep working
   (`docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants

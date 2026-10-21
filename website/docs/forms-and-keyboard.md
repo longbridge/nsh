@@ -662,7 +662,7 @@ function Note() {
 }
 ```
 
-The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view (`isAvailable` from `nsh/ios` is `false`), so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `Platform.OS === "android"` in TSX).
+The bar is as wide as the window and as tall as its content. Input accessories are iOS's: on Android the bar is an empty hidden view (`isAvailable` from `nsh/ios` is `false`), so place those controls elsewhere there, for example above the input (`os() == Os::Android` in Rust, `platform.os === "android"` in TSX).
 
 ## Related
 

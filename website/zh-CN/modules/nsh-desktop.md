@@ -220,10 +220,10 @@ Role：
 
 ```tsx
 import { effect, signal } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Menu } from "nsh/desktop";
 
-const mac = Platform.OS === "macos";
+const mac = platform.os === "macos";
 const wrap = signal(true);
 
 effect(() => {

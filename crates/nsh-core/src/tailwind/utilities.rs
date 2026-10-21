@@ -186,10 +186,7 @@ impl Decl {
             )
         };
         match self {
-            Decl::Style(StyleDecl::Set(
-                StyleKey::BackgroundImage | StyleKey::ExperimentalBackgroundImage,
-                _,
-            )) => true,
+            Decl::Style(StyleDecl::Set(StyleKey::BackgroundImage, _)) => true,
             Decl::Part(p) => gradient(p),
             Decl::AdaptivePart(p) => gradient(&p[0]),
             _ => false,
