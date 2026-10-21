@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, switches, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`), documents of Markdown or HTML (`TextView`), selections across texts
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Switch`), documents of Markdown or HTML (`TextView`), selections across texts
 (`SelectionArea`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
 (`SafeAreaView`, `safeArea()` and `safeAreaInsets()`), the system's alert dialogs (`AlertDialog`), the software
@@ -25,19 +25,19 @@ from the `nsh-base` crate (`nsh_base::{button, safe_area_view, …}`).
 ```rust tabs
 use nsh_base::{
     AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, dialog, keyboard_avoiding_view,
-    nav_page, nav_stack, safe_area_view, selection_area, text_view, theme,
+    nav_page, nav_stack, safe_area_view, selection_area, switch, text_view, theme,
 };
 ```
 
 ```tsx tabs
 import {
   AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
+  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Switch, TextView,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  SelectionAreaProps, StatusBarForeground, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
+  SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -47,6 +47,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | TSX | Rust | What it is |
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | A press target with the disabled and selected states and a role for screen readers. |
+| [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | Content presented over everything else: sheets, full-screen flows, dialogs. |
 | [`SafeAreaView`](../elements/safe-area-view.md) | `safe_area_view()` | A view padded clear of system UI and headers. |
@@ -68,6 +69,13 @@ TSX's [theme classes](../docs/tailwind.md#theme-tokens) use.
 A press target that owns its behavior and has no look: presses, the disabled and selected states and its role for
 screen readers. Its look is the app's `class` and `style` with state variants, its content is its children. See
 [Button](../elements/button.md).
+
+### Switch
+
+An on / off control that owns its behavior and has no look: presses, keyboard activation, the disabled state and the
+switch role and value for screen readers, with the value owned by the app (`checked`, `onChange`). The app styles the
+switch, its track and its thumb, whose `checked:` and `disabled:` classes follow the switch. See
+[Switch](../elements/switch.md).
 
 ## Documents
 
@@ -238,7 +246,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Switch](../elements/switch.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md),
   [SelectionArea](../elements/selection-area.md), [Text](../elements/text.md) and

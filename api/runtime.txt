@@ -261,6 +261,7 @@ NavPage function
 NavStack function
 SafeAreaView function
 SelectionArea function
+Switch function
 TextView function
 TextView.parse function
 TextView.parseHtml function

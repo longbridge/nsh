@@ -261,3 +261,55 @@ fn a_rust_apps_button_hears_its_press() {
         .dispatch_event(first.tracked[0], EventKind::Press, EventPayload::None);
     assert!(seen(&rx).texts.iter().any(|(_, t)| t.text == "pressed 1"));
 }
+
+/// `nsh/base`'s `Switch` styled by a Rust app (as its page shows it): its
+/// track's typed style takes a `checked` variant that follows the switch,
+/// as a TSX app's `checked:` classes in `trackClass` do.
+#[component]
+fn Switches() -> impl IntoElement {
+    let switch = |checked: bool| {
+        let on = signal(checked);
+        nsh_base::switch()
+            .checked(on)
+            .on_change(move |next: &bool| on.set(*next))
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .track_style(|s| {
+                s.w(px(44.0))
+                    .p(px(2.0))
+                    .rounded_full()
+                    .bg(rgb(0x0000ff))
+                    .transition_colors()
+                    .checked(|s| s.bg(rgb(0x00ff00)))
+            })
+            .thumb_style(|s| {
+                s.size(px(20.0))
+                    .rounded_full()
+                    .bg(white())
+                    .shadow_sm()
+                    .transition_transform()
+                    .checked(|s| s.translate_x(px(20.0)))
+            })
+            .child(text("Wi-Fi"))
+    };
+    view().flex_1().child(switch(false)).child(switch(true))
+}
+
+#[test]
+fn a_rust_apps_switch_styles_its_parts_by_its_value() {
+    let (_engine, rx) = start_root(Root::new::<Switches>(|| ()));
+    let first = seen(&rx);
+    let backgrounds: Vec<u32> = first
+        .styles
+        .iter()
+        .map(|(_, s)| s.background_color.0)
+        .collect();
+    for color in [0x0000_ffff, 0x00ff_00ff] {
+        assert_eq!(
+            backgrounds.iter().filter(|&&c| c == color).count(),
+            1,
+            "{color:08x} in {backgrounds:08x?}"
+        );
+    }
+}

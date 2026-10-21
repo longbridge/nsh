@@ -1,6 +1,6 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`), navigation (stacks and pages), dialogs, safe areas,
+//! controls (`Button`, `Switch`), navigation (stacks and pages), dialogs, safe areas,
 //! selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
 //! tokens (`Theme`, as `gpui-base`'s).
@@ -17,6 +17,7 @@ mod keyboard;
 mod navigation;
 mod safe_area;
 mod selection_area;
+mod switch;
 pub mod text_view;
 mod theme;
 
@@ -37,6 +38,7 @@ pub use crate::{
     navigation::{dialog, nav_page, nav_stack},
     safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     selection_area::{SelectionArea, SelectionAreaElement, SelectionAreaProps, selection_area},
+    switch::{Switch, SwitchElement, SwitchEvent, SwitchProps, switch},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
         TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewElement,
@@ -57,6 +59,7 @@ pub fn registry() -> Registry {
         .register::<SafeAreaView>()
         .register::<KeyboardAvoidingView>()
         .register::<SelectionArea>()
+        .register::<Switch>()
         .register::<TextView>()
         .module::<AlertDialog>()
         .module::<Keyboard>()
@@ -94,6 +97,7 @@ mod tests {
                 "KeyboardAvoidingView",
                 "SafeAreaView",
                 "SelectionArea",
+                "Switch",
                 "TextView"
             ]
         );

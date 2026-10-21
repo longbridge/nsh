@@ -104,6 +104,7 @@ and take their look from the app.
 | Component | Rust | What it does | Page |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
+| `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<NavStack>`, `<NavPage>` | `nsh_base::nav_stack()`, `nsh_base::nav_page()` | Native navigation: a stack of pages with the platform's header and back gestures | [NavStack](./nav-stack.md) |
 | `<SafeAreaView>` | `nsh_base::safe_area_view()` | Pads its content clear of notches, bars and the home indicator | [SafeAreaView](./safe-area-view.md) |

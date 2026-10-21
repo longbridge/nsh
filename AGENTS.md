@@ -43,7 +43,7 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, safe areas, the keyboard, the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Switch`, safe areas, the keyboard, the status
                        bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
                        the theme (`theme.rs`, as `gpui-base`'s: gpui-kit's theme files, semantic tokens and their defaults, which
                        the core keeps as design tokens and no component of `nsh-base` draws with)
@@ -288,7 +288,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
-  button, safe areas, system alerts and the keyboard today, with the status bar a prop of pages and dialogs; controls
+  button, a switch, safe areas, system alerts and the keyboard today, with the status bar a prop of pages and dialogs; controls
   such as toggles, sliders, selects, popovers and sheets as their behavior is written). Names follow `gpui-base`'s
   (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two

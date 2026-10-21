@@ -1,32 +1,32 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、开关、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Switch`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, safe_area_view, …}`）。
 
 ```rust tabs
 use nsh_base::{
     AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, dialog, keyboard_avoiding_view,
-    nav_page, nav_stack, safe_area_view, selection_area, text_view, theme,
+    nav_page, nav_stack, safe_area_view, selection_area, switch, text_view, theme,
 };
 ```
 
 ```tsx tabs
 import {
   AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
+  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Switch, TextView,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  SelectionAreaProps, StatusBarForeground, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
+  SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -35,6 +35,7 @@ import type {
 | TSX | Rust | 是什么 |
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | 带禁用和选中状态、面向屏幕阅读器有角色的按压目标。 |
+| [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | 在所有内容之上呈现的内容：sheet、全屏流程、对话框。 |
 | [`SafeAreaView`](../elements/safe-area-view.md) | `safe_area_view()` | 避开系统界面和标题栏的视图。 |
@@ -57,6 +58,12 @@ import type {
 ### Button
 
 一个只负责行为、没有外观的按压目标：处理按压、禁用和选中状态，并向屏幕阅读器报告它的角色。它的外观是应用的 `class` 和 `style` 加上状态变体，内容是它的子元素。见 [Button](../elements/button.md)。
+
+<a id="switch"></a>
+
+### Switch
+
+一个只负责行为、没有外观的开 / 关控件：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告开关角色和它的值；值由应用持有（`checked`、`onChange`）。应用为开关、它的轨道和滑块设置样式，轨道和滑块上的 `checked:` 和 `disabled:` 类跟随开关。见 [Switch](../elements/switch.md)。
 
 <a id="documents"></a>
 
@@ -233,6 +240,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Switch](../elements/switch.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。
