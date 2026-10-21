@@ -346,7 +346,7 @@ fn in_runner(
 /// files in `work_dir`, or the app's root.
 fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Reply {
     let built = (|| -> anyhow::Result<Reply> {
-        let (bytecode, map) = match kind {
+        let (bytecode, map, capabilities) = match kind {
             Entry::TestFile => test_file_bytecode(entry)?,
             Entry::App => {
                 let entry = crate::entry::resolve(entry)?;
@@ -371,6 +371,7 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
         Ok(Reply::Js {
             bytecode: file,
             source_map,
+            capabilities,
         })
     })();
     built.unwrap_or_else(|e| Reply::Failed {
@@ -380,19 +381,19 @@ fn build_for_runner(entry: &Path, kind: Entry, work_dir: &Path, n: usize) -> Rep
 
 /// The entry made for a test file, bundled against the app's sets and
 /// `nsh/test`, and compiled.
-fn test_file_bytecode(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+fn test_file_bytecode(entry: &Path) -> anyhow::Result<Compiled> {
     let mut sets = crate::ui_sets().to_vec();
     sets.extend(nsh_testing::test_sets().iter().map(SetDescription::from));
     bytecode_of(entry, &sets, false)
 }
 
+/// A compiled entry: its bytecode, its source map and the capabilities its
+/// `nsh.json` declares (JSON), which the app runs under, as on a device.
+type Compiled = (Vec<u8>, Option<String>, Option<String>);
+
 /// `entry` bundled against `sets` and compiled to bytecode, with its
-/// source map; `announce`: saying so.
-fn bytecode_of(
-    entry: &Path,
-    sets: &[SetDescription],
-    announce: bool,
-) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+/// source map and declared capabilities; `announce`: saying so.
+fn bytecode_of(entry: &Path, sets: &[SetDescription], announce: bool) -> anyhow::Result<Compiled> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
@@ -412,7 +413,8 @@ fn bytecode_of(
         ));
     }
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
-    Ok((bytecode, bundle.source_map))
+    let capabilities = bundle.capabilities.map(|c| c.to_json().to_string());
+    Ok((bytecode, bundle.source_map, capabilities))
 }
 
 /// Prints how a test of the file shown as `file` ended: a line, and for a
@@ -549,10 +551,9 @@ fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
 /// serves (each entry once), and the entries made for test files against
 /// them and `nsh/test`, in this process.
 fn compiler() -> nsh_testing::Compile {
-    type Bytecode = (Vec<u8>, Option<String>);
-    let built: Mutex<HashMap<PathBuf, Bytecode>> = Mutex::new(HashMap::new());
+    let built: Mutex<HashMap<PathBuf, Compiled>> = Mutex::new(HashMap::new());
     Arc::new(move |entry: &Path, kind: Entry| {
-        let (bytecode, map) = match kind {
+        let (bytecode, map, capabilities) = match kind {
             Entry::App => {
                 let entry = crate::entry::resolve(entry).map_err(|e| format!("{e:#}"))?;
                 let cached = built
@@ -576,10 +577,9 @@ fn compiler() -> nsh_testing::Compile {
             Entry::TestFile => test_file_bytecode(entry).map_err(|e| format!("{e:#}"))?,
         };
         // SAFETY: compiled just now by this runtime.
-        Ok(Built::Js(
-            Box::new(unsafe { Bundle::bytecode(bytecode) }),
-            map,
-        ))
+        let bundle = unsafe { Bundle::bytecode(bytecode) }
+            .with_capabilities_json(capabilities.as_deref())?;
+        Ok(Built::Js(Box::new(bundle), map))
     })
 }
 
