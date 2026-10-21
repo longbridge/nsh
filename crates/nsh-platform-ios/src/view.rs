@@ -274,6 +274,7 @@ impl Inner {
         self.state.borrow().surface.as_ref()?.with_mounter(f)
     }
 
+    #[cfg(feature = "dev")]
     pub(crate) fn dev(&self) -> std::cell::Ref<'_, Option<crate::dev::DevSession>> {
         std::cell::Ref::map(self.state.borrow(), |s| &s.dev)
     }

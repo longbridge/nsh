@@ -312,6 +312,8 @@ Font families are the same as in styles: system families and the names of fonts 
 
 Drawing an image takes a URL or an asset's URI in Rust (`LOGO.uri`), and a URL, an imported asset (`import logo from "./logo.png"`) or `{ uri }` in TSX. The image is loaded natively, and the canvas draws again once it has loaded, so you do not need to track loading yourself. Remote URLs are subject to the app's [network capabilities](./sandbox-and-capabilities.md).
 
+Canvases on iOS, macOS, Android, Windows, Linux and GPUI draw bitmap images (PNG, JPEG, GIF, WebP, ...); on them, an SVG source is an image that fails to load, and the log names it. Show SVG images with [`<Image>`](./images-and-assets.md#svg-images), or draw their shapes as `Path2D` paths. On the web, a canvas draws what the browser draws, SVG included.
+
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo.png");
 

@@ -89,6 +89,15 @@ codegen-units = 1
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
+# SVG images are drawn when they load: unoptimized, a large one takes seconds.
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
 [profile.dev.package.syntect]
 opt-level = 3
 [profile.dev.package.fancy-regex]

@@ -82,6 +82,11 @@ final class ImageBox extends View implements Node {
     private Object content;
     /** What it fades in over (a placeholder). */
     private Object previous;
+    /**
+     * The size {@code center} shows an SVG's bitmap at, in pixels: its intrinsic size at the display's density, bounded by the decoded raster (0:
+     * a bitmap, shown a pixel per pixel).
+     */
+    private float contentWidth, contentHeight, previousWidth, previousHeight;
     private final Paint previousPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private long fadeStart;
     private int fading;
@@ -96,16 +101,23 @@ final class ImageBox extends View implements Node {
         invalidate();
     }
 
-    /** Shows {@code image} (a Bitmap or an animated Drawable), fading in over {@code fadeMs}. */
-    void setImage(Object image, int fadeMs) {
+    /** Shows {@code decoded} (a Bitmap or an animated Drawable, or nothing), fading in over {@code fadeMs}. */
+    void setImage(Images.Image decoded, int fadeMs) {
+        Object image = decoded == null ? null : decoded.content;
         if (content instanceof Drawable && content != image) {
             Drawable old = (Drawable) content;
             if (old instanceof Animatable) ((Animatable) old).stop();
             old.setCallback(null);
         }
         previous = fadeMs > 0 && content instanceof Bitmap ? content : null;
+        previousWidth = contentWidth;
+        previousHeight = contentHeight;
         previousPaint.setShader(previous == null ? null : shader((Bitmap) previous));
         content = image;
+        boolean vector = decoded != null && decoded.vector;
+        float density = getResources().getDisplayMetrics().density;
+        contentWidth = vector ? decoded.intrinsicWidth * density : 0;
+        contentHeight = vector ? decoded.intrinsicHeight * density : 0;
         paint.setShader(image instanceof Bitmap ? shader((Bitmap) image) : null);
         if (image instanceof Drawable) {
             Drawable d = (Drawable) image;
@@ -148,13 +160,16 @@ final class ImageBox extends View implements Node {
             if (alpha < 1) postInvalidateOnAnimation();
             else previous = null;
         }
-        if (previous != null) draw(canvas, previous, previousPaint, 255);
-        if (content != null) draw(canvas, content, paint, Math.round(alpha * 255));
+        if (previous != null) draw(canvas, previous, previousWidth, previousHeight, previousPaint, 255);
+        if (content != null) draw(canvas, content, contentWidth, contentHeight, paint, Math.round(alpha * 255));
         decor.drawBorders(canvas);
     }
 
-    /** Draws {@code image} placed by the resize mode, inside the view's shape. */
-    private void draw(Canvas canvas, Object image, Paint paint, int alpha) {
+    /**
+     * Draws {@code image} placed by the resize mode, inside the view's shape; {@code center} uses its intrinsic
+     * pixel size within the decoded raster (0: a pixel per pixel).
+     */
+    private void draw(Canvas canvas, Object image, float naturalWidth, float naturalHeight, Paint paint, int alpha) {
         float w = getWidth(), h = getHeight();
         float bw, bh;
         if (image instanceof Bitmap) {
@@ -169,9 +184,14 @@ final class ImageBox extends View implements Node {
             case 2:
                 matrix.setScale(w / bw, h / bh);
                 break;
-            case 3:
-                matrix.setTranslate((w - bw) / 2, (h - bh) / 2);
+            case 3: {
+                // Preserve the intrinsic SVG dimensions within the decoded raster, as before.
+                float sx = naturalWidth > 0 ? Math.min(1, naturalWidth / bw) : 1;
+                float sy = naturalHeight > 0 ? Math.min(1, naturalHeight / bh) : 1;
+                matrix.setScale(sx, sy);
+                matrix.postTranslate((w - bw * sx) / 2, (h - bh * sy) / 2);
                 break;
+            }
             default: {
                 float scale = resizeMode == 1 ? Math.min(w / bw, h / bh) : Math.max(w / bw, h / bh);
                 matrix.setScale(scale, scale);

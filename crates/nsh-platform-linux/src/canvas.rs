@@ -18,8 +18,8 @@
 //! shadow color. Conic gradients are mesh patterns of thin wedges.
 //!
 //! Text is laid out with Pango (layouts cached per canvas). Images are
-//! loaded through [`crate::image::load`] when a drawing names them, kept as
-//! Cairo surfaces per canvas and drawn once loaded. Animated value slots
+//! loaded through [`crate::image::load_bitmap`] when a drawing names them,
+//! kept as Cairo surfaces per canvas and drawn once loaded. Animated value slots
 //! ([`CanvasState::args`]) are read while replaying: an animation only
 //! queues a redraw, without JS.
 
@@ -94,7 +94,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     for uri in load {
         let weak = view.downgrade();
         let key = uri.clone();
-        crate::image::load(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, move |result| {
             let Some(view) = weak.upgrade() else { return };
             let image = match result.and_then(|t| image_surface(&t)) {
                 Ok(image) => image,

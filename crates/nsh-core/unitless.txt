@@ -180,6 +180,7 @@ style::StyleValue::Number.0                                      # a generic num
 style::TextStyle.letter_spacing_em                               # a multiple of the font size (em)
 style::TextStyle.line_height_multiple                            # a multiple of the font's line height
 style::ViewStyle.opacity                                         # an opacity, 0..1
+svg::rasterize_scaled(scale)                                     # a scale factor (device pixels per point)
 text::ResolvedTextStyle.line_height_multiple                     # a multiple of the font's line height
 time::Clock::unix_ms ->                                          # time (milliseconds since the epoch: `Date.now()`)
 time::unix_ms ->                                                 # time

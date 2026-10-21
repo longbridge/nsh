@@ -15,7 +15,9 @@
   for its transform, current path and line style and tests the flattened path; after `draw` returned a kept context
   answers from everything it drew, so press handlers can hit-test the shapes; strokes take joins as round and ignore
   dashes; animated values count as 0, since JS does not see their current values), linear / radial / conic
-  gradients, `drawImage` (all three forms, images by URI or asset). Any number argument and colors may be animated values
+  gradients, `drawImage` (all three forms, images by URI or asset: native canvases draw bitmaps, loaded through their
+  platform's image module, whose canvas loads fail an SVG with a warning naming it, as bytes no decoder reads fail;
+  the web's draws what the browser draws). Any number argument and colors may be animated values
   (`createAnimatedValue`, `interpolate`, ...): those become slots bound like style values (`AnimationProp::CanvasArg`) and the
   platform redraws on its own while they animate, without JS (only what they change on iOS and macOS: "Partial
   redraws" below). Deriving a node again (`interpolate`, `mul`, ... in a `draw`
@@ -30,7 +32,7 @@
   (overloads, `roundRect`'s radii, `save` / `restore`, gradients, images) is written in `canvas.rs`. The core's decoder
   (`nsh_core::js::canvas::decode`) reads the recorded list. Recording costs: `docs/dev/performance.md`. iOS replays
   into the `drawRect:` context, keeping its own transform and path in view space; Android `CanvasBox.java` interprets an `int[]` (`encode.rs`). Not
-  supported: `getImageData` / `putImageData`, filters, SVG images.
+  supported: `getImageData` / `putImageData`, filters.
 
 **Partial redraws.** While animated values animate, iOS (`setNeedsDisplayInRect:`) and macOS (`NshView::redraw_rect`:
 `setNeedsDisplayInRect:` on the content layer) redraw only what changes: `nsh_core::canvas::DamageScan` replays the

@@ -30,6 +30,7 @@ mod net;
 #[cfg(feature = "js")]
 mod package;
 mod selection_area;
+mod svg;
 mod text;
 
 use std::ffi::c_void;

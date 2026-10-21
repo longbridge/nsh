@@ -50,6 +50,9 @@ log = "0.4"
 env_logger = "0.11"
 libc = "0.2"
 imagesize = "0.15"
+# SVG images on the native backends (`nsh-core` feature `svg`): no text,
+# system fonts or raster images, so an SVG never reads files or fonts.
+resvg = { version = "0.46", default-features = false }
 ttf-parser = "0.25"
 oxc_sourcemap = "9"
 serde = { version = "1", features = ["derive"] }
@@ -442,6 +445,15 @@ opt-level = 3
 [profile.dev.package.objc2]
 opt-level = 3
 [profile.dev.package.objc2-encode]
+opt-level = 3
+# SVG images are drawn when they load: unoptimized, a large one takes seconds.
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
 opt-level = 3
 
 # The web runtime (`nsh.wasm`): what pages download, so Rust is optimized for

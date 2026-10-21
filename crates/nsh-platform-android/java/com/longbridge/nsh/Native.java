@@ -68,6 +68,15 @@ final class Native {
     static final int CONTEXT_MENU = 57;
     static final int COMPOSITION_CHANGE = 58;
 
+    /**
+     * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
+     * (0: its intrinsic size, {@code density} pixels per point), as premultiplied RGBA, setting {@code size} to the
+     * raster's width and height and the SVG's intrinsic size in whole points; {@code maxPx} below 0 only measures (an
+     * empty array). {@code intrinsic} receives its unrounded width and height in points. Null when the bytes are
+     * not a valid SVG. Any thread.
+     */
+    static native byte[] svg(byte[] bytes, int maxPx, float density, int[] size, float[] intrinsic);
+
     /** A host whose apps keep their data in {@code dataDir}, each in a directory named by its id. */
     static native long create(NshView view, float density, boolean trace, String dataDir);
 

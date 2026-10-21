@@ -378,23 +378,16 @@ covers [props] hitSlop
 covers [props] delayLongPress
 covers [props] panActivation
 covers [props] focusable
-# props-media-image-variants
-tap id:case-props-media-image-variants
-# An imported image with @2x and @3x files loads the file for the
-# screen's pixel ratio, as a source and as a placeholder, and keeps the
-# imported file's size in points.
-prop id:flag src asset:/images/flag.png
-prop id:remote defaultSource asset:/images/flag.png
-frame id:flag 0 64 4 3
-pixelratio 3
-prop id:flag src asset:/images/flag@3x.png
-prop id:remote defaultSource asset:/images/flag@3x.png
-pixelratio 2
-prop id:flag src asset:/images/flag@2x.png
-prop id:remote defaultSource asset:/images/flag@2x.png
-frame id:flag 0 64 4 3
-# Back to the start's ratio, for the cases after this one.
-pixelratio 1
-prop id:flag src asset:/images/flag.png
+# props-media-svg
+tap id:case-props-media-svg
+# Imported SVG files as the platform receives them, each laid out at its
+# size in points: width and height, the viewBox alone, one side and the
+# viewBox's aspect ratio.
+prop id:sized src asset:/svg/badge.svg
+frame id:sized 0 64 48 20
+prop id:view-box src asset:/svg/star.svg
+frame id:view-box 0 84 24 24
+prop id:one-side src asset:/svg/mark.svg
+frame id:one-side 0 108 32 16
+covers [nsh/image] Image
 covers [props] src
-covers [props] defaultSource
