@@ -63,9 +63,10 @@ go elsewhere under these rules rather than into them.
   `Enabled` suffix when a state word exists: what the user may do is `gpui-kit`'s adjective (`scrollable`,
   `zoomable`, `selectable`, `resizable`), and only a feature with no adjective is `<feature>Enabled`
   (`pagingEnabled`, `javaScriptEnabled`; *guides* "a positive `enabled` / `visible` contract"); what something
-  blocks is `disabled` (a menu item too, `PopupMenu::disabled`). Whether a part shows is `<part>Visible`, default
-  `true` (`gpui-component` `scrollbar_visible`, `header_visible`, `cursor_visible`: `headerVisible`,
-  `scrollbarVisible`), never `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
+  blocks is `disabled` (a menu item too, `PopupMenu::disabled`). Whether a part shows is a boolean named after the
+  part, default `true` (`scrollbar`, `caret`: `scrollbar={false}`; decided by the user, 2026-10-21); where that name
+  is already a slot it is `<part>Visible` (`headerVisible`, `headerBackVisible`: `header` is a page's slot), never
+  `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
   boolean (a constant, a payload's field) is `is<Adjective>` / `has<Noun>`, as `gpui-kit`'s readers (`isAvailable`,
   `isViewable`, `isBuffering`); props never are (*guides*: builders `disabled(bool)`, readers `is_disabled()`).
 - **Begin and end**: a phase is `<act>Start` / `<act>End` (`gpui-kit`'s `on_start` / `on_end`: `onPanStart`,
@@ -145,13 +146,13 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | **Scroll, List, WebView** | | | |
 | `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
 | `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
-| `showsIndicator` | `scrollbarVisible` (default `true`) | States | `gpui-component` `scrollbar_visible` |
+| `showsIndicator` | `scrollbar` (default `true`) | States | The part's name, as `caret` |
 | `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
 | `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
 | List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
 | **Every element** | | | |
-| Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's own name, as `placeholder`; replaces the 2026-10-20 row keeping it |
+| Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's name, as `scrollbar`; replaces the 2026-10-20 row keeping it |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
@@ -163,7 +164,7 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
 | the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
 | **NavPage** | | | |
-| `headerShown` | `headerVisible` (default `true`) | States | `header_visible`; as `headerBackVisible`, which stays |
+| `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
 | **TextView** (`nsh/base`) | | | |
 | `onLinkPress(url)` | `onLinkPress({ url })` | Payloads | |
 | **`nsh/desktop`** | | | |
