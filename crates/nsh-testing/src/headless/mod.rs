@@ -1187,30 +1187,7 @@ fn failure(error: AppError) -> Result<(), String> {
 /// Prints `batch`, which came in step `step`, as `nsh test --trace` does: a line
 /// naming the step and the number of items, then one line per item.
 pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
-    // A closed output (`| head`) ends nothing: the run goes on unseen.
-    let _ = writeln!(out, "── {step}: {} items", batch.items.len());
-    for item in &batch.items {
-        let _ = match item {
-            MountItem::Text {
-                id, text, content, ..
-            } => writeln!(
-                out,
-                "   Text {{ id: {id}, text: {:?}, content: {}x{} @ {},{} }}",
-                text.text,
-                content.size.width.0,
-                content.size.height.0,
-                content.origin.x.0,
-                content.origin.y.0
-            ),
-            MountItem::Frame { id, frame } => writeln!(
-                out,
-                "   Frame {{ id: {id}, x: {}, y: {}, w: {}, h: {} }}",
-                frame.origin.x.0, frame.origin.y.0, frame.size.width.0, frame.size.height.0
-            ),
-            other => writeln!(out, "   {other:?}"),
-        };
-    }
-    let _ = out.flush();
+    crate::trace::print_items(out, step, &crate::trace::item_lines(batch));
 }
 
 #[cfg(test)]

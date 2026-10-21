@@ -447,7 +447,11 @@ app.press("Add").unwrap();
 nsh test App.test.tsx --trace
 nsh test App.tsx --trace                                   # the first frame, then 1.2 s idle
 echo 'await app.press("Add")' | nsh test App.tsx --trace    # and a press
+echo 'await app.press("Add")' | nsh test App.tsx --trace --target ios   # the same in an iOS simulator
 ```
+
+With `--target`, the trace is the platform's: the batches the host applied, under the steps that brought them, and
+the host's own timings of each commit and event, on the device's hardware.
 
 Use it to:
 

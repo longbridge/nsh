@@ -70,6 +70,13 @@ pub enum ClientMessage {
         /// The request's id.
         id: u64,
     },
+    /// A batch a traced test session's app applied
+    /// ([`ServerMessage::TestSetup`]): its mount items, a line each, as
+    /// `nsh test --trace` prints them.
+    Trace {
+        /// The items.
+        items: Vec<String>,
+    },
     /// A log line from the host (JS console or native).
     Log {
         /// Severity.
@@ -133,6 +140,11 @@ pub enum ServerMessage {
         /// The storage's entries.
         #[serde(default)]
         storage: Vec<(String, String)>,
+        /// Trace the app (`nsh test --trace`): its engine logs each
+        /// commit's timings, and the host sends each batch it applies
+        /// ([`ClientMessage::Trace`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        trace: bool,
     },
     /// What the test answers to the app's request `id`
     /// ([`ClientMessage::Fetch`]), a message per event, in order.

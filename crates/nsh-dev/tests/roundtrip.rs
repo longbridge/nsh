@@ -394,3 +394,69 @@ fn an_app_of_rust_only_runs_as_its_hosts_root() {
     // A host connecting later hears it too: it is the latest state.
     assert!(matches!(next_non_status(&rx), DevEvent::Root));
 }
+
+#[test]
+fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
+    use nsh_dev::protocol::{StepOutcome, TestStep};
+
+    let (traces_tx, traces) = mpsc::channel();
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, move |event| {
+        if let ClientEvent::Trace { items } = event {
+            let _ = traces_tx.send(items);
+        }
+    })
+    .unwrap();
+    server.test_session();
+    server.set_test_trace(true);
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let (setup_tx, setup) = mpsc::channel();
+    let client = std::sync::Arc::new(std::sync::OnceLock::<DevClient>::new());
+    let answering = client.clone();
+    let started = DevClient::start(
+        url,
+        HostInfo {
+            tests: true,
+            ..host("tester", "bc-1")
+        },
+        move |event| match event {
+            DevEvent::TestSetup { trace, .. } => {
+                let _ = setup_tx.send(trace);
+            }
+            // A step's batch goes before its outcome.
+            DevEvent::Step { id, .. } => {
+                let client = answering.get().expect("client");
+                client.trace(vec!["Create { id: 2, kind: View }".into()]);
+                client.step_done(
+                    id,
+                    StepOutcome::Done {
+                        value: serde_json::Value::Null,
+                    },
+                );
+            }
+            _ => {}
+        },
+    )
+    .unwrap();
+    let _ = client.set(started);
+    assert!(
+        setup.recv_timeout(TIMEOUT).expect("the setup"),
+        "told to trace"
+    );
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while !server.has_tester() {
+        assert!(std::time::Instant::now() < deadline, "the host never came");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    server
+        .step(
+            TestStep::Press {
+                selector: "Add".into(),
+            },
+            TIMEOUT,
+        )
+        .unwrap();
+    assert_eq!(
+        traces.try_recv().expect("the batch, before the step's end"),
+        ["Create { id: 2, kind: View }"]
+    );
+}

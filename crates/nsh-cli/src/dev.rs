@@ -345,6 +345,8 @@ impl Devices {
                 };
                 logger::device(&device, log.level, &log.target, &log.message);
             }
+            // Only a test session's traced app sends its batches.
+            ClientEvent::Trace { .. } => {}
         }
     }
 }

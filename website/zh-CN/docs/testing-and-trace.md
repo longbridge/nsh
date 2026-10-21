@@ -417,7 +417,11 @@ app.press("Add").unwrap();
 nsh test App.test.tsx --trace
 nsh test App.tsx --trace                                   # 首帧，然后空闲 1.2 s
 echo 'await app.press("Add")' | nsh test App.tsx --trace    # 再加一次点击
+echo 'await app.press("Add")' | nsh test App.tsx --trace --target ios   # 在 iOS 模拟器中做同样的事
 ```
+
+加上 `--target` 时，跟踪来自真实平台：host 应用的批次标注在带来它们的步骤下，并附带 host 自己在设备硬件上测得的每次 commit
+和事件的耗时。
 
 它的用途：
 

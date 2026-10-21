@@ -14,13 +14,29 @@ use std::{
 use nsh_dev::protocol::{FetchReply, WireRequest};
 use nsh_engine::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
 
-/// What a host sends the test about its app's requests.
+/// What a host sends the test about its app: its requests, and the
+/// batches of a traced app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
     /// Request `.0`: answer it (`ClientMessage::Fetch`).
     Fetch(u64, WireRequest),
     /// The app no longer wants the answer to request `.0`.
     Cancel(u64),
+    /// The items of a batch the traced app applied, a line each
+    /// (`ClientMessage::Trace`).
+    Trace(Vec<String>),
+}
+
+impl Outgoing {
+    /// The message that sends it to the test.
+    pub fn into_message(self) -> nsh_dev::protocol::ClientMessage {
+        use nsh_dev::protocol::ClientMessage;
+        match self {
+            Outgoing::Fetch(id, request) => ClientMessage::Fetch { id, request },
+            Outgoing::Cancel(id) => ClientMessage::FetchCancel { id },
+            Outgoing::Trace(items) => ClientMessage::Trace { items },
+        }
+    }
 }
 
 /// Sends [`Outgoing`] messages to the test (the dev client's, the web

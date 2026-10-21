@@ -105,6 +105,10 @@ pub struct HostOptions {
     /// What answers the app's requests (`nsh_dev::DevServer::set_test_network`):
     /// the test's routes, the network itself, or none.
     pub network: Option<Arc<dyn nsh_dev::protocol::TestNetwork>>,
+    /// Traces the app (`nsh test --trace`, `nsh_dev::DevServer::set_test_trace`):
+    /// what prints the items of each batch it applied, a line each
+    /// (`nsh_dev::ClientEvent::Trace`), under the step it came in.
+    pub trace: Option<Arc<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
 impl std::fmt::Debug for HostOptions {
@@ -113,6 +117,7 @@ impl std::fmt::Debug for HostOptions {
             .field("size", &self.size)
             .field("storage", &self.storage)
             .field("network", &self.network.is_some())
+            .field("trace", &self.trace.is_some())
             .finish()
     }
 }
@@ -539,6 +544,21 @@ impl Session {
                 h.unwrap_or(Points(844.0)),
             )),
         };
+        // The step a traced app's batches print under, as headless runs
+        // name them.
+        let shown = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| path.strip_prefix(cwd).ok().map(Path::to_path_buf))
+            .unwrap_or_else(|| path.to_path_buf());
+        let step = Arc::new(Mutex::new(format!("open({})", shown.display())));
+        let trace = self.run.trace.clone().map(|out| {
+            let step = step.clone();
+            Arc::new(move |items: Vec<String>| {
+                let step = step.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let mut out = out.lock().unwrap_or_else(|e| e.into_inner());
+                crate::trace::print_items(&mut **out, &step, &items);
+            }) as Arc<dyn Fn(Vec<String>) + Send + Sync>
+        });
         let options = HostOptions {
             size: size.or(Some(Size::new(Points(390.0), Points(844.0)))),
             storage,
@@ -546,9 +566,10 @@ impl Session {
                 requests: requests.clone(),
                 live,
             })),
+            trace,
         };
         let host = start(path, &options).map_err(|e| format!("open({entry:?}): {e}"))?;
-        let remote = Remote::new(host);
+        let remote = Remote::new(host, step);
         remote.take(nsh_dev::protocol::TestStep::Ready {
             timeout_ms: WAIT.as_millis() as u64 * 2,
         })?;

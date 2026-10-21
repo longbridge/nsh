@@ -171,14 +171,16 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
         Some(build::compile(entry, false).map_err(|e| e.plain)?)
     };
     let dir = entry.parent().unwrap_or(Path::new("."));
+    let trace = options.trace.clone();
     let server = DevServer::start(
         "127.0.0.1:0".parse().expect("an address"),
         nsh_js::BYTECODE_VERSION,
         Some(dir.to_path_buf()),
-        |event| {
-            // The app's log lines, as `nsh run` shows them; the host's own
-            // coming and going is the test's business.
-            if let ClientEvent::Log(log) = event {
+        move |event| match event {
+            // The app's log lines, as `nsh run` shows them (a traced app's
+            // commit timings among them); the host's own coming and going
+            // is the test's business.
+            ClientEvent::Log(log) => {
                 let level = match log.level {
                     LogLevel::Error => log::Level::Error,
                     LogLevel::Warn => log::Level::Warn,
@@ -188,6 +190,12 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
                 };
                 crate::logger::forward(level, &log.target, &log.message);
             }
+            ClientEvent::Trace { items } => {
+                if let Some(trace) = &trace {
+                    trace(items);
+                }
+            }
+            _ => {}
         },
     )
     .map_err(|e| format!("cannot start a dev server: {e}"))?;
@@ -195,6 +203,7 @@ pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, St
     server.test_session();
     // What the app starts with and what answers its requests: the test's.
     server.set_test_storage(options.storage.clone());
+    server.set_test_trace(options.trace.is_some());
     if let Some(network) = &options.network {
         server.set_test_network(network.clone());
     }

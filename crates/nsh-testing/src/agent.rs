@@ -59,6 +59,8 @@ pub struct Model {
 struct Setup {
     storage: Arc<MemoryStorage>,
     forwarder: Arc<forward::Forwarder>,
+    /// Where each batch's items go when the test traces the app.
+    trace: Option<SendOutgoing>,
 }
 
 #[derive(Default)]
@@ -76,6 +78,17 @@ impl Model {
     /// Takes in a batch the host applied (on its main thread, after
     /// applying it).
     pub fn apply(&self, batch: &MountBatch) {
+        // Before the step that brought it is done: the test prints it under
+        // that step.
+        let trace = self
+            .setup
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|setup| setup.trace.clone());
+        if let Some(send) = trace {
+            send(Outgoing::Trace(crate::trace::item_lines(batch)));
+        }
         let mut state = self.lock();
         state.screen.apply(batch);
         state.batches += 1;
@@ -96,39 +109,31 @@ impl Model {
     }
 
     /// What the test sets the app up with (before its first bundle): the
-    /// storage entries it starts with, and what sends its requests to the
-    /// test ([`Model::engine_network`], [`Model::fetch_reply`]).
-    pub fn set_up(&self, storage: Vec<(String, String)>, send: SendOutgoing) {
+    /// storage entries it starts with, whether it traces the app (`nsh test
+    /// --trace`), and what sends the test its requests and, when traced,
+    /// each batch ([`Model::set_up_engine`], [`Model::fetch_reply`]).
+    pub fn set_up(&self, storage: Vec<(String, String)>, trace: bool, send: SendOutgoing) {
         *self.setup.lock().unwrap_or_else(|e| e.into_inner()) = Some(Setup {
             storage: MemoryStorage::new(storage),
+            trace: trace.then(|| send.clone()),
             forwarder: forward::Forwarder::new(send),
         });
     }
 
-    /// The network the app's engine runs on in place of `platform` (the
-    /// host's): its requests go to the test, which answers them or lets
-    /// them through to `platform`. `platform` itself before [`Model::set_up`].
-    pub fn engine_network(
-        &self,
-        platform: Option<Arc<dyn nsh_engine::Network>>,
-    ) -> Option<Arc<dyn nsh_engine::Network>> {
+    /// Sets `config`, the engine of a test session's app, up as the test
+    /// says ([`Model::set_up`]; nothing before): its storage is the test's,
+    /// its requests go to the test (which answers them or lets them through
+    /// to the host's network), and a traced app's engine logs each commit's
+    /// timings.
+    pub fn set_up_engine(&self, config: &mut nsh_engine::EngineConfig) {
         let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
-        match &*setup {
-            Some(setup) => Some(Arc::new(forward::ForwardNetwork {
-                forwarder: setup.forwarder.clone(),
-                platform,
-            })),
-            None => platform,
-        }
-    }
-
-    /// The storage the app's engine runs on in place of its own (the
-    /// test's), after [`Model::set_up`].
-    pub fn engine_storage(&self) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
-        let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
-        setup
-            .as_ref()
-            .map(|s| s.storage.clone() as Arc<dyn nsh_core::storage::StorageBackend>)
+        let Some(setup) = &*setup else { return };
+        config.network = Some(Arc::new(forward::ForwardNetwork {
+            forwarder: setup.forwarder.clone(),
+            platform: config.network.take(),
+        }));
+        config.storage = Some(setup.storage.clone() as Arc<dyn nsh_core::storage::StorageBackend>);
+        config.trace |= setup.trace.is_some();
     }
 
     /// The test's answer to the app's request `id` (one event of it).
@@ -576,11 +581,12 @@ impl Tester {
         match event {
             nsh_dev::DevEvent::Testing => self.start(),
             nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
-            nsh_dev::DevEvent::TestSetup { storage } => {
+            nsh_dev::DevEvent::TestSetup { storage, trace } => {
                 if let Some(model) = self.model() {
                     let client = self.client.clone();
                     model.set_up(
                         storage,
+                        trace,
                         Arc::new(move |message| {
                             let Some(client) = client.get().and_then(std::sync::Weak::upgrade)
                             else {
@@ -589,6 +595,7 @@ impl Tester {
                             match message {
                                 Outgoing::Fetch(id, request) => client.fetch(id, request),
                                 Outgoing::Cancel(id) => client.fetch_cancel(id),
+                                Outgoing::Trace(items) => client.trace(items),
                             }
                         }),
                     );

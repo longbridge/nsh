@@ -176,15 +176,21 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 /// An app on a real platform's host.
 pub(crate) struct Remote {
     host: Box<dyn Host>,
+    /// The step taken now, which a traced app's batches print under.
+    step: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl Remote {
-    pub(crate) fn new(host: Box<dyn Host>) -> Self {
-        Remote { host }
+    pub(crate) fn new(host: Box<dyn Host>, step: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
+        Remote { host, step }
     }
 
-    /// Takes `step` on the host.
+    /// Takes `step` on the host; an action names what a traced app's
+    /// batches print under, as headless runs name it.
     pub(crate) fn take(&self, step: TestStep) -> Result<Value, String> {
+        if let Some(name) = step_name(&step) {
+            *self.step.lock().unwrap_or_else(|e| e.into_inner()) = name;
+        }
         self.host.step(step, STEP_TIMEOUT)
     }
 
@@ -198,6 +204,36 @@ impl Remote {
     }
 }
 
+/// The name `--trace` prints an action's batches under (as
+/// [`Headless`]'s steps name theirs); `None` for a query.
+fn step_name(step: &TestStep) -> Option<String> {
+    Some(match step {
+        TestStep::Press { selector } => format!("press({selector})"),
+        TestStep::LongPress { selector } => format!("longPress({selector})"),
+        TestStep::Type { selector, text } => format!("type({selector}, {text:?})"),
+        TestStep::Submit { selector } => format!("submit({selector})"),
+        TestStep::Clear { selector } => format!("clear({selector})"),
+        TestStep::Scroll { selector, distance } => {
+            format!("scroll({selector}, {})", Points(*distance))
+        }
+        TestStep::Back => "back".to_owned(),
+        TestStep::Wait { ms } => format!("wait({ms})"),
+        TestStep::WaitFor {
+            selector,
+            gone: false,
+            ..
+        } => format!("waitFor({selector})"),
+        TestStep::WaitFor { selector, .. } => format!("waitFor({selector}, gone)"),
+        TestStep::SetViewport { width, height } => {
+            format!("setViewport({}, {})", Points(*width), Points(*height))
+        }
+        TestStep::SetColorScheme { dark } => {
+            format!("setColorScheme({})", if *dark { "dark" } else { "light" })
+        }
+        _ => return None,
+    })
+}
+
 /// What a test asks of a real platform that only headless runs do.
 pub(crate) fn headless_only(what: &str) -> String {
     format!("{what} runs headless only for now: run the test without `--target`")
@@ -208,7 +244,9 @@ fn ms(time: Duration) -> u64 {
 }
 
 impl Driver for Remote {
-    fn step(&mut self, _: &str) {}
+    fn step(&mut self, name: &str) {
+        *self.step.lock().unwrap_or_else(|e| e.into_inner()) = name.to_owned();
+    }
     fn press(&mut self, selector: &str) -> Result<(), String> {
         self.action(TestStep::Press {
             selector: selector.into(),
