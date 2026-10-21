@@ -1075,8 +1075,10 @@ fn values_are_written_as_apps_write_them() {
 ///   user); missing until one of them;
 /// - `zoomScale` (scroll views): the zoom the platform was last told;
 /// - `stickyHeaderIndices` (lists): the sticky cells as the platform pins
-///   them, `start=<n> end=<n>` each (content points along the main axis,
-///   `end` `Infinity` for the last), in the core's order;
+///   them, `start=<n> end=<n>` each (the scroll offsets along the main
+///   axis between which a cell moves with the scroll: its position less
+///   `stickyHeaderOffset`; `end` `Infinity` for the last), in the core's
+///   order;
 /// - `scrollValue`, `pan` (`{ x?, y? }`), `pinch` (`{ scale? }`),
 ///   `rotation` (`{ angle? }`): the animated values the scroll offset
 ///   and the gestures drive, each written as the value it was created

@@ -760,6 +760,8 @@ export interface ListHostProps {
   maintainVisibleContentPosition?: { autoscrollToBottomThreshold?: number };
   /** Items that stick to the start while scrolled past (one column, not inverted). */
   stickyHeaderIndices?: number[];
+  /** How far from the start of the viewport sticky items stick, as CSS `position: sticky`'s `top` (negative: partly out of view); the content scrolls under the space before them. */
+  stickyHeaderOffset?: number;
   /** Padding and gaps of the content. */
   contentStyle?: ListContentStyle;
   /** When items count as viewable. */

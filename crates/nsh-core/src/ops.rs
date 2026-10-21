@@ -1477,6 +1477,11 @@ pub enum Prop {
     /// (one column, not inverted).
     #[prop(js = "stickyHeaderIndices", with = crate::js::host_values::sticky, reset = Prop::StickyIndices(Vec::new()), on = LIST)]
     StickyIndices(Vec<u32>),
+    /// `stickyHeaderOffset`: how far from the start of the viewport sticky
+    /// items stick, as CSS `position: sticky`'s `top` (negative: partly out
+    /// of view); the content scrolls under the space before them.
+    #[prop(js = "stickyHeaderOffset", default = Points(0.0), on = LIST)]
+    StickyOffset(Points),
     /// `contentStyle`: padding and gaps of the content.
     #[prop(js = "contentStyle", on = LIST)]
     ListContent(ListContentStyle),

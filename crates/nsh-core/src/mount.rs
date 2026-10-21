@@ -279,14 +279,19 @@ fn nearest(points: &[f32], to: f32) -> Option<f32> {
         .min_by(|a, b| (a - to).abs().total_cmp(&(b - to).abs()))
 }
 
-/// A list cell that sticks to the start of the viewport.
+/// A list cell that sticks to the start of the viewport (or the list's
+/// sticky offset from it): at scroll offset `offset` (along the main axis)
+/// it shows `clamp(offset - start, 0, end - start)` past where it is laid
+/// out.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StickyCell {
     /// The cell.
     pub cell: NodeId,
-    /// Its position along the main axis (content coordinates).
+    /// The scroll offset from which it moves with the scroll: its position
+    /// in the content less the list's sticky offset.
     pub start: Points,
-    /// Where the next sticky cell pushes it out (may be infinite).
+    /// The scroll offset at which the next sticky cell pushes it out (may be
+    /// infinite).
     pub end: Points,
 }
 

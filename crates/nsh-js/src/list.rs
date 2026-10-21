@@ -45,6 +45,7 @@ const FORWARDED: &[&str] = &[
     "inverted",
     "maintainVisibleContentPosition",
     "stickyHeaderIndices",
+    "stickyHeaderOffset",
     "contentStyle",
     "contentClass",
     "viewabilityConfig",

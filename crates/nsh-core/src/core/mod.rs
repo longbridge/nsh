@@ -2152,6 +2152,11 @@ impl<M: TextEngine> Core<M> {
                     list.set_sticky(indices);
                 }
             }
+            Prop::StickyOffset(offset) => {
+                if let Some(list) = node.list.as_mut() {
+                    list.set_sticky_offset(offset.0);
+                }
+            }
             Prop::ListContent(content) => {
                 if let Some(list) = node.list.as_mut() {
                     list.set_content(content);

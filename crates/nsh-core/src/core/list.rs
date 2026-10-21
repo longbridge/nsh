@@ -155,9 +155,10 @@ pub(super) enum Follow {
 /// the same (platforms round offsets to pixels).
 const PIN_SLACK: f32 = 1.0;
 
-/// A sticky cell's range of travel, in content coordinates along the main
-/// axis: it sits at `start` and is pushed down with the scroll offset
-/// until `end`.
+/// A sticky cell's range of travel, as scroll offsets along the main axis:
+/// from `start` it moves with the scroll offset, as far as `end` (by
+/// `clamp(offset - start, 0, end - start)` from where the cell is laid out;
+/// without a sticky offset, `start` is that position).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct StickyRange {
     pub(super) cell: u32,
@@ -193,6 +194,9 @@ pub(super) struct ListState {
     pub(super) follow_end: Option<f32>,
     /// `stickyHeaderIndices`, sorted.
     pub(super) sticky: Vec<u32>,
+    /// `stickyHeaderOffset`: sticky items stick this far from the
+    /// viewport's start.
+    sticky_offset: f32,
     /// Sticky ranges last sent to the platform.
     pub(super) sent_sticky: Vec<StickyRange>,
     pub(super) viewability: Viewability,
@@ -248,6 +252,7 @@ impl ListState {
             inverted: false,
             follow_end: None,
             sticky: Vec::new(),
+            sticky_offset: 0.0,
             sent_sticky: Vec::new(),
             viewability: Viewability::default(),
             viewable: None,
@@ -742,6 +747,15 @@ impl ListState {
         }
     }
 
+    /// `stickyHeaderOffset`.
+    pub(super) fn set_sticky_offset(&mut self, offset: f32) {
+        let offset = if offset.is_finite() { offset } else { 0.0 };
+        if offset != self.sticky_offset {
+            self.sticky_offset = offset;
+            self.dirty = true;
+        }
+    }
+
     /// Records a measured size. Returns the change if the item lies
     /// entirely before the viewport (the caller scrolls by it so the
     /// visible content stays put).
@@ -945,13 +959,13 @@ impl ListState {
         )
     }
 
-    /// The sticky item currently pinned to the viewport's start: the last
-    /// one that starts before it.
+    /// The sticky item currently pinned to the viewport's start (or its
+    /// sticky offset from it): the last one that starts before that.
     pub(super) fn active_sticky(&self) -> Option<u32> {
         if !self.sticky_enabled() {
             return None;
         }
-        let at = self.natural_offset();
+        let at = self.natural_offset() + self.sticky_offset;
         let mut active = None;
         for &s in &self.sticky {
             if s >= self.count || self.item_at(s) > at {
@@ -968,13 +982,14 @@ impl ListState {
         !self.sticky.is_empty() && self.columns == 1 && !self.inverted
     }
 
-    /// The travel range of sticky item `index`: from its position to where
-    /// the next sticky item pushes it out.
+    /// The travel range of sticky item `index`: from where it reaches the
+    /// sticky offset from the viewport's start to where the next sticky item
+    /// pushes it out.
     pub(super) fn sticky_range(&self, index: u32, cell: u32, size: f32) -> StickyRange {
-        let start = self.item_at(index);
+        let start = self.item_at(index) - self.sticky_offset;
         let next = self.sticky.iter().find(|&&s| s > index && s < self.count);
         let end = match next {
-            Some(&n) => (self.item_at(n) - size).max(start),
+            Some(&n) => (self.item_at(n) - size - self.sticky_offset).max(start),
             None => f32::INFINITY,
         };
         StickyRange { cell, start, end }
@@ -1263,6 +1278,37 @@ mod tests {
         s.anchor_end();
         assert_eq!(s.offset, 0.0);
         assert_eq!(s.to_content(s.item_at(0), 50.0), 350.0);
+    }
+
+    #[test]
+    fn sticky_items_stick_at_their_offset() {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_sticky(vec![0, 30]);
+        l.set_sticky_offset(20.0);
+        // Ranges are scroll offsets: item 0 is pinned 20 from the top from
+        // the start (pushed down by 20), item 30 from 1480 on; 30 pushes 0
+        // out when it reaches 0's end, 50 below the offset.
+        assert_eq!(
+            l.sticky_range(0, 1, 50.0),
+            StickyRange {
+                cell: 1,
+                start: -20.0,
+                end: 1430.0
+            }
+        );
+        assert_eq!(l.sticky_range(30, 2, 50.0).start, 1480.0);
+        // The pinned item is the last one that reached the offset.
+        l.offset = 1470.0;
+        assert_eq!(l.active_sticky(), Some(0));
+        l.offset = 1480.0;
+        assert_eq!(l.active_sticky(), Some(30));
+        // Without it again: as before.
+        l.set_sticky_offset(0.0);
+        assert_eq!(l.sticky_range(0, 1, 50.0).start, 0.0);
+        assert_eq!(l.active_sticky(), Some(0));
+        // A negative offset sticks items partly out of view.
+        l.set_sticky_offset(-10.0);
+        assert_eq!(l.sticky_range(30, 2, 50.0).start, 1510.0);
     }
 
     #[test]
