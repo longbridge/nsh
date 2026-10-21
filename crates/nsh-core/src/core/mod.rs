@@ -4289,6 +4289,28 @@ impl<M: TextEngine> Core<M> {
             .expect("taffy layout");
     }
 
+    /// Whether `key` is out of the layout: `display: none` on it or on a
+    /// view it is laid out in (Taffy gives all of them no size).
+    fn displays_none(&self, key: Key) -> bool {
+        let mut k = key;
+        while k != NO_KEY {
+            let n = &self.nodes[k as usize];
+            if let Some(layout) = n.layout
+                && self
+                    .layout
+                    .style(layout)
+                    .is_ok_and(|s| s.display == taffy::Display::None)
+            {
+                return true;
+            }
+            if n.kind.is_root() {
+                return false;
+            }
+            k = n.parent;
+        }
+        false
+    }
+
     #[inline]
     fn queue_text(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];
@@ -4322,12 +4344,33 @@ impl<M: TextEngine> Core<M> {
             if !created {
                 continue;
             }
-            let mut content = content_box(self.layout.layout(layout).expect("taffy layout"));
+            let boxed = self.layout.layout(layout).expect("taffy layout");
+            let mut content = content_box(boxed);
+            let hidden = boxed.size == taffy::Size::ZERO && self.displays_none(key);
             let engine = &self.text_engine;
             let cache = &mut self.measure_cache;
             let Some(LeafContext::Text(cx)) = self.layout.get_node_context_mut(layout) else {
                 continue;
             };
+            if hidden {
+                // Out of the layout (`display: none`). Its glyphs typeset
+                // in its zero box would still show where a platform does
+                // not clip text to its box (a browser), so it gets an
+                // empty layout; the text itself stays what it is.
+                if matches!(&cx.laid_out, Some((r, _)) if *r == content) {
+                    continue;
+                }
+                let layout =
+                    engine.layout(&engine.prepare(&AttributedText::default()), content.size);
+                cx.laid_out = Some((content, layout.clone()));
+                self.mount.push(MountItem::Text {
+                    id,
+                    text: cx.text.clone(),
+                    layout,
+                    content,
+                });
+                continue;
+            }
             if cx.text.no_wrap {
                 // One line at its natural width, past the box if need be.
                 content.size.width = content

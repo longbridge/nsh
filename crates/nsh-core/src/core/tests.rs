@@ -14,6 +14,13 @@ struct FakeEngine {
     layouts: Cell<u32>,
 }
 
+/// [`FakeEngine`]'s layout: the characters laid out and where its
+/// attachments go.
+struct FakeLayout {
+    chars: usize,
+    points: Vec<Option<Point<Points>>>,
+}
+
 impl TextEngine for FakeEngine {
     /// Characters and attachment offsets.
     type Prepared = (usize, Vec<u32>);
@@ -34,7 +41,7 @@ impl TextEngine for FakeEngine {
         }
     }
 
-    fn layout(&self, (_, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
+    fn layout(&self, (chars, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
         self.layouts.set(self.layouts.get() + 1);
         // One line; the third attachment on is cut off.
         let points: Vec<Option<Point<Points>>> = attachments
@@ -44,13 +51,16 @@ impl TextEngine for FakeEngine {
                 (i < 2).then_some(crate::geometry::point(Points(at as f32 * 8.0), Points(2.0)))
             })
             .collect();
-        TextLayout(Arc::new(points))
+        TextLayout(Arc::new(FakeLayout {
+            chars: *chars,
+            points,
+        }))
     }
 
     fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
-            .downcast::<Vec<Option<Point<Points>>>>()
-            .cloned()
+            .downcast::<FakeLayout>()
+            .map(|l| l.points.clone())
             .unwrap_or_default()
     }
 }
@@ -397,6 +407,89 @@ fn text_update_emits_only_text_and_frames() {
     assert!(matches!(&batch.items[0], MountItem::Text { id: 2, text, .. } if text.text == "abc"));
     // Text blocks stretch to the column width, so only the content changes.
     assert_eq!(batch.items.len(), 1);
+}
+
+#[test]
+fn text_out_of_the_layout_shows_no_glyphs() {
+    // `display: none` leaves a text no box, and a platform that does not
+    // clip text to its box (a browser) would draw what was laid out in it:
+    // a checkbox's hidden check over its shown dash.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "✓".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            class_op(4, "hidden"),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    // The text and how many of its characters are laid out.
+    let text_of = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text {
+                id: 4,
+                text,
+                layout,
+                ..
+            } => Some((
+                text.text.clone(),
+                layout.downcast::<FakeLayout>().unwrap().chars,
+            )),
+            _ => None,
+        })
+    };
+    // The text stays what it is (tests and screen readers read it); none of
+    // it is laid out.
+    let hidden = Some(("✓".to_owned(), 0));
+    let shown = Some(("✓".to_owned(), 1));
+    assert_eq!(text_of(&c.commit().unwrap()), hidden);
+    let mut toggle = |id, classes, expected: &Option<(String, usize)>| {
+        c.apply(class_op(id, classes)).unwrap();
+        assert_eq!(&text_of(&c.commit().unwrap()), expected, "{id}: {classes}");
+    };
+    toggle(4, "flex", &shown);
+    // Hidden by its own class, then by its parent's.
+    toggle(4, "hidden", &hidden);
+    toggle(4, "flex", &shown);
+    toggle(2, "hidden", &hidden);
+    toggle(2, "flex", &shown);
+    // New text while hidden: sent, still laid out empty.
+    apply(
+        &mut c,
+        vec![
+            class_op(2, "hidden"),
+            Op::SetText {
+                id: 5,
+                text: "–".into(),
+            },
+        ],
+    );
+    assert_eq!(text_of(&c.commit().unwrap()), Some(("–".to_owned(), 0)));
 }
 
 #[test]

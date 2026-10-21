@@ -6,6 +6,9 @@
   `textAlignVertical` (the core moves the content box down). `adjustsFontSizeToFit` shrinks the fonts (down to
   `minimumFontScale`, at least 0.1) until the text fits its box and lines (`Paragraph::fit`, a binary search in the core).
   `onTextLayout` reports the final lines (`TextEngine::lines`: range, box, ascender, descender, cap / x height).
+  A text out of the layout (`display: none` on it or on a view around it, `hidden`) is sent with an empty layout (its
+  text unchanged, for tests and screen readers): its box is zero, and the web, which does not clip text to its box,
+  would still draw the glyphs laid out in it.
   `selectable` (or `select-text`): range selection, drawing only (`AttributedText::selectable` /
   `selection_color`, not part of layout). iOS (`text_selection.rs`): the CoreText `TextView` adopts `UITextInput`
   (non-editable: no keyboard, `inputView` is empty) and a `UITextInteraction` (`NonEditable`) attached only while the text
