@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Tab, Tabs } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 // What each section shows: the app switches the content by its own value.
@@ -49,7 +49,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>tabs</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Click a tab, or Tab to one and press Space" : "Tap a tab to show its section"}
+        {platform.idiom === "desktop" ? "Click a tab, or Tab to one and press Space" : "Tap a tab to show its section"}
       </Text>
 
       <View style={{ maxWidth: 390, gap: 14 }}>
