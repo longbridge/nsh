@@ -518,6 +518,7 @@ impl MenuValue {
                 enabled,
                 checked,
                 role: None,
+                when: nsh_core::keymap::When::Always,
             }),
             MenuValue::Submenu {
                 label,

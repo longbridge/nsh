@@ -451,6 +451,7 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
                     enabled,
                     checked: None,
                     role: None,
+                    when: nsh_core::keymap::When::Always,
                 })
             }
         })

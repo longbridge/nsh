@@ -155,6 +155,7 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -202,4 +203,92 @@ fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppCont
     ime(&view, cx, |s| crate::text_input::char_input(s, "好"));
     assert_eq!(field_text(&view, cx).as_deref(), Some("held好"));
     wait_for(&view, cx, "compose ni|end|compose hao|change held好|end");
+}
+
+const MENU_OVER_FIELD: &str = r#"
+import { Input, mount, signal, View } from "nsh";
+import { Menu } from "nsh/desktop";
+
+function App() {
+  const text = signal("abcd");
+  const chose = (name: string) => () => text.set(`${text()} ${name}`);
+  Menu.setApplicationMenu([
+    {
+      label: "Edit",
+      submenu: [
+        { label: "Revert", shortcut: "mod+z", when: "auto", onSelect: chose("revert") },
+        { label: "Remove", shortcut: "delete", when: "auto", onSelect: chose("remove") },
+        { label: "Send", shortcut: "mod+enter", when: "auto", onSelect: chose("send") },
+        { label: "Purge", shortcut: "shift+delete", onSelect: chose("purge") },
+      ],
+    },
+  ]);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input
+        autoFocus
+        submitBehavior="submit"
+        value={text()}
+        onChange={(t) => text.set(t)}
+        style={{ height: 30 }}
+      />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", MENU_OVER_FIELD, &[]).unwrap();
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let view = AppView::new(AppOptions::default(), window, cx);
+        let title = window.window_title();
+        crate::chrome::set_standalone(view.surface(), &title, window.window_handle());
+        crate::system::own_window(view.surface());
+        view
+    });
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    let primary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes("end");
+    cx.simulate_input("e");
+    wait_for(&view, cx, "abcde");
+    cx.simulate_keystrokes(&format!("{primary}-z"));
+    wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes("home delete");
+    wait_for(&view, cx, "bcd");
+    cx.simulate_keystrokes(&format!("{primary}-enter"));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("shift-delete");
+    wait_for(&view, cx, "bcd purge");
+    cx.simulate_keystrokes("escape");
+    wait_until_blurred(&view, cx);
+    cx.simulate_keystrokes(&format!("{primary}-z delete {primary}-enter"));
+    cx.run_until_parked();
+    let bar = if cfg!(target_os = "macos") { 0.0 } else { 28.0 };
+    cx.simulate_click(
+        gpui::point(gpui::px(20.0), gpui::px(bar + 15.0)),
+        gpui::Modifiers::default(),
+    );
+    wait_for(&view, cx, "bcd purge revert remove send");
+}
+
+fn wait_until_blurred(view: &Entity<AppView>, cx: &mut VisualTestContext) {
+    let start = Instant::now();
+    loop {
+        cx.run_until_parked();
+        if field_text(view, cx).is_none() {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the field still has focus"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
