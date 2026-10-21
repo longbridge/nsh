@@ -11,9 +11,10 @@ import java.util.ArrayList;
 /**
  * Reports touches to the JS responder system (`onTouch`): one per root view
  * (the surface and each modal), fed by its {@code dispatchTouchEvent}. It
- * observes touches and passive pressed-style/ripple feedback without claiming clicks.
- * A finger is tracked when the view under it, or one around
- * it, listens to touches.
+ * also shows the pressed style and ripple of views that have one but no
+ * press handler, so they never take the click from the view around them
+ * that handles it. A finger is tracked when the view under it, or one
+ * around it, listens to touches.
  */
 final class TouchTracker {
     private static int nextId;
@@ -22,6 +23,9 @@ final class TouchTracker {
     private final View root;
     private final ArrayList<Tracked> tracked = new ArrayList<>();
     private final ArrayList<Feedback> feedback = new ArrayList<>();
+    // Reused for every event that maps a touch into a feedback view.
+    private final Matrix toView = new Matrix();
+    private final float[] point = new float[2];
 
     private static final class Feedback {
         View view;
@@ -50,8 +54,9 @@ final class TouchTracker {
 
     /**
      * A touch event reached the root; returns true when it tracks a finger
-     * that went down (the root then claims the gesture so it hears the
-     * rest even if no view takes it).
+     * that went down, or shows press feedback for it (the root then claims
+     * the gesture so it hears the rest, the release that ends the feedback
+     * included, even if no view takes it).
      */
     boolean onTouch(MotionEvent e) {
         int action = e.getActionMasked();
@@ -107,7 +112,12 @@ final class TouchTracker {
         }
     }
 
-    /** Pure style/ripple feedback must not consume a child's touch before its parent can handle it. */
+    /**
+     * Feeds the views under the finger that show pressed style or a ripple
+     * but handle no press. They stay unclickable, so the view around them
+     * that handles the press gets the click; the root delivers their
+     * feedback instead. Returns whether any is shown.
+     */
     private boolean observeFeedback(MotionEvent e) {
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
@@ -116,9 +126,9 @@ final class TouchTracker {
             for (View v = target; v != null; ) {
                 if (v instanceof Node) {
                     int id = ((Node) v).nodeId();
-                    // The first real handler owns its feedback. Text spans
-                    // likewise keep their normal press/long-press handling.
-                    if (mounter.handlesPress(id) || (v instanceof TextBox && ((TextBox) v).hasLinks())) break;
+                    // The first real handler owns its feedback, as a text's
+                    // pressable span under the finger owns its press.
+                    if (mounter.handlesPress(id) || onLink(v, e)) break;
                     if (mounter.hasPressFeedback(id) && !(v instanceof Box && ((Box) v).pointerEvents == 2)) {
                         Feedback f = new Feedback();
                         f.view = v;
@@ -135,19 +145,45 @@ final class TouchTracker {
             return false;
         }
         boolean observing = !feedback.isEmpty();
-        for (Feedback f : feedback) {
+        for (int i = feedback.size() - 1; i >= 0; i--) {
+            Feedback f = feedback.get(i);
             MotionEvent local = MotionEvent.obtain(e);
-            Matrix inverse = new Matrix();
-            if (toRoot(f.view, inverse) && inverse.invert(inverse)) {
-                float[] at = {e.getX(), e.getY()};
-                inverse.mapPoints(at);
-                local.offsetLocation(at[0] - e.getX(), at[1] - e.getY());
+            if (toView(f.view, local)) {
                 f.press.onTouchEvent(local);
+            } else {
+                // Its view left the tree mid-press: end its feedback now, as
+                // the release would no longer reach it.
+                local.setAction(MotionEvent.ACTION_CANCEL);
+                f.press.onTouchEvent(local);
+                feedback.remove(i);
             }
             local.recycle();
         }
         if (action == MotionEvent.ACTION_UP) feedback.clear();
         return observing;
+    }
+
+    /** Whether the touch of {@code e} (root coordinates) is on a pressable span of the text {@code v}. */
+    private boolean onLink(View v, MotionEvent e) {
+        if (!(v instanceof TextBox) || !((TextBox) v).hasLinks()) return false;
+        MotionEvent local = MotionEvent.obtain(e);
+        boolean on = toView(v, local) && ((TextBox) v).linkAt(local.getX(), local.getY()) >= 0;
+        local.recycle();
+        return on;
+    }
+
+    /**
+     * Maps {@code e} from this root's coordinates into {@code view}'s; false
+     * when the view is no longer under this root.
+     */
+    private boolean toView(View view, MotionEvent e) {
+        toView.reset();
+        if (!toRoot(view, toView) || !toView.invert(toView)) return false;
+        point[0] = e.getX();
+        point[1] = e.getY();
+        toView.mapPoints(point);
+        e.offsetLocation(point[0] - e.getX(), point[1] - e.getY());
+        return true;
     }
 
     /** Maps a descendant's coordinates to this root using APIs available on Android 9. */

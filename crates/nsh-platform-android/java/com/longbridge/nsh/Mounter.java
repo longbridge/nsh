@@ -1178,7 +1178,11 @@ final class Mounter {
         return f != null && f.longPressDelay >= 0 ? f.longPressDelay : ViewConfiguration.getLongPressTimeout();
     }
 
-    /** Whether presses on {@code id} show feedback. */
+    /**
+     * Whether presses on {@code id} show feedback. A view that also handles
+     * presses shows it itself; for one that does not, the root's
+     * `TouchTracker` does, and the view stays unclickable.
+     */
     boolean hasPressFeedback(int id) {
         Feedback f = feedback.get(id);
         return tracksPress(id) || f != null && f.ripple != null;

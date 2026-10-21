@@ -10,6 +10,8 @@ import android.widget.ScrollView;
 /**
  * Press handling for leaf views (text, images): `onPressIn`, `onPressOut`,
  * `onLongPress` and `onPress` with React Native semantics (see `Box`).
+ * Feedback only (`TouchTracker`), it shows the pressed style and ripple of
+ * any node view that handles no press, and reports no event.
  */
 final class Pressable {
     private final View view;

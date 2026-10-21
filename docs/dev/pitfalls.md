@@ -190,7 +190,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
   consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
   clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation
-  takes over, so a styled child leaves its parent's overlay or menu trigger clickable.
+  takes over, so a styled child leaves its parent's overlay or menu trigger clickable. The walk up from the touched
+  view stops at the first press handler, or at a text only when the finger is on one of its pressable spans (as
+  iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
+  While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
+  the view that took the down, and the release is what ends the feedback.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.
