@@ -576,6 +576,34 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         }
                     })
                 }
+                // A render prop takes the Rust closure rendering a value
+                // (`.render_image(|image| ..)`).
+                (Kind::Renderer(_), _) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    let value = quote! {
+                        ::core::option::Option::Some(#ui::Renderer::new(render))
+                    };
+                    let assign = if is_held {
+                        quote!(#ui::Prop::from(#value))
+                    } else {
+                        value
+                    };
+                    Some(quote! {
+                        $($vis)* fn #ident<E: #ui::IntoElement>(
+                            mut self,
+                            render: impl ::core::ops::Fn(
+                                &<<$props as #ui::__private::PropField<#index>>::Value as #ui::__private::RendererOf>::Item,
+                            ) -> E + 'static,
+                        ) -> Self {
+                            self.0.__props_mut().#ident = #assign;
+                            self
+                        }
+                    })
+                }
                 (Kind::Slot, _) => Some(quote! {
                     $($vis)* fn #ident(self, content: impl #ui::IntoElement) -> Self {
                         Self(self.0.fill(#js, content))

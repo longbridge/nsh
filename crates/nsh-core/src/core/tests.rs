@@ -11257,7 +11257,7 @@ mod renders {
     use super::*;
     use crate::{
         Prop,
-        ui::{AnyValue, Each, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
+        ui::{AnyValue, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
     };
 
     /// Renders each item (`key:label`) with the app's function, keyed by
@@ -11278,7 +11278,7 @@ mod renders {
 
     #[component]
     fn Shelf(props: ShelfProps) -> impl IntoElement {
-        let rows = Each::new(
+        let rows = each(
             props.items,
             |item: &String| split(item).0,
             move |item, _| {
@@ -11518,11 +11518,9 @@ mod renders {
 
     #[component]
     fn Shelves(_props: ShelvesProps) -> impl IntoElement {
-        Shelf::element(ShelfProps {
-            items: vec!["a:Apple".to_owned(), "b:Banana".to_owned()].into(),
-            render_item: Some(Renderer::new(|label: &String| text(format!("[{label}]")))).into(),
-            ..Default::default()
-        })
+        shelf()
+            .items(vec!["a:Apple".to_owned(), "b:Banana".to_owned()])
+            .render_item(|label| text(format!("[{label}]")))
     }
 
     #[test]

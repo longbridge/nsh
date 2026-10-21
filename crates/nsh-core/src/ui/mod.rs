@@ -425,6 +425,17 @@ pub mod __private {
         type Value;
     }
 
+    /// The values a render prop's function renders (`Option<Renderer<T>>`'s
+    /// `T`), for the setter a `#[component]` makes for the prop.
+    pub trait RendererOf {
+        /// What the function renders.
+        type Item;
+    }
+
+    impl<T> RendererOf for Option<super::Renderer<T>> {
+        type Item = T;
+    }
+
     /// The data of an event enum's variant `I` as its listener hears it:
     /// `#[derive(Event)]` implements it, for the listener methods a
     /// `#[component]` makes on its element.

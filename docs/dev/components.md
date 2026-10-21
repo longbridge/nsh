@@ -314,7 +314,9 @@ reasons: `reactive-components.md`.
     slot's setter takes the content to fill it with (`.header(text(..))`), an `Items` field's a `VirtualList`
     (`.items(virtual_list(..))`); a style field's (`Prop<Style>` or `Style`: `Button`'s `selected_style`) the
     typed styles' closure, as the state styles take (`.selected_style(|s| s.bg(..).text_color(..))`), made into
-    the field's `Style` (`From<StyleRefinement>`); the children are the element's `.child(..)`ren;
+    the field's `Style` (`From<StyleRefinement>`); a render prop's (`Option<Renderer<T>>`: `TextView`'s
+    `render_image`) the closure rendering a `&T` (`.render_image(|image| ..)`, made a `Renderer`); the children are
+    the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is
     `.on_press_down(..)`): a unit variant's takes `move || ..` (or `move |_: &()| ..`), a one-field variant's
     `move |value: &T| ..` (a `Listener<T>` too: `IntoListener`), a named-field variant's the event itself

@@ -17,9 +17,7 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{
-    KeyboardAvoidingView, KeyboardAvoidingViewProps, SelectionArea, SelectionAreaProps,
-};
+use nsh_base::{keyboard_avoiding_view, selection_area};
 use nsh_core::{
     LayoutAnimation, Points, Size,
     time::Instant,
@@ -39,9 +37,8 @@ use self::{
     },
 };
 use crate::ui::{
-    Badge, Finish, Finished, IconName, IconTile, PressProps, RoundButton, Segment, Segmented,
-    SegmentedEvent, SegmentedProps, SegmentedSize, Tone, appear, colors, desktop, icon, motion,
-    press_with, radius, rgb_a,
+    Badge, Finish, Finished, IconName, IconTile, RoundButton, Segment, SegmentedSize, Tone, appear,
+    colors, desktop, icon, motion, press, radius, rgb_a, segmented,
 };
 
 /// Desktop: messages and the composer in a centered column.
@@ -842,13 +839,9 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
 
     // One selection across messages: in the list, over the rows that are
     // mounted.
-    let content = If::new(
+    let content = when(
         move || !messages.with(Vec::is_empty),
-        move || {
-            SelectionArea::element(SelectionAreaProps::default())
-                .flex_1()
-                .child(chat.list_view(list, wide))
-        },
+        move || selection_area().flex_1().child(chat.list_view(list, wide)),
     )
     .otherwise(move || chat.empty());
 
@@ -875,7 +868,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             )
             .secondary(),
         )
-        .child(If::new(streaming, || {
+        .child(when(streaming, || {
             view()
                 .absolute()
                 .top(px(2.0))
@@ -917,17 +910,18 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .items_center()
                         .justify_center()
                         .bg(move || banner_tone().tint())
-                        .child(glyph(
-                            Prop::bind(move || {
-                                if offline.get() {
-                                    GlyphName::Offline
-                                } else {
-                                    GlyphName::Check
-                                }
-                            }),
-                            15.0,
-                            move || banner_tone().color(),
-                        )),
+                        .child(
+                            glyph()
+                                .name(move || {
+                                    if offline.get() {
+                                        GlyphName::Offline
+                                    } else {
+                                        GlyphName::Check
+                                    }
+                                })
+                                .size(15.0)
+                                .tint(move || banner_tone().color()),
+                        ),
                 )
                 .child(
                     view()
@@ -970,7 +964,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     };
     let backdrop = view()
         .pointer_events(pointer)
-        .on_press(move |_: &()| menu.set(false))
+        .on_press(move || menu.set(false))
         .absolute()
         .inset_0()
         .bg(rgb_a(0x000000, 0.45))
@@ -978,7 +972,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     let menu_view = chat.menu_view(pointer, &menu_value, &chips);
 
     // Suggestions while the conversation is empty.
-    let suggestions = If::new(
+    let suggestions = when(
         move || messages.with(Vec::is_empty),
         move || {
             scroll()
@@ -993,29 +987,25 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .px_4()
                         .py_2()
                         .children(chips.iter().map(|&(id, label)| {
-                            press_with(
-                                PressProps {
-                                    hit_slop: Some(4.0),
-                                    label: Some(label.into()).into(),
-                                    ..PressProps::default()
-                                },
-                                move |_: &()| chat.play(id),
-                            )
-                            .child(
-                                view()
-                                    .h(px(36.0))
-                                    .px(px(14.0))
-                                    .rounded(px(18.0))
-                                    .justify_center()
-                                    .finish(Finish::Pill)
-                                    .border_1()
-                                    .child(
-                                        text(label)
-                                            .text_size(px(13.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(colors::TEXT),
-                                    ),
-                            )
+                            press()
+                                .hit_slop(4.0)
+                                .label(label)
+                                .on_press(move || chat.play(id))
+                                .child(
+                                    view()
+                                        .h(px(36.0))
+                                        .px(px(14.0))
+                                        .rounded(px(18.0))
+                                        .justify_center()
+                                        .finish(Finish::Pill)
+                                        .border_1()
+                                        .child(
+                                            text(label)
+                                                .text_size(px(13.0))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(colors::TEXT),
+                                        ),
+                                )
                         })),
                 )
         },
@@ -1052,8 +1042,8 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 })
         })
         .gap_2()
-        .child(If::new(attachment, move || {
-            appear(0).child(
+        .child(when(attachment, move || {
+            appear().index(0).child(
                 view()
                     .flex_row()
                     .items_center()
@@ -1097,7 +1087,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .placeholder(move || format!("Message {}", model.get().name()))
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))
-                        .on_focus(move |_: &()| menu.set(false))
+                        .on_focus(move || menu.set(false))
                         .on_content_size_change(move |size: &Size<Points>| {
                             input_height.set((size.height.clamp(px(20.0), px(100.0))).0);
                         })
@@ -1131,46 +1121,44 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         )
                         .child(
                             view().flex_1().child(
-                                Segmented::element(SegmentedProps {
-                                    options: MODELS
-                                        .iter()
-                                        .map(|m| Segment::new(m.name()))
-                                        .collect::<Vec<_>>()
-                                        .into(),
-                                    selected: Prop::bind(move || {
+                                segmented()
+                                    .options(
+                                        MODELS
+                                            .iter()
+                                            .map(|m| Segment::new(m.name()))
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .selected(move || {
                                         let model = model.get();
                                         MODELS.iter().position(|m| *m == model).unwrap_or(0) as u32
-                                    }),
-                                    size: SegmentedSize::Small,
-                                })
-                                .on_event(
-                                    move |e: &SegmentedEvent| {
-                                        let SegmentedEvent::Change(i) = *e;
+                                    })
+                                    .size(SegmentedSize::Small)
+                                    .on_change(move |&i: &u32| {
                                         model.set(MODELS[i as usize]);
-                                    },
-                                ),
+                                    }),
                             ),
                         )
                         .child(
-                            If::new(streaming, move || {
-                                press_with(
-                                    PressProps {
-                                        scale: 0.9.into(),
-                                        label: Some("Stop generating".into()).into(),
-                                        ..PressProps::default()
-                                    },
-                                    move |_: &()| chat.stop(),
-                                )
-                                .child(
-                                    view()
-                                        .size(px(44.0))
-                                        .rounded(px(22.0))
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(colors::LIGHT)
-                                        .finish(Finish::Light)
-                                        .child(glyph(GlyphName::Stop, 16.0, colors::ON_LIGHT)),
-                                )
+                            when(streaming, move || {
+                                press()
+                                    .scale(0.9)
+                                    .label("Stop generating")
+                                    .on_press(move || chat.stop())
+                                    .child(
+                                        view()
+                                            .size(px(44.0))
+                                            .rounded(px(22.0))
+                                            .items_center()
+                                            .justify_center()
+                                            .bg(colors::LIGHT)
+                                            .finish(Finish::Light)
+                                            .child(
+                                                glyph()
+                                                    .name(GlyphName::Stop)
+                                                    .size(16.0)
+                                                    .tint(colors::ON_LIGHT),
+                                            ),
+                                    )
                             })
                             .otherwise(send_button),
                         ),
@@ -1178,7 +1166,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         );
 
     let pane = view().flex_1().bg(colors::BACKGROUND).child(
-        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+        keyboard_avoiding_view()
             .flex_1()
             .child(
                 view()
@@ -1224,7 +1212,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             .find(|s| s.id == id)
             .map_or("Weeks of messages, loaded at once", |s| s.prompt);
         view()
-            .on_press(move |_: &()| open_chat(id))
+            .on_press(move || open_chat(id))
             .role(AccessibilityRole::Button)
             .label(label)
             .accessibility_state(move || AccessibilityState {
@@ -1260,14 +1248,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .p_3()
         .gap(px(2.0))
         .child(
-            press_with(
-                PressProps {
-                    label: Some("New chat".into()).into(),
-                    ..PressProps::default()
-                },
-                move |_: &()| new_chat(),
-            )
-            .child(
+            press().label("New chat").on_press(new_chat).child(
                 view()
                     .h(px(40.0))
                     .rounded(px(radius::CONTROL))
@@ -1281,7 +1262,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                     .border_1()
                     .border_color(colors::BORDER)
                     .cursor_pointer()
-                    .child(icon(IconName::Plus, 15.0, colors::TEXT))
+                    .child(icon().name(IconName::Plus).size(15.0).tint(colors::TEXT))
                     .child(
                         text("New chat")
                             .text_size(px(14.0))
@@ -1326,7 +1307,7 @@ impl ChatState {
             .enumerate()
             .map(|(i, (id, name, label))| {
                 view()
-                    .on_press(move |_: &()| {
+                    .on_press(move || {
                         self.menu.set(false);
                         if id == "attach" {
                             self.attachment.set(true);
@@ -1342,15 +1323,11 @@ impl ChatState {
                     .gap_3()
                     .h(px(48.0))
                     .px_4()
-                    .child(glyph(
-                        name,
-                        16.0,
-                        if i == 0 {
-                            colors::ACCENT
-                        } else {
-                            colors::MUTED
-                        },
-                    ))
+                    .child(glyph().name(name).size(16.0).tint(if i == 0 {
+                        colors::ACCENT
+                    } else {
+                        colors::MUTED
+                    }))
                     .child(
                         text(label)
                             .flex_1()
@@ -1400,7 +1377,7 @@ impl ChatState {
             .py_6()
             .gap_6()
             .child(
-                appear(0).child(
+                appear().index(0).child(
                     view()
                         .items_center()
                         .gap_3()
@@ -1424,14 +1401,8 @@ impl ChatState {
                 FEATURED.iter().enumerate().map(|(i, &(id, name, note))| {
                     let chip = all.iter().find(|s| s.id == id).map_or("", |s| s.chip);
                     view().w(relative(0.47)).flex_grow(1.0).child(
-                        appear(i as u32 + 1).child(
-                            press_with(
-                                PressProps {
-                                    label: Some(chip.into()).into(),
-                                    ..PressProps::default()
-                                },
-                                move |_: &()| self.play(id),
-                            )
+                        appear().index(i as u32 + 1).child(
+                            press().label(chip).on_press(move || self.play(id))
                             .child(
                                 view()
                                     .min_h(px(104.0))
@@ -1443,7 +1414,7 @@ impl ChatState {
                                     .finish(Finish::Card)
                                     .border_1()
                                     .border_color(colors::BORDER)
-                                    .child(icon(name, 18.0, colors::ACCENT))
+                                    .child(icon().name(name).size(18.0).tint(colors::ACCENT))
                                     .child(
                                         text(chip)
                                             .text_size(px(14.0))
@@ -1503,7 +1474,7 @@ impl ChatState {
             dragging.replace(true);
         })
         .on_scroll(move |e: &ScrollEvent| {
-            if dragging.with(|d| *d) {
+            if dragging.get() {
                 following.set(e.offset.y + e.size.height >= e.content_size.height - px(40.0));
             }
         })
@@ -1591,28 +1562,24 @@ impl ChatState {
             .pb_1()
             .gap_3()
             .child(reply_header(model, stopped))
-            .child(If::new(reasoned, move || {
+            .child(when(reasoned, move || {
                 view()
                     .gap_2()
                     .child(
-                        press_with(
-                            PressProps {
-                                scale: 0.98.into(),
-                                label: Some("Reasoning".into()).into(),
-                                selected: open.into(),
-                                ..PressProps::default()
-                            },
-                            move |_: &()| {
+                        press()
+                            .scale(0.98)
+                            .label("Reasoning")
+                            .selected(open)
+                            .on_press(move || {
                                 if !is_live.get_untracked() {
                                     self.act(Action::Reasoning(id.get_untracked()));
                                 }
-                            },
-                        )
-                        .child(reasoning_toggle(label, thinking_now, open)),
+                            })
+                            .child(reasoning_toggle(label, thinking_now, open)),
                     )
-                    .child(If::new(open, move || reasoning_text(reason)))
+                    .child(when(open, move || reasoning_text(reason)))
             }))
-            .child(Each::new(
+            .child(each(
                 move || {
                     if is_live.get() {
                         live.tools.get()
@@ -1623,7 +1590,7 @@ impl ChatState {
                 |t: &Tool| t.id,
                 |tool, _| tool_card(tool),
             ))
-            .child(If::new(waiting, || {
+            .child(when(waiting, || {
                 view().flex_row().h(px(22.0)).items_center().child(caret())
             }))
             .child(markdown(
@@ -1636,7 +1603,7 @@ impl ChatState {
                 },
                 move || is_live.get(),
             ))
-            .child(If::new(done(|s| s == Status::Error), move || {
+            .child(when(done(|s| s == Status::Error), move || {
                 error_row(
                     move || {
                         with_reply(item, |a| a.error)
@@ -1646,19 +1613,19 @@ impl ChatState {
                     act(Action::Retry),
                 )
             }))
-            .child(If::new(stopped, || {
+            .child(when(stopped, || {
                 view()
                     .flex_row()
                     .items_center()
                     .gap_2()
-                    .child(glyph(GlyphName::Stop, 12.0, colors::FAINT))
+                    .child(glyph().name(GlyphName::Stop).size(12.0).tint(colors::FAINT))
                     .child(
                         text("You stopped this reply")
                             .text_size(px(13.0))
                             .text_color(colors::FAINT),
                     )
             }))
-            .child(If::new(done(|s| s != Status::Error), move || {
+            .child(when(done(|s| s != Status::Error), move || {
                 view()
                     .flex_row()
                     .items_center()
@@ -1732,7 +1699,7 @@ fn user_row(item: Item) -> View {
         .child(dynamic(move || {
             file.with(|f| f.as_ref().map(|f| file_chip(f, None)))
         }))
-        .child(If::new(
+        .child(when(
             move || !body.with(String::is_empty),
             move || {
                 view()
@@ -1755,7 +1722,7 @@ fn user_row(item: Item) -> View {
                     )
             },
         ))
-        .child(If::new(
+        .child(when(
             move || user.with(|u| u.3),
             || {
                 view()
@@ -1787,7 +1754,7 @@ fn reply_header(model: Memo<Model>, stopped: Memo<bool>) -> View {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors::MUTED),
         )
-        .child(If::new(stopped, || Badge::new("Stopped").tone(Tone::Warn)))
+        .child(when(stopped, || Badge::new("Stopped").tone(Tone::Warn)))
 }
 
 /// The reasoning's toggle: a glyph (a spinner while thinking), its label
@@ -1804,8 +1771,12 @@ fn reasoning_toggle(
         .h(px(32.0))
         .self_start()
         .child(
-            If::new(thinking, || spinner(14.0, colors::MUTED))
-                .otherwise(|| glyph(GlyphName::Brain, 16.0, colors::MUTED)),
+            when(thinking, || spinner(14.0, colors::MUTED)).otherwise(|| {
+                glyph()
+                    .name(GlyphName::Brain)
+                    .size(16.0)
+                    .tint(colors::MUTED)
+            }),
         )
         .child(
             text(label)
@@ -1819,7 +1790,12 @@ fn reasoning_toggle(
                 .transition_transform()
                 .duration(220.0)
                 .ease_out()
-                .child(glyph(GlyphName::CaretDown, 14.0, colors::FAINT)),
+                .child(
+                    glyph()
+                        .name(GlyphName::CaretDown)
+                        .size(14.0)
+                        .tint(colors::FAINT),
+                ),
         )
 }
 
