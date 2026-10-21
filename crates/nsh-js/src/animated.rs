@@ -606,6 +606,41 @@ unsafe extern "C" fn animated_value(
     }
 }
 
+/// A new `AnimatedValue` at `value` (owned), for the runtime's own motion
+/// (a dialog's popup sliding in).
+pub(crate) fn new_value(cx: *mut JsContext, value: f64) -> Result<JsValue, JsValue> {
+    let (node, id) = new_node(cx, true, Vec::new());
+    match send(
+        cx,
+        vec![int(ANIMATION_VALUE), int(id), qjs::JS_NewFloat64(value)],
+    ) {
+        Ok(()) => Ok(node),
+        Err(e) => {
+            free(cx, node);
+            Err(e)
+        }
+    }
+}
+
+/// Runs value `value` to `to` over `ms` with the Bézier `easing`, as its
+/// `timing` does; the end's promise is dropped.
+pub(crate) fn run_timing(cx: *mut JsContext, value: JsValue, to: f64, ms: f64, easing: [f64; 4]) {
+    // SAFETY: new values, owned by the options object and the config.
+    let options = unsafe {
+        let options = qjs::JS_NewObject(cx);
+        qjs::JS_SetPropertyStr(cx, options, c"duration".as_ptr(), qjs::JS_NewFloat64(ms));
+        let mut points = easing.map(qjs::JS_NewFloat64);
+        let curve = qjs::JS_NewArrayFrom(cx, 4, points.as_mut_ptr());
+        qjs::JS_SetPropertyStr(cx, options, c"easing".as_ptr(), curve);
+        options
+    };
+    let to = qjs::JS_NewFloat64(to);
+    let config = driver_config(cx, "timing", Some(to), options);
+    free(cx, options);
+    let end = start(cx, value, config);
+    free(cx, end);
+}
+
 /// `new AnimatedNode()`: a node of its own (a pass-through input).
 unsafe extern "C" fn animated_node(
     cx: *mut JsContext,
