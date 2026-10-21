@@ -1,7 +1,7 @@
 import type { JSX, ScrollProps, ViewStyle } from "nsh";
 import { computed, effect, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { colorScheme, Platform, windowSize } from "nsh/device";
+import { colorScheme, Platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
 import { nav } from "./nav";
@@ -702,6 +702,19 @@ export function Button(props: {
 }
 
 /** A round icon button (44 pt): light by default, `variant="secondary"` dark. */
+/** Switches the app between light and dark (`setColorScheme`), whatever the system shows. */
+export function ThemeToggle() {
+  return (
+    <RoundButton
+      icon={isDark() ? "sun" : "moon"}
+      label={isDark() ? "Light appearance" : "Dark appearance"}
+      variant="secondary"
+      size={34}
+      onPress={() => setColorScheme(isDark() ? "light" : "dark")}
+    />
+  );
+}
+
 export function RoundButton(props: {
   icon: IconName;
   label: string;
