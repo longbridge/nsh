@@ -44,22 +44,25 @@ NSH 应用分层构建，与 GPUI Kit 相同（[三层结构](./architecture.md#
 ```text
 App.tsx            # 入口，按约定：mount(App)
 nsh.json
-pages/             # 每个 NavPage 一个文件
+Cargo.toml         # 应用的 crate，包含 Rust 组件（"rust": "."）
+src/
+  lib.rs
+pages/
   Inbox.tsx
   Compose.tsx
   Settings.tsx
-components/        # 应用的可复用组件
+components/
   Card.tsx
-store.ts           # 应用的状态：signal 以及修改它们的函数
-native/            # 应用的 Rust crate（nsh.json "rust": "native"，mixed 模板）
+store.ts
 ```
 
 - `pages/` 中每个 `NavPage` 一个文件。页面只在需要时才拆成更多文件。
 - `components/` 存放应用的可复用组件，即多个页面都用到的组件。
 - `store.ts` 存放应用的状态：它的 signal 以及修改它们的函数。页面读取这些 signal 并调用这些函数。
 - 测试是放在被测代码旁边的 `*.test.tsx` 文件（`App.test.tsx`、`pages/Inbox.test.tsx`）。
-- `native/` 是应用的 Rust crate，与 `mixed` 模板生成的一样。只用 Rust 编写的应用（`rust` 模板）则是一个 Cargo 项目，根组件
-  位于 `src/lib.rs`（[项目结构](./project-structure.md)）。
+- `Cargo.toml` 和 `src/lib.rs` 是应用自己的 crate，包含它的 Rust 组件（`nsh.json` 的 `"rust": "."`）；`src/lib.rs` 中的
+  `#[native_module]` 声明 TSX 可以导入的内容。只用 Rust 编写的应用也是同样的 Cargo 项目，根组件位于 `src/lib.rs`
+  （[项目结构](./project-structure.md)）。
 
 ## 启动与根视图的归属
 
@@ -127,8 +130,8 @@ NSH 的模型来自 Solid，运行在原生的响应式图上（[响应式](./re
 
 Rust 组件从头到尾都是原生代码；TSX 在解释器 QuickJS 中运行自己的代码，它调用的一切都是原生的
 （[性能](./performance.md#1-js-做得越少越好)）。应用最常用的部分、组件库和繁重的业务逻辑用 Rust 编写；经常变化或在运行时
-下发的部分用 TSX。同一组件的两种接口共享一个定义：用 Rust 编写的组件在 Rust 中用 `switch()` 放置，在 TSX 中用
-`<Switch>`，props 和事件相同。
+下发的部分用 TSX。同一组件的两种接口共享一个定义：用 Rust 编写的组件在 Rust 中用 `quantity_stepper()` 放置，在 TSX 中用
+`<QuantityStepper>`，props 和事件相同。
 
 ## 状态归属
 
@@ -146,106 +149,128 @@ Rust 组件从头到尾都是原生代码；TSX 在解释器 QuickJS 中运行�
 制造第二个隐藏的数据来源。`nsh/base` 的每个组件都这样工作（`Dialog` 的 `open` 与 `onOpenChange`，`Button` 的
 `selected`），建立在它之上的组件库也应如此。
 
-应用组件库中的一个开关，用 Rust 编写一次，从 Rust 和 TSX 放置：
+应用自己的数量步进器，一个领域控件，用 Rust 编写一次，从 Rust 和 TSX 放置：
 
 ```rust tabs
-use nsh_base::theme;
-use nsh_core::{AccessibilityState, Checked, ui::prelude::*};
+use nsh_base::{button, theme};
+use nsh_core::ui::prelude::*;
 
-/// The props of [`Switch`].
+/// The props of [`QuantityStepper`].
 #[derive(Debug, Clone, PartialEq, Props)]
-pub struct SwitchProps {
-    /// On or off: the app owns the value.
+pub struct QuantityStepperProps {
+    /// The quantity: the app owns the value.
     #[prop(default)]
-    pub checked: Prop<bool>,
-    /// No presses; its disabled style applies.
+    pub value: Prop<u32>,
+    /// The smallest quantity (0 when left out).
     #[prop(default)]
-    pub disabled: Prop<bool>,
-    /// What screen readers say.
-    pub accessibility_label: Prop<Option<SharedString>>,
+    pub min: Prop<u32>,
+    /// The largest quantity (99 when left out).
+    #[prop(default = 99)]
+    pub max: Prop<u32>,
 }
 
-/// What a [`Switch`] reports.
+/// What a [`QuantityStepper`] reports.
 #[derive(Debug, Clone, PartialEq, Event)]
-pub enum SwitchEvent {
-    /// The user asked for the other value; the owner sets `checked`.
-    Change(bool),
+pub enum QuantityStepperEvent {
+    /// The user asked for another quantity; the owner sets `value`.
+    Change(u32),
 }
 
-/// An on / off switch drawn with the app's theme.
+/// A quantity with a button to take one away and one to add one.
 #[component]
-pub fn Switch(props: SwitchProps, cx: Scope<SwitchEvent>) -> impl IntoElement {
+pub fn QuantityStepper(props: QuantityStepperProps, cx: Scope<QuantityStepperEvent>) -> impl IntoElement {
+    // Read untracked: the user's act, measured against the owner's current value.
+    let step = move |delta: i64| {
+        let value = props.value.get_untracked();
+        let (min, max) = (props.min.get_untracked(), props.max.get_untracked());
+        let next = (i64::from(value) + delta).clamp(i64::from(min), i64::from(max)) as u32;
+        if next != value {
+            cx.emit(QuantityStepperEvent::Change(next));
+        }
+    };
     view()
-        .w(px(48.0))
-        .h(px(28.0))
-        .p(px(2.0))
-        .rounded_full()
-        .bg(move || if props.checked.get() { theme().primary() } else { theme().muted() })
-        .disabled(props.disabled)
-        .disabled_style(|s| s.opacity(0.5))
-        .role(AccessibilityRole::Switch)
-        .label(move || props.accessibility_label.get().unwrap_or_default())
-        .accessibility_state(move || AccessibilityState {
-            checked: Some(if props.checked.get() { Checked::True } else { Checked::False }),
-            ..AccessibilityState::default()
-        })
-        .on_press(move || cx.emit(SwitchEvent::Change(!props.checked.get_untracked())))
-        .child(
-            view()
-                .w(px(24.0))
-                .h(px(24.0))
-                .rounded_full()
-                .bg(move || theme().background())
-                .ml(move || if props.checked.get() { px(20.0) } else { px(0.0) }),
-        )
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .child(step_button("−", "Fewer", move || props.value.get() <= props.min.get(), move || step(-1)))
+        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground()))
+        .child(step_button("+", "More", move || props.value.get() >= props.max.get(), move || step(1)))
+}
+
+fn step_button(
+    symbol: &'static str,
+    label: &'static str,
+    disabled: impl Fn() -> bool + 'static,
+    on_press: impl Fn() + 'static,
+) -> impl IntoElement {
+    button()
+        .disabled(disabled)
+        .accessibility_label(label)
+        .on_press(on_press)
+        .w(px(32.0))
+        .h(px(32.0))
+        .items_center()
+        .justify_center()
+        .rounded(move || theme().radius())
+        .bg(move || theme().muted())
+        .active(|s| s.opacity(0.6))
+        .disabled_style(|s| s.opacity(0.4))
+        .child(text(symbol).text_color(move || theme().foreground()))
 }
 
 // 归属者：
-let wifi = signal(true);
-switch()
-    .checked(wifi)
-    .accessibility_label("Wi-Fi")
-    .on_change(move |on: &bool| wifi.set(*on))
+let quantity = signal(1_u32);
+quantity_stepper()
+    .value(quantity)
+    .min(1)
+    .max(10)
+    .on_change(move |next: &u32| quantity.set(*next))
 ```
 
 ```tsx tabs
 import { signal } from "nsh";
-import { Switch } from "my-app/native";   // native/ 中的 Rust 组件：#[native_module("my-app/native")]
+import { QuantityStepper } from "my-app";   // Rust 组件：src/lib.rs 中有 #[native_module("my-app")]
 
-function WifiRow() {
-  const wifi = signal(true);
-  return <Switch checked={wifi()} accessibilityLabel="Wi-Fi" onChange={(on) => wifi.set(on)} />;
+function CartRow() {
+  const quantity = signal(1);
+  return <QuantityStepper value={quantity()} min={1} max={10} onChange={(next) => quantity.set(next)} />;
 }
 ```
 
-在 TSX 组件库中，同一份契约：
+同一份契约的 TSX 写法，作为 `components/` 中的一个组件：
 
 ```tsx
-import { View } from "nsh";
+import { Text, View } from "nsh";
+import { Button } from "nsh/base";
 
-export interface SwitchProps {
-  /** On or off: the app owns the value. */
-  checked: boolean;
-  /** No presses; `disabled:` styles apply. */
-  disabled?: boolean;
-  /** What screen readers say. */
-  accessibilityLabel?: string;
-  /** The user asked for the other value; the owner sets `checked`. */
-  onChange?: (checked: boolean) => void;
+export interface QuantityStepperProps {
+  /** The quantity: the app owns the value. */
+  value: number;
+  /** The smallest quantity (0 when left out). */
+  min?: number;
+  /** The largest quantity (99 when left out). */
+  max?: number;
+  /** The user asked for another quantity; the owner sets `value`. */
+  onChange?: (next: number) => void;
 }
 
-export function Switch(props: SwitchProps) {
+export function QuantityStepper(props: QuantityStepperProps) {
+  const min = () => props.min ?? 0;
+  const max = () => props.max ?? 99;
+  const step = (delta: number) => {
+    const next = Math.min(max(), Math.max(min(), props.value + delta));
+    if (next !== props.value) props.onChange?.(next);
+  };
+  const buttonClass = "size-8 items-center justify-center rounded-(--radius) bg-muted active:opacity-60 disabled:opacity-40";
   return (
-    <View
-      role="switch"
-      accessibilityLabel={props.accessibilityLabel}
-      accessibilityState={{ checked: props.checked }}
-      disabled={props.disabled}
-      onPress={() => props.onChange?.(!props.checked)}
-      class="h-7 w-12 rounded-full p-0.5 disabled:opacity-50"
-      classList={{ "bg-primary": props.checked, "bg-muted": !props.checked }}
-    >
-      <View class="size-6 rounded-full bg-background" classList={{ "ml-5": props.checked }} />
+    <View class="flex-row items-center gap-3">
+      <Button disabled={props.value <= min()} accessibilityLabel="Fewer" onPress={() => step(-1)} class={buttonClass}>
+        <Text class="text-foreground">−</Text>
+      </Button>
+      <Text class="text-foreground">{props.value}</Text>
+      <Button disabled={props.value >= max()} accessibilityLabel="More" onPress={() => step(1)} class={buttonClass}>
+        <Text class="text-foreground">+</Text>
+      </Button>
     </View>
   );
 }
@@ -263,7 +288,7 @@ export function Switch(props: SwitchProps) {
 ### 避免反馈循环
 
 输入框、选择、筛选和对话框都有两条路径：归属者设置值，用户请求新值。组件不得通过变化回调把归属者提供的值再报告回去，每个
-逻辑变化只报告一次。处理用户的操作时以不跟踪的方式读取当前值（Rust 中如上所示的 `props.checked.get_untracked()`）；在 TSX
+逻辑变化只报告一次。处理用户的操作时以不跟踪的方式读取当前值（Rust 中如上所示的 `props.value.get_untracked()`）；在 TSX
 中事件处理函数本身就不跟踪。让回调可以安全地重入：变化处理函数可能同步地关闭、替换或移除调用它的组件。
 
 ### 让生命周期有界
@@ -538,7 +563,7 @@ NSH 应用以签名包的形式下发到宿主应用中，可能再也不会重�
 
 | 概念 | 命名模式 | 示例 |
 | --- | --- | --- |
-| 组件 | 名词，`PascalCase` | `Button`、`Dialog`、`Switch` |
+| 组件 | 名词，`PascalCase` | `Button`、`Dialog`、`QuantityStepper` |
 | 它的 props 和事件（Rust） | `<Component>Props`、`<Component>Event` | `ButtonProps`、`ButtonEvent::Press` → `onPress` |
 | 行为的状态对象 | `<Control>State`，由 `create<Control>` 创建 | `NavStackState`、`createNavStack` |
 | 值变化的原因 | `<Control>ChangeReason`，字符串联合类型 | `DialogChangeReason`：`"cancel"`、`"backdropPress"` |
