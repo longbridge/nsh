@@ -30,6 +30,10 @@ pub enum OverlayAnchor {
     /// A point in the root view's coordinates (touches' `pageX` /
     /// `pageY`): a menu opened where the pointer is.
     Point(Point<Points>),
+    /// What a view draws: the box around its children (the view itself
+    /// while it has none). A trigger wrapped in a view its parent
+    /// stretches is placed against what shows, not the stretched wrapper.
+    Content(NodeId),
 }
 
 /// The side of the anchor an overlay goes on (`placement`), as

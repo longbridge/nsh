@@ -16,19 +16,21 @@ A tooltip is a short hint next to what it is about: what an icon button does, th
 It never takes the pointer or presses, so the trigger works exactly as it does without it.
 
 ```rust tabs
-use nsh_base::{Tooltip, TooltipProps};
+use nsh_base::tooltip;
 use nsh_core::ui::prelude::*;
 
 fn save_button(on_save: impl Fn() + 'static) -> impl IntoElement {
-    Tooltip::element(TooltipProps {
-        offset: px(6.0).into(),
-        ..TooltipProps::default()
-    })
-    .fill(
-        "content",
-        view().rounded_md().bg(rgb(0x111827)).px_2().py_1().child(text("Save the document").text_color(white())),
-    )
-    .child(view().on_press(on_save).p_2().child(text("💾")))
+    tooltip()
+        .offset(px(6.0))
+        .content(
+            view()
+                .rounded_md()
+                .bg(rgb(0x111827))
+                .px_2()
+                .py_1()
+                .child(text("Save the document").text_color(white())),
+        )
+        .child(view().on_press(on_save).p_2().child(text("💾")))
 }
 ```
 
@@ -58,23 +60,23 @@ other side when there is no room, and stays inside the safe area.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `content` | `.fill("content", ..)` | `JSX.Element` | none | What it says. |
+| `content` | `.content(..)` | `JSX.Element` | none | What it says. |
 | `children` | `.child(..)` | `JSX.Element` | none | The trigger. |
-| `open` | `open` | `boolean` | none | Shown, controlled by the app. |
-| `defaultOpen` | `default_open` | `boolean` | `false` | Shown at first, without `open`. |
-| `delay` | `delay` | `number` | `500` | Desktops: milliseconds the pointer rests on the trigger before it shows. |
-| `disabled` | `disabled` | `boolean` | `false` | It never shows. |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | The side of the trigger it goes on. |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
-| `offset` | `offset` | `number` | `0` | The gap between the trigger and the tooltip. |
-| `margin` | `margin` | `number` | `0` | The distance it keeps from the edges of the safe area. |
-| `popupClass`, `popupStyle` | `popup_class`, `popup_style` | `string`, `StyleProp<ViewStyle>` | none | The look of the popup the content is in. |
+| `open` | `.open(..)` | `boolean` | none | Shown, controlled by the app. |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Shown at first, without `open`. |
+| `delay` | `.delay(..)` | `number` | `500` | Desktops: milliseconds the pointer rests on the trigger before it shows. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | It never shows. |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | The side of the trigger it goes on. |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
+| `offset` | `.offset(..)` | `number` | `0` | The gap between the trigger and the tooltip. |
+| `margin` | `.margin(..)` | `number` | `0` | The distance it keeps from the edges of the safe area. |
+| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the popup the content is in. |
 
 ## Events
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `TooltipEvent::OpenChange(open, reason)` | It showed or hid: `"hover"`, `"longPress"` or `"triggerPress"`. |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | It showed or hid: `"hover"`, `"longPress"` or `"triggerPress"`. |
 
 ## Accessibility
 

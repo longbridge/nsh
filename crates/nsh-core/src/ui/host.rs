@@ -753,6 +753,20 @@ impl Overlay {
         )
     }
 
+    /// Places it against what the element carrying `anchor` draws: the box
+    /// around its children, so a trigger in a wrapper its parent stretches
+    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
+        let anchor = *anchor;
+        self.bind_prop(
+            move || match anchor.node() {
+                Some(id) => OverlayAnchor::Content(id),
+                None => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
     /// Places it against a point of the root view (a touch's `page`: a
     /// menu where the pointer is).
     pub fn anchor_point(self, point: impl IntoReactive<Point<Points>>) -> Self {

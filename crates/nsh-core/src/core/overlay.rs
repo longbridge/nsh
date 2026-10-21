@@ -424,6 +424,7 @@ impl<M: TextEngine> Core<M> {
                 origin: m.page,
                 size: m.frame.size,
             }),
+            OverlayAnchor::Content(id) => self.content_bounds(id),
         };
         let Some(anchor) = anchor else {
             return frame.origin;
@@ -480,6 +481,36 @@ impl<M: TextEngine> Core<M> {
         placed.origin
     }
 
+    /// The box around what view `id` draws in its root view: around its
+    /// children's frames, or its own while it has none (laid out ones only).
+    fn content_bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let own = self.measure(id)?;
+        let key = self.key(id).ok()?;
+        let mut out: Option<(f32, f32, f32, f32)> = None;
+        for &c in &self.nodes[key as usize].children {
+            let n = &self.nodes[c as usize];
+            if n.kind == Kind::Overlay || n.layout.is_none() {
+                continue;
+            }
+            let Some(m) = self.measure(n.id) else {
+                continue;
+            };
+            let (x0, y0) = (m.page.x.0, m.page.y.0);
+            let (x1, y1) = (x0 + m.frame.size.width.0, y0 + m.frame.size.height.0);
+            out = Some(match out {
+                None => (x0, y0, x1, y1),
+                Some((a, b, c, d)) => (a.min(x0), b.min(y0), c.max(x1), d.max(y1)),
+            });
+        }
+        Some(match out {
+            Some((x0, y0, x1, y1)) => rect(x0, y0, x1 - x0, y1 - y0),
+            None => Bounds {
+                origin: own.page,
+                size: own.frame.size,
+            },
+        })
+    }
+
     /// Places the shown overlays with an anchor again, at the end of the
     /// commit: their anchors may have moved (the layout, the lists,
     /// scrolling).
@@ -510,7 +541,7 @@ impl<M: TextEngine> Core<M> {
 /// The view an overlay is anchored to.
 fn anchor_node(state: &OverlayState) -> Option<NodeId> {
     match state.config.anchor {
-        OverlayAnchor::Node(id) => Some(id),
+        OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => Some(id),
         _ => None,
     }
 }

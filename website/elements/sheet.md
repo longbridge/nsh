@@ -12,28 +12,26 @@ drawer. A press on the backdrop, Escape and the Android back button close it. It
 window, the same on every device, and draws nothing of its own: the panel and the backdrop are the app's.
 
 ```rust tabs
-use nsh_base::{OpenChangeReason, Sheet, SheetEvent, SheetProps};
+use nsh_base::{SheetEvent, sheet};
 use nsh_core::ui::prelude::*;
 
 fn filters(open: Signal<bool>) -> impl IntoElement {
-    Sheet::element(SheetProps {
-        open: Prop::bind(move || Some(open.get())),
-        ..SheetProps::default()
-    })
-    .on_event(move |e: &SheetEvent| {
-        if let SheetEvent::OpenChange(next, _) = e {
-            open.set(*next);
-        }
-    })
-    .child(
-        view()
-            .gap_3()
-            .p_6()
-            .rounded_t(px(16.0))
-            .bg(white())
-            .child(text("Filters").font_weight(FontWeight::SEMIBOLD))
-            .child(view().on_press(move || open.set(false)).child(text("Done"))),
-    )
+    sheet()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &SheetEvent| {
+            if let SheetEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .child(
+            view()
+                .gap_3()
+                .p_6()
+                .rounded_t(px(16.0))
+                .bg(white())
+                .child(text("Filters").font_weight(FontWeight::SEMIBOLD))
+                .child(view().on_press(move || open.set(false)).child(text("Done"))),
+        )
 }
 ```
 
@@ -71,18 +69,18 @@ on iOS), use a [Dialog](./dialog.md) with `presentation="pageSheet"`.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `open` | `open` | `boolean` | none | Open, controlled by the app. |
-| `defaultOpen` | `default_open` | `boolean` | `false` | Open at first, without `open`. |
-| `side` | `side` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The edge it is on. |
-| `closeOnEscape` | `close_on_escape` | `boolean` | `true` | Escape and the Android back button close it. |
-| `closeOnBackdropPress` | `close_on_backdrop_press` | `boolean` | `true` | A press on the backdrop closes it. |
-| `popupClass`, `popupStyle` | `popup_class`, `popup_style` | `string`, `StyleProp<ViewStyle>` | none | The look of the panel. |
-| `backdropClass`, `backdropStyle` | `backdrop_class`, `backdrop_style` | `string`, `StyleProp<ViewStyle>` | none | The look of the backdrop, such as a translucent color. |
+| `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
+| `side` | `.side(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The edge it is on. |
+| `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape and the Android back button close it. |
+| `closeOnBackdropPress` | `.close_on_backdrop_press(..)` | `boolean` | `true` | A press on the backdrop closes it. |
+| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the panel. |
+| `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the backdrop, such as a translucent color. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content. |
 
 ## Events
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `SheetEvent::OpenChange(open, reason)` | It closed: `"backdropPress"` or `"cancel"`. |
-| `onCancel` | `SheetEvent::Cancel` | Escape or the Android back button while it is open, whether or not it closed. |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | It closed: `"backdropPress"` or `"cancel"`. |
+| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button while it is open, whether or not it closed. |

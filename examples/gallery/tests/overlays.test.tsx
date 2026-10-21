@@ -1,7 +1,6 @@
 // The Overlays demo on a phone (headless runs are touch screens): the
-// overlay over a clipping box, a popover, a menu presented as a sheet whose
-// submenu replaces its items, a context menu and a tooltip a held finger
-// opens, a sheet; Escape and back close the top one.
+// overlay over a clipping box, a popover, a tooltip a held finger opens, a
+// sheet; Escape and back close the top one. Menus: menus.test.tsx.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -28,24 +27,7 @@ test("a popover opens from its trigger and back closes it", async () => {
   await app.waitFor("popover closed (cancel)");
 });
 
-test("a menu is a sheet on phones, its submenu in place of its items", async () => {
-  await app.press("File");
-  await app.waitFor("Open…");
-  await app.press("Share");
-  await app.waitFor("Copy link");
-  expect(app.texts()).not.toContain("Open…");
-  await app.back();
-  await app.waitFor("Open…");
-  await app.press("New");
-  await app.waitFor("chose New");
-  expect(app.texts()).not.toContain("Open…");
-});
-
-test("a held finger opens the context menu and the tooltip", async () => {
-  await app.longPress("Hold here");
-  await app.waitFor("Paste");
-  await app.press("Paste");
-  await app.waitFor("chose Paste");
+test("a held finger shows the tooltip", async () => {
   await app.longPress("Save");
   await app.waitFor("Saves the document");
 });

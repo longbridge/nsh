@@ -40,7 +40,8 @@ export const SECTIONS: Section[] = [
 /**
  * Sidebar groups, by the `group` frontmatter key. A section's pages are
  * sorted by `order`, so a group is a run of consecutive pages; the Guide
- * uses them to give every platform its own entry next to the others.
+ * uses them to give every platform its own entry next to the others. The
+ * Elements' groups list their pages by name, in the order of this table.
  */
 export const GROUPS: Record<string, Record<Lang, string>> = {
   start: { en: 'Start here', 'zh-CN': '入门' },
@@ -90,9 +91,16 @@ async function load(lang: Lang): Promise<Page[]> {
     // A Chinese page sorts by its English counterpart, so both locales list
     // the same pages in the same order whatever the translated titles are.
     const english = lang === 'en' ? entries : await getCollection(collectionName(section.id, 'en'));
+    // Elements list each group's pages by name (the primitives, then the
+    // base components); the other sections by `order`.
+    const groups = Object.keys(GROUPS);
     const key = (entry: CollectionEntry<any>) => {
       const source = english.find((e) => e.id === entry.id) ?? entry;
-      return { order: source.data.order ?? 999, title: source.data.title as string };
+      const order =
+        section.id === 'elements' && source.data.group
+          ? 1000 + groups.indexOf(source.data.group as string)
+          : (source.data.order ?? 999);
+      return { order, title: source.data.title as string };
     };
     const sorted = [...entries].sort((a, b) => {
       if (a.id === 'index' || b.id === 'index') return a.id === 'index' ? -1 : 1;

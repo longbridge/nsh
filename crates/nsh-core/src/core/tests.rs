@@ -12107,3 +12107,23 @@ fn overlays_in_a_modal_show_in_it() {
     assert!(inserts(&batch).contains(&(2, 6, None)));
     assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
 }
+
+#[test]
+fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A wrapper the root stretches, around an 80 × 30 trigger.
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("paddingTop", Number(50.0))]);
+    add(&mut c, 4, Tag::View, 2, &[]);
+    add(&mut c, 6, Tag::View, 4, &[("width", Number(80.0)), ("height", Number(30.0)), ("alignSelf", StyleValue::Str("flex-start"))]);
+    add(&mut c, 8, Tag::Overlay, 2, &[]);
+    add(&mut c, 10, Tag::View, 8, &[("width", Number(40.0)), ("height", Number(20.0))]);
+    apply(&mut c, vec![overlay_prop(8, crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(4)))]);
+    let batch = c.commit().unwrap();
+    // Centered below the trigger (0, 50, 80 × 30), not the 320-wide wrapper.
+    assert_eq!(frame_of(&batch, 8), Some(rect(20.0, 80.0, 40.0, 20.0)));
+    // Against the wrapper itself: centered on its width.
+    apply(&mut c, vec![overlay_prop(8, crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)))]);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(140.0, 80.0, 40.0, 20.0)));
+}

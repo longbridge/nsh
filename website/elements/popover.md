@@ -13,33 +13,30 @@ on a side of the trigger, moves to the other side when there is no room, stays i
 trigger as it scrolls. It draws nothing of its own: the popup and its content are the app's.
 
 ```rust tabs
-use nsh_base::{OpenChangeReason, Popover, PopoverEvent, PopoverProps};
+use nsh_base::{OpenChangeReason, PopoverEvent, popover};
 use nsh_core::ui::prelude::*;
 
 fn details() -> impl IntoElement {
-    Popover::element(PopoverProps {
-        placement: Placement::Bottom.into(),
-        offset: px(6.0).into(),
-        margin: px(8.0).into(),
-        ..PopoverProps::default()
-    })
-    .fill("trigger", view().px_3().py_2().rounded_md().bg(rgb(0xe5e7eb)).child(text("Details")))
-    .on_event(|e: &PopoverEvent| {
-        if let PopoverEvent::OpenChange(open, OpenChangeReason::PressOutside) = e {
-            log::info!("closed by a press outside: {open}");
-        }
-    })
-    .child(
-        view()
-            .w(px(240.0))
-            .gap_1()
-            .p_3()
-            .rounded_lg()
-            .bg(white())
-            .shadow_lg()
-            .child(text("Order #1024").font_weight(FontWeight::SEMIBOLD))
-            .child(text("Shipped yesterday, arriving Friday.")),
-    )
+    popover()
+        .offset(px(6.0))
+        .margin(px(8.0))
+        .trigger(view().px_3().py_2().rounded_md().bg(rgb(0xe5e7eb)).child(text("Details")))
+        .on_open_change(|e: &PopoverEvent| {
+            if let PopoverEvent::OpenChange(open, OpenChangeReason::PressOutside) = e {
+                log::info!("closed by a press outside: {open}");
+            }
+        })
+        .child(
+            view()
+                .w(px(240.0))
+                .gap_1()
+                .p_3()
+                .rounded_lg()
+                .bg(white())
+                .shadow_lg()
+                .child(text("Order #1024").font_weight(FontWeight::SEMIBOLD))
+                .child(text("Shipped yesterday, arriving Friday.")),
+        )
 }
 ```
 
@@ -101,24 +98,24 @@ For a list of actions use a [Menu](./menu.md), which becomes a sheet on phones; 
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `open` | `open` | `boolean` | none | Open, controlled by the app. |
-| `defaultOpen` | `default_open` | `boolean` | `false` | Open at first, without `open`. |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The side of the trigger it goes on. |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
-| `offset` | `offset` | `number` | `0` | The gap between the trigger and the popup. |
-| `margin` | `margin` | `number` | `0` | The distance it keeps from the edges of the safe area. |
-| `closeOnEscape` | `close_on_escape` | `boolean` | `true` | Escape and the Android back button close it. |
-| `closeOnPressOutside` | `close_on_press_outside` | `boolean` | `true` | A press outside closes it. |
-| `popupClass`, `popupStyle` | `popup_class`, `popup_style` | `string`, `StyleProp<ViewStyle>` | none | The look of the popup, the box the content is in. |
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | none | What opens it; it is placed against it. |
+| `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The side of the trigger it goes on. |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
+| `offset` | `.offset(..)` | `number` | `0` | The gap between the trigger and the popup. |
+| `margin` | `.margin(..)` | `number` | `0` | The distance it keeps from the edges of the safe area. |
+| `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape and the Android back button close it. |
+| `closeOnPressOutside` | `.close_on_press_outside(..)` | `boolean` | `true` | A press outside closes it. |
+| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The look of the popup, the box the content is in. |
+| `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it; it is placed against it. |
 | `children` | `.child(..)` | `JSX.Element` | none | The content. |
 
 ## Events
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `PopoverEvent::OpenChange(open, reason)` | It opened or closed, with why. |
-| `onCancel` | `PopoverEvent::Cancel` | Escape or the Android back button while it is open, whether or not it closed. |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
+| `onCancel` | `.on_cancel(\|\| ..)` | Escape or the Android back button while it is open, whether or not it closed. |
 
 ## Accessibility
 

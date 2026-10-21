@@ -3,7 +3,7 @@ import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Subm
 import { Platform } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius, Row, Segmented } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, tints } from "../ui";
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
@@ -30,6 +30,10 @@ const surface = () =>
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 
+/** An item under the pointer, and pressed: the accent, so it reads on the popup's gray. */
+const hovered = () => ({ backgroundColor: tints.accent });
+const pressed = () => ({ backgroundColor: isDark() ? "rgba(200,242,109,0.32)" : "rgba(124,170,20,0.28)" });
+
 /** One row of a menu: a mark (a check, a dot, an icon), the label, a note (a shortcut, a value). */
 function Item(props: {
   label: string;
@@ -47,8 +51,8 @@ function Item(props: {
       onSelect={props.onSelect}
       disabled={props.disabled}
       closeOnSelect={!props.keepOpen}
-      hoverStyle={{ backgroundColor: colors.border }}
-      activeStyle={{ backgroundColor: colors.border }}
+      hoverStyle={hovered()}
+      activeStyle={pressed()}
       disabledStyle={{ opacity: 0.35 }}
       style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingHorizontal: 8, borderRadius: 7 }}
     >
@@ -78,8 +82,8 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
       disabled={props.disabled}
       trigger={
         <View
-          hoverStyle={{ backgroundColor: colors.border }}
-          activeStyle={{ backgroundColor: colors.border }}
+          hoverStyle={hovered()}
+          activeStyle={pressed()}
           style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, opacity: props.disabled ? 0.35 : 1 }}
         >
           <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
@@ -87,7 +91,7 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
         </View>
       }
       back={
-        <View activeStyle={{ backgroundColor: colors.border }} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7 }}>
+        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7 }}>
           <Icon name="back" size={14} tint={colors.accent} />
           <Text style={{ fontSize: 14, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
         </View>

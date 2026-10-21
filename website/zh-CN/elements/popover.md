@@ -10,33 +10,30 @@ group: base
 弹出框把内容显示在触发元素旁边、其他一切之上：详情、一个小表单、一个取色器。按下触发元素会打开和关闭它；外部按压、Escape 和 Android 返回键会关闭它。它放在触发元素的某一侧，空间不够时换到另一侧，始终位于安全区之内，并在触发元素滚动时跟随它。它自己不绘制任何东西：弹出层和其中的内容都属于应用。
 
 ```rust tabs
-use nsh_base::{OpenChangeReason, Popover, PopoverEvent, PopoverProps};
+use nsh_base::{OpenChangeReason, PopoverEvent, popover};
 use nsh_core::ui::prelude::*;
 
 fn details() -> impl IntoElement {
-    Popover::element(PopoverProps {
-        placement: Placement::Bottom.into(),
-        offset: px(6.0).into(),
-        margin: px(8.0).into(),
-        ..PopoverProps::default()
-    })
-    .fill("trigger", view().px_3().py_2().rounded_md().bg(rgb(0xe5e7eb)).child(text("Details")))
-    .on_event(|e: &PopoverEvent| {
-        if let PopoverEvent::OpenChange(open, OpenChangeReason::PressOutside) = e {
-            log::info!("closed by a press outside: {open}");
-        }
-    })
-    .child(
-        view()
-            .w(px(240.0))
-            .gap_1()
-            .p_3()
-            .rounded_lg()
-            .bg(white())
-            .shadow_lg()
-            .child(text("Order #1024").font_weight(FontWeight::SEMIBOLD))
-            .child(text("Shipped yesterday, arriving Friday.")),
-    )
+    popover()
+        .offset(px(6.0))
+        .margin(px(8.0))
+        .trigger(view().px_3().py_2().rounded_md().bg(rgb(0xe5e7eb)).child(text("Details")))
+        .on_open_change(|e: &PopoverEvent| {
+            if let PopoverEvent::OpenChange(open, OpenChangeReason::PressOutside) = e {
+                log::info!("closed by a press outside: {open}");
+            }
+        })
+        .child(
+            view()
+                .w(px(240.0))
+                .gap_1()
+                .p_3()
+                .rounded_lg()
+                .bg(white())
+                .shadow_lg()
+                .child(text("Order #1024").font_weight(FontWeight::SEMIBOLD))
+                .child(text("Shipped yesterday, arriving Friday.")),
+        )
 }
 ```
 
@@ -98,16 +95,16 @@ const open = signal(false);
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `open` | `open` | `boolean` | 无 | 是否打开，由应用控制。 |
-| `defaultOpen` | `default_open` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 它位于触发元素的哪一侧。 |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"center"` | 它沿这一侧如何与触发元素对齐。 |
-| `offset` | `offset` | `number` | `0` | 触发元素与弹出层之间的间距。 |
-| `margin` | `margin` | `number` | `0` | 它与安全区边缘保持的距离。 |
-| `closeOnEscape` | `close_on_escape` | `boolean` | `true` | Escape 和 Android 返回键会关闭它。 |
-| `closeOnPressOutside` | `close_on_press_outside` | `boolean` | `true` | 外部按压会关闭它。 |
+| `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用控制。 |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 它位于触发元素的哪一侧。 |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | 它沿这一侧如何与触发元素对齐。 |
+| `offset` | `.offset(..)` | `number` | `0` | 触发元素与弹出层之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 它与安全区边缘保持的距离。 |
+| `closeOnEscape` | `.close_on_escape(..)` | `boolean` | `true` | Escape 和 Android 返回键会关闭它。 |
+| `closeOnPressOutside` | `.close_on_press_outside(..)` | `boolean` | `true` | 外部按压会关闭它。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（装着内容的盒子）的外观。 |
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | 无 | 打开它的元素；它相对这个元素放置。 |
+| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的元素；它相对这个元素放置。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容。 |
 
 <a id="events"></a>
@@ -116,8 +113,8 @@ const open = signal(false);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onOpenChange` | `PopoverEvent::OpenChange(open, reason)` | 它打开或关闭了，附带原因。 |
-| `onCancel` | `PopoverEvent::Cancel` | 打开时按下 Escape 或 Android 返回键，无论它是否关闭。 |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
+| `onCancel` | `.on_cancel(\|\| ..)` | 打开时按下 Escape 或 Android 返回键，无论它是否关闭。 |
 
 <a id="accessibility"></a>
 

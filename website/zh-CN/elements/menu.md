@@ -15,12 +15,12 @@ group: base
 选择一个条目、外部按压、Escape 和 Android 返回键都会关闭它。`ContextMenu` 是同样的菜单，由辅助按键（右键单击）在指针处打开，或在触摸屏上由手指按住触发元素打开。
 
 ```rust tabs
-use nsh_base::{Menu, MenuItem, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator, Submenu, SubmenuProps};
+use nsh_base::{menu, menu_item, menu_separator, submenu};
 use nsh_core::ui::prelude::*;
 
 fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
-    MenuItem::element(MenuItemProps::default())
-        .on_event(move |_: &MenuItemEvent| on_select())
+    menu_item()
+        .on_select(on_select)
         .px_3()
         .py_2()
         .rounded_md()
@@ -28,21 +28,19 @@ fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement
 }
 
 fn file_menu() -> impl IntoElement {
-    Menu::element(MenuProps {
-        offset: px(4.0).into(),
-        ..MenuProps::default()
-    })
-    .fill("trigger", view().px_3().py_2().child(text("File")))
-    .child(item("New", || log::info!("new")))
-    .child(item("Open…", || log::info!("open")))
-    .child(MenuSeparator::element(Default::default()).h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
-    .child(
-        Submenu::element(SubmenuProps::default())
-            .fill("trigger", view().px_3().py_2().child(text("Share ›")))
-            .fill("back", view().px_3().py_2().child(text("‹ Back")))
-            .child(item("Mail", || log::info!("mail")))
-            .child(item("Copy link", || log::info!("link"))),
-    )
+    menu()
+        .offset(px(4.0))
+        .trigger(view().px_3().py_2().child(text("File")))
+        .child(item("New", || log::info!("new")))
+        .child(item("Open…", || log::info!("open")))
+        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(
+            submenu()
+                .trigger(view().px_3().py_2().child(text("Share ›")))
+                .back(view().px_3().py_2().child(text("‹ Back")))
+                .child(item("Mail", || log::info!("mail")))
+                .child(item("Copy link", || log::info!("link"))),
+        )
 }
 ```
 
@@ -116,15 +114,15 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `open` | `open` | `boolean` | 无 | 是否打开，由应用控制。 |
-| `defaultOpen` | `default_open` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 桌面：它位于触发元素的哪一侧。 |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"start"` | 桌面：它如何与触发元素对齐。 |
-| `offset` | `offset` | `number` | `0` | 桌面：触发元素与弹出层之间的间距。 |
-| `margin` | `margin` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
+| `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用控制。 |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 桌面：它位于触发元素的哪一侧。 |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | 桌面：它如何与触发元素对齐。 |
+| `offset` | `.offset(..)` | `number` | `0` | 桌面：触发元素与弹出层之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 弹出层（桌面）或 sheet（手机），以及子菜单的弹出层。 |
 | `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 手机：sheet 后面的背景层。 |
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | 无 | 按下时打开它的元素。 |
+| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开它的元素。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 条目，每次打开时创建。 |
 
 ### ContextMenu
@@ -133,26 +131,26 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `disabled` | `disabled` | `boolean` | `false` | 辅助按键和按住的手指都不起作用。 |
-| `offset` | `offset` | `number` | `0` | 桌面：指针与弹出层之间的间距。 |
-| `margin` | `margin` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 辅助按键和按住的手指都不起作用。 |
+| `offset` | `.offset(..)` | `number` | `0` | 桌面：指针与弹出层之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 桌面：它与安全区边缘保持的距离。 |
 
 ### MenuItem
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `disabled` | `disabled` | `boolean` | `false` | 不可选择；`disabled:` 样式生效。 |
-| `closeOnSelect` | `close_on_select` | `boolean` | `true` | 选择它会关闭菜单。 |
-| `accessibilityLabel` | `accessibility_label` | `string` | 无 | 内容不足以说明时，屏幕阅读器读出的文字。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 不可选择；`disabled:` 样式生效。 |
+| `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | 选择它会关闭菜单。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 内容不足以说明时，屏幕阅读器读出的文字。 |
 | `children`、`class`、`style` | `.child(..)`、样式方法 | | 无 | 它的内容和外观，支持 `hover:` 和 `active:` 状态。 |
 
 ### Submenu
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | 无 | 打开它的条目。 |
-| `back` | `.fill("back", ..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
-| `disabled` | `disabled` | `boolean` | `false` | 它不会打开。 |
+| `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
+| `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
 
 `MenuSeparator` 是一个由你设置样式（`class`、`style`）的视图，与所在层级的条目一起显示。
@@ -163,8 +161,8 @@ import { ContextMenu, MenuItem } from "nsh/base";
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onOpenChange`（`Menu`、`ContextMenu`） | `MenuEvent::OpenChange(open, reason)` | 它打开或关闭了，附带原因。 |
-| `onSelect`（`MenuItem`） | `MenuItemEvent::Select` | 条目被选择。 |
+| `onOpenChange`（`Menu`、`ContextMenu`） | `.on_open_change(\|e\| ..)` | 它打开或关闭了，附带原因。 |
+| `onSelect`（`MenuItem`） | `.on_select(\|\| ..)` | 条目被选择。 |
 
 <a id="accessibility"></a>
 

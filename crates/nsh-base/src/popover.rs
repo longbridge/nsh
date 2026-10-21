@@ -105,7 +105,7 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
                     },
                 );
                 let popup = overlay()
-                    .anchor(&anchor)
+                    .anchor_content(&anchor)
                     .placement(props.placement)
                     .align(props.align)
                     .offset(props.offset)

@@ -124,7 +124,7 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
             move || open.get() && !props.disabled.get(),
             move || {
                 overlay()
-                    .anchor(&anchor)
+                    .anchor_content(&anchor)
                     .placement(props.placement)
                     .align(props.align)
                     .offset(props.offset)

@@ -15,19 +15,21 @@ group: base
 它从不接收指针或按压，所以触发元素的行为与没有它时完全一样。
 
 ```rust tabs
-use nsh_base::{Tooltip, TooltipProps};
+use nsh_base::tooltip;
 use nsh_core::ui::prelude::*;
 
 fn save_button(on_save: impl Fn() + 'static) -> impl IntoElement {
-    Tooltip::element(TooltipProps {
-        offset: px(6.0).into(),
-        ..TooltipProps::default()
-    })
-    .fill(
-        "content",
-        view().rounded_md().bg(rgb(0x111827)).px_2().py_1().child(text("Save the document").text_color(white())),
-    )
-    .child(view().on_press(on_save).p_2().child(text("💾")))
+    tooltip()
+        .offset(px(6.0))
+        .content(
+            view()
+                .rounded_md()
+                .bg(rgb(0x111827))
+                .px_2()
+                .py_1()
+                .child(text("Save the document").text_color(white())),
+        )
+        .child(view().on_press(on_save).p_2().child(text("💾")))
 }
 ```
 
@@ -58,16 +60,16 @@ function SaveButton(props: { onSave: () => void }) {
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `content` | `.fill("content", ..)` | `JSX.Element` | 无 | 提示的内容。 |
+| `content` | `.content(..)` | `JSX.Element` | 无 | 提示的内容。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 触发元素。 |
-| `open` | `open` | `boolean` | 无 | 是否显示，由应用控制。 |
-| `defaultOpen` | `default_open` | `boolean` | `false` | 没有 `open` 时，初始是否显示。 |
-| `delay` | `delay` | `number` | `500` | 桌面：指针在触发元素上停留多少毫秒后显示。 |
-| `disabled` | `disabled` | `boolean` | `false` | 它从不显示。 |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | 它位于触发元素的哪一侧。 |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"center"` | 它沿这一侧如何与触发元素对齐。 |
-| `offset` | `offset` | `number` | `0` | 触发元素与工具提示之间的间距。 |
-| `margin` | `margin` | `number` | `0` | 它与安全区边缘保持的距离。 |
+| `open` | `.open(..)` | `boolean` | 无 | 是否显示，由应用控制。 |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否显示。 |
+| `delay` | `.delay(..)` | `number` | `500` | 桌面：指针在触发元素上停留多少毫秒后显示。 |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | 它从不显示。 |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | 它位于触发元素的哪一侧。 |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | 它沿这一侧如何与触发元素对齐。 |
+| `offset` | `.offset(..)` | `number` | `0` | 触发元素与工具提示之间的间距。 |
+| `margin` | `.margin(..)` | `number` | `0` | 它与安全区边缘保持的距离。 |
 | `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 装着内容的弹出层的外观。 |
 
 <a id="events"></a>
@@ -76,7 +78,7 @@ function SaveButton(props: { onSave: () => void }) {
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onOpenChange` | `TooltipEvent::OpenChange(open, reason)` | 它显示或隐藏了：`"hover"`、`"longPress"` 或 `"triggerPress"`。 |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | 它显示或隐藏了：`"hover"`、`"longPress"` 或 `"triggerPress"`。 |
 
 <a id="accessibility"></a>
 

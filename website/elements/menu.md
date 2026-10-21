@@ -18,12 +18,12 @@ Choosing an item, a press outside, Escape and the Android back button close it. 
 by the secondary button (a right click) at the pointer, or by a finger held on its trigger on touch screens.
 
 ```rust tabs
-use nsh_base::{Menu, MenuItem, MenuItemEvent, MenuItemProps, MenuProps, MenuSeparator, Submenu, SubmenuProps};
+use nsh_base::{menu, menu_item, menu_separator, submenu};
 use nsh_core::ui::prelude::*;
 
 fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement {
-    MenuItem::element(MenuItemProps::default())
-        .on_event(move |_: &MenuItemEvent| on_select())
+    menu_item()
+        .on_select(on_select)
         .px_3()
         .py_2()
         .rounded_md()
@@ -31,21 +31,19 @@ fn item(label: &'static str, on_select: impl Fn() + 'static) -> impl IntoElement
 }
 
 fn file_menu() -> impl IntoElement {
-    Menu::element(MenuProps {
-        offset: px(4.0).into(),
-        ..MenuProps::default()
-    })
-    .fill("trigger", view().px_3().py_2().child(text("File")))
-    .child(item("New", || log::info!("new")))
-    .child(item("Open…", || log::info!("open")))
-    .child(MenuSeparator::element(Default::default()).h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
-    .child(
-        Submenu::element(SubmenuProps::default())
-            .fill("trigger", view().px_3().py_2().child(text("Share ›")))
-            .fill("back", view().px_3().py_2().child(text("‹ Back")))
-            .child(item("Mail", || log::info!("mail")))
-            .child(item("Copy link", || log::info!("link"))),
-    )
+    menu()
+        .offset(px(4.0))
+        .trigger(view().px_3().py_2().child(text("File")))
+        .child(item("New", || log::info!("new")))
+        .child(item("Open…", || log::info!("open")))
+        .child(menu_separator().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(
+            submenu()
+                .trigger(view().px_3().py_2().child(text("Share ›")))
+                .back(view().px_3().py_2().child(text("‹ Back")))
+                .child(item("Mail", || log::info!("mail")))
+                .child(item("Copy link", || log::info!("link"))),
+        )
 }
 ```
 
@@ -119,15 +117,15 @@ it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `open` | `open` | `boolean` | none | Open, controlled by the app. |
-| `defaultOpen` | `default_open` | `boolean` | `false` | Open at first, without `open`. |
-| `placement` | `placement` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | Desktops: the side of the trigger it goes on. |
-| `align` | `align` | `"start" \| "center" \| "end"` | `"start"` | Desktops: how it lines up with the trigger. |
-| `offset` | `offset` | `number` | `0` | Desktops: the gap between the trigger and the popup. |
-| `margin` | `margin` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
-| `popupClass`, `popupStyle` | `popup_class`, `popup_style` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (phones), and the submenus' popups. |
-| `backdropClass`, `backdropStyle` | `backdrop_class`, `backdrop_style` | `string`, `StyleProp<ViewStyle>` | none | Phones: the backdrop behind the sheet. |
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | none | What opens it when pressed. |
+| `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
+| `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
+| `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | Desktops: the side of the trigger it goes on. |
+| `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"start"` | Desktops: how it lines up with the trigger. |
+| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the trigger and the popup. |
+| `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
+| `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (phones), and the submenus' popups. |
+| `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Phones: the backdrop behind the sheet. |
+| `trigger` | `.trigger(..)` | `JSX.Element` | none | What opens it when pressed. |
 | `children` | `.child(..)` | `JSX.Element` | none | The items, made each time it opens. |
 
 ### ContextMenu
@@ -136,26 +134,26 @@ it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `disabled` | `disabled` | `boolean` | `false` | The secondary button and held fingers do nothing. |
-| `offset` | `offset` | `number` | `0` | Desktops: the gap between the pointer and the popup. |
-| `margin` | `margin` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | The secondary button and held fingers do nothing. |
+| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the pointer and the popup. |
+| `margin` | `.margin(..)` | `number` | `0` | Desktops: the distance it keeps from the edges of the safe area. |
 
 ### MenuItem
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `disabled` | `disabled` | `boolean` | `false` | Not chosen; `disabled:` styles apply. |
-| `closeOnSelect` | `close_on_select` | `boolean` | `true` | Choosing it closes the menu. |
-| `accessibilityLabel` | `accessibility_label` | `string` | none | What screen readers say, when the content is not enough. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | Not chosen; `disabled:` styles apply. |
+| `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | Choosing it closes the menu. |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say, when the content is not enough. |
 | `children`, `class`, `style` | `.child(..)`, style methods | | none | Its content and look, with `hover:` and `active:` states. |
 
 ### Submenu
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `trigger` | `.fill("trigger", ..)` | `JSX.Element` | none | The item that opens it. |
-| `back` | `.fill("back", ..)` | `JSX.Element` | none | Phones: the row above its items that returns to the items around it. |
-| `disabled` | `disabled` | `boolean` | `false` | It does not open. |
+| `trigger` | `.trigger(..)` | `JSX.Element` | none | The item that opens it. |
+| `back` | `.back(..)` | `JSX.Element` | none | Phones: the row above its items that returns to the items around it. |
+| `disabled` | `.disabled(..)` | `boolean` | `false` | It does not open. |
 | `children` | `.child(..)` | `JSX.Element` | none | Its items. |
 
 `MenuSeparator` is a view you style (`class`, `style`), shown with the items of its level.
@@ -164,8 +162,8 @@ it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` (`Menu`, `ContextMenu`) | `MenuEvent::OpenChange(open, reason)` | It opened or closed, with why. |
-| `onSelect` (`MenuItem`) | `MenuItemEvent::Select` | The item was chosen. |
+| `onOpenChange` (`Menu`, `ContextMenu`) | `.on_open_change(\|e\| ..)` | It opened or closed, with why. |
+| `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen. |
 
 ## Accessibility
 

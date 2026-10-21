@@ -1,5 +1,5 @@
 import { Overlay, signal, Text, View, type YNode } from "nsh";
-import { ContextMenu, Menu, MenuItem, MenuSeparator, Popover, Sheet, Submenu, Tooltip } from "nsh/base";
+import { Popover, Sheet, Tooltip } from "nsh/base";
 import { Platform } from "nsh/device";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius } from "../ui";
 
@@ -14,7 +14,7 @@ const popup = () => ({
   ...finish.raised,
 });
 
-/** A sheet's panel on touch screens: the bottom of the screen. */
+/** A sheet's panel: the bottom of the screen. */
 const sheet = () => ({
   backgroundColor: colors.surface,
   borderTopLeftRadius: 20,
@@ -38,36 +38,13 @@ function Trigger(props: { label: string }) {
   );
 }
 
-/** An item of the demos' menus. */
-function Item(props: { label: string; note?: string; onSelect?: () => void; disabled?: boolean }) {
-  return (
-    <MenuItem
-      onSelect={props.onSelect}
-      disabled={props.disabled}
-      hoverStyle={{ backgroundColor: colors.border }}
-      activeStyle={{ backgroundColor: colors.border }}
-      disabledStyle={{ opacity: 0.4 }}
-      style={{ flexDirection: "row", alignItems: "center", height: 36, paddingHorizontal: 10, borderRadius: 8 }}
-    >
-      <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
-      <If when={props.note}>
-        <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.note}</Text>
-      </If>
-    </MenuItem>
-  );
-}
-
-const separator = () => ({ height: 1, marginVertical: 4, backgroundColor: colors.line });
-
 /**
  * Overlays: `<Overlay>` shows its children on top of the screen whatever
- * clips them, and `nsh/base`'s popups are built on it, each presented as
- * the device suits: popups and cascading menus on desktops, sheets on
- * phones.
+ * clips them, and `nsh/base`'s popups are built on it: a popover, a
+ * tooltip, a sheet (menus have a demo of their own, `Menus.tsx`).
  */
 export function Overlays() {
   const last = signal("—");
-  const device = Platform.isDesktop ? "desktop: popups, hover, right click" : "touch: sheets, held fingers";
 
   function Primitive() {
     const open = signal(false);
@@ -114,65 +91,6 @@ export function Overlays() {
             <Text style={{ fontSize: 13, color: colors.muted }}>A press outside, Escape or back closes it.</Text>
           </View>
         </Popover>
-      </Card>
-    );
-  }
-
-  function Menus() {
-    return (
-      <Card icon="lists" title="Menu" subtitle={device}>
-        <Menu
-          offset={6}
-          margin={8}
-          popupStyle={Platform.isDesktop ? popup() : sheet()}
-          backdropStyle={backdrop}
-          onOpenChange={(open, reason) => reason !== "select" && last.set(`menu ${open ? "opened" : "closed"} (${reason})`)}
-          trigger={<Trigger label="File" />}
-        >
-          <Item label="New" note="⌘N" onSelect={() => last.set("chose New")} />
-          <Item label="Open…" note="⌘O" onSelect={() => last.set("chose Open")} />
-          <MenuSeparator style={separator()} />
-          <Submenu
-            trigger={
-              <View hoverStyle={{ backgroundColor: colors.border }} style={{ flexDirection: "row", alignItems: "center", height: 36, paddingHorizontal: 10, borderRadius: 8 }}>
-                <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>Share</Text>
-                <Text style={{ fontSize: 14, color: colors.faint }}>›</Text>
-              </View>
-            }
-            back={
-              <View style={{ height: 36, paddingHorizontal: 10, justifyContent: "center" }}>
-                <Text style={{ fontSize: 14, color: colors.accent }}>‹ Back</Text>
-              </View>
-            }
-          >
-            <Item label="Mail" onSelect={() => last.set("chose Mail")} />
-            <Item label="Messages" onSelect={() => last.set("chose Messages")} />
-            <Item label="Copy link" onSelect={() => last.set("chose Copy link")} />
-          </Submenu>
-          <MenuSeparator style={separator()} />
-          <Item label="Delete" disabled />
-        </Menu>
-      </Card>
-    );
-  }
-
-  function Context() {
-    return (
-      <Card icon="gestures" title="Context menu" subtitle={Platform.isDesktop ? "Right click the area" : "Hold a finger on the area"}>
-        <ContextMenu
-          margin={8}
-          popupStyle={Platform.isDesktop ? popup() : sheet()}
-          backdropStyle={backdrop}
-          onOpenChange={(open, reason) => reason !== "select" && last.set(`context menu ${open ? "opened" : "closed"} (${reason})`)}
-          trigger={
-            <View style={{ height: 96, borderRadius: radius.inset, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 14, color: colors.muted }}>{Platform.isDesktop ? "Right click here" : "Hold here"}</Text>
-            </View>
-          }
-        >
-          <Item label="Copy" onSelect={() => last.set("chose Copy")} />
-          <Item label="Paste" onSelect={() => last.set("chose Paste")} />
-        </ContextMenu>
       </Card>
     );
   }
@@ -224,5 +142,5 @@ export function Overlays() {
     );
   }
 
-  return <DemoPage cards={[Primitive, Popovers, Menus, Context, Tooltips, Sheets, Last]} />;
+  return <DemoPage cards={[Primitive, Popovers, Tooltips, Sheets, Last]} />;
 }

@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Receiver;
-use nsh_base::{Popover, PopoverProps};
+use nsh_base::popover;
 use nsh_core::{
     ApproxTextEngine, Bounds, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
     ui::{Root, prelude::*},
@@ -21,15 +21,13 @@ struct ScreenProps {}
 fn Screen(_props: ScreenProps) -> impl IntoElement {
     view().pt(px(100.0)).pl(px(40.0)).child(
         view().w(px(200.0)).h(px(30.0)).overflow_hidden().child(
-            Popover::element(PopoverProps {
-                default_open: true.into(),
-                placement: Placement::Bottom.into(),
-                align: Align::Start.into(),
-                offset: px(4.0).into(),
-                ..PopoverProps::default()
-            })
-            .fill("trigger", view().h(px(30.0)).child(text("Trigger")))
-            .child(view().w(px(120.0)).h(px(50.0)).child(text("Body"))),
+            popover()
+                .default_open(true)
+                .placement(Placement::Bottom)
+                .align(Align::Start)
+                .offset(px(4.0))
+                .trigger(view().h(px(30.0)).child(text("Trigger")))
+                .child(view().w(px(120.0)).h(px(50.0)).child(text("Body"))),
         ),
     )
 }

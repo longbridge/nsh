@@ -139,7 +139,7 @@ fn surface(
                 return vec![backdrop.into_element(), panel.into_element()];
             }
             let popup = match &at {
-                At::Trigger(anchor) => overlay().anchor(anchor),
+                At::Trigger(anchor) => overlay().anchor_content(anchor),
                 At::Pointer(point) => {
                     let point = *point;
                     overlay().anchor_point(move || point.get())
