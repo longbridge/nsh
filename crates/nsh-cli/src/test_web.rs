@@ -183,7 +183,9 @@ impl WebNative {
                 "type": kind,
                 "x": at.x.0,
                 "y": at.y.0,
-                "button": if kind == "mouseMoved" { "none" } else { "left" },
+                // A move with the button down is a drag of it, as
+                // Playwright sends it.
+                "button": if kind == "mouseMoved" && buttons == 0 { "none" } else { "left" },
                 "buttons": buttons,
                 "clickCount": 1,
             }),
@@ -273,6 +275,19 @@ impl Native for WebNative {
             );
             std::thread::sleep(FRAME);
         }
+    }
+
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.mouse("mouseMoved", from, 0);
+        self.mouse("mousePressed", from, 1);
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            self.mouse("mouseMoved", at, 1);
+            last = at;
+        }
+        self.mouse("mouseReleased", last, 0);
     }
 
     fn type_text(&self, text: &str) {

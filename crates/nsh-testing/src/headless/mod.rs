@@ -31,6 +31,7 @@ mod animation;
 #[cfg(feature = "live")]
 mod live;
 mod net;
+mod pointer;
 mod stub;
 
 use std::{
@@ -1067,6 +1068,22 @@ impl Headless {
         }
     }
 
+    /// One display frame of a gesture: a frame that needs nothing produces
+    /// no batch, and a late one is applied with the next.
+    fn display_frame(&mut self) {
+        if self.clock.is_manual() {
+            self.frame(FRAME);
+            self.drain();
+            return;
+        }
+        let frame = Instant::now() + FRAME;
+        while Instant::now() < frame {
+            if let Pumped::Batch | Pumped::Exited = self.pump(frame) {
+                break;
+            }
+        }
+    }
+
     /// The step `scroll(<selector>, <distance>)`: drags the scroll view
     /// `selector` names (the matching view, the nearest scroll view around
     /// it, else the first in it) by `distance` points along its axis
@@ -1122,19 +1139,7 @@ impl Headless {
             let (x, y, applied) = (scroll.x, scroll.y, scroll.applied);
             self.engine.control().scroll(id, point(x, y), applied);
             self.animator.scrolled(id, point(x, y));
-            // One display frame per step; a frame that needs nothing
-            // produces no batch, and a late one is applied with the next.
-            if self.clock.is_manual() {
-                self.frame(FRAME);
-                self.drain();
-                continue;
-            }
-            let frame = Instant::now() + FRAME;
-            while Instant::now() < frame {
-                if let Pumped::Batch | Pumped::Exited = self.pump(frame) {
-                    break;
-                }
-            }
+            self.display_frame();
         }
         self.send(id, EventKind::ScrollEndDrag, offset(&self.screen));
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
@@ -1339,6 +1344,92 @@ mod tests {
             error.starts_with("`id:rows` cannot scroll by 10: it is at "),
             "{error}"
         );
+    }
+
+    /// A card that pans, a button, a pad listening to touches and a list
+    /// that refreshes when pulled, saying what they heard.
+    #[component]
+    fn Drags() -> impl IntoElement {
+        let pan = signal(String::from("none"));
+        let presses = signal(0_u32);
+        let ups = signal(0_u32);
+        let touches = signal(0_u32);
+        let refreshes = signal(0_u32);
+        view()
+            .flex_1()
+            .child(text(move || format!("Pan {}", pan.get())))
+            .child(text(move || {
+                format!("Presses {} ups {}", presses.get(), ups.get())
+            }))
+            .child(text(move || format!("Touches {}", touches.get())))
+            .child(text(move || format!("Refreshes {}", refreshes.get())))
+            .child(
+                view()
+                    .test_id("card")
+                    .h(px(80.0))
+                    .on_pan_end(move |e: &PanEvent| {
+                        pan.set(format!("{} {}", e.translation.x.0, e.translation.y.0))
+                    }),
+            )
+            .child(
+                view()
+                    .test_id("button")
+                    .h(px(40.0))
+                    .on_press(move |_: &()| presses.update(|p| *p += 1))
+                    .on_press_up(move |_: &()| ups.update(|u| *u += 1))
+                    .child(text("Button")),
+            )
+            .child(
+                view()
+                    .test_id("pad")
+                    .h(px(60.0))
+                    .on_touch(move |_: &nsh_core::TouchEvent| touches.update(|t| *t += 1)),
+            )
+            .child(
+                scroll()
+                    .test_id("list")
+                    .flex_1()
+                    .on_refresh(move |_: &()| refreshes.update(|r| *r += 1))
+                    .children((0..30).map(|i| view().h(px(50.0)).child(text(format!("Row {i}"))))),
+            )
+    }
+
+    #[test]
+    fn a_drag_goes_to_what_a_finger_would_move() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Drags>())).unwrap();
+        app.first_render().unwrap();
+        // A pan follows the finger to the end.
+        app.drag("id:card", point(px(120.0), px(-30.0))).unwrap();
+        app.wait_for("Pan 120 -30").unwrap();
+        // A finger moving off a button cancels its press: up, no press.
+        app.drag("Button", point(px(0.0), px(40.0))).unwrap();
+        app.wait_for("Presses 0 ups 1").unwrap();
+        // A small slip still presses it.
+        app.drag("Button", point(px(0.0), px(4.0))).unwrap();
+        app.wait_for("Presses 1 ups 2").unwrap();
+        // The views listening to touches hear the finger down, moving, up.
+        app.drag("id:pad", point(px(0.0), px(30.0))).unwrap();
+        assert!(!app.shows("Touches 0"));
+        // A list pulled down past its top refreshes; dragged up, it scrolls.
+        app.drag("Row 2", point(px(0.0), px(300.0))).unwrap();
+        app.wait_for("Refreshes 1").unwrap();
+        let Pick::One(list) = app
+            .screen()
+            .scroll_view(&Selector::parse("id:list").unwrap())
+        else {
+            panic!("one list");
+        };
+        assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(Points::ZERO));
+        // It takes the drag over once the finger passed the slop, a frame
+        // in, and follows it from there, as the platforms' scroll views do.
+        app.drag("Row 2", point(px(0.0), px(-200.0))).unwrap();
+        assert_eq!(app.screen().scroll(list).map(|s| s.y), Some(px(190.0)));
+        // A short pull does not.
+        app.drag("Row 6", point(px(0.0), px(-40.0))).unwrap();
+        app.drag("Row 6", point(px(0.0), px(100.0))).unwrap();
+        assert!(app.shows("Refreshes 1"));
+        let error = app.drag("Nothing", point(px(1.0), px(1.0))).unwrap_err();
+        assert!(error.starts_with("no view matches `Nothing`"), "{error}");
     }
 
     #[cfg(feature = "js")]

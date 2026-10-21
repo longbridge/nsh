@@ -76,9 +76,9 @@ impl IosNative {
         self.on_main(move |_, window| synth::touch(window, x, y, phase));
     }
 
-    /// A finger down at `from`, moving to `to` a frame at a time, resting,
-    /// then lifting.
-    fn drag(&self, from: (f64, f64), to: (f64, f64), rest: Duration) {
+    /// A finger down at `from`, moving to `to` a frame at a time, easing
+    /// out, resting, then lifting (a scroll, a swipe).
+    fn swipe(&self, from: (f64, f64), to: (f64, f64), rest: Duration) {
         let (dx, dy) = (to.0 - from.0, to.1 - from.1);
         let n = ((dx.abs().max(dy.abs()) / MOVE_STEP).ceil() as u32).max(1);
         self.finger(from.0, from.1, Phase::Down);
@@ -152,7 +152,21 @@ impl Native for IosNative {
         // way.
         let from = (f64::from(at.x.0), f64::from(at.y.0));
         let to = (from.0 - f64::from(delta.x.0), from.1 - f64::from(delta.y.0));
-        self.drag(from, to, REST);
+        self.swipe(from, to, REST);
+    }
+
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let xy = |p: Point<Points>| (f64::from(p.x.0), f64::from(p.y.0));
+        let (x, y) = xy(from);
+        self.finger(x, y, Phase::Down);
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = (x, y);
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(nsh_testing::agent::FRAME);
+            last = xy(at);
+            self.finger(last.0, last.1, Phase::Move);
+        }
+        self.finger(last.0, last.1, Phase::Up);
     }
 
     fn type_text(&self, text: &str) {
@@ -212,7 +226,7 @@ impl Native for IosNative {
             .unwrap_or_else(|| Err("the window is gone".to_owned()))?;
         match gesture {
             Gesture::Tap(x, y) => self.tap(x, y, TAP),
-            Gesture::Swipe(from, to) => self.drag(from, to, Duration::ZERO),
+            Gesture::Swipe(from, to) => self.swipe(from, to, Duration::ZERO),
         }
         Ok(())
     }

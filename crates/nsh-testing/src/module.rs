@@ -470,6 +470,17 @@ pub struct WaitOptions {
     pub state: Option<WaitState>,
 }
 
+/// How far a drag moves the finger ([`App::drag`]), in points.
+#[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
+pub struct DragBy {
+    /// Rightwards (negative: leftwards).
+    #[prop(default)]
+    pub x: Points,
+    /// Downwards (negative: upwards).
+    #[prop(default)]
+    pub y: Points,
+}
+
 /// What [`WaitOptions`] waits for.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum WaitState {
@@ -998,6 +1009,16 @@ impl App {
             app.scroll(&selector, nsh_core::geometry::px(distance as f32))
         })
         .await
+    }
+
+    /// Drags what `selector` names: a finger lands on its middle, rests for
+    /// 100 ms, moves by `by` points, 10 per display frame, and lifts. A pan moves with it
+    /// (`onPanStart`, `onPanEnd`), the views listening to touches hear them,
+    /// a scroll view scrolls (pulled past its top, it refreshes), and the
+    /// press under the finger is cancelled.
+    pub async fn drag(this: Instance<Self>, selector: String, by: DragBy) -> Result<(), String> {
+        let by = nsh_core::geometry::point(by.x, by.y);
+        step(&this, move |app| app.drag(&selector, by)).await
     }
 
     /// Lets the app run for `ms` milliseconds (timers and animations): on a

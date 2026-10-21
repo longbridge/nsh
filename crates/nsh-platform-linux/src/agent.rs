@@ -114,6 +114,24 @@ impl Native for LinuxNative {
         }
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let (x, y) = (from.x.0, from.y.0);
+        self.on_main(move |s| {
+            crate::input::simulate(s, Simulated::Hover(x, y));
+            crate::input::simulate(s, Simulated::Down(x, y));
+        });
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            let (x, y) = (at.x.0, at.y.0);
+            self.on_main(move |s| crate::input::simulate(s, Simulated::Move(x, y)));
+            last = at;
+        }
+        let (x, y) = (last.x.0, last.y.0);
+        self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)));
+    }
+
     fn type_text(&self, text: &str) {
         // Key by key, as a keyboard's characters come.
         for ch in text.chars() {

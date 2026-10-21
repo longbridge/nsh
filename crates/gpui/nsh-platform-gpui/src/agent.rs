@@ -194,6 +194,19 @@ impl Native for GpuiNative {
         }
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.mouse(PointerKind::Move, from, 0);
+        self.mouse(PointerKind::Down, from, 0);
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            self.mouse(PointerKind::Move, at, 0);
+            last = at;
+        }
+        self.mouse(PointerKind::Up, last, 0);
+    }
+
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         self.with_surface(move |surface| crate::text_input::char_input(surface, &text));

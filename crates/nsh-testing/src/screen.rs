@@ -13,8 +13,8 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, InputConfig, MountBatch,
-    MountItem, NodeId, Points, Size, ViewKind, ui::PropEnum,
+    AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
+    MountBatch, MountItem, NodeId, PanActivation, Points, Size, ViewKind, ui::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -84,6 +84,12 @@ pub struct Screen {
     unsupported: Vec<&'static str>,
     /// The app asked for a back (`Command::Back`, what no listener took).
     back_asked: bool,
+    /// A JS responder holds the touches and keeps native drags from
+    /// starting (`SetJsResponder`'s `block`).
+    js_block: bool,
+    /// The JS responder's grants since a drag looked (`SetJsResponder`'s
+    /// `block`, in order).
+    js_grants: Vec<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -111,6 +117,12 @@ struct View {
     /// A selection area (`SelectionArea` of `nsh/base`): its texts share
     /// one selection.
     selection_area: bool,
+    /// The interaction states it tracks (`TrackStates`: pressed, hovered).
+    tracked: u8,
+    /// The values its drags, pinches and rotations drive natively.
+    gestures: GestureValues,
+    /// When a drag on it activates its JS responder (`panActivation`).
+    pan_activation: Option<PanActivation>,
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -214,6 +226,13 @@ impl Screen {
                 view.disabled = props.accessibility.state.disabled;
                 view.long_press_delay = props.long_press_delay;
                 view.selection_area = props.selection_area;
+                view.pan_activation = props.pan_activation;
+            }
+            MountItem::TrackStates { id, states } => {
+                self.nodes.entry(*id).or_default().tracked = *states;
+            }
+            MountItem::Gestures { id, values } => {
+                self.nodes.entry(*id).or_default().gestures = *values;
             }
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
@@ -282,6 +301,11 @@ impl Screen {
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
             Command::Back => self.back_asked = true,
+            Command::SetJsResponder { block } => {
+                self.js_block = *block;
+                self.js_grants.push(*block);
+            }
+            Command::ClearJsResponder => self.js_block = false,
             Command::Focus if self.input(id).is_some() => self.focused = Some(id),
             Command::Blur if id == ROOT || self.focused == Some(id) => self.focused = None,
             Command::ScrollTo { x, y, .. } => {
@@ -745,6 +769,11 @@ impl Screen {
         })
     }
 
+    /// The view the selector names, for a drag: the finger lands on it.
+    pub(crate) fn view(&self, selector: &Selector) -> Pick {
+        self.pick(selector, Some)
+    }
+
     /// The view the selector names, for a long press: it, or its nearest
     /// ancestor that hears long presses or presses.
     pub(crate) fn long_pressable(&self, selector: &Selector) -> Pick {
@@ -820,6 +849,94 @@ impl Screen {
             }
         }
         None
+    }
+
+    /// `id` and the views around it, innermost first: what a finger on it
+    /// lands on.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn chain(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut at = Some(id);
+        while let Some(id) = at {
+            let Some(view) = self.nodes.get(&id) else {
+                break;
+            };
+            out.push(id);
+            at = view.parent;
+        }
+        out
+    }
+
+    /// What pointer input knows of view `id` ([`nsh_core::input::Link`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn link(&self, id: NodeId) -> Option<nsh_core::input::Link> {
+        let view = self.nodes.get(&id)?;
+        Some(nsh_core::input::Link::new(
+            id,
+            view.events,
+            view.tracked,
+            view.gestures,
+            view.scroll.as_ref().map(|s| s.horizontal),
+            view.pan_activation,
+        ))
+    }
+
+    /// The press a finger on the views of `chain` starts: the innermost
+    /// enabled one hearing presses, with its events and `delayLongPress`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn press_in_chain(
+        &self,
+        chain: &[NodeId],
+    ) -> Option<(NodeId, EventMask, Option<f32>)> {
+        chain.iter().find_map(|&id| {
+            let view = self.nodes.get(&id)?;
+            (nsh_core::input::has_press(view.events) && !view.disabled).then_some((
+                id,
+                view.events,
+                view.long_press_delay,
+            ))
+        })
+    }
+
+    /// View `id`'s bounds in the root's points: its frame moved by those
+    /// of the views around it and the offsets of the scroll views around
+    /// it (transforms aside).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
+        let view = self.nodes.get(&id)?;
+        let mut origin = view.frame.origin;
+        let mut at = view.parent;
+        while let Some(parent) = at {
+            let Some(p) = self.nodes.get(&parent) else {
+                break;
+            };
+            origin += p.frame.origin;
+            if let Some(scroll) = &p.scroll {
+                origin -= nsh_core::Point::new(scroll.x, scroll.y);
+            }
+            at = p.parent;
+        }
+        Some(Bounds::new(origin, view.frame.size))
+    }
+
+    /// Whether a JS responder keeps native drags from starting.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn js_block(&self) -> bool {
+        self.js_block
+    }
+
+    /// A drag starts: the JS responder blocks nothing yet, as a platform's
+    /// first finger down resets it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn reset_js_block(&mut self) {
+        self.js_block = false;
+        self.js_grants.clear();
+    }
+
+    /// The JS responder's grants since the last look (`block` each).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn take_js_grants(&mut self) -> Vec<bool> {
+        std::mem::take(&mut self.js_grants)
     }
 
     /// Whether view `id` reports `event`.

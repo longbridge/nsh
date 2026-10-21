@@ -267,6 +267,16 @@ pub enum TestStep {
         /// Points; negative scrolls back.
         distance: f32,
     },
+    /// Drags the view: a finger (or the mouse) on its middle moves by
+    /// `x`, `y` points and lifts (`app.drag`).
+    Drag {
+        /// The view.
+        selector: String,
+        /// Points rightwards.
+        x: f32,
+        /// Points downwards.
+        y: f32,
+    },
     /// Goes back as the user does (`app.back`).
     Back,
     /// Lets the app run (`app.wait`).
@@ -504,6 +514,8 @@ pub enum PickTarget {
     Input,
     /// A scroll view.
     ScrollView,
+    /// The view itself (a drag lands on it).
+    View,
 }
 
 /// How a [`TestStep`] ended.

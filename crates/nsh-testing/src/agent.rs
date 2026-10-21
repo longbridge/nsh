@@ -34,6 +34,28 @@ pub use self::forward::{Outgoing, Send as SendOutgoing};
 pub use crate::screen::Pick;
 use crate::{MemoryStorage, screen::Screen, selector::Selector};
 
+/// How far a dragging finger moves in a display frame, as headless drags
+/// move it.
+pub const DRAG_STEP: Points = Points(10.0);
+/// A display frame, between a drag's moves.
+pub const FRAME: Duration = Duration::from_millis(16);
+/// How long a dragging finger rests where it lands before it moves, as a
+/// hand does: the views under it hear it land (a JS responder takes it)
+/// before a drag starts.
+pub const LANDING: Duration = Duration::from_millis(100);
+
+/// The positions of a finger dragged from `from` to `to`
+/// ([`Native::drag`]), after `from`, a display frame apart: [`DRAG_STEP`]
+/// points at most each, the last at `to`.
+pub fn drag_path(from: Point<Points>, to: Point<Points>) -> impl Iterator<Item = Point<Points>> {
+    let (dx, dy) = (to.x - from.x, to.y - from.y);
+    let steps = (dx.abs().max(dy.abs()) / DRAG_STEP).ceil().max(1.0) as u32;
+    (1..=steps).map(move |i| {
+        let t = i as f32 / steps as f32;
+        Point::new(from.x + dx * t, from.y + dy * t)
+    })
+}
+
 /// How long after the last batch the app is quiet.
 const QUIET: Duration = Duration::from_millis(100);
 /// How long a step waits for the app to be quiet at most.
@@ -242,6 +264,7 @@ impl Scene for Model {
             PickTarget::LongPressable => screen.long_pressable(&parsed),
             PickTarget::Input => screen.input_view(&parsed),
             PickTarget::ScrollView => screen.scroll_view(&parsed),
+            PickTarget::View => screen.view(&parsed),
         })
     }
     fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
@@ -480,6 +503,11 @@ pub trait Native: Send + Sync {
     /// Scrolls what is at `at` by `delta` points (positive: down or right,
     /// towards the content's end), as a trackpad or a finger does.
     fn scroll(&self, at: Point<Points>, delta: Point<Points>);
+    /// Drags from `from` to `to`: a finger (on a desktop, the mouse's
+    /// button) down at `from`, resting there for [`LANDING`], moving along
+    /// [`drag_path`] a display frame at a time and lifting at `to` at once,
+    /// still moving, as a quick drag does.
+    fn drag(&self, from: Point<Points>, to: Point<Points>);
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);
     /// Presses `key`.
@@ -697,6 +725,7 @@ impl Agent {
             TestStep::Submit { selector } => done(self.submit(&selector)),
             TestStep::Clear { selector } => done(self.clear(&selector)),
             TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
+            TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
             TestStep::Back => done(self.native.back().and_then(|()| self.settled())),
             TestStep::Wait { ms } => {
                 std::thread::sleep(Duration::from_millis(ms));
@@ -994,6 +1023,13 @@ impl Agent {
         self.settled()
     }
 
+    fn drag(&self, selector: &str, x: f32, y: f32) -> Result<(), String> {
+        let (_, at) = self.find(selector, "view", PickTarget::View)?;
+        let to = Point::new(at.x + Points(x), at.y + Points(y));
+        self.native.drag(at, to);
+        self.settled()
+    }
+
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String> {
         if self.scene.pending_dialog()?.is_none() {
             return Err("no dialog to answer".into());
@@ -1126,6 +1162,7 @@ mod tests {
         }
         fn long_press(&self, _: Point<Points>, _: Duration) {}
         fn scroll(&self, _: Point<Points>, _: Point<Points>) {}
+        fn drag(&self, _: Point<Points>, _: Point<Points>) {}
         fn type_text(&self, text: &str) {
             self.1.lock().unwrap().push(format!("type {text}"));
         }

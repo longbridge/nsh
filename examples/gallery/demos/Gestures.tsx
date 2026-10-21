@@ -66,6 +66,7 @@ function Transformable() {
           style={{ position: "absolute", width: 200, height: 150, borderRadius: 18, borderWidth: 1, borderColor: colors.faint, borderStyle: "dashed" }}
         />
         <View
+          testID="photo"
           pan={{ x, y }}
           pinch={{ scale }}
           rotation={{ angle }}
@@ -129,6 +130,7 @@ function Ball() {
       <View style={{ ...stage(), height: 200 }}>
         <Dots />
         <View
+          testID="ball"
           {...pan.panHandlers}
           style={{
             position: "absolute",
