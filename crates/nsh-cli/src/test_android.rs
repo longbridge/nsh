@@ -33,7 +33,7 @@ const CONNECT: Duration = Duration::from_secs(90);
 pub(crate) fn starter(work: &Path) -> anyhow::Result<StartHost> {
     let sdk = Arc::new(Sdk::find()?);
     let serial = crate::android::device(&sdk)?;
-    crate::run::install_android_host(&sdk, &serial, work)?;
+    crate::run::install_android_host(&sdk, &serial, work, &crate::runtime::test_android()?)?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
         start(&sdk, &serial, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
     }))

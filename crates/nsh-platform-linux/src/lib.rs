@@ -47,6 +47,8 @@ pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, Bundle, Limits, Root};
 
+#[cfg(feature = "dev")]
+pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, run_app, set_ui_sets},
     image::AssetBase,

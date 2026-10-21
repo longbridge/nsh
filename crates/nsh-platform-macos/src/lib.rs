@@ -59,6 +59,8 @@ pub use objc2;
 pub use objc2_app_kit;
 pub use objc2_foundation;
 
+#[cfg(feature = "dev")]
+pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, quit_app, run_app, set_ui_sets},
     image::AssetBase,

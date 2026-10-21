@@ -394,8 +394,8 @@ fn handle(view: &AppView, msg: Msg) {
             session.show_error(error_title(&error), &error.to_string(), false);
             None
         }
-        Msg::HotUpdateFailed => reload(session),
-        Msg::Reload => reload_latest(session),
+        Msg::HotUpdateFailed => reload(session).map(App::Js),
+        Msg::Reload => reload_latest(session).map(App::Js),
         Msg::HideStatus(shown) => {
             if session.status.as_ref().is_some_and(|s| s.1 == shown) {
                 session.hide_status();
@@ -408,8 +408,8 @@ fn handle(view: &AppView, msg: Msg) {
         }
     };
     drop(dev);
-    if let Some(bundle) = load {
-        view.load(App::Js(bundle));
+    if let Some(app) = load {
+        view.load(app);
     }
 }
 
@@ -424,8 +424,8 @@ fn error_title(error: &AppError) -> &'static str {
     }
 }
 
-/// Handles one event of the dev client; returns the bundle to load.
-fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bundle> {
+/// Handles one event of the dev client; returns the app to load.
+fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<App> {
     match event {
         DevEvent::Connected => dev.hide_status(),
         DevEvent::Disconnected => dev.show_status(Status::Reconnecting),
@@ -434,6 +434,21 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}
+        DevEvent::Root => {
+            dev.hide_status();
+            let Some(root) = crate::app::root() else {
+                dev.show_error(
+                    "This host cannot run the app",
+                    "The app is of Rust only, and this host was not built with its root.",
+                    true,
+                );
+                return None;
+            };
+            dev.latest = None;
+            dev.running = None;
+            dev.error = None;
+            return Some(App::Rust(root));
+        }
         DevEvent::Building => dev.show_status(Status::Building),
         DevEvent::BuildFailed(message) => {
             dev.hide_status();
@@ -508,7 +523,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
             if running.is_some() {
                 dev.show_status(Status::Reloaded);
             }
-            return Some(bundle);
+            return Some(App::Js(bundle));
         }
         DevEvent::Patch {
             session,

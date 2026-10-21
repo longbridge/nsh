@@ -574,7 +574,7 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, port, release, limits)?;
-    install_android_host(&sdk, &serial, work)?;
+    install_android_host(&sdk, &serial, work, &crate::runtime::android(true)?)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -608,9 +608,9 @@ pub(crate) fn install_android_host(
     sdk: &crate::android::Sdk,
     serial: &str,
     work: &Path,
+    runtime: &Path,
 ) -> anyhow::Result<()> {
     use crate::android::{self, Apk, Signing};
-    let runtime = crate::runtime::android(true)?;
     let apk_path = work.join("android/NshDev.apk");
     fs::create_dir_all(apk_path.parent().context("apk dir")?)?;
     let stamp = work.join("android/runtime.stamp");
@@ -619,7 +619,7 @@ pub(crate) fn install_android_host(
     // device replaces what this app installed. The device's install time
     // tells whether the host there is still the one this app installed.
     let installed = work.join("android/installed");
-    let version = runtime_version(&runtime)?;
+    let version = runtime_version(runtime)?;
     let built =
         apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
     if !built {
@@ -635,7 +635,7 @@ pub(crate) fn install_android_host(
                 dev: true,
                 rust: false,
                 dark: false,
-                runtime: &runtime,
+                runtime,
                 icon: None,
                 assets: Vec::new(),
                 signing: Signing::Debug,

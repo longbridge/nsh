@@ -59,6 +59,8 @@ pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, Bundle, Limits, Root};
 pub use windows;
 
+#[cfg(feature = "dev")]
+pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_ui_sets},
     image::AssetBase,

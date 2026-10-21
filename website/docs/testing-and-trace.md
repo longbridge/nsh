@@ -393,7 +393,8 @@ real time cannot do, reject. The app's requests come to the test as they do head
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. What a real
 platform cannot be given yet makes `open` reject rather than being left out: `clipboard`, `locale`, `reducedMotion`
-and `safeArea`. An app with Rust crates of its own runs its tests headless for now.
+and `safeArea`. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
 on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked

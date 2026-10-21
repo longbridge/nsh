@@ -325,7 +325,11 @@ each entry (`RunnerMessage::Build` on its stderr, one JSON line), `nsh` writes t
 `.nsh/test/build` and answers with a `Reply` on the runner's stdin, or `Reply::Root` for a Rust app's `nsh.json` (or its
 directory): the runner then makes the app's root (`app_root()`), so `open(".")` starts a Rust app. Results, file
 failures and log records come back as `RunnerMessage`s; batches of `--trace` go to the runner's stdout, which is
-`nsh`'s.
+`nsh`'s. On a real platform (`--target`) such an app's tests run in `nsh`'s process like any other's, and its apps in
+the development hosts built with its crates (`runtime::test_host`, `test_web`, `test_android`: a Rust app's too, whose
+runners have no dev server client). A Rust app's hosts know its root (the platforms' `set_root`, Android's `root!`, the
+web runtime's `rust_app!`); for its `nsh.json` the test session's server publishes no bundle but
+`DevServer::publish_root` (`ServerMessage::Root`, after the test's setup), and the host runs the root.
 
 ### On a real platform (`--target`)
 

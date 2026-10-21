@@ -104,6 +104,8 @@ struct Patch {
 
 #[derive(Clone)]
 enum Event {
+    /// The app is the host's own Rust root ([`DevServer::publish_root`]).
+    Root,
     Building,
     Failed(Arc<str>),
     Patch(Arc<Patch>),
@@ -381,6 +383,13 @@ impl DevServer {
             app_id: app.id,
             ui_sets,
         })));
+    }
+
+    /// Publishes the app as the hosts' own Rust root (`nsh.json` `"root"`,
+    /// an app of Rust only, whose hosts are built with it): they run it in
+    /// place of a bundle.
+    pub fn publish_root(&self) {
+        self.set(Event::Root);
     }
 
     /// Publishes a build error; clients keep running the last good bundle
@@ -771,6 +780,7 @@ async fn send_event(
     event: &Event,
 ) -> Result<(), BoxError> {
     match event {
+        Event::Root => send(socket, &ServerMessage::Root).await,
         Event::Building => send(socket, &ServerMessage::Building).await,
         // It cannot run the last good build either: it keeps showing why.
         Event::Failed(_) if host.refused.is_some() => Ok(()),

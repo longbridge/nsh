@@ -337,6 +337,26 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}
+        DevEvent::Root => {
+            hide_status(ui);
+            let Some(root) = crate::app::root() else {
+                return show_error(
+                    ui,
+                    "This host cannot run the app",
+                    "The app is of Rust only, and this host was not built with its root.",
+                    true,
+                );
+            };
+            let view = {
+                let mut ui = ui.borrow_mut();
+                ui.latest = None;
+                ui.running = None;
+                ui.view.upgrade()
+            };
+            let Some(view) = view else { return };
+            hide_error(ui);
+            view.load(App::Rust(root));
+        }
         DevEvent::Building => show_status(ui, Status::Building),
         DevEvent::BuildFailed(message) => {
             hide_status(ui);

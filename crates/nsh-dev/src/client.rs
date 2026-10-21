@@ -46,6 +46,8 @@ pub enum DevEvent {
         /// The event.
         reply: crate::protocol::FetchReply,
     },
+    /// Run the host's own Rust root (see [`crate::protocol::ServerMessage::Root`]).
+    Root,
     /// A rebuild started.
     Building,
     /// The build failed.
@@ -263,6 +265,7 @@ fn session(
                     on_event(DevEvent::TestSetup { storage })
                 }
                 Ok(ServerMessage::Fetch { id, reply }) => on_event(DevEvent::Fetch { id, reply }),
+                Ok(ServerMessage::Root) => on_event(DevEvent::Root),
                 Ok(ServerMessage::Building) => on_event(DevEvent::Building),
                 Ok(ServerMessage::BuildFailed { message }) => {
                     on_event(DevEvent::BuildFailed(message))
