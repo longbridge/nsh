@@ -84,12 +84,14 @@ fn mobile_ui_renders_and_answers_presses() {
             Some((five.0, plus))
         })
         .expect("the own stepper's value and its + button");
+    // Queue the complete tap before waiting for rendering: draining while
+    // pressed can cross the stepper's hold threshold and start repeating.
     for kind in [EventKind::PressIn, EventKind::PressOut] {
         engine
             .control()
             .dispatch_event(plus, kind, EventPayload::None);
-        drain(&rx, &mut screen);
     }
+    drain(&rx, &mut screen);
     assert_eq!(
         screen
             .texts
