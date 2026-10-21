@@ -66,7 +66,7 @@ crate::static_reactive!(JsonValue: JsonValue);
 crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
 
 /// Sets `prop` among `props`, replacing one of its kind.
-fn set_in(props: &mut Vec<Prop>, prop: Prop) {
+pub(crate) fn set_in(props: &mut Vec<Prop>, prop: Prop) {
     match props.iter_mut().find(|p| same_kind(p, &prop)) {
         Some(p) => *p = prop,
         None => props.push(prop),
@@ -596,9 +596,25 @@ impl Screen {
 
     /// The header's colors: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons'), as [`super::Style::from_decls`] makes
-    /// them (TS: `headerStyle`).
-    pub fn header_style(self, style: impl IntoReactive<super::Style>) -> Self {
-        self.bind_prop(style, |s: super::Style| Prop::HeaderStyle(s.0))
+    /// them (TS: `headerStyle`); a style of typed styles applies as
+    /// [`Self::header_style_with`]'s do.
+    pub fn header_style(mut self, style: impl IntoReactive<super::Style>) -> Self {
+        let style = match style.into_reactive() {
+            // Its bound parts are read in the binding, which follows them.
+            super::Reactive::Static(s) if s.1.is_bound() => {
+                super::Reactive::Bound(std::rc::Rc::new(move || s.clone()))
+            }
+            style => style,
+        };
+        self.0.bind_attr(style, |a, s: super::Style| {
+            set_in(&mut a.props, Prop::HeaderStyle(s.0));
+            if !s.1.is_empty() {
+                let typed = s.1.resolved();
+                let list = (!typed.is_empty()).then(|| Arc::new(typed.lower()));
+                set_in(&mut a.props, Prop::HeaderClassList(list));
+            }
+        });
+        self
     }
 
     /// The header's colors as typed styles: the background

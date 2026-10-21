@@ -294,7 +294,9 @@ reasons: `reactive-components.md`.
     is of the field's type (`.index(1)`); an `Option<T>` field also takes a `T` (`From<T> for Option<T>`) and a text
     one a string (`.label("Save")`); a field that is not a `Prop` takes `Into<T>` (a number exactly its type); a
     slot's setter takes the content to fill it with (`.header(text(..))`), an `Items` field's a `VirtualList`
-    (`.items(virtual_list(..))`); the children are the element's `.child(..)`ren;
+    (`.items(virtual_list(..))`); a style field's (`Prop<Style>` or `Style`: `Button`'s `selected_style`) the
+    typed styles' closure, as the state styles take (`.selected_style(|s| s.bg(..).text_color(..))`), made into
+    the field's `Style` (`From<StyleRefinement>`); the children are the element's `.child(..)`ren;
   - a **listener method per event**, named as its TSX handler in snake case (`onPressDown` is
     `.on_press_down(..)`): a unit variant's takes `move || ..` (or `move |_: &()| ..`), a one-field variant's
     `move |value: &T| ..` (a `Listener<T>` too: `IntoListener`), a named-field variant's the event itself
@@ -359,6 +361,12 @@ reasons: `reactive-components.md`.
 - **Element attributes for system UI**: `.inset_padding(insets)` / `.inset_margin(insets)` add to the padding /
   margin the styles resolve to (what `SafeAreaView` and `KeyboardAvoidingView` use, so the app's own padding stays),
   `.inline_style(props.style)` applies a `ui::Style` prop (a value or a binding).
+- **A `ui::Style` holds JS's declarations, Rust's typed styles or both**: JS decodes a style object into declarations
+  (`StylePatch`, applied as the prop it goes to: `selectedStyle`, the inline style); a Rust caller's closure gives typed
+  styles, which the element that takes the style (`.selected_style(..)`, `.checked_style(..)`, `.inline_style(..)`) adds
+  to its own in the state's variant, as `.selected(|s| ..)` would (theme colors follow the appearance natively, bound
+  parts their signals; a bound `Style` adds them as a bound part when it has typed styles as the element is made, so a
+  style prop left unset or set from JS costs nothing more), and a page's `.header_style(..)` as `header_style_with`'s.
 - **What a view gives a nested component's element** (`chip()`) goes on the component's root, after
   the root's own, as its styles do: an inline style (`.inline_style(..)`), animated values (`.bind_opacity(&v)`,
   `.bind_translate_y(&v)`), insets (bound ones are a binding, applied again when they change), on a rooted

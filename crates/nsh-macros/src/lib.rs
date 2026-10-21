@@ -201,6 +201,12 @@ fn is_number(ty: &Type) -> bool {
     )
 }
 
+/// Whether `ty` is a style (`nsh_core::ui::Style`), whose setter takes the
+/// typed styles' closure.
+fn is_style(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "Style")
+}
+
 /// `PressDown` -> `press_down`, `HTMLView` -> `html_view`.
 fn snake(name: &str) -> String {
     let name = name.strip_prefix("r#").unwrap_or(name);
@@ -476,6 +482,34 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             });
             let value_ty = ty;
             let method = match (&kind, is_held) {
+                // A style is set as an element's state styles are, with the
+                // typed styles (`.selected_style(|s| s.bg(..))`).
+                (Kind::Value, _) if is_style(value_ty) => {
+                    field_values.push(quote! {
+                        impl #ui::__private::PropField<#index> for #name {
+                            type Value = #value_ty;
+                        }
+                    });
+                    let value = quote! {
+                        <<$props as #ui::__private::PropField<#index>>::Value as ::core::convert::From<#ui::StyleRefinement>>::from(
+                            style(#ui::StyleRefinement::default()),
+                        )
+                    };
+                    let assign = if is_held {
+                        quote!(#ui::Prop::from(#value))
+                    } else {
+                        value
+                    };
+                    Some(quote! {
+                        $($vis)* fn #ident(
+                            mut self,
+                            style: impl ::core::ops::FnOnce(#ui::StyleRefinement) -> #ui::StyleRefinement,
+                        ) -> Self {
+                            self.0.__props_mut().#ident = #assign;
+                            self
+                        }
+                    })
+                }
                 (Kind::Value, true) => {
                     field_values.push(quote! {
                         impl #ui::__private::PropField<#index> for #name {
