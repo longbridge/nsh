@@ -26,6 +26,8 @@ mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
+#[cfg(feature = "js")]
+mod local_time;
 mod net;
 mod storage;
 mod text;
