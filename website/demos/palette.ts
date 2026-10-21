@@ -54,7 +54,7 @@ const __dark = {
   primary: {
     backgroundColor: "#eceef1",
     backgroundImage: "linear-gradient(180deg, #f7f8f9, #dfe1e4)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 3px 10px rgba(0,0,0,0.4)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 1px 0 rgba(0,0,0,0.5), 0 2px 6px -1px rgba(0,0,0,0.45)",
   },
   accentFill: {
     backgroundColor: "#c8f26d",
@@ -105,12 +105,12 @@ const __light: typeof __dark = {
     backgroundImage: "linear-gradient(180deg, #ffffff, #f3f3ef)",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.10)",
-    boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.05), 0 1px 2px rgba(20,20,10,0.12), 0 3px 8px rgba(20,20,10,0.05)",
+    boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
   },
   primary: {
     backgroundColor: "#1d1e22",
-    backgroundImage: "linear-gradient(180deg, #242429, #1c1e21)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), 0 2px 6px rgba(20,20,10,0.22)",
+    backgroundImage: "linear-gradient(180deg, #34363c, #1c1d21)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.05), 0 1px 0 rgba(20,20,10,0.35), 0 2px 5px -1px rgba(20,20,10,0.30)",
   },
   accentFill: {
     backgroundColor: "#c8f26d",

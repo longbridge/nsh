@@ -64,7 +64,7 @@
   --finish-raised: 0 1px 2px rgb(0 0 0 / 45%);
   --finish-primary-bg: linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%);
   --finish-primary-hover-bg: linear-gradient(180deg, #fcfcfd 0%, #e7e9eb 100%);
-  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(0 0 0 / 12%), 0 3px 10px rgb(0 0 0 / 40%);
+  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(0 0 0 / 12%), 0 1px 0 rgb(0 0 0 / 50%), 0 2px 6px -1px rgb(0 0 0 / 45%);
   --finish-accent-bg: linear-gradient(180deg, #ceef7d 0%, #c0e664 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 45%), 0 3px 12px rgb(200 242 109 / 22%);
 
@@ -191,10 +191,10 @@ html.light {
   --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
   --finish-inset: inset 0 1px 2px rgb(0 0 0 / 6%), inset 0 0 0 1px rgb(0 0 0 / 2%);
   --finish-raised-bg: linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%);
-  --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(20 20 10 / 5%), 0 1px 2px rgb(20 20 10 / 12%), 0 3px 8px rgb(20 20 10 / 5%);
-  --finish-primary-bg: linear-gradient(180deg, #242429 0%, #1c1e21 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #2c2d33 0%, #232529 100%);
-  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 14%), 0 1px 2px rgb(20 20 10 / 18%), 0 4px 12px rgb(20 20 10 / 14%);
+  --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(20 20 10 / 4%), 0 1px 0 rgb(20 20 10 / 10%), 0 2px 4px -1px rgb(20 20 10 / 10%);
+  --finish-primary-bg: linear-gradient(180deg, #34363c 0%, #1c1d21 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #3c3e44 0%, #232529 100%);
+  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 18%), inset 0 0 0 1px rgb(255 255 255 / 5%), 0 1px 0 rgb(20 20 10 / 35%), 0 2px 5px -1px rgb(20 20 10 / 30%);
   --finish-accent-bg: linear-gradient(180deg, #cdf276 0%, #c6ed69 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 55%), 0 1px 3px rgb(80 110 10 / 18%);
   --accent-border: #a7cf3f;

@@ -1,4 +1,4 @@
-import { effect, Image, mount, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 import { Platform, windowSize } from "nsh/device";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
@@ -7,9 +7,8 @@ import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
-import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, header, IconTile, lazy, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
+import { Appear, Badge, colors, desktop, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
 
 /** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
@@ -242,7 +241,7 @@ function Sidebar() {
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
-          <Image src={logo} style={{ width: 32, height: 32, borderRadius: 8 }} />
+          <Logo size={32} />
           <View style={{ flex: 1, gap: 1 }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
             <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {Platform.OS}</Text>

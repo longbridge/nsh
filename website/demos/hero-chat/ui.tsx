@@ -169,13 +169,13 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
     },
     light: {
       backgroundImage: "linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 3px 10px rgba(0,0,0,0.4)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 1px 0 rgba(0,0,0,0.5), 0 2px 6px -1px rgba(0,0,0,0.45)",
     },
     accent: {
       backgroundImage: "linear-gradient(180deg, #ceef7d 0%, #c0e664 100%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 3px 12px rgba(200,242,109,0.22)",
     },
-    track: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.6)" },
+    track: { boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)" },
     /** A knob or handle over a track. */
     knob: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 6px rgba(0,0,0,0.45)" },
     /**
@@ -183,9 +183,9 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
      * small round button), a specular top, a faint inner edge, a lower rim.
      */
     pill: {
-      backgroundColor: "#2a2c31",
-      backgroundImage: "linear-gradient(180deg, #313338 0%, #2c2e33 52%, #2a2c30 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 -1px 0 rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.35)",
+      backgroundColor: "#2c2e33",
+      backgroundImage: "linear-gradient(180deg, #313338 0%, #2c2e33 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.2)",
       borderColor: "rgba(255,255,255,0.07)",
     },
     /** A tinted capsule's rim and highlight (badges). */
@@ -215,23 +215,23 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
     inset: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.07)" },
     raised: {
       backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.05), 0 1px 2px rgba(20,20,10,0.14), 0 3px 8px rgba(20,20,10,0.06)",
+      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #25272b 0%, #1d1e22 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), 0 3px 10px rgba(20,20,10,0.22)",
+      backgroundImage: "linear-gradient(180deg, #34363c 0%, #1c1d21 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.05), 0 1px 0 rgba(20,20,10,0.35), 0 2px 5px -1px rgba(20,20,10,0.30)",
     },
     accent: {
       backgroundImage: "linear-gradient(180deg, #cff27e 0%, #c6ec6b 100%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 3px 10px rgba(110,150,20,0.25)",
     },
-    track: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.10)" },
+    track: { boxShadow: "inset 0 1px 1px rgba(20,20,10,0.08)" },
     knob: { boxShadow: "inset 0 1px 0 #ffffff, 0 1px 4px rgba(20,20,10,0.28)" },
     pill: {
       backgroundColor: "#ffffff",
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fbfbf9 52%, #f2f2ee 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255,255,255,0.7), inset 0 -1px 0 rgba(20,20,10,0.06), 0 1px 3px rgba(20,20,10,0.12), 0 4px 10px rgba(20,20,10,0.05)",
-      borderColor: "rgba(20,20,10,0.08)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.04), 0 1px 0 rgba(20,20,10,0.10), 0 2px 4px -1px rgba(20,20,10,0.10)",
+      borderColor: "rgba(20,20,10,0.10)",
     },
     chip: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(20,20,10,0.04)" },
     glass: {
@@ -712,8 +712,7 @@ export function Segmented<T extends string>(props: {
         padding: 3,
         borderRadius: height / 2,
         backgroundColor: colors.inset,
-        // The track's glass: the sunk shadow plus a lit lower rim.
-        boxShadow: `${finish.track.boxShadow}, inset 0 -1px 0 ${isDark() ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.85)"}`,
+        boxShadow: finish.track.boxShadow,
         borderWidth: 1,
         borderColor: colors.border,
       }}

@@ -302,9 +302,9 @@ const RAISED: Look = Look {
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.05)),
-        drop(1.0, 2.0, rgb_a(INK, 0.14)),
-        drop(3.0, 8.0, rgb_a(INK, 0.06)),
+        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.04)),
+        drop(1.0, 0.0, rgb_a(INK, 0.10)),
+        drop(2.0, 3.0, rgb_a(INK, 0.07)),
     ],
     dark: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.08)),
@@ -317,16 +317,20 @@ const RAISED: Look = Look {
 const LIGHT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0x25272b), rgb(0xf7f8f9), 0.0),
-        stop(rgb(0x1d1e22), rgb(0xdfe1e4), 1.0),
+        stop(rgb(0x34363c), rgb(0xf7f8f9), 0.0),
+        stop(rgb(0x1c1d21), rgb(0xdfe1e4), 1.0),
     ],
     light: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.14)),
-        drop(3.0, 10.0, rgb_a(INK, 0.22)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.18)),
+        inner(0.0, 0.0, 1.0, rgb_a(WHITE, 0.05)),
+        drop(1.0, 0.0, rgb_a(INK, 0.35)),
+        drop(2.0, 4.0, rgb_a(INK, 0.22)),
     ],
     dark: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.9)),
-        drop(3.0, 10.0, rgb_a(BLACK, 0.4)),
+        inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.12)),
+        drop(1.0, 0.0, rgb_a(BLACK, 0.5)),
+        drop(2.0, 5.0, rgb_a(BLACK, 0.35)),
     ],
     border: None,
     backdrop_blur: 0.0,
@@ -353,8 +357,8 @@ const ACCENT: Look = Look {
 const TRACK: Look = Look {
     fill: None,
     stops: &[],
-    light: &[inner(1.0, 2.0, 0.0, rgb_a(INK, 0.10))],
-    dark: &[inner(1.0, 3.0, 0.0, rgb_a(BLACK, 0.6))],
+    light: &[inner(1.0, 1.0, 0.0, rgb_a(INK, 0.08))],
+    dark: &[inner(1.0, 2.0, 0.0, rgb_a(BLACK, 0.5))],
     border: None,
     backdrop_blur: 0.0,
 };
@@ -375,26 +379,24 @@ const KNOB: Look = Look {
 };
 
 const PILL: Look = Look {
-    fill: Some(tone(rgb(0xffffff), rgb(0x2a2c31))),
+    fill: Some(tone(rgb(0xffffff), rgb(0x2c2e33))),
     stops: &[
         stop(rgb(0xffffff), rgb(0x313338), 0.0),
-        stop(rgb(0xfbfbf9), rgb(0x2c2e33), 0.52),
-        stop(rgb(0xf2f2ee), rgb(0x2a2c30), 1.0),
+        stop(rgb(0xf3f3ef), rgb(0x2c2e33), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        inner(0.0, 0.0, 1.0, rgb_a(WHITE, 0.7)),
-        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.06)),
-        drop(1.0, 3.0, rgb_a(INK, 0.12)),
-        drop(4.0, 10.0, rgb_a(INK, 0.05)),
+        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.04)),
+        drop(1.0, 0.0, rgb_a(INK, 0.10)),
+        drop(2.0, 3.0, rgb_a(INK, 0.07)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.16)),
-        inner(0.0, 0.0, 1.0, rgb_a(WHITE, 0.03)),
-        inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.28)),
-        drop(2.0, 6.0, rgb_a(BLACK, 0.35)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.10)),
+        inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.25)),
+        drop(1.0, 2.0, rgb_a(BLACK, 0.45)),
+        drop(3.0, 8.0, rgb_a(BLACK, 0.2)),
     ],
-    border: Some(tone(rgb_a(INK, 0.08), rgb_a(WHITE, 0.07))),
+    border: Some(tone(rgb_a(INK, 0.10), rgb_a(WHITE, 0.07))),
     backdrop_blur: 0.0,
 };
 
