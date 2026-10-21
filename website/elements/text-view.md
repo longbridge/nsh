@@ -435,8 +435,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { View } from "nsh";
-import { Image } from "nsh/image";
+import { Image, View } from "nsh";
 
 <TextView
   markdown={reply()}
