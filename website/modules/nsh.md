@@ -227,9 +227,9 @@ function Input(props: InputProps): YNode;
 The host elements `nsh` exports, written as tags: `<View>`, `<Text>`, `<Scroll>`, `<Input>`. The compiler makes the
 native view in place for a tag that names one of them through its import (an alias too), so importing them costs
 nothing at run time. They are components like any other, so they can also be passed around (`const Tag = inline ? Text : View`).
-The other elements come from their own modules: `Image` from [`nsh/image`](./nsh-image.md), `List` from
-[`nsh/list`](./nsh-list.md), `Canvas`, `WebView` and `Video` from theirs. Their props are documented under
-[Elements](../elements/index.md).
+`nsh` exports the other primitives the same way: [`List`](./nsh-list.md), [`Image`](./nsh-image.md),
+[`Canvas`](./nsh-canvas.md), [`WebView`](./nsh-webview.md) and [`Video`](./nsh-video.md), each with its own reference
+page. Their props are documented under [Elements](../elements/index.md).
 
 ## Types
 

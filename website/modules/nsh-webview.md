@@ -1,15 +1,15 @@
 ---
-title: nsh/webview
+title: WebView
 description: WebView, a native web page view (WKWebView, android.webkit.WebView), with its props, events and ref methods.
-order: 13
+order: 2.35
 ---
 
-# nsh/webview
+# WebView
 
-`nsh/webview` exports `WebView`: a web page shown by the platform's own browser engine (`WKWebView` on iOS and Mac Catalyst, `android.webkit.WebView` on Android). It is a native view laid out like any other, so it scrolls, clips and overlaps other views correctly.
+`nsh` exports `WebView`: a web page shown by the platform's own browser engine (`WKWebView` on iOS and Mac Catalyst, `android.webkit.WebView` on Android). It is a native view laid out like any other, so it scrolls, clips and overlaps other views correctly.
 
 ```ts
-import { WebView, type WebViewNavigation, type WebViewProps } from "nsh/webview";
+import { WebView, type WebViewNavigation, type WebViewProps } from "nsh";
 ```
 
 See [Web view and video](../docs/web-view-and-video.md) for the guide and [`<WebView>`](../elements/web-view.md) for its props.
@@ -27,8 +27,7 @@ interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desktop">, 
 ```
 
 ```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView, type WebViewNavigation } from "nsh/webview";
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
 
 function Browser() {
   const nav = signal<WebViewNavigation | null>(null);

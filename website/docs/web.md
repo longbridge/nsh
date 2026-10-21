@@ -1,6 +1,6 @@
 ---
 title: Web
-description: Build web apps with Native Shell components rendered as HTML and CSS, develop in the browser, and publish to any static host or CDN.
+description: Build web apps in Rust or TSX with Native Shell components rendered as HTML and CSS, develop in the browser, and publish to any static host or CDN.
 order: 16
 group: platforms
 demo: counter
@@ -14,13 +14,13 @@ Build web apps with Native Shell using the same components, styles and applicati
 
 ## What runs where
 
-The page is built from HTML elements styled with CSS. NSH turns component updates into batches of DOM changes, while the browser displays the interface and handles scrolling, text selection and input. WebAssembly hosts the shared Rust engine for component state, layout and updates.
+The page is built from HTML elements styled with CSS. NSH turns component updates into batches of DOM changes, while the browser displays the interface and handles scrolling, text selection and input. WebAssembly hosts the shared Rust engine for component state, layout and updates: with a Rust app's crate compiled in, or with QuickJS for a TSX app.
 
 On every native platform the engine has its own thread and hands one `MountBatch` per commit to the main thread. A browser page has one thread, so the web build drives the same engine step by step from the page's event loop (`nsh_engine::LocalEngine`):
 
 ```text
 pointer / keyboard / scroll events ─┐
-setTimeout (the engine's deadline) ─┼─▶ nsh.wasm: engine turn (JS, core, layout) ─▶ one JSON batch ─▶ nsh.js: DOM
+setTimeout (the engine's deadline) ─┼─▶ nsh.wasm: engine turn (Rust or JS, core, layout) ─▶ one JSON batch ─▶ nsh.js: DOM
 requestAnimationFrame ──────────────┘                                                 ▲
                                                           native animation outputs ───┘
 ```
@@ -45,79 +45,12 @@ Published apps behave as desktop apps in desktop browsers and as phone apps in p
 - **Selection and menus**: in desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers: buttons, pressable rows, tabs) and text with `selectable={false}` or `select-none`; dragging the mouse over it selects it, Ctrl/Cmd+C copies it line by line and Ctrl/Cmd+A selects all of the text the selection is in. In phone and tablet browsers only `selectable` text is selectable, as in native apps. The browser's context menu appears only in selectable text and inputs.
 
 
-## Publish an app
-
-```sh
-nsh package App.tsx --target web           # out/<Name>/: a static site
-nsh package App.tsx --target web --run     # and serve it on this machine (open the address it prints)
-```
-
-`nsh package --target web` writes `out/<Name>/` (`--out` for another directory), laid out like a frontend build: one
-page and files named after their content.
-
-| File | What it is |
-|---|---|
-| `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
-| `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
-| `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
-| `nsh.<digest>.wasm` | The engine, the core, the runtime's modules and QuickJS without its compiler (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli) |
-| `app.<digest>.nshc` | The app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
-| `harden.<digest>.nshc` | The [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
-| `chunks/<name>.<digest>.nshc` | What `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
-| `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
-| `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
-
-`<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
-new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
-works from any directory of any host (`https://example.com/apps/counter/`).
-
-### Deploy it
-
-Upload the directory to any static host: an object store behind a CDN, Cloudflare Pages, Netlify, GitHub Pages,
-nginx. Two rules make it load fast and update reliably:
-
-| Files | `Cache-Control` |
-|---|---|
-| `index.html`, `manifest.webmanifest` | `no-cache` (revalidated on every load, so a release shows at once) |
-| everything else | `public, max-age=31536000, immutable` |
-
-Serve `.wasm` as `application/wasm` (browsers then compile it while it downloads) and let the host or CDN compress
-text and WebAssembly (gzip or brotli). `nsh package --target web --run` serves the site this way on
-`http://127.0.0.1:4173/`.
-
-An app published for the web runs like a packaged native app: as a release, [hardened](./sandbox-and-capabilities.md)
-(no `eval`), with the capabilities its `nsh.json` declares. When they restrict `network`, the page also carries a
-Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin), so the browser itself
-refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
-later errors go to the browser's console.
-
-### Embed it with an iframe
-
-There is no embedding API on the web: embed the published app with an `<iframe>`. Its size is the app's window:
-
-```html
-<iframe src="https://apps.example.com/counter/" title="Counter"
-        style="width: 390px; height: 844px; border: 0"></iframe>
-```
-
-## Develop in the browser
-
-```sh
-nsh run App.tsx --target web
-```
-
-starts the dev server and prints its page's address, `http://127.0.0.1:8790/`: open it in any browser. The page is a development host
-like the others: it runs each build of the app, applies edits in place (hot updates), shows build errors and runtime
-errors over the app, and sends the app's `console` output to the terminal. Phones on the same network open the
-address `nsh run` prints under it (`on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
-web runtime is there (in the distribution, always).
-
 ## Apps with Rust components
 
-An app written in Rust ([Building with Rust](./rust.md)) publishes and runs in the browser with the same commands:
+An app written in Rust ([Building with Rust](./rust.md)) publishes and runs in the browser from its directory:
 
 ```sh
-nsh package --target web           # out/<Name>/: the app's own nsh.wasm, with its crate
+nsh package --target web           # .nsh/out/<Name>/: the app's own nsh.wasm, with its crate
 nsh run --target web               # the dev server's page; editing the Rust code builds it again
 ```
 
@@ -140,6 +73,80 @@ HTTP requests through the same network stack as JS's `fetch` (the browser's here
 The build needs the Rust target and a clang that compiles to WebAssembly, as the runtime's own build does:
 `rustup target add wasm32-unknown-unknown`, plus `clang` and `llvm-ar` (on macOS, an LLVM toolchain such as
 Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown`).
+
+## Publish an app
+
+```sh
+# A Rust app, from its directory
+nsh package --target web                   # .nsh/out/<Name>/: a static site
+nsh package --target web --run             # and serve it on this machine (open the address it prints)
+
+# A TSX app
+nsh package App.tsx --target web
+nsh package App.tsx --target web --run
+```
+
+`nsh package --target web` writes `.nsh/out/<Name>/` (`--out` for another directory), laid out like a frontend build: one
+page and files named after their content.
+
+| File | What it is |
+|---|---|
+| `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
+| `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
+| `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
+| `nsh.<digest>.wasm` | A Rust app: the engine, the components and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli). A TSX app: the engine, the core, the runtime's modules and QuickJS without its compiler (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli) |
+| `app.<digest>.nshc` | A TSX app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
+| `harden.<digest>.nshc` | With a TSX app, the [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
+| `chunks/<name>.<digest>.nshc` | With a TSX app, what `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
+| `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
+| `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
+
+`<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
+new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
+works from any directory of any host (`https://example.com/apps/counter/`).
+
+### Deploy it
+
+Upload the directory to any static host: an object store behind a CDN, Cloudflare Pages, Netlify, GitHub Pages,
+nginx. Two rules make it load fast and update reliably:
+
+| Files | `Cache-Control` |
+|---|---|
+| `index.html`, `manifest.webmanifest` | `no-cache` (revalidated on every load, so a release shows at once) |
+| everything else | `public, max-age=31536000, immutable` |
+
+Serve `.wasm` as `application/wasm` (browsers then compile it while it downloads) and let the host or CDN compress
+text and WebAssembly (gzip or brotli). `nsh package --target web --run` serves the site this way on
+`http://127.0.0.1:4173/`.
+
+An app published for the web runs like a packaged native app: as a release, a TSX app [hardened](./sandbox-and-capabilities.md)
+(no `eval`), with the capabilities its `nsh.json` declares. When they restrict `network`, the page also carries a
+Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin), so the browser itself
+refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
+later errors go to the browser's console.
+
+### Embed it with an iframe
+
+There is no embedding API on the web: embed the published app with an `<iframe>`. Its size is the app's window:
+
+```html
+<iframe src="https://apps.example.com/counter/" title="Counter"
+        style="width: 390px; height: 844px; border: 0"></iframe>
+```
+
+## Develop in the browser
+
+```sh
+nsh run --target web               # a Rust app, from its directory
+nsh run App.tsx --target web       # a TSX app
+```
+
+starts the dev server and prints its page's address, `http://127.0.0.1:8790/`: open it in any browser. The page is a development host
+like the others: it runs each build of the app, shows build errors and runtime errors over the app, and sends the app's
+logs to the terminal. A change to a Rust app's crate builds its runtime again and the open page loads it by itself;
+TSX edits are applied in place (hot updates). Phones on the same network open the
+address `nsh run` prints under it (`on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
+web runtime is there (in the distribution, always).
 
 ## Build the website's player
 
@@ -171,7 +178,8 @@ The compiler is also a Rust function, `nsh_bundler::compile_module(name, source,
 
 ## Embed it in a page
 
-`nsh.js` is an ES module. `createPlayer` loads the runtime into a container; `run` starts a bundle that `nsh build` writes: `bundle.nshc`, its bytecode, as bytes, or `bundle.js` as a string. The runtime `nsh package --target web` ships (`nsh.wasm`) has no JavaScript compiler and runs bytecode only; the development runtime (`nsh-dev.wasm` in the distribution) runs both:
+A Rust app is embedded as its published site, in an [iframe](#embed-it-with-an-iframe). For TSX, `nsh.js` is an ES
+module. `createPlayer` loads the runtime into a container; `run` starts a bundle that `nsh build` writes: `bundle.nshc`, its bytecode, as bytes, or `bundle.js` as a string. The runtime `nsh package --target web` ships (`nsh.wasm`) has no JavaScript compiler and runs bytecode only; the development runtime (`nsh-dev.wasm` in the distribution) runs both:
 
 ```js
 import { createPlayer } from "./nsh.js";
@@ -232,7 +240,8 @@ The page reports the rest of the environment, and keeps it current:
 
 ## Split bundles
 
-A web app does not need to download all of its code before the first screen shows. `nsh package --target web` publishes apps split, with each chunk as `chunks/<name>.<digest>.nshc` and the page mapping chunks to those files (a bundle run as bytecode loads its chunks as bytecode: `Screen.nshc` next to `Screen.js`). To split a bundle yourself, `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
+A TSX web app does not need to download all of its code before the first screen shows (a Rust app is one `nsh.wasm`,
+which the browser compiles while it downloads). `nsh package --target web` publishes TSX apps split, with each chunk as `chunks/<name>.<digest>.nshc` and the page mapping chunks to those files (a bundle run as bytecode loads its chunks as bytecode: `Screen.nshc` next to `Screen.js`). To split a bundle yourself, `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
 
 ```sh
 nsh build --release --split -o site/app
@@ -259,7 +268,7 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 ## Limits
 
-The web runtime is for demos and documentation. It does not have:
+The browser decides these, and the web backend follows it:
 
 - **Web views of other sites**: `WebView` is an `<iframe>`. Inline HTML (`source={{ html }}`) gets everything: `onMessage`, `postMessage`, `injectJavaScript`, the injected scripts and load events (it runs with an origin of its own, apart from the page). A page of another site only gets `postMessage` and load events with the URL it was given: browsers hide its navigations, title, history and errors from the page around it, and `userAgent` cannot be set.
 - **Videos with sound that start on their own**: `Video` is a `<video>` with every prop and event, but browsers only start a video with sound after a user gesture (muted videos play).

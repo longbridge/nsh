@@ -46,7 +46,7 @@ Name the product **Native Shell** in formal places (page titles, the home page,
 a page's first mention, the README's opening, meta descriptions) and **NSH**
 everywhere else in prose, as GPUI is written: "NSH apps", "NSH's components",
 "NSH 应用". Lowercase `nsh` is for code only, in backticks: the CLI (`nsh run`),
-`nsh.json`, the modules (`nsh`, `nsh/list`), crates and packages. A short,
+`nsh.json`, the modules (`nsh`, `nsh/animated`), crates and packages. A short,
 uppercase name is one the community can build on (`nsh-*` crates, NSH plugins).
 
 Write in positive terms: say what nsh, a platform or a feature is and does,
@@ -99,6 +99,25 @@ demo: guide-getting-started     # optional; a demo from demos/<name>.tsx
   `> [!WARNING]`, `> [!CAUTION]`.
 - **Code blocks** highlight `tsx ts js json sh bash swift java kotlin rust
   toml diff xml html yaml css`.
+- **Code tabs**: consecutive fences whose info string holds the word `tabs`
+  become one block with a tab per fence, named after its language (`rust`
+  → Rust, `tsx` → TSX, others capitalized). The first tab is selected;
+  choosing another switches every group on the page and is remembered. Any
+  other text between the fences (a blank line is fine) ends the group.
+  Show examples Rust first, then TSX:
+
+  ````md
+  ```rust tabs
+  view().child(text("Hello"))
+  ```
+
+  ```tsx tabs
+  <View><Text>Hello</Text></View>
+  ```
+  ````
+
+  The `.md` endpoints and `llms-full.txt` print the fences as plain
+  consecutive blocks (`src/lib/remark-code-tabs.js`).
 
 Each page is also served as Markdown at its URL plus `.md`; `/llms.txt`
 lists every page and `/llms-full.txt` holds all English pages.
@@ -156,10 +175,11 @@ player, or editing a demo, invalidates Astro's content cache automatically
 | --- | --- |
 | `src/content.config.ts` | The six collections (three sections × two locales) and the schema |
 | `src/lib/sections.ts` | Section labels, page lists in sidebar order, routes |
-| `src/lib/remark-*.js`, `rehype-heading-anchors.js` | Title removal, callouts, `.md` links, demo insertion, heading anchors |
+| `src/lib/remark-*.js`, `rehype-heading-anchors.js` | Title removal, callouts, code tabs, `.md` links, demo insertion, heading anchors |
+| `src/lib/code-tabs-client.ts` | Switches code tabs, page-wide, and remembers the choice |
 | `src/lib/demo.js` | Demo sources, the demo frame and the demo panel markup |
 | `src/lib/markdown-endpoint.ts`, `llms.ts` | `<page>.md`, `llms.txt`, `llms-full.txt` |
 | `src/pages/[section]/[...slug].astro` | Content pages (and `zh-CN/`); `[section].md.ts` / `[...slug].md.ts` the Markdown |
 | `src/components/Home.astro` | The home page in both languages |
 | `src/styles/global.css` | Tokens and everything shared; see `DESIGN.md` |
-| `tests/` | `content.test.ts` (frontmatter, translations, demos), `links.test.ts` (built site) |
+| `tests/` | `content.test.ts` (frontmatter, translations, demos), `code-tabs.test.ts` (code tabs), `links.test.ts` (built site) |

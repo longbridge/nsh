@@ -772,7 +772,7 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   /* The opening paragraph is the page's standfirst. */
   .doc-body > p:first-child { color: var(--muted-foreground); font-size: 1.05rem; line-height: 1.7; }
 
-  p, ul, ol, pre, table, blockquote, .callout, details, figure { margin-block: 1rem; }
+  p, ul, ol, pre, table, blockquote, .callout, details, figure, .code-tabs { margin-block: 1rem; }
   .doc-body > :first-child { margin-top: 0; }
   .doc-body > :last-child { margin-bottom: 0; }
 
@@ -917,6 +917,65 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   .doc-code-copy:hover, .doc-code-copy[data-copied] { color: var(--foreground); }
   .doc-code-copy[data-copied] { color: var(--success); }
   .doc-code-copy svg { width: 0.85rem; height: 0.85rem; }
+
+  /* Code tabs (remark-code-tabs.js): the same card as a code block, its
+     header row a tab per language instead of one label. The selected tab is
+     the text colour over a 2px accent bar; the copy button stays in the row. */
+  .code-tabs {
+    position: relative;
+    margin-block: 1rem;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--finish-card-bg);
+    background-color: var(--card);
+    box-shadow: inset 0 1px 0 var(--highlight), var(--code-shadow);
+  }
+  .code-tabs__list {
+    display: flex;
+    gap: 0.25rem;
+    height: 2.25rem;
+    padding: 0 2.6rem 0 0.4rem;
+    border-bottom: 1px solid var(--divider);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .code-tabs__tab {
+    position: relative;
+    padding: 0 0.5rem;
+    color: var(--muted-foreground);
+    font: 600 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 140ms ease;
+  }
+  .code-tabs__tab:hover { color: var(--foreground); }
+  .code-tabs__tab[aria-selected="true"] { color: var(--foreground); }
+  .code-tabs__tab[aria-selected="true"]::after {
+    position: absolute;
+    right: 0.5rem;
+    bottom: -1px;
+    left: 0.5rem;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--citrus);
+    content: "";
+  }
+  .code-tabs__tab:focus-visible { outline-offset: -2px; border-radius: 6px; }
+  .code-tabs__panel:focus-visible { outline-offset: -2px; }
+  .code-tabs__panel[hidden] { display: none; }
+  .code-tabs pre {
+    position: static;
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none;
+  }
+  .code-tabs pre::before { display: none; }
+  .code-tabs:hover .doc-code-copy, .code-tabs:focus-within .doc-code-copy { opacity: 1; }
 
   /* Tables: a clean card, a faintly tinted header with small muted labels,
      hairlines between rows. */

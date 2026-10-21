@@ -8,22 +8,22 @@ order: 15
 
 Besides the ECMAScript standard library, an NSH app's JS environment has a set of standard globals: `fetch` with `Headers`, `Request` and `Response`; the Streams Standard; `URL` and `URLSearchParams`; `TextEncoder` / `TextDecoder`; `Blob`, `File` and `FormData`; `EventTarget`, `Event` and `AbortController`; timers, `requestAnimationFrame` and `console`; and `Intl` for number and date formatting. They are implemented natively in Rust, follow the WHATWG standards, and need no import, so the many JavaScript libraries built on these standards (HTTP clients, URL and encoding helpers, stream utilities) work unchanged.
 
-This page lists every global an app has. UI is built with [elements](../elements/index.md) and the app's own components, and everything else an app uses comes from the [modules](./index.md) it imports.
+This page lists every global an app has. These are the TSX environment's: Rust code uses Rust's standard library, crates.io and NSH's services of `nsh_core::ui::prelude` instead (`fetch`, timers, tasks; see [Building with Rust](../docs/rust.md)), named in the table's Rust column. UI is built with [elements](../elements/index.md) and the app's own components, and everything else an app uses comes from the [modules](./index.md) it imports.
 
 The TypeScript declarations of all of these are generated into `.nsh/types/nsh/globals.d.ts` (see [Project structure](../docs/project-structure.md)).
 
-| Group | Globals |
-|---|---|
-| [Console and timing](#console-and-timing) | `console`, `performance` |
-| [Timers and frames](#timers-and-frames) | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `queueMicrotask`, `requestAnimationFrame`, `cancelAnimationFrame` |
-| [Base64 and errors](#base64-and-errors) | `atob`, `btoa`, `DOMException` |
-| [Events and abort signals](#events-and-abort-signals) | `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal` |
-| [URLs](#urls) | `URL`, `URLSearchParams` |
-| [Text encoding](#text-encoding) | `TextEncoder`, `TextDecoder` |
-| [Blobs and form data](#blobs-and-form-data) | `Blob`, `File`, `FormData` |
-| [Fetch](#fetch) | `fetch`, `Headers`, `Request`, `Response` |
-| [Number and date formatting](#number-and-date-formatting) | `Intl.NumberFormat`, `Intl.DateTimeFormat`, `toLocaleString` |
-| [Streams](#streams) | `ReadableStream`, `WritableStream`, `TransformStream`, readers, writers, controllers, `ByteLengthQueuingStrategy`, `CountQueuingStrategy`, `TextEncoderStream`, `TextDecoderStream` |
+| Group | Globals | Rust |
+|---|---|---|
+| [Console and timing](#console-and-timing) | `console`, `performance` | the `log` crate (`log::info!`, ...), `nsh_core::time::now()` |
+| [Timers and frames](#timers-and-frames) | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `queueMicrotask`, `requestAnimationFrame`, `cancelAnimationFrame` | `set_timeout`, `set_interval`, `timer(delay).await`, `request_animation_frame`, `next_frame().await`, `Spawned::cancel()` |
+| [Base64 and errors](#base64-and-errors) | `atob`, `btoa`, `DOMException` | the `base64` crate, `Result` |
+| [Events and abort signals](#events-and-abort-signals) | `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal` | signals and closures; `Spawned::cancel()` ends a task |
+| [URLs](#urls) | `URL`, `URLSearchParams` | the `url` crate |
+| [Text encoding](#text-encoding) | `TextEncoder`, `TextDecoder` | `str::as_bytes`, `String::from_utf8` |
+| [Blobs and form data](#blobs-and-form-data) | `Blob`, `File`, `FormData` | `Vec<u8>` bodies of `HttpRequest` |
+| [Fetch](#fetch) | `fetch`, `Headers`, `Request`, `Response` | `fetch`, `HttpRequest`, `HttpResponse` |
+| [Number and date formatting](#number-and-date-formatting) | `Intl.NumberFormat`, `Intl.DateTimeFormat`, `toLocaleString` | `format!` and crates.io's formatting crates, with `locale()` |
+| [Streams](#streams) | `ReadableStream`, `WritableStream`, `TransformStream`, readers, writers, controllers, `ByteLengthQueuingStrategy`, `CountQueuingStrategy`, `TextEncoderStream`, `TextDecoderStream` | `fetch` gives the whole body; `background` tasks run long-lived connections on native targets |
 
 Native hosts also provide `Buffer`, `crypto`, `process` and `WebSocket`; see [Standard modules](./standard-modules.md) for their modules, permissions and resource limits.
 
@@ -44,14 +44,14 @@ declare var performance: {
 };
 ```
 
-`console` writes one line per call to the runtime's log (target `js`): `log` and `info` at info level, `debug`, `warn` and `error` at their levels. Arguments are joined with spaces; strings print verbatim, errors with their stack, functions as `[Function name]`, and objects and arrays as JSON (falling back to `String(value)` for cycles).
+In Rust, the `log` crate's macros (`log::info!`, `log::warn!`, ...) write to the same log, and appear in the terminal of `nsh run` too. `console` writes one line per call to the runtime's log (target `js`): `log` and `info` at info level, `debug`, `warn` and `error` at their levels. Arguments are joined with spaces; strings print verbatim, errors with their stack, functions as `[Function name]`, and objects and arrays as JSON (falling back to `String(value)` for cycles).
 
 While a device is connected to the dev server, its log lines appear in the terminal running `nsh run` / `nsh dev`, prefixed with the device name; see [Dev server and debugging](../docs/dev-server-and-debugging.md).
 
 > [!NOTE]
 > Only the five methods above exist. There is no `console.table`, `console.group`, `console.time` or `console.assert`, and no `%s` / `%o` format substitutions.
 
-`performance.now()` is the clock `requestAnimationFrame` passes to its callbacks. `performance` has no other members.
+`performance.now()` is the clock `requestAnimationFrame` passes to its callbacks; in Rust, `nsh_core::time::now()` and the `Instant`s that `request_animation_frame` and `next_frame()` give are that clock. `performance` has no other members.
 
 ## Timers and frames
 
@@ -66,14 +66,28 @@ function requestAnimationFrame(callback: (time: number) => void): number;
 function cancelAnimationFrame(id: number): void;
 ```
 
-Timers behave as in browsers: a missing, negative or non-finite delay is 0, the returned id is a positive integer, and clearing an unknown id does nothing. `handler` must be a function (string handlers are not evaluated). Timers do not clamp nested delays to 4 ms.
+Rust: `set_timeout(delay, f)` and `set_interval(period, f)` return a `Spawned` handle whose `cancel()` clears them, `timer(delay).await` waits in a task, and `request_animation_frame(f)` / `next_frame().await` give the next frame's time; all of them end with the component that made them. Timers behave as in browsers: a missing, negative or non-finite delay is 0, the returned id is a positive integer, and clearing an unknown id does nothing. `handler` must be a function (string handlers are not evaluated). Timers do not clamp nested delays to 4 ms.
 
 > [!WARNING]
 > The extra `...args` of `setTimeout` / `setInterval` are declared but currently not passed to the handler. Use a closure instead: `setTimeout(() => save(id), 100)`.
 
 `requestAnimationFrame` callbacks run once, at the next frame the engine produces, all with the same `performance.now()` time. A callback that requests another frame is called at the following frame, so the usual loop works:
 
-```ts
+```rust tabs
+spawn(async move {
+    let start = next_frame().await;
+    loop {
+        let time = next_frame().await;
+        let elapsed = time.duration_since(start).as_secs_f32() * 1000.0;
+        progress.set((elapsed / 300.0).min(1.0));
+        if elapsed >= 300.0 {
+            break;
+        }
+    }
+});
+```
+
+```tsx tabs
 let start = 0;
 function tick(time: number) {
   if (!start) start = time;
@@ -180,9 +194,17 @@ channel.send("hello");
 
 These events are unrelated to the events of elements (`onPress`, `onChange`, ...), which are props; see [Touch and gestures](../docs/touch-and-gestures.md).
 
-`AbortSignal` cancels `fetch` requests and stream pipes, and removes listeners added with `{ signal }`:
+`AbortSignal` cancels `fetch` requests and stream pipes, and removes listeners added with `{ signal }`. In Rust, a request runs in a task, and cancelling the task cancels it:
 
-```ts
+```rust tabs
+let search = spawn(async move {
+    let _ = fetch("https://api.example.com/search?q=nsh").await;
+});
+// later, for example when the screen closes (a task also ends with its component):
+search.cancel();
+```
+
+```tsx tabs
 const controller = new AbortController();
 const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
 fetch("https://api.example.com/search?q=nsh", { signal }).catch((e) => {
@@ -238,9 +260,15 @@ class URLSearchParams {
 }
 ```
 
-URLs are parsed per the URL Standard. A URL's `searchParams` is live in both directions: changing the parameters rewrites the query, and setting `search` or `href` parses it again.
+URLs are parsed per the URL Standard. A URL's `searchParams` is live in both directions: changing the parameters rewrites the query, and setting `search` or `href` parses it again. Rust code uses the `url` crate, which follows the same standard:
 
-```ts
+```rust tabs
+let mut url = url::Url::parse("https://api.example.com")?.join("/v1/items")?;
+url.query_pairs_mut().append_pair("page", "2").append_pair("tag", "new");
+url.as_str(); // "https://api.example.com/v1/items?page=2&tag=new"
+```
+
+```tsx tabs
 const url = new URL("/v1/items", "https://api.example.com");
 url.searchParams.set("page", "2");
 url.searchParams.append("tag", "new");
@@ -356,9 +384,27 @@ type HeadersInit = Headers | Record<string, string> | Iterable<[string, string]>
 type BodyInit = ReadableStream<Uint8Array> | Blob | BufferSource | FormData | URLSearchParams | string;
 ```
 
-`fetch` sends HTTP and HTTPS requests through the platform's own network stack: `NSURLSession` on iOS and Mac Catalyst, `HttpURLConnection` on Android. So the system's proxy settings, TLS configuration and certificate trust apply. `data:` URLs and `blob:` URLs (from `URL.createObjectURL`) are answered locally without touching the network; any other scheme rejects.
+`fetch` sends HTTP and HTTPS requests through the platform's own network stack: `NSURLSession` on iOS and Mac Catalyst, `HttpURLConnection` on Android. So the system's proxy settings, TLS configuration and certificate trust apply. `data:` URLs and `blob:` URLs (from `URL.createObjectURL`) are answered locally without touching the network; any other scheme rejects. Rust's `fetch(request)` goes through the same stack and the same capabilities, takes a URL or an `HttpRequest`, and resolves with an `HttpResponse` holding the whole body ([Networking](../docs/networking.md#from-rust-components)):
 
-```ts
+```rust tabs
+#[derive(serde::Deserialize)]
+struct Todo {
+    id: u32,
+    title: String,
+    done: bool,
+}
+
+async fn load_todos(token: &str) -> Result<Vec<Todo>, String> {
+    let request = HttpRequest::get("https://api.example.com/todos").header("Authorization", format!("Bearer {token}"));
+    let response = fetch(request).await?;
+    if !response.ok() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    serde_json::from_slice(&response.body).map_err(|e| e.to_string())
+}
+```
+
+```tsx tabs
 type Todo = { id: number; title: string; done: boolean };
 
 async function loadTodos(): Promise<Todo[]> {

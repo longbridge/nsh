@@ -7,8 +7,10 @@ group: delivery
 
 # 沙箱与能力
 
-每个 NSH 应用都运行在自己的 QuickJS VM 中，应用在 VM 之外能做的一切都要经过 NSH 的原生运行时。因此，你可以在宿主应用
-制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
+用 Rust 编写的应用是编译进发布它的应用中的原生代码，和该应用的其余部分一样，以它的信任运行；它对 NSH 服务的调用（`fetch`、图片、
+web view、状态栏）和 TSX 一样经过同样的原生检查，受宿主授予的范围约束。应用运行的 TSX 和 JavaScript（它自己的，或它下载的
+[签名包](./signed-packages.md)）在每个视图一个的 QuickJS VM 中运行，它们在 VM 之外能做的一切都要经过 NSH 的原生运行时。因此，
+你可以在宿主应用制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
 
 - **限制（Limits）** 约束单个应用可使用的内存、时间和原生资源。
 - **加固（Hardening）** 在 release 构建中移除所有把字符串变成代码的途径。
@@ -20,7 +22,7 @@ bundle 中只有应用自己的代码：响应式图、渲染器以及应用导�
 
 ## 限制
 
-嵌入在其他应用中的应用，在宿主应用决定的限制内运行。独立运行的应用（用 `nsh package` 打包的应用，包括 Web，以及用
+限制约束的是 VM：它们作用于 TSX 和 JavaScript。嵌入在其他应用中的应用，在宿主应用决定的限制内运行。独立运行的应用（用 `nsh package` 打包的应用，包括 Web，以及用
 `nsh run` 运行的应用）是你自己的代码，和原生应用一样：它可以使用设备给它的内存和时间；4096 KB 的解释器栈让过深的递归
 抛出应用可以捕获的 `RangeError`。
 
@@ -59,7 +61,7 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 宿主应用按视图设定限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
 [Android](./embedding-android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
 
-开发时想看应用在宿主应用的限制下表现如何，用 [`--limits`](./cli.md#nsh-run) 运行它：`nsh run --limits` 使用上面的默认值，
+开发时想看 TSX 应用在宿主应用的限制下表现如何，用 [`--limits`](./cli.md#nsh-run) 运行它：`nsh run App.tsx --limits` 使用上面的默认值，
 `nsh run --limits memory=128MB,call=500ms` 像宿主应用那样设置这两项，其余保持默认值。
 
 ## 加固
@@ -193,6 +195,14 @@ fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to c
 ## 授权：宿主应用允许什么
 
 嵌入 NSH 的宿主应用可以用同样的 JSON 格式授予 **至多** 哪些能力：
+
+```rust
+// iOS，用 Rust（nsh_platform_ios::AppView）
+let grant = nsh_engine::Capabilities::from_json(&serde_json::json!({
+    "network": { "hosts": ["api.example.com"] }
+}))?;
+app.set_granted_capabilities(Some(grant));
+```
 
 ```swift
 // iOS

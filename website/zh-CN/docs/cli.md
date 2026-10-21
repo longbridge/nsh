@@ -7,13 +7,13 @@ group: start
 
 # 命令行
 
-`nsh` 是 NSH 应用唯一需要的工具。所有构建应用的子命令都接受 `[ENTRY]`：入口模块，或应用目录（以其中的 `App.tsx` 为入口；默认为当前目录，所以 `cd my-app && nsh run` 即可）。命令会读取入口旁边的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
+`nsh` 是构建 NSH 应用的工具，无论用 Rust 还是 TSX 编写。所有构建应用的子命令都接受 `[ENTRY]`：应用目录（默认为当前目录，所以 `cd my-app && nsh run` 即可），它运行 Rust 应用的根组件（`nsh.json` 的 `"root"`）或 TSX 应用的 `App.tsx`；也可以是一个 TSX 入口模块。命令会读取应用根目录中的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
 
 ```text
 nsh <COMMAND>
 
-  init         Create an app
-  build        Bundle an app and compile it to QuickJS bytecode
+  init         Create an app in Rust or TSX
+  build        Build an app: describe a Rust app's crates, or bundle a TSX app and compile it to QuickJS bytecode
   test         Run an app's tests headless
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
   run          Like dev, and also run the app in a development host
@@ -26,7 +26,7 @@ nsh <COMMAND>
   revoke       Sign a revocation list
 ```
 
-`nsh <command> --help` 打印某个命令的参数；`nsh --version` 打印版本号。
+`nsh <command> --help` 打印某个命令的参数；`nsh -V`（`--version`）打印版本号和构建它的 Git 提交。
 
 ## 输出
 
@@ -59,14 +59,14 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 
 | 模板 | 创建的内容 |
 |---|---|
-| `ts` | TSX 应用：`App.tsx`、它的测试 `App.test.tsx`（`nsh test`）、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
 | `rust` | 用 Rust 编写的应用：一个 Cargo 项目（`Cargo.toml`、包含根组件的 `src/lib.rs`、供 `cargo run` 使用的 `src/main.rs`），设置了 `"rust": "."` 和 `"root": "App"` 的 `nsh.json`、`.gitignore` 和 README（其中也说明了之后如何添加 TSX 入口）。`nsh run` 和 `nsh package` 在所有目标（包括浏览器）上挂载根组件，不使用 QuickJS（`nsh test` 为 TypeScript 测试打开它）（见[用 Rust 开发](./rust.md)）；`cargo run` 直接在 macOS、Windows 或 Linux 上启动它。 |
+| `ts` | TSX 应用：`App.tsx`、它的测试 `App.test.tsx`（`nsh test`）、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
 | `mixed` | 带有自己 Rust crate 的 TSX 应用：`App.tsx`、`tsconfig.json`、设置了 `"rust": "native"` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及 `native/` 中的 crate，它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。 |
 
 | 参数 | 说明 |
 |---|---|
 | `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写），crate 的导入说明符是 `<name>/native`（小写，单词以 `-` 连接）。 |
-| `--template <TEMPLATE>` | `ts`、`rust` 或 `mixed`（见上表）。`rust` 和 `mixed` 需要 Rust 工具链；`cargo run` 还需要原生桌面后端的开发库。 |
+| `--template <TEMPLATE>` | `rust`、`ts` 或 `mixed`（见上表）。`rust` 和 `mixed` 需要 Rust 工具链；`cargo run` 还需要原生桌面后端的开发库。 |
 | `--nsh-source <DIR>` | 与 `rust` 或 `mixed` 一起使用：crate 按路径依赖 `DIR` 中 NSH 源码仓库的 crate，基于 NSH 源码构建应用。 |
 
 `rust` 和 `mixed` 的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器和宿主。对这样的应用，`nsh` 在每条命令之前构建一个由应用 crate 和 NSH 核心组成的小程序，用它描述这些 crate 的组件、模块和类（crate 有改动时才重新运行）；有了这份描述，CLI 自己完成打包、编译、类型检查、开发服务和打包发布。Rust 应用的构建只编译它的 crate 和 NSH 的核心。请在新的应用目录中创建它们：只要其中任何一个文件已存在，就会在写入之前报告为冲突。
@@ -79,7 +79,13 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>]
 ```
 
-启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
+```sh
+nsh run my-app                     # Rust 应用的根组件，或 TSX 应用的 App.tsx，在本机的后端上运行
+nsh run my-app --target ios        # 在 iOS 模拟器中
+nsh run my-app/App.tsx --target web
+```
+
+对 TSX 入口，`nsh run` 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
 
 Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运行时不需要开发服务器，也没有 QuickJS：`nsh run` 为目标平台构建挂载了根组件的应用运行器并启动它（桌面上是 debug 构建，日志打印在终端；模拟器和 Android 上会安装应用），修改 crate 的 Rust 代码后重新构建并重启。使用 `--target web` 时会打印页面地址，已打开的页面会自动加载新的运行时。指定 TSX 入口（`nsh run App.tsx`）则运行 TSX 入口。
 
@@ -136,17 +142,19 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>]
 | `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（目前为 `macos`、`linux`、`windows`、`gpui` 和 `web`；`web` 在 headless 的 Chrome、Edge 或 Chromium 里运行）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)）。 |
 | `--browser <PATH>` | `--target web` 运行应用所用的 Chrome、Edge 或 Chromium 可执行文件（默认：本机安装的那个）。 |
 
+NSH 生成的文件都放在 `.nsh/` 下：类型声明、runner 源码，以及默认的构建和打包输出 `.nsh/out/`。Cargo 保留它通常的 `target/` 缓存和已有的 `CARGO_TARGET_DIR` 行为；NSH 不会添加 Cargo 配置来移动它。`--out` 仍可指定输出位置。
+
 ## nsh build
 
 ```sh
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建并描述应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件，因此没有 bundle。
+构建应用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建并描述应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件。对 TSX 应用，它打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-o, --out <OUT>` | `out` | 输出目录。 |
+| `-o, --out <OUT>` | `.nsh/out` | 输出目录。 |
 | `--release` | | 压缩代码并去掉调试信息。 |
 | `--split` | | 把 `import()` 加载的代码放进独立的 chunk 文件，第一次导入时才下载（Web 应用，见[拆分 bundle](./web.md#拆分-bundle)）。不加时，bundle 包含整个应用。 |
 
@@ -167,12 +175,12 @@ nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [-o <OUT>] [flags]
 ```
 
-用预构建的运行时以 release 模式构建可安装的应用。整个过程不涉及 Rust，也不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；Web 则写出一个静态站点，同样不需要任何工具。元数据来自 `nsh.json`，可被参数覆盖。Rust 应用（`nsh.json` 中有 `"root"`）用它自己的运行器打包，运行器从 NSH 源码仓库用 Rust 构建：没有 bundle，也没有 QuickJS，直接挂载根组件（见[用 Rust 开发](./rust.md)）。
+以 release 模式构建可安装的应用。Rust 应用（`nsh.json` 中有 `"root"`）用它自己的运行器打包，运行器由 Cargo 用你的 crate 和 NSH 的 crate 构建，挂载根组件，不带 QuickJS（见[用 Rust 开发](./rust.md)）；TSX 应用使用预构建的运行时。整个过程不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；Web 则写出一个静态站点，同样不需要任何工具。元数据来自 `nsh.json`，可被参数覆盖。
 
 | 参数 | 说明 |
 |---|---|
 | `--target <TARGET>` | 必填。`ios`：iOS 设备，签名的 `.ipa`（不带 `--sign` 时为未签名的 `.app`）。`ios-simulator`：ad hoc 签名的 `.app`。`android`：签名的 `.apk`。`macos`：ad hoc 签名的 `.app`（[macOS](./macos.md#打包)）。`linux`：一个目录 `<Name>/`（可执行文件、`nsh/`、`.desktop` 文件）和 `<Name>.tar.gz`（[Linux](./linux.md#打包)）。`windows`：一个目录 `<Name>\`（`<Name>.exe`、`nsh\`）和 `<Name>.zip`（[Windows](./windows.md#打包)）。`web`：一个目录 `<Name>/`，即静态站点（`index.html` 和以内容命名的文件）（[Web](./web.md#发布应用)）。 |
-| `-o, --out <OUT>` | 输出目录（默认 `out`）。 |
+| `-o, --out <OUT>` | 输出目录（默认 `.nsh/out`）。 |
 | `--name <NAME>` | 显示名称。 |
 | `--id <ID>` | Bundle identifier，例如 `com.example.app`。 |
 | `--app-version <VERSION>` | 版本号，例如 `1.2.0`。 |
@@ -186,13 +194,13 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|web [
 | `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux` 和 `windows` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
 
 ```sh
-nsh package App.tsx --target ios-simulator --run
-nsh package App.tsx --target ios --sign "Apple Development: Jane Doe (ABCDE12345)" --profile dev.mobileprovision
-nsh package App.tsx --target android --keystore release.jks --key-alias upload
-nsh package App.tsx --target macos
-nsh package App.tsx --target linux
-nsh package App.tsx --target windows
-nsh package App.tsx --target web
+nsh package my-app --target ios-simulator --run
+nsh package my-app --target ios --sign "Apple Development: Jane Doe (ABCDE12345)" --profile dev.mobileprovision
+nsh package my-app --target android --keystore release.jks --key-alias upload
+nsh package my-app --target macos
+nsh package my-app --target linux
+nsh package my-app --target windows
+nsh package my-app --target web
 ```
 
 参见[打包](./packaging.md)。
@@ -238,7 +246,7 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 |---|---|
 | `--key <KEY>` | release 密钥的私钥。 |
 | `--cert <CERT>` | 它的证书（`nsh certify`）。 |
-| `-o, --out <OUT>` | 要写入的包。默认：`out/<id>-<build>.nshpkg`。 |
+| `-o, --out <OUT>` | 要写入的包。默认：`.nsh/out/<id>-<build>.nshpkg`。 |
 | `--id <ID>` | 应用 id。 |
 | `--app-version <VERSION>` | 版本号。 |
 | `--build <BUILD>` | 构建号：每次发布都必须递增。 |

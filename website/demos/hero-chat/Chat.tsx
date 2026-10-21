@@ -1,8 +1,7 @@
-import { batch, computed, effect, Input, Scroll, signal, Text, View, type YNode } from "nsh";
+import { batch, computed, effect, Input, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
-import { List } from "nsh/list";
 import { Icon, type IconName } from "./icons";
 import { alpha, Appear, Badge, colors, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "./ui";
 import { Glyph } from "./chat/glyphs";

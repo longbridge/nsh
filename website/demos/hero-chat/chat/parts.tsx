@@ -1,5 +1,4 @@
-import { type JSX, Text, View } from "nsh";
-import { Image } from "nsh/image";
+import { Image, type JSX, Text, View } from "nsh";
 import { Icon } from "../icons";
 import { alpha, Badge, colors, finish, isDark, mono, Press, radius, type Tone, toneColor, toneTint } from "../ui";
 import { Glyph, type GlyphName } from "./glyphs";

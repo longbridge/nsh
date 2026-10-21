@@ -7,17 +7,17 @@ group: start
 
 # 用 Rust 开发
 
-Native Shell 应用可以用 TSX 编写，也可以用 Rust，或者两者结合。三种方式运行在同一个引擎上：响应式图、渲染器、Taffy
+Native Shell 应用可以用 Rust 编写，也可以用 TSX，或者两者结合。三种方式运行在同一个引擎上：响应式图、渲染器、Taffy
 布局以及原生模块（导航、对话框、键盘、状态栏）始终是 Rust，各平台都用自己的原生 UI 渲染。不同的是你自己的代码用什么语言，以及应用是否带着
 JavaScript 虚拟机。
 
-| | TSX | Rust | Rust + TSX |
+| | Rust | TSX | Rust + TSX |
 |---|---|---|---|
-| 你的 UI、状态和事件处理 | TSX，运行在 QuickJS 上 | Rust | Rust 组件和模块，TSX 页面使用它们 |
-| 应用运行的内容 | QuickJS 和引擎 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎，加上你的 crate |
-| 适合 | 运行时下发的应用和模块、快速迭代 | 业务复杂度高的中大型应用 | Rust 核心加上经常变化的部分 |
-| 修改代码 | 热更新 | 重新构建并重启 | TSX 热更新，Rust 重新构建并重启 |
-| 创建 | `nsh init my-app --template ts` | `nsh init my-app --template rust` | `nsh init my-app --template mixed` |
+| 你的 UI、状态和事件处理 | Rust | TSX，运行在 QuickJS 上 | Rust 组件和模块，TSX 页面使用它们 |
+| 应用运行的内容 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎 | QuickJS 和引擎，加上你的 crate |
+| 适合 | 业务复杂度高的中大型应用 | 运行时下发的应用和模块、快速迭代 | Rust 核心加上经常变化的部分 |
+| 修改代码 | 重新构建并重启 | 热更新 | TSX 热更新，Rust 重新构建并重启 |
+| 创建 | `nsh init my-app --template rust` | `nsh init my-app --template ts` | `nsh init my-app --template mixed` |
 
 ## 如何选择
 
@@ -26,7 +26,9 @@ crates.io 生态，你自己的代码（不只是 NSH 的代码）也是原生�
 Rust 和原生代码：在 iOS、Android、macOS、Windows、Linux、GPUI 和 Web 上，应用里既不带也不运行 JavaScript 虚拟机。
 组件是只运行一次的函数，把信号绑定到显示的内容上，和 TSX 一样（[响应式](./reactivity.md)），样式用类型化的方法而不是 class 字符串。
 
-**Rust + TSX** 保留这个核心，在值得的地方加上 TSX：页面、设置、引导、实验性功能，任何需要热更新快速迭代、或作为[签名包](./signed-packages.md)
+**TSX** 适合应用发布之后才到达的界面：原生应用在运行时加载的模块，由模型生成或由其他团队编写，以[签名包](./signed-packages.md)下发，运行在宿主配置的沙箱里，开发时支持热更新。
+
+**Rust + TSX** 保留 Rust 核心，在值得的地方加上 TSX：页面、设置、引导、实验性功能，任何需要热更新快速迭代、或作为[签名包](./signed-packages.md)
 在运行时下发的部分。TSX 像导入其他 NSH 模块一样导入你的 Rust 组件和模块，两部分通过类型化的接口衔接。TSX 运行在 QuickJS
 上，这时应用会带上 QuickJS。
 
@@ -42,7 +44,7 @@ nsh package --target web       # 或 ios、ios-simulator、android、macos、lin
 `src/lib.rs` 包含整个应用：组件、状态、事件处理和任务。
 
 ```rust
-use nsh_base::theme;
+use nsh_base::{button, theme};
 use nsh_core::ui::prelude::*;
 
 /// TSX 通过 `app/native` 可以使用的组件。
@@ -69,21 +71,22 @@ pub fn App() -> impl IntoElement {
         .child(text(move || format!("Count: {}", count.get())))
         .child(text(quote))
         .child(
-            // 按钮就是一个响应按压的视图，用主题的颜色绘制。
-            view()
+            // nsh_base 的无样式按钮，用主题的颜色绘制。
+            button()
                 .px(px(20.0))
                 .py(px(12.0))
                 .rounded(move || theme().radius())
                 .bg(move || theme().primary())
                 .active(|s| s.bg(move || theme().primary_active()))
-                .role(AccessibilityRole::Button)
-                .on_press(move |_: &()| count.update(|c| *c += 1))
+                .on_press(move || count.update(|c| *c += 1))
                 .child(text("Tap").text_color(move || theme().primary_foreground())),
         )
 }
 ```
 
-监听器是接收事件的闭包（`move |text: &str| ..`），没有数据的事件也可以写成 `move || ..`；`.child(..)`
+元素和组件用同样的方式创建：一个函数创建它（`view()`、`text(..)`、`nsh_base` 的 `button()`、你的 `#[component] fn Chart`
+生成的 `chart()`），它的方法设置 props（每个 prop 一个设置方法，接受值、signal 或闭包）和监听器（每个事件一个方法）。
+监听器是接收事件的闭包（`move |text: &str| ..`），没有数据的事件写成 `move || ..`；`.child(..)`
 接受一个元素，或元素的 `Option`、`Vec`、数组、迭代器（`.child(rows.iter().map(|r| row(r)))`）。
 
 `nsh.json` 指定根组件，`nsh` 负责挂载它：
@@ -135,16 +138,15 @@ use nsh_core::{
     ui::{desktop::{close_window, set_title_bar, title_bar}, prelude::*},
 };
 
-#[component]
-fn TitleBar() -> impl IntoElement {
-    set_title_bar(TitleBarStyle::Hidden, Some(42.0));
+fn window_bar() -> impl IntoElement {
+    set_title_bar(TitleBarStyle::Hidden, Some(px(42.0)));
     view()
         .h(px(42.0))
         .flex_row()
         .items_center()
         .window_drag(true)
-        .pl(move || px(title_bar().left + 12.0))
-        .pr(move || px(title_bar().right + 12.0))
+        .pl(move || title_bar().left + px(12.0))
+        .pr(move || title_bar().right + px(12.0))
         .child(text("My app").flex_1())
         .child(text("Close").window_drag(false).on_press(close_window))
 }
@@ -163,6 +165,33 @@ crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内�
 TSX：
 
 ```rust
+/// 价格图表。
+#[derive(Clone, PartialEq, Props)]
+pub struct ChartProps {
+    /// 要绘制的代码。
+    pub symbol: Prop<SharedString>,
+    /// 显示的时间范围。
+    #[prop(default = SharedString::from("1D"))]
+    pub range: Prop<SharedString>,
+}
+
+#[derive(Event)]
+pub enum ChartEvent {
+    /// 选中了一个价格。
+    #[args(price)]
+    Select(f64),
+}
+
+/// 价格图表；按下时选中最新价格。
+#[component]
+pub fn Chart(props: ChartProps, cx: Scope<ChartEvent>) -> impl IntoElement {
+    view()
+        .h(px(160.0))
+        .bg(move || theme().muted())
+        .on_press(move || cx.emit(ChartEvent::Select(101.5)))
+        .child(text(move || format!("{} · {}", props.symbol.get(), props.range.get())))
+}
+
 /// A ledger kept in Rust.
 #[class]
 pub struct Ledger {
@@ -217,7 +246,7 @@ const ledger = new Ledger();   // 状态保存在 Rust 中
 function Overview() {
   const balance = signal(ledger.add(Portfolio.total()));   // Rust，立即调用
   return (
-    <View className="p-4 gap-2">
+    <View class="gap-2 p-4">
       <Text>Balance: {balance()}</Text>
       <Chart symbol="NSH" range="1M" onSelect={(e) => balance.set(ledger.add(e.price))} />
       <View onPress={() => ledger.upload("https://example.com/ledger")} role="button" class="rounded-lg bg-blue-600 px-4 py-2 active:bg-blue-700">
@@ -252,7 +281,7 @@ pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
 }
 ```
 
-props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
+props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 代码用组件的构造函数放置同一个组件，每个 prop 一个设置方法，每个事件一个监听方法：`chart().symbol("NSH").range("1M").on_select(move |price: &f64| last.set(*price))`。Rust 组件自己的内容、事件和状态留在
 Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型的 prop 传 `level={1.5}`）和内置元素上一样给出警告：这个 prop 保持原值，组件的其余部分照常渲染。
 
 函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
@@ -280,25 +309,13 @@ Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简�
 
 ## 测试
 
-对于带 Rust crate 的应用，`nsh test` 同样运行它的 TypeScript 测试（[测试](./testing-and-trace.md)）：在用你的 crate 构建的
-无界面运行器中。在 Rust 应用中，`open(".")` 启动它的根组件：
+Rust 应用的测试以无界面方式运行它，可以在 `cargo test` 中，也可以在 `nsh test` 中，使用同一个驱动：运行在真实的引擎上，没有窗口，以
+60 Hz 提供显示帧，所以定时器、任务和动画都像在屏幕上一样运行。驱动启动应用，维护一份它所显示视图的模型，并在用选择器指定的视图上执行步骤（`press`、`type_text`、`submit`、`scroll`、`wait_for`），选择器可以是文本、无障碍标签或
+test id（`text:`、`label:`、`id:`）；步骤无法执行时，会带着屏幕上的文字失败。
 
-```tsx
-// App.test.tsx, next to nsh.json
-import { expect, open, test } from "nsh/test";
-
-test("a tap counts", async () => {
-  const app = await open(".");
-  await app.press("Tap");
-  expect(app.texts()).toContain("Count: 1");
-});
-```
-
-测试也可以在 `cargo test` 中用同一个驱动无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、
-任务和动画都像在屏幕上一样运行。`nsh_testing::Headless`（nsh-testing 的默认特性，不含 QuickJS）启动应用，维护一份它所显示
-视图的模型（`app.screen()`：它们的文本、应用发送的命令），并执行 `nsh test` 的那些步骤（`press`、`type_text`、`submit`、
-`scroll`、`wait_for`），视图用同样的选择器指定（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）；步骤无法执行时
-返回带有屏幕文字的错误。Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
+在 `cargo test` 中，`nsh_testing::Headless`（nsh-testing 的默认特性，不含 QuickJS）运行根组件（`app.screen()`：屏幕上的文字、应用发送的命令）；`EngineConfig::new`
+是一个手机尺寸、其余都未设置的引擎。`nsh test` 在用你的 crate 构建的无界面运行器中运行 TypeScript 测试（[测试](./testing-and-trace.md)），其中
+`open(".")` 启动 Rust 应用的根组件：
 
 ```toml
 [dev-dependencies]
@@ -306,8 +323,9 @@ nsh-engine = "0.1"
 nsh-testing = "0.1"
 ```
 
-```rust
-use nsh_engine::EngineConfig;
+```rust tabs
+// tests/app.rs：cargo test
+use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
 
 #[test]
@@ -317,6 +335,17 @@ fn a_tap_counts() {
     app.press("Tap").unwrap();
     app.wait_for("Count: 1").unwrap();
 }
+```
+
+```tsx tabs
+// App.test.tsx，与 nsh.json 放在一起：nsh test
+import { expect, open, test } from "nsh/test";
+
+test("a tap counts", async () => {
+  const app = await open(".");
+  await app.press("Tap");
+  expect(app.texts()).toContain("Count: 1");
+});
 ```
 
 TSX 入口用 `nsh-testing` 的特性 `bundle` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由

@@ -7,9 +7,9 @@ group: start
 
 # Installation
 
-Everything NSH does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
+Everything NSH does goes through one command, `nsh`. It builds apps written in Rust or TSX, runs them on every platform, serves TSX to development hosts with hot updates, and packages installable apps. You can use it from a prebuilt distribution or build it from a checkout of the repository.
 
-On top of `nsh`, each platform needs its own tools:
+Apps written in Rust also need a Rust toolchain ([below](#for-apps-written-in-rust)); TSX apps need `nsh` alone. On top of that, each platform needs its own tools:
 
 | Platform | Develop and package on | Needs |
 |---|---|---|
@@ -64,6 +64,18 @@ The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-
 
 > [!NOTE]
 > The binaries are not signed yet. macOS quarantines files downloaded by a browser; the install script, Homebrew and mise download with `curl` and are not affected, otherwise run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). There is no Intel Mac or arm64 Linux / Windows build: build those from a checkout.
+
+## For apps written in Rust
+
+Install Rust through [rustup](https://rustup.rs). `nsh` builds a Rust app's runner for each target with Cargo, from your crate and NSH's crates on crates.io at the CLI's version, so add the Rust targets of the platforms you run on:
+
+```sh
+rustup target add aarch64-apple-ios-sim aarch64-apple-ios aarch64-apple-ios-macabi   # iOS simulator, devices, Mac Catalyst
+rustup target add aarch64-linux-android x86_64-linux-android                         # Android (with the SDK's NDK)
+rustup target add wasm32-unknown-unknown                                             # the web
+```
+
+The desktops build for the machine you are on. `cargo run` in a Rust app's directory starts it on the desktop backend directly, which builds with the backend's development libraries ([Platform tools](#platform-tools)). Android builds also use an **NDK** from the SDK, as [building the Android runtime](#building-the-android-runtime) does.
 
 ## The prebuilt distribution
 
@@ -208,7 +220,9 @@ On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p
 
 ## Editor setup
 
-NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
+A Rust app is a Cargo project: rust-analyzer (VS Code, Zed, Neovim, RustRover) checks it and completes NSH's API, with its doc comments, as for any crate.
+
+For TSX, NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
 
 ## Next steps
 

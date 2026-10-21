@@ -1,6 +1,5 @@
-import { type GestureResponderEvent, mount, signal, Text, View } from "nsh";
+import { Canvas, type GestureResponderEvent, mount, Path2D, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { Canvas, Path2D } from "nsh/canvas";
 import { tint, ui } from "./palette";
 
 const TAU = Math.PI * 2;
