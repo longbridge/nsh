@@ -474,6 +474,61 @@ pub fn measure_line(
     engine.measure(&prepared, None).width
 }
 
+/// How `text` sits on one line in a canvas font ([`line_metrics`]): its
+/// width, and the font's extent above and below the baseline, so a
+/// component can center text in a box or place a caret over it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TextMetrics {
+    /// The advance width (canvas `measureText(text).width`).
+    pub width: Points,
+    /// Above the baseline (`fontBoundingBoxAscent`).
+    pub ascent: Points,
+    /// Below the baseline (`fontBoundingBoxDescent`).
+    pub descent: Points,
+    /// The line's height: ascent, descent and the font's leading.
+    pub height: Points,
+}
+
+/// [`TextMetrics`] of `text` on one line in `font`, by `engine`. Engines
+/// that do not report their lines give the em box's split of the size
+/// (0.8 above the baseline, 0.2 below) and the measured height.
+pub fn line_metrics(
+    engine: &impl crate::text::TextEngine,
+    font: &CanvasFont,
+    text: &str,
+) -> TextMetrics {
+    let mut attributed = crate::text::AttributedText {
+        no_wrap: true,
+        max_lines: 1,
+        ..Default::default()
+    };
+    // An empty line still has the font's extent.
+    attributed.push(if text.is_empty() { " " } else { text }, font.text_style());
+    let prepared = engine.prepare(&attributed);
+    let size = engine.measure(&prepared, None);
+    let width = if text.is_empty() {
+        Points::ZERO
+    } else {
+        size.width
+    };
+    let layout = engine.layout(&prepared, size);
+    match engine.lines(&layout).first() {
+        Some(line) => TextMetrics {
+            width,
+            ascent: line.ascender,
+            descent: line.descender,
+            height: line.height,
+        },
+        None => TextMetrics {
+            width,
+            ascent: Points(font.size.0 * 0.8),
+            descent: Points(font.size.0 * 0.2),
+            height: size.height,
+        },
+    }
+}
+
 /// Where text sits horizontally relative to its x (`textAlign`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum CanvasTextAlign {

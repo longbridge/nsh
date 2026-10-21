@@ -716,7 +716,7 @@ impl<M: TextEngine + 'static> Core<M> {
         core.components
             .runtime
             .set_measure(Rc::new(move |font, text| {
-                crate::canvas::measure_line(&*engine, font, text).0
+                crate::canvas::line_metrics(&*engine, font, text)
             }));
         core
     }

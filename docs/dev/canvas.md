@@ -56,7 +56,8 @@ whole canvas. Numbers:
 `docs/dev/performance.md`.
 
 Rust components record drawings with `ui::Painter` (the same operations; `docs/dev/components.md`), measure text
-with `measure_text(font, text)`, on the core's text engine, and hit-test what a painter recorded with the same
+with `measure_text(font, text)` and `text_metrics(font, text)` (its width and the font's ascent, descent and line
+height, from the first line the core's text engine lays it out in: `canvas::line_metrics`), and hit-test what a painter recorded with the same
 `point_in_path` / `point_in_stroke` (`Painter::is_point_in_path` / `is_point_in_stroke` for the current path,
 `path_contains` / `stroke_contains` for a `Path`; animated values count as 0 there too).
 

@@ -1308,6 +1308,25 @@ mod tests {
         assert!(steps.iter().any(|s| s == "press(text:Add)"), "{steps:?}");
     }
 
+    /// The metrics of a line of text in a canvas font.
+    #[component]
+    fn Metrics() -> impl IntoElement {
+        let m = text_metrics("20px system-ui", "abc");
+        text(format!(
+            "{} {} {} {}",
+            m.width.0, m.ascent.0, m.descent.0, m.height.0
+        ))
+    }
+
+    /// The approximate engine's lines: characters 0.55 em wide, the em
+    /// above the baseline and a fifth of it below, 1.2 em lines.
+    #[test]
+    fn text_metrics_are_the_engines_line() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Metrics>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("33 20 4 24").unwrap();
+    }
+
     /// A name field that says hello and keeps what was sent.
     #[component]
     fn Form() -> impl IntoElement {
