@@ -432,16 +432,16 @@ pub fn toast(message: impl Into<String>, duration: super::ToastDuration) {
     act(super::services::toast(message.into(), duration));
 }
 
-/// The size in pixels of the image at `uri` (TS: `Image.getSize`).
-pub fn image_size(uri: impl Into<String>) -> Answer<Result<ImageSize, String>> {
-    let (answer, action) = super::services::image_size(uri.into());
+/// The size in pixels of the image at `src` (TS: `Image.getSize`).
+pub fn image_size(src: impl Into<String>) -> Answer<Result<ImageSize, String>> {
+    let (answer, action) = super::services::image_size(src.into());
     act(action);
     answer
 }
 
-/// Loads the image at `uri` ahead of showing it (TS: `Image.prefetch`).
-pub fn prefetch_image(uri: impl Into<String>) -> super::Prefetch {
-    let (answer, action) = super::services::prefetch(uri.into());
+/// Loads the image at `src` ahead of showing it (TS: `Image.prefetch`).
+pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
+    let (answer, action) = super::services::prefetch(src.into());
     act(action);
     answer
 }

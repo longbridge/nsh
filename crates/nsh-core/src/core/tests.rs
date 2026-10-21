@@ -12723,7 +12723,7 @@ fn image_ops(id: NodeId, source: ImageSource, placeholder: Option<ImageSource>) 
     if placeholder.is_some() {
         ops.push(Op::SetProp {
             id,
-            prop: Prop::Image(ImageProp::DefaultSource(placeholder)),
+            prop: Prop::Image(ImageProp::Placeholder(placeholder)),
         });
     }
     ops.push(Op::Insert {
@@ -12935,12 +12935,13 @@ fn image_scales_decode_from_js() {
     let decode = |v: serde_json::Value| ImageSource::decode(&J(v), &mut HostCx::default());
 
     let source = decode(serde_json::json!({
-        "uri": "asset:/a.png", "width": 40, "height": 30, "scales": [1, 2, "3", -1, 2.5, 3]
+        "url": "asset:/a.png", "size": { "width": 40, "height": 30 }, "scales": [1, 2, "3", -1, 2.5, 3]
     }))
     .unwrap();
     assert_eq!(source.size, Some(crate::geometry::size_pt(40.0, 30.0)));
     assert_eq!(source.scales.iter().collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
-    let plain = decode(serde_json::json!({ "uri": "asset:/a.png", "width": 40, "height": 30 }));
+    let plain =
+        decode(serde_json::json!({ "url": "asset:/a.png", "size": { "width": 40, "height": 30 } }));
     assert_eq!(plain.unwrap().scales, ImageScales::NONE);
     assert_eq!(
         decode(serde_json::json!("https://x.org/a.png"))
@@ -12948,11 +12949,11 @@ fn image_scales_decode_from_js() {
             .scales,
         ImageScales::NONE
     );
-    let odd = decode(serde_json::json!({ "uri": "asset:/a.png", "scales": "2" })).unwrap();
+    let odd = decode(serde_json::json!({ "url": "asset:/a.png", "scales": "2" })).unwrap();
     assert!(odd.scales.is_empty());
     // Only the first entries are read.
     let long = decode(serde_json::json!({
-        "uri": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
+        "url": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
     }));
     assert_eq!(long.unwrap().scales.iter().collect::<Vec<_>>(), [1.0]);
 }
@@ -13029,12 +13030,12 @@ mod asset_variants {
     use crate::ui::{ImageAsset, prelude::*};
 
     const FLAG: ImageAsset = ImageAsset {
-        uri: "asset:/@demo/flag.png",
+        url: "asset:/@demo/flag.png",
         size: crate::geometry::size_pt(17.0, 12.0),
         scales: &[1.0, 2.0, 3.0],
     };
     const PLAIN: ImageAsset = ImageAsset {
-        uri: "asset:/@demo/plain.png",
+        url: "asset:/@demo/plain.png",
         size: crate::geometry::size_pt(10.0, 10.0),
         scales: &[],
     };

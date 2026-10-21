@@ -14,7 +14,7 @@
 //! are kept from it (`crate::input`).
 //!
 //! As on iOS and macOS, pages talk to the app through
-//! `window.ReactNativeWebView.postMessage(data)` (a script message handler,
+//! `window.nsh.postMessage(data)` (a script message handler,
 //! `onMessage`), and `postMessage()` dispatches a `message` event on the
 //! page's `window`. Events are the iOS ones: `onLoadStart` and
 //! `onNavigationStateChange` when a navigation starts, `onLoad` and
@@ -79,8 +79,8 @@ use crate::{decor::rgba, surface::Surface, view::NshView};
 /// The script message handler the bridge posts to.
 const HANDLER: &str = "nsh";
 
-/// Lets pages talk to the app, like React Native's web view.
-const BRIDGE: &str = "window.ReactNativeWebView = window.ReactNativeWebView || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
+/// Lets pages talk to the app: `window.nsh.postMessage(data)`.
+const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
 
 /// `scrollable: false`: the top document does not scroll.
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";

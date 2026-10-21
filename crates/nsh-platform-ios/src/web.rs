@@ -17,8 +17,8 @@ use objc2_ui_kit::{UIView, UIViewAutoresizing};
 
 use crate::native_view::NshView;
 
-/// Lets pages talk to the app, like React Native's web view.
-const BRIDGE: &str = "window.ReactNativeWebView = window.ReactNativeWebView || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
+/// Lets pages talk to the app: `window.nsh.postMessage(data)`.
+const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
 
 fn webkit() -> bool {
     static LOADED: OnceLock<bool> = OnceLock::new();

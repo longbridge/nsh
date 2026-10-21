@@ -323,7 +323,7 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 The browser decides these, and the web backend follows it:
 
-- **Web views of other sites**: `WebView` is an `<iframe>`. Inline HTML (`source={{ html }}`) gets everything: `onMessage`, `postMessage`, `injectJavaScript`, the injected scripts and load events (it runs with an origin of its own, apart from the page). A page of another site only gets `postMessage` and load events with the URL it was given: browsers hide its navigations, title, history and errors from the page around it, and `userAgent` cannot be set.
+- **Web views of other sites**: `WebView` is an `<iframe>`. Inline HTML (`html`) gets everything: `onMessage`, `postMessage`, `injectJavaScript`, the injected scripts and load events (it runs with an origin of its own, apart from the page). A page of another site only gets `postMessage` and load events with the URL it was given: browsers hide its navigations, title, history and errors from the page around it, and `userAgent` cannot be set.
 - **Videos with sound that start on their own**: `Video` is a `<video>` with every prop and event, but browsers only start a video with sound after a user gesture (muted videos play).
 - **Native components**: registered native components belong to the native apps that embed NSH; on the web their view stays empty, with a warning in the console.
 - **Platform services**: reading the clipboard (`Clipboard.getString`, also `hasString`) needs a secure context (HTTPS) and may ask the user. Images do not report `onProgress`.

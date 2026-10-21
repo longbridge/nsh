@@ -39,7 +39,7 @@ import logo from "./assets/logo.png";
   <Image src={logo} />
   <Image
     src="https://example.com/avatar.jpg"
-    defaultSource={logo}
+    placeholder={logo}
     resizeMode="cover"
     style={{ width: 64, height: 64, borderRadius: 32 }}
   />
@@ -52,14 +52,13 @@ ratio with one of them).
 
 ## Sources
 
-The source (`src` and `defaultSource`; `image(..)` and `.placeholder(..)` in Rust) takes:
+The source (`src` and `placeholder`; `image(..)` and `.placeholder(..)` in Rust) takes:
 
 | Value | Example | Description |
 |---|---|---|
-| An asset | Rust `asset!("logo.png")`, TSX `import logo from "./logo.png"` | An `ImageAsset` `{ uri, width, height, scales? }`, sized in points: a `@2x` file counts half its pixels. With `logo@2x.png` / `logo@3x.png` next to `logo.png`, the variant for the screen's pixel ratio is loaded ([pixel densities](../docs/images-and-assets.md#pixel-densities)). `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported, and `.svg`, sized by its `width` and `height` or `viewBox` ([SVG images](../docs/images-and-assets.md#svg-images)). |
+| An asset | Rust `asset!("logo.png")`, TSX `import logo from "./logo.png"` | An `ImageAsset` `{ url, size, scales? }`, sized in points: a `@2x` file counts half its pixels. With `logo@2x.png` / `logo@3x.png` next to `logo.png`, the variant for the screen's pixel ratio is loaded ([pixel densities](../docs/images-and-assets.md#pixel-densities)). `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported, and `.svg`, sized by its `width` and `height` or `viewBox` ([SVG images](../docs/images-and-assets.md#svg-images)). |
 | A URL | `"https://example.com/a.jpg"` | Downloaded and cached. Downloads of the same URL are shared between views. |
 | An asset path | `"asset:/images/a.png"` | A file of the app's assets. |
-| `{ uri }` | `{ uri: "https://…" }` | TSX: the same as the string. |
 
 During development assets are served by the dev server; `nsh build` and `nsh package` copy them into the app (a Rust
 crate ships its `assets/` directory with `registry.assets(assets!())`). See
@@ -75,9 +74,9 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `src` | `image(src)` | `string \| ImageAsset \| { uri: string }` | | The image. |
+| `src` | `image(src)` | `string \| ImageAsset` | | The image. |
 | `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | `"cover"` | How the image fits its box. |
-| `defaultSource` | `.placeholder(src)` | `string \| ImageAsset \| { uri: string }` | | Shown until `src` has loaded; best a local asset. |
+| `placeholder` | `.placeholder(src)` | `string \| ImageAsset` | | Shown until `src` has loaded; best a local asset. |
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | Blurs the image by this radius in points (applied once while decoding, off the main thread). |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`, Android `300` | How long a loaded image fades in, in milliseconds. |
 | `tintColor` (style) | `.tint_color(..)` | `ColorValue` | | Recolors a template image (an icon drawn in one color). |
@@ -132,9 +131,9 @@ An image with [pixel-density variants](../docs/images-and-assets.md#pixel-densit
 pixel ratio changes and the image loads another variant, it reports that load too: `onLoadStart`, then `onLoad` with the
 new file's size (or `onError`), then `onLoadEnd`.
 
-To know an image's size or load it before showing it, TSX calls `Image.getSize(uri)` and `Image.prefetch(uri)` (the
+To know an image's size or load it before showing it, TSX calls `Image.getSize(src)` and `Image.prefetch(src)` (the
 same `Image` that renders the element carries them; see the [Image API](../modules/nsh-image.md)), and Rust
-`image_size(uri)` and `prefetch_image(uri)`, awaited in a task. Given an imported image with variants, `Image.getSize`
+`image_size(src)` and `prefetch_image(src)`, awaited in a task. Given an imported image with variants, `Image.getSize`
 and `Image.prefetch` load the variant this screen shows, and `getSize` resolves with the imported file's size (64×64
 for `logo.png`).
 

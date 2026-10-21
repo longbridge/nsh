@@ -1926,11 +1926,31 @@ impl<M: TextEngine> Core<M> {
                 refuse(self, "the image", &source.uri, "network");
                 Prop::Source(None)
             }
-            Prop::Image(ImageProp::DefaultSource(Some(source)))
+            Prop::Image(ImageProp::Placeholder(Some(source)))
                 if !self.access.allows_media(&source.uri) =>
             {
                 refuse(self, "the placeholder", &source.uri, "network");
-                Prop::Image(ImageProp::DefaultSource(None))
+                Prop::Image(ImageProp::Placeholder(None))
+            }
+            Prop::Native(NativeProp::Src(Some(url)))
+                if kind == Kind::Video && !self.access.allows_media(&url) =>
+            {
+                refuse(self, "the video", &url, "network");
+                Prop::Native(NativeProp::Src(None))
+            }
+            Prop::Native(NativeProp::Src(Some(url)))
+                if kind == Kind::WebView && !self.access.allows_webview(&url) =>
+            {
+                refuse(self, "the web page", &url, "webview.hosts");
+                Prop::Native(NativeProp::Src(None))
+            }
+            Prop::Native(NativeProp::Html(Some(_)))
+                if kind == Kind::WebView && !self.access.allows_webviews() =>
+            {
+                self.deny(
+                    "web views are not granted: add `webview` to capabilities in nsh.json".into(),
+                );
+                Prop::Native(NativeProp::Html(None))
             }
             Prop::Native(NativeProp::Source(crate::WebSource::Uri(uri)))
                 if kind == Kind::Video && !self.access.allows_media(&uri) =>
@@ -2008,7 +2028,7 @@ impl<M: TextEngine> Core<M> {
             Prop::Image(option) => {
                 if let Some(image) = node.image.as_mut() {
                     match option {
-                        ImageProp::DefaultSource(source) => image.options.placeholder = source,
+                        ImageProp::Placeholder(source) => image.options.placeholder = source,
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
                     }
@@ -5116,6 +5136,40 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
     use NativeProp as P;
     match (control, prop) {
         (NativeProps::WebView(p), P::Source(v)) => p.source = v,
+        // `src`, `html` and `baseUrl` make one source: `html` shows over
+        // `src`, with the base URL set before or after it.
+        (NativeProps::WebView(p), P::Src(Some(url))) => {
+            if !matches!(p.source, crate::WebSource::Html { .. }) {
+                p.source = crate::WebSource::Uri(url.clone());
+            }
+            p.src = Some(url);
+        }
+        (NativeProps::WebView(p), P::Src(None)) => {
+            p.src = None;
+            if matches!(p.source, crate::WebSource::Uri(_)) {
+                p.source = crate::WebSource::None;
+            }
+        }
+        (NativeProps::WebView(p), P::Html(Some(html))) => {
+            p.source = crate::WebSource::Html {
+                html,
+                base_url: p.base_url.clone(),
+            };
+        }
+        (NativeProps::WebView(p), P::Html(None)) => {
+            if matches!(p.source, crate::WebSource::Html { .. }) {
+                p.source = match &p.src {
+                    Some(url) => crate::WebSource::Uri(url.clone()),
+                    None => crate::WebSource::None,
+                };
+            }
+        }
+        (NativeProps::WebView(p), P::BaseUrl(url)) => {
+            if let crate::WebSource::Html { base_url, .. } = &mut p.source {
+                base_url.clone_from(&url);
+            }
+            p.base_url = url;
+        }
         (NativeProps::WebView(p), P::InjectedJavaScript(v)) => p.injected_js = v,
         (NativeProps::WebView(p), P::InjectedJavaScriptBefore(v)) => p.injected_js_before = v,
         (NativeProps::WebView(p), P::UserAgent(v)) => p.user_agent = v,
@@ -5128,6 +5182,7 @@ fn apply_native(control: &mut NativeProps, prop: NativeProp) {
                 _ => None,
             }
         }
+        (NativeProps::Video(p), P::Src(v)) => p.source = v,
         (NativeProps::Video(p), P::Paused(v)) => p.paused = v,
         (NativeProps::Video(p), P::Muted(v)) => p.muted = v,
         (NativeProps::Video(p), P::Volume(v)) => p.volume = v.clamp(0.0, 1.0),

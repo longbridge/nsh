@@ -2,13 +2,11 @@
 //! descriptions, list layouts) and the props whose whole variant is
 //! decoded by hand (`#[prop(with = …)]`): the shapes JS sends them in.
 
-use std::sync::Arc;
-
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
     ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
-    StatusBarSetting, StatusBarStyle, Viewability, WebSource,
+    StatusBarSetting, StatusBarStyle, Viewability,
     geometry::{Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
@@ -41,51 +39,34 @@ fn scales<I: HostInput>(input: &I) -> ImageScales {
         .collect()
 }
 
-/// `"https://…"` or a bundled asset `{ uri, width, height, scales }`.
+/// `"https://…"` or a bundled asset `{ url, size: { width, height }, scales }`.
 impl HostValue for ImageSource {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
-        if let Some(uri) = input.as_string() {
-            return (!uri.is_empty()).then(|| ImageSource {
-                uri: uri.into(),
+        if let Some(url) = input.as_string() {
+            return (!url.is_empty()).then(|| ImageSource {
+                uri: url.into(),
                 size: None,
                 scales: ImageScales::NONE,
             });
         }
-        let uri = input.field("uri")?.as_string()?;
-        let size = match (number(input, "width"), number(input, "height")) {
-            (Some(w), Some(h)) => Some(size(Points(w), Points(h))),
+        let url = input.field("url")?.as_string()?;
+        let extent = input.field("size");
+        let size = match extent
+            .as_ref()
+            .map(|e| (number(e, "width"), number(e, "height")))
+        {
+            Some((Some(w), Some(h))) => Some(size(Points(w), Points(h))),
             _ => None,
         };
         Some(ImageSource {
-            uri: uri.into(),
+            uri: url.into(),
             size,
             scales: scales(input),
         })
     }
 
     fn ts_type(_: &mut TsTypes) -> String {
-        "string | ImageAsset | { uri: string }".into()
-    }
-}
-
-/// `"https://…"`, `{ uri }` or `{ html, baseUrl }`.
-impl HostValue for WebSource {
-    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
-        if let Some(uri) = input.as_string() {
-            return Some(WebSource::Uri(uri.into()));
-        }
-        if let Some(html) = input.field("html").and_then(|h| h.as_string()) {
-            return Some(WebSource::Html {
-                html: html.into(),
-                base_url: field::<Arc<str>, _>(input, "baseUrl", cx),
-            });
-        }
-        let uri = input.field("uri")?.as_string()?;
-        Some(WebSource::Uri(uri.into()))
-    }
-
-    fn ts_type(_: &mut TsTypes) -> String {
-        "string | { uri: string } | { html: string; baseUrl?: string }".into()
+        "string | ImageAsset".into()
     }
 }
 

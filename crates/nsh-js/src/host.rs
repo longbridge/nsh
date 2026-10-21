@@ -618,6 +618,13 @@ impl Host {
                         rquickjs::String::from_str(cx.clone(), text).map(|s| s.into_value())
                     }
                     (_, EventPayload::Value(value)) => payload_value(&cx, value),
+                    // A video's `onLoad`: `{ duration, size }` of the
+                    // platforms' `duration`, `width` and `height`.
+                    (EventKind::Load, EventPayload::Map(fields))
+                        if fields.iter().any(|(k, _)| *k == "duration") =>
+                    {
+                        video_load(&cx, fields)
+                    }
                     _ => payload_object(&cx, payload),
                 };
                 let raw = cx.as_raw().as_ptr();
@@ -1065,6 +1072,23 @@ impl Drop for Host {
 fn mark_handled(cx: &Ctx<'_>, promise: &rquickjs::Promise<'_>) {
     // SAFETY: a live promise of this context.
     unsafe { qjs::JS_PromiseMarkAsHandled(cx.as_raw().as_ptr(), promise.as_raw()) };
+}
+
+/// A video's `onLoad` payload: `{ duration, size: { width, height } }`.
+fn video_load<'js>(
+    cx: &Ctx<'js>,
+    fields: &[(&'static str, PayloadValue)],
+) -> rquickjs::Result<Value<'js>> {
+    let obj = rquickjs::Object::new(cx.clone())?;
+    let size = rquickjs::Object::new(cx.clone())?;
+    for (key, value) in fields {
+        match *key {
+            "width" | "height" => size.set(*key, payload_value(cx, value)?)?,
+            _ => obj.set(*key, payload_value(cx, value)?)?,
+        }
+    }
+    obj.set("size", size)?;
+    Ok(obj.into_value())
 }
 
 /// The JS object handed to event handlers.

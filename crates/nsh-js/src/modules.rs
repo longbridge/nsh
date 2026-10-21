@@ -446,7 +446,7 @@ const IMAGE_EXPORTS: &[Item] = &[(
         image
     }),
     Ts::value(
-        "An image (a URL or `import logo from \"./logo.png\"`), decoded and cached\nnatively; `Image.getSize(uri)` and `Image.prefetch(uri)` ask about one\nwithout showing it.",
+        "An image (a URL or `import logo from \"./logo.png\"`), decoded and cached\nnatively; `Image.getSize(src)` and `Image.prefetch(src)` ask about one\nwithout showing it.",
         "((props: ImageProps) => YNode) & ImageModule",
     ),
 )];

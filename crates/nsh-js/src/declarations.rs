@@ -91,9 +91,9 @@ export interface TextProps extends CommonProps, TextHostProps {
 
 /** An image asset (`import logo from "./logo.png"`), sized in points. */
 export interface ImageAsset {
-  uri: string;
-  width: number;
-  height: number;
+  url: string;
+  /** Its size in points. */
+  size: Size;
   /** The pixel densities it ships in, 1 being the imported file:
    * `[1, 2, 3]` when `logo@2x.png` and `logo@3x.png` sit next to
    * `logo.png`. The image loads the one for the screen's pixel ratio.

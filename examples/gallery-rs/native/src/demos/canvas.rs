@@ -1037,7 +1037,7 @@ fn draw_compositing(c: Palette, width: f32, height: f32) -> Painter {
         .clip()
         .fill_color(c.raised)
         .fill_rect(0.0, 0.0, 92.0, height)
-        .draw_image(crate::assets::LOGO.uri, rect(10.0, cy - 36.0, 72.0, 72.0))
+        .draw_image(crate::assets::LOGO.url, rect(10.0, cy - 36.0, 72.0, 72.0))
         .restore()
         .stroke_color(c.border)
         .line_width(1.5)

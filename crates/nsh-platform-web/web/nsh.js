@@ -409,7 +409,7 @@ function importGlue(url) {
 
 /**
  * The script a web view's HTML starts with: the first message from the
- * player carrying `token` hands it the port `ReactNativeWebView.postMessage`
+ * player carrying `token` hands it the port `window.nsh.postMessage`
  * writes to, and which runs `injectJavaScript` and history steps. The
  * page's own `message` listeners never see that message.
  */
@@ -417,7 +417,7 @@ function webBridge(token) {
   return `(() => {
   let port = null;
   const queue = [];
-  window.ReactNativeWebView = { postMessage(data) { data = String(data); port ? port.postMessage(data) : queue.push(data); } };
+  window.nsh = { postMessage(data) { data = String(data); port ? port.postMessage(data) : queue.push(data); } };
   addEventListener("message", (e) => {
     if (port || e.source !== parent || e.data !== ${JSON.stringify(token)} || !e.ports[0]) return;
     e.stopImmediatePropagation();
@@ -1803,7 +1803,7 @@ class Player {
   // Images
 
   /**
-   * `source`, `resizeMode`, `defaultSource` (shown until the image loads,
+   * `src`, `resizeMode`, `placeholder` (shown until the image loads,
    * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
    * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
    */
@@ -3188,10 +3188,10 @@ class Player {
   // Web views and videos
 
   /**
-   * A web view is an <iframe>. HTML (`source={{ html }}`) loads as
+   * A web view is an <iframe>. HTML (`html`) loads as
    * `srcdoc` in a sandbox with an origin of its own (it never reaches the
    * player's page), with a bridge script first: the page's
-   * `window.ReactNativeWebView.postMessage(data)` reaches `onMessage`
+   * `window.nsh.postMessage(data)` reaches `onMessage`
    * through a `MessageChannel`, and `injectJavaScript` runs through it.
    * `injectedJavaScriptBeforeContentLoaded` / `injectedJavaScript` are
    * scripts at the document's start and end. A URL loads as it is

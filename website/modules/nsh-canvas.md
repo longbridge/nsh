@@ -227,10 +227,10 @@ cx.fillRect(0, 0, width, height);
 ### Images
 
 ```ts
-drawImage(image: string | ImageAsset | { uri: string }, ...args: CanvasNumber[]): void;
+drawImage(image: string | ImageAsset, ...args: CanvasNumber[]): void;
 ```
 
-Draws an image given as a URL, an imported asset (`import logo from "./logo.png"`) or `{ uri }`. It is loaded natively; the canvas draws again once it has loaded. An imported asset draws the imported file itself; import the `@3x` file to draw sharp on every screen. Three forms, as in HTML:
+Draws an image given as a URL or an imported asset (`import logo from "./logo.png"`). It is loaded natively; the canvas draws again once it has loaded. An imported asset draws the imported file itself; import the `@3x` file to draw sharp on every screen. Three forms, as in HTML:
 
 - `drawImage(image, dx, dy)`: at its natural size.
 - `drawImage(image, dx, dy, dw, dh)`: scaled into a rectangle.

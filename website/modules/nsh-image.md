@@ -16,8 +16,8 @@ import { Image, type ImageSize } from "nsh";
 
 ```ts
 const Image: ((props: ImageProps) => YNode) & {
-  getSize(source: string | { uri: string }): Promise<ImageSize>;
-  prefetch(source: string | { uri: string }): Promise<boolean>;
+  getSize(src: string | ImageAsset): Promise<ImageSize>;
+  prefetch(src: string | ImageAsset): Promise<boolean>;
 };
 ```
 
@@ -26,7 +26,7 @@ See [Images and assets](../docs/images-and-assets.md) for the guide.
 ## Image.getSize
 
 ```ts
-getSize(source: string | { uri: string }): Promise<ImageSize>;
+getSize(src: string | ImageAsset): Promise<ImageSize>;
 
 interface ImageSize {
   width: number;   // pixels (an SVG's: points)
@@ -50,7 +50,7 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 ## Image.prefetch
 
 ```ts
-prefetch(source: string | { uri: string }): Promise<boolean>;
+prefetch(src: string | ImageAsset): Promise<boolean>;
 ```
 
 Loads an image ahead of showing it. Resolves with `true` once its bytes are in memory (`false` when it could not be loaded). For an imported image with pixel-density variants, it loads the variant the views load on this screen. Use it for the next page of a gallery or the image behind a tap.
@@ -62,8 +62,8 @@ next.forEach((p) => Image.prefetch(p.url));
 
 ## Related
 
-- [`<Image>`](../elements/image.md): `src`, `resizeMode`, `defaultSource`, `onLoad`, `onProgress`, `onError` and the other props.
-- Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ uri, width, height, scales? }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
+- [`<Image>`](../elements/image.md): `src`, `resizeMode`, `placeholder`, `onLoad`, `onProgress`, `onError` and the other props.
+- Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ url, size, scales? }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
 
 > [!NOTE]
 > When your app declares `capabilities` in `nsh.json`, `getSize` and `prefetch` of remote URLs must be allowed under `network`, like `fetch`. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).

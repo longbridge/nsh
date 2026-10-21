@@ -261,7 +261,7 @@ Images and fonts ship with the app. A Rust crate reads each file of its `assets/
 ```rust tabs
 use nsh_core::ui::{FontAsset, ImageAsset, asset};
 
-const LOGO: ImageAsset = asset!("logo@2x.png");      // its uri, and its size: 64×64 points
+const LOGO: ImageAsset = asset!("logo@2x.png");      // its url, and its size: 64×64 points
 const INTER: FontAsset = asset!("Inter.ttf");        // its uri, and its family: "Inter"
 
 image(LOGO)
@@ -270,7 +270,7 @@ text("Hello").font_family(INTER.family)
 
 ```tsx tabs
 import { Image, Text } from "nsh";
-import logo from "./assets/logo@2x.png";   // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
+import logo from "./assets/logo@2x.png";   // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
 import Inter from "./assets/Inter.ttf";     // "Inter"
 
 <Image src={logo} />
@@ -279,7 +279,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 
 | Extension | Import gives |
 |---|---|
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height, scales? }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. A file without a suffix also ships its `@1.5x`–`@4x` siblings, listed in `scales`, and the screen's variant is loaded ([pixel densities](./images-and-assets.md#pixel-densities)). |
+| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ url, size, scales? }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. A file without a suffix also ships its `@1.5x`–`@4x` siblings, listed in `scales`, and the screen's variant is loaded ([pixel densities](./images-and-assets.md#pixel-densities)). |
 | `.svg` | An `ImageAsset` sized in points by the SVG's `width` and `height` (or `viewBox`). |
 | `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |

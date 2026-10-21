@@ -209,7 +209,7 @@ fn asset_in(dir: &Path, package: &str, lit: LitStr) -> syn::Result<TokenStream> 
                 const _: &[u8] = ::core::include_bytes!(#source);
                 #(const _: &[u8] = ::core::include_bytes!(#variant_sources);)*
                 #ui::ImageAsset {
-                    uri: #uri,
+                    url: #uri,
                     size: ::nsh_core::geometry::size(
                         ::nsh_core::geometry::Points(#width),
                         ::nsh_core::geometry::Points(#height),
@@ -374,7 +374,7 @@ mod tests {
         // Two pixels per point: 128 × 64 pixels are 64 × 32 points.
         let logo = code(asset_in(&dir, "app", lit("logo@2x.png")).unwrap());
         assert!(
-            logo.contains("ImageAsset{uri:\"asset:/@app/logo@2x.png\""),
+            logo.contains("ImageAsset{url:\"asset:/@app/logo@2x.png\""),
             "{logo}"
         );
         assert!(
@@ -446,7 +446,7 @@ mod tests {
             ],
         );
         let out = expand(&dir, "logo.png");
-        assert!(out.contains("uri : \"asset:/@demo/logo.png\""), "{out}");
+        assert!(out.contains("url : \"asset:/@demo/logo.png\""), "{out}");
         assert!(out.contains(&size("40f32", "30f32")), "{out}");
         assert!(out.contains("scales : & [1f32 , 2f32 , 3f32]"), "{out}");
         // Cargo builds again when a variant changes.

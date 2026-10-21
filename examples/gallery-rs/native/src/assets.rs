@@ -26,7 +26,7 @@ mod tests {
     fn assets_are_read_at_compile_time() {
         // 128 pixels at 2 per point.
         assert_eq!(
-            (LOGO.uri, LOGO.size),
+            (LOGO.url, LOGO.size),
             (
                 "asset:/@gallery-native/logo@2x.png",
                 size(px(64.0), px(64.0))

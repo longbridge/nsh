@@ -1463,7 +1463,7 @@ mod tests {
             import { WebView } from "nsh/webview";
             import { List } from "nsh/list";
             import { Canvas } from "nsh/canvas";
-            export const a = <Box><Text>t</Text><Image src="x" /><WebView source="about:blank" /></Box>;
+            export const a = <Box><Text>t</Text><Image src="x" /><WebView src="about:blank" /></Box>;
             export const b = <List each={[1]}>{(i) => <Text>{i()}</Text>}</List>;
             export const c = <Canvas draw={() => {}} />;
             Image.prefetch("x");"#,
@@ -1492,7 +1492,7 @@ mod tests {
         let code = flat(
             &compile(
                 r#"import { Canvas, Image, List, Text, Video, View, WebView } from "nsh";
-            export const a = <View><Text>t</Text><Image src="x" /><WebView source="about:blank" /><Video source="v" /></View>;
+            export const a = <View><Text>t</Text><Image src="x" /><WebView src="about:blank" /><Video src="v" /></View>;
             export const b = <List each={[1]}>{(i) => <Text>{i()}</Text>}</List>;
             export const c = <Canvas draw={() => {}} />;
             Image.prefetch("x");"#,

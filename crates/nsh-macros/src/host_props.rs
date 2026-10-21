@@ -29,6 +29,7 @@ struct VariantAttrs {
     nested: bool,
     internal: bool,
     once: bool,
+    shared: bool,
 }
 
 fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
@@ -66,10 +67,11 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
                 "nested" => out.nested = true,
                 "internal" => out.internal = true,
                 "once" => out.once = true,
+                "shared" => out.shared = true,
                 _ => {
                     return Err(meta.error(
                         "expected `js`, `ios`, `android`, `desktop`, `web`, `default`, `min`, `max`, `on`, `ts`, \
-                         `with`, `reset`, `required`, `nested`, `internal` or `once`",
+                         `with`, `reset`, `required`, `nested`, `internal`, `once` or `shared`",
                     ));
                 }
             }
@@ -183,7 +185,25 @@ pub(crate) fn host_props(input: DeriveInput) -> syn::Result<TokenStream2> {
                 ::core::option::Option::Some(::core::option::Option::Some(Self::#ident(value)))
             }}
         };
-        decode_arms.push(quote! { #(#names)|* => return #decode, });
+        if a.shared {
+            // A name other elements' props share (`src`, `placeholder`):
+            // decoded as this variant on its own elements only.
+            let Some(on) = &a.on else {
+                return Err(syn::Error::new(
+                    v.span(),
+                    "a `shared` name needs the elements it is for: `on = …`",
+                ));
+            };
+            decode_arms.push(quote! {
+                #(#names)|* if cx.on_element({
+                    #[allow(unused_imports)]
+                    use #host::on::*;
+                    #on
+                }) => return #decode,
+            });
+        } else {
+            decode_arms.push(quote! { #(#names)|* => return #decode, });
+        }
         // What clearing it from JS sets.
         let reset = if let Some(r) = &a.reset {
             quote!(::core::option::Option::Some(#r))

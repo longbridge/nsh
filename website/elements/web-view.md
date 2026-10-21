@@ -38,7 +38,7 @@ function Browser() {
     <View style={{ flex: 1 }}>
       <Text numberOfLines={1}>{nav()?.title ?? "Loading…"}</Text>
       <WebView
-        source="https://example.com"
+        src="https://example.com"
         style={{ flex: 1 }}
         onNavigationStateChange={(e) => nav.set(e)}
       />
@@ -47,7 +47,7 @@ function Browser() {
 }
 ```
 
-In TSX `source` is required (see the [WebView API](../modules/nsh-webview.md)). The
+In TSX a web view takes one of `src` and `html` (see the [WebView API](../modules/nsh-webview.md)). The
 [web view and video guide](../docs/web-view-and-video.md) covers messaging patterns and capabilities.
 
 ## Props
@@ -56,7 +56,9 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `source` | `web_view(url)`, `web_view_html(html, base_url)`, `.html(html, base_url)` | `string \| { uri: string } \| { html: string; baseUrl?: string }` | | A URL, or an HTML string with the base URL its relative links resolve against. |
+| `src` | `web_view(url)` | `string` | | The URL of the page to show. |
+| `html` | `web_view_html(html, base_url)`, `.html(html, base_url)` | `string` | | Inline HTML, shown instead of `src`. |
+| `baseUrl` | `base_url` of `web_view_html` / `.html` | `string` | | What `html`'s relative links resolve against. |
 | `injectedJavaScript` | `.injected_java_script(..)` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `.user_agent(..)` | `string` | | The browser's user agent string. |
@@ -79,7 +81,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 | `onLoad` | `.on_load` | `WebViewNavigation` | A page finished loading. |
 | `onError` | `.on_error` | `{ message }` (`&str`) | Loading failed. |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
-| `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.ReactNativeWebView.postMessage(data)`. |
+| `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
 
 `WebViewNavigation` is `{ url, title, loading, canGoBack, canGoForward }`; in Rust `WebNavigation` with `url`, `title`,
 `loading`, `can_go_back` and `can_go_forward`.
@@ -96,7 +98,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 
 ## Messaging
 
-The app and the page exchange strings. The page posts with `window.ReactNativeWebView.postMessage(data)`; the app posts
+The app and the page exchange strings. The page posts with `window.nsh.postMessage(data)`; the app posts
 with the ref's `postMessage(data)` (`post_message(..)` in Rust). Send JSON for structured data.
 
 ```rust tabs
@@ -104,7 +106,7 @@ use nsh_core::ui::prelude::*;
 
 const PAGE: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width">
-<button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
 <p id="got"></p>
 <script>
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
@@ -133,7 +135,7 @@ import { signal, Text, View, WebView, type YNode } from "nsh";
 
 const page = `<!doctype html>
 <meta name="viewport" content="width=device-width">
-<button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
 <p id="got"></p>
 <script>
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
@@ -144,7 +146,7 @@ function Bridge() {
   let web!: YNode;
   return (
     <View style={{ gap: 12 }}>
-      <WebView ref={web} source={{ html: page }} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
       <Text onPress={() => web.postMessage("hi from the app")}>Post to the page · got: {message()}</Text>
     </View>
   );
@@ -154,7 +156,7 @@ function Bridge() {
 ## Capabilities
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md) in `nsh.json`, a web view shows and
-navigates to the hosts listed under `webview`. A `source` on another host shows an empty view; a top-level navigation
+navigates to the hosts listed under `webview`. A `src` on another host shows an empty view; a top-level navigation
 to one (a link the user taps) is cancelled natively.
 
 ```json

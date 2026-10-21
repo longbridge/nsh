@@ -255,11 +255,11 @@ fn variant_mismatch(
     })
 }
 
-/// The module of an image import: its URI and size in points and, when
+/// The module of an image import: its URL and size in points and, when
 /// it has variants (their `scales`, above 1), the scales it ships in, 1
-/// first. Without variants it is `{ uri, width, height }`.
+/// first. Without variants it is `{ url, size: { width, height } }`.
 fn image_module(
-    uri: &str,
+    url: &str,
     (w, h): (impl std::fmt::Display, impl std::fmt::Display),
     scales: &[f32],
 ) -> String {
@@ -272,7 +272,7 @@ fn image_module(
             .collect();
         format!(", scales: [{}]", list.join(", "))
     };
-    format!("export default {{ uri: {uri:?}, width: {w}, height: {h}{scales} }};")
+    format!("export default {{ url: {url:?}, size: {{ width: {w}, height: {h} }}{scales} }};")
 }
 
 impl NshPlugin {
@@ -613,16 +613,16 @@ mod tests {
         let module = |scales: &[f32]| image_module("asset:/img/flag.png", (40.0, 30.0), scales);
         assert_eq!(
             module(&[2.0, 3.0]),
-            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30, scales: [1, 2, 3] };"
+            "export default { url: \"asset:/img/flag.png\", size: { width: 40, height: 30 }, scales: [1, 2, 3] };"
         );
         assert_eq!(
             module(&[1.5, 4.0]),
-            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30, scales: [1, 1.5, 4] };"
+            "export default { url: \"asset:/img/flag.png\", size: { width: 40, height: 30 }, scales: [1, 1.5, 4] };"
         );
-        // Without variants: `{ uri, width, height }`.
+        // Without variants: `{ url, size }`.
         assert_eq!(
             module(&[]),
-            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30 };"
+            "export default { url: \"asset:/img/flag.png\", size: { width: 40, height: 30 } };"
         );
     }
 

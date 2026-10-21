@@ -87,7 +87,7 @@ function App() {
       <View style={{ flex: 1, flexDirection: wide() ? "row" : "column", gap: 16 }}>
         <Image
           src={sources[source()]}
-          defaultSource={placeholder}
+          placeholder={placeholder}
           resizeMode={mode()}
           blurRadius={blur() ? 12 : 0}
           fadeDuration={250}

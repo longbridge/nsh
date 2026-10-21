@@ -1781,7 +1781,7 @@ impl Image {
     /// [`super::ImageAsset`]).
     pub fn placeholder(mut self, src: impl IntoReactive<super::ImageSrc>) -> Self {
         super::host::bind_prop(&mut self.0, src, |src: super::ImageSrc| {
-            Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
+            Prop::Image(crate::ImageProp::Placeholder(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,

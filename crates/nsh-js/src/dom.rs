@@ -1280,7 +1280,9 @@ fn set_prop(
     let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
     // Decoding may run JS (getters): no borrow is held meanwhile.
     let mut warnings = crate::protocol::Warnings::deferred();
-    let decoded = crate::protocol::decode_prop(id, name, v, &mut warnings);
+    // SAFETY: live node data.
+    let tag = unsafe { (*p).tag };
+    let decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),

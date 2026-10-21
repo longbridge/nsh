@@ -301,7 +301,7 @@ const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
 
 下列内容由浏览器决定，Web 后端遵循它：
 
-- **其他网站的 Web 视图**：`WebView` 是一个 `<iframe>`。内联 HTML（`source={{ html }}`）功能完整：`onMessage`、`postMessage`、`injectJavaScript`、注入脚本和加载事件都可用（它在独立的源中运行，与所在页面隔离）。其他网站的页面只有 `postMessage` 和加载事件，事件中的 URL 是传入的那个：浏览器不向外层页面透露它的导航、标题、历史和错误，`userAgent` 也无法设置。
+- **其他网站的 Web 视图**：`WebView` 是一个 `<iframe>`。内联 HTML（`html`）功能完整：`onMessage`、`postMessage`、`injectJavaScript`、注入脚本和加载事件都可用（它在独立的源中运行，与所在页面隔离）。其他网站的页面只有 `postMessage` 和加载事件，事件中的 URL 是传入的那个：浏览器不向外层页面透露它的导航、标题、历史和错误，`userAgent` 也无法设置。
 - **自动播放的有声视频**：`Video` 是一个 `<video>`，支持全部属性和事件，但浏览器只在用户操作之后才允许有声视频开始播放（静音视频可以自动播放）。
 - **原生组件**：注册的原生组件属于嵌入 NSH 的原生应用；在 Web 上它的视图保持为空，并在控制台给出警告。
 - **平台服务**：读取剪贴板（`Clipboard.getString`，`hasString` 也一样）需要安全上下文（HTTPS），并可能询问用户。图片不报告 `onProgress`。

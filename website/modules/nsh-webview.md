@@ -20,7 +20,6 @@ See [Web view and video](../docs/web-view-and-video.md) for the guide and [`<Web
 const WebView: (props: WebViewProps) => YNode;
 
 interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desktop">, WebViewHostProps {
-  source: string | { uri: string } | { html: string; baseUrl?: string };
   ios?: IOSWebViewHostProps;
   desktop?: DesktopWebViewHostProps;
 }
@@ -39,7 +38,7 @@ function Browser() {
         <Text onPress={() => web.reload()}>Reload</Text>
         <Text numberOfLines={1} style={{ flex: 1 }}>{nav()?.title ?? ""}</Text>
       </View>
-      <WebView ref={web} source="https://example.com" style={{ flex: 1 }} onNavigationStateChange={(n) => nav.set(n)} />
+      <WebView ref={web} src="https://example.com" style={{ flex: 1 }} onNavigationStateChange={(n) => nav.set(n)} />
     </View>
   );
 }
@@ -53,7 +52,9 @@ mount(Browser);
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `source` | `string \| { uri: string } \| { html: string; baseUrl?: string }` | (required) | A URL, `{ uri }`, or inline HTML with an optional base URL for its relative links. |
+| `src` | `string` | | The URL of the page to show. |
+| `html` | `string` | | Inline HTML, shown instead of `src`. |
+| `baseUrl` | `string` | | What `html`'s relative links resolve against. |
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `userAgent` | `string` | platform's | The user agent string. |
@@ -70,7 +71,7 @@ mount(Browser);
 | `onLoad` | `WebViewNavigation` | A page finished loading. |
 | `onError` | `{ message: string }` | A page failed to load. |
 | `onNavigationStateChange` | `WebViewNavigation` | The URL, title, loading state or history changed. |
-| `onMessage` | `{ data: string }` | The page called `window.ReactNativeWebView.postMessage(data)`. |
+| `onMessage` | `{ data: string }` | The page called `window.nsh.postMessage(data)`. |
 
 ```ts
 interface WebViewNavigation {
@@ -95,12 +96,12 @@ interface WebViewNavigation {
 
 ## Talking to the page
 
-The page sends strings to the app with `window.ReactNativeWebView.postMessage(…)`; the app sends strings to the page with `ref.postMessage(…)`. Send JSON for structured data.
+The page sends strings to the app with `window.nsh.postMessage(…)`; the app sends strings to the page with `ref.postMessage(…)`. Send JSON for structured data.
 
 ```tsx
 const page = `<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
 <body>
-  <button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+  <button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
   <p id="got"></p>
   <script>
     window.addEventListener('message', (e) => { document.getElementById('got').textContent = e.data; });
@@ -110,7 +111,7 @@ const page = `<!doctype html><html><head><meta name="viewport" content="width=de
 let web!: YNode;
 const message = signal("");
 
-<WebView ref={web} source={{ html: page }} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+<WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
 <Text onPress={() => web.postMessage("hi from the app")}>Post to the page</Text>
 ```
 

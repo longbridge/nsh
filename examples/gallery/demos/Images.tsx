@@ -189,7 +189,7 @@ function Placeholders() {
     <Card
       icon="photos"
       title="Placeholder and fade"
-      subtitle="defaultSource, then a fade"
+      subtitle="A placeholder, then a fade"
       right={<Button label="Reload" variant="secondary" onPress={() => seed.set(seed() + 1)} />}
     >
       <View style={{ flexDirection: "row", gap: 12 }}>
@@ -198,7 +198,7 @@ function Placeholders() {
             <View style={{ flex: 1, gap: 8 }}>
               <Image
                 src={photo(fade().id, 600 + seed(), 600 + seed())}
-                defaultSource={logo}
+                placeholder={logo}
                 fadeDuration={fade().ms}
                 resizeMode="cover"
                 style={{ ...frame(), height: 100 }}

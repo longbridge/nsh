@@ -10,12 +10,12 @@ use super::SharedString;
 use crate::geometry::{Points, Size};
 
 /// An image file of a crate (`asset!("logo@2x.png")`; TS: `import logo
-/// from "./logo@2x.png"`): its URI and natural size, which lays the image
+/// from "./logo@2x.png"`): its URL and natural size, which lays the image
 /// out before it loads.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageAsset {
     /// `asset:/@<package>/<path>`.
-    pub uri: &'static str,
+    pub url: &'static str,
     /// Its size in points, the size it lays out at: the file's pixels over
     /// the `@2x` / `@3x` of its name. (What decoding reports, as
     /// [`super::ImageSize`] does, is in [`crate::geometry::DevicePixels`].)
@@ -102,7 +102,7 @@ impl<T: Into<SharedString>> From<T> for ImageSrc {
 impl From<ImageAsset> for ImageSrc {
     fn from(asset: ImageAsset) -> Self {
         Self {
-            uri: asset.uri.into(),
+            uri: asset.url.into(),
             size: Some((asset.size.width.0, asset.size.height.0)),
             scales: asset.scales.iter().copied().collect(),
         }

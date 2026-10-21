@@ -233,7 +233,7 @@ and Windows.
 - **Web views** sit above everything GPUI draws at their place (NSH content drawn over one is under it) and are
   missing from the offscreen screenshots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
-  them. `source.baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
+  them. `baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported; failed
   loads report no `onError` on macOS and Windows.
 - **Accessibility** (AccessKit 0.24, as GPUI Fast 0.1.9 uses it): the adapters pass on only `Click`, `Focus`,
   `SetValue` and `ScrollIntoView` everywhere, `Increment` / `Decrement` on macOS and `Expand` / `Collapse` on

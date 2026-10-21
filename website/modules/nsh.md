@@ -251,7 +251,7 @@ page. Their props are documented under [Elements](../elements/index.md).
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `HoverEvent`, `ContextMenuEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
 | `Point`, `Size`, `Bounds`, `Edges`, `Modifiers` | The shapes payloads and props are made of, with GPUI's fields (`nsh_core::geometry`) |
-| `ImageAsset` | What importing an image file gives (`{ uri, width, height, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |
+| `ImageAsset` | What importing an image file gives (`{ url, size: Size, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`, `AccessibilityState` | Accessibility props |
 

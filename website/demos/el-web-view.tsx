@@ -21,7 +21,7 @@ const page = (c: ReturnType<typeof ui>) => `<!doctype html>
 <script>
   let taps = 0;
   document.getElementById("post").onclick = () =>
-    window.ReactNativeWebView.postMessage("tap " + ++taps + " from the page");
+    window.nsh.postMessage("tap " + ++taps + " from the page");
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = "App says: " + e.data; });
 </script>`;
 
@@ -53,9 +53,9 @@ function App() {
       <View style={{ flex: 1, flexDirection: wide() ? "row" : "column", gap: 16 }}>
         <WebView
           ref={web}
-          source={{ html: page(ui()) }}
+          html={page(ui())}
           // Runs after each load: the page reports its title.
-          injectedJavaScript={`window.ReactNativeWebView.postMessage("loaded: " + document.title)`}
+          injectedJavaScript={`window.nsh.postMessage("loaded: " + document.title)`}
           onLoad={(e) => nav.set(e)}
           onMessage={(e) => messages.set([e.data, ...messages()].slice(0, 4))}
           style={{ flex: 1, minHeight: 240, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: ui().border }}

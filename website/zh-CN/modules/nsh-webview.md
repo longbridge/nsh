@@ -20,7 +20,6 @@ import { WebView, type WebViewNavigation, type WebViewProps } from "nsh";
 const WebView: (props: WebViewProps) => YNode;
 
 interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desktop">, WebViewHostProps {
-  source: string | { uri: string } | { html: string; baseUrl?: string };
   ios?: IOSWebViewHostProps;
   desktop?: DesktopWebViewHostProps;
 }
@@ -39,7 +38,7 @@ function Browser() {
         <Text onPress={() => web.reload()}>Reload</Text>
         <Text numberOfLines={1} style={{ flex: 1 }}>{nav()?.title ?? ""}</Text>
       </View>
-      <WebView ref={web} source="https://example.com" style={{ flex: 1 }} onNavigationStateChange={(n) => nav.set(n)} />
+      <WebView ref={web} src="https://example.com" style={{ flex: 1 }} onNavigationStateChange={(n) => nav.set(n)} />
     </View>
   );
 }
@@ -53,7 +52,9 @@ mount(Browser);
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `source` | `string \| { uri: string } \| { html: string; baseUrl?: string }` | （必填） | URL、`{ uri }`，或内联 HTML 加上可选的基础 URL（用于解析相对链接）。 |
+| `src` | `string` | | 要显示的页面的 URL。 |
+| `html` | `string` | | 内联 HTML，代替 `src` 显示。 |
+| `baseUrl` | `string` | | `html` 中相对链接的解析基准。 |
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自身的脚本之前运行。 |
 | `userAgent` | `string` | 平台默认 | 用户代理字符串。 |
@@ -70,7 +71,7 @@ mount(Browser);
 | `onLoad` | `WebViewNavigation` | 页面加载完成。 |
 | `onError` | `{ message: string }` | 页面加载失败。 |
 | `onNavigationStateChange` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
-| `onMessage` | `{ data: string }` | 页面调用了 `window.ReactNativeWebView.postMessage(data)`。 |
+| `onMessage` | `{ data: string }` | 页面调用了 `window.nsh.postMessage(data)`。 |
 
 ```ts
 interface WebViewNavigation {
@@ -95,12 +96,12 @@ interface WebViewNavigation {
 
 ## 与页面通信
 
-页面用 `window.ReactNativeWebView.postMessage(…)` 向应用发送字符串；应用用 `ref.postMessage(…)` 向页面发送字符串。结构化数据请用 JSON 传递。
+页面用 `window.nsh.postMessage(…)` 向应用发送字符串；应用用 `ref.postMessage(…)` 向页面发送字符串。结构化数据请用 JSON 传递。
 
 ```tsx
 const page = `<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
 <body>
-  <button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+  <button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
   <p id="got"></p>
   <script>
     window.addEventListener('message', (e) => { document.getElementById('got').textContent = e.data; });
@@ -110,7 +111,7 @@ const page = `<!doctype html><html><head><meta name="viewport" content="width=de
 let web!: YNode;
 const message = signal("");
 
-<WebView ref={web} source={{ html: page }} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+<WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
 <Text onPress={() => web.postMessage("hi from the app")}>Post to the page</Text>
 ```
 

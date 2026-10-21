@@ -1106,7 +1106,7 @@ native!(
 native!(
     /// `drawImage(image, dx, dy)` at its natural size, `(image, dx, dy,
     /// dw, dh)`, or `(image, sx, sy, sw, sh, dx, dy, dw, dh)` (source in
-    /// image pixels); `image` is a URL, an imported asset or `{ uri }`.
+    /// image pixels); `image` is a URL or an imported asset.
     draw_image,
     |cx, this, a| {
         let image = at(a, 0);
@@ -1116,11 +1116,21 @@ native!(
             if qjs::JS_IsString(image) {
                 (qjs::JS_DupValue(cx, image), nan(), nan())
             } else if qjs::JS_IsObject(image) {
-                let or_nan = |v: JsValue| if is_undefined(v) { nan() } else { v };
+                // An imported asset: `{ url, size: { width, height } }`.
+                let size = qjs::JS_GetPropertyStr(cx, image, c"size".as_ptr());
+                let side = |key: &std::ffi::CStr| {
+                    if !qjs::JS_IsObject(size) {
+                        return nan();
+                    }
+                    let v = qjs::JS_GetPropertyStr(cx, size, key.as_ptr());
+                    if is_undefined(v) { nan() } else { v }
+                };
+                let (width, height) = (side(c"width"), side(c"height"));
+                free_values(cx, [size]);
                 (
-                    qjs::JS_GetPropertyStr(cx, image, c"uri".as_ptr()),
-                    or_nan(qjs::JS_GetPropertyStr(cx, image, c"width".as_ptr())),
-                    or_nan(qjs::JS_GetPropertyStr(cx, image, c"height".as_ptr())),
+                    qjs::JS_GetPropertyStr(cx, image, c"url".as_ptr()),
+                    width,
+                    height,
                 )
             } else {
                 (UNDEFINED, nan(), nan())
@@ -1494,7 +1504,7 @@ export interface Path2D extends CanvasPath {}"#,
    * `(image, sx, sy, sw, sh, dx, dy, dw, dh)` for part of it (source in
    * image pixels). The canvas draws again once it has loaded.
    */
-  drawImage(image: string | ImageAsset | { uri: string }, ...args: CanvasNumber[]): void;
+  drawImage(image: string | ImageAsset, ...args: CanvasNumber[]): void;
 }
 export interface CanvasRenderingContext2D extends CanvasPath, CanvasContextMethods, CanvasProperties {}"#,
         ),

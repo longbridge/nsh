@@ -898,7 +898,9 @@ pub fn derive_js_ops(input: TokenStream) -> TokenStream {
 /// decoder `with = path`), where it applies (`on = TEXT | INPUT`), its
 /// TypeScript type (`ts = "…"` over the payload's) and its reset
 /// (`reset = …`); `nested` delegates to an enum of the same kind,
-/// `internal` keeps it out of the element types. Doc comments document
+/// `internal` keeps it out of the element types, and `shared` marks a name
+/// other elements' props have too (`src`, `placeholder`): it decodes as
+/// this variant only on the elements of its `on`. Doc comments document
 /// the props.
 #[proc_macro_derive(HostProps, attributes(prop))]
 pub fn derive_host_props(input: TokenStream) -> TokenStream {

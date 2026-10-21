@@ -128,7 +128,7 @@ runtime does not know: they are not granted there.
 
 ### `network`
 
-Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `defaultSource`, canvas images,
+Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `placeholder`, canvas images,
 `Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
@@ -164,7 +164,7 @@ paths.
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
-`about:blank` and inline HTML (`source={{ html }}`) need only web views to be granted at all: `"webview": { "hosts": [] }`
+`about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
 allows them without allowing any remote page.
 
 ### `statusBar`

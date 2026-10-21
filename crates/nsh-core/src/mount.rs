@@ -59,6 +59,11 @@ pub enum ViewKind {
 pub struct WebProps {
     /// What it shows.
     pub source: WebSource,
+    /// The `src` prop, which [`Self::source`] loads unless `html` is set.
+    pub src: Option<Arc<str>>,
+    /// The `baseUrl` prop, which [`Self::source`] holds while `html` is
+    /// set.
+    pub base_url: Option<Arc<str>>,
     /// Script run after each page loads.
     pub injected_js: Option<Arc<str>>,
     /// Script run before each page's own scripts.
@@ -77,6 +82,8 @@ impl Default for WebProps {
     fn default() -> Self {
         Self {
             source: WebSource::None,
+            src: None,
+            base_url: None,
             injected_js: None,
             injected_js_before: None,
             user_agent: None,
@@ -528,7 +535,7 @@ impl Default for InputConfig {
 /// How an image is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImageOptions {
-    /// `defaultSource`: shown until the image loads (and if it fails).
+    /// `placeholder`: shown until the image loads (and if it fails).
     pub placeholder: Option<ImageSource>,
     /// `blurRadius` in points (0: sharp).
     pub blur_radius: Points,

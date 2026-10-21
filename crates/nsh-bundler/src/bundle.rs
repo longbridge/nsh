@@ -887,17 +887,17 @@ mod tests {
         let bundle = bundle_dev(&dir).unwrap();
         let code: String = bundle.code.split_whitespace().collect();
         assert!(
-            code.contains("uri:\"asset:/icon.svg\",width:24,height:24"),
+            code.contains("url:\"asset:/icon.svg\",size:{width:24,height:24}"),
             "{code}"
         );
         // One side and the viewBox's ratio; `@2x` does not apply to SVG.
         assert!(
-            code.contains("uri:\"asset:/logo@2x.svg\",width:96,height:48"),
+            code.contains("url:\"asset:/logo@2x.svg\",size:{width:96,height:48}"),
             "{code}"
         );
         // The shortest number of the size they lay out at.
         assert!(
-            code.contains("uri:\"asset:/odd.svg\",width:9.6,height:4.8"),
+            code.contains("url:\"asset:/odd.svg\",size:{width:9.6,height:4.8}"),
             "{code}"
         );
         assert_eq!(bundle.assets.len(), 3);

@@ -28,12 +28,12 @@ The element's props are listed on [image](../elements/image.md).
 
 ## Images in the app
 
-A Rust crate keeps its files in its `assets/` directory: `asset!("logo@2x.png")` (the path relative to `assets/`) is an `ImageAsset`, `{ uri, size, scales }`, read when the crate compiles, and `registry.assets(assets!())` in the crate's `#[native_module]` function ships every file of the directory with the app. In TSX, import an image file like a module: the import gives an `ImageAsset`, `{ uri, width, height, scales? }`, and the bundler ships the file with the app:
+A Rust crate keeps its files in its `assets/` directory: `asset!("logo@2x.png")` (the path relative to `assets/`) is an `ImageAsset`, `{ url, size, scales }`, read when the crate compiles, and `registry.assets(assets!())` in the crate's `#[native_module]` function ships every file of the directory with the app. In TSX, import an image file like a module: the import gives an `ImageAsset`, `{ url, size, scales? }`, and the bundler ships the file with the app:
 
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo@2x.png");
 
-// LOGO.uri: "asset:/@my-app/logo@2x.png", LOGO.size: 64 × 64 points
+// LOGO.url: "asset:/@my-app/logo@2x.png", LOGO.size: 64 × 64 points
 
 #[native_module("app/native")]
 fn native(registry: &mut Registry) {
@@ -44,7 +44,7 @@ fn native(registry: &mut Registry) {
 ```tsx tabs
 import logo from "./assets/logo@2x.png";
 
-logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
+logo; // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
 ```
 
 Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` ([SVG images](#svg-images)).
@@ -53,7 +53,7 @@ Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` (
 
 **Natural size.** An image from an asset lays out at its natural size when its style leaves the width or height open, so `image(LOGO)` and `<Image src={logo} />` need no style. Set one dimension and the aspect ratio, or both, to size it differently.
 
-In Rust, a missing or broken file fails the build, and a changed one builds the crate again. In TSX, assets are resolved relative to the importing module, and their `uri` is relative to the app's root (the entry's directory). `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
+In Rust, a missing or broken file fails the build, and a changed one builds the crate again. In TSX, assets are resolved relative to the importing module, and their `url` is relative to the app's root (the entry's directory). `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
 
 > [!TIP]
 > In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server, which serves the whole app directory, and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
@@ -78,10 +78,10 @@ const LOGO: ImageAsset = asset!("logo.png");
 ```tsx tabs
 import logo from "./assets/logo.png";
 
-logo; // { uri: "asset:/assets/logo.png", width: 64, height: 64, scales: [1, 2, 3] }
+logo; // { url: "asset:/assets/logo.png", size: { width: 64, height: 64 }, scales: [1, 2, 3] }
 ```
 
-- `asset!` and the bundler look for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of an image named without a suffix. `scales` lists them, with 1 for the named file; an image without siblings has no scales (in TSX it imports as `{ uri, width, height }`). The bundler ships the siblings it finds, and `assets!()` ships the whole directory.
+- `asset!` and the bundler look for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of an image named without a suffix. `scales` lists them, with 1 for the named file; an image without siblings has no scales (in TSX it imports as `{ url, size }`). The bundler ships the siblings it finds, and `assets!()` ships the whole directory.
 - The image loads the smallest scale at least the screen's pixel ratio, otherwise the largest, as React Native picks: `logo.png` on a 1× screen, `logo@2x.png` on a 2× one, `logo@3x.png` on a 3× phone (and at 2.625). On the web only that file is downloaded.
 - When the pixel ratio changes (a window moved to another screen, browser zoom), the images whose choice changes load again, with their [load events](#load-events). Their size stays the named file's size, in points.
 - A variant whose pixels are not the named file's size times its scale gets a build warning in TSX and fails the build in Rust.
@@ -98,7 +98,7 @@ Import an `.svg` file like any image. Its size in points is its `width` and `hei
 import logo from "./assets/logo.svg"; // <svg width="120" height="40" …>
 import star from "./assets/star.svg"; // <svg viewBox="0 0 24 24" …>
 
-logo; // { uri: "asset:/assets/logo.svg", width: 120, height: 40 }
+logo; // { url: "asset:/assets/logo.svg", size: { width: 120, height: 40 } }
 
 <Image src={logo} />
 <Image src={star} style={{ width: 36, height: 36, tintColor: "#0969da" }} />
@@ -114,7 +114,7 @@ An SVG is sharp at the size it is shown. The browser draws it as vectors; iOS, m
 
 ## Remote images
 
-Give the element a URL: a string in Rust (a closure for one that changes), a URL string or `{ uri }` in TSX:
+Give the element a URL: a string in Rust (a closure for one that changes), a URL string in TSX:
 
 ```rust tabs
 image(move || user.with(|u| u.avatar_url.clone()))
@@ -181,7 +181,7 @@ image(ICON).size(px(24.0)).tint_color(AdaptiveColor::rgb(0x0969da, 0x58a6ff))
 
 | Prop | Rust | Description |
 |---|---|---|
-| `defaultSource` | `.placeholder(..)` | An image shown until `src` has loaded; best a local asset |
+| `placeholder` | `.placeholder(..)` | An image shown until `src` has loaded, a URL or an asset; best a local asset |
 | `fadeDuration` | `.fade_duration(ms)` | Milliseconds the loaded image fades in over. Default 0 on iOS, 300 on Android |
 | `blurRadius` | `.blur_radius(px(..))` | Blurs the image by this radius in points, applied once when decoding |
 
@@ -197,7 +197,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 ```tsx tabs
 <Image
   src={`https://picsum.photos/seed/${id()}/300/300`}
-  defaultSource={placeholder}
+  placeholder={placeholder}
   fadeDuration={250}
   style={{ width: 100, height: 100, borderRadius: 12 }}
 />
@@ -265,30 +265,30 @@ const ok = await Image.prefetch("https://example.com/next.jpg");      // true on
 
 | Rust | TSX | Returns |
 |---|---|---|
-| `image_size(uri)` | `Image.getSize(source)` | The image's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)); an error when it cannot be loaded |
-| `prefetch_image(uri)` | `Image.prefetch(source)` | `true` once the image's bytes are loaded |
+| `image_size(src)` | `Image.getSize(src)` | The image's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)); an error when it cannot be loaded |
+| `prefetch_image(src)` | `Image.prefetch(src)` | `true` once the image's bytes are loaded |
 
-In TSX, `source` is a URL string, `{ uri }` or an imported image. For an imported image with [variants](#pixel-densities), both load the variant the views load on this screen, and `getSize` gives the imported file's size. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
+In TSX, `src` is a URL string or an imported image. For an imported image with [variants](#pixel-densities), both load the variant the views load on this screen, and `getSize` gives the imported file's size. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
 
 A common use is sizing a remote image by its aspect ratio:
 
 ```rust tabs
-fn remote_image(uri: &'static str) -> impl IntoElement {
+fn remote_image(url: &'static str) -> impl IntoElement {
     let ratio = signal(1.0_f32);
     spawn(async move {
-        if let Ok(size) = image_size(uri).await {
+        if let Ok(size) = image_size(url).await {
             ratio.set(size.width.0 as f32 / size.height.0 as f32);
         }
     });
-    image(uri).w_full().aspect_ratio(ratio)
+    image(url).w_full().aspect_ratio(ratio)
 }
 ```
 
 ```tsx tabs
-function RemoteImage(props: { uri: string }) {
+function RemoteImage(props: { url: string }) {
   const ratio = signal(1);
-  Image.getSize(props.uri).then((s) => ratio.set(s.width / s.height));
-  return <Image src={props.uri} style={{ width: "100%", aspectRatio: ratio() }} />;
+  Image.getSize(props.url).then((s) => ratio.set(s.width / s.height));
+  return <Image src={props.url} style={{ width: "100%", aspectRatio: ratio() }} />;
 }
 ```
 

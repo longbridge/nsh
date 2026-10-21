@@ -29,8 +29,8 @@
 //! Windows 11 (and Edge's installer on Windows 10). Without it, a web view
 //! draws a neutral placeholder, as on Linux.
 //!
-//! Pages talk to the app as with React Native's web view: the bridge script
-//! defines `window.ReactNativeWebView.postMessage(data)` (`onMessage`), and
+//! Pages talk to the app through `window.nsh`: the bridge script
+//! defines `window.nsh.postMessage(data)` (`onMessage`), and
 //! `postMessage()` dispatches a `message` event on the page's `window`.
 //! Top-level navigations stay within the app's `webview` capability.
 //! Events and their payloads are the iOS ones: `onLoadStart` and
@@ -128,8 +128,8 @@ use crate::{
     view::{Hosted, ItemPointer, NshView},
 };
 
-/// Lets pages talk to the app, like React Native's web view.
-const BRIDGE: &str = "window.ReactNativeWebView = window.ReactNativeWebView || { postMessage: function (data) { window.chrome.webview.postMessage(String(data)); } };";
+/// Lets pages talk to the app: `window.nsh.postMessage(data)`.
+const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.chrome.webview.postMessage(String(data)); } };";
 
 // The loader, linked statically (webview2-com-sys imports it from
 // `WebView2Loader.dll`, which would have to ship next to every app).
@@ -175,7 +175,7 @@ pub(crate) struct WebItem {
     scroll_script: Rc<RefCell<Option<String>>>,
     /// The engine's own user agent (restored when the app's is removed).
     default_agent: RefCell<Option<String>>,
-    /// The HTML served at its base URL (`source.baseUrl`).
+    /// The HTML served at its base URL (`baseUrl`).
     html: RefCell<Option<(String, Arc<str>)>>,
     /// The document requests are watched (for `html`).
     serving: Cell<bool>,
@@ -679,7 +679,7 @@ impl WebItem {
     }
 
     /// Answers the request of the document at the base URL with the app's
-    /// HTML (`source.baseUrl`).
+    /// HTML (`baseUrl`).
     fn serve_html(&self, webview: &ICoreWebView2) {
         if self.serving.replace(true) {
             return;

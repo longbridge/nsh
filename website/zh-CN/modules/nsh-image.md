@@ -16,8 +16,8 @@ import { Image, type ImageSize } from "nsh";
 
 ```ts
 const Image: ((props: ImageProps) => YNode) & {
-  getSize(source: string | { uri: string }): Promise<ImageSize>;
-  prefetch(source: string | { uri: string }): Promise<boolean>;
+  getSize(src: string | ImageAsset): Promise<ImageSize>;
+  prefetch(src: string | ImageAsset): Promise<boolean>;
 };
 ```
 
@@ -26,7 +26,7 @@ const Image: ((props: ImageProps) => YNode) & {
 ## Image.getSize
 
 ```ts
-getSize(source: string | { uri: string }): Promise<ImageSize>;
+getSize(src: string | ImageAsset): Promise<ImageSize>;
 
 interface ImageSize {
   width: number;   // 像素（SVG 为点）
@@ -50,7 +50,7 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 ## Image.prefetch
 
 ```ts
-prefetch(source: string | { uri: string }): Promise<boolean>;
+prefetch(src: string | ImageAsset): Promise<boolean>;
 ```
 
 在显示之前预先加载图片。数据进入内存后 resolve 为 `true`（无法加载时为 `false`）。对于带有像素密度变体的导入图片，它加载视图在当前屏幕上加载的那个变体。适合用于相册的下一页，或点击后才会显示的图片。
@@ -62,8 +62,8 @@ next.forEach((p) => Image.prefetch(p.url));
 
 ## 相关内容
 
-- [`<Image>`](../elements/image.md)：`src`、`resizeMode`、`defaultSource`、`onLoad`、`onProgress`、`onError` 等属性。
-- 导入图片文件（`import logo from "./logo.png"`）会得到一个 `ImageAsset`（`{ uri, width, height, scales? }`，尺寸单位为点），`<Image src>` 和画布的 `drawImage` 都接受它。
+- [`<Image>`](../elements/image.md)：`src`、`resizeMode`、`placeholder`、`onLoad`、`onProgress`、`onError` 等属性。
+- 导入图片文件（`import logo from "./logo.png"`）会得到一个 `ImageAsset`（`{ url, size, scales? }`，尺寸单位为点），`<Image src>` 和画布的 `drawImage` 都接受它。
 
 > [!NOTE]
 > 如果应用在 `nsh.json` 中声明了 `capabilities`，对远程 URL 调用 `getSize` 和 `prefetch` 需要像 `fetch` 一样在 `network` 中允许。见[沙箱与权限](../docs/sandbox-and-capabilities.md)。

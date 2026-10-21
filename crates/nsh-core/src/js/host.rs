@@ -67,18 +67,62 @@ pub trait HostList {
     fn item(&self, index: usize) -> Option<Self::Item>;
 }
 
-/// Where decoding reports what it could not take.
+/// Where decoding reports what it could not take, and the element it
+/// decodes for.
 #[derive(Debug, Default)]
 pub struct HostCx {
     /// Warnings for the app's console (`unknown role`).
     pub warnings: Vec<String>,
+    /// The [`on`] bits of the element the props are set on
+    /// ([`element_bits`]); 0 when unknown, which decodes a name several
+    /// elements share as the first prop of that name.
+    pub element: u32,
 }
 
 impl HostCx {
+    /// The context of props set on an element `tag`.
+    pub fn for_element(tag: crate::Tag) -> Self {
+        Self {
+            element: element_bits(tag),
+            ..Self::default()
+        }
+    }
+
     /// Reports `message`.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.warnings.push(message.into());
     }
+
+    /// Whether a prop of the elements `on` applies to the element decoded
+    /// for (always, when it is unknown).
+    pub fn on_element(&self, on: u32) -> bool {
+        self.element == 0 || self.element & on != 0
+    }
+}
+
+/// The [`on`] bits of the props element `tag` takes.
+pub fn element_bits(tag: crate::Tag) -> u32 {
+    use crate::Tag;
+    on::ALL
+        | match tag {
+            Tag::Text => on::TEXT,
+            Tag::Image => on::IMAGE,
+            Tag::Scroll => on::SCROLLING | on::SCROLL,
+            Tag::List => on::SCROLLING | on::LIST,
+            Tag::Input => on::INPUT,
+            Tag::Screen => on::SCREEN,
+            Tag::Modal => on::MODAL,
+            Tag::WebView => on::WEBVIEW,
+            Tag::Video => on::VIDEO,
+            Tag::InputAccessory => on::INPUT_ACCESSORY,
+            Tag::View
+            | Tag::Cell
+            | Tag::Stack
+            | Tag::HeaderItem
+            | Tag::Canvas
+            | Tag::Native
+            | Tag::Overlay => 0,
+        }
 }
 
 /// A prop's value: how it comes out of a JS value and its TypeScript type.
@@ -593,7 +637,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::VIDEO,
-        "(e: { duration: number; width: number; height: number }) => void",
+        "(e: { duration: number; size: Size }) => void",
         "",
     ),
     (
@@ -688,7 +732,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::Message,
         on::WEBVIEW,
         "(e: { data: string }) => void",
-        "The page called `window.ReactNativeWebView.postMessage(data)`.",
+        "The page called `window.nsh.postMessage(data)`.",
     ),
     (
         EventKind::NavigationStateChange,

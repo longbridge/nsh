@@ -30,7 +30,7 @@ play at 1×), and `onEnd` only comes for videos that do not loop.
 On [Windows](./windows.md) a web view is a WebView2 control in a child window that follows its view: it is clipped to
 its parents and rounded corners, but NSH content drawn over it (a dialog, a sheet) stays under it. It needs the
 WebView2 Runtime (part of Windows 11; installed with Edge on Windows 10), else it shows a placeholder;
-`source.baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported. Videos are
+`baseUrl` for HTML, `scrollable` and `allowsBackForwardNavigationGestures` are not supported. Videos are
 ordinary content (clipped, transformed and covered like any view) and play the formats the installed Media Foundation
 codecs decode; `rate` works, there is no poster, and the control bar always shows while `controls` is on.
 
@@ -49,7 +49,7 @@ pub fn App() -> impl IntoElement {
 import { mount, WebView } from "nsh";
 
 function App() {
-  return <WebView source="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
+  return <WebView src="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
 }
 
 mount(App);
@@ -57,13 +57,15 @@ mount(App);
 
 ### Sources
 
-| `source` | Shows |
-|---|---|
-| `"https://…"` or `{ uri: "https://…" }` | A web page. |
-| `{ html: "<!doctype html>…" }` | HTML from a string. |
-| `{ html, baseUrl: "https://example.com/" }` | HTML whose relative URLs resolve against `baseUrl`. |
+A web view shows one of `src` and `html`:
 
-In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows HTML (`base_url` an `Option<&str>`); the URL and the HTML can be a signal or a closure, which loads the page again when what it reads changes. Changing `source` loads the new page.
+| Props | Shows |
+|---|---|
+| `src="https://…"` | A web page. |
+| `html="<!doctype html>…"` | HTML from a string, shown instead of `src`. |
+| `html` with `baseUrl="https://example.com/"` | HTML whose relative URLs resolve against `baseUrl`. |
+
+In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows HTML (`base_url` an `Option<&str>`); the URL and the HTML can be a signal or a closure, which loads the page again when what it reads changes. Changing `src` or `html` loads the new page.
 
 ### Props
 
@@ -71,7 +73,9 @@ In Rust each prop is a builder method in snake case (`injected_java_script`, `ja
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `source` | `string \| { uri } \| { html, baseUrl? }` | | What to show. |
+| `src` | `string` | | The URL of the page to show. |
+| `html` | `string` | | Inline HTML, shown instead of `src`. |
+| `baseUrl` | `string` | | What `html`'s relative URLs resolve against. |
 | `injectedJavaScript` | `string` | | Runs after each page loads. |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | Runs before each page's own scripts. |
 | `javaScriptEnabled` | `boolean` | `true` | Pages run scripts. |
@@ -161,7 +165,7 @@ function Browser() {
       </Text>
       <WebView
         ref={web}
-        source="https://developer.mozilla.org/"
+        src="https://developer.mozilla.org/"
         style={{ flex: 1 }}
         onNavigationStateChange={(n) => nav.set(n)}
         ios={{ allowsBackForwardNavigationGestures: true }}
@@ -180,7 +184,7 @@ mount(Browser);
 
 ### Messaging between the page and the app
 
-Pages talk to the app with `window.ReactNativeWebView.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
+Pages talk to the app with `window.nsh.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -188,7 +192,7 @@ use nsh_core::ui::prelude::*;
 const PAGE: &str = r#"<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
 <body style="font-family: -apple-system, sans-serif; margin: 16px">
-  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
     Post to the app
   </button>
   <p id="got">Nothing from the app yet.</p>
@@ -232,7 +236,7 @@ import { mount, signal, Text, View, WebView, type YNode } from "nsh";
 const page = `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
 <body style="font-family: -apple-system, sans-serif; margin: 16px">
-  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
     Post to the app
   </button>
   <p id="got">Nothing from the app yet.</p>
@@ -250,7 +254,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 50, gap: 12 }}>
       <WebView
         ref={web}
-        source={{ html: page }}
+        html={page}
         style={{ height: 240 }}
         onMessage={(e) => last.set(JSON.parse(e.data).type)}
       />
@@ -270,15 +274,15 @@ The ref's `inject_java_script` (`injectJavaScript(script)`) runs code in the cur
 ```rust tabs
 web_view("https://example.com")
     .injected_java_script_before_content("window.isNativeApp = true;")
-    .injected_java_script("window.ReactNativeWebView.postMessage(document.title);")
+    .injected_java_script("window.nsh.postMessage(document.title);")
     .on_message(|title: &str| log::info!("title {title}"))
 ```
 
 ```tsx tabs
 <WebView
-  source="https://example.com"
+  src="https://example.com"
   injectedJavaScriptBeforeContentLoaded={`window.isNativeApp = true;`}
-  injectedJavaScript={`window.ReactNativeWebView.postMessage(document.title);`}
+  injectedJavaScript={`window.nsh.postMessage(document.title);`}
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
@@ -295,7 +299,7 @@ If your `nsh.json` declares `"capabilities"`, a web view may only show and navig
 }
 ```
 
-The check covers the web view's `source` and every top-level navigation the page makes (links, redirects, `location` changes); it is decided natively when the platform asks whether a navigation may proceed. A page's own subresources (scripts, images, frames) are the web content's business and are not checked. `*.example.com` matches subdomains only; list `example.com` as well for the bare domain. An app without a `"capabilities"` key may show any page. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
+The check covers the web view's `src` and every top-level navigation the page makes (links, redirects, `location` changes); it is decided natively when the platform asks whether a navigation may proceed. A page's own subresources (scripts, images, frames) are the web content's business and are not checked. `*.example.com` matches subdomains only; list `example.com` as well for the bare domain. An app without a `"capabilities"` key may show any page. See [Sandbox and capabilities](./sandbox-and-capabilities.md).
 
 ## Video
 
@@ -355,7 +359,7 @@ function Player() {
     <View style={{ flex: 1, justifyContent: "center", padding: 16, gap: 12 }}>
       <Video
         ref={video}
-        source="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
         paused={paused()}
         repeat
         resizeMode="contain"
@@ -385,7 +389,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `source` | `string \| { uri }` | | The video's URL. |
+| `src` | `string` | | The video's URL. |
 | `paused` | `boolean` | `false` | Playback is paused. |
 | `muted` | `boolean` | `false` | No sound. |
 | `volume` | `number` | `1` | 0..1. |
@@ -398,7 +402,7 @@ In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) 
 | Event | Payload | When |
 |---|---|---|
 | `onLoadStart` | | Loading started. |
-| `onLoad` | `{ duration, width, height }` | The video is ready: its length in seconds and its size. |
+| `onLoad` | `{ duration, size }` | The video is ready: its length in seconds and its size. |
 | `onProgress` | `{ currentTime, duration }` | While playing, every `progressUpdateInterval` ms. |
 | `onBuffer` | `{ isBuffering }` | Playback stalled waiting for data, or resumed. |
 | `onEnd` | | Playback reached the end. |
@@ -425,7 +429,7 @@ view()
 
 ```tsx tabs
 <View style={{ height: 220 }}>
-  <Video source={url} paused={paused()} style={{ flex: 1 }} />
+  <Video src={url} paused={paused()} style={{ flex: 1 }} />
   <View
     onPress={() => paused.set(!paused())}
     style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}

@@ -52,7 +52,7 @@
 //! stack's top screen, removed) and resumes, on the frame it was, when it
 //! is drawn again. `onLoad` comes once per load.
 //!
-//! `defaultSource` shows until the image arrives (and stays on error); an
+//! The `placeholder` shows until the image arrives (and stays on error); an
 //! image that had to load then fades in over `fadeDuration` (default 0, as
 //! iOS).
 

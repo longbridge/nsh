@@ -227,10 +227,10 @@ cx.fillRect(0, 0, width, height);
 ### 图片
 
 ```ts
-drawImage(image: string | ImageAsset | { uri: string }, ...args: CanvasNumber[]): void;
+drawImage(image: string | ImageAsset, ...args: CanvasNumber[]): void;
 ```
 
-绘制一张图片，可以是 URL、导入的资源（`import logo from "./logo.png"`）或 `{ uri }`。图片在原生侧加载，加载完成后画布会重新绘制。导入的资源绘制导入的文件本身；要在所有屏幕上绘制清晰，请导入 `@3x` 文件。与 HTML 一样有三种形式：
+绘制一张图片，可以是 URL 或导入的资源（`import logo from "./logo.png"`）。图片在原生侧加载，加载完成后画布会重新绘制。导入的资源绘制导入的文件本身；要在所有屏幕上绘制清晰，请导入 `@3x` 文件。与 HTML 一样有三种形式：
 
 - `drawImage(image, dx, dy)`：按原始尺寸绘制。
 - `drawImage(image, dx, dy, dw, dh)`：缩放到矩形内。

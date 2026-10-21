@@ -344,7 +344,7 @@ pub fn web_view(url: impl IntoReactive<String>) -> WebView {
 }
 
 /// A web view showing the page `html`, its relative links resolved against
-/// `base_url` (TS: `source={{ html, baseUrl }}`).
+/// `base_url` (TS: `html` and `baseUrl`).
 pub fn web_view_html(html: impl IntoReactive<String>, base_url: Option<&str>) -> WebView {
     WebView(ElNode::new(Tag::WebView)).html(html, base_url)
 }
@@ -1046,7 +1046,7 @@ impl WebView {
         self.listen(EventKind::Error, listener.into_listener(), events::message)
     }
 
-    /// The page called `window.ReactNativeWebView.postMessage(data)`.
+    /// The page called `window.nsh.postMessage(data)`.
     pub fn on_message<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::Message, listener.into_listener(), events::data)
     }

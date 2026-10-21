@@ -51,7 +51,7 @@ fn page(dark: bool) -> String {
 <body>
 <h3>An inline page</h3>
 <p>HTML from a string. It sends messages to the app and receives them.</p>
-<button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
 <div id="got">No message from the app yet.</div>
 <script>window.addEventListener('message', (e) => {{ document.getElementById('got').textContent = 'From the app: ' + e.data; }});</script>
 </body></html>"#

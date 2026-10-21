@@ -797,9 +797,9 @@ pub enum KeyboardTaps {
 /// How an `<image>` is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ImageProp {
-    /// `defaultSource`: shown until `src` has loaded (best a local asset).
-    #[prop(js = "defaultSource", on = IMAGE)]
-    DefaultSource(Option<ImageSource>),
+    /// `placeholder`: shown until `src` has loaded (best a local asset).
+    #[prop(js = "placeholder", on = IMAGE, shared)]
+    Placeholder(Option<ImageSource>),
     /// `blurRadius`: blurs the image by this radius in points (decoded once, off
     /// the main thread).
     #[prop(js = "blurRadius", on = IMAGE)]
@@ -1432,7 +1432,7 @@ pub enum Prop {
     /// to its default.
     RustProp(&'static str, Option<crate::ui::AnyValue>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
-    #[prop(js = "src", on = IMAGE)]
+    #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
     /// `resizeMode`: how an image (or a video) fits its box.
     #[prop(js = "resizeMode", on = IMAGE | VIDEO)]
@@ -1522,7 +1522,7 @@ pub enum Prop {
     #[prop(js = "defaultValue", once, on = INPUT)]
     DefaultValue(String),
     /// `placeholder`: shown while the input is empty.
-    #[prop(js = "placeholder", on = INPUT)]
+    #[prop(js = "placeholder", on = INPUT, shared)]
     Placeholder(String),
     /// The placeholder's color (Rust components; TS sets the
     /// `placeholderColor` style key or `placeholder:text-*`).
@@ -1771,7 +1771,7 @@ pub enum Prop {
 pub enum WebSource {
     /// Nothing.
     None,
-    /// A URL.
+    /// A URL (`src`).
     Uri(Arc<str>),
     /// HTML, with the URL relative links resolve against.
     Html {
@@ -1790,10 +1790,19 @@ pub enum NativeProp {
     /// say it is disabled (its accessibility state).
     #[prop(js = "disabled")]
     Disabled(bool),
-    /// `source` of a web view or video: a URL, `{ uri }`, or (web views) `{ html,
-    /// baseUrl }`.
-    #[prop(js = "source", default = WebSource::None, on = WEBVIEW | VIDEO)]
+    /// What a web view or video loads, as Rust sets it (TS sets `src`,
+    /// `html` and `baseUrl`).
     Source(WebSource),
+    /// `src` of a web view or video: the URL it loads.
+    #[prop(js = "src", on = WEBVIEW | VIDEO, shared)]
+    Src(Option<Arc<str>>),
+    /// `html` (web views): the page to show instead of loading `src`.
+    #[prop(js = "html", on = WEBVIEW)]
+    Html(Option<Arc<str>>),
+    /// `baseUrl` (web views): the URL the relative links of `html`
+    /// resolve against.
+    #[prop(js = "baseUrl", on = WEBVIEW)]
+    BaseUrl(Option<Arc<str>>),
     /// `injectedJavaScript` (web views): runs after each page loads.
     #[prop(js = "injectedJavaScript", on = WEBVIEW)]
     InjectedJavaScript(Option<Arc<str>>),

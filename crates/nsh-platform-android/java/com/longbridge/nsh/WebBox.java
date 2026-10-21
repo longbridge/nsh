@@ -14,7 +14,7 @@ import org.json.JSONObject;
 
 /**
  * `<webview>`: an {@code android.webkit.WebView}. Pages reach the app through
- * {@code window.ReactNativeWebView.postMessage}, like React Native's web view;
+ * {@code window.nsh.postMessage};
  * the app's messages arrive as {@code message} events on {@code window}.
  */
 @SuppressLint({"ViewConstructor", "SetJavaScriptEnabled"})
@@ -29,7 +29,7 @@ final class WebBox extends WidgetBox {
         super(context, mounter, id, new WebView(context));
         web = (WebView) widget;
         web.getSettings().setDomStorageEnabled(true);
-        web.addJavascriptInterface(new Bridge(), "ReactNativeWebView");
+        web.addJavascriptInterface(new Bridge(), "nsh");
         web.setWebViewClient(new Client());
         web.setOnTouchListener((v, e) -> {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {

@@ -11,21 +11,21 @@ use crate::{
 #[module]
 pub(crate) struct Image;
 
-/// An image's URI: a string or `{ uri }` (an imported image, with the
-/// `scales` of its variants).
+/// An image's address: a string or an imported image (`ImageAsset`, with
+/// the `scales` of its variants).
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ImageUri {
-    uri: String,
+pub(crate) struct ImageUrl {
+    url: String,
     scales: ImageScales,
     size: Option<ImageSize>,
 }
 
-impl ImageUri {
-    /// The URI the views load at the surface's pixel ratio, and the scale
-    /// of that variant (1 for the URI itself).
+impl ImageUrl {
+    /// The URL the views load at the surface's pixel ratio, and the scale
+    /// of that variant (1 for the URL itself).
     fn pick(self) -> (String, f32) {
         let source = ImageSource {
-            uri: self.uri.into(),
+            uri: self.url.into(),
             size: None,
             scales: self.scales,
         };
@@ -35,21 +35,21 @@ impl ImageUri {
     }
 }
 
-impl JsValue for ImageUri {
+impl JsValue for ImageUrl {
     fn ts_type(_types: &mut TsTypes) -> String {
-        "string | { uri: string }".into()
+        "string | ImageAsset".into()
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        if let Some(uri) = value.as_string() {
+        if let Some(url) = value.as_string() {
             return Ok(Self {
-                uri,
+                url,
                 scales: ImageScales::NONE,
                 size: None,
             });
         }
         if value.kind() == JsKind::Object
-            && let Some(uri) = value.field("uri")?.get().as_string()
+            && let Some(url) = value.field("url")?.get().as_string()
         {
             let list = value.field("scales")?;
             let list = list.get();
@@ -63,9 +63,14 @@ impl JsValue for ImageUri {
             // Only variant assets use the imported file's dimensions.
             // Plain sources keep reporting the loaded file's pixels.
             let size =
-                if !scales.is_empty() && uri.starts_with("asset:/") && !uri.contains(['?', '#']) {
+                if !scales.is_empty() && url.starts_with("asset:/") && !url.contains(['?', '#']) {
+                    let extent = value.field("size")?;
+                    let extent = extent.get();
                     let dimension = |key| -> Result<Option<DevicePixels>, PropError> {
-                        Ok(value
+                        if extent.kind() != JsKind::Object {
+                            return Ok(None);
+                        }
+                        Ok(extent
                             .field(key)?
                             .get()
                             .as_number()
@@ -78,13 +83,13 @@ impl JsValue for ImageUri {
                 } else {
                     None
                 };
-            return Ok(Self { uri, scales, size });
+            return Ok(Self { url, scales, size });
         }
-        Err(value.expected("a URI or { uri }"))
+        Err(value.expected("a URL or an imported image"))
     }
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        Ok(JsOwned::new(host, host.new_string(&self.uri)?))
+        Ok(JsOwned::new(host, host.new_string(&self.url)?))
     }
 }
 
@@ -94,10 +99,10 @@ impl Image {
     /// show it next. An imported image with variants loads the variant the
     /// views load and resolves with the imported file's size. Without
     /// dimensions, it falls back to the variant's pixels over its scale.
-    pub(crate) async fn get_size(source: ImageUri) -> Result<ImageSize, String> {
-        let imported_size = source.size;
-        let (uri, scale) = source.pick();
-        let size = crate::ui::prelude::image_size(uri).await?;
+    pub(crate) async fn get_size(src: ImageUrl) -> Result<ImageSize, String> {
+        let imported_size = src.size;
+        let (url, scale) = src.pick();
+        let size = crate::ui::prelude::image_size(url).await?;
         if let Some(size) = imported_size {
             return Ok(size);
         }
@@ -111,7 +116,7 @@ impl Image {
     /// Loads the image ahead of showing it: true once its bytes are in
     /// memory. An imported image with variants loads the variant the views
     /// load at the screen's pixel ratio.
-    pub(crate) async fn prefetch(source: ImageUri) -> bool {
-        crate::ui::prelude::prefetch_image(source.pick().0).await
+    pub(crate) async fn prefetch(src: ImageUrl) -> bool {
+        crate::ui::prelude::prefetch_image(src.pick().0).await
     }
 }

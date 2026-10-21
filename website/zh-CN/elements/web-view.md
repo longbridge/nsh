@@ -35,7 +35,7 @@ function Browser() {
     <View style={{ flex: 1 }}>
       <Text numberOfLines={1}>{nav()?.title ?? "加载中…"}</Text>
       <WebView
-        source="https://example.com"
+        src="https://example.com"
         style={{ flex: 1 }}
         onNavigationStateChange={(e) => nav.set(e)}
       />
@@ -44,7 +44,7 @@ function Browser() {
 }
 ```
 
-在 TSX 中 `source` 是必填的（参见 [WebView API](../modules/nsh-webview.md)）。[Web view 与视频指南](../docs/web-view-and-video.md)介绍了通信模式和能力声明。
+在 TSX 中 web view 接受 `src` 和 `html` 二者之一（参见 [WebView API](../modules/nsh-webview.md)）。[Web view 与视频指南](../docs/web-view-and-video.md)介绍了通信模式和能力声明。
 
 ## 属性
 
@@ -52,7 +52,9 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `source` | `web_view(url)`、`web_view_html(html, base_url)`、`.html(html, base_url)` | `string \| { uri: string } \| { html: string; baseUrl?: string }` | | 一个 URL，或一段 HTML 字符串及其相对链接所基于的 base URL。 |
+| `src` | `web_view(url)` | `string` | | 要显示的页面的 URL。 |
+| `html` | `web_view_html(html, base_url)`、`.html(html, base_url)` | `string` | | 内联 HTML，代替 `src` 显示。 |
+| `baseUrl` | `web_view_html` / `.html` 的 `base_url` | `string` | | `html` 中相对链接的解析基准。 |
 | `injectedJavaScript` | `.injected_java_script(..)` | `string` | | 每个页面加载完成后执行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `.injected_java_script_before_content(..)` | `string` | | 在每个页面自身的脚本之前执行。 |
 | `userAgent` | `.user_agent(..)` | `string` | | 浏览器的 user agent 字符串。 |
@@ -75,7 +77,7 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 | `onLoad` | `.on_load` | `WebViewNavigation` | 页面加载完成。 |
 | `onError` | `.on_error` | `{ message }`（`&str`） | 加载失败。 |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
-| `onMessage` | `.on_message` | `{ data: string }`（`&str`） | 页面调用了 `window.ReactNativeWebView.postMessage(data)`。 |
+| `onMessage` | `.on_message` | `{ data: string }`（`&str`） | 页面调用了 `window.nsh.postMessage(data)`。 |
 
 `WebViewNavigation` 为 `{ url, title, loading, canGoBack, canGoForward }`；Rust 中为 `WebNavigation`，字段是 `url`、`title`、`loading`、`can_go_back` 和 `can_go_forward`。
 
@@ -91,14 +93,14 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 
 ## 通信
 
-应用和页面之间交换的是字符串。页面通过 `window.ReactNativeWebView.postMessage(data)` 发送；应用通过 ref 的 `postMessage(data)`（Rust 中为 `post_message(..)`）发送。结构化数据请用 JSON。
+应用和页面之间交换的是字符串。页面通过 `window.nsh.postMessage(data)` 发送；应用通过 ref 的 `postMessage(data)`（Rust 中为 `post_message(..)`）发送。结构化数据请用 JSON。
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
 
 const PAGE: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width">
-<button onclick="window.ReactNativeWebView.postMessage('来自页面的问候')">发给应用</button>
+<button onclick="window.nsh.postMessage('来自页面的问候')">发给应用</button>
 <p id="got"></p>
 <script>
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
@@ -127,7 +129,7 @@ import { signal, Text, View, WebView, type YNode } from "nsh";
 
 const page = `<!doctype html>
 <meta name="viewport" content="width=device-width">
-<button onclick="window.ReactNativeWebView.postMessage('来自页面的问候')">发给应用</button>
+<button onclick="window.nsh.postMessage('来自页面的问候')">发给应用</button>
 <p id="got"></p>
 <script>
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = e.data; });
@@ -138,7 +140,7 @@ function Bridge() {
   let web!: YNode;
   return (
     <View style={{ gap: 12 }}>
-      <WebView ref={web} source={{ html: page }} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
+      <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
       <Text onPress={() => web.postMessage("来自应用的问候")}>发给页面 · 收到：{message()}</Text>
     </View>
   );
@@ -147,7 +149,7 @@ function Bridge() {
 
 ## 能力声明
 
-应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `source` 显示为空视图；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。
+应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `src` 显示为空视图；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。
 
 ```json
 {

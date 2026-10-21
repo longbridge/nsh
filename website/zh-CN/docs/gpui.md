@@ -140,7 +140,7 @@ view.load(App::Js(Bundle::source(code)));
 - **视频**在 Linux 上播放（GStreamer）；在 macOS 和 Windows 上显示占位内容并报告 `onError`。
 - **Web 视图**是位于 NSH 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）；在 Xwayland
   下页面一直是黑的（日志中有 "Failed to create GBM buffer"）时，请用 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 运行应用。macOS 和
-  Windows 上裁剪祖先不会裁剪它们，加载失败也不会报告 `onError`。不支持 `source.baseUrl`、`scrollable` 和
+  Windows 上裁剪祖先不会裁剪它们，加载失败也不会报告 `onError`。不支持 `baseUrl`、`scrollable` 和
   `allowsBackForwardNavigationGestures`。
 - **无障碍**通过 AccessKit 实现：读屏软件在所有平台上都能激活、聚焦、设置值并把元素滚动到可见；自定义操作和上下文菜单操作
   尚未传递。

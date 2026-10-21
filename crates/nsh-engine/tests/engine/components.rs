@@ -746,7 +746,7 @@ let note: unknown;
 setTimeout(async () => {
   Toast.show("hello", "long");
   AccessibilityInfo.setAccessibilityFocus(note);
-  const size = await Image.getSize({ uri: "https://example.com/a.png" });
+  const size = await Image.getSize("https://example.com/a.png");
   let failed = "no";
   try {
     await Image.getSize("https://example.com/missing.png");

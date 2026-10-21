@@ -37,7 +37,7 @@ import logo from "./assets/logo.png";
   <Image src={logo} />
   <Image
     src="https://example.com/avatar.jpg"
-    defaultSource={logo}
+    placeholder={logo}
     resizeMode="cover"
     style={{ width: 64, height: 64, borderRadius: 32 }}
   />
@@ -48,14 +48,13 @@ import logo from "./assets/logo.png";
 
 ## 图片来源
 
-图片来源（`src` 和 `defaultSource`；Rust 中为 `image(..)` 和 `.placeholder(..)`）接受：
+图片来源（`src` 和 `placeholder`；Rust 中为 `image(..)` 和 `.placeholder(..)`）接受：
 
 | 值 | 示例 | 说明 |
 |---|---|---|
-| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
+| 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ url, size, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
-| `{ uri }` | `{ uri: "https://…" }` | TSX：与字符串形式相同。 |
 
 开发期间资源由开发服务器提供；`nsh build` 和 `nsh package` 会把它们拷贝进应用（Rust crate 用 `registry.assets(assets!())` 发布它的 `assets/` 目录）。参见[图片与资源](../docs/images-and-assets.md)。
 
@@ -68,9 +67,9 @@ import logo from "./assets/logo.png";
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `src` | `image(src)` | `string \| ImageAsset \| { uri: string }` | | 图片。 |
+| `src` | `image(src)` | `string \| ImageAsset` | | 图片。 |
 | `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | `"cover"` | 图片如何适配其盒子。 |
-| `defaultSource` | `.placeholder(src)` | `string \| ImageAsset \| { uri: string }` | | `src` 加载完成前显示的图片；最好是本地资源。 |
+| `placeholder` | `.placeholder(src)` | `string \| ImageAsset` | | `src` 加载完成前显示的图片；最好是本地资源。 |
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | 以该半径（点）模糊图片（在解码时于主线程外处理一次）。 |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |
 | `tintColor`（样式） | `.tint_color(..)` | `ColorValue` | | 为模板图片（单色绘制的图标）重新着色。 |
@@ -122,7 +121,7 @@ const state = signal("加载中");
 
 带有[像素密度变体](../docs/images-and-assets.md#像素密度)的图片会加载其中一个文件，`onLoad` 报告的是该文件的像素尺寸：对于 64×64 点的 `logo.png`，在 3× 屏幕上报告 `logo@3x.png` 的 192×192。像素比变化、图片加载另一个变体时，这次加载同样会触发事件：先是 `onLoadStart`，然后是带有新文件尺寸的 `onLoad`（或 `onError`），最后是 `onLoadEnd`。
 
-如果需要在显示前获取图片尺寸或预先加载，TSX 调用 `Image.getSize(uri)` 和 `Image.prefetch(uri)`（它们就挂在渲染这个元素的同一个 `Image` 上；参见 [Image API](../modules/nsh-image.md)），Rust 在任务中 await `image_size(uri)` 和 `prefetch_image(uri)`。
+如果需要在显示前获取图片尺寸或预先加载，TSX 调用 `Image.getSize(src)` 和 `Image.prefetch(src)`（它们就挂在渲染这个元素的同一个 `Image` 上；参见 [Image API](../modules/nsh-image.md)），Rust 在任务中 await `image_size(src)` 和 `prefetch_image(src)`。
 传入带有变体的导入图片时，`Image.getSize` 和 `Image.prefetch` 加载当前屏幕显示的那个变体，`getSize` resolve 为导入文件的尺寸（`logo.png` 为 64×64）。
 
 ## ref 方法

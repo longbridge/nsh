@@ -169,7 +169,7 @@ and scrolling; Alt+F4, F11 and Ctrl+Q cannot be bound.
 Different, or not supported:
 
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
-  page does not blur it. `source.baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
+  page does not blur it. `baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
   stays above everything NSH draws.
 - **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
 - **Zooming scroll views** (`zoomTo`, the zoom props); the scroll indicator cannot be dragged.

@@ -343,8 +343,11 @@ impl<'js> HostInput for Js<'js> {
 
 /// The op setting prop `name` to `value`: a style, a registered native
 /// component's prop, one of the core's host props or an event listener.
+/// `tag` is the element's, when known: it picks the prop of a name several
+/// elements share (`src`, `placeholder`).
 pub(crate) fn decode_prop<'js>(
     id: NodeId,
+    tag: Option<nsh_core::Tag>,
     name: &str,
     value: Value<'js>,
     warnings: &mut Warnings,
@@ -367,7 +370,7 @@ pub(crate) fn decode_prop<'js>(
         let (style, patch) = decode_style(entries, warnings)?;
         return Ok(Some(Op::SetStyle { id, style, patch }));
     }
-    let mut cx = HostCx::default();
+    let mut cx = tag.map_or_else(HostCx::default, HostCx::for_element);
     let input = Js(value);
     let decoded = <Prop as HostProps>::decode(name, &input, &mut cx);
     for message in cx.warnings {
