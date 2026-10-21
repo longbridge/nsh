@@ -447,7 +447,7 @@ overflow.
 
 Use a visible label for each field and place help or validation next to the field it describes. Align related fields,
 but do not force long labels into a narrow fixed column. Use the appropriate control: `Checkbox` for independent
-choices, a radio group (`Button`s with `role="radio"`) for a small visible set, a `Menu` of choices for a longer set,
+choices, a [`RadioGroup`](../elements/radio.md) of `Radio`s for a small visible set, a `Menu` of choices for a longer set,
 and [`Switch`](../elements/switch.md) for a setting that takes effect immediately. Their parts (the switch's track and
 thumb, the checkbox's indicator) are the app's to style, with `checked:`, `indeterminate:` and `disabled:` classes
 that follow the control:

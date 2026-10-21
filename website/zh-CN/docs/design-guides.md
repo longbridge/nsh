@@ -301,7 +301,7 @@ NSH 的 flex child 即使设置 `flex-1`，也可能因为长内容拒绝收缩�
 
 ### 表单与设置
 
-每个字段使用可见 label，help 与 validation 放在所描述字段附近。相关字段应对齐，但不要强迫长 label 进入过窄固定列。独立选择用 `Checkbox`，少量可见互斥项用单选组（带 `role="radio"` 的 `Button`），较长集合用列出选项的 `Menu`，立即生效的设置用 [`Switch`](../elements/switch.md)。它们的部件（开关的轨道和滑块、复选框的指示器）由应用设置样式，`checked:`、`indeterminate:` 和 `disabled:` 类名跟随控件：
+每个字段使用可见 label，help 与 validation 放在所描述字段附近。相关字段应对齐，但不要强迫长 label 进入过窄固定列。独立选择用 `Checkbox`，少量可见互斥项用由 `Radio` 组成的 [`RadioGroup`](../elements/radio.md)，较长集合用列出选项的 `Menu`，立即生效的设置用 [`Switch`](../elements/switch.md)。它们的部件（开关的轨道和滑块、复选框的指示器）由应用设置样式，`checked:`、`indeterminate:` 和 `disabled:` 类名跟随控件：
 
 ```rust tabs
 use nsh_base::{switch, theme};
