@@ -384,7 +384,9 @@ The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
+a gesture at a time; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
+view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
+one per gesture), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
 (`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
 the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
 (`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the

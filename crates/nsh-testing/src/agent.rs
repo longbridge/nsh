@@ -1080,6 +1080,24 @@ impl Agent {
     /// is not: the innermost scroll view around it that hides it scrolls it
     /// towards its own middle, a gesture at a time, as a user would.
     fn scroll_into_view(&self, id: NodeId, selector: &str) -> Result<Point<Points>, String> {
+        let (at, scrolled) = self.bring_into_view(id, selector)?;
+        if !scrolled {
+            return Ok(at);
+        }
+        // What the scrolling brought (rows bound, images decoded) lands
+        // before the step acts, once: between the gestures only the view's
+        // own movement is waited for ([`Agent::stopped`]).
+        self.settled()?;
+        Ok(self.native.bounds(id).map_or(at, |b| b.center()))
+    }
+
+    /// [`Agent::scroll_into_view`]'s gestures: the view's middle, and
+    /// whether a gesture moved anything.
+    fn bring_into_view(
+        &self,
+        id: NodeId,
+        selector: &str,
+    ) -> Result<(Point<Points>, bool), String> {
         let not_on_screen = || {
             format!(
                 "`{selector}` is not on screen (it has no native view); {}",
@@ -1105,7 +1123,7 @@ impl Agent {
                 // is pressed where it is when it shows.
                 if anchors.peek().is_none() {
                     return if window.contains(&at) {
-                        Ok(at)
+                        Ok((at, before.is_some()))
                     } else {
                         Err(not_on_screen())
                     };
@@ -1127,7 +1145,7 @@ impl Agent {
             });
             let Some((_, horizontal, scroller)) = hiding else {
                 if window.contains(&at) {
-                    return Ok(at);
+                    return Ok((at, before.is_some()));
                 }
                 return Err(not_on_screen());
             };
@@ -1158,7 +1176,7 @@ impl Agent {
                 Point::new(Points(0.0), Points(step))
             };
             self.native.scroll(middle, delta);
-            self.settled()?;
+            self.stopped(id)?;
             before = Some(at);
         }
         Err(format!(
@@ -1347,6 +1365,29 @@ impl Agent {
                 break;
             }
             self.scene.wait_for_batch(activity.batches, POLL);
+        }
+        self.check()
+    }
+
+    /// Waits until view `id` stops moving after a gesture scrolled it: its
+    /// bounds the same over a few polls ([`SETTLE`] at most). What else the
+    /// app does meanwhile (a ticking timer, an animation of its own) does
+    /// not hold the next gesture back, as it holds a step's end
+    /// ([`Agent::settled`]).
+    fn stopped(&self, id: NodeId) -> Result<(), String> {
+        const STILL: usize = 3;
+        let start = Instant::now();
+        let mut last = self.native.bounds(id);
+        let mut still = 0;
+        while still < STILL && start.elapsed() < SETTLE {
+            std::thread::sleep(POLL);
+            let now = self.native.bounds(id);
+            if now == last {
+                still += 1;
+            } else {
+                still = 0;
+                last = now;
+            }
         }
         self.check()
     }

@@ -2,8 +2,6 @@
 // the app runs as macOS; on a real platform, as it).
 import { expect, open, test } from "nsh/test";
 
-// The System demo animates without end: on a real platform each step
-// waits out the agent's settling, so it takes longer than most.
 test("a right click shows the menu, and its items are chosen", async () => {
   const app = await open("../App.tsx", { platform: "macos" });
   await app.press("label:System");
@@ -23,4 +21,4 @@ test("a right click shows the menu, and its items are chosen", async () => {
   await app.rightClick("id:menu-target");
   await app.chooseMenuItem("Copy");
   await app.waitFor("Chose Copy");
-}, 60_000);
+});
