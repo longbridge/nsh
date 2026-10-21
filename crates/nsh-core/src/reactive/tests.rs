@@ -278,6 +278,20 @@ fn an_effect_that_keeps_writing_what_it_reads_runs_away() {
 }
 
 #[test]
+fn rounds_do_not_add_up_to_a_runaway() {
+    let a = signal(0);
+    render_effect(move || {
+        get(a);
+    });
+    // Each write is a round of its own: together they run the effect more
+    // than `MAX_RUNS` times, none of them runs away.
+    for v in 1..=MAX_RUNS as i64 + 10 {
+        set(a, v);
+    }
+    assert!(!graph().data.runaway);
+}
+
+#[test]
 fn handles_free_signals_and_reuse_slots_with_new_generations() {
     let a = signal(5);
     let generation = graph().generation(a);
