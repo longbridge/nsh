@@ -225,8 +225,23 @@ Things that were found the hard way. Read the section of the area you change bef
 - **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
-- **Tiling window managers ignore the host's `--window-size`** (the window's default size): scripted screenshots have the size
-  the window got, and the script's `resize` too (it resizes on X11 and floating windows).
+- **Tiling window managers ignore the host's `--window-size`** (the window's default size): a test's screenshots have the size
+  the window got, and so does `app.setViewport` (it resizes on X11 and floating windows).
+
+## iOS, the test agent's input
+
+- **Touches made in process do not move the first responder**: a made-up tap on a text field leaves the keyboard's
+  focus where it was, so the agent focuses the input a tap lands in itself (as KIF does).
+- **`UITextField.insertText:` skips the field's delegate** (no `shouldChangeCharactersInRange`, so no `maxLength`):
+  typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
+  controlled input's value comes back lose characters, so keys come at a typist's pace.
+- **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
+  velocity and flings. A drag whose path leaves the scroll view moves it much further than the finger.
+- **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
+  scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
+  it only stops it.
+- **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
+  pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 
 ## macOS, AppKit
 
@@ -257,8 +272,8 @@ Things that were found the hard way. Read the section of the area you change bef
 - `NSView`'s display link does not fire while the window is occluded or minimized, or the screen is locked: a surface
   that wants frames falls back to a main-queue timer after 100 ms without one (`surface.rs`), or transitions never end.
 - `window.sendEvent:` delivers an event without making it `NSApp.currentEvent`, and synthesized mouse moves only arrive
-  when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. Scripted
-  input posts to the application's queue (`script.rs`).
+  when the window accepts mouse moved events; a window-less `CGEvent`'s location is in screen coordinates. The test
+  agent's input posts to the application's queue (`synth.rs`).
 - `CALayer.backgroundFilters` (iOS's backdrop blur) do nothing in AppKit windows, `layerUsesCoreImageFilters` or
   not, and Core Image is not even loaded (`CIFilter` is missing) unless something links it. Backdrop blur is an
   `NSVisualEffectView` with within-window blending; it needs `wantsLayer` set when created, or it has no layer to order
@@ -270,7 +285,7 @@ Things that were found the hard way. Read the section of the area you change bef
   the return type): write the body as one expression.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
   filters and cut masks at the mask layer's bounds; they show no sheets or `AVPlayerLayer` content, and
-  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, `--script`'s `shot`, shows them: WebKit
+  `renderInContext:` no `WKWebView` pages either (`cacheDisplayInRect:`, the test agent's screenshot, shows them: WebKit
   draws them for it). Pages and dialogs that leave as images take their live web views and videos along (`native::lend`).
 - `screencapture -l` needs the Screen Recording permission and fails ("could not create image from window") without
   it; while the screen is locked a full-screen capture is black.
@@ -287,17 +302,17 @@ Things that were found the hard way. Read the section of the area you change bef
   thread-local destructors run after the graphics DLLs and their driver threads are gone. `run_app` runs the window on
   a thread of its own and joins it, so the devices, font faces and bitmaps cached per thread go at a plain thread exit.
 - **Win32 timers tick at ~15.6 ms** (the default timer resolution) and wake-ups come late on a loaded machine: tests
-  must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and `--script`
-  `wait`s need slack.
+  must not assume two timers a few milliseconds apart run in separate turns (chain them instead), and a test's waits
+  need slack.
 - **Child windows cover everything a window draws** (the "airspace" limit): web views are WebView2 composition
   controllers in the window's DirectComposition tree for this reason (`compose.rs`); native components that bring an
-  `HWND` of their own still cover NSH content. Offscreen screenshots (`--script`'s `shot`) have no web views:
-  `screen` captures them (`PrintWindow` with `PW_RENDERFULLCONTENT`).
+  `HWND` of their own still cover NSH content. Offscreen drawings of the window have no web views: the test
+  agent's screenshots capture them (`PrintWindow` with `PW_RENDERFULLCONTENT`).
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).
 - **A focused WebView2 page has the keyboard in a window of its own** (`Chrome_WidgetWin_0`, a child of the
   surface's window): the surface's window gets no keys until it takes the focus back, so alerts and dialogs take it
-  (`native::take_keyboard`), and `--script`'s `type` / `key` post to that window while it has the focus. A
+  (`native::take_keyboard`), and the test agent's typing and keys post to that window while it has the focus. A
   `MoveFocus` right after the click needs a few hundred milliseconds before typed characters reach the page.
 - **`std::fs::canonicalize` returns verbatim paths** (`\\?\C:\…`), which rolldown and path prefix comparisons do not
   take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid;

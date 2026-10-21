@@ -5,8 +5,8 @@
 //!
 //! The window procedure ([`crate::window`]) turns Win32 messages into the
 //! events here (root coordinates, points; times in seconds of the
-//! surface's clock), and so do scripted steps ([`crate::script`]): real
-//! and simulated input share every handler.
+//! surface's clock), and so does the test agent's input
+//! (`crate::synth`): real and simulated input share every handler.
 //!
 //! Hit testing walks the views ([`pick`]), as the Linux backend does:
 //! points go into children through their frames, the parent's scroll

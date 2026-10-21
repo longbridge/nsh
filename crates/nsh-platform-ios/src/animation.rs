@@ -61,6 +61,12 @@ impl Animator {
         changed
     }
 
+    /// Whether the graph animates.
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.graph.is_animating()
+    }
+
     pub(crate) fn take_finished(&mut self) -> Vec<Finished> {
         std::mem::take(&mut self.finished)
     }

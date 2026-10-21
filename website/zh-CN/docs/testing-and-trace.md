@@ -242,10 +242,10 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 ### 在真实平台上运行
 
-`nsh test --target macos`（或 `gpui`）在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
+`nsh test --target macos`（或 `linux`、`windows`、`gpui`、`web`、`ios`）在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
 数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
 
-- 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 上按 Escape，GPUI 里按鼠标的后退键）；
+- 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户的操作（macOS 和 Linux 上按 Escape，Windows 和 GPUI 里按鼠标的后退键，web 上是浏览器的后退按钮，iOS 上是点标题栏的返回按钮或把 sheet 往下滑）；
 - 不在屏幕上的视图会先被滚动到可见，每次一个手势；
 - 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
 - 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
@@ -253,7 +253,11 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 ```sh
 nsh test --target macos                       # 在 macOS 窗口里运行应用的测试
+nsh test --target linux                       # 在 GTK 窗口里运行（没有显示器的机器上用 xvfb-run -a …）
+nsh test --target windows                     # 在 Win32 窗口里运行
+nsh test --target ios                         # 在 iOS 模拟器里运行
 nsh test --target gpui                        # 在 GPUI 窗口里运行（macOS、Windows、Linux）
+nsh test --target web                         # 在 headless 的 Chrome、Edge 或 Chromium 里运行
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
@@ -261,6 +265,13 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 `app.clock.runFor(ms)` 会真的等待这么久，而真实时间做不到的 `fastForward` 和 `setSystemTime` 会 reject。真实平台暂时还给不了的
 选项会让 `open` reject，而不是被忽略：模拟的 `network` 路由、`storage`、`clipboard`、`locale`、`reducedMotion` 和 `safeArea`；请求会
 发往真实网络。`app.storage()` 和 `app.requests()` 只在 headless 下可用。带有自己 Rust crate 的应用暂时只在 headless 下运行测试。
+
+在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或
+`--browser <PATH>` 指定的可执行文件（需要有浏览器：找不到时 `nsh test` 会列出它找过的位置）。整个运行共用一个浏览器，
+每次 `open` 得到一个拥有独立存储的页面。输入是浏览器的可信输入，与用户的输入一样：鼠标点击、滚轮滚动和按键。
+
+在 iOS 上，应用运行在 iOS 模拟器里的开发 host 中：使用已启动的模拟器，否则 `nsh test` 会启动最新的 iPhone。步骤是手指的触摸和软键盘的输入，
+UIKit 收到它们的方式与在设备上相同。`setColorScheme` 切换模拟器的外观，`nsh test` 会在应用结束后把它恢复原样；屏幕是所模拟设备的尺寸。
 
 ### 从标准输入给出步骤
 

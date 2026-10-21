@@ -30,8 +30,6 @@ mod animation;
 #[cfg(feature = "live")]
 mod live;
 mod net;
-pub(crate) mod screen;
-pub(crate) mod selector;
 mod stub;
 
 use std::{
@@ -53,20 +51,19 @@ use nsh_engine::{
     AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
 };
 
+use self::animation::{Animator, FRAME};
 #[cfg(feature = "live")]
 pub use self::live::UreqNetwork;
-use self::{
-    animation::{Animator, FRAME},
-    screen::{Back, Pick},
-    selector::Selector,
-};
 pub use self::{
     net::DirectoryAssets,
-    screen::Screen,
     stub::{
         MemoryStorage, RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse,
         StubRoute,
     },
+};
+use crate::{
+    screen::{Back, Pick, Screen},
+    selector::Selector,
 };
 
 /// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait by

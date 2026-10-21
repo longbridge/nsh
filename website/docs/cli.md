@@ -78,7 +78,7 @@ Apps whose Rust crates depend on NSH through Git use the checkout Cargo resolves
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>]
 ```
 
 Starts the dev server (as `nsh dev`), launches a development host that loads the app from it, and rebuilds on every save. Hot module replacement patches the running app in place; logs and errors from the app are printed in the terminal. Stop it with Ctrl-C (or by closing the Catalyst, macOS, Linux, Windows or GPUI window). However it ends (Ctrl-C, `kill` / `pkill`, an error), it stops the host it started: the Catalyst app, the macOS, Linux, Windows or GPUI host, the development host in the simulator, or on the Android device.
@@ -96,7 +96,6 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 | `--fps` | | Shows the performance monitor over the app: frame rate, what frames and commits cost, CPU, GPU and memory ([macOS](./macos.md#performance-monitor); `--target macos` only for now). |
 | `--name <NAME>` | `nsh.json` name | Application display name in the menu bar and initial window title (`--target macos`, TSX entries). |
 | `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
-| `--script <STEPS>` | | Runs semicolon-separated automation steps, such as `"wait 800; shot a.png; quit"` (`--target macos`, `linux`, `windows` and `gpui`; an app written in Rust: `macos`, `linux` and `windows`). With `quit` the command ends with the script: screenshots of an app with a Rust crate of its own need no host started by hand. On macOS, screenshot-only scripts start in the background; scripted presses activate the app when needed. |
 
 With `--target android`, the first device `adb devices` lists is used; the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
 
@@ -121,7 +120,7 @@ Use `nsh dev --server-only` with an app that embeds the development SDK (`Native
 ## nsh test
 
 ```sh
-nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>]
+nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>] [--browser <PATH>]
 ```
 
 Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS unless a test opens the app as Android (`open`'s `platform`): `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
@@ -136,7 +135,8 @@ Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test file
 | `--filter <NAME>` | Runs only the tests whose name (after the names of the `describe` blocks it is in) contains `NAME`. |
 | `--trace` | Prints every mount batch of the apps the tests open, under the step it came in (`── press(Add): 7 items`), and the time of every commit: what the first frame, a step or a frame of scrolling costs. |
 | `--junit <FILE>` | Also writes the results to `FILE` as a JUnit XML report, the format CI services show test results from: a `testsuite` per test file, a `testcase` per test. |
-| `--target <TARGET>` | Runs the apps the tests open on this platform's development host instead of headless (`macos` and `gpui` for now): the steps act with the platform's own input ([Testing](./testing-and-trace.md#on-a-real-platform)). |
+| `--target <TARGET>` | Runs the apps the tests open on this platform's development host instead of headless (`macos`, `linux`, `windows`, `gpui`, `web` and `ios` for now; `web` runs them in a headless Chrome, Edge or Chromium): the steps act with the platform's own input ([Testing](./testing-and-trace.md#on-a-real-platform)). |
+| `--browser <PATH>` | The Chrome, Edge or Chromium executable `--target web` runs the apps in (default: the one installed on this machine). |
 
 ## nsh check
 

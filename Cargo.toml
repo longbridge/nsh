@@ -38,7 +38,7 @@ nsh-platform-linux = { version = "0.1.1", path = "crates/nsh-platform-linux", de
 nsh-platform-macos = { version = "0.1.1", path = "crates/nsh-platform-macos", default-features = false }
 nsh-platform-windows = { version = "0.1.1", path = "crates/nsh-platform-windows", default-features = false }
 nsh-dev = { version = "0.1.1", path = "crates/nsh-dev" }
-nsh-testing = { version = "0.1.1", path = "crates/nsh-testing" }
+nsh-testing = { version = "0.1.1", path = "crates/nsh-testing", default-features = false }
 
 anyhow = "1"
 thiserror = "2"

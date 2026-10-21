@@ -101,7 +101,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
         run: cargo clippy -p gallery-native --all-targets --locked -- -D warnings
-      - name: Test the Rust root
+      # The crate's unit tests; the app's tests are TypeScript (`nsh test`,
+      # the web job).
+      - name: Test the crate
         run: cargo test -p gallery-native --locked
       - name: Check the native dependency graph
         run: |
@@ -149,12 +151,14 @@ jobs:
             echo "The Rust app's web runtime unexpectedly carries JS"
             exit 1
           fi
-      - name: Check that the Rust app builds no JS engine or bundler
+      - name: Test the Rust app and check that it builds no JS engine or bundler
         run: |
-          # `nsh` describes the app's crates with the generated `describe`
-          # program: it links no QuickJS, nsh-js, bundler, rolldown or Oxc.
-          # The test runner runs TypeScript tests (QuickJS, source maps) on
-          # entries `nsh` builds: no bundler or parser.
+          # `nsh test` builds the app's programs in `.nsh/rust` and runs its
+          # TypeScript tests (`examples/gallery-rs/*.test.tsx`) in the test
+          # runner. `nsh` describes the app's crates with the generated
+          # `describe` program: it links no QuickJS, nsh-js, bundler,
+          # rolldown or Oxc. The test runner runs TypeScript tests (QuickJS,
+          # source maps) on entries `nsh` builds: no bundler or parser.
           check() {
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
               -p "nsh-app-gallery-native-$1" -e normal --target all \
@@ -172,6 +176,16 @@ jobs:
           for app in counter gallery rust-exports; do
             ./target/debug/nsh test "examples/$app"
           done
+      # The same tests in the runner's Chrome, headless, with the browser's
+      # trusted input (`nsh test --target web`): those a real platform runs
+      # (no stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in Chrome
+        run: |
+          ./target/debug/nsh test examples/counter --target web
+          for file in form navigation photos; do
+            ./target/debug/nsh test "examples/gallery/tests/$file.test.tsx" --target web
+          done
+          ./target/debug/nsh test examples/gallery/tests/environment.test.tsx --target web --filter appearance
       - name: Publish a TSX app with a Rust crate for the web
         run: |
           # A TSX entry and the app's crate: QuickJS runs App.tsx, the

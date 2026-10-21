@@ -23,6 +23,8 @@
 #![cfg(windows)]
 
 mod access;
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod canvas;
@@ -42,9 +44,10 @@ mod native;
 mod navigation;
 mod net;
 mod render;
-mod script;
 mod scroll;
 mod surface;
+#[cfg(feature = "dev")]
+mod synth;
 mod system;
 mod text;
 mod text_input;

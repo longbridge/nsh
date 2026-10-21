@@ -329,7 +329,8 @@ failures and log records come back as `RunnerMessage`s; batches of `--trace` go 
 
 ### On a real platform (`--target`)
 
-`nsh test --target <platform>` runs the apps tests open on the platform's development host. `App` drives either kind
+`nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
+`windows`, `gpui`, `web`, `ios`). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
 `nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
 For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
@@ -344,20 +345,53 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
 (`Native`: press, long press, scroll, typed keys, `back`, dialogs, screenshots, the window's size and appearance),
-then waits until no batch came for 100 ms and no native animation runs (2 s at most). `Native`'s calls do their work
+then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
+finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
 test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
 `runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (stubbed
 routes, storage, clipboard, locale, reduced motion, safe area).
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
-and key events (which `--script` steps use too), `NSView` frames converted to the content's top-left points, `NSAlert`
+and key events, `NSView` frames converted to the content's top-left points, `NSAlert`
 buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
 attaches the model to the surface on the server's test session (before the first bundle) and starts the agent's
 thread. GPUI (`nsh-platform-gpui`, feature `dev`): `agent.rs` on GPUI's main thread, input through the handlers real
 input goes through (`synth.rs`), back the mouse's back button, dialogs pressed at their buttons' laid-out middles
-(`docs/dev/gpui.md`). Both use `nsh_testing::agent::Tester`, which turns the dev client's test events into an agent's
-steps on a `Worker` thread.
+(`docs/dev/gpui.md`). Linux (`nsh-platform-linux`, feature `dev`): input through `input::simulate` and the focused
+GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s clicked, screenshots rendered
+offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
+points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). iOS (`nsh-platform-ios`,
+feature `dev`; `nsh-cli/src/test_ios.rs`): the CLI installs the host in a simulator (a booted one, else the newest
+iPhone) and launches it per `open` with `--dev-server` and a fresh `--data-dir` (the simulator shares the Mac's network
+and files). Touches are IOHID digitizer events handed to UIKit (`-[UIApplication _enqueueHIDEvent:]`, with IOKit's
+and BackBoardServices' functions looked up at run time, `synth.rs`), so UIKit makes the `UITouch`es and runs hit
+testing, gesture recognizers and scroll views as for a finger: a press is a finger down and up, a scroll a drag kept
+inside the scroll view that rests (still reporting where it is) before it lifts, so it ends without a fling; a tap
+that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
+tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
+a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
+Back taps the header's back button (the bar button carrying the back chevron's mask) or swipes a presented sheet
+down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
+`drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
+The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
+app; the screen keeps its device's size. All of them use `nsh_testing::agent::Tester`, which turns the dev client's
+test events into an agent's steps on a `Worker` thread.
+These hosts are also how a change to a platform is checked by hand: `nsh test <entry> --target <platform>` with steps
+on standard input (`app.screenshot("a.png")`, `app.press(…)`) opens the app in the platform's window, takes them and
+closes it.
+
+The web (`--target web`, `nsh-cli/src/test_web.rs`): the agent runs in the CLI, the app in a page of a headless
+Chromium browser (Chrome, Edge or Chromium; `--browser <PATH>`, else the one installed where `cdp.rs` looks; nsh never
+fetches one and fails saying so when there is none). One browser serves the run; each `open` gets a page in a browser
+context of its own (storage apart) on a dev server of its own that also serves the web host's page
+(`DevServer::serve_web`). The development runtime (`nsh-dev.wasm`, feature `dev` of `nsh-platform-web`) keeps the
+`Model` once the server's hello says `test`, and answers the steps' questions about it (`TestStep::Scene` with a
+`SceneQuery`: `nsh_testing::agent::answer`; where views are, the viewport, inputs' text and dialogs' buttons from the
+DOM, in `nsh.js`'s `testPage`). The CLI's agent sees the app through `RemoteScene`, which asks those questions
+through `DevServer::step`, and acts with the browser's trusted input over the DevTools protocol (`Input.dispatch*`:
+mouse presses, wheel events of 20 px a frame apart, key events with macOS's editing commands, as Playwright sends
+them), `history.back()` for back, `Emulation.*` for the viewport and the color scheme and `Page.captureScreenshot`.
 
 ## New apps (`nsh init --template`)
 
@@ -369,7 +403,7 @@ otherwise, so scripts and CI never wait for an answer.
   that exist are kept; only a directory that has them all is refused.
 - **`rust`**: an independent Cargo workspace: `Cargo.toml`, `src/main.rs` (a native desktop entry using
   `AppSource::Rust(Root::of::<App>())`; the platform dependencies are target-specific and disable default features,
-  so `cargo run` mounts the Rust root directly and accepts `NSH_SCRIPT` for window checks), `src/lib.rs` (the root
+  so `cargo run` mounts the Rust root directly), `src/lib.rs` (the root
   component and its `#[native_module("<slug>/native")]` registry, which exports `App` for a TSX entry added later),
   `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
   that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native

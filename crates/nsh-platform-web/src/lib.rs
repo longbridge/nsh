@@ -64,6 +64,14 @@ thread_local! {
     /// The bytes of the asset JS hands over in `read_asset`.
     pub(crate) static ASSET: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
     static FRAME_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    /// A test session's model of the app (`nsh test --target web`,
+    /// [`nsh_test_start`]): every batch and error goes to it.
+    #[cfg(feature = "dev")]
+    static TEST_MODEL: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>> =
+        const { RefCell::new(None) };
+    /// The last answer of [`nsh_test_answer`] (JSON).
+    #[cfg(feature = "dev")]
+    static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// How the next [`nsh_start`] runs its bundle ([`nsh_bundle_options`]).
@@ -184,10 +192,22 @@ struct Sink;
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
+        #[cfg(feature = "dev")]
+        TEST_MODEL.with(|m| {
+            if let Some(model) = &*m.borrow() {
+                model.apply(&batch);
+            }
+        });
         BATCHES.with(|b| b.borrow_mut().push(batch));
     }
 
     fn report_error(&self, message: &str) {
+        #[cfg(feature = "dev")]
+        TEST_MODEL.with(|m| {
+            if let Some(model) = &*m.borrow() {
+                model.error(message);
+            }
+        });
         ffi::report_error(message);
     }
 
@@ -752,6 +772,63 @@ pub extern "C" fn nsh_compiled_ptr() -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_compiled_len() -> usize {
     COMPILED.with(|c| c.borrow().len())
+}
+
+/// The server runs a test session (`nsh test --target web`): the app's
+/// model is kept from the next bundle on, for [`nsh_test_answer`].
+#[cfg(feature = "dev")]
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_test_start() {
+    TEST_MODEL.with(|m| {
+        m.borrow_mut()
+            .get_or_insert_with(|| std::sync::Arc::new(nsh_testing::agent::Model::default()));
+    });
+}
+
+/// Answers a test step (JSON `nsh_dev::protocol::TestStep`, `len` bytes at
+/// `ptr`) from the app's model: the answer's length in bytes, its JSON at
+/// [`nsh_test_answer_ptr`]: `{"done": value}`, `{"failed": message}`, or
+/// `{"page": true}` when the page's views answer it (where a view is, the
+/// viewport, an input's text, a dialog's buttons).
+///
+/// # Safety
+///
+/// `ptr` points at `len` bytes from [`nsh_alloc`].
+#[cfg(feature = "dev")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
+    // SAFETY: per the contract.
+    let text = unsafe { string(ptr, len) };
+    let answer = match serde_json::from_str::<nsh_dev::protocol::TestStep>(&text) {
+        Err(e) => serde_json::json!({ "failed": format!("not a step: {e}") }),
+        Ok(nsh_dev::protocol::TestStep::Scene {
+            query: nsh_dev::protocol::SceneQuery::Animating,
+        }) => {
+            let animating =
+                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.animating()));
+            serde_json::json!({ "done": animating })
+        }
+        Ok(step) => {
+            let model = TEST_MODEL.with(|m| m.borrow().clone());
+            match model.and_then(|m| nsh_testing::agent::answer(&m, &step)) {
+                Some(Ok(value)) => serde_json::json!({ "done": value }),
+                Some(Err(message)) => serde_json::json!({ "failed": message }),
+                None => serde_json::json!({ "page": true }),
+            }
+        }
+    };
+    TEST_ANSWER.with(|a| {
+        let mut a = a.borrow_mut();
+        *a = answer.to_string();
+        a.len()
+    })
+}
+
+/// Where the text of the last [`nsh_test_answer`] starts.
+#[cfg(feature = "dev")]
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_test_answer_ptr() -> *const u8 {
+    TEST_ANSWER.with(|a| a.borrow().as_ptr())
 }
 
 /// Stops the app.

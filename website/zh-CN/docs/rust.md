@@ -338,7 +338,8 @@ fn the_module_formats_money() {
 ```
 
 `nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_testing::start` 把批次交给自己维护屏幕模型的测试。
-`examples/rust-exports` 用这种方式测试它的 TSX 入口，`examples/gallery-rs` 测试它的 Rust 根组件。
+`examples/rust-exports` 用这种方式测试它的 TSX 入口；`examples/gallery-rs` 用 TypeScript 测试它的 Rust 根组件，
+大致每个 demo 一个测试文件。
 
 ## 主题
 

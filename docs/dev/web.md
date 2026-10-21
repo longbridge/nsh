@@ -48,7 +48,7 @@ QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (C
 `Dev`): `runtime/web/nsh.wasm`, `nsh-dev.wasm` and `nsh.js` in the distribution (`cargo xtask dist` puts them there);
 in a checkout it builds `nsh-platform-web` with `--profile web --target wasm32-unknown-unknown` whatever its own
 profile (a debug build is several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-ar`), with
-`--features bytecode-only` for the release one, copies the result to `nsh.wasm` / `nsh-dev.wasm` next to it (both
+`--features bytecode-only` for the release one and `--features dev` for the development host's, copies the result to `nsh.wasm` / `nsh-dev.wasm` next to it (both
 build to the same file) and takes `nsh.js` from the crate.
 
 - **`nsh package --target web`** writes a static site. Every file but `index.html` and `manifest.webmanifest` is
@@ -79,6 +79,14 @@ build to the same file) and takes `nsh.js` from the crate.
   each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
+- **Tests** (`nsh test --target web`, `docs/dev/tooling.md` "On a real platform"): the CLI opens the development host
+  in a headless Chromium browser it drives over the DevTools protocol (`nsh-cli/src/cdp.rs`, `test_web.rs`). When the
+  server's hello says `test`, the page calls `player.testStart()` (`nsh_test_start`): from the next bundle on, every
+  batch and error of the app also goes to an `nsh_testing::agent::Model` in the module (feature `dev`, `Sink`). Its
+  hello says `tests` (`player.takesTests`), so the server sends it steps; each `step` is answered at once with
+  `player.testStep`: `nsh_test_answer` answers what the model knows (selectors, texts, dialogs, activity) and whether
+  an animation runs, `testPage` what only the DOM knows (`getBoundingClientRect` in CSS pixels, the viewport, an
+  input's value, where a dialog's button is). The input itself is the browser's trusted input, sent by the CLI.
 
 `nsh_bundle_options` sets how the next `nsh_start` / `nsh_start_bytecode` runs: development settings by default (the
 player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities,

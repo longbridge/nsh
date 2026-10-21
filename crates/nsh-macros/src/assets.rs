@@ -157,7 +157,7 @@ pub(crate) fn asset(lit: LitStr) -> syn::Result<TokenStream> {
     asset_in(&dir, &package, lit)
 }
 
-/// `asset!(lit)` in a crate named `package` whose assets are in `dir`.
+/// `asset!` of package `package`, whose files are in `dir`.
 fn asset_in(dir: &Path, package: &str, lit: LitStr) -> syn::Result<TokenStream> {
     let span = lit.span();
     let rel = lit.value();
@@ -253,15 +253,20 @@ fn files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
 /// `assets!()`.
 pub(crate) fn assets(span: Span) -> syn::Result<TokenStream> {
     let (dir, package) = crate_assets(span)?;
+    assets_in(&dir, &package, span)
+}
+
+/// `assets!()` of package `package`, whose files are in `dir`.
+fn assets_in(dir: &Path, package: &str, span: Span) -> syn::Result<TokenStream> {
     let mut found = Vec::new();
     if dir.is_dir() {
-        files(&dir, &mut found)
+        files(dir, &mut found)
             .map_err(|e| syn::Error::new(span, format!("{}: {e}", dir.display())))?;
     }
     let ui = quote!(::nsh_core::ui);
     let mut entries = Vec::new();
     for file in &found {
-        let rel = file.strip_prefix(&dir).expect("listed under the directory");
+        let rel = file.strip_prefix(dir).expect("listed under the directory");
         let Some(path) = published(rel) else {
             return Err(syn::Error::new(
                 span,
@@ -289,13 +294,51 @@ pub(crate) fn assets(span: Span) -> syn::Result<TokenStream> {
 mod tests {
     use super::*;
 
-    /// The header of a `w`×`h` PNG: all the image size reader looks at.
-    fn png(w: u32, h: u32) -> Vec<u8> {
-        let mut out = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
-        out.extend(w.to_be_bytes());
-        out.extend(h.to_be_bytes());
-        out.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        out
+    /// The start of a PNG of `width` × `height` pixels: what is read of it.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut data = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        data.extend(width.to_be_bytes());
+        data.extend(height.to_be_bytes());
+        data.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        data
+    }
+
+    /// The start of a GIF of `width` × `height` pixels.
+    fn gif(width: u16, height: u16) -> Vec<u8> {
+        let mut data = b"GIF89a".to_vec();
+        data.extend(width.to_le_bytes());
+        data.extend(height.to_le_bytes());
+        data.extend([0, 0, 0]);
+        data
+    }
+
+    /// A crate's `assets/` directory of its own, under the temporary
+    /// directory: a 2× logo, a GIF, a font and its licence in `fonts/`,
+    /// and a file the system left there.
+    fn crate_assets(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-macros-assets-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("fonts")).unwrap();
+        for (path, data) in [
+            ("logo@2x.png", png(128, 64)),
+            ("bounce.gif", gif(96, 96)),
+            ("fonts/Script.ttf", b"not a font".to_vec()),
+            ("fonts/OFL.txt", b"license".to_vec()),
+            (".DS_Store", Vec::new()),
+        ] {
+            std::fs::write(dir.join(path), data).unwrap();
+        }
+        dir
+    }
+
+    fn lit(path: &str) -> LitStr {
+        LitStr::new(path, Span::call_site())
+    }
+
+    /// The code's text without the spaces tokens print between them.
+    fn code(tokens: TokenStream) -> String {
+        tokens.to_string().replace(' ', "")
     }
 
     /// An `assets/` directory with `files` (name, pixel size).
@@ -323,6 +366,72 @@ mod tests {
             "size : :: nsh_core :: geometry :: size (:: nsh_core :: geometry :: Points ({w}) , \
              :: nsh_core :: geometry :: Points ({h}) ,)"
         )
+    }
+
+    #[test]
+    fn an_image_carries_its_natural_size_in_points() {
+        let dir = crate_assets("image");
+        // Two pixels per point: 128 × 64 pixels are 64 × 32 points.
+        let logo = code(asset_in(&dir, "app", lit("logo@2x.png")).unwrap());
+        assert!(
+            logo.contains("ImageAsset{uri:\"asset:/@app/logo@2x.png\""),
+            "{logo}"
+        );
+        assert!(
+            logo.contains("Points(64f32)") && logo.contains("Points(32f32)"),
+            "{logo}"
+        );
+        let bounce = code(asset_in(&dir, "app", lit("bounce.gif")).unwrap());
+        assert!(bounce.contains("Points(96f32)"), "{bounce}");
+        // A file of another kind is only its URI.
+        let license = code(asset_in(&dir, "app", lit("fonts/OFL.txt")).unwrap());
+        assert!(
+            license.contains("FileAsset{uri:\"asset:/@app/fonts/OFL.txt\"}"),
+            "{license}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_cannot_be_read_fails_the_build() {
+        let dir = crate_assets("errors");
+        let error = |path: &str| asset_in(&dir, "app", lit(path)).unwrap_err().to_string();
+        assert!(error("../logo@2x.png").contains("inside the crate's `assets/`"));
+        assert!(error("missing.png").starts_with("no asset"));
+        assert!(error("fonts/Script.ttf").starts_with("cannot read font"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_crate_ships_its_files_sorted_by_path_with_their_kinds() {
+        let dir = crate_assets("list");
+        let files = code(assets_in(&dir, "app", Span::call_site()).unwrap());
+        let listed: Vec<(&str, &str)> = files
+            .split("AssetFile{uri:\"asset:/@app/")
+            .skip(1)
+            .map(|entry| {
+                let path = &entry[..entry.find('"').unwrap()];
+                let kind = entry.split("AssetKind::").nth(1).unwrap();
+                (path, &kind[..kind.find('}').unwrap()])
+            })
+            .collect();
+        // The system's hidden file is left out.
+        assert_eq!(
+            listed,
+            [
+                ("bounce.gif", "Image"),
+                ("fonts/OFL.txt", "File"),
+                ("fonts/Script.ttf", "Font"),
+                ("logo@2x.png", "Image"),
+            ]
+        );
+        // Each one's source is the file on this system.
+        let source = dir.join("logo@2x.png");
+        assert!(
+            files.contains(&format!("source:{:?}", source.to_str().unwrap()).replace(' ', "")),
+            "{files}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

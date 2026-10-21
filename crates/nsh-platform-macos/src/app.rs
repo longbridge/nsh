@@ -84,10 +84,6 @@ pub struct AppOptions {
     /// Reopening from the Dock shows the same window. Quit still stops the app.
     /// Only used by [`run_app`]; defaults to false.
     pub keep_alive_on_close: bool,
-    /// Steps run once the window shows (`wait 500; shot a.png; tap 10 20;
-    /// quit`): for checking a backend change without touching the screen.
-    /// See [`crate::script`].
-    pub script: Option<String>,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
     pub components: crate::native::Components,
@@ -123,7 +119,6 @@ impl Default for AppOptions {
             title: "nsh".to_owned(),
             size: (1200, 800),
             keep_alive_on_close: false,
-            script: None,
             components: Default::default(),
             appearance: Appearance::System,
             fps: false,
@@ -549,15 +544,7 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     }
     window.makeKeyAndOrderFront(None);
     window.makeFirstResponder(Some(view.surface().root.ns()));
-    // A scripted run (screenshots, simulated input) keeps the process in
-    // the background: it must not steal focus from what the user is in.
-    // Presses in the script activate the app themselves when they need to.
-    if options.script.is_none() {
-        app.activate();
-    }
-    if let Some(script) = &options.script {
-        crate::script::run(&window, view.surface().clone(), script);
-    }
+    app.activate();
     RUNNING.with(|r| {
         *r.borrow_mut() = Some(Running {
             window,

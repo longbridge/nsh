@@ -91,8 +91,6 @@ enum Key {
     Mouse,
     /// A touchscreen finger, by its event sequence.
     Touch(usize),
-    /// A scripted finger ([`simulate`]).
-    Simulated,
 }
 
 /// Pointer state of one surface.
@@ -786,15 +784,15 @@ fn scroll_event(
 
 // --- Simulation ---------------------------------------------------------------------
 
-/// A simulated pointer action ([`crate::script`]), in root coordinates.
+/// A simulated pointer action of the mouse ([`crate::synth`]), in root
+/// coordinates.
+#[cfg(feature = "dev")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Simulated {
-    /// Press at `(x, y)`, with the mouse when `true`, else a finger.
-    Down(f32, f32, bool),
-    /// Move to `(x, y)` while pressed.
-    Move(f32, f32, bool),
-    /// Release at `(x, y)`.
-    Up(f32, f32, bool),
+    /// A press at `(x, y)`.
+    Down(f32, f32),
+    /// A release at `(x, y)`.
+    Up(f32, f32),
     /// A wheel / touchpad scroll at `(x, y)` by `(dx, dy)` points.
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
@@ -802,15 +800,13 @@ pub(crate) enum Simulated {
 }
 
 /// Feeds a simulated pointer action through the same path as real input.
-/// A simulated finger's drags scroll, the mouse's do not.
+#[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
-    let key = |mouse| if mouse { Key::Mouse } else { Key::Simulated };
     match action {
-        Simulated::Down(x, y, mouse) => down(surface, key(mouse), x, y, time),
-        Simulated::Move(x, y, mouse) => motion(surface, key(mouse), x, y, time),
-        Simulated::Up(x, y, mouse) => {
-            up(surface, key(mouse), x, y, time, false);
+        Simulated::Down(x, y) => down(surface, Key::Mouse, x, y, time),
+        Simulated::Up(x, y) => {
+            up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
             if let Some(native) = pick(&surface.root, x, y).and_then(|hit| hit.native) {
@@ -829,6 +825,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
 }
 
 /// Focuses `widget` or the first focusable widget inside it.
+#[cfg(feature = "dev")]
 fn focus_native(widget: &gtk::Widget) {
     if widget.grab_focus() {
         return;

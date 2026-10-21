@@ -40,6 +40,9 @@ struct State {
     on_error: Option<ErrorHandler>,
     #[cfg(feature = "dev")]
     dev: Option<crate::dev::DevSession>,
+    /// A test session's model of the app, for every surface from now on.
+    #[cfg(feature = "dev")]
+    test_model: Option<std::sync::Arc<nsh_testing::agent::Model>>,
 }
 
 impl AppView {
@@ -59,6 +62,8 @@ impl AppView {
                     on_error: None,
                     #[cfg(feature = "dev")]
                     dev: None,
+                    #[cfg(feature = "dev")]
+                    test_model: None,
                 }),
             }),
         }
@@ -219,6 +224,8 @@ impl Inner {
             UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
         );
         surface.set_host_environment(state.host);
+        #[cfg(feature = "dev")]
+        surface.set_test_model(state.test_model.clone());
         let weak: Weak<Inner> = Rc::downgrade(this);
         surface.set_error_handler(move |message| {
             if let Some(inner) = weak.upgrade() {
@@ -250,6 +257,23 @@ impl Inner {
     }
 
     #[cfg(feature = "dev")]
+    /// Keeps `model` of the app for `nsh test --target ios`, in the surface
+    /// running now and those to come.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: std::sync::Arc<nsh_testing::agent::Model>) {
+        let mut state = self.state.borrow_mut();
+        if let Some(surface) = &state.surface {
+            surface.set_test_model(Some(model.clone()));
+        }
+        state.test_model = Some(model);
+    }
+
+    /// `f` with the running app's mounter.
+    #[cfg(feature = "dev")]
+    pub(crate) fn with_mounter<R>(&self, f: impl FnOnce(&crate::mount::Mounter) -> R) -> Option<R> {
+        self.state.borrow().surface.as_ref()?.with_mounter(f)
+    }
+
     pub(crate) fn dev(&self) -> std::cell::Ref<'_, Option<crate::dev::DevSession>> {
         std::cell::Ref::map(self.state.borrow(), |s| &s.dev)
     }

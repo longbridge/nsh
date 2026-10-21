@@ -16,12 +16,7 @@ cargo run
 ```
 
 This starts the root directly on the machine's native desktop backend: GTK 4 on Linux, AppKit on macOS, Win32 on
-Windows. Install the backend's development libraries before building. The native entry accepts scripted window checks
-through `NSH_SCRIPT`, for example:
-
-```sh
-NSH_SCRIPT='wait 800; shot window.png; quit' cargo run
-```
+Windows. Install the backend's development libraries before building.
 
 The `nsh` commands build the app's runners from the NSH crates `Cargo.toml` depends on: crates.io's at the version of
 the `nsh` you run (keep the `nsh-*` dependencies at that version when you upgrade `nsh`), or an NSH checkout's by path.

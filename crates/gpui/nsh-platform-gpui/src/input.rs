@@ -5,7 +5,7 @@
 //!
 //! The surface element ([`crate::events`]) turns GPUI's events into the
 //! events here (root coordinates, points; times in seconds of the
-//! surface's clock), and so do scripted steps ([`crate::script`]): real
+//! surface's clock), and so does the test agent's input (`crate::synth`): real
 //! and simulated input share every handler.
 //!
 //! Hit testing walks the views ([`pick`]), as the Linux backend does:

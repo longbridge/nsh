@@ -2,7 +2,7 @@
 //!
 //! [`frame`] draws the whole tree of a surface into its window's swap
 //! chain and presents it; [`snapshot`] draws it into an offscreen bitmap
-//! and reads the pixels back (`--script` screenshots). Both go through
+//! and reads the pixels back (`nsh test`'s screenshots). Both go through
 //! [`draw_view`], which draws one view and its subtree in this order:
 //!
 //! 1. shadows and background ([`crate::decor::draw_background`]),
@@ -1007,6 +1007,7 @@ fn draw_into(
 }
 
 /// Pixels of a snapshot: BGRA, premultiplied, `width * 4` bytes per row.
+#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub(crate) struct Pixels {
     /// Width in pixels.
     pub(crate) width: u32,
@@ -1018,6 +1019,7 @@ pub(crate) struct Pixels {
 
 /// Draws the surface offscreen at `scale` and reads the pixels back,
 /// whatever covers the window.
+#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub(crate) fn snapshot(surface: &Rc<Surface>, scale: f32) -> windows::core::Result<Pixels> {
     let gfx = gfx::get()?;
     let (w, h) = surface.size();

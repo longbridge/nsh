@@ -5,6 +5,7 @@
 
 mod android;
 mod build;
+mod cdp;
 mod check;
 mod dev;
 mod entry;
@@ -17,6 +18,8 @@ mod rust_app;
 mod sign;
 mod test;
 mod test_host;
+mod test_ios;
+mod test_web;
 mod ui;
 mod web;
 mod windows;
@@ -144,9 +147,14 @@ enum Command {
         junit: Option<PathBuf>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
-        /// (macos and gpui for now).
+        /// (macos, linux, windows, gpui, web and ios for now; web runs them in
+        /// a headless Chrome, Edge or Chromium, ios in a simulator).
         #[arg(long, value_enum)]
         target: Option<run::Target>,
+        /// The Chrome, Edge or Chromium executable `--target web` runs the
+        /// apps in (default: the one installed on this machine).
+        #[arg(long, value_name = "PATH")]
+        browser: Option<PathBuf>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -241,13 +249,6 @@ enum Command {
         /// `windows`, `gpui`).
         #[arg(long = "window-size", value_name = "WIDTHxHEIGHT")]
         size: Option<String>,
-        /// Script steps to run once the window shows (`wait`, `shot`,
-        /// `tap`, `quit`, ...; the desktop hosts: `--target macos`,
-        /// `linux`, `windows`, `gpui`; an app of Rust only: `macos`,
-        /// `linux`, `windows`, as GPUI has no runner of its own). With `quit` the command exits when the
-        /// script does — snapshots without a window staying open.
-        #[arg(long)]
-        script: Option<String>,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -578,7 +579,16 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             trace,
             junit,
             target,
-        } => test::test(&path, &entry, filter, trace, junit.as_deref(), target),
+            browser,
+        } => test::test(
+            &path,
+            &entry,
+            filter,
+            trace,
+            junit.as_deref(),
+            target,
+            browser.as_deref(),
+        ),
         Command::Dev {
             entry,
             port,
@@ -660,7 +670,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             device,
             name,
             size,
-            script,
         } => {
             no_limits_for_rust(&entry, limits)?;
             run::run(
@@ -673,7 +682,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 run::HostWindow {
                     name: name.as_deref(),
                     size: size.as_deref(),
-                    script: script.as_deref(),
                 },
             )
         }

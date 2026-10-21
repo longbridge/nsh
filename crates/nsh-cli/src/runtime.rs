@@ -287,7 +287,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
         .join("web");
     let features: &[&str] = match kind {
         WebKind::Release => &["--features", "bytecode-only"],
-        WebKind::Dev => &[],
+        WebKind::Dev => &["--features", "dev"],
     };
     if build {
         let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));

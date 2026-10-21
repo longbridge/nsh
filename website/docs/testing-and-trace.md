@@ -257,13 +257,14 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 
 ### On a real platform
 
-`nsh test --target macos` (or `gpui`) runs the same tests on the platform's development host instead of headless: each `open`
-starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's own input
-at the views their selectors name, as Playwright does in a browser:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`) runs the same tests on the platform's development host instead of headless:
+each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
+own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
-  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS, the mouse's back
-  button in GPUI);
+  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
+  back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
+  swiped down on iOS);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
@@ -273,7 +274,11 @@ at the views their selectors name, as Playwright does in a browser:
 
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
+nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
+nsh test --target windows                     # in Win32 windows
+nsh test --target ios                         # in an iOS simulator
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
+nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
@@ -283,6 +288,16 @@ real time cannot do, reject. What a real platform cannot be given yet makes `ope
 out: stubbed `network` routes, `storage`, `clipboard`, `locale`, `reducedMotion` and `safeArea`; requests go to the
 network. `app.storage()` and `app.requests()` are headless only. An app with Rust crates of its own runs its tests
 headless for now.
+
+On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
+on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked
+when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
+the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
+
+On iOS, the apps run in the development host in an iOS simulator: the booted one, else the newest iPhone, which
+`nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
+device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
+has the simulated device's size.
 
 ### Steps from standard input
 

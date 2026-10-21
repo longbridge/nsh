@@ -22,9 +22,9 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [signed-packages.md](signed-packages.md) | Keys, packages, verification, revocation |
 | [embedding.md](embedding.md) | `nsh package`, the iOS / Android SDKs, native components |
 | [tooling.md](tooling.md) | `.nsh/types`, the dev server, hot reload, symbolication |
-| [macos.md](macos.md) | The macOS backend (AppKit): building, how each area maps to AppKit, `--script` checks, what differs |
-| [linux.md](linux.md) | The Linux backend (GTK 4): building, how each area maps to GTK, `--script` checks, what differs |
-| [windows.md](windows.md) | The Windows backend (Win32, Direct2D): building, how each area maps to Windows, `--script` checks, what differs |
+| [macos.md](macos.md) | The macOS backend (AppKit): building, how each area maps to AppKit, `nsh test --target macos`, what differs |
+| [linux.md](linux.md) | The Linux backend (GTK 4): building, how each area maps to GTK, `nsh test --target linux`, what differs |
+| [windows.md](windows.md) | The Windows backend (Win32, Direct2D): building, how each area maps to Windows, `nsh test --target windows`, what differs |
 | [gpui.md](gpui.md) | The GPUI backend (macOS, Windows, Linux): building, the surface element and `DrawCx`, embedding as a GPUI view, what differs |
 | [web.md](web.md) | The WebAssembly runtime of the website's demos: `LocalEngine`, the clock, the DOM protocol |
 | [compatibility.md](compatibility.md) | The backward compatibility contract: what apps depend on, the rules, `api/` and its tests |
