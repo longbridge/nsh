@@ -297,12 +297,14 @@ const INSET: Look = Look {
 const RAISED: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xfbfbf9), rgb(0x292b30), 0.0),
-        stop(rgb(0xf6f6f4), rgb(0x26282c), 1.0),
+        stop(rgb(0xffffff), rgb(0x292b30), 0.0),
+        stop(rgb(0xf3f3ef), rgb(0x26282c), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        drop(1.0, 2.0, rgb_a(INK, 0.12)),
+        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.05)),
+        drop(1.0, 2.0, rgb_a(INK, 0.14)),
+        drop(3.0, 8.0, rgb_a(INK, 0.06)),
     ],
     dark: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.08)),
@@ -315,8 +317,8 @@ const RAISED: Look = Look {
 const LIGHT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0x25272b), rgb(0xeeeff1), 0.0),
-        stop(rgb(0x1d1e22), rgb(0xe1e2e4), 1.0),
+        stop(rgb(0x25272b), rgb(0xf7f8f9), 0.0),
+        stop(rgb(0x1d1e22), rgb(0xdfe1e4), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.14)),
@@ -375,9 +377,9 @@ const KNOB: Look = Look {
 const PILL: Look = Look {
     fill: Some(tone(rgb(0xffffff), rgb(0x2a2c31))),
     stops: &[
-        stop(rgb(0xfcfcfa), rgb(0x313338), 0.0),
+        stop(rgb(0xffffff), rgb(0x313338), 0.0),
         stop(rgb(0xfbfbf9), rgb(0x2c2e33), 0.52),
-        stop(rgb(0xf8f8f5), rgb(0x2a2c30), 1.0),
+        stop(rgb(0xf2f2ee), rgb(0x2a2c30), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),

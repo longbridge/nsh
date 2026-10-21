@@ -168,8 +168,8 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.45)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #eeeff1 0%, #e1e2e4 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 3px 10px rgba(0,0,0,0.4)",
+      backgroundImage: "linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(0,0,0,0.12), 0 3px 10px rgba(0,0,0,0.4)",
     },
     accent: {
       backgroundImage: "linear-gradient(180deg, #ceef7d 0%, #c0e664 100%)",
@@ -214,8 +214,8 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
     },
     inset: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.07)" },
     raised: {
-      backgroundImage: "linear-gradient(180deg, #fbfbf9 0%, #f6f6f4 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 2px rgba(20,20,10,0.12)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.05), 0 1px 2px rgba(20,20,10,0.14), 0 3px 8px rgba(20,20,10,0.06)",
     },
     light: {
       backgroundImage: "linear-gradient(180deg, #25272b 0%, #1d1e22 100%)",
@@ -229,7 +229,7 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
     knob: { boxShadow: "inset 0 1px 0 #ffffff, 0 1px 4px rgba(20,20,10,0.28)" },
     pill: {
       backgroundColor: "#ffffff",
-      backgroundImage: "linear-gradient(180deg, #fcfcfa 0%, #fbfbf9 52%, #f8f8f5 100%)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fbfbf9 52%, #f2f2ee 100%)",
       boxShadow: "inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255,255,255,0.7), inset 0 -1px 0 rgba(20,20,10,0.06), 0 1px 3px rgba(20,20,10,0.12), 0 4px 10px rgba(20,20,10,0.05)",
       borderColor: "rgba(20,20,10,0.08)",
     },

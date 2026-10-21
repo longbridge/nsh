@@ -62,9 +62,9 @@
   --finish-inset: inset 0 1px 3px rgb(0 0 0 / 55%);
   --finish-raised-bg: linear-gradient(180deg, #292b30 0%, #26282c 100%);
   --finish-raised: 0 1px 2px rgb(0 0 0 / 45%);
-  --finish-primary-bg: linear-gradient(180deg, #eeeff1 0%, #e1e2e4 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #f5f5f6 0%, #e9ebed 100%);
-  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), 0 3px 10px rgb(0 0 0 / 40%);
+  --finish-primary-bg: linear-gradient(180deg, #f7f8f9 0%, #dfe1e4 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #fcfcfd 0%, #e7e9eb 100%);
+  --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(0 0 0 / 12%), 0 3px 10px rgb(0 0 0 / 40%);
   --finish-accent-bg: linear-gradient(180deg, #ceef7d 0%, #c0e664 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 45%), 0 3px 12px rgb(200 242 109 / 22%);
 
@@ -190,8 +190,8 @@ html.light {
   --finish-card: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 3%), 0 1px 2px rgb(20 20 10 / 6%), 0 8px 24px rgb(20 20 10 / 7%);
   --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
   --finish-inset: inset 0 1px 2px rgb(0 0 0 / 6%), inset 0 0 0 1px rgb(0 0 0 / 2%);
-  --finish-raised-bg: linear-gradient(180deg, #fbfbfa 0%, #f8f8f5 100%);
-  --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 3%), 0 1px 2px rgb(20 20 10 / 8%);
+  --finish-raised-bg: linear-gradient(180deg, #ffffff 0%, #f3f3ef 100%);
+  --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(20 20 10 / 5%), 0 1px 2px rgb(20 20 10 / 12%), 0 3px 8px rgb(20 20 10 / 5%);
   --finish-primary-bg: linear-gradient(180deg, #242429 0%, #1c1e21 100%);
   --finish-primary-hover-bg: linear-gradient(180deg, #2c2d33 0%, #232529 100%);
   --finish-primary: inset 0 1px 0 rgb(255 255 255 / 14%), 0 1px 2px rgb(20 20 10 / 18%), 0 4px 12px rgb(20 20 10 / 14%);
