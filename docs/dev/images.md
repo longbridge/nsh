@@ -26,7 +26,8 @@
   screen, browser zoom) only the images whose pick changes are marked `dirty::IMAGE` and sent again, with no relayout.
   The backends load a re-sent image as a new source, with its events: `onLoadStart`, `onLoad` (the variant's pixels, as
   for any source) or `onError`, then `onLoadEnd`. `Image.getSize` / `Image.prefetch` pick the same way, so a prefetch
-  warms the bytes the views load; `getSize` divides the variant's pixels by its scale, the imported file's size.
+  warms the bytes the views load; `getSize` returns the imported dimensions after a successful load, including when a variant has mismatched
+  dimensions. Without imported dimensions it divides the variant's pixels by its scale.
   The bundler finds the variants: its image `load` hook (`plugin.rs`) stats the fixed names `<stem>@<s>x.<ext>` for the
   scales of `IMAGE_SCALES` above 1 (no directory listing), only for bitmap imports without a density suffix
   (`logo@3x.png` probes nothing and ships alone; an SVG, drawn for the screen at any ratio, ships no variants). The ones

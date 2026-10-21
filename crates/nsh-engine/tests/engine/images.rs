@@ -201,7 +201,7 @@ const icon = { uri: "asset:/img.png", width: 40, height: 30, scales: [1, 2, 3] }
 const shown = signal("waiting");
 setTimeout(async () => {
   const size = await Image.getSize(icon);
-  const plain = await Image.getSize({ uri: "asset:/single.png", width: 10, height: 10 });
+  const plain = await Image.getSize({ uri: "asset:/single.png", width: 999, height: 999 });
   const ready = await Image.prefetch(icon);
   shown.set(`${size.width}x${size.height} ${plain.width}x${plain.height} ${ready}`);
 }, 0);
@@ -212,7 +212,7 @@ mount(() => <Text>{shown()}</Text>);
 /// Answers every image request with its file's pixel size (the variant's
 /// scale times 40x30 for `img`, 10x10 for `single`), until the app shows
 /// its result: the URIs asked for and the text shown.
-fn info(pixel_ratio: f32) -> (Vec<String>, String) {
+fn info(pixel_ratio: f32, variant_size: Option<(f64, f64)>) -> (Vec<String>, String) {
     let (engine, rx) = start(INFO_APP, pixel_ratio);
     let control = engine.control();
     let mut asked = Vec::new();
@@ -236,7 +236,9 @@ fn info(pixel_ratio: f32) -> (Vec<String>, String) {
                     let (w, h) = if uri.contains("single") {
                         (10.0, 10.0)
                     } else {
-                        (40.0 * scale, 30.0 * scale)
+                        variant_size
+                            .filter(|_| scale != 1.0)
+                            .unwrap_or((40.0 * scale, 30.0 * scale))
                     };
                     control.dispatch_event(
                         ROOT_ID,
@@ -258,7 +260,7 @@ fn info(pixel_ratio: f32) -> (Vec<String>, String) {
 
 #[test]
 fn variant_info_get_size_and_prefetch_ask_for_the_picked_variant() {
-    let (asked, shown) = info(3.0);
+    let (asked, shown) = info(3.0, None);
     assert_eq!(
         asked,
         [
@@ -270,11 +272,26 @@ fn variant_info_get_size_and_prefetch_ask_for_the_picked_variant() {
     // The imported file's size, whatever variant was asked for.
     assert_eq!(shown, "40x30 10x10 true");
 
-    let (asked, shown) = info(2.0);
+    let (asked, shown) = info(2.0, None);
     assert_eq!(asked[0], "asset:/img@2x.png");
     assert_eq!(shown, "40x30 10x10 true");
 
-    let (asked, shown) = info(1.0);
+    let (asked, shown) = info(1.0, None);
     assert_eq!(asked[0], "asset:/img.png");
     assert_eq!(shown, "40x30 10x10 true");
+}
+
+/// A mismatched variant is a build warning: its decoded size must not
+/// change getSize's result for the imported asset.
+#[test]
+fn variant_info_get_size_keeps_imported_dimensions_for_mismatched_variants() {
+    for ratio in [1.0, 2.0, 3.0] {
+        let (asked, shown) = info(ratio, Some((120.0, 90.0)));
+        assert_eq!(shown, "40x30 10x10 true", "at pixel ratio {ratio}");
+        assert_eq!(
+            asked.len(),
+            3,
+            "getSize still loads the image before returning"
+        );
+    }
 }
