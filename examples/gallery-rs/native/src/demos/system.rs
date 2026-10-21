@@ -14,8 +14,8 @@ use nsh_core::{
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
-    Inset, MONO, Meter, PressProps, Row, Segment, SegmentedEvent, Stat, ToggleEvent, Tone, appear,
-    caption, colors, icon, inset_shadow, legend, press_with, rgb_a, segmented, tints, toggle,
+    Inset, MONO, Meter, Row, Segment, Stat, Tone, appear, caption, colors, icon, inset_shadow,
+    legend, press, rgb_a, segmented, tints, toggle,
 };
 
 /// The status bar's styles, in the segments' order.
@@ -270,14 +270,12 @@ fn StatusBarCard() -> impl IntoElement {
         .title("Status bar")
         .subtitle("A dialog's statusBar: over the page's while it is open")
         .child(
-            segmented(
-                BAR_STYLES.map(|(_, _, label)| Segment::new(label)),
-                Prop::bind(move || index.get() as u32),
-            )
-            .on_event(move |event: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = *event;
-                picked.set(Some(i as usize));
-            }),
+            segmented()
+                .options(BAR_STYLES.map(|(_, _, label)| Segment::new(label)))
+                .selected(move || index.get() as u32)
+                .on_change(move |&i: &u32| {
+                    picked.set(Some(i as usize));
+                }),
         )
         .child(
             Row::new(false)
@@ -293,12 +291,14 @@ fn StatusBarCard() -> impl IntoElement {
                                 .font_family(MONO),
                         ),
                 )
-                .child(toggle(hidden, "Hide the status bar").on_event(
-                    move |event: &ToggleEvent| {
-                        let ToggleEvent::Change(on) = *event;
-                        hidden.set(on);
-                    },
-                )),
+                .child(
+                    toggle()
+                        .value(hidden)
+                        .label("Hide the status bar")
+                        .on_change(move |&on: &bool| {
+                            hidden.set(on);
+                        }),
+                ),
         )
         .child(Button::new("Preview", move |_: &()| open.set(true)).icon(IconName::Mobile))
         .child(preview)
@@ -313,28 +313,30 @@ fn action_row(
     detail: &'static str,
     on_press: impl Into<Listener<()>>,
 ) -> AnyElement {
-    press_with(
-        PressProps {
-            scale: 0.98.into(),
-            label: Some(title.into()).into(),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
-        Row::new(first)
-            .child(IconTile::new(name).tint(tint).size(34.0))
-            .child(
-                view()
-                    .flex_1()
-                    .gap(px(1.0))
-                    .py_2()
-                    .child(text(title).text_size(px(15.0)).text_color(colors::TEXT))
-                    .child(text(detail).text_size(px(12.0)).text_color(colors::MUTED)),
-            )
-            .child(icon(IconName::Chevron, 14.0, colors::FAINT)),
-    )
-    .into_element()
+    let on_press: Listener<()> = on_press.into();
+    press()
+        .scale(0.98)
+        .label(title)
+        .on_press(on_press)
+        .child(
+            Row::new(first)
+                .child(IconTile::new(name).tint(tint).size(34.0))
+                .child(
+                    view()
+                        .flex_1()
+                        .gap(px(1.0))
+                        .py_2()
+                        .child(text(title).text_size(px(15.0)).text_color(colors::TEXT))
+                        .child(text(detail).text_size(px(12.0)).text_color(colors::MUTED)),
+                )
+                .child(
+                    icon()
+                        .name(IconName::Chevron)
+                        .size(14.0)
+                        .tint(colors::FAINT),
+                ),
+        )
+        .into_element()
 }
 
 /// System dialogs and a toast; the last answer pops in.
@@ -790,7 +792,7 @@ fn Network() -> impl IntoElement {
             |(_, (id, _))| *id,
             |post, _| {
                 let i = post.with_untracked(|(i, _)| *i);
-                appear(i as u32).child(
+                appear().index(i as u32).child(
                     Row::new(i == 0)
                         .child(
                             text(move || post.with(|(_, (id, _))| format!("#{id}")))
@@ -948,9 +950,9 @@ fn Shortcuts() -> impl IntoElement {
 pub(crate) fn System() -> impl IntoElement {
     DemoPage::new()
         .card(environment)
-        .card(|| StatusBarCard::element(()))
-        .card(|| Dialogs::element(()))
-        .card(|| FramesAndTimers::element(()))
-        .card(|| Shortcuts::element(()))
-        .card(|| Network::element(()))
+        .card(status_bar_card)
+        .card(dialogs)
+        .card(frames_and_timers)
+        .card(shortcuts)
+        .card(network)
 }

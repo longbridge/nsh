@@ -19,9 +19,9 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
-    PressRole, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, Tone, caption,
-    colors, icon, legend, lengths, press_with, radius, rect, segmented, tints,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressRole,
+    Segment, SegmentedSize, Tone, caption, colors, icon, legend, lengths, press, radius, rect,
+    segmented, tints,
 };
 
 /// The tones of the demos' dots and tiles.
@@ -128,44 +128,41 @@ fn chip(
     active: Memo<bool>,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            hit_slop: Some(4.0),
-            role: PressRole::Tab.into(),
-            selected: Prop::bind(move || active.get()),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
-        view()
-            .h(px(36.0))
-            .px(px(14.0))
-            .rounded(px(18.0))
-            .justify_center()
-            .style_when(
-                move || !active.get(),
-                |s| {
-                    s.bg(colors::RAISED)
-                        .finish(Finish::Raised)
-                        .border_1()
-                        .border_color(colors::BORDER)
-                },
-            )
-            .style_when(active, |s| s.bg(colors::LIGHT).finish(Finish::Light))
-            .child(
-                text(label)
-                    .text_size(px(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(move || {
-                        if active.get() {
-                            colors::ON_LIGHT
-                        } else {
-                            colors::TEXT
-                        }
-                    }),
-            ),
-    )
+    let on_press: Listener<()> = on_press.into();
+    press()
+        .hit_slop(4.0)
+        .role(PressRole::Tab)
+        .selected(move || active.get())
+        .on_press(on_press)
+        .child(
+            view()
+                .h(px(36.0))
+                .px(px(14.0))
+                .rounded(px(18.0))
+                .justify_center()
+                .style_when(
+                    move || !active.get(),
+                    |s| {
+                        s.bg(colors::RAISED)
+                            .finish(Finish::Raised)
+                            .border_1()
+                            .border_color(colors::BORDER)
+                    },
+                )
+                .style_when(active, |s| s.bg(colors::LIGHT).finish(Finish::Light))
+                .child(
+                    text(label)
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(move || {
+                            if active.get() {
+                                colors::ON_LIGHT
+                            } else {
+                                colors::TEXT
+                            }
+                        }),
+                ),
+        )
 }
 
 // --- Hero -------------------------------------------------------------------
@@ -253,7 +250,12 @@ fn Hero() -> impl IntoElement {
             )
             .finish_shadow(Finish::Accent)
             .bind_scale(&breathe.interpolate(&[0.0, 1.0], &[0.9, 1.08]))
-            .child(icon(IconName::Animation, 22.0, colors::ON_ACCENT))
+            .child(
+                icon()
+                    .name(IconName::Animation)
+                    .size(22.0)
+                    .tint(colors::ON_ACCENT),
+            )
     };
     Card::new()
         .icon(IconName::Animation)
@@ -970,12 +972,13 @@ fn Interpolations() -> impl IntoElement {
                 )),
         )
         .child(
-            segmented(["t = 0", "t = 1", "t = 2"].map(Segment::new), at).on_event(
-                move |SegmentedEvent::Change(to): &SegmentedEvent| {
+            segmented()
+                .options(["t = 0", "t = 1", "t = 2"].map(Segment::new))
+                .selected(at)
+                .on_change(move |to: &u32| {
                     at.set(*to);
                     let _ = t.spring(*to as f32, spring(140.0, 16.0));
-                },
-            ),
+                }),
         )
         .child(
             view()
@@ -1079,7 +1082,7 @@ fn HidingHeader() -> impl IntoElement {
                                 ..Interpolation::default()
                             },
                         ))
-                        .child(icon(IconName::Search, 16.0, colors::MUTED))
+                        .child(icon().name(IconName::Search).size(16.0).tint(colors::MUTED))
                         .child(
                             text("Search")
                                 .flex_1()
@@ -1155,16 +1158,16 @@ fn Layout() -> impl IntoElement {
         .subtitle("Frames, inserts and removals of the next commit")
         .right(Badge::new(move || format!("{} views", len.get())))
         .child(
-            Segmented::element(SegmentedProps {
-                options: PRESETS
-                    .iter()
-                    .map(|(label, _)| Segment::new(*label))
-                    .collect::<Vec<_>>()
-                    .into(),
-                selected: preset.into(),
-                size: SegmentedSize::Small,
-            })
-            .on_event(move |SegmentedEvent::Change(i): &SegmentedEvent| preset.set(*i)),
+            segmented()
+                .options(
+                    PRESETS
+                        .iter()
+                        .map(|(label, _)| Segment::new(*label))
+                        .collect::<Vec<_>>(),
+                )
+                .selected(preset)
+                .size(SegmentedSize::Small)
+                .on_change(move |i: &u32| preset.set(*i)),
         )
         .child(
             view()
@@ -1237,12 +1240,12 @@ fn Layout() -> impl IntoElement {
 #[component]
 pub(crate) fn Animations() -> impl IntoElement {
     DemoPage::new()
-        .card(|| Hero::element(()))
-        .card(|| EasingPlot::element(()))
-        .card(|| EasingRace::element(()))
-        .card(|| Composition::element(()))
-        .card(|| Springs::element(()))
-        .card(|| Interpolations::element(()))
-        .card(|| HidingHeader::element(()))
-        .card(|| Layout::element(()))
+        .card(hero)
+        .card(easing_plot)
+        .card(easing_race)
+        .card(composition)
+        .card(springs)
+        .card(interpolations)
+        .card(hiding_header)
+        .card(layout)
 }

@@ -1084,6 +1084,13 @@ static_reactive!(f64: f64);
 static_reactive!(u32: u32);
 static_reactive!(i32: i32);
 static_reactive!(usize: usize);
+static_reactive!(u8: u8);
+static_reactive!(u64: u64);
+static_reactive!(u128: u128);
+static_reactive!(i8: i8);
+static_reactive!(i64: i64);
+static_reactive!(i128: i128);
+static_reactive!(isize: isize);
 static_reactive!((u32, u32): (u32, u32));
 static_reactive!(String: String);
 

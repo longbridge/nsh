@@ -13,7 +13,7 @@ use nsh_core::ui::prelude::*;
 
 pub use crate::{
     account::Account,
-    gauge::{Gauge, GaugeEvent, GaugeProps},
+    gauge::{Gauge, GaugeElement, GaugeEvent, GaugeProps, gauge},
     ledger::Ledger,
 };
 

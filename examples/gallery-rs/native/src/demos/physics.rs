@@ -8,9 +8,8 @@ use std::f32::consts::TAU;
 use nsh_core::{Bounds, Points, ui::prelude::*};
 
 use crate::ui::{
-    Badge, Finish, Finished, IconName, IconTile, MONO, Segment, Segmented, SegmentedEvent,
-    SegmentedProps, SegmentedSize, Stat, Tone, appear, colors, hint, icon, lengths, radius, rect,
-    segmented, tints,
+    Badge, Finish, Finished, IconName, IconTile, MONO, Segment, SegmentedSize, Stat, Tone, appear,
+    colors, hint, icon, lengths, radius, rect, segmented, tints,
 };
 
 /// The card's width and height.
@@ -233,7 +232,7 @@ pub(crate) fn Physics() -> impl IntoElement {
         .gap_3()
         .bg(colors::BACKGROUND)
         .child(
-            appear(0).child(
+            appear().index(0).child(
                 view()
                     .flex_row()
                     .items_center()
@@ -319,7 +318,12 @@ pub(crate) fn Physics() -> impl IntoElement {
                         .on_pan_end(release)
                         .on_press(tap)
                         .on_long_press(reset)
-                        .child(icon(IconName::Gestures, 28.0, colors::ON_ACCENT))
+                        .child(
+                            icon()
+                                .name(IconName::Gestures)
+                                .size(28.0)
+                                .tint(colors::ON_ACCENT),
+                        )
                         .child(
                             text("Drag me")
                                 .text_color(colors::ON_ACCENT)
@@ -339,31 +343,25 @@ pub(crate) fn Physics() -> impl IntoElement {
                 .p_3()
                 .gap_3()
                 .child(
-                    segmented(
-                        ["Spring", "Coast", "Snap"].map(Segment::new),
-                        Prop::bind(move || {
+                    segmented()
+                        .options(["Spring", "Coast", "Snap"].map(Segment::new))
+                        .selected(move || {
                             MODES.iter().position(|m| *m == mode.get()).unwrap_or(0) as u32
-                        }),
-                    )
-                    .on_event(
-                        move |SegmentedEvent::Change(i): &SegmentedEvent| {
+                        })
+                        .on_change(move |i: &u32| {
                             mode.set(MODES[*i as usize]);
-                        },
-                    ),
+                        }),
                 )
                 .child(
-                    Segmented::element(SegmentedProps {
-                        options: ["Soft", "Bouncy", "Firm"].map(Segment::new).to_vec().into(),
-                        selected: Prop::bind(move || {
+                    segmented()
+                        .options(["Soft", "Bouncy", "Firm"].map(Segment::new).to_vec())
+                        .selected(move || {
                             FEELS.iter().position(|f| *f == feel.get()).unwrap_or(0) as u32
-                        }),
-                        size: SegmentedSize::Small,
-                    })
-                    .on_event(
-                        move |SegmentedEvent::Change(i): &SegmentedEvent| {
+                        })
+                        .size(SegmentedSize::Small)
+                        .on_change(move |i: &u32| {
                             feel.set(FEELS[*i as usize]);
-                        },
-                    ),
+                        }),
                 )
                 .child(
                     view()

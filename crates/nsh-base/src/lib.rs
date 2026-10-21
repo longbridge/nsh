@@ -26,10 +26,13 @@ pub use crate::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
         AlertDialogRole,
     },
-    button::{Button, ButtonEvent, ButtonProps},
-    keyboard::{AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewProps},
+    button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
+    keyboard::{
+        AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
+        KeyboardAvoidingViewProps, keyboard_avoiding_view,
+    },
     navigation::{dialog, nav_page, nav_stack},
-    safe_area::{Edge, SafeAreaView, SafeAreaViewProps},
+    safe_area::{Edge, SafeAreaView, SafeAreaViewElement, SafeAreaViewProps, safe_area_view},
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
 };
 

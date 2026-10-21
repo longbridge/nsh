@@ -2,7 +2,7 @@
 //! and `cargo run` mount.
 
 use nsh_core::ui::prelude::*;
-use nsh_base::{SafeAreaView, SafeAreaViewProps, theme};
+use nsh_base::{safe_area_view, theme};
 
 /// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
 /// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").
@@ -20,7 +20,7 @@ pub fn App() -> impl IntoElement {
         .bg(move || theme().background())
         .text_color(move || theme().foreground())
         .child(
-            SafeAreaView::element(SafeAreaViewProps::default())
+            safe_area_view()
                 .flex_1()
                 .child(
                     view()

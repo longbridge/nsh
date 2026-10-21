@@ -126,10 +126,10 @@ pub use self::{
         declarations,
     },
     element::{
-        Accessible, AnyElement, Attrs, BoundListConfig, Child, Children, ComponentElement, ElNode,
-        Element, FluentBuilder, Image, Interactive, IntoChild, IntoElement, IntoListener, Items,
-        ListConfig, ListElement, Listener, ParentElement, Position, Slot, SlotElement, Style, Text,
-        View, image, text, view,
+        Accessible, AnyElement, Attrs, BoundListConfig, Child, Children, ComponentBuilder,
+        ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive, IntoChild,
+        IntoElement, IntoListener, Items, ListConfig, ListElement, Listener, ParentElement,
+        Position, Slot, SlotElement, Style, Text, View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
     env::Environment,
@@ -149,7 +149,7 @@ pub use self::{
         ModuleCx, ModuleFuture, ModuleParam, ModuleSpec, Overload, OverloadSpec, SyncCall,
     },
     once::Scope,
-    prop::Prop,
+    prop::{IntoProp, Prop},
     reactive::{
         IntoReactive, Memo, Owner, Reactive, ReadSignal, Runtime, Signal, SignalEquals, Stored,
         batch, cleanup, computed, create_root, effect, provide_context, signal, signal_with,
@@ -224,6 +224,7 @@ pub mod prelude {
         Children,
         ClaimRequest,
         Component,
+        ComponentBuilder,
         ComponentElement,
         ComponentError,
         ComponentRef,
@@ -409,6 +410,26 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use serde_json::Map as JsonMap;
+
+    /// The type of a props struct's field `I` as its setter takes it (the
+    /// value of an `Option`): `#[derive(Props)]` implements it where the
+    /// field's type is in scope, for the setters a `#[component]` makes on
+    /// its element.
+    pub trait PropField<const I: usize> {
+        /// What the setter takes.
+        type Value;
+    }
+
+    /// The data of an event enum's variant `I` as its listener hears it:
+    /// `#[derive(Event)]` implements it, for the listener methods a
+    /// `#[component]` makes on its element.
+    pub trait EventVariant<const I: usize> {
+        /// What the listener hears.
+        type Data: ?Sized + 'static;
+
+        /// The data of `event`, when it is this variant.
+        fn pick(event: &Self) -> Option<&Self::Data>;
+    }
 
     pub use super::{callback::NamedArgs, class::__private::*};
 
