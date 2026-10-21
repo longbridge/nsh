@@ -1359,6 +1359,11 @@ pub enum Prop {
     /// for slot `name` (created by the generated glue).
     #[prop(js = "componentSlot", internal)]
     ComponentSlot(Arc<str>),
+    /// `componentRender`: this view holds what the app's function of a
+    /// Rust component's render prop rendered for a key (the prop, U+001F,
+    /// the key; made by the generated glue on `JsEvent::Render`).
+    #[prop(js = "componentRender", internal)]
+    ComponentRender(Arc<str>),
     /// A property of a registered native component (`$name` from JS):
     /// any JSON value, `None` to remove it.
     ComponentProp(Arc<str>, Option<crate::JsonValue>),
@@ -1632,6 +1637,11 @@ pub enum Prop {
     /// closes a popover). Default true.
     #[prop(js = "focusable")]
     Focusable(Option<bool>),
+    /// The view is a selection area (`SelectionArea` of `nsh/base`): the
+    /// texts in it share one selection ([`crate::selection`]); set by
+    /// components (`Element::selection_area`).
+    #[prop(js = "selectionArea", internal)]
+    SelectionArea(bool),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
     AllowFontScaling(bool),

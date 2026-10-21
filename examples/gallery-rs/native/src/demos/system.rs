@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use nsh_base::dialog;
 use nsh_core::{
     animation::{Curve, EaseMode},
     keymap::When,
@@ -233,7 +234,7 @@ fn StatusBarCard() -> impl IntoElement {
                 AdaptiveColor::from(rgb(0x111214))
             }
         };
-        modal()
+        dialog()
             .animation(ModalAnimation::Fade)
             .status_bar(move || {
                 StatusBarSetting::default()

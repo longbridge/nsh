@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use nsh_core::ui::{Screen, SharedString, Signal, prelude::global};
 
-/// What makes a pushed screen: a `screen()` with its header options and
+/// What makes a pushed screen: a `nav_page()` with its header options and
 /// content, made once when it is pushed (its bindings keep it current).
 pub(crate) type ScreenFn = Rc<dyn Fn() -> Screen>;
 

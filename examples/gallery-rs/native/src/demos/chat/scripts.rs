@@ -2,7 +2,6 @@
 //! `demos/chat/scripts.ts`): the scenarios, their steps, a free-form
 //! reply and a long history.
 
-use super::markdown::{Block, parse};
 use crate::ui::Tone;
 
 /// Fictional models: the picker changes the voice and whether the reply
@@ -134,7 +133,6 @@ pub(crate) struct Assistant {
     pub(crate) reasoning: Option<Reasoning>,
     pub(crate) tools: Vec<Tool>,
     pub(crate) md: String,
-    pub(crate) blocks: Vec<Block>,
     pub(crate) status: Status,
     pub(crate) error: Option<&'static str>,
     pub(crate) rating: Option<Rating>,
@@ -491,7 +489,6 @@ pub(crate) fn history(mut next_id: impl FnMut() -> String) -> Vec<Msg> {
                 reasoning: None,
                 tools: Vec::new(),
                 md: a.into(),
-                blocks: parse(a, false),
                 status: Status::Done,
                 error: None,
                 rating: None,

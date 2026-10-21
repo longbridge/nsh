@@ -12,6 +12,8 @@ import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
+import BaseSelectionArea from "./base-selection-area";
+import BaseTextView from "./base-text-view";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
@@ -22,6 +24,8 @@ const cases: Record<string, () => JSX.Element> = {
   "base-nav-page": BaseNavPage,
   "base-nav-stack": BaseNavStack,
   "base-safe-area-keyboard": BaseSafeAreaKeyboard,
+  "base-text-view": BaseTextView,
+  "base-selection-area": BaseSelectionArea,
 };
 const shown = signal("");
 

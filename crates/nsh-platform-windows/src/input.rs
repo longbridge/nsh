@@ -325,19 +325,26 @@ enum Item {
     Input(NshView),
     /// Selectable text (mouse selection).
     Text(NshView),
+    /// A selection area (mouse selection across its texts), with the view
+    /// pressed in it.
+    Area(NshView, NshView),
 }
 
 impl Item {
     fn view(&self) -> &NshView {
         match self {
-            Item::Hosted(view, _) | Item::Input(view) | Item::Text(view) => view,
+            Item::Hosted(view, _) | Item::Input(view) | Item::Text(view) | Item::Area(view, _) => {
+                view
+            }
         }
     }
 
     fn same(&self, other: &Item) -> bool {
         match (self, other) {
             (Item::Hosted(_, a), Item::Hosted(_, b)) => Rc::ptr_eq(&a.item, &b.item),
-            (Item::Input(a), Item::Input(b)) | (Item::Text(a), Item::Text(b)) => a == b,
+            (Item::Input(a), Item::Input(b))
+            | (Item::Text(a), Item::Text(b))
+            | (Item::Area(a, _), Item::Area(b, _)) => a == b,
             _ => false,
         }
     }
@@ -372,6 +379,9 @@ impl Item {
             }
             Item::Input(view) => crate::text_input::pointer(surface, view, &event),
             Item::Text(view) => crate::text::pointer(surface, view, &event),
+            Item::Area(area, target) => {
+                crate::selection_area::pointer(surface, area, target, &event)
+            }
         }
     }
 }
@@ -538,7 +548,7 @@ thread_local! {
 
 /// Runs `f` on this (main) thread after `ms` milliseconds, from the
 /// message loop (a thread timer: no window and no frames needed).
-fn after_ms(ms: u64, f: impl FnOnce() + 'static) {
+pub(crate) fn after_ms(ms: u64, f: impl FnOnce() + 'static) {
     use windows::Win32::UI::WindowsAndMessaging::SetTimer;
     // SAFETY: a thread timer with a callback; `on_timer` only touches this
     // thread's table.
@@ -770,6 +780,9 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
         if let Some(c) = view_cursor(&v.state()) {
             return c;
         }
+        if crate::selection_area::is_area_text(&v) {
+            return Cursor::Text;
+        }
         view = v.parent_view();
     }
     Cursor::Arrow
@@ -815,13 +828,14 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     };
     let mut view = Some(hit.view);
     while let Some(v) = view {
-        let (id, listens, input, selectable) = {
+        let (id, listens, input, selectable, area) = {
             let s = v.state();
             (
                 s.id,
                 s.events.contains(EventKind::ContextMenu),
                 s.kind == ViewKind::Input,
                 crate::text::selectable(&s),
+                s.props.selection_area,
             )
         };
         if listens {
@@ -843,8 +857,12 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable {
-            crate::text::context_menu(surface, &v);
+        if selectable || area {
+            // Text in a selection area has the area's menu.
+            match crate::selection_area::area_of(&v) {
+                Some(area) => crate::selection_area::context_menu(surface, &area),
+                None => crate::text::context_menu(surface, &v),
+            }
             return;
         }
         view = v.parent_view();
@@ -874,6 +892,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             }
             // Any press elsewhere clears a text selection.
             crate::text::window_pressed(surface, x, y);
+            crate::selection_area::window_pressed(surface, x, y);
             if mouse {
                 surface.input.last.set(Some((x, y)));
                 match event.button {
@@ -946,6 +965,7 @@ fn raw_pointer(surface: &Rc<Surface>, key: Key, event: &PointerEvent) -> bool {
     if event.kind == PointerKind::Down {
         // A press anywhere clears a text selection.
         crate::text::window_pressed(surface, x, y);
+        crate::selection_area::window_pressed(surface, x, y);
     }
     let (lx, ly) = local(view, x, y);
     native.item.pointer(&ItemPointer {
@@ -1054,6 +1074,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
+        || crate::selection_area::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
@@ -1358,6 +1379,9 @@ fn down(
     if item.is_none() {
         let candidate = if hit.view.kind() == ViewKind::Input {
             Some(Item::Input(hit.view.clone()))
+        } else if !touch && let Some(area) = crate::selection_area::target(&hit.view) {
+            // Mouse drags in a selection area select across its texts.
+            Some(Item::Area(area, hit.view.clone()))
         } else if !touch && crate::text::selectable(&hit.view.state()) {
             // Mouse drags over selectable text select it rather than
             // pan.
@@ -1371,7 +1395,7 @@ fn down(
         }
     }
     let native = matches!(item, Some(Item::Hosted(..) | Item::Input(_)));
-    let selects = matches!(item, Some(Item::Text(_)));
+    let selects = matches!(item, Some(Item::Text(_) | Item::Area(..)));
     let input = &surface.input;
     if input.pointers.borrow().is_empty() {
         input.js_block.set(false);

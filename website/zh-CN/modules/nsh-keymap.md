@@ -6,9 +6,13 @@ order: 8.7
 
 # nsh/keymap
 
-`nsh/keymap` 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。
+快捷键 API 绑定应用的键盘快捷键：一个按键组合（如 `"mod+k"`）和它要运行的函数。Rust 代码调用 `nsh_core::ui::prelude` 中的 `on_key`、`on_key_with` 和 `key_label`；TSX 从 `nsh/keymap` 导入 `keymap`。两者接受同样的按键组合，遵循同样的规则。
 
-```ts
+```rust tabs
+use nsh_core::ui::prelude::*; // on_key、on_key_with、KeyOptions、key_label
+```
+
+```tsx tabs
 import { keymap } from "nsh/keymap";
 ```
 
@@ -25,6 +29,15 @@ interface KeyBindingOptions {
 }
 ```
 
+| TS | Rust |
+|---|---|
+| `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
+| `keymap.bind(keystroke, handler, { when, repeat })` | `on_key_with(keystroke, KeyOptions { when, repeat }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
+| `keymap.label(keystroke)` | `key_label(keystroke)` |
+
+Rust 绑定与创建它的组件（所有者）同生命周期；处理函数收到的是你写下的按键组合。
+
 快捷键在 macOS、Windows、Linux 和浏览器中可用（浏览器自己的按键，比如 Ctrl+T 或 Cmd+W，不会传给页面）。在 iOS 和 Android 上，`bind` 会保留绑定，但目前没有按键会触发它们，因此同一份代码可以在所有平台上运行。
 
 ## keymap.bind
@@ -33,9 +46,21 @@ interface KeyBindingOptions {
 bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
 ```
 
-按下 `keystroke` 时运行 `handler`，并返回一个移除该绑定的函数。处理函数收到的是你写下的按键组合字符串，大小写保持原样。
+按下 `keystroke` 时运行 `handler`，并返回一个移除该绑定的函数。处理函数收到的是你写下的按键组合字符串，大小写保持原样。Rust：`on_key(keystroke, handler)`。
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let open = signal(false);
+    on_key("mod+k", move |_| open.set(true));
+    on_key("escape", move |_| open.set(false));
+    text(move || if open.get() { "搜索…" } else { "按 ⌘K" })
+}
+```
+
+```tsx tabs
 import { mount, signal, Text } from "nsh";
 import { keymap } from "nsh/keymap";
 
@@ -46,9 +71,15 @@ keymap.bind("escape", () => open.set(false));
 mount(() => <Text>{open() ? "搜索…" : "按 ⌘K"}</Text>);
 ```
 
-传入一个对象可以一次绑定多个按键组合；返回的函数会把它们全部移除：
+传入一个对象可以一次绑定多个按键组合；返回的函数会把它们全部移除。在 Rust 中，每个按键组合调用一次 `on_key`：
 
-```ts
+```rust tabs
+on_key("mod+s", move |_| save());
+on_key("mod+shift+p", move |_| open_palette());
+on_key("f5", move |_| refresh());
+```
+
+```tsx tabs
 const unbind = keymap.bind({
   "mod+s": save,
   "mod+shift+p": openPalette,
@@ -58,7 +89,15 @@ const unbind = keymap.bind({
 
 组件渲染时创建的绑定会随组件一起移除，所以一个屏幕的快捷键与这个屏幕同生共死：
 
-```tsx
+```rust tabs
+#[component]
+fn Editor() -> impl IntoElement {
+    on_key("mod+enter", move |_| send());
+    input().multiline(true)
+}
+```
+
+```tsx tabs
 function Editor() {
   keymap.bind("mod+enter", send);
   return <Input multiline />;
@@ -73,13 +112,17 @@ function Editor() {
 label(keystroke: string): string;
 ```
 
-返回 `keystroke` 在应用所运行的平台上，菜单和提示中的显示方式：对 `"mod+shift+l"`，在 macOS 和 iOS 上（以及 Mac、iPhone、iPad 上的浏览器里）是 `"⇧⌘L"`，在 Windows、Linux 和其他浏览器里是 `"Ctrl+Shift+L"`。用它来显示应用的快捷键，显示的就是实际可用的按键：
+返回 `keystroke` 在应用所运行的平台上，菜单和提示中的显示方式：对 `"mod+shift+l"`，在 macOS 和 iOS 上（以及 Mac、iPhone、iPad 上的浏览器里）是 `"⇧⌘L"`，在 Windows、Linux 和其他浏览器里是 `"Ctrl+Shift+L"`。Rust：`key_label(keystroke)`。用它来显示应用的快捷键，显示的就是实际可用的按键：
 
-```tsx
+```rust tabs
+text(format!("搜索 {}", key_label("mod+k")))
+```
+
+```tsx tabs
 <Text>搜索 {keymap.label("mod+k")}</Text>
 ```
 
-按键组合无效时，它和 `bind` 一样抛出 `TypeError`。
+按键组合无效时，它和 `bind` 一样抛出 `TypeError`；`key_label` 和 `on_key` 以同样的信息 panic。
 
 ## 按键组合
 
@@ -113,7 +156,7 @@ label(keystroke: string): string;
 
 拥有键盘焦点的文本输入框需要它自己的按键：输入、移动光标、删除，以及全选、剪切、复制、粘贴、撤销和重做。因此默认情况下，当文本输入框（或网页视图）拥有焦点时，按键组合属于这些的绑定不会触发：普通键、只带 Shift 或 Option 的键、方向键、Home、End、Page Up / Down、Return、Tab、Escape、Backspace、Delete，以及 `mod+a`、`mod+c`、`mod+v`、`mod+x`、`mod+z`。其他带 Command 或 Control 的按键组合，以及功能键，无论焦点在哪里都会触发。
 
-`when` 可以改变这一点：
+`when` 可以改变这一点（Rust：`KeyOptions { when: When::Always, .. }`）：
 
 | `when` | 触发 |
 |---|---|
@@ -121,7 +164,16 @@ label(keystroke: string): string;
 | `"always"` | 在文本输入框中也触发，先于输入框看到按键 |
 | `"notEditing"` | 文本输入框拥有焦点时从不触发 |
 
-```ts
+```rust tabs
+use nsh_core::keymap::When;
+
+// 在消息输入框中也能发送。
+on_key_with("mod+enter", KeyOptions { when: When::Always, ..KeyOptions::default() }, move |_| send());
+// 只在用户没有输入时。
+on_key_with("mod+e", KeyOptions { when: When::NotEditing, ..KeyOptions::default() }, move |_| archive());
+```
+
+```tsx tabs
 // 在消息输入框中也能发送。
 keymap.bind("mod+enter", send, { when: "always" });
 // 只在用户没有输入时。
@@ -130,11 +182,15 @@ keymap.bind("mod+e", archive, { when: "notEditing" });
 
 ## 运行哪个绑定
 
-触发了绑定的按键会被消耗：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后在 JS 线程上运行。
+触发了绑定的按键会被消耗：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后运行，Rust 在引擎线程上，TSX 在 JS 线程上。
 
 按住一个键只触发一次绑定，直到松开为止；设置 `repeat: true` 后，每次自动重复都会再次触发（例如在列表中逐项移动）：
 
-```ts
+```rust tabs
+on_key_with("alt+down", KeyOptions { repeat: true, ..KeyOptions::default() }, move |_| next_item());
+```
+
+```tsx tabs
 keymap.bind("alt+down", nextItem, { repeat: true });
 ```
 

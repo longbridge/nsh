@@ -648,7 +648,8 @@ define_class!(
             }
         }
 
-        /// The Edit menu's Select All (Cmd+A): a selectable text's.
+        /// The Edit menu's Select All (Cmd+A): a selectable text's or a
+        /// selection area's.
         #[unsafe(method(selectAll:))]
         fn select_all(&self, _sender: Option<&AnyObject>) {
             if let Some(surface) = self.surface() {

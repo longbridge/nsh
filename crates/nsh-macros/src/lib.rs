@@ -297,8 +297,10 @@ fn last_segment(ty: &Type) -> Option<(&Ident, Option<&Type>)> {
     Some((&seg.ident, arg))
 }
 
-enum Kind {
+enum Kind<'a> {
     Value,
+    /// `Option<Renderer<T>>`: the app's function rendering `T`s.
+    Renderer(&'a Type),
     Slot,
     Children,
     Items,
@@ -312,6 +314,9 @@ enum Kind {
 ///   Fields start with their default (`Default::default()` without one);
 ///   JS clearing a prop restores it.
 /// - `Option<Slot>`: a named slot, JSX the app passes in that prop.
+/// - `Option<Renderer<T>>`: a render function, `(value: T) => JSX.Element`
+///   in TypeScript (optional), which the view calls with a key and a value
+///   where it places the content.
 /// - `Children`: the JSX children; with `#[prop(lazy)]` JS makes them only
 ///   while the view places them (made again each time it does, released
 ///   when it stops: a sheet's content starts fresh when it opens).
@@ -384,6 +389,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
         let kind = match last_segment(ty) {
             Some((id, Some(inner))) if id == "Option" => match last_segment(inner) {
                 Some((s, _)) if s == "Slot" => Kind::Slot,
+                Some((r, Some(t))) if r == "Renderer" => Kind::Renderer(t),
                 _ => Kind::Value,
             },
             Some((id, _)) if id == "Children" => Kind::Children,
@@ -432,6 +438,38 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         kind: #ui::PropKind::Value,
                         decode: ::core::option::Option::Some(|v| {
                             <#ty as #ui::JsValue>::from_js(v).map(#ui::AnyValue::new)
+                        }),
+                    }
+                });
+                let take = assign(quote!(value));
+                set_arms.push(quote! {
+                    #js => {
+                        let value: #ty = match value {
+                            ::core::option::Option::Some(v) => v.take::<#ty>().ok_or_else(|| {
+                                #ui::PropError(::std::format!("`{}`: a value of another type", #js))
+                            })?,
+                            ::core::option::Option::None => #init,
+                        };
+                        ::core::result::Result::Ok(#take)
+                    }
+                });
+            }
+            Kind::Renderer(t) => {
+                specs.push(quote! {
+                    #ui::PropSpec {
+                        name: #js,
+                        ts: ::std::format!("(value: {}) => JSX.Element", #ui::ts_of::<#t>()(types)),
+                        optional: true,
+                        doc: #field_doc,
+                        kind: #ui::PropKind::Renderer,
+                        decode: ::core::option::Option::Some(|v| match v.kind() {
+                            #ui::JsKind::Function => ::core::result::Result::Ok(#ui::AnyValue::new(
+                                ::core::option::Option::Some(#ui::Renderer::<#t>::__js(#js)),
+                            )),
+                            #ui::JsKind::Undefined | #ui::JsKind::Null => ::core::result::Result::Ok(
+                                #ui::AnyValue::new(::core::option::Option::<#ui::Renderer<#t>>::None),
+                            ),
+                            _ => ::core::result::Result::Err(v.expected("a function")),
                         }),
                     }
                 });

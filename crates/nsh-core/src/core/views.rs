@@ -544,6 +544,14 @@ impl<M: TextEngine> Core<M> {
                 };
                 let attrs = *attrs;
                 let old = std::mem::replace(&mut node.attrs, attrs.clone());
+                // The app's classes changed: the styles go again.
+                let restyle = (attrs.class != old.class).then(|| {
+                    (
+                        node.style.clone(),
+                        node.classes.clone(),
+                        attrs.class.clone(),
+                    )
+                });
                 let (attrs, old) = match &cx {
                     Some(cx) => {
                         let mut old = old;
@@ -555,6 +563,19 @@ impl<M: TextEngine> Core<M> {
                     None => (attrs, old),
                 };
                 self.apply_attrs_over(id, &attrs, &old, app.as_ref());
+                if let Some((style, classes, class)) = restyle {
+                    let outer = cx.and_then(|cx| cx.user);
+                    let classes =
+                        self.apply_el_styles(id, &style, &style, classes, class.as_ref(), outer);
+                    if let Some(node) = self
+                        .components
+                        .instances
+                        .get_mut(&host)
+                        .and_then(|i| i.bound.get_mut(&id))
+                    {
+                        node.classes = classes;
+                    }
+                }
             }
             Patch::Style { host, id, style } => {
                 let user = if id == host {
@@ -570,7 +591,9 @@ impl<M: TextEngine> Core<M> {
                 };
                 let old_style = std::mem::replace(&mut node.style, style.clone());
                 let old_classes = node.classes.clone();
-                let classes = self.apply_styles(id, &style, &old_style, old_classes, user);
+                let class = node.attrs.class.clone();
+                let classes =
+                    self.apply_el_styles(id, &style, &old_style, old_classes, class.as_ref(), user);
                 if let Some(node) = self
                     .components
                     .instances

@@ -299,6 +299,11 @@ impl NshView {
         *self.ivars().control.borrow_mut() = Some(control.clone());
     }
 
+    /// The view is a selection area (`ViewProps::selection_area`).
+    pub(crate) fn is_selection_area(&self) -> bool {
+        self.ivars().props.borrow().selection_area
+    }
+
     /// The area descendants cover outside the bounds, in the view's
     /// coordinates (`MountItem::Overflow`).
     pub(crate) fn set_overflow(&self, extent: Option<CGRect>) {

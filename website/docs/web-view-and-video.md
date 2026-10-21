@@ -7,14 +7,14 @@ group: ui
 
 # Web view and video
 
-`WebView` from `nsh/webview` and `Video` from `nsh/video` embed the platform's own web engine and media player as ordinary views. Because NSH renders with native views, they sit in your layout like any other element: they scroll with their parent, take rounded corners and clipping, and other views can overlap them without layering problems.
+The web view and the video player embed the platform's own web engine and media player as ordinary views: `web_view` and `video` in Rust (`nsh_core::ui::prelude`), `WebView` and `Video` from `nsh` in TSX. Because NSH renders with native views, they sit in your layout like any other element: they scroll with their parent, take rounded corners and clipping, and other views can overlap them without layering problems.
 
 | Component | iOS | Android | macOS | Linux | Windows |
 |---|---|---|---|---|---|
 | `WebView` | WKWebView | `android.webkit.WebView` | WKWebView | WebKitGTK 6.0's `WebKitWebView` | WebView2, in a child window |
 | `Video` | AVPlayerLayer; AVPlayerViewController with `controls` | MediaPlayer on a TextureView; MediaController with `controls` | AVPlayerLayer; AVKit's AVPlayerView with `controls` | GTK's media stream (GStreamer) in a `GtkPicture`; `GtkVideo` with `controls` | Media Foundation's media engine, frames drawn with Direct2D; NSH's own control bar with `controls` |
 
-The frameworks behind them (WebKit, AVFoundation) are loaded the first time an app uses one, so apps that never show a web page or a video do not pay for them at launch. Import them from `nsh/webview` and `nsh/video`.
+The frameworks behind them (WebKit, AVFoundation) are loaded the first time an app uses one, so apps that never show a web page or a video do not pay for them at launch.
 
 On [macOS](./macos.md) the web view has no scroll view of its own: with `scrollEnabled={false}` the mouse wheel and the
 trackpad scroll the app's scroll views around it instead of the page, which still scrolls with its keyboard and its
@@ -36,9 +36,17 @@ codecs decode; `rate` works, there is no poster, and the control bar always show
 
 ## WebView
 
-```tsx
-import { mount } from "nsh";
-import { WebView } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    web_view("https://en.m.wikipedia.org/wiki/Swift_(programming_language)").flex_1()
+}
+```
+
+```tsx tabs
+import { mount, WebView } from "nsh";
 
 function App() {
   return <WebView source="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
@@ -55,9 +63,11 @@ mount(App);
 | `{ html: "<!doctype html>…" }` | HTML from a string. |
 | `{ html, baseUrl: "https://example.com/" }` | HTML whose relative URLs resolve against `baseUrl`. |
 
-Changing `source` loads the new page.
+In Rust, `web_view(url)` shows a page and `web_view_html(html, base_url)` shows HTML (`base_url` an `Option<&str>`); the URL and the HTML can be a signal or a closure, which loads the page again when what it reads changes. Changing `source` loads the new page.
 
 ### Props
+
+In Rust each prop is a builder method in snake case (`injected_java_script`, `java_script_enabled`, `scroll_enabled`, `user_agent`; `injected_java_script_before_content` for `injectedJavaScriptBeforeContentLoaded`, `back_forward_gestures` for iOS's `allowsBackForwardNavigationGestures`) and each event an `on_…` method (`on_navigation_state_change`) whose listener gets a `WebNavigation` (`url`, `title`, `loading`, `can_go_back`, `can_go_forward`) or, for `on_error` and `on_message`, a `&str`.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
@@ -84,11 +94,57 @@ Events:
 
 ### A browser with back and forward
 
-The ref has `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)` and `postMessage(data)`:
+The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)` and `post_message` / `postMessage(data)`:
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView, type WebViewNavigation } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+pub fn browser() -> impl IntoElement {
+    let web = element_ref();
+    let nav = signal(None::<WebNavigation>);
+    let button = move |label: &'static str, enabled: fn(&WebNavigation) -> bool, action: fn(&ElementRef)| {
+        let enabled = move || nav.with(|n| n.as_ref().is_some_and(enabled));
+        text(label)
+            .p(px(12.0))
+            .text_color(move || if enabled() { rgb(0x0969da) } else { rgb(0x8c959f) })
+            .disabled(move || !enabled())
+            .on_press(move || action(&web))
+    };
+    view()
+        .flex_1()
+        .pt(px(50.0))
+        .child(
+            text(move || {
+                nav.with(|n| match n {
+                    Some(n) if n.loading => "Loading…".to_owned(),
+                    Some(n) => n.title.clone(),
+                    None => String::new(),
+                })
+            })
+            .number_of_lines(1)
+            .px(px(12.0))
+            .text_color(rgb(0x57606a)),
+        )
+        .child(
+            web_view("https://developer.mozilla.org/")
+                .element_ref(&web)
+                .flex_1()
+                .on_navigation_state_change(move |n: &WebNavigation| nav.set(Some(n.clone())))
+                .back_forward_gestures(true),
+        )
+        .child(
+            view()
+                .flex_row()
+                .justify_around()
+                .child(button("Back", |n| n.can_go_back, |web| web.go_back()))
+                .child(button("Forward", |n| n.can_go_forward, |web| web.go_forward()))
+                .child(button("Reload", |_| true, |web| web.reload())),
+        )
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
 
 function Browser() {
   let web!: YNode;
@@ -124,11 +180,54 @@ mount(Browser);
 
 ### Messaging between the page and the app
 
-Pages talk to the app with `window.ReactNativeWebView.postMessage(string)`, which arrives as `onMessage`. The app talks to the page with the ref's `postMessage(string)`, which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
+Pages talk to the app with `window.ReactNativeWebView.postMessage(string)`, which arrives as `on_message` (`onMessage`). The app talks to the page with the ref's `post_message` (`postMessage(string)`), which arrives in the page as a `message` event on `window`. Messages are strings; send JSON for structured data.
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView } from "nsh/webview";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+const PAGE: &str = r#"<!doctype html>
+<html><head><meta name="viewport" content="width=device-width"></head>
+<body style="font-family: -apple-system, sans-serif; margin: 16px">
+  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+    Post to the app
+  </button>
+  <p id="got">Nothing from the app yet.</p>
+  <script>
+    window.addEventListener("message", (e) => {
+      document.getElementById("got").textContent = "The app says: " + e.data;
+    });
+  </script>
+</body></html>"#;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let web = element_ref();
+    let last = signal(String::new());
+    view()
+        .flex_1()
+        .pt(px(50.0))
+        .gap(px(12.0))
+        .child(
+            web_view_html(PAGE, None)
+                .element_ref(&web)
+                .h(px(240.0))
+                .on_message(move |data: &str| {
+                    let message: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+                    last.set(message["type"].as_str().unwrap_or_default().to_owned());
+                }),
+        )
+        .child(
+            text("Post to the page")
+                .p(px(16.0))
+                .text_color(rgb(0x0969da))
+                .on_press(move || web.post_message("hi from nsh")),
+        )
+        .child(text(move || format!("Last message: {}", last.get())).px(px(16.0)))
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, View, WebView, type YNode } from "nsh";
 
 const page = `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
@@ -166,9 +265,16 @@ function App() {
 mount(App);
 ```
 
-`injectJavaScript(script)` runs code in the current page at any time; `injectedJavaScript` and `injectedJavaScriptBeforeContentLoaded` run on every page load, before or after the page's own scripts, which is the place to install hooks:
+The ref's `inject_java_script` (`injectJavaScript(script)`) runs code in the current page at any time; `injected_java_script` and `injected_java_script_before_content` (`injectedJavaScript`, `injectedJavaScriptBeforeContentLoaded`) run on every page load, before or after the page's own scripts, which is the place to install hooks:
 
-```tsx
+```rust tabs
+web_view("https://example.com")
+    .injected_java_script_before_content("window.isNativeApp = true;")
+    .injected_java_script("window.ReactNativeWebView.postMessage(document.title);")
+    .on_message(|title: &str| log::info!("title {title}"))
+```
+
+```tsx tabs
 <WebView
   source="https://example.com"
   injectedJavaScriptBeforeContentLoaded={`window.isNativeApp = true;`}
@@ -193,9 +299,53 @@ The check covers the web view's `source` and every top-level navigation the page
 
 ## Video
 
-```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+pub fn player() -> impl IntoElement {
+    let player = element_ref();
+    let paused = signal(true);
+    let time = signal(String::new());
+    let link = |label: &'static str| text(label).text_color(rgb(0x0969da));
+    view()
+        .flex_1()
+        .justify_center()
+        .p(px(16.0))
+        .gap(px(12.0))
+        .child(
+            video("https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4")
+                .element_ref(&player)
+                .paused(paused)
+                .repeat(true)
+                .resize_mode(ResizeMode::Contain)
+                .h(px(220.0))
+                .rounded(px(12.0))
+                .overflow_hidden()
+                .bg(rgb(0x000000))
+                .on_progress(move |e: &VideoProgress| {
+                    time.set(format!("{:.1} / {:.1} s", e.current_time, e.duration))
+                })
+                .on_end(move || paused.set(true)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .gap(px(16.0))
+                .items_center()
+                .child(
+                    text(move || if paused.get() { "Play" } else { "Pause" })
+                        .text_color(rgb(0x0969da))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .on_press(move || paused.update(|p| *p = !*p)),
+                )
+                .child(link("Restart").on_press(move || player.seek(0.0)))
+                .child(text(move || time.get()).text_color(rgb(0x57606a))),
+        )
+}
+```
+
+```tsx tabs
+import { mount, signal, Text, Video, View, type YNode } from "nsh";
 
 function Player() {
   let video!: YNode;
@@ -231,6 +381,8 @@ mount(Player);
 
 Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from signals and the player follows. The ref has `seek(seconds)`.
 
+In Rust, `video(url)` makes the player (the URL a value, a signal or a closure) and each prop is a builder method in snake case (`paused`, `repeat(true)`, `resize_mode(ResizeMode::Contain)`, `progress_interval` for `progressUpdateInterval`); `on_load` gets a `VideoInfo` (`duration`, `size`), `on_progress` a `VideoProgress` (`current_time`, `duration`) and `on_buffer` a `bool`.
+
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `source` | `string \| { uri }` | | The video's URL. |
@@ -254,7 +406,24 @@ Playback is controlled by props: set `paused`, `muted`, `volume` and `rate` from
 
 With `controls`, the platform draws its own play button, scrubber and full-screen button. Without, draw your own with views over or below the video; since the video is a native view in your layout, overlays work naturally:
 
-```tsx
+```rust tabs
+view()
+    .h(px(220.0))
+    .child(video(url).paused(paused).flex_1())
+    .child(
+        view()
+            .absolute()
+            .inset_0()
+            .items_center()
+            .justify_center()
+            .on_press(move || paused.update(|p| *p = !*p))
+            .child(when(move || paused.get(), || {
+                text("▶").text_size(px(48.0)).text_color(rgb(0xffffff))
+            })),
+    )
+```
+
+```tsx tabs
 <View style={{ height: 220 }}>
   <Video source={url} paused={paused()} style={{ flex: 1 }} />
   <View
@@ -273,6 +442,5 @@ Video sources are network requests: with declared capabilities, the video's host
 ## Related
 
 - [`WebView`](../elements/web-view.md) and [`Video`](../elements/video.md): the element references.
-- [`nsh/webview`](../modules/nsh-webview.md) and [`nsh/video`](../modules/nsh-video.md).
 - [Sandbox and capabilities](./sandbox-and-capabilities.md): `webview` and `network` grants.
 - [Native components](./native-components.md): embedding other native views your host app provides.

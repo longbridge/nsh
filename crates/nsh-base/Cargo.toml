@@ -10,6 +10,19 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["highlight"]
+# Built-in syntax highlighting of `TextView`'s code blocks (syntect).
+highlight = ["dep:syntect", "dep:two-face"]
+
 [dependencies]
 nsh-core.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+markdown.workspace = true
+html5ever.workspace = true
+markup5ever_rcdom.workspace = true
+regex.workspace = true
+log.workspace = true
+syntect = { workspace = true, optional = true }
+two-face = { workspace = true, optional = true }

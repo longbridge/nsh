@@ -34,6 +34,38 @@
   Linux the UI font is the first of a list that GPUI can set in bold (GNOME's Adwaita Sans is variable: Noto Sans or
   DejaVu Sans take its place, with Adwaita Sans's ascent and descent, so lines are as tall as GTK's). Symbols that are
   text by default (♥, ✓) take a text font when the fallback would draw them as color emoji, so the text's color applies.
+- **Selection areas**: a view with `ViewProps::selection_area` (`SelectionArea` of `nsh/base`, a selectable
+  `TextView`; set by components with `Element::selection_area`, the internal host prop `Prop::SelectionArea`) makes
+  its texts select together, as a browser page's do: one selection from a place in one text to a place in another, in
+  document order (the area's subtree, depth first), across paragraphs, views and `TextView`s. The model is
+  platform-independent (`nsh_core::selection`): a backend lists the area's texts (`SelectionTexts`: content, content
+  boxes in the area's coordinates with scroll offsets applied, its text engine's hit test), feeds `SelectionModel` its
+  gestures (press with the click count and Shift, drag, long press, a handle's drag, select all) and draws what
+  `ranges` says with its own highlight (each text's `selectionColor`), handles and menu; Copy takes `text` (attachments
+  left out, texts on one row joined by a tab, the others by a line break). Positions are (text index, UTF-16 offset),
+  never inside a surrogate pair. A point outside every text is hit-tested in reading order: the horizontally nearest
+  text on its row, above every text the first text's start, below every text the last one's end, between rows the
+  nearer of the end of the text above and the start of the text below. Words are runs of letters, digits and `_`, runs
+  of spaces, or single other characters (each CJK ideograph, kana, emoji or punctuation mark); a triple click selects
+  a whole text. Desktops select as their single texts do (drag, double click words, triple click paragraphs, drags go
+  on by them, Shift+click extends; Ctrl / Cmd+A, Ctrl / Cmd+C, Escape; a press elsewhere clears), touch screens with a
+  long press (a word) and then the platform's handles and edit menu (Copy, Select All). Texts with `selectable={false}`
+  stay out; an area inside another is part of the outer one (only the outermost area keeps a model); texts outside
+  areas select alone, as above. Views without the flag change nothing (no extra mount items). iOS
+  (`selection_area.rs`): `UITextInteraction` selects within one `UITextInput` view, so an area has its own
+  `AreaResponder`, a zero-sized subview at the area's origin (its coordinates are the area's) that owns the model and
+  is the first responder its Copy and Select All (and the hardware keyboard's ⌘C / ⌘A) go to. On the area: a long
+  press (fingers, the Pencil) selects a word and its drag goes on by words; two handles (a stem and a round knob in
+  the tint, subviews of the area kept in front, with enlarged touch targets; scroll views wait for their drag to
+  fail) move the ends and hide where a clipping scroll view cuts their caret off; a tap off the highlight clears, on
+  it toggles the edit menu (`UIEditMenuInteraction` from iOS 16, `UIMenuController` before: Copy, Select All).
+  Pointers (Mac Catalyst's mouse, iPad trackpads) select as on the desktops, without handles. The texts are the
+  area's `TextView`s (key: their node), listed again when a gesture starts and, while something is selected, after
+  every batch and scroll; each draws its part of the highlight behind its glyphs (`selectionColor`, else the tint, at
+  20%), and texts in an area drop their own `UITextInteraction` (`TextView::in_selection_area`). Resigning first
+  responder clears, so a surface shows one selection. Android (`selection_area.rs`, `SelectionArea.java`): the
+  shared Rust model runs on the UI thread over JNI, hit-testing through a Java callback; a long press selects a word,
+  then handles and a floating `ActionMode` (Copy, Select all, Share).
 - **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
   ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
   spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.

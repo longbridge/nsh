@@ -68,6 +68,7 @@ works and its runner only needs GTK.
 | Area | Module | GTK |
 |---|---|---|
 | Text | `text.rs` | Pango layouts on the engine thread, `gsk::TextNode` glyph runs; colors and decorations read per cluster from the spans (a layout is reused for texts that only differ in them); cap / x height from the font's OS/2 table (HarfBuzz); `selectable` text's range selection, desktop style (below) |
+| Selection areas | `selection_area.rs` | One selection across the texts of a `selection_area` view's subtree (`nsh_core::selection`'s model; depth-first order, an area inside another is part of it), driven from `input.rs`'s pointer handlers, so simulated drags select too: a mouse press in an area presses the model (GTK's double-click time and distance count clicks, Shift+click extends), a drag past 3 pt (10 pt over a press target, which then does not fire) drags it, dragging past a scroll view's edge around the area scrolls it; texts draw their part with the `selectable` highlight and run no selection of their own; the area view takes the focus while it has a selection (Ctrl+A / Ctrl+C / Ctrl+Insert / Escape, the menu's Copy and Select All), any press elsewhere or losing the focus clears it (one selection per surface), a finished drag sets the primary selection |
 | Decoration | `decor.rs` | GSK nodes: shadows (React Native's take the box's shape with a fill, the content's without, as iOS), colors, gradients, inset shadows, borders (over the children, as UIKit), outlines, filters |
 | Images | `image.rs` | Loaded and decoded on worker threads (GDK's PNG / JPEG / TIFF loaders, the `image` crate for GIF and WebP), textures in an LRU cache per resolved location; animated GIF / WebP play on timers of their frame delays (paused while unmapped); blur and tint at draw time |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Cairo into a recording surface (`Snapshot::append_cairo`), sharp at any scale; shadows blurred into a mask; conic gradients as mesh patterns |
@@ -117,7 +118,7 @@ bubble back up. What NSH adds:
 - **At the window**, keys nothing focused used: going back (`navigation::key_pressed`: Escape, which leaves a focused
   field instead; Alt+Left and the Back key, also from a field, which does not use them), scrolling (`scroll.rs`, not
   while a field has the focus) and the mouse's back button. A `selectable` text with a selection takes Ctrl+A / Ctrl+C
-  / Escape (`text.rs`); without one Escape goes on.
+  / Escape (`text.rs`), and so does a selection area with one (`selection_area.rs`, above); without one Escape goes on.
 - **The app's shortcuts** (`nsh/keymap`, `keymap.rs`): the mounted table becomes a global-scope, capture-phase
   `gtk::ShortcutController` on the root, which the window runs before the focus widget and its own capture
   controllers (in the bubble phase a field would take Ctrl+A or Ctrl+Return first); one `gtk::Shortcut` per binding

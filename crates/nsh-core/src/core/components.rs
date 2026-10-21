@@ -303,6 +303,10 @@ pub(super) enum Part {
     Filled(&'static str),
 }
 
+/// A node's app classes ([`Components::app_classes`]): its own rules, the
+/// classes, and what goes after them.
+pub(super) type AppClass = (Option<Arc<ClassList>>, SharedString, Option<Arc<ClassList>>);
+
 /// The node's classes: its styles lowered, and what was merged after them.
 pub(super) type Classes = (Option<Arc<ClassList>>, Option<Arc<ClassList>>);
 
@@ -518,6 +522,13 @@ pub(super) struct Components {
     /// script): a call posted during a synchronous call from JS waits for
     /// its op ([`RustCall::Post`]).
     posts: Posts,
+    /// What the app's JS functions render for the views
+    /// ([`crate::ui::Renderer`]).
+    pub(super) renders: super::renders::Renders,
+    /// Nodes of views with the app's classes (`Element::app_class`): their
+    /// own rules, the classes and what goes after them, resolved again
+    /// when the tokens change.
+    pub(super) app_classes: FxHashMap<NodeId, AppClass>,
 }
 
 impl Default for Components {
@@ -569,6 +580,8 @@ impl Default for Components {
             regions: FxHashMap::default(),
             next_region: 1,
             posts: Posts::default(),
+            renders: Default::default(),
+            app_classes: FxHashMap::default(),
         }
     }
 }
@@ -860,6 +873,23 @@ impl<M: TextEngine> Core<M> {
                     &animated,
                     app.as_ref(),
                 )))
+            }
+            // A render's holder joins its host: placed in its placeholder.
+            Op::Insert { parent, child, .. }
+                if self.is_host(parent) && self.is_render_holder(child) =>
+            {
+                self.insert_render_holder(parent, child);
+                Ok(None)
+            }
+            Op::Remove { parent, child }
+                if self.is_host(parent) && self.is_render_holder(child) =>
+            {
+                self.remove_render_holder(child, false);
+                Ok(None)
+            }
+            Op::Release { id } if self.is_render_holder(id) => {
+                self.remove_render_holder(id, true);
+                Ok(Some(Op::Release { id }))
             }
             // A slot's node joins its host: the view places it.
             Op::Insert { parent, child, .. }
@@ -1404,6 +1434,18 @@ impl<M: TextEngine> Core<M> {
                 break;
             }
         }
+        self.flush_renders();
+    }
+
+    /// Node `id` goes: what the views' renders and the app's classes knew
+    /// of it goes too.
+    fn forget_node_extras(&mut self, id: NodeId) {
+        if !self.components.renders.is_empty() {
+            self.forget_render_place(id);
+        }
+        if !self.components.app_classes.is_empty() {
+            self.components.app_classes.remove(&id);
+        }
     }
 
     /// Sends the failures of views' code (bindings, effects, listeners) to
@@ -1485,7 +1527,15 @@ impl<M: TextEngine> Core<M> {
         let given_changed = std::mem::take(&mut inst.given_changed);
         let attrs = if let Some(node) = inst.bound.get_mut(&host) {
             let (style, classes) = (node.style.clone(), node.classes.clone());
-            let classes = self.apply_styles(host, &style, &style, classes, cx.user.clone());
+            let class = node.attrs.class.clone();
+            let classes = self.apply_el_styles(
+                host,
+                &style,
+                &style,
+                classes,
+                class.as_ref(),
+                cx.user.clone(),
+            );
             if let Some(node) = inst.bound.get_mut(&host) {
                 node.classes = classes;
                 given_changed.then(|| node.attrs.clone())
@@ -1494,7 +1544,15 @@ impl<M: TextEngine> Core<M> {
             }
         } else if let Some(root) = inst.root.as_mut() {
             let (style, classes) = (root.style.clone(), root.classes.clone());
-            root.classes = self.apply_styles(host, &style, &style, classes, cx.user.clone());
+            let class = root.attrs.class.clone();
+            root.classes = self.apply_el_styles(
+                host,
+                &style,
+                &style,
+                classes,
+                class.as_ref(),
+                cx.user.clone(),
+            );
             given_changed.then(|| root.attrs.clone())
         } else {
             None
@@ -1931,7 +1989,14 @@ impl<M: TextEngine> Core<M> {
         }
         let user = cx.user.clone();
         let top_js = cx.js;
-        let classes = self.apply_styles(host, &el.style, &old_style, old_classes, user);
+        let classes = self.apply_el_styles(
+            host,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            user,
+        );
         let text = self.reconcile_text(host, host, el.text.take(), old_text);
         if bound.is_some() {
             Self::keep_bound(
@@ -2115,7 +2180,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// `inner`'s rules, then `outer`'s (one list per pair, kept).
-    fn merge_user(
+    pub(super) fn merge_user(
         &mut self,
         inner: Option<Arc<ClassList>>,
         outer: Option<Arc<ClassList>>,
@@ -2197,7 +2262,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    fn detach_id(&mut self, id: NodeId) {
+    pub(super) fn detach_id(&mut self, id: NodeId) {
         if let Ok(key) = self.key(id)
             && self.nodes[key as usize].parent != NO_KEY
         {
@@ -2227,6 +2292,9 @@ impl<M: TextEngine> Core<M> {
         }
         if let Some(r) = &new.element_ref {
             r.attach(node);
+        }
+        if new.render != old.render {
+            self.update_render(node, old.render.as_ref(), new.render.as_ref());
         }
         let mut props = std::mem::take(&mut self.components.props);
         new.changes(old, &mut props);
@@ -2275,6 +2343,51 @@ impl<M: TextEngine> Core<M> {
             }
         }
         (own, user)
+    }
+
+    /// [`Self::apply_styles`] for an element of a view: the app's classes
+    /// it carries (`class`, [`crate::ui::Element::app_class`]) go after its
+    /// own styles, then `outer` (a root's: what the views and the app give
+    /// its host).
+    pub(super) fn apply_el_styles(
+        &mut self,
+        id: NodeId,
+        style: &StyleRefinement,
+        old_style: &StyleRefinement,
+        old: Classes,
+        class: Option<&SharedString>,
+        outer: Option<Arc<ClassList>>,
+    ) -> Classes {
+        let Some(class) = class.filter(|c| !c.trim().is_empty()) else {
+            if !self.components.app_classes.is_empty() {
+                self.components.app_classes.remove(&id);
+            }
+            return self.apply_styles(id, style, old_style, old, outer);
+        };
+        let app = self.app_class_list(class);
+        let user = self.merge_user(Some(app), outer.clone());
+        let classes = self.apply_styles(id, style, old_style, old, user);
+        self.components
+            .app_classes
+            .insert(id, (classes.0.clone(), class.clone(), outer));
+        classes
+    }
+
+    /// The rules of the app's classes `class` (the unknown ones warned of
+    /// once, as a host's).
+    pub(super) fn app_class_list(&mut self, class: &str) -> Arc<ClassList> {
+        let (list, fresh) = self.tailwind.get(class);
+        if fresh && !list.unknown().is_empty() {
+            log::warn!(
+                "unknown classes: {}",
+                list.unknown()
+                    .iter()
+                    .map(|s| &**s)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        list
     }
 
     /// Registers `el`'s handlers for node `id` and listens to their events
@@ -3218,7 +3331,14 @@ impl<M: TextEngine> Core<M> {
             ),
         };
         self.apply_attrs(node, &el.attrs, &old_attrs);
-        let classes = self.apply_styles(node, &el.style, &old_style, old_classes, None);
+        let classes = self.apply_el_styles(
+            node,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            None,
+        );
         // Its events are the component's first (`component_event` finds it
         // by its host); the node stays JS's or the placing view's.
         let events = self.apply_handlers(node, &el, old_events, EventMask::default(), inst);
@@ -3409,7 +3529,14 @@ impl<M: TextEngine> Core<M> {
             };
         }
         self.apply_attrs(id, &el.attrs, &old_attrs);
-        let classes = self.apply_styles(id, &el.style, &old_style, old_classes, None);
+        let classes = self.apply_el_styles(
+            id,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            None,
+        );
         let text = self.reconcile_text(id, host, el.text.take(), old_text);
         if bound.is_some() {
             Self::keep_bound(
@@ -3846,6 +3973,7 @@ impl<M: TextEngine> Core<M> {
 
     fn release_id(&mut self, id: NodeId) {
         self.components.owners.remove(&id);
+        self.forget_node_extras(id);
         // A root component's host is its view's: only the name goes.
         if self.is_alias(id) {
             self.unalias(id);
@@ -3921,6 +4049,8 @@ impl<M: TextEngine> Core<M> {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
+        // Its root's (a render or classes of the app's) on the host.
+        self.forget_node_extras(host);
         if let Inner::Component(inner) = &mut inst.inner {
             if let Err(message) = caught(|| inner.cleanup()) {
                 log::error!(target: "js", "{} failed in its cleanup: {message}", inner.name());

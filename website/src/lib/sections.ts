@@ -23,8 +23,8 @@ export const SECTIONS: Section[] = [
     id: 'elements',
     label: { en: 'Elements', 'zh-CN': '元素' },
     blurb: {
-      en: 'The host elements every UI is built from — View, Text, Image, scroll views, lists — and their props.',
-      'zh-CN': '构成所有界面的宿主元素——View、Text、Image、滚动视图、列表——及其属性。',
+      en: 'The primitives every UI is built from — View, Text, Image, scroll views, lists — and the base components of nsh/base, in Rust and TSX.',
+      'zh-CN': '构成所有界面的原语——View、Text、Image、滚动视图、列表——以及 nsh/base 的基础组件，均附 Rust 与 TSX 示例。',
     },
   },
   {
@@ -48,6 +48,9 @@ export const GROUPS: Record<string, Record<Lang, string>> = {
   delivery: { en: 'Delivery and security', 'zh-CN': '下发与安全' },
   ui: { en: 'Building UI', 'zh-CN': '构建界面' },
   tools: { en: 'Tools and internals', 'zh-CN': '工具与原理' },
+  // Elements: the primitives of `nsh`, then the base components of `nsh/base`.
+  primitives: { en: 'Primitives', 'zh-CN': '原语' },
+  base: { en: 'Base', 'zh-CN': 'Base' },
 };
 
 export interface Page {

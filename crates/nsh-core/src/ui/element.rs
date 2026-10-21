@@ -177,6 +177,14 @@ pub struct Attrs {
     pub(crate) animated: Vec<(crate::StyleDecl, super::LiveNode)>,
     /// Animated nodes host props read (drags, scroll offsets), held.
     pub(crate) bound: Vec<super::LiveNode>,
+    /// Tailwind classes the app gave through a prop (a component's part),
+    /// after the element's own styles.
+    pub(crate) class: Option<SharedString>,
+    /// The view is a selection area ([`crate::selection`]).
+    pub(crate) selection_area: bool,
+    /// Where a JS renderer's content goes (the element is its
+    /// placeholder: [`super::Renderer::render`]).
+    pub(crate) render: Option<super::renderer::RenderAt>,
 }
 
 impl Attrs {
@@ -223,6 +231,9 @@ impl Attrs {
         }
         if self.inset_margin != old.inset_margin {
             out.push(Prop::InsetMargin(self.inset_margin.unwrap_or_default()));
+        }
+        if self.selection_area != old.selection_area {
+            out.push(Prop::SelectionArea(self.selection_area));
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -762,6 +773,24 @@ pub trait Element: IntoElement + Sized {
     /// Native's names), over the element's styles.
     fn inline_style(mut self, style: impl IntoReactive<Style>) -> Self {
         self.node().bind_attr(style, |a, style| a.inline = style.0);
+        self
+    }
+
+    /// Makes the view a selection area (`SelectionArea` of `nsh/base`):
+    /// the texts in it that are not `selectable={false}` share one
+    /// selection, from text to text ([`crate::selection`]).
+    fn selection_area(mut self, area: impl IntoReactive<bool>) -> Self {
+        self.node()
+            .bind_attr(area, |a, area| a.selection_area = area);
+        self
+    }
+
+    /// Tailwind classes the app passed (a prop naming the classes of one
+    /// of the component's parts: `classes={{ heading: "text-2xl" }}`),
+    /// after the element's own styles, as the app's `class` on a
+    /// component's root is: at equal rank they win.
+    fn app_class(mut self, class: impl IntoReactive<Option<SharedString>>) -> Self {
+        self.node().bind_attr(class, |a, class| a.class = class);
         self
     }
 }

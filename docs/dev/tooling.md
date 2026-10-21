@@ -264,8 +264,8 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
-- images are not loaded; an image's size (`ImageInfo`) and an image or files on the clipboard fail the step that asked
-  (`Screen::take_unsupported`).
+- images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
+  for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
 Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
 `Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.

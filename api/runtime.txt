@@ -181,6 +181,11 @@ KeyboardAvoidingView function
 NavPage function
 NavStack function
 SafeAreaView function
+SelectionArea function
+TextView function
+TextView.parse function
+TextView.parseHtml function
+TextView.plainText function
 createNavStack function
 keyboardFrame function
 safeArea function

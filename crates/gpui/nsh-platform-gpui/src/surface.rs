@@ -526,6 +526,7 @@ impl Surface {
             model.apply(batch);
         }
         crate::access::batch_applied(self);
+        crate::selection_area::batch_applied(self);
     }
 
     /// Writes the animated values to the views and reports finished

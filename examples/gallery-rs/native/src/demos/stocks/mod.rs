@@ -25,6 +25,7 @@ mod ticket;
 
 use std::{cell::RefCell, f32::consts::TAU, rc::Rc, time::Duration};
 
+use nsh_base::nav_page;
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     animation::{Curve, EaseMode},
@@ -166,7 +167,7 @@ fn open(live: &Live, index: usize) {
         // The screen is outside the watchlist: it gets the market here.
         provide_context(live.clone());
         with_header(
-            header(screen().title(code)).header_right(MarketButton::element(())),
+            header(nav_page().title(code)).header_right(MarketButton::element(())),
             || PageHeader::new(code).right(MarketButton::element(())),
         )
         .child(StockView::element(StockViewProps {

@@ -7,7 +7,8 @@ group: tools
 
 # Architecture
 
-This page is for app developers who want to know what happens between `count.set(1)` and a label changing on screen.
+This page is for app developers who want to know what happens between `count.set(1)` and a label changing on screen,
+in an app written in Rust or in TSX.
 You do not need it to write apps, but it explains why NSH behaves the way it does: why components run once, why
 animations stay smooth while JS is busy, why the main thread never waits for your code.
 
@@ -26,7 +27,7 @@ animations stay smooth while JS is busy, why the main thread never waits for you
 2. **NSH's JSX compiler** turns JSX into direct calls to the native renderer, in the same pass. Static props and
    children are set once; expressions that can change (they call a function or read a property) become bindings the
    renderer follows. Components become plain function calls with a props object whose changing props are getters.
-3. **rolldown** bundles your modules into one ES module. Imports of NSH's modules (`nsh`, `nsh/list`,
+3. **rolldown** bundles your modules into one ES module. Imports of NSH's modules (`nsh`, `nsh/animated`,
    `nsh/base`, ...) stay imports: those modules are native, served by the runtime. **The bundle contains only your
    app's code**; the counter example is under 1 KB of JS.
 4. The bundle is compiled to **bytecode** (`bundle.nshc`), which loads faster than source, and a **source map**
@@ -35,17 +36,22 @@ animations stay smooth while JS is busy, why the main thread never waits for you
 Images and fonts you import are collected as assets, and type declarations for your editor are written to
 `.nsh/types`.
 
+An app written in Rust has no bundle: Cargo builds each target's runner with your crate linked in, and the root
+component `nsh.json` names runs on the engine natively. Everything below holds for it as well, with your components'
+code running in Rust where a TSX app's runs in QuickJS.
+
 ## Running: two threads per app
 
 Each running app (an `NshAppView` on iOS, an `NshView` on Android, the window of a packaged app) is one **engine** with
-its own QuickJS VM and its own **engine thread**. There are no global singletons, so several apps can run side by side
+its own **engine thread**, and, for TSX, its own QuickJS VM. There are no global singletons, so several apps can run side by side
 in one host app.
 
 ### The engine thread
 
 Everything about your app's logic happens here:
 
-- **QuickJS** runs your code: components, event handlers, timers, effects.
+- **Your code** runs here: components, event handlers, timers, effects. Rust components run natively; TSX runs in
+  **QuickJS**.
 - **The reactive graph** (signals, computed values, effects, owners, context) is native. Its nodes are QuickJS objects
   of native classes, so the garbage collector sees the references through them, but tracking dependencies and
   scheduling updates is Rust (it follows the algorithm of Solid 1.9).
@@ -87,9 +93,12 @@ the system's gestures.
 In the counter example, a tap costs about 0.12 ms in a release build on a Mac, JS and commit together, and produces a
 handful of mount items (see [Testing](./testing-and-trace.md)).
 
+In a Rust app the handler is a Rust closure (`count.set(count.get() + 1)`), and the same graph, commit and batch
+follow, with no interpreter on the way.
+
 Three properties follow from this design:
 
-- **One JS turn is one commit.** However many signals a handler sets, the views change once, together.
+- **One turn is one commit.** However many signals a handler sets, the views change once, together.
 - **Components run once.** Only bindings re-run; there is no re-render of a component and no virtual DOM diff. The
   diffing that remains is the core's, over frames and styles, in Rust.
 - **Only changes travel.** Unchanged styles and frames are not sent; new views get no default values.
@@ -144,7 +153,7 @@ the names show up in logs and docs:
 
 | Crate | What it is |
 |---|---|
-| `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the native animation graph (values, interpolation, timing / spring / decay); the Rust components' framework and theme; the runtime's Rust modules (`nsh/image`, ...). |
+| `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the native animation graph (values, interpolation, timing / spring / decay); the Rust components' framework and theme; the runtime's Rust modules (`nsh/android`, ...). |
 | `nsh-base` | `nsh/base`, the unstyled base components (NSH's `gpui-base`): navigation, safe areas, dialogs, the keyboard and the status bar; Rust apps use it as `nsh_base`. |
 | `nsh-js` | The QuickJS host and NSH's runtime: the reactive graph, the renderer, every native module, the global APIs, hot module replacement, limits; and the TypeScript declarations of all of it. |
 | `nsh-engine` | The engine thread: drives `nsh-js` and `nsh-core` and hands one batch per frame to the platform. |

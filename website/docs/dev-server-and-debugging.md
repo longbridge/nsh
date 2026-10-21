@@ -1,21 +1,29 @@
 ---
 title: Dev Server and Debugging
-description: Run apps with nsh run and nsh dev, connect simulators, emulators and devices, and use hot module replacement, logs, the error overlay and source-mapped stacks.
+description: Run Rust and TSX apps with nsh run and nsh dev, connect simulators, emulators and devices, and use rebuilds, hot module replacement, logs, the error overlay and source-mapped stacks.
 order: 60
 group: tools
 ---
 
 # Dev Server and Debugging
 
-During development, NSH builds your app on every save and pushes it to every connected host, which updates in place.
-Two commands do this:
+During development, NSH builds your app on every save. A Rust app (`nsh.json` names its `"root"`) is built into its
+own runner, which `nsh run` starts; a change to its crate builds it again and restarts the app. A TSX app is pushed to
+every connected host, which updates in place. Two commands do this:
 
-- `nsh run` starts the dev server **and** launches a development host: a Mac Catalyst or AppKit window, a GTK window on
-  Linux, a Win32 window on Windows, an iOS simulator or an Android device or emulator.
-- `nsh dev --server-only` starts the dev server, for hosts you start yourself: your own app with the development SDK, a device
-  on the network, or several hosts at once.
+- `nsh run` builds the app **and** launches it: a Mac Catalyst or AppKit window, a GTK window on Linux, a Win32 window
+  on Windows, an iOS simulator, an Android device or emulator, or a browser page. For TSX it also starts the dev
+  server, which the development host connects to.
+- `nsh dev --server-only` starts the dev server for TSX, for hosts you start yourself: your own app with the
+  development SDK, a device on the network, or several hosts at once.
 
 ```sh
+# A Rust app, from its directory
+nsh run                             # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
+nsh run --target ios                # iOS simulator
+nsh run --target android            # Android device or emulator
+
+# A TSX app
 nsh run App.tsx                     # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
 nsh run App.tsx --target macos      # AppKit window (macOS)
 nsh run App.tsx --target ios        # iOS simulator
@@ -29,11 +37,12 @@ nsh dev App.tsx --server-only       # server only
 
 | Flag | Description |
 |---|---|
-| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | Where to run. Default `macos` on macOS (AppKit), `linux` on Linux, `windows` on Windows. |
+| `--target <catalyst \| ios \| android \| macos \| linux \| windows \| gpui \| web>` | Where to run. Default `macos` on macOS (AppKit), `linux` on Linux, `windows` on Windows. A Rust app runs on all of them but `gpui`, which embeds its root in a GPUI app ([GPUI](./gpui.md)). |
 | `--device <name or UDID>` | The iOS simulator to use. Default: a booted one, else the newest iPhone (booted for you). |
 | `--port <port>` | Dev server port. Default 8790; the next free port is used if it is taken. |
-| `--release` | Serve release builds (minified, no debug info, no hot updates). |
-| `--trace` | Log the time of every commit on the host. |
+| `--release` | Serve release builds of TSX (minified, no debug info, no hot updates). |
+| `--trace` | Log the time of every commit on the host (TSX apps). |
+| `--script <steps>` | Steps to take once the window shows (`wait 800; shot a.png; tap 100 200; quit`), on the desktops, for checking a change without touching the screen. |
 
 What each target does:
 
@@ -56,7 +65,10 @@ What each target does:
 When `nsh run` ends, however it ends, it stops the host it started: it quits the Catalyst app or closes the macOS, Linux or Windows host, terminates the
 development host in the simulator, or force-stops it on the device.
 
-The hosts are generic: they run any NSH app the server sends, so there is nothing to build per app.
+For a Rust app each target runs the app's own runner, built with its crate: the desktops a debug build in place, with
+its output in the terminal; iOS and Android a package of it, installed. For TSX the hosts are generic: they run any
+NSH app the server sends, so there is nothing to build per app (an app with a crate of its own gets hosts built with
+it).
 
 ## `nsh dev`
 
@@ -91,9 +103,16 @@ installs the app's host.
 > A device on the LAN needs to reach your computer on the dev server's port: same network, no firewall in between.
 > Assets (images, fonts) are served over plain HTTP from the same port.
 
+## Rust edits
+
+Rust is compiled: a change to an app's crate, or to a crate it depends on by path, builds the app again, and `nsh run`
+restarts it with the new code. The app's state starts afresh; keep what must survive a restart in
+[storage](../modules/nsh-storage.md). A build error is printed in the terminal, and the next save that compiles runs
+again. In an app with Rust and TSX, TSX edits stay hot updates (below) and Rust edits restart the app.
+
 ## Hot module replacement
 
-Development builds keep one module per source file. When you save, NSH rebuilds, compares the modules with the last
+TSX development builds keep one module per source file. When you save, NSH rebuilds, compares the modules with the last
 good build and sends a **patch** with only the modules that changed. The host applies it in place in well under a
 millisecond; from saving a file to seeing the change takes roughly 120 ms.
 
@@ -121,7 +140,7 @@ What happens to your app:
 
 The host **reloads the whole app** instead of patching when:
 
-- the change imports an NSH module the running app did not import yet (for example the first `import … from "nsh/list"`);
+- the change imports an NSH module the running app did not import yet (for example the first `import … from "nsh/animated"`);
 - the app's `capabilities` in `nsh.json` changed;
 - the host is not running the build the patch is based on (it just connected, or a previous load failed);
 - a patch cannot be applied.
@@ -136,8 +155,11 @@ Anything loaded from a dev server, `--release` or not, skips the runtime's harde
 
 ## Logs
 
-`console.log`, `console.info`, `console.debug`, `console.warn` and `console.error` go to the native log with target
-`js`. While a host is connected, its log lines are forwarded to the terminal running `nsh run` / `nsh dev`: your
+A Rust app logs with the `log` crate (`log::info!`, `log::warn!`, `log::error!`): `nsh run` shows the lines in its
+terminal, with the app's output, on the desktops and in the iOS simulator.
+
+In TSX, `console.log`, `console.info`, `console.debug`, `console.warn` and `console.error` go to the native log with
+target `js`. While a host is connected, its log lines are forwarded to the terminal running `nsh run` / `nsh dev`: your
 `console.log` lines as they are (prefixed with the device's name when several devices are connected), warnings and
 errors after the device's name:
 
@@ -230,8 +252,8 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
   signals and navigators on purpose. Restart with Ctrl-C and `nsh run`, or change the state's initializer.
 - **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md);
   refusals are logged with the key to add.
-- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which
-  prints every native view operation.
+- **Something is slow**: reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which prints every
+  native view operation, or run a TSX app with `--trace`.
 - **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date; see
   [Project structure](./project-structure.md).
 

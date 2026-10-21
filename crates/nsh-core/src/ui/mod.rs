@@ -55,6 +55,7 @@ mod once;
 pub mod palette;
 mod prop;
 pub mod reactive;
+pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
 mod scrollable;
@@ -92,6 +93,10 @@ pub use nsh_macros::{
     native_module,
 };
 
+// Kept for apps written before `nsh_base` presented dialogs and
+// navigation, as TSX's `nsh/base` does.
+#[allow(deprecated)]
+pub use self::host::{modal, screen, stack};
 pub(crate) use self::{
     animated::LiveNode,
     back::BackListener,
@@ -137,7 +142,7 @@ pub use self::{
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, Modal, NativeView,
         Orientation, Painter, Screen, Scroll, Stack, Video, WebView, canvas, input,
-        input_accessory_view, modal, native, screen, scroll, stack, video, web_view, web_view_html,
+        input_accessory_view, native, scroll, video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
     module::{
@@ -151,6 +156,7 @@ pub use self::{
         batch, cleanup, computed, create_root, effect, provide_context, signal, signal_with,
         stored, untracked, use_context,
     },
+    renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     scrollable::Scrollable,
@@ -303,6 +309,8 @@ pub mod prelude {
         Radians,
         Registry,
         Rems,
+        Rendered,
+        Renderer,
         ResizeMode,
         ResponderEvent,
         ReturnKeyType,
@@ -354,7 +362,6 @@ pub mod prelude {
         input,
         input_accessory_view,
         methods,
-        modal,
         module,
         native,
         native_module,
@@ -367,10 +374,8 @@ pub mod prelude {
         rems,
         rgb,
         rgba,
-        screen,
         scroll,
         size,
-        stack,
         text,
         transparent_black,
         transparent_white,
@@ -398,6 +403,10 @@ pub mod prelude {
         batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context,
         resource, resource_with_value, signal, signal_with, stored, untracked, use_context,
     };
+    // Kept for apps written before `nsh_base` presented dialogs and
+    // navigation (`nsh_base::{dialog, nav_stack, nav_page}`).
+    #[allow(deprecated)]
+    pub use super::{modal, screen, stack};
 }
 
 /// What the macros' code and nsh's generated workspace name.

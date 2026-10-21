@@ -10,19 +10,47 @@ demo: guide-device
 
 The environment an app runs in changes while it runs: the window resizes (rotation, split view, a Mac window), the user switches to dark mode or a larger text size, the keyboard comes and goes. NSH exposes each of these as a **reactive accessor**: call it like a signal, and whatever read it (a style, a text, a computed value) updates when it changes. There are no listeners to add or remove.
 
-| Accessor | Module | Value |
-|---|---|---|
-| `windowSize()` | `nsh/device` | `{ width, height }` of the surface, in points. |
-| `colorScheme()` | `nsh/device` | `"light"` or `"dark"`: the system's, or the app's own (`setColorScheme`). |
-| `fontScale()` | `nsh/device` | The user's preferred text size relative to the default (1 is the default). |
-| `safeArea()` | `nsh/base` | Insets of the surface not covered by system UI: `{ top, right, bottom, left }`. |
-| `safeAreaInsets()` | `nsh/base` | The insets where the calling component renders (a page, a dialog). |
-| `keyboardFrame()` | `nsh/base` | `{ height, duration }` of the software keyboard. |
-| `locale()` | `nsh/device` | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
-| `I18nManager.isRTL` | `nsh/device` | Whether the app lays out right to left. |
-| `reduceMotion()`, `screenReaderEnabled()` | `nsh/accessibility` | See [Accessibility](./accessibility.md). |
+In Rust the accessors are functions of `nsh_core::ui::prelude`; in TSX they come from the modules listed.
 
-```tsx
+| Rust | TSX | Value |
+|---|---|---|
+| `window()` | `windowSize()` (`nsh/device`) | The surface's width and height, in points. |
+| `dark()` | `colorScheme()` (`nsh/device`) | Dark or light: the system's, or the app's own (`set_color_scheme`, `setColorScheme`). |
+| `font_scale()` | `fontScale()` (`nsh/device`) | The user's preferred text size relative to the default (1 is the default). |
+| `safe_area()` | `safeArea()` (`nsh/base`) | Insets of the surface not covered by system UI: top, right, bottom, left. |
+| `cx.insets()` | `safeAreaInsets()` (`nsh/base`) | The insets where the calling component renders (a page, a dialog). |
+| `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh/base`) | The software keyboard's height and animation duration. |
+| `locale()` | `locale()` (`nsh/device`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
+| `rtl()` | `I18nManager.isRTL` (`nsh/device`) | Whether the app lays out right to left. |
+| `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh/accessibility`) | See [Accessibility](./accessibility.md). |
+
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    view()
+        .flex_1()
+        .pt(move || safe_area().top + px(16.0))
+        .px(px(16.0))
+        // A light and a dark value: the color follows the appearance natively.
+        .bg(AdaptiveColor::rgb(0xffffff, 0x0d1117))
+        .child(
+            text(move || {
+                let size = window();
+                format!(
+                    "{} × {} pt, text at {:.2}×",
+                    size.width.0.round(),
+                    size.height.0.round(),
+                    font_scale()
+                )
+            })
+            .text_color(AdaptiveColor::rgb(0x1f2328, 0xe6edf3)),
+        )
+}
+```
+
+```tsx tabs
 import { mount, Text, View } from "nsh";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
 import { safeArea } from "nsh/base";
@@ -42,12 +70,28 @@ mount(App);
 
 ## Window size and responsive layout
 
-`windowSize()` is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when NSH is embedded. Use it to change the layout, not only sizes:
+`window()` (TSX: `windowSize()`) is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when NSH is embedded. Use it to change the layout, not only sizes:
 
-```tsx
-import { View } from "nsh";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+fn gallery() -> impl IntoElement {
+    let columns = || {
+        let width = window().width.0;
+        if width >= 700.0 { 4.0 } else if width >= 500.0 { 3.0 } else { 2.0 }
+    };
+    let side = move || px((window().width.0 - 32.0 - (columns() - 1.0) * 8.0) / columns());
+    view().flex_row().flex_wrap().gap_2().child(each(
+        photos,
+        |p| p.id,
+        move |p, _| image(move || p.with(|p| p.url.clone())).w(side).aspect_ratio(1.0),
+    ))
+}
+```
+
+```tsx tabs
+import { Image, View } from "nsh";
 import { windowSize } from "nsh/device";
-import { Image } from "nsh/image";
 
 function Gallery() {
   const columns = () => (windowSize().width >= 700 ? 4 : windowSize().width >= 500 ? 3 : 2);
@@ -61,21 +105,42 @@ function Gallery() {
 }
 ```
 
-Often flexbox, percentages and `aspectRatio` do the job without reading the size at all; see [Layout](./layout.md). With Tailwind, the breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`, `max-*:`, `min-[…]:`) and `portrait:` / `landscape:` follow the window too: `class="grid grid-cols-2 md:grid-cols-4"`.
+Often flexbox, percentages and `aspect_ratio` (`aspectRatio`) do the job without reading the size at all; see [Layout](./layout.md). Rust's `style_when(|| window().width.0 >= 640.0, |s| s.flex_row())` switches styles with the width; in TSX with Tailwind, the breakpoint variants (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`, `max-*:`, `min-[…]:`) and `portrait:` / `landscape:` follow the window too: `class="grid grid-cols-2 md:grid-cols-4"`.
 
 ## Dark mode
 
-`colorScheme()` follows the system appearance unless the app sets its own. The simplest way to support dark mode is the `dark:` Tailwind variant, which applies when `colorScheme()` is `"dark"`:
+The appearance follows the system unless the app sets its own. In Rust, the simplest way to support dark mode is a color with a light and a dark value, `AdaptiveColor::rgb(light, dark)`: it switches natively when the appearance does, with nothing to run. In TSX it is the `dark:` Tailwind variant, which applies when `colorScheme()` is `"dark"`:
 
-```tsx
+```rust tabs
+view()
+    .flex_1()
+    .p_4()
+    .bg(AdaptiveColor::rgb(0xffffff, 0x18181b))
+    .child(
+        text("Follows the system appearance")
+            .text_color(AdaptiveColor::rgb(0x18181b, 0xf4f4f5)),
+    )
+```
+
+```tsx tabs
 <View class="flex-1 bg-white dark:bg-zinc-900 p-4">
   <Text class="text-zinc-900 dark:text-zinc-100">Follows the system appearance</Text>
 </View>
 ```
 
-With inline styles, read `colorScheme()` in the style; for more than a few colors, derive a palette once:
+For anything else, read `dark()` (TSX: `colorScheme()`) in a closure or a computed value; in TSX, for more than a few colors, derive a palette once:
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+// `dark()` is reactive: the closure runs again when the appearance changes.
+view()
+    .flex_1()
+    .bg(move || if dark() { rgb(0x0d1117) } else { rgb(0xf6f8fa) })
+    .child(text("Hello"))
+```
+
+```tsx tabs
 import { computed, Text, View } from "nsh";
 import { colorScheme } from "nsh/device";
 
@@ -90,19 +155,37 @@ const palette = computed(() =>
 </View>
 ```
 
-Rust components from your app's own crate take their colors from the theme, which has light and dark values (`nsh.json` `"theme"`, see [Building with Rust](./rust.md)), so they switch with the system as well. To match the status bar to your background, give your pages and dialogs a [`statusBar`](../modules/nsh-base.md#status-bar), or the app one in `nsh.json`.
+Rust components also take their colors from the theme, which has light and dark values (`nsh.json` `"theme"`, see [Building with Rust](./rust.md)), so they switch with the system as well. To match the status bar to your background, give your pages and dialogs a [`statusBar`](../modules/nsh-base.md#status-bar), or the app one in `nsh.json`.
 
 ### An app with its own appearance
 
-An app that is always dark (or always light) says so in `nsh.json`, and `colorScheme()`, `dark:` classes, the theme, the status bar's default style and alerts follow it from the first frame (packaged apps also launch in it):
+An app that is always dark (or always light) says so in `nsh.json`, and `dark()` and `colorScheme()`, adaptive colors, `dark:` classes, the theme, the status bar's default style and alerts follow it from the first frame (packaged apps also launch in it):
 
 ```json
 { "appearance": "dark" }
 ```
 
-`setColorScheme` from `nsh/device` changes it at run time, for an in-app appearance setting; `"system"` follows the system again:
+`set_color_scheme(Appearance::Dark)` (TSX: `setColorScheme` from `nsh/device`) changes it at run time, for an in-app appearance setting; `Appearance::System` (`"system"`) follows the system again:
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+view()
+    .on_press(move || {
+        set_color_scheme(if dark() { Appearance::Light } else { Appearance::Dark })
+    })
+    .role(AccessibilityRole::Button)
+    .rounded_lg()
+    .px_4()
+    .py_2()
+    .bg(AdaptiveColor::rgb(0xe5e5e5, 0x262626))
+    .child(
+        text(|| if dark() { "Light" } else { "Dark" })
+            .text_color(AdaptiveColor::rgb(0x171717, 0xfafafa)),
+    )
+```
+
+```tsx tabs
 import { Text, View } from "nsh";
 import { colorScheme, setColorScheme } from "nsh/device";
 
@@ -116,26 +199,47 @@ import { colorScheme, setColorScheme } from "nsh/device";
 
 ## Text size
 
-`fontScale()` is the user's text size setting (Dynamic Type on iOS, font size on Android) relative to the default. Text and inputs follow it by themselves: `fontSize: 16` renders larger when the user asked for larger text. Per element you can opt out or cap it:
+`font_scale()` (TSX: `fontScale()`) is the user's text size setting (Dynamic Type on iOS, font size on Android) relative to the default. Text and inputs follow it by themselves: `fontSize: 16` renders larger when the user asked for larger text. Per element you can opt out or cap it:
 
-| Prop (on `<Text>` and `<Input>`) | Default | Description |
-|---|---|---|
-| `allowFontScaling` | `true` | Follow the system text size. |
-| `maxFontSizeMultiplier` | `0` (none) | The largest scale applied to this text. |
+| Rust (on `text` and `input`) | TSX (on `<Text>` and `<Input>`) | Default | Description |
+|---|---|---|---|
+| `.allow_font_scaling(..)` | `allowFontScaling` | `true` | Follow the system text size. |
+| `.max_font_size_multiplier(..)` | `maxFontSizeMultiplier` | `0` (none) | The largest scale applied to this text. |
 
-```tsx
+```rust tabs
+text("Today")
+    .text_size(px(34.0))
+    .font_weight(FontWeight::BOLD)
+    .max_font_size_multiplier(1.4)
+```
+
+```tsx tabs
 <Text style={{ fontSize: 34, fontWeight: "700" }} maxFontSizeMultiplier={1.4}>Today</Text>
 ```
 
-Read `fontScale()` to adapt layout that does not follow text automatically, such as switching a row to a column when the text gets large: `flexDirection: fontScale() > 1.3 ? "column" : "row"`.
+Read `font_scale()` to adapt layout that does not follow text automatically, such as switching a row to a column when the text gets large: `.style_when(|| font_scale() > 1.3, |s| s.flex_col())` in Rust, `flexDirection: fontScale() > 1.3 ? "column" : "row"` in TSX.
 
-The text size scales text: every `<Text>` and `<Input>` that allows font scaling, and the platform's alerts and toasts. Lengths keep their size: spacing, widths and heights, corner radii, borders and images, in points or in classes (`p-4`, `rounded-lg`, `w-[2rem]`). Boxes sized by their content grow with their text.
+The text size scales text: every text and input that allows font scaling, and the platform's alerts and toasts. Lengths keep their size: spacing, widths and heights, corner radii, borders and images, in points or in classes (`p-4`, `rounded-lg`, `w-[2rem]`). Boxes sized by their content grow with their text.
 
 ## Language and region
 
-`locale()` is the user's locale, as a BCP 47 tag. `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
+`locale()` is the user's locale, as a BCP 47 tag (`locale().as_str()` in Rust). In TSX, `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+fn greeting() -> &'static str {
+    match locale().as_str().split('-').next() {
+        Some("de") => "Willkommen",
+        Some("zh") => "欢迎",
+        _ => "Welcome",
+    }
+}
+
+text(greeting)
+```
+
+```tsx tabs
 import { Text } from "nsh";
 import { locale } from "nsh/device";
 
@@ -152,11 +256,35 @@ An app shown inside a native app follows that app's own settings when it sets th
 
 Notches, the home indicator, the status bar, Android's navigation bar and the Mac Catalyst title bar cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets.
 
-- `safeArea()` gives the surface's insets.
-- `safeAreaInsets()` gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
-- `SafeAreaView` from `nsh/base` is a view padded by those insets (all edges by default, or `edges={["top", "bottom"]}`), on top of its own padding.
+- `safe_area()` (TSX: `safeArea()`) gives the surface's insets.
+- A component's `cx.insets()` (TSX: `safeAreaInsets()`) gives the insets **where the component renders**: inside a navigation [page](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [dialog](../elements/dialog.md) they are the dialog's. Prefer it in components that may be shown in several places.
+- `safe_area_view()` from `nsh_base` (TSX: `SafeAreaView` from `nsh/base`) is a view padded by those insets (all edges by default, or `.edges(vec![Edge::Top, Edge::Bottom])`, `edges={["top", "bottom"]}`), on top of its own padding.
 
-```tsx
+```rust tabs
+use nsh_base::{Edge, safe_area_view};
+use nsh_core::ui::prelude::*;
+
+fn screen() -> impl IntoElement {
+    safe_area_view()
+        .edges(vec![Edge::Top, Edge::Left, Edge::Right])
+        .flex_1()
+        .bg(white())
+        .child(content())
+        .child(bottom_bar())
+}
+
+// A component, for its `Scope`: the insets where it renders.
+#[component]
+fn BottomBar(cx: Scope<NoEvent>) -> impl IntoElement {
+    // `cx.insets()`: the insets where the component renders.
+    view()
+        .flex_row()
+        .pt(px(8.0))
+        .pb(move || cx.insets().bottom + px(8.0))
+}
+```
+
+```tsx tabs
 import { View } from "nsh";
 import { SafeAreaView, safeAreaInsets } from "nsh/base";
 
@@ -179,7 +307,16 @@ On Android, a view embedded below a toolbar gets only the parts of the system ba
 
 ## The platform
 
-`Platform` from `nsh/device` describes where the app runs. It is not reactive: these do not change while the app runs.
+`os()`, `os_version()`, `idiom()` and `is_desktop()` in Rust, and `Platform` from `nsh/device` in TSX, describe where the app runs. They are not reactive: these do not change while the app runs.
+
+| Rust | TSX | Description |
+|---|---|---|
+| `os()` | `Platform.OS` | `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web` (`os().name()` is TSX's string). Mac Catalyst is iOS. |
+| `os_version()` | `Platform.Version` | Major and minor; on Android the API level and 0. |
+| `idiom()` | `Platform.isPad`, `isTV`, `isMacCatalyst`, `constants.interfaceIdiom` | `Idiom::Phone`, `Pad`, `Mac`, `Tv` or `Desktop`. |
+| `is_desktop()` | `Platform.isDesktop` | macOS, Windows or Linux, or a desktop browser. |
+
+TSX's `Platform` in full:
 
 | Member | Description |
 |---|---|
@@ -192,7 +329,13 @@ On Android, a view embedded below a toolbar gets only the parts of the system ba
 | `Platform.constants` | `{ osVersion, interfaceIdiom }`, the idiom being `"phone"`, `"pad"`, `"mac"`, `"tv"` or `"desktop"`. |
 | `Platform.select(spec)` | The value for this platform; see [Platform-specific code](./platform-specific.md#platformselect). |
 
-```tsx
+```rust tabs
+use nsh_core::ui::{Os, prelude::*};
+
+let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().0 >= 30);
+```
+
+```tsx tabs
 import { Platform } from "nsh/device";
 
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
@@ -222,7 +365,7 @@ live.
 
 ## Pixel density
 
-`PixelRatio` from `nsh/device` converts between points and device pixels.
+`pixel_ratio()` and `round_to_nearest_pixel(points)` in Rust, and `PixelRatio` from `nsh/device` in TSX, convert between points and device pixels.
 
 | Method | Description |
 |---|---|
@@ -233,7 +376,13 @@ live.
 
 A hairline, one device pixel tall:
 
-```tsx
+```rust tabs
+view()
+    .h(move || px(1.0 / pixel_ratio()))
+    .bg(rgb(0xd0d7de))
+```
+
+```tsx tabs
 import { View } from "nsh";
 import { PixelRatio } from "nsh/device";
 
@@ -241,11 +390,11 @@ const hairline = 1 / PixelRatio.get();
 <View style={{ height: hairline, backgroundColor: "#d0d7de" }} />
 ```
 
-`PixelRatio` is not reactive. A window can move to a screen with another density (a Mac with an external display), so read it in components that also read `windowSize()`, which changes in that case.
+In Rust, `pixel_ratio()` is reactive, so a hairline follows a window moved to a screen with another density. TSX's `PixelRatio` is not: read it in components that also read `windowSize()`, which changes in that case.
 
 ## Right to left
 
-When the device language is written right to left (Arabic, Hebrew, Persian, ...), NSH lays the app out right to left: rows run from the right, `left` and `right` style properties swap, text aligns to the right, and native widgets mirror. `I18nManager` from `nsh/device` controls it:
+When the device language is written right to left (Arabic, Hebrew, Persian, ...), NSH lays the app out right to left: rows run from the right, `left` and `right` style properties swap, text aligns to the right, and native widgets mirror. `rtl()`, `allow_rtl(allow)` and `force_rtl(force)` in Rust, and `I18nManager` from `nsh/device` in TSX, control it:
 
 | Member | Description |
 |---|---|
@@ -256,7 +405,7 @@ When the device language is written right to left (Arabic, Hebrew, Persian, ...)
 
 Changes apply at once, without restarting the app; the demo on this page toggles `forceRTL`.
 
-Write layouts that work both ways with the logical properties: `marginStart` / `marginEnd`, `paddingStart` / `paddingEnd`, `start` / `end`, `borderTopStartRadius` and so on, which mean left and right in left-to-right layouts and the reverse right to left. `left` and `right` themselves also swap. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for a subtree, for example to keep a phone number or a media player's controls left to right. The `rtl:` and `ltr:` Tailwind variants apply per direction.
+Write layouts that work both ways with the logical properties: in Rust `ms` / `me` and `ps` / `pe` (Tailwind's names), in TSX `marginStart` / `marginEnd`, `paddingStart` / `paddingEnd`, `start` / `end`, `borderTopStartRadius` and so on, which mean left and right in left-to-right layouts and the reverse right to left. `left` and `right` themselves also swap. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for a subtree, for example to keep a phone number or a media player's controls left to right. The `rtl:` and `ltr:` Tailwind variants apply per direction.
 
 Horizontal scroll views and lists start at the right end in right-to-left layouts. On Android, the host app must declare `android:supportsRtl="true"` in its manifest for native widgets to mirror.
 

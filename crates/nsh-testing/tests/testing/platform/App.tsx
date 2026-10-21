@@ -1,6 +1,6 @@
 // What a platform does besides drawing, as headless runs play it: going
-// back, dialogs, the clipboard, native animations, a dialog; and a request
-// only a real platform answers.
+// back, dialogs, the clipboard, native animations, a dialog, and images
+// that never load.
 import { mount, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
@@ -22,6 +22,7 @@ function Home() {
   const answer = signal("none");
   const pasted = signal("");
   const moved = signal("still");
+  const measured = signal("unmeasured");
   const sheet = signal(false);
   const shown = signal(0);
   const x = createAnimatedValue(0);
@@ -62,7 +63,16 @@ function Home() {
         <Press label="Copy" onPress={() => Clipboard.setString("copied text")} />
         <Press label="Paste" onPress={async () => pasted.set(await Clipboard.getString())} />
         <Press label="Move" onPress={() => Animated.timing(x, { toValue: 100, duration: 300 }).start(() => moved.set("done"))} />
-        <Press label="Measure" onPress={() => Image.getSize("https://example.com/a.png")} />
+        <Press
+          label="Measure"
+          onPress={() =>
+            Image.getSize("https://example.com/a.png").then(
+              () => measured.set("measured"),
+              () => measured.set("not loaded"),
+            )
+          }
+        />
+        <Text>{`Size: ${measured()}`}</Text>
         <Press label="Sheet" onPress={() => sheet.set(true)} />
         <Dialog open={sheet()} onOpenChange={(open) => sheet.set(open)} onOpen={() => shown.set(shown() + 1)}>
           <Text>In the sheet</Text>

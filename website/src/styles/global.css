@@ -68,19 +68,21 @@
   --finish-accent-bg: linear-gradient(180deg, #dbf893 0%, #b3dd4e 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 45%), 0 3px 12px rgb(200 242 109 / 22%);
 
-  /* Code: Shiki emits the macos-classic-light colours (src/light.theme.json);
-     the rules below map them onto these, so every snippet shares one palette. */
+  /* Code: Shiki emits the allsum-light colours (src/light.theme.json, the
+     palette of TextView's built-in highlighting); the rules below map them
+     onto these, so every snippet shares one palette. */
   --code-bg: #0c0d0f;
   --code-fg: #d6d9dd;
-  --code-keyword: #7ea8ff;
-  --code-string: #45d49a;
-  --code-comment: #6b7078;
-  --code-fn: #c8f26d;
-  --code-type: #8fd3e8;
-  --code-constant: #ffb547;
-  --code-number: var(--code-constant);
-  --code-property: #8fd3e8;
-  --code-variable: var(--code-keyword);
+  --code-keyword: #c4a7ff;
+  --code-string: #9fd68a;
+  --code-comment: #7d7a72;
+  --code-fn: #82b8ff;
+  --code-type: #6fd3d8;
+  --code-number: #f5b27a;
+  --code-constant: var(--code-number);
+  --code-property: #f0c674;
+  --code-variable: var(--code-property);
+  --code-deletion: #f87171;
   --code-link: var(--doc-link);
 
   --grid-line: rgb(255 255 255 / 4%);
@@ -197,13 +199,14 @@ html.light {
 
   --code-bg: #f0f0eb;
   --code-fg: #24262a;
-  --code-keyword: #3d63d1;
-  --code-string: #0f8a55;
-  --code-comment: #8c9097;
-  --code-fn: #4a6a0a;
-  --code-type: #0d6b84;
-  --code-constant: #b26a00;
-  --code-property: #0d6b84;
+  --code-keyword: #8250df;
+  --code-string: #116329;
+  --code-comment: #6e7781;
+  --code-fn: #0550ae;
+  --code-type: #0a7285;
+  --code-number: #953800;
+  --code-property: #7d4e00;
+  --code-deletion: #cf222e;
 
   --grid-line: rgb(21 22 26 / 5%);
   --scrollbar-thumb: rgb(21 22 26 / 18%);
@@ -323,18 +326,14 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
 
 .astro-code { background: var(--code-bg) !important; color: var(--code-fg) !important; }
 .astro-code span { color: var(--code-fg) !important; background-color: transparent !important; }
-.astro-code span[style*="color:#0433ff" i] { color: var(--code-keyword) !important; }
-.astro-code span[style*="color:#0000a2" i] { color: var(--code-fn) !important; }
-.astro-code span[style*="color:#571ab7" i] { color: var(--code-type) !important; }
-.astro-code span[style*="color:#036a07" i] { color: var(--code-string) !important; }
-.astro-code span[style*="color:#9a9a9a" i] { color: var(--code-comment) !important; }
-.astro-code span[style*="color:#c5060b" i],
-.astro-code span[style*="color:#3b96a6" i],
-.astro-code span[style*="color:#d21f07" i] { color: var(--code-constant) !important; }
-.astro-code span[style*="color:#8090e5" i] { color: var(--code-property) !important; }
-.astro-code span[style*="color:#318495" i] { color: var(--code-variable) !important; }
-.astro-code span[style*="color:#119605" i] { color: var(--code-number) !important; }
-.astro-code span[style*="color:#005cc5" i] { color: var(--code-link) !important; }
+.astro-code span[style*="color:#8250df" i] { color: var(--code-keyword) !important; }
+.astro-code span[style*="color:#116329" i] { color: var(--code-string) !important; }
+.astro-code span[style*="color:#6e7781" i] { color: var(--code-comment) !important; }
+.astro-code span[style*="color:#953800" i] { color: var(--code-number) !important; }
+.astro-code span[style*="color:#0550ae" i] { color: var(--code-fn) !important; }
+.astro-code span[style*="color:#7d4e00" i] { color: var(--code-property) !important; }
+.astro-code span[style*="color:#0a7285" i] { color: var(--code-type) !important; }
+.astro-code span[style*="color:#cf222e" i] { color: var(--code-deletion) !important; }
 
 /* ====================================================================
    Top bar
@@ -772,7 +771,7 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   /* The opening paragraph is the page's standfirst. */
   .doc-body > p:first-child { color: var(--muted-foreground); font-size: 1.05rem; line-height: 1.7; }
 
-  p, ul, ol, pre, table, blockquote, .callout, details, figure { margin-block: 1rem; }
+  p, ul, ol, pre, table, blockquote, .callout, details, figure, .code-tabs { margin-block: 1rem; }
   .doc-body > :first-child { margin-top: 0; }
   .doc-body > :last-child { margin-bottom: 0; }
 
@@ -917,6 +916,65 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   .doc-code-copy:hover, .doc-code-copy[data-copied] { color: var(--foreground); }
   .doc-code-copy[data-copied] { color: var(--success); }
   .doc-code-copy svg { width: 0.85rem; height: 0.85rem; }
+
+  /* Code tabs (remark-code-tabs.js): the same card as a code block, its
+     header row a tab per language instead of one label. The selected tab is
+     the text colour over a 2px accent bar; the copy button stays in the row. */
+  .code-tabs {
+    position: relative;
+    margin-block: 1rem;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--finish-card-bg);
+    background-color: var(--card);
+    box-shadow: inset 0 1px 0 var(--highlight), var(--code-shadow);
+  }
+  .code-tabs__list {
+    display: flex;
+    gap: 0.25rem;
+    height: 2.25rem;
+    padding: 0 2.6rem 0 0.4rem;
+    border-bottom: 1px solid var(--divider);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .code-tabs__tab {
+    position: relative;
+    padding: 0 0.5rem;
+    color: var(--muted-foreground);
+    font: 600 0.7rem/1 var(--font-mono);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 140ms ease;
+  }
+  .code-tabs__tab:hover { color: var(--foreground); }
+  .code-tabs__tab[aria-selected="true"] { color: var(--foreground); }
+  .code-tabs__tab[aria-selected="true"]::after {
+    position: absolute;
+    right: 0.5rem;
+    bottom: -1px;
+    left: 0.5rem;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--citrus);
+    content: "";
+  }
+  .code-tabs__tab:focus-visible { outline-offset: -2px; border-radius: 6px; }
+  .code-tabs__panel:focus-visible { outline-offset: -2px; }
+  .code-tabs__panel[hidden] { display: none; }
+  .code-tabs pre {
+    position: static;
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none;
+  }
+  .code-tabs pre::before { display: none; }
+  .code-tabs:hover .doc-code-copy, .code-tabs:focus-within .doc-code-copy { opacity: 1; }
 
   /* Tables: a clean card, a faintly tinted header with small muted labels,
      hairlines between rows. */

@@ -33,7 +33,8 @@ export type IconName =
   | "search"
   | "star"
   | "bell"
-  | "spark";
+  | "spark"
+  | "sidebar";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -218,6 +219,10 @@ const glyphs: Record<IconName, Draw> = {
   },
   spark: (c) => {
     line(c, [10, 3, 11.5, 8.5, 17, 10, 11.5, 11.5, 10, 17, 8.5, 11.5, 3, 10, 8.5, 8.5, 10, 3]);
+  },
+  sidebar: (c) => {
+    rect(c, 3, 4, 14, 12, 3);
+    line(c, [8, 4, 8, 16]);
   },
 };
 

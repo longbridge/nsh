@@ -1,23 +1,42 @@
 ---
 title: 测试
-description: 用 TypeScript 编写测试并用 nsh test 无界面运行：像用户一样打开应用、点击、输入、滚动和等待，模拟网络和存储；读懂 --trace 打印的原生视图操作和耗时；以及用于 UI 测试的 testID。
+description: 无界面测试应用：用 Rust 配合 cargo test 和 nsh_testing，或用 TypeScript 配合 nsh test：像用户一样打开应用、点击、输入、滚动和等待，模拟网络和存储；读懂 --trace 打印的原生视图操作和耗时；以及用于 UI 测试的 testID。
 order: 61
 group: tools
 ---
 
 # 测试
 
-`nsh test` 以 **无界面（headless）** 方式运行应用：使用真实的运行时（与设备上相同的 QuickJS VM、响应式图、渲染器、
-组件、布局和列表虚拟化），但不需要模拟器、设备或窗口。只要 CLI 能运行的地方它都能运行，包括 Linux CI 机器。它做两件事：
+NSH 以 **无界面（headless）** 方式运行应用：使用真实的引擎（与设备上相同的响应式图、渲染器、组件、布局和列表虚拟化，
+TSX 还有 QuickJS），以 60 Hz 提供显示帧，但不需要模拟器、设备或窗口。只要 Cargo 或 CLI 能运行的地方它都能运行，包括
+Linux CI 机器。它做两件事：
 
-- 运行用 TypeScript 编写的测试：每个测试打开应用，像用户一样操作（点击、输入、滚动），并检查屏幕上的内容；
+- 运行测试：每个测试打开应用，像用户一样操作（点击、输入、滚动），并检查屏幕上的内容。Rust 应用的测试用 Rust 编写，由
+  `cargo test` 配合 `nsh-testing` crate 运行；用 TypeScript 编写的测试由 `nsh test` 运行，TSX 应用和 Rust 应用都适用；
 - 加上 `--trace` 时，打印运行时发送给原生视图的每一个操作并附带耗时：首帧、一次点击或一帧滚动的开销。
 
-## 用 nsh test 编写测试
+## 编写测试
 
-测试文件是放在代码旁边的 `*.test.tsx` 或 `*.test.ts` 文件，它导入 `nsh/test`：
+同一个测试，分别用 Rust 和 TypeScript 编写：它在存储中放一个空的待办列表打开应用，输入、点击，并检查屏幕显示的内容。
 
-```tsx
+```rust tabs
+// tests/app/main.rs
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, MemoryStorage};
+
+#[test]
+fn adds_a_todo() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.storage = Some(MemoryStorage::new([("todos".to_owned(), "[]".to_owned())]));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("id:new-todo", "Buy milk").unwrap();
+    app.press("text:Add").unwrap();
+    app.wait_for("text:Buy milk").unwrap();
+    assert!(app.screen().texts().contains(&"1 item left"));
+}
+```
+
+```tsx tabs
 // App.test.tsx
 import { expect, open, test } from "nsh/test";
 
@@ -29,6 +48,38 @@ test("adds a todo", async () => {
   expect(app.texts()).toContain("1 item left");
 });
 ```
+
+## 用 cargo test 编写 Rust 测试
+
+Rust 应用的测试是它的 crate 的集成测试，以 `nsh-engine` 和 `nsh-testing`（默认 feature，不含 QuickJS）作为 dev-dependencies：
+
+```toml
+[dev-dependencies]
+nsh-engine = "0.1"
+nsh-testing = "0.1"
+```
+
+```sh
+cargo test                    # crate 的所有测试
+cargo test adds_a_todo        # 名称包含 "adds_a_todo" 的测试
+```
+
+`EngineConfig::new(root)` 是一个手机尺寸（390×844 点）、其余都未设置的引擎；它的字段对应下文 `open` 的选项：`storage`
+（`MemoryStorage::new(entries)`）、`network`（`StubNetwork`，见下文）、`viewport`、`environment`（外观、区域设置、减少动态效果）、
+`clock`（`Clock::manual(time)`，见下文）。`nsh_testing::Headless::start(config)` 启动应用，并维护它所显示视图的模型。它的步骤就是
+下文 `nsh test` 的步骤，选择器相同，只是用 Rust 写：`press`、`long_press`、`clear`、`type_text`、`submit`、
+`scroll(selector, px(3000.0))`、`back`、`wait`、`wait_for`、`wait_for_gone`、`wait_until`、`run_for`、`fast_forward`、
+`set_system_time`、`set_viewport`、`set_clipboard` 和 `on_dialog`；`app.shows(text)` 和 `app.screen()`（`texts()`、
+`count(selector)`、`enabled(selector)`、`dialogs()`、`clipboard()`、`commands()`）读取屏幕上的内容。无法执行的步骤会返回一个错误，
+附带屏幕上的文字。
+
+`nsh_testing::tsx(entry, sets)`（feature `bundle`）以同样的方式打开应用的 TSX 入口，基于 NSH 的和 crate 的 UI 集合构建
+（[用 Rust 开发](./rust.md#测试)）。`examples/gallery-rs` 就这样测试它的 Rust 根组件，每个演示一个模块；`examples/rust-exports`
+从 Rust 测试它的 TSX 入口。
+
+## 用 nsh test 编写测试
+
+测试文件是放在代码旁边的 `*.test.tsx` 或 `*.test.ts` 文件，它导入 `nsh/test`，就像上面的 `App.test.tsx`：
 
 ```sh
 nsh test                      # 当前目录中应用的所有测试文件
@@ -110,9 +161,39 @@ describe("the cart", () => {
 ### 模拟网络
 
 `network` 按 `"<METHOD> <URL>"` 列出路由（只写 URL 表示 `GET`；`*` 匹配任意文字）。没有路由匹配的请求会失败，因此测试不会在
-未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数：
+未经允许时访问网络。路由是一个响应，或者一个接收请求、返回响应（或响应的 Promise）的函数；在 Rust 中，
+`StubNetwork::new(routes)` 接受同样的路由，每个是一个 `StubResponse` 或一个 `StubRoute::Handler`：
 
-```tsx
+```rust tabs
+use std::sync::Arc;
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, StubNetwork, StubResponse};
+
+#[test]
+fn adds_a_todo_on_the_server() {
+    let mut todos = StubResponse::default();
+    todos.status = 200;
+    todos.headers = vec![("content-type".to_owned(), "application/json".to_owned())];
+    todos.body = br#"[{ "id": 1, "title": "Walk" }]"#.to_vec();
+    let mut created = StubResponse::default();
+    created.status = 201;
+    let mut offline = StubResponse::default();
+    offline.error = Some("offline".to_owned());
+    let network = Arc::new(StubNetwork::new([
+        ("GET https://api.example.com/todos".to_owned(), todos),
+        ("POST https://api.example.com/todos".to_owned(), created),
+        ("GET https://api.example.com/sync".to_owned(), offline),
+    ]));
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.network = Some(network.clone());
+    let mut app = Headless::start(config).unwrap();
+    app.press("Add").unwrap();
+    let methods: Vec<String> = network.requests().iter().map(|r| r.method.clone()).collect();
+    assert_eq!(methods, ["GET", "POST"]);
+}
+```
+
+```tsx tabs
 const app = await open("./App.tsx", {
   network: {
     "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
@@ -139,15 +220,36 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 
 ### 控制时间
 
-在系统时钟上，应用的定时器和原生动画与在设备上耗时相同，等待它们的测试也一样慢。给 `open` 传 `clock` 后，应用改在手动
-时钟上运行，就像 Jest 的假定时器或 Playwright 的 `page.clock`：时间只随测试推进，并且立即推进：
+在系统时钟上，应用的定时器和原生动画与在设备上耗时相同，等待它们的测试也一样慢。使用手动时钟（Rust 中的
+`EngineConfig::clock`，TypeScript 中 `open` 的 `clock`）时，应用改在手动时钟上运行，就像 Jest 的假定时器或 Playwright 的
+`page.clock`：时间只随测试推进，并且立即推进：
 
-```tsx
+```rust tabs
+use std::time::{Duration, SystemTime};
+use nsh_engine::{Clock, EngineConfig, Root};
+use nsh_testing::Headless;
+
+#[test]
+fn autosaves() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    // 2026-01-01T09:00:00Z
+    config.clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_258_000));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("label:Note", "Milk").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap(); // 十秒后的自动保存
+    assert!(app.shows("Saved at 09:00:10"));
+}
+```
+
+```tsx tabs
 const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
 await app.type("label:Note", "Milk");
 await app.clock.runFor(10_000);            // 十秒后的自动保存
 expect(app.texts()).toContain("Saved at 09:00:10");
 ```
+
+响应带 `delay` 的 `StubNetwork` 用 `.with_clock(clock.clone())` 跟随手动时钟。下面是 `nsh test` 的步骤；`Headless` 都有对应的方法
+（`run_for`、`fast_forward`、`set_system_time`）。
 
 | 步骤 | 说明 |
 |---|---|
@@ -220,8 +322,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
-- **图片不会加载**：不会有 `onLoad` 或 `onError`。
-- **只有真实平台才能回答的请求会让步骤失败**：图片尺寸（`Image.getSize`、`Image.prefetch`）、剪贴板里的图片或文件。
+- **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
+- **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
 
 ### 断言
 
@@ -285,13 +387,25 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 这 1.2 s 让引擎的空闲垃圾回收在第一步之前运行，这样，如果应用丢掉了它仍在使用的对象，问题就会暴露出来：它的处理函数
 不再生效。
 
-示例中有可以参考的测试：TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、深色模式、手动时钟），带
-Rust crate 的应用见 `examples/rust-exports`，Rust 应用见 `examples/gallery-rs`。
+示例中有可以参考的测试：Rust 应用见 `examples/gallery-rs`（`cargo test`，每个演示一个模块，以及 `App.test.tsx`），带 Rust crate
+的应用见 `examples/rust-exports`，TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、
+深色模式、手动时钟）。
 
 ## 用 --trace 跟踪
 
-`--trace` 会打印测试所打开应用的每个挂载批次，标注它所属的步骤，以及每次提交的耗时。可以对测试文件使用，也可以对应用
-入口使用，并从标准输入给出步骤：
+`--trace` 会打印测试所打开应用的每个挂载批次，标注它所属的步骤，以及每次提交的耗时。在 Rust 中，测试也能打印同样的内容：
+`observe` 把每个批次连同它的步骤交给测试，`EngineConfig::trace` 通过 `log` crate 记录 `perf` 行（target `nsh::perf`；在测试中
+安装一个 logger，例如 `env_logger`）：
+
+```rust
+let mut config = EngineConfig::new(Root::of::<my_app::App>());
+config.trace = true;
+let mut app = Headless::start(config).unwrap();
+app.observe(|step, batch| nsh_testing::print_batch(&mut std::io::stdout(), step, batch));
+app.press("Add").unwrap();
+```
+
+`nsh test` 可以对测试文件使用 `--trace`，也可以对应用入口使用，并从标准输入给出步骤：
 
 ```sh
 nsh test App.test.tsx --trace
@@ -379,6 +493,10 @@ perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
 
 ### 滚动
 
+```rust
+app.scroll("id:photos", px(3000.0)).unwrap();
+```
+
 ```sh
 echo 'await app.scroll("id:photos", 3000)' | nsh test examples/gallery/Bench.tsx --trace
 ```
@@ -394,12 +512,12 @@ perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
 ```
 
 对于[列表](./lists.md)，这能展示虚拟化的实际效果：哪些帧绑定了新行、一行需要多少操作，以及没有露出新行的帧不产生任何
-内容。要得到有意义的耗时，请使用 release 构建的 CLI（在源码检出中为 `./target/release/nsh`）。
+内容。要得到有意义的耗时，请使用 release 构建（`cargo test --release`，或源码检出中的 `./target/release/nsh`）。
 
 ### 在 CI 中
 
-`nsh test` 只需要 CLI，因此可以在 Linux runner 上运行；只要有测试失败，它就以非零退出码退出：测试本身失败、应用无法构建
-或什么都没渲染、应用在某一步中抛出异常，都算失败。
+无界面测试不需要设备或显示器，因此可以在 Linux runner 上运行：Rust 应用的测试用 `cargo test`，`nsh test` 则只需要 CLI。只要有测试
+失败，两者都以非零退出码退出：测试本身失败、应用无法构建或什么都没渲染、应用在某一步中抛出异常，都算失败。
 
 ```yaml
 # .github/workflows/test.yml
@@ -408,7 +526,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: nsh test --junit test-results.xml
+      - run: cargo test                            # Rust 应用的测试
+      - run: nsh test --junit test-results.xml     # 它的 TypeScript 测试，或 TSX 应用的测试
 ```
 
 （在 runner 上安装 `nsh` CLI 的方式与本地安装相同；参见[安装](./installation.md)。）
@@ -424,10 +543,18 @@ jobs:
 
 ## 用于 UI 测试的 `testID`
 
-`nsh test` 检查的是运行时渲染出的内容，它的 `id:` 选择器按 `testID` 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
-驱动真实的原生 UI，请给视图设置 `testID`：
+无界面测试检查的是运行时渲染出的内容，它们的 `id:` 选择器按测试 id 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
+驱动真实的原生 UI，请给视图设置测试 id：Rust 中用 `.test_id(…)`，TSX 中用 `testID`：
 
-```tsx
+```rust tabs
+view()
+    .test_id("add-to-cart")
+    .p_3()
+    .on_press(add)
+    .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
+```
+
+```tsx tabs
 <View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
   <Text testID="cart-count">{`${count()} items`}</Text>
 </View>
@@ -438,7 +565,7 @@ jobs:
 | iOS | 视图的 `accessibilityIdentifier`（在 XCUITest 中为 `app.otherElements["add-to-cart"]`）。 |
 | Android | 无障碍节点的 view id 资源名（在 UI Automator 中为 `By.res("add-to-cart")`）。 |
 
-`testID` 是每个元素以及每个 Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
+在 Rust 中测试 id 是每个元素的方法；`testID` 是每个元素以及每个 Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
 `accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `--trace` 的输出中，它出现在视图的 `ViewProps` item 里，
 形如 `test_id: Some("add-to-cart")`。
 

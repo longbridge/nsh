@@ -1,15 +1,15 @@
 ---
 title: Introduction
-description: "What Native Shell is: native UI from TSX modules on iOS, Android, macOS, Windows and Linux, loaded by apps after they ship, signed and sandboxed."
+description: "What Native Shell is: native UI written in Rust or TSX on iOS, Android, macOS, Windows, Linux and the web; apps written in Rust, and TSX modules loaded by apps after they ship, signed and sandboxed."
 order: 1
 group: start
 ---
 
 # Introduction
 
-Native Shell (NSH for short) is designed for **AI-generated, dynamically delivered native UI**. A model writes a small module in TSX, and a native app loads it at run time and shows it with the platform's own UI, inside a sandbox the app controls. The same mechanism makes native apps extensible in general — plugins, features, whole screens delivered after release.
+Native Shell (NSH for short) runs native UI written in **Rust or TSX**, on one engine written in Rust, and shows it with each platform's own UI. Write a whole app in Rust, compiled to native code with no JavaScript VM; write TSX modules that a native app loads at run time, in a sandbox it controls; or combine both, with TSX screens on top of your Rust components. NSH is designed for **AI-generated, dynamically delivered native UI**: a model writes a small TSX module, and the app shows it natively. The same mechanism makes native apps extensible in general — plugins, features, whole screens delivered after release.
 
-NSH runs on phones and desktops alike: iOS (UIKit), Android (Android views), macOS (AppKit), Windows (Win32 windows drawn with Direct2D) and Linux (GTK 4). Each platform has a native backend of its own, and the same module runs on all of them ([Platforms](./platforms.md)).
+NSH runs on phones and desktops alike: iOS (UIKit), Android (Android views), macOS (AppKit), Windows (Win32 windows drawn with Direct2D) and Linux (GTK 4), in GPUI apps and on the web. Each platform has a native backend of its own, and the same app runs on all of them ([Platforms](./platforms.md)).
 
 > [!IMPORTANT]
 > NSH is the layer inside an app for UI that is generated, changed or added after it ships. On a phone or a desktop, the app stays a native app, built and released the way it always was.
@@ -35,7 +35,7 @@ NSH runs on phones and desktops alike: iOS (UIKit), Android (Android views), mac
 - **The host stays in control.** Each module runs in its own sandboxed VM, with memory, time and node limits, and reaches only what the host grants: network hosts, web pages, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Several modules can run side by side; there are no global singletons.
 - **It looks like the rest of the app.** Modules render with the platform's own UI, so text, input, accessibility and scrolling are the system's. The host can register its own native views — a map, a player, a design-system component — for modules to use ([Native components](./native-components.md)).
 
-**Third: standalone apps.** The same modules can also be a whole app. `nsh package` turns them into an installable iOS, Android, macOS, Windows or Linux app with the prebuilt runtime, which is also the quickest way to try NSH: the [getting started](./getting-started.md) guide does exactly that. It is a supported use, but not the one NSH is designed around.
+**Third: whole apps, in Rust or TSX.** `nsh package` turns an app into an installable iOS, Android, macOS, Windows, Linux or web app. An app written in Rust gets Rust's type system, the crates.io ecosystem and native performance for its own code, with no JavaScript VM on any platform ([Building with Rust](./rust.md)); a TSX app runs on the prebuilt runtime. The [getting started](./getting-started.md) guide creates one of each.
 
 ## Why Native Shell, next to GPUI Shell
 
@@ -48,11 +48,36 @@ NSH therefore renders modules with each platform's own UI: UIKit on [iOS](./embe
 
 The two are positioned differently. GPUI Shell is for extending GPUI desktop applications; Native Shell is for native apps on every platform, phones and desktops alike.
 
-## A module
+## An app
 
-A module is TypeScript and JSX:
+The same counter, in Rust and in TSX:
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+#[component]
+pub fn Counter() -> impl IntoElement {
+    let count = signal(0);
+    view()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .child(text(move || count.get().to_string()).text_5xl().font_weight(FontWeight::BOLD))
+        .child(
+            view()
+                .rounded_lg()
+                .bg(rgb(0x2563eb))
+                .px_5()
+                .py_3()
+                .active(|s| s.opacity(0.6))
+                .on_press(move || count.update(|n| *n += 1))
+                .child(text("Tap").text_lg().text_color(white())),
+        )
+}
+```
+
+```tsx tabs
 import { mount, signal, Text, View } from "nsh";
 
 function Counter() {
@@ -74,9 +99,9 @@ function Counter() {
 mount(Counter);
 ```
 
-`<View>` becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS and a GTK widget on Linux, `<Text>` a native text view, and the button's press feedback (`activeStyle`) runs on the main thread without a round trip to JavaScript. When you tap, `count.update` changes one signal, and only the text that reads `count()` is updated: the component function does not run again.
+A view (`view()`, `<View>`) becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS and a GTK widget on Linux, a text a native text view, and the button's press feedback (`.active(..)`, `activeStyle`) runs on the main thread. When you tap, `count.update` changes one signal, and only the text that reads it is updated: the component function does not run again. The Rust app is native code from start to end; in the TSX app, only the module's own code is JavaScript.
 
-The host app shows it with a few lines of native code ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app)). On iOS:
+A TSX module is also what a native app loads at run time. The host app shows it with a few lines of native code ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app)). On iOS:
 
 ```swift
 let app = NshAppView()                         // a UIView: place it anywhere
@@ -84,23 +109,24 @@ try app.grantCapabilities(#"{ "network": { "hosts": ["api.example.com"] } }"#)
 let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // verified, then run
 ```
 
-Only the module's code is JavaScript. Everything it calls into — the reactive graph, the renderer, layout, text and every module it imports — is native, written in Rust.
+Everything the module calls into — the reactive graph, the renderer, layout, text and every module it imports — is native, written in Rust.
 
-## How a module runs
+## How it runs
 
-A module (an "app" in the CLI's terms) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`. The toolchain is a single `nsh` binary:
+The toolchain is a single `nsh` binary. An app written in Rust is a crate: `nsh` builds the runner of each target with your crate linked in, and its root component runs on the engine directly. A TSX app (a module) is a set of `.tsx` / `.ts` files with an entry, usually `App.tsx`:
 
 1. **Build.** `nsh` bundles the module's files (with rolldown and Oxc) and compiles the JSX with its own compiler. Imports of `nsh` and `nsh/*` stay imports: the runtime serves them natively, so the bundle holds only your code. The bundle is compiled to QuickJS bytecode.
 2. **Run.** On the device, the engine thread runs the bytecode in [QuickJS](https://github.com/quickjs-ng/quickjs). Compiled JSX calls the native renderer directly; changes are collected during one JavaScript turn, laid out with [Taffy](https://github.com/DioxusLabs/taffy) (flexbox and CSS grid), and handed to the main thread as one batch of view operations per frame.
 3. **Render.** The main thread applies the batch to native views. Text is measured and laid out once on the engine thread (CoreText on Apple platforms, `StaticLayout` on Android, DirectWrite on Windows, Pango on Linux) and only drawn on the main thread.
 
-Because JavaScript only describes the UI and handles events, the work done in the interpreter is small. Parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
+A Rust app takes the same path from step 2 on, with its components running natively in place of QuickJS. In a TSX app, JavaScript only describes the UI and handles events, so the work done in the interpreter is small. Parsing styles, resolving Tailwind classes, diffing, layout and text all happen in Rust.
 
 > [!NOTE]
 > The main thread never waits for JavaScript. Questions the system asks synchronously (may this input accept another character, may the user swipe back, may this sheet close) are answered natively from props you set beforehand, such as `maxLength`, `popOnBack` or `closeOnSwipe`. Events reach your code afterwards.
 
 ## What you get
 
+- **Rust or TSX.** Apps written in Rust, with typed styles and compile-time checks and no JavaScript VM; TSX for screens and modules delivered at run time; or both, with TSX importing your Rust components, modules and classes ([Building with Rust](./rust.md)).
 - **Embedding.** `NshAppView` (Swift), `NshView` (Java/Kotlin) and the desktops' `AppView` (AppKit, GTK, Win32) put a module in a native app, as many as you like ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app), [Windows](./windows.md#embedding-in-a-win32-app)).
 - **Signed, revocable delivery.** Ed25519-signed packages, release keys certified by an offline root key, revocation lists ([Signed packages](./signed-packages.md)).
 - **A sandbox the host configures.** VM limits and capabilities granted per view, in the iOS and Android SDKs ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
@@ -135,7 +161,8 @@ The usual ways to put UI into an app after release are web views, server-driven 
 
 ## Next steps
 
-- [Installation](./installation.md) and [Getting started](./getting-started.md): get `nsh`, write a first module and run it on each platform.
+- [Installation](./installation.md) and [Getting started](./getting-started.md): get `nsh`, write a first app in Rust or TSX and run it on each platform.
+- [Building with Rust](./rust.md): apps written in Rust, and TSX on top of them.
 - [Platforms](./platforms.md): what runs where, and how to run, package and embed on iOS, Android, macOS, Windows and Linux.
 - [Signed packages](./signed-packages.md) and [Sandbox and capabilities](./sandbox-and-capabilities.md): deliver modules and decide what they may do.
-- [JSX and components](./jsx-and-components.md) and [Reactivity](./reactivity.md): the two ideas everything else builds on.
+- [JSX and components](./jsx-and-components.md) and [Reactivity](./reactivity.md): the two ideas everything else builds on, in Rust and TSX.

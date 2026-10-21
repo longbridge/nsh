@@ -87,8 +87,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
   `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
-- **`disabled`** on any element applies `disabled:` classes and removes its press listeners from what is mounted (no press,
-  no feedback).
+- **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
+  is mounted (no press, no feedback; a secondary click goes on to the nearest enabled listener around it).
 - **`onHoverIn` / `onHoverOut` / `onHoverMove`** (any element) tell JS, after the fact, that the mouse came over a view,
   left it, or moved over it with no button down. On the desktops they follow the same hover tracking as `hover:`
   classes: the views along the chain under the mouse (innermost first) whose classes read `HOVERED` or that listen to

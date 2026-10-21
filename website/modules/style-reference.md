@@ -6,7 +6,7 @@ order: 16
 
 # Style reference
 
-This page lists every key of the `style` prop. The keys and their types come from the generated declarations in `.nsh/types/nsh/types.d.ts`, so your editor checks them as you type. Layout is flexbox with a column default, numbers are points, and the CSS features are there too: grid, gradients, box shadows, filters, blend modes, outlines, transitions and keyframe animations.
+This page lists every key of the `style` prop, and the method of `Styled` that sets it in Rust. Rust components style elements with typed methods named after Tailwind's utilities (`.p_4()`, `.rounded(px(12.0))`, `.bg(color)`, from `nsh_core::ui::prelude`), which lower to the same keys; TSX passes `style` objects (and classes). The Rust column names the method; a value, a signal or a closure goes to most of them, and `.style_when(…)` / `.style_with(…)` make any of them conditional. The keys and their types come from the generated declarations in `.nsh/types/nsh/types.d.ts`, so your editor checks them as you type. Layout is flexbox with a column default, numbers are points, and the CSS features are there too: grid, gradients, box shadows, filters, blend modes, outlines, transitions and keyframe animations.
 
 For how to apply styles, combine them with classes and inherit text styles, see [Styling](../docs/styling.md). For the class syntax, see the [Tailwind reference](./tailwind-reference.md).
 
@@ -21,7 +21,26 @@ Each interface extends the one before it:
 | `TextStyle` | `ViewStyle` | `<Text>` and `<Input>` (and views, whose text styles pass to the text inside them) |
 | `ImageStyle` | `ViewStyle` | `<Image>` |
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+fn card() -> View {
+    view().p_4().rounded(px(12.0)).bg(white()).shadow([BoxShadow {
+        offset_y: px(4.0),
+        blur: px(12.0),
+        color: rgba(0x00000014).into(),
+        ..BoxShadow::default()
+    }])
+}
+
+fn title(label: &str) -> Text {
+    text(label.to_string()).text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(0x111111))
+}
+
+card().child(title("Hello"))
+```
+
+```tsx tabs
 import type { ViewStyle, TextStyle } from "nsh";
 import { Text, View } from "nsh";
 
@@ -39,9 +58,13 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 </View>;
 ```
 
-`style` also takes an array; entries merge left to right and falsy entries are skipped, so conditional styles need no spreading:
+`style` also takes an array; entries merge left to right and falsy entries are skipped, so conditional styles need no spreading. In Rust, `.style_when(condition, …)` adds styles while the condition holds:
 
-```tsx
+```rust tabs
+card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
+```
+
+```tsx tabs
 <View style={[card, selected() && { borderColor: "#2563eb", borderWidth: 2 }]} />
 ```
 
@@ -50,13 +73,13 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ## Value types
 
-| Type | Accepts |
-|---|---|
-| `number` | Points (density-independent). `1` is one point on iOS and one dp on Android. |
-| `DimensionValue` | `number` (points), `` `${number}%` `` (of the parent), or `"auto"`. |
-| `LengthValue` | `number` (points) or `` `${number}%` ``. No `"auto"`. |
-| `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). |
-| `AnimatedNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. |
+| Type | Accepts | Rust |
+|---|---|---|
+| `number` | Points (density-independent). `1` is one point on iOS and one dp on Android. | `Points`: `px(16.0)` |
+| `DimensionValue` | `number` (points), `` `${number}%` `` (of the parent), or `"auto"`. | `Length`: `px(…)`, `relative(0.5)`, `auto()` |
+| `LengthValue` | `number` (points) or `` `${number}%` ``. No `"auto"`. | `DefiniteLength`: `px(…)`, `relative(0.5)` |
+| `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). | `Hsla` / `AdaptiveColor`: `rgb(0x2563eb)`, `hsla(…)`, theme colors (`theme().primary()`) |
+| `AnimatedNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. | `AnimatedValue` / `AnimatedNode`, bound with `.bind_opacity(&v)`, `.bind_background(&v)`, `.bind_translate_x(&v)`, ... |
 
 Strings with CSS syntax (`boxShadow`, `backgroundImage`, `filter`, `gridTemplateColumns`, ...) take lengths in `px` and bare numbers (both points), `pt`, or `rem` (16 points).
 
@@ -66,58 +89,67 @@ Layout is computed in Rust (flexbox and CSS grid). The defaults differ from CSS'
 
 ### Display and position
 
-| Key | Type | Description |
-|---|---|---|
-| `display` | `"flex" \| "grid" \| "block" \| "none"` | The layout of the children. `"none"` removes the element from layout and hides it. `"block"` stacks children as CSS block layout does. Default `"flex"`. |
-| `position` | `"relative" \| "absolute"` | `"absolute"` takes the element out of the flow and places it by `top` / `right` / `bottom` / `left` relative to its parent. Default `"relative"`. |
-| `top` | `DimensionValue` | Offset from the parent's top edge (absolute) or from the element's own position (relative). |
-| `right` | `DimensionValue` | Offset from the right edge. In right-to-left layouts it means the end edge. |
-| `bottom` | `DimensionValue` | Offset from the bottom edge. |
-| `left` | `DimensionValue` | Offset from the left edge. In right-to-left layouts it means the start edge. |
-| `start` | `DimensionValue` | Left in left-to-right layouts, right in right-to-left ones. |
-| `end` | `DimensionValue` | Right in left-to-right layouts, left in right-to-left ones. |
-| `zIndex` | `number` | Order among siblings (stable for equal values); also the native stacking order. |
-| `direction` | `"inherit" \| "ltr" \| "rtl"` | Layout direction, inherited by default. Right to left, `left` and `right` properties mean start and end. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `display` | `"flex" \| "grid" \| "block" \| "none"` | `.flex()`, `.grid()`, `.hidden()` | The layout of the children. `"none"` removes the element from layout and hides it. `"block"` stacks children as CSS block layout does. Default `"flex"`. |
+| `position` | `"relative" \| "absolute"` | `.relative()`, `.absolute()` | `"absolute"` takes the element out of the flow and places it by `top` / `right` / `bottom` / `left` relative to its parent. Default `"relative"`. |
+| `top` | `DimensionValue` | `.top(…)`, `.inset(…)` | Offset from the parent's top edge (absolute) or from the element's own position (relative). |
+| `right` | `DimensionValue` | `.right(…)` | Offset from the right edge. In right-to-left layouts it means the end edge. |
+| `bottom` | `DimensionValue` | `.bottom(…)` | Offset from the bottom edge. |
+| `left` | `DimensionValue` | `.left(…)` | Offset from the left edge. In right-to-left layouts it means the start edge. |
+| `start` | `DimensionValue` | | Left in left-to-right layouts, right in right-to-left ones. |
+| `end` | `DimensionValue` | | Right in left-to-right layouts, left in right-to-left ones. |
+| `zIndex` | `number` | `.z_index(z)` | Order among siblings (stable for equal values); also the native stacking order. |
+| `direction` | `"inherit" \| "ltr" \| "rtl"` | | Layout direction, inherited by default. Right to left, `left` and `right` properties mean start and end. |
 
 ### Flexbox
 
-| Key | Type | Description |
-|---|---|---|
-| `flexDirection` | `"row" \| "column" \| "row-reverse" \| "column-reverse"` | The main axis. Default `"column"`. |
-| `flexWrap` | `"wrap" \| "nowrap" \| "wrap-reverse"` | Whether children wrap onto several lines. Default `"nowrap"`. |
-| `flex` | `number` | One number, not the CSS shorthand: a positive number sets `flexGrow` to it, `flexShrink: 1` and `flexBasis: 0`; `0` makes the element inflexible; a negative number shrinks it down to its minimum size. |
-| `flexGrow` | `number` | How much of the free space the element takes. Default `0`. |
-| `flexShrink` | `number` | How much the element shrinks when space runs out. Default `0`, not `1` as in CSS. |
-| `flexBasis` | `DimensionValue` | The main-axis size before free space is distributed. |
-| `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | Distribution of children along the main axis. Default `"normal"`: `"flex-start"` in flex containers; in grids, tracks sized `auto` stretch. |
-| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Alignment of children on the cross axis. Default `"stretch"`. |
-| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Overrides the parent's `alignItems` for this element. |
-| `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | Distribution of wrapped lines (and grid tracks) on the cross axis. Default `"flex-start"` in flex containers and `"normal"` in grids, where tracks sized `auto` stretch. `"start"` / `"end"` follow the writing direction. |
-| `gap` | `LengthValue` | Space between rows and columns of children. |
-| `rowGap` | `LengthValue` | Space between rows. |
-| `columnGap` | `LengthValue` | Space between columns. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `flexDirection` | `"row" \| "column" \| "row-reverse" \| "column-reverse"` | `.flex_row()`, `.flex_col()`, `.flex_row_reverse()`, `.flex_col_reverse()` | The main axis. Default `"column"`. |
+| `flexWrap` | `"wrap" \| "nowrap" \| "wrap-reverse"` | `.flex_wrap()` | Whether children wrap onto several lines. Default `"nowrap"`. |
+| `flex` | `number` | `.flex_1()`, `.flex_auto()`, `.flex_none()` | One number, not the CSS shorthand: a positive number sets `flexGrow` to it, `flexShrink: 1` and `flexBasis: 0`; `0` makes the element inflexible; a negative number shrinks it down to its minimum size. |
+| `flexGrow` | `number` | `.flex_grow(f)` | How much of the free space the element takes. Default `0`. |
+| `flexShrink` | `number` | `.flex_shrink(f)`, `.flex_shrink_0()` | How much the element shrinks when space runs out. Default `0`, not `1` as in CSS. |
+| `flexBasis` | `DimensionValue` | `.basis(…)` | The main-axis size before free space is distributed. |
+| `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | `.justify_start()`, `.justify_center()`, `.justify_end()`, `.justify_between()`, `.justify_around()`, `.justify_evenly()` | Distribution of children along the main axis. Default `"normal"`: `"flex-start"` in flex containers; in grids, tracks sized `auto` stretch. |
+| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | `.items_start()`, `.items_center()`, `.items_end()`, `.items_stretch()`, `.items_baseline()` | Alignment of children on the cross axis. Default `"stretch"`. |
+| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | `.self_start()`, `.self_center()`, `.self_end()`, `.self_stretch()` | Overrides the parent's `alignItems` for this element. |
+| `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | | Distribution of wrapped lines (and grid tracks) on the cross axis. Default `"flex-start"` in flex containers and `"normal"` in grids, where tracks sized `auto` stretch. `"start"` / `"end"` follow the writing direction. |
+| `gap` | `LengthValue` | `.gap(…)`, `.gap_4()` | Space between rows and columns of children. |
+| `rowGap` | `LengthValue` | `.gap_y(…)` | Space between rows. |
+| `columnGap` | `LengthValue` | `.gap_x(…)` | Space between columns. |
 
 ### Grid
 
 Set `display: "grid"` to lay out children in a CSS grid. Track lists use CSS syntax.
 
-| Key | Type | Description |
-|---|---|---|
-| `gridTemplateColumns` | `string` | Column tracks: `"repeat(3, 1fr)"`, `"200px 1fr"`, `minmax()`, `auto-fill` / `auto-fit`, line names (`"[a] 40px [b c] 1fr [d]"`). |
-| `gridTemplateRows` | `string` | Row tracks, same syntax. |
-| `gridAutoColumns` | `string` | Size of implicitly created columns. |
-| `gridAutoRows` | `string` | Size of implicitly created rows. |
-| `gridAutoFlow` | `"row" \| "column" \| "dense" \| "row dense" \| "column dense"` | How items without a placement fill the grid. |
-| `gridColumn` | `number \| string` | Column placement: `"1 / 3"`, `"span 2"`, a line number or a line name (`"content-start / content-end"`, `"2 col"`, `"span col"`). |
-| `gridColumnStart` | `number \| string` | Start column line. |
-| `gridColumnEnd` | `number \| string` | End column line. |
-| `gridRow` | `number \| string` | Row placement, same syntax as `gridColumn`. |
-| `gridRowStart` | `number \| string` | Start row line. |
-| `gridRowEnd` | `number \| string` | End row line. |
-| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | How grid items sit in their areas along the row. |
-| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Overrides `justifyItems` for this item. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `gridTemplateColumns` | `string` | `.grid_template_columns(…)`, `.grid_cols(n)` | Column tracks: `"repeat(3, 1fr)"`, `"200px 1fr"`, `minmax()`, `auto-fill` / `auto-fit`, line names (`"[a] 40px [b c] 1fr [d]"`). |
+| `gridTemplateRows` | `string` | `.grid_template_rows(…)`, `.grid_rows(n)` | Row tracks, same syntax. |
+| `gridAutoColumns` | `string` | | Size of implicitly created columns. |
+| `gridAutoRows` | `string` | | Size of implicitly created rows. |
+| `gridAutoFlow` | `"row" \| "column" \| "dense" \| "row dense" \| "column dense"` | `.grid_flow_col()`, `.grid_flow_dense()` | How items without a placement fill the grid. |
+| `gridColumn` | `number \| string` | `.col_span(n)`, `.col_span_full()` | Column placement: `"1 / 3"`, `"span 2"`, a line number or a line name (`"content-start / content-end"`, `"2 col"`, `"span col"`). |
+| `gridColumnStart` | `number \| string` | `.col_start(…)` | Start column line. |
+| `gridColumnEnd` | `number \| string` | `.col_end(…)` | End column line. |
+| `gridRow` | `number \| string` | `.row_span(n)`, `.row_span_full()` | Row placement, same syntax as `gridColumn`. |
+| `gridRowStart` | `number \| string` | `.row_start(…)` | Start row line. |
+| `gridRowEnd` | `number \| string` | `.row_end(…)` | End row line. |
+| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | How grid items sit in their areas along the row. |
+| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | | Overrides `justifyItems` for this item. |
 
-```tsx
+```rust tabs
+view()
+    .grid()
+    .grid_template_columns("repeat(3, 1fr)")
+    .gap_2()
+    .child(view().col_span(2).h(px(60.0)).bg(rgb(0xc7d2fe)))
+    .child(view().h(px(60.0)).bg(rgb(0xa5b4fc)))
+```
+
+```tsx tabs
 <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
   <View style={{ gridColumn: "span 2", height: 60, backgroundColor: "#c7d2fe" }} />
   <View style={{ height: 60, backgroundColor: "#a5b4fc" }} />
@@ -126,45 +158,45 @@ Set `display: "grid"` to lay out children in a CSS grid. Track lists use CSS syn
 
 ### Size
 
-| Key | Type | Description |
-|---|---|---|
-| `width` | `DimensionValue` | Width. |
-| `height` | `DimensionValue` | Height. |
-| `minWidth` | `LengthValue` | Minimum width. |
-| `minHeight` | `LengthValue` | Minimum height. |
-| `maxWidth` | `LengthValue` | Maximum width. |
-| `maxHeight` | `LengthValue` | Maximum height. |
-| `aspectRatio` | `number` | Width divided by height; the missing dimension is computed from the other one. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `width` | `DimensionValue` | `.w(…)`, `.w_full()`, `.size(…)` | Width. |
+| `height` | `DimensionValue` | `.h(…)`, `.h_full()` | Height. |
+| `minWidth` | `LengthValue` | `.min_w(…)` | Minimum width. |
+| `minHeight` | `LengthValue` | `.min_h(…)` | Minimum height. |
+| `maxWidth` | `LengthValue` | `.max_w(…)` | Maximum width. |
+| `maxHeight` | `LengthValue` | `.max_h(…)` | Maximum height. |
+| `aspectRatio` | `number` | `.aspect_ratio(r)`, `.aspect_square()` | Width divided by height; the missing dimension is computed from the other one. |
 
 ### Margin
 
 Margins accept `"auto"` (absorbs free space, as in flexbox) and negative values.
 
-| Key | Type | Description |
-|---|---|---|
-| `margin` | `DimensionValue` | All four sides. |
-| `marginHorizontal` | `DimensionValue` | Left and right. |
-| `marginVertical` | `DimensionValue` | Top and bottom. |
-| `marginTop` | `DimensionValue` | Top. |
-| `marginRight` | `DimensionValue` | Right. |
-| `marginBottom` | `DimensionValue` | Bottom. |
-| `marginLeft` | `DimensionValue` | Left. |
-| `marginStart` | `DimensionValue` | Left in left-to-right layouts, right in right-to-left ones. |
-| `marginEnd` | `DimensionValue` | The opposite of `marginStart`. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `margin` | `DimensionValue` | `.m(…)`, `.m_4()` | All four sides. |
+| `marginHorizontal` | `DimensionValue` | `.mx(…)` | Left and right. |
+| `marginVertical` | `DimensionValue` | `.my(…)` | Top and bottom. |
+| `marginTop` | `DimensionValue` | `.mt(…)` | Top. |
+| `marginRight` | `DimensionValue` | `.mr(…)` | Right. |
+| `marginBottom` | `DimensionValue` | `.mb(…)` | Bottom. |
+| `marginLeft` | `DimensionValue` | `.ml(…)` | Left. |
+| `marginStart` | `DimensionValue` | `.ms(…)` | Left in left-to-right layouts, right in right-to-left ones. |
+| `marginEnd` | `DimensionValue` | `.me(…)` | The opposite of `marginStart`. |
 
 ### Padding
 
-| Key | Type | Description |
-|---|---|---|
-| `padding` | `LengthValue` | All four sides. |
-| `paddingHorizontal` | `LengthValue` | Left and right. |
-| `paddingVertical` | `LengthValue` | Top and bottom. |
-| `paddingTop` | `LengthValue` | Top. |
-| `paddingRight` | `LengthValue` | Right. |
-| `paddingBottom` | `LengthValue` | Bottom. |
-| `paddingLeft` | `LengthValue` | Left. |
-| `paddingStart` | `LengthValue` | Left in left-to-right layouts, right in right-to-left ones. |
-| `paddingEnd` | `LengthValue` | The opposite of `paddingStart`. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `padding` | `LengthValue` | `.p(…)`, `.p_4()` | All four sides. |
+| `paddingHorizontal` | `LengthValue` | `.px(…)` | Left and right. |
+| `paddingVertical` | `LengthValue` | `.py(…)` | Top and bottom. |
+| `paddingTop` | `LengthValue` | `.pt(…)` | Top. |
+| `paddingRight` | `LengthValue` | `.pr(…)` | Right. |
+| `paddingBottom` | `LengthValue` | `.pb(…)` | Bottom. |
+| `paddingLeft` | `LengthValue` | `.pl(…)` | Left. |
+| `paddingStart` | `LengthValue` | `.ps(…)` | Left in left-to-right layouts, right in right-to-left ones. |
+| `paddingEnd` | `LengthValue` | `.pe(…)` | The opposite of `paddingStart`. |
 
 ## ViewStyle
 
@@ -172,75 +204,86 @@ Everything drawn by a view. All keys of `LayoutStyle` apply too.
 
 ### Background
 
-| Key | Type | Description |
-|---|---|---|
-| `backgroundColor` | `ColorValue \| AnimatedNode` | The fill color. Takes a native animated color. |
-| `backgroundImage` | `string` | CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas. |
-| `experimental_backgroundImage` | `string` | Alias of `backgroundImage`. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `backgroundColor` | `ColorValue \| AnimatedNode` | `.bg(color)`, `.bind_background(&node)` | The fill color. Takes a native animated color. |
+| `backgroundImage` | `string` | `.bg_linear(angle)`, `.bg_radial()`, `.bg_conic()` with `.gradient_from` / `_via` / `_to` | CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas. |
+| `experimental_backgroundImage` | `string` | | Alias of `backgroundImage`. |
 
-```tsx
+```rust tabs
+view().h(px(120.0)).rounded(px(16.0)).bg_linear(deg(135.0)).gradient_from(rgb(0x6366f1)).gradient_to(rgb(0xec4899))
+```
+
+```tsx tabs
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #6366f1, #ec4899)" }} />
 ```
 
 ### Borders
 
-| Key | Type | Description |
-|---|---|---|
-| `borderWidth` | `number` | Width of all four sides. |
-| `borderTopWidth` | `number` | Top side. |
-| `borderRightWidth` | `number` | Right side. |
-| `borderBottomWidth` | `number` | Bottom side. |
-| `borderLeftWidth` | `number` | Left side. |
-| `borderStartWidth` | `number` | Start side (left in left-to-right layouts). |
-| `borderEndWidth` | `number` | End side. |
-| `borderColor` | `ColorValue` | Color of all four sides. |
-| `borderTopColor` | `ColorValue` | Top side. |
-| `borderRightColor` | `ColorValue` | Right side. |
-| `borderBottomColor` | `ColorValue` | Bottom side. |
-| `borderLeftColor` | `ColorValue` | Left side. |
-| `borderStartColor` | `ColorValue` | Start side. |
-| `borderEndColor` | `ColorValue` | End side. |
-| `borderStyle` | `"solid" \| "dashed" \| "dotted"` | Line style. Default `"solid"`. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `borderWidth` | `number` | `.border(w)`, `.border_1()`, `.border_2()` | Width of all four sides. |
+| `borderTopWidth` | `number` | `.border_t(w)` | Top side. |
+| `borderRightWidth` | `number` | `.border_r(w)` | Right side. |
+| `borderBottomWidth` | `number` | `.border_b(w)` | Bottom side. |
+| `borderLeftWidth` | `number` | `.border_l(w)` | Left side. |
+| `borderStartWidth` | `number` | `.border_s(w)` | Start side (left in left-to-right layouts). |
+| `borderEndWidth` | `number` | `.border_e(w)` | End side. |
+| `borderColor` | `ColorValue` | `.border_color(c)` | Color of all four sides. |
+| `borderTopColor` | `ColorValue` | `.border_t_color(c)` | Top side. |
+| `borderRightColor` | `ColorValue` | `.border_r_color(c)` | Right side. |
+| `borderBottomColor` | `ColorValue` | `.border_b_color(c)` | Bottom side. |
+| `borderLeftColor` | `ColorValue` | `.border_l_color(c)` | Left side. |
+| `borderStartColor` | `ColorValue` | `.border_s_color(c)` | Start side. |
+| `borderEndColor` | `ColorValue` | `.border_e_color(c)` | End side. |
+| `borderStyle` | `"solid" \| "dashed" \| "dotted"` | `.border_solid()`, `.border_dashed()`, `.border_dotted()` | Line style. Default `"solid"`. |
 
 ### Corners
 
-| Key | Type | Description |
-|---|---|---|
-| `borderRadius` | `number` | Radius of all four corners. |
-| `borderTopLeftRadius` | `number` | Top-left corner. |
-| `borderTopRightRadius` | `number` | Top-right corner. |
-| `borderBottomRightRadius` | `number` | Bottom-right corner. |
-| `borderBottomLeftRadius` | `number` | Bottom-left corner. |
-| `borderTopStartRadius` | `number` | Top corner on the start side. |
-| `borderTopEndRadius` | `number` | Top corner on the end side. |
-| `borderBottomStartRadius` | `number` | Bottom corner on the start side. |
-| `borderBottomEndRadius` | `number` | Bottom corner on the end side. |
-| `borderCurve` | `"circular" \| "continuous"` | `"continuous"`: corners whose curvature eases into the edges, like iOS app icons. Where the box is too small the curve falls back to circular, so pills stay pills. Works on both platforms. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `borderRadius` | `number` | `.rounded(r)`, `.rounded_lg()` | Radius of all four corners. |
+| `borderTopLeftRadius` | `number` | `.rounded_tl(r)` | Top-left corner. |
+| `borderTopRightRadius` | `number` | `.rounded_tr(r)` | Top-right corner. |
+| `borderBottomRightRadius` | `number` | `.rounded_br(r)` | Bottom-right corner. |
+| `borderBottomLeftRadius` | `number` | `.rounded_bl(r)` | Bottom-left corner. |
+| `borderTopStartRadius` | `number` | `.rounded_ss(r)` | Top corner on the start side. |
+| `borderTopEndRadius` | `number` | `.rounded_se(r)` | Top corner on the end side. |
+| `borderBottomStartRadius` | `number` | `.rounded_es(r)` | Bottom corner on the start side. |
+| `borderBottomEndRadius` | `number` | `.rounded_ee(r)` | Bottom corner on the end side. |
+| `borderCurve` | `"circular" \| "continuous"` | `.border_curve(curve)` | `"continuous"`: corners whose curvature eases into the edges, like iOS app icons. Where the box is too small the curve falls back to circular, so pills stay pills. Works on both platforms. |
 
 ### Outline
 
 An outline is drawn outside the border and takes no space in layout.
 
-| Key | Type | Description |
-|---|---|---|
-| `outlineWidth` | `number` | Line width. |
-| `outlineColor` | `ColorValue` | Line color. |
-| `outlineStyle` | `"solid" \| "double" \| "dashed" \| "dotted" \| "none" \| "hidden"` | Line style. |
-| `outlineOffset` | `number` | Distance from the border edge; negative values move it inside. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `outlineWidth` | `number` | `.outline(w)` | Line width. |
+| `outlineColor` | `ColorValue` | `.outline_color(c)` | Line color. |
+| `outlineStyle` | `"solid" \| "double" \| "dashed" \| "dotted" \| "none" \| "hidden"` | `.outline_dashed()`, `.outline_dotted()`, `.outline_none()` | Line style. |
+| `outlineOffset` | `number` | `.outline_offset(o)` | Distance from the border edge; negative values move it inside. |
 
 ### Shadows
 
 Two ways to cast a shadow: the CSS `boxShadow` (several layers, spread, inset) or the four `shadow*` keys.
 
-| Key | Type | Description |
-|---|---|---|
-| `boxShadow` | `string` | CSS `box-shadow`: offsets, blur, spread and color, several layers separated by commas, `inset` for inner shadows. |
-| `shadowColor` | `ColorValue` | Shadow color. |
-| `shadowOffset` | `{ width: number; height: number }` | Offset. Default `{ width: 0, height: -3 }`. |
-| `shadowOpacity` | `number` | Opacity, 0 to 1. Default `0` (no shadow). |
-| `shadowRadius` | `number` | Blur radius. Default `3`. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `boxShadow` | `string` | `.shadow([BoxShadow { … }])`, `.shadow_md()` | CSS `box-shadow`: offsets, blur, spread and color, several layers separated by commas, `inset` for inner shadows. |
+| `shadowColor` | `ColorValue` | `.shadow_color(c)` | Shadow color. |
+| `shadowOffset` | `{ width: number; height: number }` | `.shadow_offset(point)` | Offset. Default `{ width: 0, height: -3 }`. |
+| `shadowOpacity` | `number` | `.shadow_opacity(o)` | Opacity, 0 to 1. Default `0` (no shadow). |
+| `shadowRadius` | `number` | `.shadow_radius(r)` | Blur radius. Default `3`. |
 
-```tsx
+```rust tabs
+view().p_4().rounded(px(12.0)).bg(white()).shadow([
+    BoxShadow { offset_y: px(1.0), blur: px(2.0), color: rgba(0x0000000f).into(), ..BoxShadow::default() },
+    BoxShadow { offset_y: px(8.0), blur: px(24.0), spread: px(-4.0), color: rgba(0x0000001f).into(), ..BoxShadow::default() },
+])
+```
+
+```tsx tabs
 <View style={{ padding: 16, borderRadius: 12, backgroundColor: "#fff",
   boxShadow: "0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -4px rgb(0 0 0 / 0.12)" }} />
 ```
@@ -250,31 +293,35 @@ Two ways to cast a shadow: the CSS `boxShadow` (several layers, spread, inset) o
 
 ### Opacity, visibility and overflow
 
-| Key | Type | Description |
-|---|---|---|
-| `opacity` | `number \| AnimatedNode` | 0 (invisible) to 1. Takes a native animated value. |
-| `visibility` | `"visible" \| "hidden" \| "collapse"` | Hidden views keep their space in layout (unlike `display: "none"`). |
-| `overflow` | `"visible" \| "hidden"` | `"hidden"` clips children to the view's bounds (and corners). |
-| `backfaceVisibility` | `"visible" \| "hidden"` | `"hidden"`: invisible while a 3D rotation turns it away. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `opacity` | `number \| AnimatedNode` | `.opacity(o)`, `.bind_opacity(&value)` | 0 (invisible) to 1. Takes a native animated value. |
+| `visibility` | `"visible" \| "hidden" \| "collapse"` | | Hidden views keep their space in layout (unlike `display: "none"`). |
+| `overflow` | `"visible" \| "hidden"` | `.overflow_hidden()` | `"hidden"` clips children to the view's bounds (and corners). |
+| `backfaceVisibility` | `"visible" \| "hidden"` | `.backface_hidden()`, `.backface_visible()` | `"hidden"`: invisible while a 3D rotation turns it away. |
 
 ### Transforms
 
-| Key | Type | Description |
-|---|---|---|
-| `transform` | `TransformStep[]` | A list of steps, applied right to left like CSS. |
-| `transformOrigin` | `string \| (number \| string)[]` | The point `transform` acts around: keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`). Default the center. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `transform` | `TransformStep[]` | `.translate_x(…)`, `.scale(…)`, `.rotate(…)`, ... (below) | A list of steps, applied right to left like CSS. |
+| `transformOrigin` | `string \| (number \| string)[]` | `.transform_origin(…)`, `.origin_top_left()`, ... | The point `transform` acts around: keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`). Default the center. |
 
 A `TransformStep` is an object with one key:
 
-| Step | Value | Native animated |
-|---|---|---|
-| `translateX`, `translateY` | `number` (points) | yes |
-| `scale`, `scaleX`, `scaleY` | `number` (factor) | yes |
-| `rotate`, `rotateZ`, `rotateX`, `rotateY` | `number` (degrees) or `string` (`"45deg"`, `"0.5rad"`) | yes |
-| `skewX`, `skewY` | `number` (degrees) or `string` | no |
-| `perspective` | `number` | no |
+| Step | Value | Rust | Native animated |
+|---|---|---|---|
+| `translateX`, `translateY` | `number` (points) | `.translate_x(…)`, `.translate_y(…)`; `.bind_translate_x(&v)` | yes |
+| `scale`, `scaleX`, `scaleY` | `number` (factor) | `.scale(f)`, `.scale_x(f)`, `.scale_y(f)`; `.bind_scale(&v)` | yes |
+| `rotate`, `rotateZ`, `rotateX`, `rotateY` | `number` (degrees) or `string` (`"45deg"`, `"0.5rad"`) | `.rotate(deg(…))`, `.rotate_x(…)`, `.rotate_y(…)`; `.bind_rotate(&v)` | yes |
+| `skewX`, `skewY` | `number` (degrees) or `string` | `.skew_x(…)`, `.skew_y(…)` | no |
+| `perspective` | `number` | `.perspective(d)` | no |
 
-```tsx
+```rust tabs
+view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
+```
+
+```tsx tabs
 <View style={{ transform: [{ perspective: 600 }, { rotateY: "20deg" }, { scale: 0.95 }] }} />
 ```
 
@@ -283,11 +330,11 @@ A `TransformStep` is an object with one key:
 
 ### Filters and blending
 
-| Key | Type | Description |
-|---|---|---|
-| `filter` | `string` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`. |
-| `backdropFilter` | `string` | CSS filters of what is behind the view, such as `"blur(10px)"` for frosted glass. |
-| `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | How the view blends with what is behind it. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `filter` | `string` | `.blur(r)`, `.brightness(…)`, `.contrast(…)`, `.grayscale(…)`, `.hue_rotate(…)`, `.invert(…)`, `.saturate(…)`, `.sepia(…)` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`. |
+| `backdropFilter` | `string` | `.backdrop_blur(r)`, `.backdrop_brightness(…)`, ... | CSS filters of what is behind the view, such as `"blur(10px)"` for frosted glass. |
+| `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | How the view blends with what is behind it. |
 
 > [!WARNING]
 > Platform limits:
@@ -299,14 +346,23 @@ A `TransformStep` is an object with one key:
 
 When a transitioned property changes (from a new style, a class or a variant such as `active:`), the platform animates it natively. No JS runs during the animation.
 
-| Key | Type | Description |
-|---|---|---|
-| `transitionProperty` | `string` | Comma-separated properties that animate: `"all"`, `"colors"` (`color`, `backgroundColor`, `borderColor`, ...), `"opacity"`, `"transform"`, `"boxShadow"`, `"borderRadius"`, `"borderWidth"`, or `"none"`. |
-| `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | Milliseconds as a number, or `"150ms"` / `"0.2s"`. |
-| `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | Delay before the transition starts. |
-| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | The easing curve. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `transitionProperty` | `string` | `.transition()`, `.transition_all()`, `.transition_colors()`, `.transition_opacity()`, `.transition_shadow()`, `.transition_transform()`, `.transition_none()` | Comma-separated properties that animate: `"all"`, `"colors"` (`color`, `backgroundColor`, `borderColor`, ...), `"opacity"`, `"transform"`, `"boxShadow"`, `"borderRadius"`, `"borderWidth"`, or `"none"`. |
+| `transitionDuration` | `number \| "${number}ms" \| "${number}s"` | `.duration(ms)` | Milliseconds as a number, or `"150ms"` / `"0.2s"`. |
+| `transitionDelay` | `number \| "${number}ms" \| "${number}s"` | `.delay(ms)` | Delay before the transition starts. |
+| `transitionTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.ease_linear()`, `.ease_in()`, `.ease_out()`, `.ease_in_out()`, `.ease_bezier(…)` | The easing curve. |
 
-```tsx
+```rust tabs
+view()
+    .on_press(move || open.update(|o| *o = !*o))
+    .h(move || px(if open.get() { 160.0 } else { 56.0 }))
+    .opacity(move || if open.get() { 1.0 } else { 0.8 })
+    .transition()
+    .duration(200.0)
+```
+
+```tsx tabs
 <View
   onPress={() => open.set(!open())}
   style={{ height: open() ? 160 : 56, opacity: open() ? 1 : 0.8,
@@ -318,21 +374,21 @@ When a transitioned property changes (from a new style, a class or a variant suc
 
 Built-in keyframe animations, run natively (Tailwind's `animate-*`).
 
-| Key | Type | Description |
-|---|---|---|
-| `animationName` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | The animation. |
-| `animationDuration` | `number \| "${number}ms" \| "${number}s"` | Length of one iteration. |
-| `animationDelay` | `number \| "${number}ms" \| "${number}s"` | Delay before the first iteration. |
-| `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | The easing curve. |
-| `animationIterationCount` | `number \| "infinite"` | How many times it runs. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `animationName` | `"none" \| "spin" \| "ping" \| "pulse" \| "bounce"` | `.animate_spin()`, `.animate_ping()`, `.animate_pulse()`, `.animate_bounce()`, `.animate_none()` | The animation. |
+| `animationDuration` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | Length of one iteration. |
+| `animationDelay` | `number \| "${number}ms" \| "${number}s"` | `.animation(KeyframeAnimation { … })` | Delay before the first iteration. |
+| `animationTimingFunction` | `"linear" \| "ease" \| "ease-in" \| "ease-out" \| "ease-in-out" \| "cubic-bezier(...)"` | `.animation(KeyframeAnimation { … })` | The easing curve. |
+| `animationIterationCount` | `number \| "infinite"` | `.animation(KeyframeAnimation { … })` | How many times it runs. |
 
 For animations driven by values, gestures or springs, use [nsh/animated](./nsh-animated.md) instead.
 
 ### Pointer
 
-| Key | Type | Description |
-|---|---|---|
-| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...` (every CSS cursor keyword, and `"none"`) | The pointer shape over the view, for pointers (iPad trackpads, Mac Catalyst, desktops). |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `cursor` | `"auto" \| "default" \| "pointer" \| "text" \| "grab" \| "grabbing" \| "not-allowed" \| ...` (every CSS cursor keyword, and `"none"`) | `.cursor(Cursor)`, `.cursor_pointer()` | The pointer shape over the view, for pointers (iPad trackpads, Mac Catalyst, desktops). |
 
 ## TextStyle
 
@@ -340,53 +396,53 @@ Text styles apply to `<Text>` and `<Input>`. They are also inherited, as in CSS:
 
 ### Font
 
-| Key | Type | Description |
-|---|---|---|
-| `color` | `ColorValue` | Text color. |
-| `fontSize` | `number` | Size in points. |
-| `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `"normal"` (400), `"bold"` (700) or 100–900. |
-| `fontFamily` | `string` | A system family, or the name an imported font evaluates to (`import Inter from "./Inter.ttf"`). See [Fonts](../docs/fonts.md). |
-| `fontStyle` | `"normal" \| "italic"` | Italic. |
-| `fontVariant` | `("small-caps" \| "oldstyle-nums" \| "lining-nums" \| "tabular-nums" \| "proportional-nums")[]` | OpenType number and letter forms. `tabular-nums` keeps digits the same width, useful for counters and timers. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `color` | `ColorValue` | `.text_color(c)` | Text color. |
+| `fontSize` | `number` | `.text_size(s)`, `.text_sm()`, `.text_lg()`, ... | Size in points. |
+| `fontWeight` | `"normal" \| "bold" \| number \| "${number}"` | `.font_weight(FontWeight::SEMIBOLD)` | `"normal"` (400), `"bold"` (700) or 100–900. |
+| `fontFamily` | `string` | `.font_family(name)` | A system family, or the name an imported font evaluates to (`import Inter from "./Inter.ttf"`). See [Fonts](../docs/fonts.md). |
+| `fontStyle` | `"normal" \| "italic"` | `.italic()` | Italic. |
+| `fontVariant` | `("small-caps" \| "oldstyle-nums" \| "lining-nums" \| "tabular-nums" \| "proportional-nums")[]` | `.small_caps()`, `.oldstyle_nums()`, `.lining_nums()`, `.tabular_nums()`, `.proportional_nums()` | OpenType number and letter forms. `tabular-nums` keeps digits the same width, useful for counters and timers. |
 
 ### Spacing and alignment
 
-| Key | Type | Description |
-|---|---|---|
-| `lineHeight` | `number` | Line height in points. |
-| `letterSpacing` | `number` | Extra space between characters, in points. |
-| `textAlign` | `"auto" \| "left" \| "center" \| "right" \| "justify"` | Horizontal alignment. |
-| `textAlignVertical` | `"auto" \| "top" \| "center" \| "bottom"` | Where text shorter than its box sits (a `<Text>` with a height). |
-| `writingDirection` | `"auto" \| "ltr" \| "rtl"` | Base direction of the text; `"auto"` takes it from the content. |
-| `textTransform` | `"none" \| "uppercase" \| "lowercase" \| "capitalize"` | Case transformation. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `lineHeight` | `number` | `.line_height(h)` | Line height in points. |
+| `letterSpacing` | `number` | `.letter_spacing(s)` | Extra space between characters, in points. |
+| `textAlign` | `"auto" \| "left" \| "center" \| "right" \| "justify"` | `.text_left()`, `.text_center()`, `.text_right()`, `.text_justify()` | Horizontal alignment. |
+| `textAlignVertical` | `"auto" \| "top" \| "center" \| "bottom"` | | Where text shorter than its box sits (a `<Text>` with a height). |
+| `writingDirection` | `"auto" \| "ltr" \| "rtl"` | `.writing_direction(d)` | Base direction of the text; `"auto"` takes it from the content. |
+| `textTransform` | `"none" \| "uppercase" \| "lowercase" \| "capitalize"` | `.uppercase()`, `.lowercase()`, `.capitalize()`, `.normal_case()` | Case transformation. |
 
 > [!TIP]
 > Tailwind's `leading-*` and `tracking-*` classes set line heights as multiples of the font size and letter spacing in `em`, so they scale with `text-*` sizes.
 
 ### Decoration
 
-| Key | Type | Description |
-|---|---|---|
-| `textDecorationLine` | `"none" \| "underline" \| "line-through" \| "underline line-through"` | Lines drawn with the text. |
-| `textDecorationColor` | `ColorValue` | Color of the lines (default the text color). |
-| `textDecorationStyle` | `"solid" \| "double" \| "dotted" \| "dashed" \| "wavy"` | Line style. |
-| `textDecorationThickness` | `number \| "auto" \| "from-font"` | Line thickness. |
-| `textUnderlineOffset` | `number \| "auto"` | Distance of the underline from the baseline. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `textDecorationLine` | `"none" \| "underline" \| "line-through" \| "underline line-through"` | `.underline()`, `.line_through()`, `.no_underline()` | Lines drawn with the text. |
+| `textDecorationColor` | `ColorValue` | `.text_decoration_color(c)` | Color of the lines (default the text color). |
+| `textDecorationStyle` | `"solid" \| "double" \| "dotted" \| "dashed" \| "wavy"` | `.text_decoration_solid()`, `_double()`, `_dotted()`, `_dashed()`, `_wavy()` | Line style. |
+| `textDecorationThickness` | `number \| "auto" \| "from-font"` | `.text_decoration_thickness(t)` | Line thickness. |
+| `textUnderlineOffset` | `number \| "auto"` | `.underline_offset(o)` | Distance of the underline from the baseline. |
 
 ### Placeholder and selection
 
-| Key | Type | Description |
-|---|---|---|
-| `placeholderColor` | `ColorValue` | The color of an `<Input>`'s placeholder (`placeholder:text-*`). |
-| `selectionColor` | `ColorValue` | An `<Input>`'s caret and selection, a selectable `<Text>`'s selection highlight and handles (`selection:text-*`); the platform's accent by default. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `placeholderColor` | `ColorValue` | `.placeholder_color(c)` of an input | The color of an `<Input>`'s placeholder (`placeholder:text-*`). |
+| `selectionColor` | `ColorValue` | `.selection_color(c)` of an input or a text | An `<Input>`'s caret and selection, a selectable `<Text>`'s selection highlight and handles (`selection:text-*`); the platform's accent by default. |
 
 ### Text shadow
 
-| Key | Type | Description |
-|---|---|---|
-| `textShadowColor` | `ColorValue` | Shadow color. |
-| `textShadowOffset` | `{ width: number; height: number }` | Shadow offset. |
-| `textShadowRadius` | `number` | Blur radius. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `textShadowColor` | `ColorValue` | `.text_shadow_color(c)` | Shadow color. |
+| `textShadowOffset` | `{ width: number; height: number }` | `.text_shadow_offset(point)` | Shadow offset. |
+| `textShadowRadius` | `number` | `.text_shadow_radius(r)` | Blur radius. |
 
 > [!NOTE]
 > iOS draws no gradients (`backgroundImage`) or inset box shadows on `<Text>`.
@@ -395,9 +451,9 @@ Text styles apply to `<Text>` and `<Input>`. They are also inherited, as in CSS:
 
 All keys of `ViewStyle`, plus:
 
-| Key | Type | Description |
-|---|---|---|
-| `tintColor` | `ColorValue` | Recolors a template image (every opaque pixel takes this color), for monochrome icons. |
+| Key | Type | Rust | Description |
+|---|---|---|---|
+| `tintColor` | `ColorValue` | `.tint_color(c)` of an image | Recolors a template image (every opaque pixel takes this color), for monochrome icons. |
 
 How an image fills its box is the `resizeMode` prop of `<Image>`, not a style; see [image](../elements/image.md).
 
@@ -405,14 +461,14 @@ How an image fills its box is the `resizeMode` prop of `<Image>`, not a style; s
 
 Some settings are props in NSH, not style keys. Their Tailwind classes exist, but an explicit prop wins over the class:
 
-| Setting | Prop | Class |
-|---|---|---|
-| Line limit | `numberOfLines` on `<Text>` | `line-clamp-*`, `truncate` |
-| Ellipsis position | `ellipsizeMode` on `<Text>` | `text-ellipsis`, `text-clip` |
-| Touch pass-through | `pointerEvents` | `pointer-events-none`, `pointer-events-auto` |
-| Image fit | `resizeMode` on `<Image>` | `object-cover`, `object-contain`, ... |
-| Selectable text | `selectable` on `<Text>` | `select-text`, `select-none` |
-| Material shadow (Android) | `android={{ elevation }}` | |
+| Setting | Prop | Rust | Class |
+|---|---|---|---|
+| Line limit | `numberOfLines` on `<Text>` | `.number_of_lines(n)` | `line-clamp-*`, `truncate` |
+| Ellipsis position | `ellipsizeMode` on `<Text>` | `.ellipsize_mode(mode)` | `text-ellipsis`, `text-clip` |
+| Touch pass-through | `pointerEvents` | `.pointer_events(…)` | `pointer-events-none`, `pointer-events-auto` |
+| Image fit | `resizeMode` on `<Image>` | `.resize_mode(mode)` | `object-cover`, `object-contain`, ... |
+| Selectable text | `selectable` on `<Text>` | `.selectable(true)` | `select-text`, `select-none` |
+| Material shadow (Android) | `android={{ elevation }}` | `.elevation(e)` | |
 
 ## Related
 

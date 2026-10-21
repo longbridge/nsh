@@ -1,16 +1,16 @@
 ---
-title: nsh/canvas
+title: Canvas
 description: Canvas, the 2D drawing context, Path2D and gradients, with the parts of HTML Canvas 2D that NSH supports.
-order: 5
+order: 2.3
 demo: mod-canvas
 ---
 
-# nsh/canvas
+# Canvas
 
-`nsh/canvas` draws with an HTML Canvas 2D–style context. Your `draw` function **records** the drawing; the platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution. Numbers and colors in a drawing may be [animated values](./nsh-animated.md): when they animate, the platform redraws on its own, without running `draw` again.
+`Canvas` draws with an HTML Canvas 2D–style context. Your `draw` function **records** the drawing; the platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution. Numbers and colors in a drawing may be [animated values](./nsh-animated.md): when they animate, the platform redraws on its own, without running `draw` again.
 
 ```ts
-import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh";
 ```
 
 See [Canvas](../docs/canvas.md) for the guide and [`<Canvas>`](../elements/canvas.md) for its props.
@@ -39,8 +39,7 @@ A view drawn with a 2D context. It takes every [view prop](../elements/view.md) 
 Give the canvas a size through its style (`width` / `height`, `flex: 1`, `aspectRatio`, ...). Coordinates are in points, the origin at the top left.
 
 ```tsx
-import { mount, signal, Text, View } from "nsh";
-import { Canvas } from "nsh/canvas";
+import { Canvas, mount, signal, Text, View } from "nsh";
 
 function App() {
   const values = signal([12, 30, 22, 48, 36, 60, 52, 75]);
@@ -73,7 +72,7 @@ Any argument typed `CanvasNumber` and any paint (`fillStyle`, `strokeStyle`) acc
 
 ```tsx
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
+import { Canvas } from "nsh";
 
 const progress = createAnimatedValue(0);
 

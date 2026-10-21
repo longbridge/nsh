@@ -4,7 +4,7 @@ description: "十一个 Node 风格的标准模块：固定版本的 LLRT 工具
 order: 14.5
 ---
 
-Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shell 兼容的 Node 风格接口，运行在应用的 VM 中，由 NSH 的原生运行时实现，能力检查在 Rust 中进行。`.nsh/types` 中的 TypeScript 声明与模块由同一份规格生成，类型所示即运行时所导出。
+Native Shell 为 TSX 提供十一个标准模块，按裸模块名导入（Rust 代码使用 Rust 自己的库：见[在 Rust 中](#在-rust-中)）：与 gpui-shell 兼容的 Node 风格接口，运行在应用的 VM 中，由 NSH 的原生运行时实现，能力检查在 Rust 中进行。`.nsh/types` 中的 TypeScript 声明与模块由同一份规格生成，类型所示即运行时所导出。
 
 | 模块 | 导出 |
 |---|---|
@@ -19,6 +19,24 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 | `process` | `run`、`spawn`、`exit`、`platform`、`arch`、`nextTick`、`ChildProcess`、默认导出；默认导出对象还有 `env` 和 `dataDir`，它也是全局 `process` |
 | `net` | `connect`、`Socket`、默认导出 |
 | `websocket` | `WebSocket.connect(url, options?)` 解析为 `WebSocketConnection`（`read`、`write`、`close`）、`WebSocketConnection`；原生宿主上另有全局 `WebSocket` 构造器 |
+
+## 在 Rust 中
+
+Rust 代码用 Rust 标准库和 crates.io 完成同样的工作，作为应用自己的原生代码运行：阻塞调用用 `blocking(…)` 在运行时的线程上执行，异步调用用 `background(…)`（`nsh_core::ui::prelude`），结果在任务中回到组件。`nsh.json` 的 `capabilities` 约束应用的 TSX 和 NSH 的服务（`fetch`、剪贴板）；应用自己的 Rust 代码以应用进程的权限运行。在浏览器应用中，Rust 代码用 `fetch` 访问网络，用 `nsh_core::storage::Storage` 保存数据。
+
+| 模块 | Rust |
+|---|---|
+| `buffer` | `Vec<u8>`、`&[u8]`、`base64` crate |
+| `crypto` | `sha2`、`hmac`、`rand`、`uuid` 等 crate |
+| `path` | `std::path` |
+| `url` | `url` crate |
+| `zlib` | `flate2`、`brotli`、`zstd` 等 crate |
+| `os` | `std::env::consts`、`os()` |
+| `console` | `log` crate |
+| `fs/promises` | 在 `blocking(…)` 中使用 `std::fs`；键值数据用 `Storage` |
+| `process` | 在 `blocking(…)` 中使用 `std::process::Command` |
+| `net` | 在 `blocking(…)` 中使用 `std::net::TcpStream`，或在 `background(…)` 中使用 `tokio::net` |
+| `websocket` | 在 `background(…)` 中使用 `tokio-tungstenite` 等 crate |
 
 ## 导入与类型
 
@@ -84,7 +102,33 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 命令须与 `process.execute` 完全一致：`git` 和 `/usr/bin/git` 是两项不同的授权。裸命令通过宿主 `PATH` 中的绝对目录解析；在 Windows 上，裸命令还会在其中匹配 `<name>.com` 和 `<name>.exe`。批处理文件（`.cmd`、`.bat`）通过 `cmd.exe` 运行：授权它的绝对路径（`C:\Windows\System32\cmd.exe`），并把 `/d`、`/c` 和脚本作为参数传入。子进程的环境是宿主的 `PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、`TEMP`、`TMP`、`TMPDIR`、`LANG` 和 `LC_*`，加上 `process.env` 授权的变量名（按名称精确匹配，仅在环境变量不区分大小写的 Windows 上忽略大小写）。子进程在应用的数据目录（不存在时创建）中运行，或在 `cwd` 中运行；`cwd` 须是 `fs.write` 根目录内已存在的目录，因为子进程可以在其运行目录中写入。嵌入应用可以进一步缩小授权。
 
-```ts
+```rust tabs
+use std::{
+    io::{BufRead, BufReader},
+    process::{Command, Stdio},
+};
+
+spawn(async move {
+    // `run`：命令退出后得到全部输出。
+    if let Ok(Ok(output)) = blocking(|| Command::new("git").args(["status", "--short"]).output()).await {
+        log::info!("{} {}", output.status, String::from_utf8_lossy(&output.stdout));
+    }
+    // `spawn` 配合 `lines: true`：逐行得到输出。
+    let _ = blocking(|| -> std::io::Result<()> {
+        let mut child = Command::new("git").args(["log", "--oneline"]).stdout(Stdio::piped()).spawn()?;
+        if let Some(stdout) = child.stdout.take() {
+            for line in BufReader::new(stdout).lines() {
+                log::info!("{}", line?);
+            }
+        }
+        log::info!("done {}", child.wait()?);
+        Ok(())
+    })
+    .await;
+});
+```
+
+```tsx tabs
 import process from "process";
 
 const { code, stdout } = await process.run("git", ["status", "--short"]);
@@ -138,7 +182,24 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 }
 ```
 
-```ts
+```rust tabs
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+spawn(async move {
+    let _ = background(async {
+        let (mut socket, _) = connect_async("wss://chat.example.com/socket").await?;
+        socket.send(Message::text("hello")).await?;
+        while let Some(message) = socket.next().await {
+            log::info!("{}", message?);
+        }
+        Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+    })
+    .await;
+});
+```
+
+```tsx tabs
 const socket = new WebSocket("wss://chat.example.com/socket");
 socket.addEventListener("open", () => socket.send("hello"));
 socket.addEventListener("message", (event) => console.log(event.data));
@@ -156,7 +217,28 @@ TCP 使用 socket 授权：应用所连接的精确主机与端口。
 }
 ```
 
-```ts
+```rust tabs
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+};
+
+spawn(async move {
+    let reply = blocking(|| -> std::io::Result<String> {
+        let mut socket = TcpStream::connect(("tcp.example.com", 9000))?;
+        socket.write_all(b"hello\n")?;
+        let mut bytes = [0; 1024];
+        let n = socket.read(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes[..n]).into_owned())
+    })
+    .await;
+    if let Ok(Ok(reply)) = reply {
+        log::info!("{reply}");
+    }
+});
+```
+
+```tsx tabs
 import { connect } from "net";
 
 const socket = await connect("tcp.example.com", 9000);

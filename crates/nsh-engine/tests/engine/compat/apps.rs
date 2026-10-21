@@ -20,7 +20,10 @@
 //!   quiet);
 //! - `tap <selector>`: presses the first view on screen `id:<testID>`,
 //!   `label:<accessibility label>` or `text:<text>` names, or its nearest
-//!   pressable ancestor (as `nsh test`'s `press`);
+//!   pressable ancestor (as `nsh test`'s `press`); `span:<text>` presses
+//!   the innermost pressable span (a nested `<Text>` with `onPress`, a
+//!   link) where `<text>` starts in the first text that contains it, else
+//!   the text's nearest pressable ancestor;
 //! - `wait <ms>`: lets timers and animations run;
 //! - `frame <selector> <x> <y> <width> <height>`: the first view on screen
 //!   the selector names (itself, pressable or not) is laid out at that
@@ -118,7 +121,7 @@ use std::{
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
     ApproxTextEngine, ContextMenuEvent, EventKind, EventPayload, HoverEvent, MountBatch, MountItem,
-    NodeId, PayloadValue, Points, Size, TouchEvent, TouchPhase, TouchPoint,
+    NodeId, PayloadValue, Points, Size, TextLink, TouchEvent, TouchPhase, TouchPoint,
     geometry::{DevicePixels, point, px},
     keymap::Modifiers,
     platform::{Environment, Idiom, Os},
@@ -186,6 +189,8 @@ struct View {
     test_id: Option<Arc<str>>,
     label: Option<Arc<str>>,
     text: Option<String>,
+    /// Its text's pressable spans.
+    links: Vec<TextLink>,
     frame: Option<Rect>,
     /// What the platform got for it, as `prop` and `style` read it.
     mounted: Mounted,
@@ -227,7 +232,9 @@ impl Views {
                     view.label = props.accessibility.label.clone();
                 }
                 MountItem::Text { id, text, .. } => {
-                    self.nodes.entry(*id).or_default().text = Some(text.text.clone());
+                    let view = self.nodes.entry(*id).or_default();
+                    view.text = Some(text.text.clone());
+                    view.links = text.links.clone();
                 }
                 MountItem::Frame { id, frame, .. } => {
                     self.nodes.entry(*id).or_default().frame = Some(Rect::from(*frame));
@@ -281,6 +288,20 @@ impl Views {
     fn find(&self, selector: &str) -> Option<NodeId> {
         self.find_view(selector)
             .and_then(|id| self.pressable_from(id))
+    }
+
+    /// For `span:<text>`, the innermost pressable span where `<text>`
+    /// starts in the first text that contains it.
+    fn link(&self, selector: &str) -> Option<NodeId> {
+        let want = selector.strip_prefix("span:")?;
+        let view = self.nodes.get(&self.find_view(selector)?)?;
+        let text = view.text.as_deref()?;
+        let at = text[..text.find(want)?].encode_utf16().count() as u32;
+        view.links
+            .iter()
+            .filter(|l| l.start <= at && at < l.end)
+            .min_by_key(|l| l.end - l.start)
+            .map(|l| l.node)
     }
 
     /// The first view on screen `selector` names.
@@ -629,7 +650,7 @@ pub(crate) fn run(code: String, script: &str, dir: &Path) -> Result<(), Failure>
             }
             "tap" => {
                 run.settle(TAP_WAIT);
-                let Some(id) = run.views.find(arg) else {
+                let Some(id) = run.views.link(arg).or_else(|| run.views.find(arg)) else {
                     return failed("nothing to press".into(), &run);
                 };
                 run.control

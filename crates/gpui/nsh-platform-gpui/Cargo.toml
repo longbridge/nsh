@@ -38,7 +38,7 @@ log.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 nsh-core.workspace = true
 nsh-engine.workspace = true
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
 gpui.workspace = true
 gpui_platform.workspace = true
 image = { workspace = true, features = ["gif", "webp", "jpeg", "bmp", "ico", "tiff"] }
