@@ -13143,3 +13143,59 @@ mod asset_variants {
         assert_eq!(src.size, Some((17.0, 12.0)));
     }
 }
+
+mod rust_lazy_context {
+    use super::*;
+    use crate::ui::{Root, prelude::*};
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ProviderProps {
+        #[prop(lazy)]
+        children: Children,
+    }
+
+    #[component]
+    fn Provider(props: ProviderProps) -> impl IntoElement {
+        provide_context("provided");
+        let open = signal(false);
+        view()
+            .on_press(move || open.set(true))
+            .child(when(open, move || props.children))
+    }
+
+    #[component]
+    fn Consumer() -> impl IntoElement {
+        text(use_context::<&'static str>().unwrap_or("missing"))
+    }
+
+    #[component]
+    fn App() -> impl IntoElement {
+        provider().child(consumer())
+    }
+
+    #[test]
+    fn rust_lazy_children_inherit_the_context_where_they_are_placed() {
+        let mut c = core();
+        c.mount_root(&Root::of::<App>());
+        let batch = c.commit().unwrap();
+        let trigger = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        c.component_event(trigger, EventKind::Press, &EventPayload::None);
+        let batch = c.commit().unwrap();
+        let texts: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["provided"]);
+    }
+}

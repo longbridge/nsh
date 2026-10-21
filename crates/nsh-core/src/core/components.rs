@@ -1637,7 +1637,9 @@ impl<M: TextEngine> Core<M> {
                 break;
             }
             key = Some(parent);
-            let id = self.nodes[parent as usize].id;
+            // A component may return another component as its root. The
+            // innermost one owns the content's placement context.
+            let id = self.base_of(self.nodes[parent as usize].id);
             // What JS made is under a component through its JS children:
             // under where it places them.
             let owner = self
