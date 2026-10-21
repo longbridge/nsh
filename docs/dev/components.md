@@ -551,9 +551,11 @@ the core sets the root's direction from it and the language (in an app whose JS 
 ## Assets
 
 A crate ships files in its `assets/` directory, as TS imports them: `asset!("logo@2x.png")` (`nsh-macros`, the path
-relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size }` (the natural size
-in points, `Size<Points>`: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the
-font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
+relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size, scales }` (the natural size in
+points, `Size<Points>`: `@2x` / `@3x` divide the pixels; `scales` lists the `@1.5x`–`@4x` siblings of a file named
+without a density, which `assets!()` ships and images pick from by the screen's pixel ratio, as for TS imports), a
+`FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the font's name table) or a `FileAsset { uri }`; a missing
+or unreadable file fails the build (a variant too, and one whose pixels are off its scale), a changed one builds the
 crate again (`include_bytes!`). An `.svg` is a `FileAsset`, where TS's import gives an `ImageAsset` (the macro reads
 no SVG: sizing one takes usvg): `image(ICON.uri)` shows it, laid out by its style.
 The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry

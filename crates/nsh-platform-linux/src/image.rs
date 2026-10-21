@@ -1384,6 +1384,7 @@ mod tests {
         let source = ImageSource {
             uri: "asset:/logo@2x.svg".into(),
             size: None,
+            scales: nsh_core::ImageScales::NONE,
         };
         assert_eq!(
             natural(&picture.texture, picture.points, Some(&source)),

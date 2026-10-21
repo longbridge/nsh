@@ -28,7 +28,7 @@ The element's props are listed on [image](../elements/image.md).
 
 ## Images in the app
 
-A Rust crate keeps its files in its `assets/` directory: `asset!("logo@2x.png")` (the path relative to `assets/`) is an `ImageAsset`, `{ uri, size }`, read when the crate compiles, and `registry.assets(assets!())` in the crate's `#[native_module]` function ships every file of the directory with the app. In TSX, import an image file like a module: the import gives an `ImageAsset`, `{ uri, width, height }`, and the bundler ships the file with the app:
+A Rust crate keeps its files in its `assets/` directory: `asset!("logo@2x.png")` (the path relative to `assets/`) is an `ImageAsset`, `{ uri, size, scales }`, read when the crate compiles, and `registry.assets(assets!())` in the crate's `#[native_module]` function ships every file of the directory with the app. In TSX, import an image file like a module: the import gives an `ImageAsset`, `{ uri, width, height, scales? }`, and the bundler ships the file with the app:
 
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo@2x.png");
@@ -49,7 +49,7 @@ logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
 
 Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`, and `.svg` ([SVG images](#svg-images)).
 
-**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. The file you name is the one that shows: NSH uses `logo@2x.png` and `logo@3x.png` as two separate assets. Export at the highest density you need (`@3x` for the sharpest result on every phone); images are downsampled to the screen when decoded.
+**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. A file named with a suffix is the one that shows; a file named without one shows its [pixel-density variants](#pixel-densities) when it has them.
 
 **Natural size.** An image from an asset lays out at its natural size when its style leaves the width or height open, so `image(LOGO)` and `<Image src={logo} />` need no style. Set one dimension and the aspect ratio, or both, to size it differently.
 
@@ -57,6 +57,38 @@ In Rust, a missing or broken file fails the build, and a changed one builds the 
 
 > [!TIP]
 > In TSX, `src` also accepts `asset:/path` strings, and imported files are the ones guaranteed to ship. A path that is never imported works with the dev server, which serves the whole app directory, and is missing from packaged apps. Import every image you use. A Rust crate ships its whole `assets/` directory through `assets!()`.
+
+### Pixel densities
+
+Name the file without a suffix and put its denser versions next to it, and the app loads the one that fits the screen:
+
+```text
+assets/
+├── logo.png       64×64 pixels
+├── logo@2x.png    128×128
+└── logo@3x.png    192×192
+```
+
+```rust tabs
+const LOGO: ImageAsset = asset!("logo.png");
+
+// LOGO.size: 64 × 64 points, LOGO.scales: [1.0, 2.0, 3.0]
+```
+
+```tsx tabs
+import logo from "./assets/logo.png";
+
+logo; // { uri: "asset:/assets/logo.png", width: 64, height: 64, scales: [1, 2, 3] }
+```
+
+- `asset!` and the bundler look for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of an image named without a suffix. `scales` lists them, with 1 for the named file; an image without siblings has no scales (in TSX it imports as `{ uri, width, height }`). The bundler ships the siblings it finds, and `assets!()` ships the whole directory.
+- The image loads the smallest scale at least the screen's pixel ratio, otherwise the largest, as React Native picks: `logo.png` on a 1× screen, `logo@2x.png` on a 2× one, `logo@3x.png` on a 3× phone (and at 2.625). On the web only that file is downloaded.
+- When the pixel ratio changes (a window moved to another screen, browser zoom), the images whose choice changes load again, with their [load events](#load-events). Their size stays the named file's size, in points.
+- A variant whose pixels are not the named file's size times its scale gets a build warning in TSX and fails the build in Rust.
+- A file named with a density suffix (`./logo@3x.png`, `asset!("logo@3x.png")`) is that file alone.
+- An [SVG image](#svg-images) is drawn for the screen at any ratio, so it ships no variants.
+
+One file is fine too: export it at the highest density you need (`@3x` for the sharpest result on every phone) and name it with its suffix; images are downsampled to the screen when decoded. Variants let each screen download, decode and keep the file that fits it.
 
 ## SVG images
 
@@ -209,6 +241,8 @@ const status = signal("loading…");
 
 The load event reports the source image's size, not the size it was decoded at.
 
+An image with [pixel-density variants](#pixel-densities) loads one of its files, and the load event reports that file's pixels: 192×192 for `logo@3x.png` on a 3× screen, where `Image.getSize(logo)` resolves with the imported file's 64×64. When the pixel ratio changes and the image loads another variant, that load reports its events too: `onLoadStart`, then `onLoad` with the new file's size (or `onError`), then `onLoadEnd`.
+
 ## An image's size and prefetching
 
 Images that are not on screen can be measured and loaded ahead: `image_size(..)` and `prefetch_image(..)` in Rust, `Image.getSize` and `Image.prefetch` (on the same `Image` that renders the element) in TSX:
@@ -234,7 +268,7 @@ const ok = await Image.prefetch("https://example.com/next.jpg");      // true on
 | `image_size(uri)` | `Image.getSize(source)` | The image's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)); an error when it cannot be loaded |
 | `prefetch_image(uri)` | `Image.prefetch(source)` | `true` once the image's bytes are loaded |
 
-In TSX, `source` is a URL string or `{ uri }`. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
+In TSX, `source` is a URL string, `{ uri }` or an imported image. For an imported image with [variants](#pixel-densities), both load the variant the views load on this screen, and `getSize` gives the imported file's size. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
 
 A common use is sizing a remote image by its aspect ratio:
 

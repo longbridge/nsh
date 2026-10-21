@@ -202,6 +202,79 @@ fn density(path: &Path) -> f64 {
     }
 }
 
+/// Whether the file name says its density (`logo@2x.png`, `logo@1x.png`).
+fn has_density(path: &Path) -> bool {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    stem.rsplit_once('@')
+        .and_then(|(_, d)| d.strip_suffix('x'))
+        .is_some_and(|d| d.parse::<f64>().is_ok())
+}
+
+/// The pixel-density variants of image `path` (a file without a density
+/// suffix): its siblings `<stem>@<scale>x.<ext>` for the scales of
+/// [`nsh_core::IMAGE_SCALES`] above 1 that exist. Stat calls only: no
+/// directory listing.
+pub(crate) fn variants(path: &Path) -> Vec<(f32, PathBuf)> {
+    if has_density(path) {
+        return Vec::new();
+    }
+    let (Some(stem), Some(ext)) = (
+        path.file_stem().and_then(|s| s.to_str()),
+        path.extension().and_then(|e| e.to_str()),
+    ) else {
+        return Vec::new();
+    };
+    nsh_core::IMAGE_SCALES
+        .into_iter()
+        .filter(|s| *s != 1.0)
+        .map(|s| (s, path.with_file_name(format!("{stem}@{s}x.{ext}"))))
+        .filter(|(_, p)| p.is_file())
+        .collect()
+}
+
+/// Why the `scale` variant `rel` of an image of `points` (its size in
+/// points) does not fit it: its `pixels` are not the points times the
+/// scale (to the pixel).
+fn variant_mismatch(
+    rel: &str,
+    points: (f64, f64),
+    scale: f32,
+    pixels: (usize, usize),
+) -> Option<String> {
+    let scale = f64::from(scale);
+    let expected = (points.0 * scale, points.1 * scale);
+    let off = |want: f64, got: usize| (want - got as f64).abs() >= 1.0;
+    (off(expected.0, pixels.0) || off(expected.1, pixels.1)).then(|| {
+        format!(
+            "{rel}: {}x{} pixels, expected {}x{} ({}x{} points at @{scale}x)",
+            pixels.0, pixels.1, expected.0, expected.1, points.0, points.1
+        )
+    })
+}
+
+/// The module of an image import: its URI and size in points and, when
+/// it has variants (their `scales`, above 1), the scales it ships in, 1
+/// first. Without variants it is `{ uri, width, height }`.
+fn image_module(
+    uri: &str,
+    (w, h): (impl std::fmt::Display, impl std::fmt::Display),
+    scales: &[f32],
+) -> String {
+    let scales = if scales.is_empty() {
+        String::new()
+    } else {
+        let list: Vec<String> = std::iter::once(1.0)
+            .chain(scales.iter().copied())
+            .map(|s| s.to_string())
+            .collect();
+        format!(", scales: [{}]", list.join(", "))
+    };
+    format!("export default {{ uri: {uri:?}, width: {w}, height: {h}{scales} }};")
+}
+
 impl NshPlugin {
     /// The entry's first statement, giving the renderer the app's themes,
     /// appearance and status bar.
@@ -372,30 +445,42 @@ impl Plugin for NshPlugin {
         // points) lets the image lay out before it is decoded. An SVG's is
         // its own (a file name's `@2x` does not apply), as the native
         // backends read it, written as the shortest number that is the
-        // `f32` they lay it out at.
-        let (w, h) = if has_extension(path, &["svg"]) {
+        // `f32` they lay it out at; drawn for the screen at any ratio, it
+        // ships no pixel-density variants. A bitmap's variants ship with it,
+        // and the core loads the one for the screen.
+        let ((w, h), variants) = if has_extension(path, &["svg"]) {
             let data = std::fs::read(path).map_err(|e| self.fail(path, &e.to_string()))?;
             let (size, warnings) =
                 svg_asset(&rel, &data).map_err(|e| self.fail(path, &e.to_string()))?;
             for warning in warnings {
                 log::warn!(target: "nsh::build", "{warning}");
             }
-            (size.width.0.to_string(), size.height.0.to_string())
+            let size = (size.width.0.to_string(), size.height.0.to_string());
+            (size, Vec::new())
         } else {
             let dim = imagesize::size(path)
                 .map_err(|e| self.fail(path, &format!("cannot read image: {e}")))?;
             let scale = density(path);
             let (w, h) = (dim.width as f64 / scale, dim.height as f64 / scale);
-            (w.to_string(), h.to_string())
+            let variants = variants(path);
+            for (scale, variant) in &variants {
+                let d = imagesize::size(variant)
+                    .map_err(|e| self.fail(variant, &format!("cannot read image: {e}")))?;
+                if let Some(warning) =
+                    variant_mismatch(&self.rel(variant), (w, h), *scale, (d.width, d.height))
+                {
+                    log::warn!(target: "nsh::build", "{warning}");
+                }
+            }
+            ((w.to_string(), h.to_string()), variants)
         };
-        self.assets
-            .lock()
-            .expect("assets lock")
-            .push(path.to_path_buf());
-        let code = format!(
-            "export default {{ uri: {uri:?}, width: {w}, height: {h} }};",
-            uri = format!("asset:/{rel}"),
-        );
+        {
+            let mut assets = self.assets.lock().expect("assets lock");
+            assets.push(path.to_path_buf());
+            assets.extend(variants.iter().map(|(_, p)| p.clone()));
+        }
+        let scales: Vec<f32> = variants.iter().map(|(s, _)| *s).collect();
+        let code = image_module(&format!("asset:/{rel}"), (w, h), &scales);
         Ok(Some(HookLoadOutput {
             code: code.into(),
             module_type: Some(ModuleType::Js),
@@ -464,11 +549,200 @@ impl Plugin for NshPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use super::*;
+    use crate::{BundleOptions, bundle};
+
+    /// The header of a `w`×`h` PNG: all the image size reader looks at.
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        out.extend(w.to_be_bytes());
+        out.extend(h.to_be_bytes());
+        out.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        out
+    }
+
+    /// An app importing `import` (from `img/`), with `files` (name, pixel
+    /// size) in `img/`.
+    fn app(name: &str, import: &str, files: &[(&str, (u32, u32))]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-variants-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("img")).unwrap();
+        for (file, (w, h)) in files {
+            std::fs::write(dir.join("img").join(file), png(*w, *h)).unwrap();
+        }
+        std::fs::write(
+            dir.join("App.tsx"),
+            format!(
+                "import {{ mount }} from \"nsh\";\nimport {{ Image }} from \"nsh/image\";\nimport icon from \"./img/{import}\";\nmount(() => <Image src={{icon}} />);\n"
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    fn try_bundle(dir: &Path) -> Result<crate::Bundle, crate::BundleError> {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+    }
+
+    fn bundled(dir: &Path) -> crate::Bundle {
+        try_bundle(dir).unwrap()
+    }
+
+    fn assets(bundle: &crate::Bundle) -> Vec<String> {
+        bundle
+            .assets
+            .iter()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect()
+    }
 
     fn svg(body: &str) -> Vec<u8> {
         format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{body}</svg>"#)
             .into_bytes()
+    }
+
+    #[test]
+    fn variant_probe_lists_the_scales_in_the_image_module() {
+        let module = |scales: &[f32]| image_module("asset:/img/flag.png", (40.0, 30.0), scales);
+        assert_eq!(
+            module(&[2.0, 3.0]),
+            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30, scales: [1, 2, 3] };"
+        );
+        assert_eq!(
+            module(&[1.5, 4.0]),
+            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30, scales: [1, 1.5, 4] };"
+        );
+        // Without variants: `{ uri, width, height }`.
+        assert_eq!(
+            module(&[]),
+            "export default { uri: \"asset:/img/flag.png\", width: 40, height: 30 };"
+        );
+    }
+
+    #[test]
+    fn variant_probe_ships_the_siblings_and_lists_their_scales() {
+        let dir = app(
+            "ships",
+            "flag.png",
+            &[
+                ("flag.png", (40, 30)),
+                ("flag@2x.png", (80, 60)),
+                ("flag@3x.png", (120, 90)),
+                ("other@2x.png", (2, 2)),
+            ],
+        );
+        let bundle = bundled(&dir);
+        assert!(bundle.code.contains("scales"), "{}", bundle.code);
+        assert_eq!(
+            assets(&bundle),
+            ["img/flag.png", "img/flag@2x.png", "img/flag@3x.png"]
+        );
+    }
+
+    #[test]
+    fn variant_probe_finds_every_scale_and_skips_gaps() {
+        let dir = app(
+            "every",
+            "a.webp",
+            &[
+                ("a.webp", (10, 10)),
+                ("a@1.5x.webp", (15, 15)),
+                ("a@4x.webp", (40, 40)),
+            ],
+        );
+        let variants: Vec<f32> = variants(&dir.join("img/a.webp"))
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect();
+        assert_eq!(variants, [1.5, 4.0]);
+        let bundle = bundled(&dir);
+        assert!(bundle.code.contains("1.5"), "{}", bundle.code);
+        assert_eq!(
+            assets(&bundle),
+            ["img/a.webp", "img/a@1.5x.webp", "img/a@4x.webp"]
+        );
+    }
+
+    #[test]
+    fn variant_probe_leaves_an_nx_import_as_it_was() {
+        let dir = app(
+            "suffixed",
+            "flag@3x.png",
+            &[
+                ("flag.png", (40, 30)),
+                ("flag@2x.png", (80, 60)),
+                ("flag@3x.png", (120, 90)),
+            ],
+        );
+        assert!(variants(&dir.join("img/flag@3x.png")).is_empty());
+        assert!(variants(&dir.join("img/flag@1x.png")).is_empty());
+        let bundle = bundled(&dir);
+        assert!(!bundle.code.contains("scales"), "{}", bundle.code);
+        assert!(bundle.code.contains("asset:/img/flag@3x.png"));
+        assert_eq!(assets(&bundle), ["img/flag@3x.png"]);
+    }
+
+    /// An app without variants ships its image alone, in a module without
+    /// `scales` (`variant_probe_lists_the_scales_in_the_image_module` holds
+    /// the module's text).
+    #[test]
+    fn variant_probe_changes_nothing_without_variants() {
+        let dir = app("none", "flag.png", &[("flag.png", (40, 30))]);
+        let bundle = bundled(&dir);
+        assert!(
+            bundle.code.contains("asset:/img/flag.png"),
+            "{}",
+            bundle.code
+        );
+        assert!(!bundle.code.contains("scales"), "{}", bundle.code);
+        assert_eq!(assets(&bundle), ["img/flag.png"]);
+    }
+
+    #[test]
+    fn variant_probe_warns_when_a_variant_has_the_wrong_size() {
+        let fits = |scale, pixels| variant_mismatch("img/a@2x.png", (40.0, 30.0), scale, pixels);
+        assert_eq!(fits(2.0, (80, 60)), None);
+        assert_eq!(fits(3.0, (120, 90)), None);
+        let warning = fits(2.0, (120, 90)).expect("a warning");
+        assert!(
+            warning.starts_with("img/a@2x.png: 120x90 pixels, expected 80x60"),
+            "{warning}"
+        );
+        // 1.5x of an odd size: either rounding fits.
+        let odd = |pixels| variant_mismatch("b@1.5x.png", (41.0, 31.0), 1.5, pixels);
+        assert_eq!(odd((61, 46)), None);
+        assert_eq!(odd((62, 47)), None);
+        assert!(odd((60, 46)).is_some());
+        // The bundle still builds, with the variant.
+        let dir = app(
+            "mismatch",
+            "a.png",
+            &[("a.png", (40, 30)), ("a@2x.png", (120, 90))],
+        );
+        assert_eq!(assets(&bundled(&dir)), ["img/a.png", "img/a@2x.png"]);
+    }
+
+    /// A variant that is no image fails the build, as the imported file
+    /// does, naming it.
+    #[test]
+    fn variant_probe_fails_on_an_unreadable_variant() {
+        let dir = app("unreadable", "a.png", &[("a.png", (40, 30))]);
+        std::fs::write(dir.join("img/a@3x.png"), b"not an image").unwrap();
+        let Err(error) = try_bundle(&dir) else {
+            panic!("the build fails");
+        };
+        let error = error.to_string();
+        assert!(
+            error.starts_with("img/a@3x.png\ncannot read image: "),
+            "{error}"
+        );
     }
 
     #[test]
@@ -524,5 +798,18 @@ mod tests {
         let error = svg_asset("a.svg", b"<svg><rect").unwrap_err();
         assert!(error.to_string().starts_with("invalid SVG: "), "{error}");
         assert!(svg_asset("a.svg", b"\x89PNG\r\n\x1a\n").is_err());
+    }
+
+    /// An SVG is drawn for the screen at any ratio: its `@Nx` siblings
+    /// neither ship nor appear in `scales`.
+    #[test]
+    fn svg_import_ships_no_variants() {
+        let dir = app("svg", "mark.svg", &[]);
+        for file in ["mark.svg", "mark@2x.svg", "mark@3x.svg"] {
+            std::fs::write(dir.join("img").join(file), svg("")).unwrap();
+        }
+        let bundle = bundled(&dir);
+        assert!(!bundle.code.contains("scales"), "{}", bundle.code);
+        assert_eq!(assets(&bundle), ["img/mark.svg"]);
     }
 }

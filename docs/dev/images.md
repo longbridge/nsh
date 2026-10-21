@@ -16,6 +16,31 @@
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
   decodes them. Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
+- **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
+  `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
+  entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the
+  `defaultSource` placeholder): React Native's rule, the smallest scale at least the surface's `pixel_ratio`, otherwise
+  the largest, for `asset:/` URIs without a query or a fragment (a bundled file's name has neither). The backends load
+  that URI as any other, so their caches and decoding are unchanged; the size in points still comes from the source, so
+  layout never depends on the variant. When the pixel ratio changes (`apply_environment`: a window moved to another
+  screen, browser zoom) only the images whose pick changes are marked `dirty::IMAGE` and sent again, with no relayout.
+  The backends load a re-sent image as a new source, with its events: `onLoadStart`, `onLoad` (the variant's pixels, as
+  for any source) or `onError`, then `onLoadEnd`. `Image.getSize` / `Image.prefetch` pick the same way, so a prefetch
+  warms the bytes the views load; `getSize` returns the imported dimensions after a successful load, including when a variant has mismatched
+  dimensions. Without imported dimensions it divides the variant's pixels by its scale.
+  The bundler finds the variants: its image `load` hook (`plugin.rs`) stats the fixed names `<stem>@<s>x.<ext>` for the
+  scales of `IMAGE_SCALES` above 1 (no directory listing), only for bitmap imports without a density suffix
+  (`logo@3x.png` probes nothing and ships alone; an SVG, drawn for the screen at any ratio, ships no variants). The ones
+  found join `Bundle::assets`, so the dev server, `out/assets`, every package, `.nshpkg` and the web package's asset map
+  carry them, and the module gains `scales` (1 first) only when there is one: an app without variants bundles byte for
+  byte as before. Width and height still come from the imported file; a variant that cannot be read fails the build as
+  the imported file does, and one whose pixels are off that size times its scale by a pixel or more is warned about on
+  `nsh::build`.
+  Rust's `asset!` does the same for a crate image (`nsh-macros` `assets.rs`): `ImageAsset::scales` lists the siblings it
+  finds (`assets!()` already ships the whole directory) and `include_bytes!`s them, so a changed variant rebuilds the
+  crate. It reads each variant's size: one that cannot be read, or whose pixels are off, fails the build (a proc macro
+  has errors only, where the bundler warns about the size). A proc macro cannot read nsh-core, so its `VARIANT_SCALES`
+  repeats `IMAGE_SCALES` above 1: change them together.
 - **SVG** (`nsh_core::svg`, cargo feature `svg`, which every native platform crate enables and `nsh-platform-web` never
   does: browsers draw SVG with `<img>`, and the tint mask works on it as on bitmaps). The decoders sniff the bytes
   (`svg::sniff`: `<svg` after a BOM, XML declaration, comments and doctype, or gzip) before their platform decoder and

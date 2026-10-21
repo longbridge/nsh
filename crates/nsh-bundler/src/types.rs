@@ -56,7 +56,9 @@ fn assets() -> String {
     for ext in crate::plugin::IMAGE_EXTENSIONS {
         let doc = match *ext {
             "svg" => "The SVG image, sized in points by its `width` and `height` (or `viewBox`).",
-            _ => "The image, sized in points (`@2x` files at half their pixels).",
+            _ => {
+                "The image, sized in points (`@2x` files at half their pixels). Imported without a density suffix, its `@1.5x`–`@4x` siblings ship too (in `scales`) and the one for the screen loads."
+            }
         };
         let _ = write!(
             out,
@@ -91,5 +93,23 @@ mod tests {
         assert!(svg.contains("ImageAsset"), "{svg}");
         assert!(svg.contains("The SVG image, sized in points"), "{svg}");
         assert!(!svg.contains("@2x"), "{svg}");
+    }
+
+    #[test]
+    fn variant_types_image_modules_describe_variants() {
+        let assets = super::assets();
+        for ext in crate::plugin::IMAGE_EXTENSIONS
+            .iter()
+            .filter(|e| **e != "svg")
+        {
+            let module = format!("declare module \"*.{ext}\" {{");
+            let at = assets.find(&module).expect(ext);
+            let block = &assets[at..at + assets[at..].find("\n}\n").unwrap()];
+            assert!(
+                block.contains("its `@1.5x`–`@4x` siblings ship too (in `scales`)"),
+                "{block}"
+            );
+            assert!(block.contains("import(\"./types\").ImageAsset"), "{block}");
+        }
     }
 }

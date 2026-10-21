@@ -91,6 +91,11 @@ export interface ImageAsset {
   uri: string;
   width: number;
   height: number;
+  /** The pixel densities it ships in, 1 being the imported file:
+   * `[1, 2, 3]` when `logo@2x.png` and `logo@3x.png` sit next to
+   * `logo.png`. The image loads the one for the screen's pixel ratio.
+   * Absent when the imported file is the only one. */
+  scales?: number[];
 }
 
 /** `<Image>` */
@@ -745,6 +750,21 @@ fn member_names(members: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variant_types_image_asset_lists_its_scales() {
+        let files = type_definitions(&[]);
+        let (_, types) = files
+            .iter()
+            .find(|(path, _)| path == "nsh/types.d.ts")
+            .expect("nsh/types.d.ts");
+        let at = types
+            .find("export interface ImageAsset {")
+            .expect("ImageAsset");
+        let asset = &types[at..at + types[at..].find("\n}").unwrap()];
+        assert!(asset.contains("  scales?: number[];"), "{asset}");
+        assert!(asset.contains("The image loads the one for the screen's pixel ratio."));
+    }
 
     #[test]
     fn default_export_statements_name_the_default_namespace_value() {
