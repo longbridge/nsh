@@ -2953,6 +2953,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-testing",
  "rustc-hash",
  "serde_json",
  "ttf-parser",

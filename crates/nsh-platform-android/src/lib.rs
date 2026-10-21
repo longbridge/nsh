@@ -15,6 +15,8 @@
 
 #![cfg(target_os = "android")]
 
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 #[cfg(feature = "dev")]
 mod dev;

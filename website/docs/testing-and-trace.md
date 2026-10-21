@@ -257,14 +257,14 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 
 ### On a real platform
 
-`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`) runs the same tests on the platform's development host instead of headless:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
 each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
 own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
   back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
-  swiped down on iOS);
+  swiped down on iOS, the back button on Android);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
@@ -277,6 +277,7 @@ nsh test --target macos                       # the app's tests in macOS windows
 nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
 nsh test --target windows                     # in Win32 windows
 nsh test --target ios                         # in an iOS simulator
+nsh test --target android                     # on the Android device or emulator adb lists first
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test tests/form.test.tsx --target macos   # one file
@@ -298,6 +299,11 @@ On iOS, the apps run in the development host in an iOS simulator: the booted one
 `nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
 device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
 has the simulated device's size.
+
+On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
+of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
+`back` is the system's back. `setColorScheme` switches the device's dark theme, which `nsh test` sets back after the
+app.
 
 ### Steps from standard input
 

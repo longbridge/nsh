@@ -330,7 +330,7 @@ failures and log records come back as `RunnerMessage`s; batches of `--trace` go 
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
-`windows`, `gpui`, `web`, `ios`). `App` drives either kind
+`windows`, `gpui`, `web`, `ios`, `android`). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
 `nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
 For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
@@ -375,7 +375,18 @@ Back taps the header's back button (the bar button carrying the back chevron's m
 down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
 `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
-app; the screen keeps its device's size. All of them use `nsh_testing::agent::Tester`, which turns the dev client's
+app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
+`nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
+`open` with the dev server's port forwarded (`adb reverse`) and a data directory of its own in the host's cache
+(`dataDir`, emptied as it starts). The agent's calls go to `TestAgent` (a class looked up in `JNI_OnLoad`), which does
+each on the UI thread: `MotionEvent`s dispatched to the window's views (or the dialog's) as a finger's, with drags
+that rest before they lift as on iOS; typing as a keyboard's `KeyEvent`s (`KeyCharacterMap`; what no key types is
+committed through the field's input connection), Ctrl+A first as a shortcut, as the window's input stage offers it;
+back is the activity's back press; dialogs are answered with a tap on the `AlertDialog`'s button (back to close it);
+screenshots draw the window and the dialog into a bitmap. A step waits for the native animation graph and for anything
+that moves: a signature of every shown view's place, offset, scroll position and opacity, compared between looks. The
+system's appearance is the device's night mode, which the CLI switches (`cmd uimode night`) and restores. All of them
+use `nsh_testing::agent::Tester`, which turns the dev client's
 test events into an agent's steps on a `Worker` thread.
 These hosts are also how a change to a platform is checked by hand: `nsh test <entry> --target <platform>` with steps
 on standard input (`app.screenshot("a.png")`, `app.press(…)`) opens the app in the platform's window, takes them and

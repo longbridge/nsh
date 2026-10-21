@@ -38,6 +38,10 @@ pub(crate) struct Java {
     pub(crate) view_dev_status: JMethodID,
     #[cfg_attr(not(feature = "dev"), allow(dead_code))]
     pub(crate) view_dev_error: JMethodID,
+    /// `com.longbridge.nsh.TestAgent`: the test agent's platform part
+    /// (any thread; it does its work on the UI thread).
+    #[cfg(feature = "dev")]
+    pub(crate) test_agent: GlobalRef,
 }
 
 static JAVA: OnceLock<Java> = OnceLock::new();
@@ -102,6 +106,8 @@ pub(crate) fn init(vm: JavaVM) -> jni::errors::Result<()> {
             "devError",
             "(Ljava/lang/String;Ljava/lang/String;Z)V",
         )?,
+        #[cfg(feature = "dev")]
+        test_agent: class(&mut env, "com/longbridge/nsh/TestAgent")?,
         text,
         net,
         vm,

@@ -124,12 +124,13 @@ final class SystemUi {
             }
         }
         b.setOnDismissListener(d -> {
+            if (TestAgent.shownDialog == d) TestAgent.shownDialog = null;
             if (!answered[0]) {
                 answered[0] = true;
                 answer(mounter, dialogId, -1);
             }
         });
-        b.show();
+        TestAgent.shownDialog = b.show();
     }
 
     private static void answer(Mounter mounter, int dialogId, int index) {
