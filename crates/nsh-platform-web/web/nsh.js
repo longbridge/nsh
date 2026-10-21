@@ -595,13 +595,12 @@ class Player {
         }),
       },
     };
-    const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
-    let module;
-    try {
-      module = await WebAssembly.compileStreaming(response());
-    } catch {
-      module = await WebAssembly.compile(await (await response()).arrayBuffer());
-    }
+    // One request either way: a host that does not serve `application/wasm`
+    // gets the body compiled whole instead of streamed.
+    const response = await (typeof url === "string" || url instanceof URL ? fetch(url) : url);
+    const module = response.headers.get("Content-Type")?.startsWith("application/wasm") && WebAssembly.compileStreaming
+      ? await WebAssembly.compileStreaming(response)
+      : await WebAssembly.compile(await response.arrayBuffer());
     // The compiler's dependencies link wasm-bindgen glue they never call
     // here (oxc-browserslist's dates): stubs that say so if they are.
     for (const { module: name, name: field, kind } of WebAssembly.Module.imports(module)) {
