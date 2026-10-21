@@ -341,7 +341,8 @@ A component draws content of the app's for values it has (a row of its data, a c
 render function: a prop `Option<Renderer<T>>`, in TypeScript `(value: T) => JSX.Element`. The component calls
 `render(key, value)` where the content goes and gets a view it styles and places as any other (inside a `text(..)`, an
 inline view). The content is kept per key while the value stays equal, and rendered again when it changes. A Rust
-parent passes `Renderer::new(|value: &T| ..)`.
+parent passes a closure to the prop's setter (`quote().render_badge(|symbol| ..)`), which makes the
+`Renderer` of it.
 
 Styles in a component are typed; the app's Tailwind classes reach one of its parts through a prop of classes and
 `.app_class(..)` on that part's element. They apply after the element's own styles, with the app's theme, `dark:` and

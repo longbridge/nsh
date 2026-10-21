@@ -104,13 +104,13 @@ and take their look from the app.
 | Component | Rust | What it does | Page |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
-| `<TextView>` | `nsh_base::TextView::element(props)` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
-| `<SelectionArea>` | `nsh_base::SelectionArea::element(props)` | Makes the texts inside it select together | [nsh/base](../modules/nsh-base.md#selectionarea) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<NavStack>`, `<NavPage>` | `nsh_base::nav_stack()`, `nsh_base::nav_page()` | Native navigation: a stack of pages with the platform's header and back gestures | [NavStack](./nav-stack.md) |
 | `<SafeAreaView>` | `nsh_base::safe_area_view()` | Pads its content clear of notches, bars and the home indicator | [SafeAreaView](./safe-area-view.md) |
 | `<KeyboardAvoidingView>` | `nsh_base::keyboard_avoiding_view()` | Keeps its content above the software keyboard | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
 | `AlertDialog` | `nsh_base::alert_dialog()` | The system's alert and action sheet | [AlertDialog](./alert-dialog.md) |
+| `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
+| `<SelectionArea>` | `nsh_base::selection_area()` | Makes the texts inside it select together | [SelectionArea](./selection-area.md) |
 
 > [!NOTE]
 > A string is only drawn inside a `Text`. A string child of a `View` creates no native view and takes no part in
