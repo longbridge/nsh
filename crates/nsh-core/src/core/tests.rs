@@ -1190,6 +1190,85 @@ fn scroll_reports_content_size() {
     )));
 }
 
+/// `overflow: "hidden"` clips in layout as well as in paint: what a box
+/// clips away must not grow an ancestor scroll view's content size. A
+/// preview laid out at its design width and scaled down by a transform
+/// (transforms do not affect layout) otherwise leaves a vertical scroll
+/// view scrollable sideways.
+#[test]
+fn clipped_overflow_does_not_grow_scroll_content() {
+    /// The content width of a 320pt-wide vertical scroll view holding a
+    /// 300pt box, itself holding a 400pt-wide absolute child.
+    fn content_width(clips: bool) -> f32 {
+        let mut c = core();
+        let mut boxed = vec![
+            ("width", StyleValue::Number(300.0)),
+            ("height", StyleValue::Number(100.0)),
+        ];
+        if clips {
+            boxed.push(("overflow", StyleValue::Str("hidden")));
+        }
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::Scroll,
+                },
+                style_op(2, &[("height", StyleValue::Number(200.0))]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::View,
+                },
+                style_op(3, &boxed),
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                style_op(
+                    4,
+                    &[
+                        ("position", StyleValue::Str("absolute")),
+                        ("left", StyleValue::Number(0.0)),
+                        ("top", StyleValue::Number(0.0)),
+                        ("width", StyleValue::Number(400.0)),
+                        ("height", StyleValue::Number(50.0)),
+                    ],
+                ),
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScrollContent { id: 2, size } => Some(size.width.0),
+                _ => None,
+            })
+            .expect("scroll content size")
+    }
+    // Visible: the 400pt child reaches the scroll view, which scrolls to it.
+    assert_eq!(content_width(false), 400.0);
+    // Clipped: the scroll view keeps its own width, so it does not scroll
+    // sideways at all.
+    assert_eq!(content_width(true), 320.0);
+}
+
 /// A scroll view's content size set twice in one batch (a row relaid in
 /// two passes) reaches the platform once, with the last size: a transient
 /// smaller size would clamp the offset before the content grows back.

@@ -1648,6 +1648,22 @@ impl<M: TextEngine> Core<M> {
             self.restack(key);
         }
         let node = &mut self.nodes[key as usize];
+        // `overflow: "hidden"` clips in layout as well as in paint: what a box
+        // clips away must not reach an enclosing scroll view's content size,
+        // or a child laid out wider than its box and scaled down with a
+        // transform (transforms do not affect layout) leaves the scroll view
+        // scrollable across its own axis.
+        // `Clip`, not `Hidden`: both stop the overflow from propagating, but
+        // `Hidden` is a scroll container in CSS and would also make the box's
+        // automatic minimum size as a flex or grid item 0, which clipping the
+        // paint must not do. Set here rather than while parsing the style so
+        // that what `overflow` sets as a style stays what it was.
+        let clip = if node.view_style.overflow_hidden {
+            taffy::Overflow::Clip
+        } else {
+            taffy::Overflow::Visible
+        };
+        layout.overflow = taffy::Point { x: clip, y: clip };
         if node.kind.derives_layout() {
             node.base_layout = Some(Box::new(layout));
             self.sync_layout_style(key);

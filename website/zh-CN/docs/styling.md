@@ -187,7 +187,7 @@ view()
 - **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……；以及跟随方向的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
 - **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius`（Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
 - **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`）绘制曲率平滑过渡到边的圆角，就像 iOS 应用图标，两个平台都支持。胶囊形状（`borderRadius` 为高度的一半）依然是胶囊。
-- **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。
+- **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。裁掉的部分在布局上同样被裁掉：它不会进入外层滚动视图的内容尺寸，所以一个盒子把子视图按更大的尺寸排版、再用 `transform` 缩小（transform 不影响布局）时，不会让滚动视图多出可滚动的范围。
 
 超过边长一半的半径会被截断，所以 `borderRadius: 9999`（`.rounded_full()`）会得到圆形或胶囊。
 
