@@ -56,16 +56,16 @@
 
   /* Finishes (`finish` in ui.tsx): gentle top-to-bottom gradients, a
      highlight along the top edge, soft shadows. */
-  --finish-card-bg: linear-gradient(180deg, #1d1e22 0%, #17181b 100%);
+  --finish-card-bg: linear-gradient(180deg, #1b1c20 0%, #191a1d 100%);
   --finish-card: 0 10px 28px rgb(0 0 0 / 38%);
   --finish-flat: 0 1px 2px rgb(0 0 0 / 30%);
   --finish-inset: inset 0 1px 3px rgb(0 0 0 / 55%);
-  --finish-raised-bg: linear-gradient(180deg, #2d2f34 0%, #222428 100%);
+  --finish-raised-bg: linear-gradient(180deg, #292b30 0%, #26282c 100%);
   --finish-raised: 0 1px 2px rgb(0 0 0 / 45%);
-  --finish-primary-bg: linear-gradient(180deg, #fbfbfc 0%, #d4d6d9 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #ffffff 0%, #dfe1e4 100%);
+  --finish-primary-bg: linear-gradient(180deg, #eeeff1 0%, #e1e2e4 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #f5f5f6 0%, #e9ebed 100%);
   --finish-primary: inset 0 1px 0 rgb(255 255 255 / 90%), 0 3px 10px rgb(0 0 0 / 40%);
-  --finish-accent-bg: linear-gradient(180deg, #dbf893 0%, #b3dd4e 100%);
+  --finish-accent-bg: linear-gradient(180deg, #ceef7d 0%, #c0e664 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 45%), 0 3px 12px rgb(200 242 109 / 22%);
 
   /* Code: Shiki emits the allsum-light colours (src/light.theme.json, the
@@ -103,10 +103,10 @@
   --nav-bg: color-mix(in srgb, var(--background) 72%, transparent);
   --nav-line: var(--line);
   --page-light: rgb(255 255 255 / 3.5%);
-  /* Dark surfaces get their top light from their gradients: a 1px inset highlight right inside a 1px border
-     reads as a doubled, blurry edge. */
-  --highlight: transparent;
-  --band-tinted: linear-gradient(180deg, #0d0e10, #0b0c0e);
+  /* Surfaces are nearly flat, so their top light is a faint 1px inset highlight: bright enough to read as an
+     edge catching light, faint enough not to double the border under it. */
+  --highlight: rgb(255 255 255 / 5%);
+  --band-tinted: linear-gradient(180deg, #0c0d0f, #0c0d0f);
   --logo-dot: #eef0f2;
   --logo-ring: transparent;
   --code-surface: rgb(0 0 0 / 14%);
@@ -116,7 +116,7 @@
   /* Liquid glass, for floating and layered surfaces only: a translucent
      fill, a lit rim (top light, bottom dark) and a gentle shadow. */
   --glass-fill: rgb(30 32 36 / 55%);
-  --glass-thumb: linear-gradient(180deg, rgb(255 255 255 / 16%), rgb(255 255 255 / 5%));
+  --glass-thumb: linear-gradient(180deg, rgb(255 255 255 / 12.4%), rgb(255 255 255 / 8.6%));
   --glass-edge: inset 0 1px 0 rgb(255 255 255 / 12%), inset 0 -1px 0 rgb(0 0 0 / 25%), inset 0 0 0 1px rgb(255 255 255 / 6%), 0 2px 8px rgb(0 0 0 / 25%);
   --glass-thumb-edge: inset 0 1px 0 rgb(255 255 255 / 22%), inset 0 -1px 0 rgb(0 0 0 / 20%), 0 1px 3px rgb(0 0 0 / 35%);
   --logo-top: #e2fb9f;
@@ -124,11 +124,11 @@
   --accent-border: transparent;
   --nav-active: rgb(255 255 255 / 6%);
   --nav-hover: rgb(255 255 255 / 3.5%);
-  --callout-tint: 9%;
-  --callout-tint-end: 3%;
+  --callout-tint: 8%;
+  --callout-tint-end: 8%;
   --callout-base: var(--card);
-  --callout-edge: transparent;
-  --active-shadow: 0 1px 2px rgb(0 0 0 / 45%), 0 4px 10px -6px rgb(0 0 0 / 55%);
+  --callout-edge: rgb(255 255 255 / 6%);
+  --active-shadow: 0 1px 2px rgb(0 0 0 / 35%);
   --callout-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px -12px rgb(0 0 0 / 45%);
   /* A faint grain over the page, as on the gallery's surfaces. */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  .07 0 0 0 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -186,16 +186,16 @@ html.light {
   --destructive: #d43345;
   --important: #4a6a0a;
 
-  --finish-card-bg: linear-gradient(180deg, #ffffff 0%, #fafaf7 100%);
+  --finish-card-bg: linear-gradient(180deg, #fdfdfc 0%, #fcfcfa 100%);
   --finish-card: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 3%), 0 1px 2px rgb(20 20 10 / 6%), 0 8px 24px rgb(20 20 10 / 7%);
   --finish-flat: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 2.5%), 0 1px 2px rgb(20 20 10 / 5%);
   --finish-inset: inset 0 1px 2px rgb(0 0 0 / 6%), inset 0 0 0 1px rgb(0 0 0 / 2%);
-  --finish-raised-bg: linear-gradient(180deg, #ffffff 0%, #f4f4f0 100%);
+  --finish-raised-bg: linear-gradient(180deg, #fbfbfa 0%, #f8f8f5 100%);
   --finish-raised: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 3%), 0 1px 2px rgb(20 20 10 / 8%);
-  --finish-primary-bg: linear-gradient(180deg, #2a2b30 0%, #16171a 100%);
-  --finish-primary-hover-bg: linear-gradient(180deg, #33353b 0%, #1c1d21 100%);
+  --finish-primary-bg: linear-gradient(180deg, #242429 0%, #1c1e21 100%);
+  --finish-primary-hover-bg: linear-gradient(180deg, #2c2d33 0%, #232529 100%);
   --finish-primary: inset 0 1px 0 rgb(255 255 255 / 14%), 0 1px 2px rgb(20 20 10 / 18%), 0 4px 12px rgb(20 20 10 / 14%);
-  --finish-accent-bg: linear-gradient(180deg, #d4f683 0%, #bfe95c 100%);
+  --finish-accent-bg: linear-gradient(180deg, #cdf276 0%, #c6ed69 100%);
   --finish-accent: inset 0 1px 0 rgb(255 255 255 / 55%), 0 1px 3px rgb(80 110 10 / 18%);
   --accent-border: #a7cf3f;
 
@@ -225,7 +225,7 @@ html.light {
   --nav-line: rgb(40 40 20 / 13%);
   --page-light: rgb(255 255 255 / 70%);
   --highlight: #ffffff;
-  --band-tinted: linear-gradient(180deg, #eeeee9, #ebebe5);
+  --band-tinted: linear-gradient(180deg, #edede8, #ecece6);
   --logo-dot: #15161a;
   --logo-ring: transparent;
   --code-surface: rgb(120 120 90 / 4%);
@@ -233,11 +233,11 @@ html.light {
   --chip-bg: rgb(21 22 26 / 5.5%);
   --chip-edge: rgb(21 22 26 / 4%);
   --glass-fill: rgb(255 255 255 / 62%);
-  --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 72%));
+  --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 81.1%));
   --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(20 20 10 / 8%);
   --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(20 20 10 / 14%);
-  --logo-top: #b5df4d;
-  --logo-bottom: #7ea51f;
+  --logo-top: #2c6c14;
+  --logo-bottom: #20580c;
   --nav-active: rgb(0 0 0 / 4.5%);
   --nav-hover: rgb(0 0 0 / 2.8%);
   --callout-tint: 7%;
