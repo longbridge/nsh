@@ -372,6 +372,74 @@ fn mounts_subtree_built_detached() {
 }
 
 #[test]
+fn a_spans_test_id_is_in_its_blocks_text() {
+    let mut c = core();
+    let text_of = |c: &mut Core<_>| {
+        c.commit().unwrap().items.into_iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text),
+            _ => None,
+        })
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "see ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "docs".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(text_of(&mut c).unwrap().test_ids, []);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 4,
+            prop: Prop::TestId(Some("docs".into())),
+        }],
+    );
+    assert_eq!(
+        text_of(&mut c).unwrap().test_ids,
+        [crate::SpanTestId {
+            start: 4,
+            end: 8,
+            test_id: "docs".into(),
+        }]
+    );
+}
+
+#[test]
 fn text_update_emits_only_text_and_frames() {
     let mut c = core();
     apply(
