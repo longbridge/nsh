@@ -50,7 +50,7 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 
 A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
-The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/embedding-ios.md) and [Embedding on Android](../docs/embedding-android.md)).
+The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/ios.md) and [Embedding on Android](../docs/android.md)).
 
 ## Storage.getItem
 

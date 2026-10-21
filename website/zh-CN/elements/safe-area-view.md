@@ -123,6 +123,6 @@ function BottomBar() {
 ## 平台说明
 
 - **iOS**：边距来自 UIKit 的安全区：状态栏、刘海或灵动岛，以及主屏幕指示条。
-- **Android**：NSH 报告系统栏和显示屏挖孔与 NSH 视图重叠的部分。NSH [嵌入](../docs/embedding-android.md)在原生工具栏下方时，视图的顶部边距为 0。
+- **Android**：NSH 报告系统栏和显示屏挖孔与 NSH 视图重叠的部分。NSH [嵌入](../docs/android.md)在原生工具栏下方时，视图的顶部边距为 0。
 - **Mac Catalyst**：顶部边距是窗口的标题栏。
 - **桌面平台（macOS、Windows、Linux、GPUI）和 Web**：页面的内容从它的 `header` 下方开始，对话框为它的内容提供自己的边距，与手机上一样。

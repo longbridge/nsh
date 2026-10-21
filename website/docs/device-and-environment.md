@@ -250,7 +250,7 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 ## In an embedding app
 
-An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./embedding-ios.md), `setLocale` and `setFontScale` in Java on [Android](./embedding-android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
+An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./ios.md), `setLocale` and `setFontScale` in Java on [Android](./android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
 
 ## Safe areas
 

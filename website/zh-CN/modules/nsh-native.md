@@ -16,7 +16,7 @@ use nsh_core::ui::prelude::*; // native、NativeEvent、element_ref
 import { nativeComponent, nativeModule } from "nsh/native";
 ```
 
-原生侧的注册方法见[原生组件](../docs/native-components.md)，以及 [iOS 嵌入](../docs/embedding-ios.md) / [Android 嵌入](../docs/embedding-android.md)。
+原生侧的注册方法见[原生组件](../docs/native-components.md)，以及 [iOS 嵌入](../docs/ios.md) / [Android 嵌入](../docs/android.md)。
 
 ## nativeComponent
 

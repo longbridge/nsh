@@ -89,9 +89,9 @@ nsh dev App.tsx
 Connect hosts to the printed URL:
 
 - **Your own iOS app**, linked with `NativeShellDev.xcframework`:
-  `try app.connectDevServer(URL(string: "ws://192.168.1.20:8790/ws")!)`. See [Embedding in iOS apps](./embedding-ios.md#development).
+  `try app.connectDevServer(URL(string: "ws://192.168.1.20:8790/ws")!)`. See [Embedding in iOS apps](./ios.md#development).
 - **Your own Android app**, with `nsh-dev.aar`: `nsh.connectDevServer("ws://192.168.1.20:8790/ws")`, or
-  `adb reverse tcp:8790 tcp:8790` and `ws://127.0.0.1:8790/ws`. See [Embedding in Android apps](./embedding-android.md#development).
+  `adb reverse tcp:8790 tcp:8790` and `ws://127.0.0.1:8790/ws`. See [Embedding in Android apps](./android.md#development).
 
 Any number of hosts can be connected at once; every build goes to all of them. A host that connects later receives the
 current build right away. A host that cannot run the app, because it lacks a UI set the app imports (a development
@@ -260,4 +260,4 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
 
 - [CLI](./cli.md)
 - [Testing](./testing-and-trace.md)
-- [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)
+- [Embedding in iOS apps](./ios.md), [Embedding in Android apps](./android.md)

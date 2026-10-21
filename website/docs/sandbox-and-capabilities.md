@@ -66,8 +66,8 @@ not cover: without them, an app could exhaust the device's memory through the UI
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
 > handler.
 
-Host apps set the limits per view: `NshAppView.limits` on [iOS](./embedding-ios.md#limits),
-`NshView.setLimits` on [Android](./embedding-android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
+Host apps set the limits per view: `NshAppView.limits` on [iOS](./ios.md#limits),
+`NshView.setLimits` on [Android](./android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
 [GPUI app](./gpui.md#embedding-in-a-gpui-app). They apply from the next load.
 
 To see in development what a TSX app does within a host app's limits, run it with
@@ -254,4 +254,4 @@ them.
 
 - [Signed packages](./signed-packages.md)
 - [Networking](./networking.md)
-- [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)
+- [Embedding in iOS apps](./ios.md), [Embedding in Android apps](./android.md)

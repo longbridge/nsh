@@ -44,7 +44,7 @@ NSH 同时运行在手机和桌面上：iOS（UIKit）、Android（Android 视�
 - **系统能力都得重新实现。** 嵌在原生页面里的自绘界面，没有平台的文本选区，也没有选区弹出的菜单（拷贝、分享、翻译、查询、全选），更没有系统输入法、无障碍，以及每一代 iOS 带来的新系统视觉效果。在 GPU 渲染器里复刻这些是一项永远做不完的大工程，而且复刻品总会和真正的系统行为走样。
 - **手机团队得接手一套新的 UI 技术栈。** 要在现有手机客户端里大规模运营一层自绘界面，iOS 和 Android 团队就得接手一个陌生的渲染器，以及它在各种系统版本和设备上的兼容性问题和缺陷。
 
-因此 NSH 用每个平台自己的界面来渲染模块：[iOS](./embedding-ios.md) 上用 UIKit，[Android](./embedding-android.md) 上用 Android 视图，[macOS](./macos.md) 上用 AppKit，[Windows](./windows.md) 上用 Direct2D 绘制的 Win32 窗口，[Linux](./linux.md) 上用 GTK 4。同一种模块格式和同一个运行时可以运行在所有这些宿主上。
+因此 NSH 用每个平台自己的界面来渲染模块：[iOS](./ios.md) 上用 UIKit，[Android](./android.md) 上用 Android 视图，[macOS](./macos.md) 上用 AppKit，[Windows](./windows.md) 上用 Direct2D 绘制的 Win32 窗口，[Linux](./linux.md) 上用 GTK 4。同一种模块格式和同一个运行时可以运行在所有这些宿主上。
 
 两者的定位不同：GPUI Shell 用于扩展 GPUI 桌面应用；Native Shell 面向每个平台上的原生应用，手机和桌面一视同仁。
 
@@ -101,7 +101,7 @@ mount(Counter);
 
 视图（`view()`、`<View>`）在 iOS 上变成 `UIView`，在 Android 上变成 `ViewGroup`，在 macOS 上变成 `NSView`，在 Linux 上变成 GTK 控件，文本变成原生文本视图，按钮的按压反馈（`.active(..)`、`activeStyle`）在主线程上完成。点击时，`count.update` 只修改一个信号，只有读取它的那段文本会更新：组件函数不会重新执行。Rust 应用从头到尾都是原生代码；在 TSX 应用中，只有模块自己的代码是 JavaScript。
 
-TSX 模块也是原生应用在运行时加载的东西。宿主应用只需几行原生代码就能显示它（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Windows](./windows.md#嵌入-win32-应用)、[Linux](./linux.md#嵌入-gtk-应用)）。在 iOS 上：
+TSX 模块也是原生应用在运行时加载的东西。宿主应用只需几行原生代码就能显示它（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Windows](./windows.md#嵌入-win32-应用)、[Linux](./linux.md#嵌入-gtk-应用)）。在 iOS 上：
 
 ```swift
 let app = NshAppView()                         // 一个 UIView：可以放在任何地方
@@ -127,7 +127,7 @@ Rust 应用从第 2 步起走同样的路径，只是由它的组件以原生方
 ## 你能得到什么
 
 - **Rust 或 TSX。** 用 Rust 编写的应用，带有类型化的样式和编译期检查，不带 JavaScript 虚拟机；用 TSX 编写运行时下发的页面和模块；或者两者结合，由 TSX 导入你的 Rust 组件、模块和类（[用 Rust 开发](./rust.md)）。
-- **嵌入。** `NshAppView`（Swift）、`NshView`（Java/Kotlin）和桌面端的 `AppView`（AppKit、GTK、Win32）可以把模块放进原生应用，数量不限（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）。
+- **嵌入。** `NshAppView`（Swift）、`NshView`（Java/Kotlin）和桌面端的 `AppView`（AppKit、GTK、Win32）可以把模块放进原生应用，数量不限（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）。
 - **签名、可吊销的下发。** Ed25519 签名的包，发布密钥由离线根密钥认证，支持吊销列表（[签名包](./signed-packages.md)）。
 - **由宿主配置的沙箱。** 在 iOS 和 Android SDK 中，每个视图单独设置虚拟机限制和授予的能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
 - **模块可以使用宿主的视图。** 用 Swift、Java 或 Rust 注册原生组件（[原生组件](./native-components.md)）。
@@ -141,8 +141,8 @@ Rust 应用从第 2 步起走同样的路径，只是由它的组件以原生方
 
 | 平台 | 状态 | 后端 | 说明 |
 |---|---|---|---|
-| iOS | 已支持（iOS 15.0+） | UIKit | 真机和模拟器；通过 `NativeShell.xcframework` 嵌入（[iOS](./embedding-ios.md)） |
-| Android | 已支持（API 28，Android 9+） | Android 视图 | `arm64-v8a` 和 `x86_64`；通过 `nsh.aar` 嵌入（[Android](./embedding-android.md)） |
+| iOS | 已支持（iOS 15.0+） | UIKit | 真机和模拟器；通过 `NativeShell.xcframework` 嵌入（[iOS](./ios.md)） |
+| Android | 已支持（API 28，Android 9+） | Android 视图 | `arm64-v8a` 和 `x86_64`；通过 `nsh.aar` 嵌入（[Android](./android.md)） |
 | macOS | 已支持（macOS 14+） | AppKit | 独立应用；通过 `AppView` 嵌入（[macOS](./macos.md)） |
 | Windows | 已支持（Windows 10 1809+） | Win32、Direct2D | 独立应用；通过 `AppView` 嵌入（[Windows](./windows.md)） |
 | Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |

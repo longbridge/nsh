@@ -50,7 +50,7 @@ Rust 函数是同步的，因为数据就在内存中：在组件运行的地方
 
 损坏的 `storage.json` 会被保留为同目录下的 `storage.json.corrupt`，应用从空存储开始；读不了的文件则让应用的改动只留在内存中，文件本身永远不会被覆盖。
 
-app id 是 `nsh.json` 中的 `id`，它随应用一起传递：`nsh build` 和 `nsh package` 把它写在 bundle 旁边，开发服务器会发送它，签名包则带有经发布密钥证书担保的 id。因此无论应用在哪里运行，都无需任何设置就各自保存自己的数据；没有 id 的应用保存在 `default` 下。宿主应用可以另选位置（见[在 iOS 中嵌入](../docs/embedding-ios.md)和[在 Android 中嵌入](../docs/embedding-android.md)）。
+app id 是 `nsh.json` 中的 `id`，它随应用一起传递：`nsh build` 和 `nsh package` 把它写在 bundle 旁边，开发服务器会发送它，签名包则带有经发布密钥证书担保的 id。因此无论应用在哪里运行，都无需任何设置就各自保存自己的数据；没有 id 的应用保存在 `default` 下。宿主应用可以另选位置（见[在 iOS 中嵌入](../docs/ios.md)和[在 Android 中嵌入](../docs/android.md)）。
 
 ## Storage.getItem
 

@@ -322,7 +322,7 @@ bundle 或下载的签名包。下面几节加载的是 TSX 模块。
 
 ### iOS
 
-在 Debug 配置中链接 `NativeShellDev.xcframework`，在 Release 中链接 `NativeShell.xcframework`（[在 iOS 应用中嵌入](./embedding-ios.md)），然后：
+在 Debug 配置中链接 `NativeShellDev.xcframework`，在 Release 中链接 `NativeShell.xcframework`（[在 iOS 应用中嵌入](./ios.md)），然后：
 
 ```swift
 import NativeShell
@@ -343,7 +343,7 @@ try app.loadBundle(at: Bundle.main.url(forResource: "bundle", withExtension: "ns
 
 ### Android
 
-调试版添加 `nsh-dev.aar`，发布版添加 `nsh.aar`（[在 Android 应用中嵌入](./embedding-android.md)），然后：
+调试版添加 `nsh-dev.aar`，发布版添加 `nsh.aar`（[在 Android 应用中嵌入](./android.md)），然后：
 
 ```kotlin
 val nsh = NshView(this)
@@ -421,6 +421,6 @@ nsh test my-app/App.tsx --trace      # TSX 应用的入口
 
 - [用 Rust 开发](./rust.md)：Rust 应用、它的主题，以及在 Rust crate 之上使用 TSX。
 - [JSX 与组件](./jsx-and-components.md)和[响应式](./reactivity.md)：Rust 与 TSX 中的组件和 signal。
-- [平台](./platforms.md)：每个平台支持什么，以及各平台自己的页面（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md)、[Windows](./windows.md)、[Linux](./linux.md)）。
+- [平台](./platforms.md)：每个平台支持什么，以及各平台自己的页面（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md)、[Windows](./windows.md)、[Linux](./linux.md)）。
 - [签名包](./signed-packages.md)和[沙箱与能力](./sandbox-and-capabilities.md)：下发方式，以及模块能做什么。
 - [项目结构](./project-structure.md)：`nsh.json`、资源和文件。

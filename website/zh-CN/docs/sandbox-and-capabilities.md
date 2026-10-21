@@ -58,8 +58,8 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
 
-宿主应用按视图设定限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
-[Android](./embedding-android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
+宿主应用按视图设定限制：[iOS](./ios.md) 上用 `NshAppView.limits`，
+[Android](./android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
 
 开发时想看 TSX 应用在宿主应用的限制下表现如何，用 [`--limits`](./cli.md#nsh-run) 运行它：`nsh run App.tsx --limits` 使用上面的默认值，
 `nsh run --limits memory=128MB,call=500ms` 像宿主应用那样设置这两项，其余保持默认值。
@@ -237,4 +237,4 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 
 - [签名包](./signed-packages.md)
 - [网络](./networking.md)
-- [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)
+- [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)

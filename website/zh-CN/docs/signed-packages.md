@@ -257,8 +257,8 @@ runOnUiThread(() -> nsh.runPackage(pkg));
 
 包声明的[能力](./sandbox-and-capabilities.md)随包一起传递：包只能做它声明的事，并且还要在宿主应用授予的范围之内。
 
-完整 API：[GPUI](./gpui.md#嵌入-gpui-应用)、[嵌入 iOS 应用](./embedding-ios.md)、
-[嵌入 Android 应用](./embedding-android.md)。
+完整 API：[GPUI](./gpui.md#嵌入-gpui-应用)、[嵌入 iOS 应用](./ios.md)、
+[嵌入 Android 应用](./android.md)。
 
 ## 已发布包的报错
 
@@ -332,5 +332,5 @@ adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity 
 ## 另请参阅
 
 - [沙箱与能力](./sandbox-and-capabilities.md)
-- [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)
+- [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)
 - [CLI](./cli.md)

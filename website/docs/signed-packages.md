@@ -274,8 +274,8 @@ accepts at once, as `openPackage` does on iOS and Android.
 The package's declared [capabilities](./sandbox-and-capabilities.md) travel with it: a package can do only what it
 declares, and only what the host app grants on top.
 
-Full API: [GPUI](./gpui.md#embedding-in-a-gpui-app), [Embedding in iOS apps](./embedding-ios.md#signed-packages),
-[Embedding in Android apps](./embedding-android.md#signed-packages).
+Full API: [GPUI](./gpui.md#embedding-in-a-gpui-app), [Embedding in iOS apps](./ios.md#signed-packages),
+[Embedding in Android apps](./android.md#signed-packages).
 
 ## Errors from published packages
 
@@ -350,5 +350,5 @@ refused there too.
 ## See also
 
 - [Sandbox and capabilities](./sandbox-and-capabilities.md)
-- [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)
+- [Embedding in iOS apps](./ios.md), [Embedding in Android apps](./android.md)
 - [CLI](./cli.md)

@@ -124,7 +124,7 @@ insets change.
 - **iOS**: the insets come from UIKit's safe area: the status bar, the notch or Dynamic Island, and the home
   indicator.
 - **Android**: NSH reports the parts of the system bars and the display cutout that overlap the NSH view. When NSH is
-  [embedded](../docs/embedding-android.md) below a native toolbar, the view's top inset is 0.
+  [embedded](../docs/android.md) below a native toolbar, the view's top inset is 0.
 - **Mac Catalyst**: the top inset is the window's title bar.
 - **Desktops (macOS, Windows, Linux, GPUI) and the web**: a page's content starts below its `header`, and a dialog
   gives its content insets of its own, as on the phones.

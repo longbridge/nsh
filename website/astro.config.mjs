@@ -21,6 +21,14 @@ export default defineConfig({
   output: 'static',
   trailingSlash: 'never',
 
+  // The platform pages' former paths.
+  redirects: {
+    '/docs/embedding-ios': '/docs/ios',
+    '/docs/embedding-android': '/docs/android',
+    '/zh-CN/docs/embedding-ios': '/zh-CN/docs/ios',
+    '/zh-CN/docs/embedding-android': '/zh-CN/docs/android',
+  },
+
   integrations: [pagefind()],
 
   markdown: {

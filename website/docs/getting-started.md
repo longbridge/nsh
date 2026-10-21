@@ -349,7 +349,7 @@ signed package. The sections below load TSX modules.
 ### iOS
 
 Link `NativeShellDev.xcframework` in Debug and `NativeShell.xcframework` in Release ([Embedding in iOS
-apps](./embedding-ios.md)), then:
+apps](./ios.md)), then:
 
 ```swift
 import NativeShell
@@ -372,7 +372,7 @@ resources.
 ### Android
 
 Add `nsh-dev.aar` for debug builds and `nsh.aar` for release builds ([Embedding in Android
-apps](./embedding-android.md)), then:
+apps](./android.md)), then:
 
 ```kotlin
 val nsh = NshView(this)
@@ -461,8 +461,8 @@ checks what it shows (`nsh test my-app`). A Rust app tests its root the same way
 - [Building with Rust](./rust.md): Rust apps, their theme, and TSX on top of a Rust crate.
 - [JSX and components](./jsx-and-components.md) and [Reactivity](./reactivity.md): components and signals, in Rust and
   TSX.
-- [Platforms](./platforms.md): what each platform supports, and its own page ([iOS](./embedding-ios.md),
-  [Android](./embedding-android.md), [macOS](./macos.md), [Windows](./windows.md), [Linux](./linux.md)).
+- [Platforms](./platforms.md): what each platform supports, and its own page ([iOS](./ios.md),
+  [Android](./android.md), [macOS](./macos.md), [Windows](./windows.md), [Linux](./linux.md)).
 - [Signed packages](./signed-packages.md) and [Sandbox and capabilities](./sandbox-and-capabilities.md): delivery and
   what modules may do.
 - [Project structure](./project-structure.md): what goes in `nsh.json`, assets, files.

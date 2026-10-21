@@ -15,7 +15,7 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 一样被裁剪、随内容滚动并接收触摸。
 
 > [!NOTE]
-> 只有在嵌入 NSH 的应用中（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）才有原生组件。
+> 只有在嵌入 NSH 的应用中（[iOS](./ios.md)、[Android](./android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）才有原生组件。
 > 打包出的独立应用（`nsh package`）和开发宿主不会注册任何组件，因此在那里该元素会渲染成一个空视图（并记录一次“未知名称”日志）。
 
 ## 整体流程
@@ -577,5 +577,5 @@ fn register(app: &AppView) {
 ## 另请参阅
 
 - [`nsh/native` 参考](../modules/nsh-native.md)
-- [嵌入 iOS 应用](./embedding-ios.md)和[嵌入 Android 应用](./embedding-android.md)
+- [嵌入 iOS 应用](./ios.md)和[嵌入 Android 应用](./android.md)
 - [架构](./architecture.md)：props 和事件如何跨线程传递

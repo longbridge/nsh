@@ -218,7 +218,7 @@ launch screen.
 
 ### The status bar on each platform
 
-- **iOS**: hiding and showing animate with a fade. In an app [embedded](../docs/embedding-ios.md) in a native one,
+- **iOS**: hiding and showing animate with a fade. In an app [embedded](../docs/ios.md) in a native one,
   the host app's view controller decides how the status bar looks. The host applies NSH's setting by returning
   `NshAppView.preferredStatusBarStyle`, `NshAppView.prefersStatusBarHidden` and
   `NshAppView.preferredStatusBarUpdateAnimation` from its view controller.

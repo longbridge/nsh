@@ -16,7 +16,7 @@ use nsh_core::ui::prelude::*; // native, NativeEvent, element_ref
 import { nativeComponent, nativeModule } from "nsh/native";
 ```
 
-See [Native components](../docs/native-components.md) for registering the native side, and [Embedding on iOS](../docs/embedding-ios.md) / [Embedding on Android](../docs/embedding-android.md).
+See [Native components](../docs/native-components.md) for registering the native side, and [Embedding on iOS](../docs/ios.md) / [Embedding on Android](../docs/android.md).
 
 ## nativeComponent
 

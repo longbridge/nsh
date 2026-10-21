@@ -97,6 +97,8 @@ test('images in pages reach a built file below the base', () => {
 
 test('every content page has its Markdown twin', () => {
   const missing = pages
+    // A former path's redirect (`redirects` in astro.config.mjs) has no content of its own.
+    .filter((page) => !readFileSync(page, 'utf8').includes('http-equiv="refresh"'))
     .map((page) => page.slice(dist.length).replace(/\/index\.html$/, ''))
     .filter((route) => /^\/(?:zh-CN\/)?(?:docs|elements|components|modules)(?:\/|$)/.test(route))
     .filter((route) => !existsSync(join(dist, `${route}.md`)));

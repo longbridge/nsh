@@ -79,9 +79,9 @@ nsh dev App.tsx
 将宿主连接到打印出的 URL：
 
 - **你自己的 iOS 应用**，链接 `NativeShellDev.xcframework`：
-  `try app.connectDevServer(URL(string: "ws://192.168.1.20:8790/ws")!)`。参见[嵌入 iOS 应用](./embedding-ios.md)。
+  `try app.connectDevServer(URL(string: "ws://192.168.1.20:8790/ws")!)`。参见[嵌入 iOS 应用](./ios.md)。
 - **你自己的 Android 应用**，使用 `nsh-dev.aar`：`nsh.connectDevServer("ws://192.168.1.20:8790/ws")`，或者执行
-  `adb reverse tcp:8790 tcp:8790` 后使用 `ws://127.0.0.1:8790/ws`。参见[嵌入 Android 应用](./embedding-android.md)。
+  `adb reverse tcp:8790 tcp:8790` 后使用 `ws://127.0.0.1:8790/ws`。参见[嵌入 Android 应用](./android.md)。
 
 可以同时连接任意数量的宿主；每次构建都会发给所有宿主。后连接的宿主会立即收到当前构建。无法运行该应用的宿主（缺少应用导入的某个
 UI 集，例如为另一个应用构建的开发宿主）不会收到构建：它会在屏幕上说明原因，终端也会打印一行 `warn`，给出安装该应用宿主的命令。
@@ -224,4 +224,4 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 
 - [CLI](./cli.md)
 - [测试](./testing-and-trace.md)
-- [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)
+- [嵌入 iOS 应用](./ios.md)、[嵌入 Android 应用](./android.md)

@@ -17,7 +17,7 @@ Because NSH renders with the system's own views, a native component is just one 
 there is no layering problem, it clips, scrolls and receives touches like a `<View>`.
 
 > [!NOTE]
-> Native components exist only where an app embeds NSH ([iOS](./embedding-ios.md), [Android](./embedding-android.md),
+> Native components exist only where an app embeds NSH ([iOS](./ios.md), [Android](./android.md),
 > [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app),
 > [Windows](./windows.md#embedding-in-a-win32-app)).
 > A packaged standalone app (`nsh package`) or a development host registers none, so the element renders an empty
@@ -600,5 +600,5 @@ with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work
 ## See also
 
 - [`nsh/native` reference](../modules/nsh-native.md)
-- [Embedding in iOS apps](./embedding-ios.md) and [in Android apps](./embedding-android.md)
+- [Embedding in iOS apps](./ios.md) and [in Android apps](./android.md)
 - [Architecture](./architecture.md): how props and events cross threads

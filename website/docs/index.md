@@ -44,7 +44,7 @@ NSH runs on phones and desktops alike: iOS (UIKit), Android (Android views), mac
 - **System behavior would have to be rebuilt.** A self-drawn surface inside a native screen has none of the platform's text selection, nor the selection menu that comes with it (Copy, Share, Translate, Look Up, Select All), nor the system's input methods, accessibility and new visual materials each iOS release brings. Recreating them in a GPU renderer is a large, never-finished job, and the copies drift from the real thing.
 - **Mobile teams would have to adopt a new UI stack.** Running a self-drawn layer at scale in an existing mobile client means its iOS and Android teams take on an unfamiliar renderer, its compatibility issues across OS versions and devices, and its bugs.
 
-NSH therefore renders modules with each platform's own UI: UIKit on [iOS](./embedding-ios.md), Android views on [Android](./embedding-android.md), AppKit on [macOS](./macos.md), Win32 windows drawn with Direct2D on [Windows](./windows.md) and GTK 4 on [Linux](./linux.md). One module format and one runtime run in all these hosts.
+NSH therefore renders modules with each platform's own UI: UIKit on [iOS](./ios.md), Android views on [Android](./android.md), AppKit on [macOS](./macos.md), Win32 windows drawn with Direct2D on [Windows](./windows.md) and GTK 4 on [Linux](./linux.md). One module format and one runtime run in all these hosts.
 
 The two are positioned differently. GPUI Shell is for extending GPUI desktop applications; Native Shell is for native apps on every platform, phones and desktops alike.
 
@@ -101,7 +101,7 @@ mount(Counter);
 
 A view (`view()`, `<View>`) becomes a `UIView` on iOS, a `ViewGroup` on Android, an `NSView` on macOS and a GTK widget on Linux, a text a native text view, and the button's press feedback (`.active(..)`, `activeStyle`) runs on the main thread. When you tap, `count.update` changes one signal, and only the text that reads it is updated: the component function does not run again. The Rust app is native code from start to end; in the TSX app, only the module's own code is JavaScript.
 
-A TSX module is also what a native app loads at run time. The host app shows it with a few lines of native code ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app)). On iOS:
+A TSX module is also what a native app loads at run time. The host app shows it with a few lines of native code ([iOS](./ios.md), [Android](./android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app)). On iOS:
 
 ```swift
 let app = NshAppView()                         // a UIView: place it anywhere
@@ -127,7 +127,7 @@ A Rust app takes the same path from step 2 on, with its components running nativ
 ## What you get
 
 - **Rust or TSX.** Apps written in Rust, with typed styles and compile-time checks and no JavaScript VM; TSX for screens and modules delivered at run time; or both, with TSX importing your Rust components, modules and classes ([Building with Rust](./rust.md)).
-- **Embedding.** `NshAppView` (Swift), `NshView` (Java/Kotlin) and the desktops' `AppView` (AppKit, GTK, Win32) put a module in a native app, as many as you like ([iOS](./embedding-ios.md), [Android](./embedding-android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app), [Windows](./windows.md#embedding-in-a-win32-app)).
+- **Embedding.** `NshAppView` (Swift), `NshView` (Java/Kotlin) and the desktops' `AppView` (AppKit, GTK, Win32) put a module in a native app, as many as you like ([iOS](./ios.md), [Android](./android.md), [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app), [Windows](./windows.md#embedding-in-a-win32-app)).
 - **Signed, revocable delivery.** Ed25519-signed packages, release keys certified by an offline root key, revocation lists ([Signed packages](./signed-packages.md)).
 - **A sandbox the host configures.** VM limits and capabilities granted per view, in the iOS and Android SDKs ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
 - **The host's own views in modules.** Register native components from Swift, Java or Rust ([Native components](./native-components.md)).
@@ -141,8 +141,8 @@ A Rust app takes the same path from step 2 on, with its components running nativ
 
 | Platform | Status | Backend | Notes |
 |---|---|---|---|
-| iOS | Supported (iOS 15.0+) | UIKit | Devices and the simulator; embedded with `NativeShell.xcframework` ([iOS](./embedding-ios.md)) |
-| Android | Supported (API 28, Android 9+) | Android views | `arm64-v8a` and `x86_64`; embedded with `nsh.aar` ([Android](./embedding-android.md)) |
+| iOS | Supported (iOS 15.0+) | UIKit | Devices and the simulator; embedded with `NativeShell.xcframework` ([iOS](./ios.md)) |
+| Android | Supported (API 28, Android 9+) | Android views | `arm64-v8a` and `x86_64`; embedded with `nsh.aar` ([Android](./android.md)) |
 | macOS | Supported (macOS 14+) | AppKit | Standalone apps; embedded with `AppView` ([macOS](./macos.md)) |
 | Windows | Supported (Windows 10 1809+) | Win32, Direct2D | Standalone apps; embedded with `AppView` ([Windows](./windows.md)) |
 | Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |
