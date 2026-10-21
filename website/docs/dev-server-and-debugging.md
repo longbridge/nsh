@@ -42,7 +42,6 @@ nsh dev App.tsx --server-only       # server only
 | `--port <port>` | Dev server port. Default 8790; the next free port is used if it is taken. |
 | `--release` | Serve release builds of TSX (minified, no debug info, no hot updates). |
 | `--trace` | Log the time of every commit on the host (TSX apps). |
-| `--script <steps>` | Steps to take once the window shows (`wait 800; shot a.png; tap 100 200; quit`), on the desktops, for checking a change without touching the screen. |
 
 What each target does:
 

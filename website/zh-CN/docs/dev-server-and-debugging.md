@@ -39,7 +39,6 @@ nsh dev App.tsx --server-only       # server only
 | `--port <port>` | 开发服务器端口。默认 8790；如被占用，则使用下一个空闲端口。 |
 | `--release` | 提供 TSX 的 release 构建（压缩、无调试信息、无热更新）。 |
 | `--trace` | 在宿主上记录每次提交（commit）的耗时（TSX 应用）。 |
-| `--script <steps>` | 窗口显示后执行的步骤（`wait 800; shot a.png; tap 100 200; quit`），用于桌面平台，不用触碰屏幕就能检查改动。 |
 
 各个目标的行为：
 
