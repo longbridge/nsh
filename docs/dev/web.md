@@ -195,12 +195,13 @@ The runtime is a raw module (`nsh_*` exports, `nsh` / `env` imports), not a wasm
 `web-sys` / `js-sys` imports have nothing to call by themselves. `RustApp::web` hands the built module to
 `bindgen::install`, whose reader (`bindgen::needs`: the import section and wasm-bindgen's custom section, the others
 skipped by size) decides by its imports: it needs wasm-bindgen's glue when it imports a JS function through it, a
-`__wbindgen_placeholder__` import named `__wbg_<name>_<hash>` (web-sys', js-sys' and the crates' own `#[wasm_bindgen]
-extern` blocks, snippets included). wasm-bindgen's intrinsics (`__wbindgen_describe`, `__wbg___wbindgen_throw_…`,
-the `__wbindgen_externref_xform__` table functions) come with every module that links it, through the descriptor
-functions and runtime exports its `#[no_mangle]` items add, whether the code calls JS or not (chrono's default
-`wasmbind` without `Utc::now`), and only such a function reaches them: that module is copied and served exactly as
-before, without the CLI (`nsh.js` stubs the intrinsics). Otherwise `bindgen::process` runs the `wasm-bindgen` CLI
+`__wbindgen_placeholder__` import named `__wbg_<name>_<hash>` or `__wbindgen_…`: web-sys, js-sys,
+a crate's own extern blocks, and wasm-bindgen intrinsics (`JsValue::as_string`, generic casts such as
+`JsValue::from_str`) all need glue. The descriptor (`__wbindgen_describe`), throw helper
+(`__wbg___wbindgen_throw_…` or `__wbindgen_throw`) and `__wbindgen_externref_xform__` imports alone do not
+trigger processing: linking wasm-bindgen can retain these even without calling JS (chrono's default
+`wasmbind` without `Utc::now`). Such a module is copied and served as before, without the CLI.
+Otherwise `bindgen::process` runs the `wasm-bindgen` CLI
 (`NSH_WASM_BINDGEN`, else `PATH`) of the version the module records (the first record of its
 `__wasm_bindgen_unstable` section, `{"schema_version":…,"version":"0.2.129"}`; `bindgen::check_cli` stops the build
 with both versions and the install command when the CLI's differs) with `--target web --no-typescript

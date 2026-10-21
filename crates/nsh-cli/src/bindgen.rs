@@ -64,13 +64,11 @@ pub(crate) fn install(built: &Path, out: &Path, name: &str) -> anyhow::Result<Op
     }
 }
 
-/// The version of the wasm-bindgen crate `module` links when it calls JS
-/// through it: when it imports a function of web-sys', js-sys' or a crate's
-/// own `#[wasm_bindgen] extern` blocks (`__wbindgen_placeholder__`'s
-/// `__wbg_<name>_<hash>`). wasm-bindgen's intrinsics (`__wbindgen_…`,
-/// `__wbg___wbindgen_…`, the `__wbindgen_externref_xform__` table) come
-/// with every module that links it, used or not, and are not reached
-/// without such a function: that module runs without the glue (`None`).
+/// The version of the wasm-bindgen crate `module` links when its imports
+/// need JS glue: web-sys, js-sys, a crate's own extern blocks, or intrinsics
+/// such as `JsValue::as_string` and the generic casts of `JsValue::from_str`.
+/// Only the descriptor and throw helpers that linking wasm-bindgen alone
+/// can retain are ignored, along with its externref transform imports.
 /// The version is the one the module records (its `__wasm_bindgen_unstable`
 /// section), which the CLI must equal.
 pub(crate) fn needs(module: &[u8]) -> anyhow::Result<Option<String>> {
@@ -118,8 +116,9 @@ fn read_module(module: &[u8]) -> Result<Linked, &'static str> {
                     let module = section.name()?;
                     let field = section.name()?;
                     linked.bindings |= module == "__wbindgen_placeholder__"
-                        && field.starts_with("__wbg_")
-                        && !field.starts_with("__wbg___wbindgen_");
+                        && (field.starts_with("__wbg_") || field.starts_with("__wbindgen_"))
+                        && !matches!(field, "__wbindgen_describe" | "__wbindgen_throw")
+                        && !field.starts_with("__wbg___wbindgen_throw_");
                     section.import_kind()?;
                 }
             }
@@ -527,6 +526,7 @@ mod tests {
             &[
                 ("nsh", "now_ms"),
                 ("__wbindgen_placeholder__", "__wbindgen_describe"),
+                ("__wbindgen_placeholder__", "__wbindgen_throw"),
                 (
                     "__wbindgen_placeholder__",
                     "__wbg___wbindgen_throw_41e9ee4f547fc59a",
@@ -577,6 +577,26 @@ mod tests {
         let mut cut = calls.clone();
         cut.truncate(cut.len() - 3);
         assert!(needs(&cut).is_err());
+    }
+
+    /// JsValue operations need glue even without a web-sys/js-sys extern.
+    #[test]
+    fn wasm_bindgen_is_needed_by_intrinsics_and_generic_casts() {
+        let section = bindgen_section("0.2.129");
+        for field in [
+            "__wbg___wbindgen_string_get_0380ccaa2f57f0d9",
+            "__wbindgen_describe_generic_import",
+            "__wbindgen_object_drop_ref",
+            // Older wasm-bindgen versions imported intrinsics directly.
+            "__wbindgen_string_new",
+            "__wbindgen_string_get",
+        ] {
+            let wasm = module(
+                &[("__wbindgen_placeholder__", field)],
+                &[("__wasm_bindgen_unstable", &section)],
+            );
+            assert_eq!(needs(&wasm).unwrap().as_deref(), Some("0.2.129"), "{field}");
+        }
     }
 
     #[test]
@@ -847,6 +867,38 @@ pub extern "C" fn probe() {
         let error = super::process(&built, "0.0.1", &out, "nsh").unwrap_err();
         assert!(error.to_string().contains("0.0.1"), "{error}");
         assert!(glue.exists() && Path::new(&out.join("nsh.wasm")).exists());
+        // Only JsValue intrinsics, without web-sys or an extern JS call.
+        write(
+            "src/lib.rs",
+            r#"#[no_mangle]
+pub extern "C" fn probe() {
+    let value = wasm_bindgen::JsValue::from_str("hello");
+    assert_eq!(value.as_string().as_deref(), Some("hello"));
+}
+"#,
+        );
+        let status =
+            std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+                .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+                .arg("--manifest-path")
+                .arg(root.join("Cargo.toml"))
+                .env("CARGO_TARGET_DIR", root.join("target"))
+                .status()
+                .unwrap();
+        assert!(status.success());
+        assert_eq!(
+            needs(&std::fs::read(&built).unwrap()).unwrap(),
+            Some(version)
+        );
+        let glue = install(&built, &out, "nsh")
+            .unwrap()
+            .expect("intrinsics need glue");
+        assert!(
+            std::fs::read_to_string(glue)
+                .unwrap()
+                .contains("__nsh_imports")
+        );
+        assert!(snippets(&out.join("nsh-bindgen.js")).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

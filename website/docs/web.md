@@ -79,8 +79,8 @@ Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_un
 A crate can call the browser's own APIs through [wasm-bindgen](https://wasm-bindgen.github.io/wasm-bindgen/) and
 its `web-sys` and `js-sys` crates, behind `#[cfg(target_arch = "wasm32")]`: a WebSocket, `IndexedDB`, the
 clipboard, any Web API, and JS of the crate's own (`#[wasm_bindgen(inline_js = …)]`, `module = "/js/…"`). When the
-app's web runtime calls JS this way, `nsh` runs the `wasm-bindgen` CLI on it and ships its glue and the crate's JS
-next to the runtime, in development and in published sites alike. The CLI's version is the one of the `wasm-bindgen`
+app's web runtime calls JS this way (including `JsValue` conversions), `nsh` runs the `wasm-bindgen` CLI on it and
+ships its glue and the crate's JS next to the runtime, in development and in published sites alike. The CLI's version is the one of the `wasm-bindgen`
 crate the runtime links, which `nsh` names: `cargo install wasm-bindgen-cli --version <version> --locked` installs it
 (`NSH_WASM_BINDGEN` names a CLI elsewhere than on `PATH`). A runtime that links wasm-bindgen and calls no JS through
 it (through a dependency's default features) builds as every other runtime does.

@@ -74,7 +74,7 @@ crate，不含 QuickJS；站点里没有 `app.nshc` 和 `harden.nshc`；运行�
 
 crate 可以通过 [wasm-bindgen](https://wasm-bindgen.github.io/wasm-bindgen/) 及其 `web-sys`、`js-sys` crate，在
 `#[cfg(target_arch = "wasm32")]` 下调用浏览器自身的 API：WebSocket、`IndexedDB`、剪贴板以及任何 Web API，还有 crate 自己的
-JS（`#[wasm_bindgen(inline_js = …)]`、`module = "/js/…"`）。当应用的 Web 运行时以这种方式调用 JS 时，`nsh` 会对它运行
+JS（`#[wasm_bindgen(inline_js = …)]`、`module = "/js/…"`）。当应用的 Web 运行时以这种方式调用 JS 时（包括 `JsValue` 转换），`nsh` 会对它运行
 `wasm-bindgen` CLI，并把胶水代码和 crate 的 JS 放在运行时旁边，开发时和发布的站点都是如此。CLI 的版本就是运行时链接的
 `wasm-bindgen` crate 的版本，`nsh` 会指出这个版本：用 `cargo install wasm-bindgen-cli --version <version> --locked` 安装
 （`NSH_WASM_BINDGEN` 可以指定 `PATH` 以外的 CLI）。链接了 wasm-bindgen 但不通过它调用 JS 的运行时
