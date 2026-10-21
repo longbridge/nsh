@@ -73,6 +73,11 @@ go elsewhere under these rules rather than into them.
   `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. A pointer over a view is `onHoverIn` /
   `onHoverOut` (decided by the user, 2026-10-21), a file drag over it `onFileDragEnter` / `onFileDragLeave` (the DOM's
   `dragenter`).
+- **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
+  `<prefix>X` / `<prefix>Y` fields: `position` in the view, `pagePosition` in the root view (the surface or its dialog),
+  and the keys held as `modifiers` (`{ control, alt, shift, platform }`, GPUI's `Modifiers`: `platform` is Command on
+  Apple platforms, the Windows / Super key elsewhere), as GPUI's `MouseMoveEvent { position, modifiers }` (decided by
+  the user, 2026-10-21). The frozen responder events keep React Native's `locationX` / `pageX`.
 - **Intent over geometry**: an event says what the app should do when the act has a name (`onLoadMore`, as
   `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`).
 - **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
@@ -153,6 +158,8 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
 | **Every element** | | | |
 | Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's name, as `scrollbar`; replaces the 2026-10-20 row keeping it |
+| `HoverEvent` (`onHoverMove`) `locationX` / `locationY`, `pageX` / `pageY`, `altKey` / `ctrlKey` / `metaKey` / `shiftKey` | `{ position: Point; pagePosition: Point; modifiers: Modifiers }` | Points | GPUI `MouseMoveEvent`; new types `Point`, `Modifiers` in `nsh` |
+| `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
