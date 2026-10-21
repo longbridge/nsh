@@ -65,7 +65,7 @@ go elsewhere under these rules rather than into them.
   (`pagingEnabled`, `javaScriptEnabled`; *guides* "a positive `enabled` / `visible` contract"); what something
   blocks is `disabled` (a menu item too, `PopupMenu::disabled`). Whether a part shows is `<part>Visible`, default
   `true` (`gpui-component` `scrollbar_visible`, `header_visible`, `cursor_visible`: `headerVisible`,
-  `scrollbarVisible`, `caretVisible`), never `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
+  `scrollbarVisible`), never `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
   boolean (a constant, a payload's field) is `is<Adjective>` / `has<Noun>`, as `gpui-kit`'s readers (`isAvailable`,
   `isViewable`, `isBuffering`); props never are (*guides*: builders `disabled(bool)`, readers `is_disabled()`).
 - **Begin and end**: a phase is `<act>Start` / `<act>End` (`gpui-kit`'s `on_start` / `on_end`: `onPanStart`,
@@ -152,7 +152,7 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
 | **Every element** | | | |
-| Input `caretHidden` | `caretVisible` (default `true`) | States | `gpui-component` `cursor_visible`; replaces the 2026-10-20 row keeping it |
+| Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's own name, as `placeholder`; replaces the 2026-10-20 row keeping it |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
