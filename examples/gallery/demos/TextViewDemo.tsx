@@ -1,8 +1,7 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { Clipboard } from "nsh/clipboard";
-import { SelectionArea, TextView } from "nsh/base";
-import { Button, Caption, Card, colors, DemoPage, Press } from "../ui";
-import { Glyph } from "./chat/glyphs";
+import { SelectionArea, TextView, type TextViewImage } from "nsh/base";
+import { Button, Caption, Card, colors, DemoPage } from "../ui";
+import { ImageViewer } from "./ImageViewer";
 
 const MARKDOWN = `# Release notes
 
@@ -32,6 +31,8 @@ for (const change of doc.changes) apply(change);
 
 > Measure before you optimize.
 
+![Green mountains under low clouds](https://picsum.photos/id/1018/1200/750)
+
 > [!TIP]
 > Long-press any paragraph to select and copy it.
 
@@ -58,12 +59,120 @@ Benchmarks ran on a mid-range phone.[^1]
 [^1]: A Pixel 7a and an iPhone 13, release builds.
 `;
 
-const HTML = `<h3>From HTML</h3>
-<p>Simple markup reads as a reader shows it: <b>bold</b>, <i>italic</i>, <mark>marked</mark>, H<sub>2</sub>O, x<sup>2</sup> and <a href="https://example.com">links</a>.</p>
-<ul><li>Lists</li><li>and <code>code</code></li></ul>
-<blockquote>Quotes, too.</blockquote>`;
+const HTML = `<article>
+  <header>
+    <h1 id="lantern-3">Lantern 3.0: notes that sync offline</h1>
+    <p><small>Posted by the Lantern team &middot; 14 min read &middot; <a href="https://example.com/blog/lantern-3" title="Permalink">permalink</a></small></p>
+  </header>
 
-const EXTENDED = `Thanks @maya and @liam for the review!
+  <section>
+    <h2 id="highlights">Highlights</h2>
+    <p>
+      Lantern    3.0 is our <b>largest</b> release so far:   notes now sync
+      <i>without a connection</i>, the editor gained <u>inline comments</u>, and the
+      <s>experimental</s> <mark>stable</mark> plugin API ships today. Search is
+      <mark color="yellow">twice as fast</mark>, and errors stand out in
+      <mark style="background-color: #fecaca">red</mark>.
+    </p>
+    <p>
+      Formulas in notes render too: H<sub>2</sub>O, e<sup>i&pi;</sup> + 1 = 0, and
+      2<sup>10</sup> = 1&#8239;024. Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to open the
+      command bar, or run <code>lantern sync --dry-run</code> first. Our designer put it best:
+      <q>a note app should feel like paper that remembers</q>. The <abbr title="Conflict-free replicated data type">CRDT</abbr>
+      engine behind it is open source.
+    </p>
+    <figure>
+      <a href="https://picsum.photos/id/1015/600/300"><img src="https://picsum.photos/id/1015/320/160" alt="A river valley under clouds" width="320" height="160"></a>
+      <figcaption>The new welcome screen, photographed on a slow train. <em>Tap to open it full size.</em></figcaption>
+    </figure>
+    <figure>
+      <img src="https://picsum.photos/id/1036/1200/750" alt="A tent in the snow below mountains" width="320" height="200">
+      <figcaption>Base camp, where the team wrote the sync engine. <em>Press it to zoom in.</em></figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2 id="upgrading">Upgrading</h2>
+    <h3>Step by step</h3>
+    <ol start="3">
+      <li>Back up your vault (steps 1 and 2 were installing and signing in)</li>
+      <li>Open <b>Settings &rarr; Sync</b> and choose a mode:
+        <ul>
+          <li><i>Live</i>: every change, right away</li>
+          <li><i>Batched</i>: every few minutes
+            <ol>
+              <li>on Wi-Fi only</li>
+              <li>or on any network</li>
+            </ol>
+          </li>
+        </ul>
+      </li>
+      <li>Restart the app</li>
+    </ol>
+
+    <h3>Checklist</h3>
+    <ul>
+      <li><input type="checkbox" checked> Export a backup</li>
+      <li><input type="checkbox" checked> Update every device</li>
+      <li><input type="checkbox"> Turn on end-to-end encryption</li>
+    </ul>
+
+    <h4>Terms</h4>
+    <dl>
+      <dt>Vault</dt>
+      <dd>A folder of notes that syncs as one.</dd>
+      <dt>Replica</dt>
+      <dd>A device's copy of a vault, merged with the others when they meet.</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2 id="plugins">Plugins</h2>
+    <blockquote>
+      <p>We rewrote our tag manager against the new API in an afternoon, and it got faster.</p>
+      <p>&mdash; <cite>Mara Okafor, maintainer of Tagline</cite></p>
+    </blockquote>
+    <p>A plugin is a module that exports <code>activate</code>:</p>
+    <pre><code class="language-ts">export function activate(app: App) {
+  app.commands.add("word-count", () =&gt; {
+    const words = app.editor.text().split(/\\s+/).length;
+    app.toast(\`\${words} words\`);
+  });
+}</code></pre>
+  </section>
+
+  <section>
+    <h2 id="performance">Performance</h2>
+    <table>
+      <thead>
+        <tr><th align="left">Operation</th><th align="right">2.9</th><th align="right">3.0</th><th style="text-align: center">Change</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Cold start</td><td align="right">820 ms</td><td align="right">410 ms</td><td align="center">&minus;50%</td></tr>
+        <tr><td>Search 10k notes</td><td align="right">96 ms</td><td align="right">44 ms</td><td align="center">&minus;54%</td></tr>
+        <tr><td>Full sync</td><td align="right">3.1 s</td><td align="right">1.2 s</td><td align="center">&minus;61%</td></tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan="3">Median of 20 runs on a 2021 laptop</td><td align="center">&#10003;</td></tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <details>
+    <summary>Known issues</summary>
+    <p>Very large attachments (over 200&nbsp;MB) still upload in one piece. Resumable uploads arrive in 3.1.</p>
+  </details>
+  <details open>
+    <summary>Thanks</summary>
+    <p>
+      NSH is created by <a href="https://github.com/sunli829"><img src="https://avatars.githubusercontent.com/u/20092316?s=48" alt="sunli829" style="width: 20px; height: 20px"></a> <a href="https://github.com/sunli829">@sunli829</a>
+      and <a href="https://github.com/huacnlee"><img src="https://avatars.githubusercontent.com/u/5518?s=48" alt="huacnlee" width="20" height="20"></a> <a href="https://github.com/huacnlee">@huacnlee</a>,
+      with&nbsp;&hearts;.
+    </p>
+  </details>
+</article>`;
+
+const EXTENDED = `Thanks @huacnlee and @sunli829 for the review!
 
 \`\`\`chart
 Mon 12
@@ -108,26 +217,6 @@ nsh export --out backup.json
 
 That's it. Ping me if anything looks off.`;
 
-/** A code block's Copy action. */
-function CopyCode(props: { code: string }) {
-  const copied = signal(false);
-  return (
-    <Press
-      onPress={() => {
-        Clipboard.setString(props.code);
-        copied.set(true);
-        setTimeout(() => copied.set(false), 1600);
-      }}
-      accessibilityLabel="Copy code"
-      hitSlop={4}
-    >
-      <View style={{ height: 16, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <Glyph name={copied() ? "check" : "copy"} size={12} tint={copied() ? colors.up : colors.muted} />
-        <Text style={{ fontSize: 11, color: copied() ? colors.up : colors.muted }}>{copied() ? "Copied" : "Copy"}</Text>
-      </View>
-    </Press>
-  );
-}
 
 /** A formula without a math renderer of the app's: its TeX, set apart. */
 function Tex(props: { tex: string; display: boolean }) {
@@ -142,24 +231,29 @@ function Tex(props: { tex: string; display: boolean }) {
 
 function Markdown() {
   const pressed = signal("nothing yet");
+  const viewing = signal<TextViewImage | null>(null);
   return (
     <Card icon="text" title="Markdown" subtitle="CommonMark and GitHub's: tables, tasks, alerts, footnotes, math, HTML">
       <TextView
         markdown={MARKDOWN}
         selectable
-        renderCodeBlockActions={(code) => <CopyCode code={code.code} />}
+        codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={(url) => pressed.set(url)}
+        onImagePress={(image) => viewing.set(image)}
       />
       <Caption label="Link pressed" note={pressed()} />
+      <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );
 }
 
 function Html() {
+  const viewing = signal<TextViewImage | null>(null);
   return (
-    <Card icon="text" title="HTML" subtitle="The same parts, from simple markup">
-      <TextView html={HTML} selectable />
+    <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
+      <TextView html={HTML} selectable onImagePress={(image) => viewing.set(image)} />
+      <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );
 }
@@ -197,7 +291,7 @@ function Extensions() {
           switch (node.name) {
             case "mention":
               return (
-                <View class="rounded-full bg-sky-500/15 px-2">
+                <View class="translate-y-[7px] rounded-full bg-sky-500/15 px-2">
                   <Text class="text-[14px] font-medium text-sky-700 dark:text-sky-300">@{node.attributes?.["1"]}</Text>
                 </View>
               );
@@ -256,7 +350,7 @@ function Streaming() {
         options={{ streaming: streaming() }}
         caret={streaming() ? <Caret /> : undefined}
         selectable
-        renderCodeBlockActions={(code) => <CopyCode code={code.code} />}
+        codeBlockActions={[{ id: "copy", label: "Copy code" }]}
       />
       <Button label={streaming() ? "Streaming…" : "Stream it"} icon="play" variant="secondary" disabled={streaming()} onPress={play} />
     </Card>

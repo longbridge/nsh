@@ -12,15 +12,15 @@ test("a chat reply streams in as Markdown, with a table and code to copy", async
   expect(app.shows("Windowed list")).toBe(true);
   expect(app.shows("Prefer fixed heights for rows you can predict.")).toBe(true);
   await app.press("label:Copy code");
-  expect(app.shows("Copied")).toBe(true);
+  expect(app.clipboard()).toContain("<List each={photos()} estimatedItemSize={76}>");
 });
 
 test("the Text View demo shows Markdown, HTML and extensions, and streams", async () => {
   const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Text View");
   await app.waitFor("Release notes");
-  expect(app.shows("From HTML")).toBe(true);
-  expect(app.shows("@maya")).toBe(true);
+  expect(app.shows("Lantern 3.0: notes that sync offline")).toBe(true);
+  expect(app.shows("@huacnlee")).toBe(true);
   expect(app.shows("HEADS UP")).toBe(true);
   await app.press("Stream it");
   await app.clock.runFor(10_000);

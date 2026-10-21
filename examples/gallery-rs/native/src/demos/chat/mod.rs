@@ -1634,10 +1634,7 @@ impl ChatState {
                         with_reply(item, |a| a.md.clone()).unwrap_or_default()
                     }
                 },
-                move || id.get(),
                 move || is_live.get(),
-                copied,
-                Rc::new(move |key, text| self.act(Action::Copy(key, text))),
             ))
             .child(If::new(done(|s| s == Status::Error), move || {
                 error_row(

@@ -406,7 +406,7 @@ export function Chat(props: { autoplay?: string } = {}) {
             <Caret />
           </View>
         </If>
-        <Markdown md={md()} id={m().id} streaming={live()} caret={live() ? <Caret /> : undefined} copied={copied()} onCopy={(key, text) => copy(key, text)} />
+        <Markdown md={md()} id={m().id} streaming={live()} caret={live() ? <Caret /> : undefined} />
         <If when={!live() && m().status === "error"}>
           <ErrorRow message={m().error ?? "Something went wrong."} onRetry={() => retry(m())} />
         </If>
