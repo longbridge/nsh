@@ -3,33 +3,34 @@ import { SelectionArea, TextView, type TextViewImage } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 
-const MARKDOWN = `# Release notes
+const MARKDOWN = `# Native Shell
 
-Version **2.4** brings *offline sync*, ~~beta~~ stable widgets and \`inline code\`. Press <kbd>⌘K</kbd> to search, or read [the guide](https://nsh.dev/guide).
+**NSH** loads apps written in *TSX* into native apps at run time and renders them with each platform's ~~web views~~ own views. Press <kbd>⌘K</kbd> to search the docs, or read [the guide](https://github.com/longbridge/nsh).
 
-## What changed
+## How it works
 
-1. Sync runs in the background
-2. Conflicts are merged per field
-   - text by paragraph
-   - lists by item
+1. The bundler compiles TSX to QuickJS bytecode
+2. The runtime runs it on a native core
+   - the reactive graph and the renderer are Rust
+   - layout is Taffy (flex and grid)
 
-- [x] Offline cache
-- [x] Background refresh
-- [ ] Shared folders
+- [x] Signed packages, checked before they run
+- [x] Hot reload on save
+- [ ] A styled component library (that one is yours)
 
-| Platform | Startup | Memory |
-|:---------|--------:|-------:|
-| iOS      |  180 ms |  42 MB |
-| Android  |  210 ms |  55 MB |
-| Desktop  |  140 ms |  61 MB |
+| Platform | Views | Text |
+|:---------|:------|-----:|
+| iOS      | UIKit | CoreText |
+| Android  | Android views | StaticLayout |
+| Linux    | GTK 4 | Pango |
 
-\`\`\`ts
-const doc = await sync.pull({ since: lastRun });
-for (const change of doc.changes) apply(change);
+\`\`\`tsx
+import { mount, Text } from "nsh";
+
+mount(() => <Text class="text-lg font-semibold">Hello, NSH</Text>);
 \`\`\`
 
-> Measure before you optimize.
+> Only the app's code is JS: everything else is native.
 
 ![Green mountains under low clouds](https://picsum.photos/id/1018/1200/750)
 
@@ -37,26 +38,26 @@ for (const change of doc.changes) apply(change);
 > Long-press any paragraph to select and copy it.
 
 > [!WARNING]
-> The old sync API is deprecated.
+> Apps are never rebuilt once delivered, so nothing that reached \`main\` is removed.
 
-The energy of a body at rest is $E = mc^2$.
+A list stays smooth at $60$ frames a second, $16.7\\,\\text{ms}$ each.
 
 $$
-\\int_0^1 x^2\\,dx = \\tfrac{1}{3}
+t_{\\text{frame}} = \\tfrac{1000}{60}\\,\\text{ms}
 $$
 
 <details>
-<summary>How merging works</summary>
+<summary>Why QuickJS</summary>
 
-Each field keeps the newest write; lists merge **by item** so nothing is lost.
+It is small, starts fast and runs **bytecode** delivered with the app, so nothing is parsed on the device.
 
 </details>
 
 ---
 
-Benchmarks ran on a mid-range phone.[^1]
+Numbers come from the gallery's benchmarks.[^1]
 
-[^1]: A Pixel 7a and an iPhone 13, release builds.
+[^1]: Release builds on a mid-range phone and a 2021 laptop.
 `;
 
 const HTML = `<article>
@@ -206,19 +207,19 @@ const extensions = [
   { name: "note", container: "note" },
 ];
 
-const REPLY = `Here is a plan for **the migration**:
+const REPLY = `Here is how to put **an NSH app** in your iOS app:
 
-1. Export the data with \`nsh export\`
-2. Check the *dry run* report
-3. Switch the app over
+1. Build the SDK with \`cargo xtask ios-embed\`
+2. Add *NativeShell.xcframework* to the project
+3. Show the app in an \`NshAppView\`
 
-| Step | Time |
-|------|-----:|
-| Export | 2 min |
-| Check | 5 min |
+| Step | Where |
+|------|------:|
+| SDK | your Mac |
+| View | your app |
 
 \`\`\`sh
-nsh export --out backup.json
+nsh package my-app --target ios-simulator --run
 \`\`\`
 
 That's it. Ping me if anything looks off.`;
@@ -363,12 +364,12 @@ function Streaming() {
   );
 }
 
-const QUESTION = "How long does the **migration** take?";
+const QUESTION = "Which **platforms** does NSH run on?";
 
-const ANSWER = `About seven minutes:
+const ANSWER = `Every one with a native backend:
 
-- Export: 2 min
-- Check: 5 min`;
+- iOS and Android: UIKit and Android views
+- macOS, Windows and Linux: AppKit, Win32 and GTK 4`;
 
 /** Two documents and a plain text that select as one, around a label that stays out. */
 function Selection() {

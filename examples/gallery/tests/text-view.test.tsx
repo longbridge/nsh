@@ -18,7 +18,7 @@ test("a chat reply streams in as Markdown, with a table and code to copy", async
 test("the Text View demo shows Markdown, HTML and extensions, and streams", async () => {
   const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Text View");
-  await app.waitFor("Release notes");
+  await app.waitFor("Native Shell");
   expect(app.shows("NSH 0.1.0: native UI from TSX")).toBe(true);
   expect(app.shows("@huacnlee")).toBe(true);
   expect(app.shows("HEADS UP")).toBe(true);
