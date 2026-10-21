@@ -2879,6 +2879,7 @@ dependencies = [
  "markup5ever_rcdom",
  "nsh-core",
  "regex",
+ "rustc-hash",
  "serde",
  "serde_json",
  "syntect",

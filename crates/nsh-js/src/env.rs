@@ -4,15 +4,20 @@
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
-//! context screens and modals provide (`safeAreaInsets`).
+//! context screens and modals provide (`safeAreaInsets`); the design
+//! tokens the app is drawn with (`token()` of `nsh`).
 
 use std::{
     cell::{Cell, RefCell},
     ffi::{CStr, c_int},
     ptr,
+    sync::Arc,
 };
 
-use nsh_core::platform::{Appearance, ColorScheme, Environment, Idiom, Os};
+use nsh_core::{
+    platform::{Appearance, ColorScheme, Environment, Idiom, Os},
+    ui::{Token, Tokens},
+};
 use rquickjs::qjs;
 
 use crate::{
@@ -54,6 +59,12 @@ pub(crate) struct Env {
     appearance: Cell<Appearance>,
     /// The insets context (owned): screens and modals provide theirs.
     insets: Cell<JsValue>,
+    /// The design tokens the app is drawn with ([`set_tokens`]).
+    tokens: RefCell<Arc<Tokens>>,
+    /// A signal of their version (owned): `token()` reads it, so what read
+    /// a token follows a new theme.
+    tokens_signal: Cell<JsValue>,
+    tokens_version: Cell<u32>,
 }
 
 impl Default for Env {
@@ -64,6 +75,9 @@ impl Default for Env {
             accessors: std::array::from_fn(|_| Cell::new(UNDEFINED)),
             appearance: Cell::new(Appearance::System),
             insets: Cell::new(UNDEFINED),
+            tokens: RefCell::new(Arc::default()),
+            tokens_signal: Cell::new(UNDEFINED),
+            tokens_version: Cell::new(0),
         }
     }
 }
@@ -83,6 +97,7 @@ impl Env {
                 qjs::JS_FreeValue(raw, c.replace(UNDEFINED));
             }
             qjs::JS_FreeValue(raw, self.insets.replace(UNDEFINED));
+            qjs::JS_FreeValue(raw, self.tokens_signal.replace(UNDEFINED));
         }
     }
 }
@@ -105,7 +120,70 @@ pub(crate) fn init(cx: *mut JsContext) {
     // SAFETY: a context whose default is the accessor (borrowed).
     let insets = unsafe { crate::dom::context(cx, UNDEFINED, 1, args.as_mut_ptr()) };
     e.insets.set(insets);
+    e.tokens_signal.set(reactive::new_signal(cx, number(0.0)));
 }
+
+/// Takes in the design tokens the app is drawn with: what read a token
+/// runs again.
+pub(crate) fn set_tokens(cx: *mut JsContext, tokens: Arc<Tokens>) {
+    let e = env(cx);
+    if **e.tokens.borrow() == *tokens {
+        return;
+    }
+    e.tokens.replace(tokens);
+    let version = e.tokens_version.get().wrapping_add(1);
+    e.tokens_version.set(version);
+    reactive::set_signal(cx, e.tokens_signal.get(), number(version as f32));
+}
+
+/// `token(name)`: the design token `name` in the appearance shown (a
+/// color as `#rrggbbaa`, a number, a font family), `undefined` when there
+/// is none. Reading it tracks the tokens and the appearance.
+unsafe extern "C" fn token(
+    cx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let e = env(cx);
+    for tracked in [
+        e.tokens_signal.get(),
+        e.accessors[Part::ColorScheme as usize].get(),
+    ] {
+        // SAFETY: calls a signal and an accessor the environment owns.
+        unsafe {
+            let read = qjs::JS_Call(cx, tracked, UNDEFINED, 0, ptr::null_mut());
+            if qjs::JS_IsException(read) {
+                return read;
+            }
+            qjs::JS_FreeValue(cx, read);
+        }
+    }
+    let Some(name) = crate::dom::string_arg(cx, arg(argc, argv, 0)) else {
+        return UNDEFINED;
+    };
+    let dark = scheme(e, &current(cx)) == "dark";
+    let value = e.tokens.borrow().get(&name);
+    match value {
+        Some(Token::Color(c)) => {
+            let c = nsh_core::Color::from(if dark { c.dark } else { c.light });
+            string(cx, &format!("#{:08x}", c.0))
+        }
+        Some(Token::Number(n)) => number(n),
+        Some(Token::Font(f)) => string(cx, &f),
+        _ => UNDEFINED,
+    }
+}
+
+/// `token` of `nsh`.
+pub(crate) const TOKEN_EXPORT: crate::modules::Item = (
+    "token",
+    Export::Function(token, 1),
+    Ts::function(
+        "The design token `name` of the app's theme (`nsh.json` `\"theme\"`, over\nshadcn/ui's tokens) in the appearance shown, reactive: a color as\n`#rrggbbaa`, a number (a length in points), a font family. The names are\nthe theme's CSS variables without `--`, which classes name too\n(`bg-primary`, `bg-up/30`, `rounded-(--radius)`).",
+        &["<K extends keyof Tokens>(name: K): Tokens[K]"],
+    ),
+);
 
 /// An accessor's run: reads its signal (tracked).
 unsafe extern "C" fn read(

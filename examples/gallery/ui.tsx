@@ -1,5 +1,5 @@
-import type { JSX, ScrollProps, ViewStyle } from "nsh";
-import { computed, effect, Image, Scroll, signal, Text, View } from "nsh";
+import type { JSX, ScrollProps, Tokens, ViewStyle } from "nsh";
+import { computed, effect, Image, Scroll, signal, Text, token, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
@@ -14,9 +14,8 @@ export const isDark = () => colorScheme() !== "light";
 
 /**
  * An object with `dark`'s keys whose getters read `dark` or `light` by the
- * appearance shown: every read in a reactive scope (JSX, a `draw`, an
- * effect) follows appearance changes, and spreads into components keep the
- * getters.
+ * appearance shown, for the finishes below: shadows and gradients are no
+ * design tokens, so they stay here while every color is the theme's.
  */
 function themed<T extends object>(dark: T, light: T): T {
   const out = {} as T;
@@ -69,93 +68,64 @@ export interface Palette {
   down: string;
 }
 
+/** An object whose getters read the theme's tokens: reads in a reactive
+ * scope (JSX, a `draw`, an effect) follow the appearance and the theme. */
+function tokens<K extends string>(names: Record<K, keyof Tokens>): Record<K, string> {
+  const out = {} as Record<K, string>;
+  for (const key of Object.keys(names) as K[]) {
+    Object.defineProperty(out, key, { enumerable: true, get: () => token(names[key]) });
+  }
+  return out;
+}
+
 /**
  * The gallery's look: a graphite page (or a paper one in light
  * appearance), cards with an inset surface, tabular numbers and one citrus
- * accent. Sizes are for phones: 16 pt gutters, 44 pt touch targets, 15 pt
- * body text. The desktop layout (`desktop`) keeps them and puts more side by
- * side.
+ * accent, its colors the tokens of `theme.json`. Sizes are for phones:
+ * 16 pt gutters, 44 pt touch targets, 15 pt body text. The desktop layout
+ * (`desktop`) keeps them and puts more side by side.
  */
-export const colors: Palette = themed<Palette>(
-  {
-    background: "#101113",
-    surface: "#18191c",
-    inset: "#0c0d0f",
-    raised: "#24262a",
-    field: "#0c0d0f",
-    fieldBorder: "#2c2e33",
-    border: "#2c2e33",
-    line: "#24262a",
-    text: "#eceef1",
-    muted: "#8d9198",
-    faint: "#5a5e65",
-    accent: "#c8f26d",
-    accentFill: "#c8f26d",
-    onAccent: "#13160c",
-    light: "#eef0f2",
-    onLight: "#111214",
-    track: "#24262a",
-    knob: "#8d9198",
-    code: "#d9dde3",
-    info: "#7ea8ff",
-    warn: "#ffb547",
-    danger: "#ff6170",
-    up: "#45d49a",
-    down: "#ff6170",
-  },
-  {
-    background: "#f4f4f2",
-    surface: "#ffffff",
-    inset: "#f0f0ec",
-    raised: "#fbfbf9",
-    field: "#e8e8e3",
-    fieldBorder: "#cfcfc8",
-    border: "#d8d8d1",
-    line: "#e2e2dc",
-    text: "#16171a",
-    muted: "#5f636a",
-    faint: "#9a9ea4",
-    accent: "#4f6e0c",
-    accentFill: "#c8f26d",
-    onAccent: "#13160c",
-    light: "#16171a",
-    onLight: "#ffffff",
-    track: "#e2e2dd",
-    knob: "#ffffff",
-    code: "#2a2d33",
-    info: "#3d63d1",
-    warn: "#b26a00",
-    danger: "#d43a4a",
-    up: "#138a5a",
-    down: "#d43a4a",
-  },
-);
+export const colors: Palette = tokens<keyof Palette>({
+  background: "background",
+  surface: "card",
+  inset: "inset",
+  raised: "raised",
+  field: "field",
+  fieldBorder: "input",
+  border: "border",
+  line: "line",
+  text: "foreground",
+  muted: "muted-foreground",
+  faint: "faint",
+  accent: "brand",
+  accentFill: "brand-fill",
+  onAccent: "on-brand",
+  light: "primary",
+  onLight: "primary-foreground",
+  track: "track",
+  knob: "knob",
+  code: "code",
+  info: "info",
+  warn: "warn",
+  danger: "destructive",
+  up: "up",
+  down: "down",
+});
 
-/** `rgba()` of a `#rrggbb` color. */
-export function alpha(hex: string, a: number) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+/** `color` at opacity `a`. */
+export function alpha(color: string, a: number) {
+  return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
 }
 
 /** Translucent tints of the tones, for fills behind text. */
-export const tints = themed(
-  {
-    accent: "rgba(200,242,109,0.14)",
-    info: "rgba(126,168,255,0.16)",
-    warn: "rgba(255,181,71,0.16)",
-    danger: "rgba(255,97,112,0.16)",
-    up: "rgba(69,212,154,0.16)",
-    down: "rgba(255,97,112,0.16)",
-  },
-  {
-    accent: "rgba(124,170,20,0.14)",
-    info: "rgba(61,99,209,0.10)",
-    warn: "rgba(178,106,0,0.11)",
-    danger: "rgba(212,58,74,0.10)",
-    up: "rgba(19,138,90,0.10)",
-    down: "rgba(212,58,74,0.10)",
-  },
-);
+export const tints = tokens({
+  accent: "brand-tint",
+  info: "info-tint",
+  warn: "warn-tint",
+  danger: "destructive-tint",
+  up: "up-tint",
+  down: "down-tint",
+});
 
 /** A surface's finish: a gradient over its color and its shadows. */
 export interface Finish {
@@ -277,7 +247,18 @@ export const toneTint = (tone: Tone) => (tone === "neutral" ? colors.raised : ti
 /** The monospaced family, for code (API names, identifiers). Figures use
  * the system font with tabular numbers instead. */
 export const mono = "monospace";
-export const radius = { card: 16, inset: 12, control: 10 } as const;
+/** Corner radii (`theme.json`'s `radius-card`, `radius`, `radius-control`). */
+export const radius = {
+  get card() {
+    return token("radius-card");
+  },
+  get inset() {
+    return token("radius");
+  },
+  get control() {
+    return token("radius-control");
+  },
+};
 
 /** The system header's colors on every page (iOS, Android). */
 export const header = {
@@ -331,7 +312,7 @@ export function PageHeader(props: {
           role="button"
           accessibilityLabel="Back"
           hitSlop={6}
-          class="hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"
+          class="hover:bg-hover active:bg-accent"
           style={{ height: 32, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 10, borderRadius: radius.control, cursor: "pointer" }}
         >
           <Icon name="back" size={18} tint={tint()} />
@@ -655,8 +636,8 @@ export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
 /**
  * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
- * `primary` is light (the main action), `secondary` dark, `accent` citrus.
- * A `color` fills it with that color instead.
+ * `primary` is light (the main action), `secondary` dark, `accent` citrus
+ * (the theme's `brand-fill`). A `color` fills it with that color instead.
  */
 export function Button(props: {
   label: string;

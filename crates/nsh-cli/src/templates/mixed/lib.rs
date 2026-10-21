@@ -38,7 +38,7 @@ pub fn Badge(props: BadgeProps, cx: Scope<BadgeEvent>) -> impl IntoElement {
         .py_2()
         .rounded_full()
         .bg(move || theme().primary())
-        .active(|s| s.bg(move || theme().primary_active()))
+        .active(|s| s.bg(move || theme().primary().opacity(0.9)))
         .on_press(move || cx.emit(BadgeEvent::Press))
         .child(text(props.label).text_color(move || theme().primary_foreground()))
 }

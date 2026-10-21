@@ -5359,7 +5359,7 @@ mod components {
     fn Swatch(_props: SwatchProps) -> impl IntoElement {
         view()
             .size_10()
-            .bg(move || tokens().color("primary.background").unwrap())
+            .bg(move || tokens().color("primary").unwrap())
             .active(|s| s.bg(rgb(0xff0000)))
     }
 
@@ -5393,7 +5393,7 @@ mod components {
                 _ => None,
             })
         };
-        let primary = token("primary.background");
+        let primary = token("primary");
         let batch = c.commit().unwrap();
         assert_eq!(background(&batch), Some(Color::from(primary.light)));
         assert_eq!(frame_of(&batch, 2).map(|f| f.size.width.0), Some(40.0));
@@ -5442,7 +5442,7 @@ mod components {
         view()
             .on_press(move || dim.set(true))
             .child(pill().selected(true).selected_style(move |s| {
-                s.bg(move || tokens().color("primary.background").unwrap())
+                s.bg(move || tokens().color("primary").unwrap())
                     .opacity(move || if dim.get() { 0.5_f32 } else { 1.0 })
             }))
     }
@@ -5479,7 +5479,7 @@ mod components {
                 _ => None,
             })
         };
-        let primary = token("primary.background");
+        let primary = token("primary");
         let batch = c.commit().unwrap();
         assert_eq!(styled(&batch), Some((Color::from(primary.light), 1.0)));
         // Dark appearance: the theme color switches natively.
@@ -5526,8 +5526,7 @@ mod components {
             })
         };
         let themed = |hex: u32| {
-            tokens_with(&[("primary.background", rgb(hex).into())])
-                .over(&test_tokens(None).unwrap())
+            tokens_with(&[("primary", rgb(hex).into())]).over(&test_tokens(None).unwrap())
         };
         c.commit().unwrap();
         c.set_host_tokens(Some(themed(0x00ff00)));
@@ -5540,7 +5539,7 @@ mod components {
             &mut c,
             vec![Op::SetProp {
                 id: ROOT_ID,
-                prop: Prop::UiTheme(r##"{ "primary.background": "#0000ff" }"##.into()),
+                prop: Prop::UiTheme(r##"{ "primary": "#0000ff" }"##.into()),
             }],
         );
         assert_eq!(c.commit().as_ref().and_then(background), None);
@@ -5563,13 +5562,13 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            Color::from(token("primary.background").light)
+            Color::from(token("primary").light)
         );
         // Not a token of the app's theme.
         assert!(view_style_of(&batch, 4).is_none());
         let host = tokens_with(&[
-            ("primary.background", AdaptiveColor::rgb(0x00ff00, 0x004400)),
-            ("chart.up", rgb(0x0000ff).into()),
+            ("primary", AdaptiveColor::rgb(0x00ff00, 0x004400)),
+            ("chart-up", rgb(0x0000ff).into()),
         ]);
         c.set_host_tokens(Some(host.clone()));
         let batch = c.commit().unwrap();
@@ -5593,7 +5592,7 @@ mod components {
         );
         // New values of the same tokens: only their classes are resolved.
         let mut changed = host;
-        changed.set_color("primary.background", rgb(0xff00ff).into());
+        changed.set_color("primary", rgb(0xff00ff).into());
         c.set_host_tokens(Some(changed));
         let batch = c.commit().unwrap();
         assert_eq!(
@@ -5633,7 +5632,7 @@ mod components {
             ],
         );
         c.commit().unwrap();
-        c.set_host_tokens(Some(tokens_with(&[("chart.up", rgb(0x0000ff).into())])));
+        c.set_host_tokens(Some(tokens_with(&[("chart-up", rgb(0x0000ff).into())])));
         let batch = c.commit().unwrap();
         // The app's class wins over the component's own background.
         assert_eq!(
@@ -5652,7 +5651,7 @@ mod components {
             &mut c,
             vec![Op::SetProp {
                 id: ROOT_ID,
-                prop: Prop::UiTheme(r##"{ "chart.up": "#0000ff" }"##.into()),
+                prop: Prop::UiTheme(r##"{ "chart-up": "#0000ff" }"##.into()),
             }],
         );
         view_with_classes(&mut c, 2, "w-10 h-10 bg-chart-up");
@@ -13198,4 +13197,45 @@ mod rust_lazy_context {
             .collect();
         assert_eq!(texts, ["provided"]);
     }
+}
+
+/// The tokens' `font-sans` is the font text is drawn with unless it sets
+/// its own, as a page's `--font-sans` is in Tailwind; a new one lays the
+/// text out again.
+#[test]
+fn text_takes_the_tokens_sans_font() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 3,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(text.spans[0].style.font_family, None);
+    let mut tokens = crate::ui::tokens::sample();
+    tokens.set_font(crate::ui::FONT_SANS, "Inter");
+    c.set_tokens(tokens);
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert_eq!(
+        text.spans[0].style.font_family,
+        Some(crate::style::FontFamily::new("Inter"))
+    );
 }

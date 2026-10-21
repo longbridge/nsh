@@ -178,7 +178,7 @@ function SidebarRow(props: { demo: DemoEntry }) {
       role="button"
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
-      class={active() ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"}
+      class={active() ? "bg-accent" : "hover:bg-hover active:bg-accent"}
       style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: radius.control, cursor: "pointer" }}
     >
       <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
@@ -204,7 +204,7 @@ function SidebarToggle() {
       role="button"
       accessibilityLabel="Toggle sidebar"
       accessibilityState={{ selected: sidebarOpen() }}
-      class="hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"
+      class="hover:bg-hover active:bg-accent"
       style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control, cursor: "pointer" }}
     >
       <Icon name="sidebar" size={18} tint={colors.muted} />

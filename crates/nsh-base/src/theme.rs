@@ -1,31 +1,38 @@
-//! The theme of NSH apps' UI, as `gpui-base`'s: semantic tokens (the app's
-//! background and text, borders, the main and destructive actions, muted
-//! surfaces, the overlay under dialogs, focus rings) with a light and a
-//! dark value each, corner radii and the base font size.
+//! The theme of NSH apps' UI: shadcn/ui's design tokens, exactly. The
+//! surfaces and roles (`background`, `card`, `popover`, `primary`,
+//! `secondary`, `muted`, `accent`), each with the color of what is drawn on
+//! it (`-foreground`), `destructive`, `border`, `input`, `ring`, the charts'
+//! colors (`chart-1` to `chart-5`), the sidebar's (`sidebar`, ...), each
+//! with a light and a dark value; the corner radius (`radius`) and the
+//! fonts (`font-sans`, `font-mono`, Tailwind's).
 //!
-//! A theme file is gpui-kit's format: `{ "themes": [{ "mode": "light",
-//! "radius": 8, "colors": { "primary.background": "#7c3aed", … } }, {
-//! "mode": "dark", … }] }`, colors as CSS colors or Tailwind palette names
-//! (`neutral-900`). An app's (`nsh.json` `"theme"`) goes over the default
-//! ([`DEFAULT_THEME`]); keys no token here names (`sidebar.background`,
-//! `chart.up`, `radius.card`) are kept as they are. The core keeps the
-//! result as design tokens ([`Tokens`]), which Tailwind classes name
-//! (`bg-primary`, `rounded-(--radius)`), and reads `nsh.json`'s theme with
+//! A theme file is shadcn's `cssVars`, as a registry item has them (what
+//! tweakcn and shadcn's themes export): `{ "cssVars": { "theme": { … },
+//! "light": { "primary": "oklch(0.205 0 0)", … }, "dark": { … } } }`,
+//! values as CSS writes them (colors, `var(--ring)`, `color-mix()`,
+//! lengths in `rem` or `px`, font family lists). An app's
+//! (`nsh.json` `"theme"`) goes over the default ([`DEFAULT_THEME`], shadcn's
+//! `neutral`); names it adds (`surface`, `up`, `radius-card`) are the app's
+//! own tokens, as variables a CSS theme adds are.
+//!
+//! The core keeps the result as design tokens ([`Tokens`]), which Tailwind
+//! classes name (`bg-primary`, `bg-up/30`, `rounded-(--radius)`) and TS
+//! reads (`token()` of `nsh`); it reads `nsh.json`'s theme with
 //! [`tokens_of`], which `nsh/base`'s registry brings. What draws with them
 //! is the app's: no component of `nsh/base` reads them, but for the
-//! default reading typography of `TextView`, whose colors are these tokens.
+//! default reading typography of `TextView`.
 
 use std::sync::{Arc, LazyLock};
 
 use nsh_core::{
     Color, JsonValue,
-    color::{Hsla, opaque_grey},
+    color::Hsla,
     geometry::{Points, px},
-    tailwind,
-    ui::{AdaptiveColor, Tokens},
+    ui::{AdaptiveColor, FONT_MONO, FONT_SANS, Tokens},
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 
-/// The default theme file: gpui-kit's default theme with mobile radii.
+/// The default theme file: shadcn/ui's `neutral` theme.
 pub const DEFAULT_THEME: &str = include_str!("default-theme.json");
 
 static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
@@ -34,9 +41,10 @@ static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
     Theme(Arc::new(tokens))
 });
 
-static PALETTE: LazyLock<tailwind::Theme> = LazyLock::new(tailwind::Theme::default);
+/// Points per `rem`, as Tailwind's theme has them.
+const REM: f32 = 16.0;
 
-/// A theme: design tokens with the semantic ones named. Cheap to clone.
+/// A theme: design tokens with shadcn's named. Cheap to clone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme(Arc<Tokens>);
 
@@ -82,7 +90,7 @@ macro_rules! semantic {
         impl Theme {
             $(
                 $(#[doc = $doc])*
-                #[doc = concat!("\n\nKey `", $key, "`.")]
+                #[doc = concat!("\n\nToken `", $key, "`.")]
                 pub fn $name(&self) -> AdaptiveColor {
                     self.semantic($key)
                 }
@@ -96,40 +104,64 @@ semantic! {
     background = "background",
     /// Text and icons on [`Theme::background`].
     foreground = "foreground",
+    /// Cards.
+    card = "card",
+    /// Text on [`Theme::card`].
+    card_foreground = "card-foreground",
+    /// Popovers, menus, tooltips.
+    popover = "popover",
+    /// Text on [`Theme::popover`].
+    popover_foreground = "popover-foreground",
+    /// The main action.
+    primary = "primary",
+    /// Text on [`Theme::primary`].
+    primary_foreground = "primary-foreground",
+    /// Secondary actions.
+    secondary = "secondary",
+    /// Text on [`Theme::secondary`].
+    secondary_foreground = "secondary-foreground",
+    /// Muted surfaces.
+    muted = "muted",
+    /// Secondary text: hints, captions, placeholders.
+    muted_foreground = "muted-foreground",
+    /// What is hovered or focused: menu items, list rows.
+    accent = "accent",
+    /// Text on [`Theme::accent`].
+    accent_foreground = "accent-foreground",
+    /// Destructive actions and errors.
+    destructive = "destructive",
     /// Borders and dividers.
     border = "border",
-    /// Destructive actions.
-    danger = "danger.background",
-    /// [`Theme::danger`] while pressed.
-    danger_active = "danger.active.background",
-    /// Text on [`Theme::danger`].
-    danger_foreground = "danger.foreground",
-    /// Muted surfaces.
-    muted = "muted.background",
-    /// Secondary text: hints, captions, placeholders.
-    muted_foreground = "muted.foreground",
-    /// Dims what is under a sheet or a dialog.
-    overlay = "overlay",
-    /// The main action.
-    primary = "primary.background",
-    /// [`Theme::primary`] while pressed.
-    primary_active = "primary.active.background",
-    /// Text on [`Theme::primary`].
-    primary_foreground = "primary.foreground",
+    /// The borders of inputs.
+    input = "input",
     /// Focus rings.
     ring = "ring",
-    /// Links in text.
-    link = "link",
-    /// Information: notes, hints.
-    info = "info.background",
-    /// Success: done, tips.
-    success = "success.background",
-    /// Warnings.
-    warning = "warning.background",
-    /// The background of selected text.
-    selection = "selection.background",
-    /// The header rows of tables and lists.
-    list_head = "list.head.background",
+    /// A chart's first series.
+    chart_1 = "chart-1",
+    /// A chart's second series.
+    chart_2 = "chart-2",
+    /// A chart's third series.
+    chart_3 = "chart-3",
+    /// A chart's fourth series.
+    chart_4 = "chart-4",
+    /// A chart's fifth series.
+    chart_5 = "chart-5",
+    /// The sidebar.
+    sidebar = "sidebar",
+    /// Text on [`Theme::sidebar`].
+    sidebar_foreground = "sidebar-foreground",
+    /// The sidebar's main action.
+    sidebar_primary = "sidebar-primary",
+    /// Text on [`Theme::sidebar_primary`].
+    sidebar_primary_foreground = "sidebar-primary-foreground",
+    /// What is hovered or focused in the sidebar.
+    sidebar_accent = "sidebar-accent",
+    /// Text on [`Theme::sidebar_accent`].
+    sidebar_accent_foreground = "sidebar-accent-foreground",
+    /// The sidebar's borders.
+    sidebar_border = "sidebar-border",
+    /// Focus rings in the sidebar.
+    sidebar_ring = "sidebar-ring",
 }
 
 impl Theme {
@@ -140,40 +172,54 @@ impl Theme {
         Ok(Self(Arc::new(tokens)))
     }
 
-    /// The corner radius of controls (buttons, inputs). Key `radius`.
+    /// The corner radius. Token `radius`.
     pub fn radius(&self) -> Points {
-        self.size("radius")
+        px(self
+            .number("radius")
+            .or_else(|| DEFAULT.number("radius"))
+            .unwrap_or(0.0))
     }
 
-    /// The corner radius of large surfaces (cards, sheets, dialogs). Key
-    /// `radius.lg`.
-    pub fn radius_lg(&self) -> Points {
-        self.size("radius.lg")
+    /// The app's font family, which text is drawn with unless it sets
+    /// its own (`None`: the system's). Token `font-sans`.
+    pub fn font_sans(&self) -> Option<Arc<str>> {
+        self.0.font(FONT_SANS).cloned()
     }
 
-    /// The base font size. Key `font.size`.
-    pub fn font_size(&self) -> Points {
-        self.size("font.size")
+    /// The monospaced font family (`None`: the system's). Token
+    /// `font-mono`.
+    pub fn font_mono(&self) -> Option<Arc<str>> {
+        self.0.font(FONT_MONO).cloned()
     }
 
-    /// The color of key `key` (any key the theme sets).
-    pub fn color(&self, key: &str) -> Option<AdaptiveColor> {
-        self.0.color(key)
+    /// The color named `name` (any the theme sets).
+    pub fn color(&self, name: &str) -> Option<AdaptiveColor> {
+        self.0.color(name)
     }
 
-    /// The number of key `key` (any key the theme sets).
-    pub fn number(&self, key: &str) -> Option<f32> {
-        self.0.number(key)
+    /// The number named `name` (any the theme sets).
+    pub fn number(&self, name: &str) -> Option<f32> {
+        self.0.number(name)
     }
 
-    /// Sets the color of key `key`.
-    pub fn set_color(&mut self, key: &str, color: AdaptiveColor) {
-        Arc::make_mut(&mut self.0).set_color(key, color);
+    /// The font family named `name` (any the theme sets).
+    pub fn font(&self, name: &str) -> Option<Arc<str>> {
+        self.0.font(name).cloned()
     }
 
-    /// Sets the number of key `key`.
-    pub fn set_number(&mut self, key: &str, value: f32) {
-        Arc::make_mut(&mut self.0).set_number(key, value);
+    /// Sets the color named `name`.
+    pub fn set_color(&mut self, name: &str, color: AdaptiveColor) {
+        Arc::make_mut(&mut self.0).set_color(name, color);
+    }
+
+    /// Sets the number named `name`.
+    pub fn set_number(&mut self, name: &str, value: f32) {
+        Arc::make_mut(&mut self.0).set_number(name, value);
+    }
+
+    /// Sets the font family named `name`.
+    pub fn set_font(&mut self, name: &str, family: impl Into<Arc<str>>) {
+        Arc::make_mut(&mut self.0).set_font(name, family);
     }
 
     /// Its design tokens.
@@ -187,19 +233,12 @@ impl Theme {
         Arc::unwrap_or_clone(self.0)
     }
 
-    /// A semantic color: the theme's, else the default's (tokens an
+    /// One of shadcn's colors: the theme's, else the default's (tokens an
     /// embedding app gives may leave it out).
-    fn semantic(&self, key: &str) -> AdaptiveColor {
-        self.color(key)
-            .or_else(|| DEFAULT.color(key))
+    fn semantic(&self, name: &str) -> AdaptiveColor {
+        self.color(name)
+            .or_else(|| DEFAULT.color(name))
             .unwrap_or(AdaptiveColor::TRANSPARENT)
-    }
-
-    fn size(&self, key: &str) -> Points {
-        px(self
-            .number(key)
-            .or_else(|| DEFAULT.number(key))
-            .unwrap_or(0.0))
     }
 }
 
@@ -209,221 +248,301 @@ impl From<Theme> for Tokens {
     }
 }
 
-/// A CSS color or a Tailwind palette name.
+/// A CSS color.
 fn color(value: &str) -> Option<Hsla> {
-    Color::parse(value)
-        .or_else(|| PALETTE.color(value))
-        .map(Hsla::from)
+    Color::parse(value).map(Hsla::from)
 }
 
-/// The pressed shade of `c`: 12% black over it in light appearance, 12%
-/// white in dark (its alpha kept).
-fn pressed(c: Hsla, dark: bool) -> Hsla {
-    c.blend(opaque_grey(if dark { 1.0 } else { 0.0 }, 0.12))
+/// A CSS length in points: `0.625rem`, `10px`, `10`.
+fn length(value: &str) -> Option<f32> {
+    let value = value.trim();
+    let (number, scale) = if let Some(n) = value.strip_suffix("rem") {
+        (n, REM)
+    } else if let Some(n) = value.strip_suffix("px") {
+        (n, 1.0)
+    } else {
+        (value, 1.0)
+    };
+    number
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|n| n.is_finite())
+        .map(|n| n * scale)
 }
 
-/// Applies the themes of `json` over `tokens`: each entry's `mode` picks
-/// the appearance of the colors it sets (a key `tokens` lacks takes the
-/// color in both until a mode sets its own); numbers come from any entry.
-/// A pressed color (`X.active.background`) an entry leaves out (or null)
-/// where it sets the color it is pressed on (`X.background`) follows that
-/// color, when the theme under it has one.
+/// The family of a CSS `font-family` list that the platform draws with:
+/// its first, unquoted (`None`: a generic family, the system's font).
+fn font_family(value: &str) -> Option<&str> {
+    let first = value.split(',').next()?.trim().trim_matches(['"', '\'']);
+    let generic = matches!(
+        first,
+        "" | "sans-serif"
+            | "serif"
+            | "system-ui"
+            | "ui-sans-serif"
+            | "ui-serif"
+            | "-apple-system"
+            | "BlinkMacSystemFont"
+    );
+    (!generic).then_some(first)
+}
+
+/// Applies theme file `json` (shadcn's `cssVars`) over `tokens`.
 fn apply(tokens: &mut Tokens, json: &str) -> Result<(), ThemeError> {
     let value: JsonValue =
         serde_json::from_str(json).map_err(|e| ThemeError(format!("not JSON: {e}")))?;
-    let entries = match value.get("themes") {
-        Some(JsonValue::Array(entries)) => entries.as_slice(),
-        _ => return Err(ThemeError("expected `{ \"themes\": [...] }`".into())),
-    };
-    for entry in entries {
-        let dark = match entry.get("mode").and_then(JsonValue::as_str) {
-            Some("dark") => true,
-            Some("light") | None => false,
-            Some(m) => return Err(ThemeError(format!("unknown mode `{m}`"))),
+    if let Some(vars) = value.get("cssVars") {
+        return apply_css_vars(tokens, vars);
+    }
+    Err(ThemeError(
+        "expected shadcn's `{ \"cssVars\": { ... } }`".into(),
+    ))
+}
+
+/// Applies shadcn's `cssVars`: `theme`'s values in both appearances,
+/// `light`'s in the light one (and the dark one when `dark` leaves them
+/// out), `dark`'s in the dark one. A color may name another
+/// (`var(--ring)`, in `color-mix()` too) of the same appearance: the
+/// file's or the one under it. Values of no kind a token has (shadows,
+/// letter spacing) are left out, as they are of no Tailwind utility NSH
+/// draws with a token.
+fn apply_css_vars(tokens: &mut Tokens, vars: &JsonValue) -> Result<(), ThemeError> {
+    let section = |name: &str| -> Result<FxHashMap<String, String>, ThemeError> {
+        let Some(v) = vars.get(name) else {
+            return Ok(FxHashMap::default());
         };
-        if let JsonValue::Object(fields) = entry {
-            for (key, value) in fields {
-                if let Some(n) = value.as_f64() {
-                    tokens.set_number(key, n as f32);
+        let JsonValue::Object(fields) = v else {
+            return Err(ThemeError(format!("cssVars.{name}: expected an object")));
+        };
+        let mut out = FxHashMap::default();
+        for (key, value) in fields {
+            match value {
+                JsonValue::Null => {}
+                JsonValue::String(s) => {
+                    out.insert(key.clone(), s.clone());
+                }
+                JsonValue::Number(n) => {
+                    out.insert(key.clone(), n.to_string());
+                }
+                v => {
+                    return Err(ThemeError(format!(
+                        "cssVars.{name}.{key}: expected a CSS value, got {v}"
+                    )));
                 }
             }
         }
-        let Some(JsonValue::Object(colors)) = entry.get("colors") else {
+        Ok(out)
+    };
+    let (both, light, dark) = (section("theme")?, section("light")?, section("dark")?);
+    let mut light_vars = both.clone();
+    light_vars.extend(light.iter().map(|(k, v)| (k.clone(), v.clone())));
+    let mut dark_vars = light_vars.clone();
+    dark_vars.extend(dark.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+    let base = tokens.clone();
+    let mut names: Vec<&String> = light_vars.keys().chain(dark.keys()).collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        let value = dark_vars.get(name).or_else(|| light_vars.get(name));
+        let Some(value) = value else { continue };
+        if name.starts_with("font-") {
+            if let Some(family) = font_family(value) {
+                tokens.set_font(name, family);
+            }
             continue;
-        };
-        let set = |tokens: &mut Tokens, key: &str, c: Hsla| {
-            let mut slot = tokens.color(key).unwrap_or(AdaptiveColor::from(c));
-            if dark {
-                slot.dark = c;
-            } else {
-                slot.light = c;
-            }
-            tokens.set_color(key, slot);
-        };
-        for (key, value) in colors {
-            let Some(prefix) = key.strip_suffix(".background") else {
-                continue;
-            };
-            let active = format!("{prefix}.active.background");
-            if colors.get(&active).is_none_or(JsonValue::is_null)
-                && tokens.color(&active).is_some()
-                && let Some(c) = value.as_str().and_then(color)
-            {
-                set(tokens, &active, pressed(c, dark));
-            }
         }
-        for (key, value) in colors {
-            // A theme file may write the colors it leaves unset as null.
-            let value = match value {
-                JsonValue::Null => continue,
-                JsonValue::String(s) => s,
-                v => return Err(ThemeError(format!("`{key}`: not a color: {v}"))),
-            };
-            // Values NSH does not read (gradients) are left out.
-            if let Some(c) = color(value) {
-                set(tokens, key, c);
+        let resolve = |vars: &FxHashMap<String, String>, dark: bool| {
+            resolve_color(name, vars, &base, dark, &mut FxHashSet::default())
+        };
+        match (resolve(&light_vars, false)?, resolve(&dark_vars, true)?) {
+            (Some(l), Some(d)) => tokens.set_color(name, AdaptiveColor { light: l, dark: d }),
+            (Some(c), None) | (None, Some(c)) => tokens.set_color(name, c.into()),
+            (None, None) => {
+                if let Some(n) = length(value) {
+                    tokens.set_number(name, n);
+                }
             }
         }
     }
     Ok(())
 }
 
+/// The color `name` is in `vars` (of one appearance), with the colors it
+/// names (`var(--x)`, `var(--x, fallback)`) resolved: the file's, else
+/// `base`'s. `None` when it is no color. A name that names itself is an
+/// error.
+fn resolve_color(
+    name: &str,
+    vars: &FxHashMap<String, String>,
+    base: &Tokens,
+    dark: bool,
+    seen: &mut FxHashSet<String>,
+) -> Result<Option<Hsla>, ThemeError> {
+    let Some(value) = vars.get(name) else {
+        return Ok(base
+            .color(name)
+            .map(|c| if dark { c.dark } else { c.light }));
+    };
+    if !seen.insert(name.to_owned()) {
+        return Err(ThemeError(format!("`{name}` names itself")));
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value.as_str();
+    while let Some(start) = rest.find("var(") {
+        out.push_str(&rest[..start]);
+        let inner = &rest[start + 4..];
+        let mut depth = 1;
+        let end = inner
+            .char_indices()
+            .find(|&(_, c)| {
+                depth += match c {
+                    '(' => 1,
+                    ')' => -1,
+                    _ => 0,
+                };
+                depth == 0
+            })
+            .map(|(i, _)| i)
+            .ok_or_else(|| ThemeError(format!("`{name}`: unclosed var()")))?;
+        let (var, fallback) = match inner[..end].split_once(',') {
+            Some((v, f)) => (v.trim(), Some(f.trim())),
+            None => (inner[..end].trim(), None),
+        };
+        let Some(var) = var.strip_prefix("--") else {
+            return Err(ThemeError(format!(
+                "`{name}`: var() names no `--` variable"
+            )));
+        };
+        match resolve_color(var, vars, base, dark, seen)? {
+            Some(c) => out.push_str(&format!("#{:08x}", Color::from(c).0)),
+            None => match fallback {
+                Some(f) => out.push_str(f),
+                None => {
+                    seen.remove(name);
+                    return Ok(None);
+                }
+            },
+        }
+        rest = &inner[end + 1..];
+    }
+    out.push_str(rest);
+    seen.remove(name);
+    Ok(color(&out))
+}
+
 #[cfg(test)]
 mod tests {
-    use nsh_core::color::rgb;
-
     use super::*;
 
-    fn hsla(hex: u32) -> Hsla {
-        rgb(hex).into()
+    fn hex(c: Hsla) -> u32 {
+        Color::from(c).0 >> 8
     }
 
+    /// shadcn's names, every one: the default theme has these and no
+    /// other.
+    const SHADCN: &[&str] = &[
+        "background",
+        "foreground",
+        "card",
+        "card-foreground",
+        "popover",
+        "popover-foreground",
+        "primary",
+        "primary-foreground",
+        "secondary",
+        "secondary-foreground",
+        "muted",
+        "muted-foreground",
+        "accent",
+        "accent-foreground",
+        "destructive",
+        "border",
+        "input",
+        "ring",
+        "chart-1",
+        "chart-2",
+        "chart-3",
+        "chart-4",
+        "chart-5",
+        "sidebar",
+        "sidebar-foreground",
+        "sidebar-primary",
+        "sidebar-primary-foreground",
+        "sidebar-accent",
+        "sidebar-accent-foreground",
+        "sidebar-border",
+        "sidebar-ring",
+    ];
+
     #[test]
-    fn the_default_theme_has_every_token_in_both_modes() {
+    fn the_default_theme_is_shadcns_neutral() {
         let theme = Theme::default();
-        assert_eq!(theme.primary().light, hsla(0x171717));
-        assert_eq!(theme.primary().dark, hsla(0xfafafa));
-        assert_eq!(
-            (theme.radius(), theme.radius_lg(), theme.font_size()),
-            (px(12.0), px(16.0), px(16.0))
-        );
+        let mut colors: Vec<&str> = theme.tokens().colors().map(|(k, _)| k).collect();
+        colors.sort_unstable();
+        let mut expected = SHADCN.to_vec();
+        expected.sort_unstable();
+        assert_eq!(colors, expected);
+        let numbers: Vec<_> = theme.tokens().numbers().collect();
+        assert_eq!(numbers, [("radius", 10.0)]);
+        assert_eq!(theme.tokens().fonts().count(), 0);
+        // oklch(0.205 0 0) / oklch(0.922 0 0).
+        assert_eq!(hex(theme.primary().light), 0x171717);
+        assert_eq!(hex(theme.primary().dark), 0xe5e5e5);
+        assert_eq!(theme.radius(), px(10.0));
+        // oklch(1 0 0 / 10%).
+        assert!((theme.border().dark.a - 0.1).abs() < 0.01);
         // Tokens without them read the defaults.
         assert_eq!(Theme(Arc::default()).ring(), theme.ring());
-    }
-
-    /// The pressed shades the theme derived before it computed them with
-    /// `Hsla::blend`: each channel moved 12% of the way to black or white.
-    #[test]
-    fn pressed_shades_pack_as_before() {
-        let before = |c: Color, level: u8| {
-            let channel = |shift: u32| {
-                let v = ((c.0 >> shift) & 0xff) as f32;
-                ((v + (f32::from(level) - v) * 0.12).round() as u32) << shift
-            };
-            Color(channel(24) | channel(16) | channel(8) | c.0 & 0xff)
-        };
-        let mut colors: Vec<Color> = Vec::new();
-        for (_, c) in Theme::default().tokens().colors() {
-            colors.extend([Color::from(c.light), Color::from(c.dark)]);
-        }
-        colors.extend((0..=0xffu32).map(|v| Color(v << 24 | v << 16 | v << 8 | 0xff)));
-        for c in colors {
-            assert_eq!(Color::from(pressed(c.into(), false)), before(c, 0), "{c:?}");
-            assert_eq!(
-                Color::from(pressed(c.into(), true)),
-                before(c, 0xff),
-                "{c:?}"
-            );
-        }
+        assert_eq!(theme.font_sans(), None);
     }
 
     #[test]
-    fn a_theme_overrides_the_default_and_derives_pressed_colors() {
+    fn css_vars_go_over_the_default() {
         let theme = Theme::from_json(
-            r##"{ "themes": [
-                { "mode": "light", "radius": 8, "colors": {
-                    "primary.background": "#7c3aed", "border": "red-500", "sidebar.background": "#000" } },
-                { "mode": "dark", "colors": { "primary.background": "#a78bfa", "primary.active.background": "#ffffff" } }
-            ] }"##,
+            r##"{ "cssVars": {
+                "theme": { "font-sans": "Inter, sans-serif", "font-mono": "'JetBrains Mono', monospace",
+                           "radius-card": "14px", "shadow-sm": "0 1px 2px #0000" },
+                "light": { "primary": "#7c3aed", "surface": "#ffffff", "up": "#138a5a",
+                           "up-subtle": "color-mix(in srgb, var(--up) 50%, transparent)",
+                           "sidebar-ring": "var(--primary)", "radius": "0.5rem" },
+                "dark": { "surface": "#18191c" }
+            } }"##,
         )
         .unwrap();
-        assert_eq!(theme.primary().light, hsla(0x7c3aed));
-        // Left out: its base color's pressed shade; set: as given.
-        assert_eq!(theme.primary_active().light, pressed(hsla(0x7c3aed), false));
-        assert_eq!(theme.primary_active().dark, hsla(0xffffff));
+        assert_eq!(hex(theme.primary().light), 0x7c3aed);
+        // Only light: both.
+        assert_eq!(hex(theme.primary().dark), 0x7c3aed);
+        let surface = theme.color("surface").unwrap();
         assert_eq!(
-            theme.border().light,
-            Hsla::from(PALETTE.color("red-500").unwrap())
+            (hex(surface.light), hex(surface.dark)),
+            (0xffffff, 0x18191c)
         );
-        // A mode the theme leaves out stays the default's.
-        assert_eq!(theme.border().dark, Theme::default().border().dark);
+        assert_eq!(hex(theme.sidebar_ring().light), 0x7c3aed);
         assert_eq!(theme.radius(), px(8.0));
-        assert!(theme.color("sidebar.background").is_some());
-        assert!(Theme::from_json(r#"{ "themes": [{ "colors": { "ring": 3 } }] }"#).is_err());
-    }
-
-    #[test]
-    fn keys_no_token_names_are_kept() {
-        let theme = Theme::from_json(
-            r##"{ "themes": [
-                { "mode": "dark", "radius.card": 10, "colors": {
-                    "sidebar.background": "#111111", "chart.up": "green-500",
-                    "title_bar.background": "linear-gradient(red, blue)" } },
-                { "mode": "light", "colors": { "sidebar.background": "#eeeeee" } }
-            ] }"##,
-        )
-        .unwrap();
-        let sidebar = theme.color("sidebar.background").unwrap();
-        assert_eq!(
-            (sidebar.light, sidebar.dark),
-            (hsla(0xeeeeee), hsla(0x111111))
+        assert_eq!(theme.number("radius-card"), Some(14.0));
+        assert_eq!(theme.font_sans().as_deref(), Some("Inter"));
+        assert_eq!(theme.font_mono().as_deref(), Some("JetBrains Mono"));
+        // Of no kind a token has.
+        assert_eq!(theme.tokens().get("shadow-sm"), None);
+        // Keys left out keep the default.
+        assert_eq!(theme.muted(), Theme::default().muted());
+        assert!(
+            Theme::from_json(r#"{ "cssVars": { "light": { "a": "var(--b)", "b": "var(--a)" } } }"#)
+                .is_err()
         );
-        // Set in one mode only: both.
-        let up = theme.color("chart.up").unwrap();
-        assert_eq!(up.light, up.dark);
-        // Values NSH does not read are left out.
-        assert_eq!(theme.color("title_bar.background"), None);
-        assert_eq!(theme.number("radius.card"), Some(10.0));
+        assert!(Theme::from_json(r#"{ "colors": {} }"#).is_err());
     }
 
     #[test]
-    fn colors_a_theme_leaves_unset_keep_their_value() {
-        // A theme file may write unset colors (and numbers) as null.
+    fn a_var_falls_back() {
         let theme = Theme::from_json(
-            r##"{ "themes": [{ "mode": "dark", "radius": null, "colors": {
-                "primary.background": null, "primary.active.background": null,
-                "danger.background": "#ff0000", "danger.active.background": null,
-                "ring": "#ff0000", "sidebar.background": null } }] }"##,
+            r##"{ "cssVars": { "light": { "edge": "var(--nothing, #ff0000)", "line": "var(--border)" } } }"##,
         )
         .unwrap();
-        let default = Theme::default();
-        assert_eq!(theme.primary(), default.primary());
-        assert_eq!(theme.primary_active(), default.primary_active());
-        assert_eq!(theme.radius(), default.radius());
-        assert_eq!(theme.ring().dark, hsla(0xff0000));
-        assert_eq!(theme.ring().light, default.ring().light);
-        // A null pressed color follows its base color.
-        assert_eq!(theme.danger_active().dark, pressed(hsla(0xff0000), true));
-    }
-
-    /// Text on the status colors, at rest and pressed, reads in both
-    /// appearances: a contrast of at least 4.5:1 (WCAG AA for text the
-    /// size of a button's label).
-    #[test]
-    fn text_on_status_colors_stands_out() {
-        let theme = Theme::default();
-        for status in ["danger", "info", "success", "warning"] {
-            let text = theme.color(&format!("{status}.foreground")).unwrap();
-            for key in [
-                format!("{status}.background"),
-                format!("{status}.active.background"),
-            ] {
-                let background = theme.color(&key).unwrap();
-                for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
-                    let contrast = b.contrast_ratio(t);
-                    assert!(contrast >= 4.5, "{key}: {b:?} / {t:?}: {contrast}");
-                }
-            }
-        }
+        assert_eq!(hex(theme.color("edge").unwrap().light), 0xff0000);
+        // The default's, in each appearance.
+        assert_eq!(theme.color("line").unwrap(), Theme::default().border());
     }
 }

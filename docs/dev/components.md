@@ -63,7 +63,7 @@ come from two places:
   `.bg(move || theme().primary())`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
   is updated. A prop is read with `props.x.get()` in a binding and `get_untracked()` in a listener. The root can be
   any element; the app's `class` (merged last, it wins) and `style` apply to it.
-- **Colors come from the theme** (`nsh_base::theme()`: gpui-kit's semantic tokens, a light and a dark value each),
+- **Colors come from the theme** (`nsh_base::theme()`: shadcn/ui's tokens, a light and a dark value each),
   not literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
@@ -615,23 +615,37 @@ it changes, and they are resolved again when the tokens change (`Components::app
 ## The theme
 
 The core has no theme, as GPUI has none: it keeps **design tokens** (`ui::Tokens`: colors with a light and a dark
-value, and numbers, by key), gives no key a meaning and has none of its own. The theme is `nsh/base`'s, as
-`gpui-base`'s is: `nsh_base::Theme` (`crates/nsh-base/src/theme.rs`) reads gpui-kit's theme files, names the semantic
-tokens (`background`, `foreground`, `border`, `primary` / `primary_active` / `primary_foreground`, `danger` /
-`danger_active` / `danger_foreground`, `muted` / `muted_foreground`, `overlay`, `ring`, `radius`, `radius_lg`,
-`font_size`) and brings the defaults (`default-theme.json`, gpui-kit's default theme with mobile radii); no component
-of `nsh/base` draws with them. An app sets its own in `nsh.json`: `"theme": "brand.json"` (a gpui-kit theme file,
-relative to `nsh.json`) or the same JSON inline, over the default. Keys the theme does not name (desktop components',
-the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` / `set_number`):
-tokens of the app's classes (`styles.md`); a pressed color (`X.active.background`) the file leaves out is derived from
-its base; null colors (gpui-kit serializes unset ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the
+value, numbers and font families, named as CSS custom properties without `--`: `muted-foreground`, `radius`,
+`font-sans`), gives no name a meaning but `font-sans` (the app's default font, as Tailwind's `--font-sans` is a
+page's; `font-mono` is the monospaced one) and has none of its own. The theme is `nsh/base`'s: `nsh_base::Theme`
+(`crates/nsh-base/src/theme.rs`) has shadcn/ui's tokens, exactly: `background` / `foreground`, `card`, `popover`,
+`primary`, `secondary`, `muted`, `accent` (each with its `-foreground`), `destructive`, `border`, `input`, `ring`,
+`chart-1` to `chart-5`, `sidebar`, `sidebar-foreground`, `sidebar-primary` / `-foreground`, `sidebar-accent` /
+`-foreground`, `sidebar-border`, `sidebar-ring` and `radius` (one accessor each: `primary()`, `chart_1()`,
+`sidebar_ring()`, `radius()`), plus `font-sans` / `font-mono` (`font_sans()`, `font_mono()`; unset, the system's
+fonts). The defaults are shadcn's `neutral` theme (`default-theme.json`, `radius` 0.625rem = 10 pt); no component of
+`nsh/base` draws with them but `TextView`'s reading typography.
+
+A theme file is shadcn's registry `cssVars`, as shadcn and tweakcn export them: `{ "cssVars": { "theme": {…},
+"light": {…}, "dark": {…} } }` (`theme`'s values in both appearances, `light`'s in the light one and in the dark one
+where `dark` leaves them out). Values are CSS: colors (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, names,
+`color-mix()`, `var(--x[, fallback])` of the same appearance's tokens, the file's or the default's), lengths (`rem`
+is 16 pt, `px`) and font family lists for `font-*` names (the first family that is not generic, `system-ui` /
+`sans-serif` / ... meaning the system's); values of no kind a token has (shadows, letter spacing) are left out. An
+app sets its own in `nsh.json`: `"theme": "brand.json"` (relative to `nsh.json`) or the same JSON inline, over the
+default. Names the theme adds (`surface`, `up`, `radius-card`) are the app's own tokens, as the variables of a
+Tailwind 4 `@theme` are (`Theme::color` / `number` / `font`, `set_color` / `set_number` / `set_font`): classes name
+them (`bg-surface`, `bg-up/30`, `rounded-(--radius-card)`; `styles.md`) and TS reads them with `token()` of `nsh`
+(`nsh-js` `env.rs`: reactive, a color as `#rrggbbaa` in the appearance shown, a number, a font family), typed by
+`interface Tokens`, which nsh writes per app into `.nsh/types/nsh/tokens.d.ts` from the theme
+(`nsh_bundler::tokens_declaration`). The bundler checks the
 theme; the entry hands the file to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any
 view is made; the core makes tokens of it with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s
 `tokens_of`, which also gives the defaults when the engine starts). A Rust app's root carries them
 (`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of the surface (`ui::ambient::tokens`): new
 tokens run again the bindings that read them. An embedding app can give a surface its own (`Core::set_host_tokens`,
 `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they are in the first frame): they win over the
-app's until cleared, and the app's keys they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
+app's until cleared, and the app's names they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
 and GPUI Kit apps").
 
 ## The host node and ids

@@ -1,5 +1,7 @@
 //! CSS value syntax shared by style strings and Tailwind classes: colors
-//! (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, named), lengths, angles,
+//! (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, named, and `color-mix()`
+//! of any of them in `srgb`, `srgb-linear`, `xyz`, `oklab`, `oklch` or
+//! `hsl`, as CSS Color 5 mixes), lengths, angles,
 //! and the lists of `box-shadow`, `filter` and gradients. Lengths are
 //! points: `px` and bare numbers are points, `rem` is 16 points.
 
@@ -124,6 +126,7 @@ pub(crate) fn color(s: &str) -> Option<Color> {
             "hsl" | "hsla" => hsl(args),
             "oklch" => oklab(args, true),
             "oklab" => oklab(args, false),
+            "color-mix" => color_mix(args),
             _ => None,
         };
     }
@@ -262,6 +265,207 @@ pub(crate) fn oklab_to_color(l: f32, a: f32, b: f32, alpha: f32) -> Color {
 fn from_unit(r: f32, g: f32, b: f32, a: f32) -> Color {
     use crate::color::byte;
     Color::rgba(byte(r), byte(g), byte(b), byte(a))
+}
+
+/// The color space `color-mix()` interpolates in.
+#[derive(Clone, Copy, PartialEq)]
+enum MixSpace {
+    Srgb,
+    /// Also `xyz`, `xyz-d65` and `xyz-d50`: they are linear transforms of
+    /// linear sRGB, and a linear transform commutes with the (premultiplied)
+    /// interpolation, so mixing in them gives the same color.
+    SrgbLinear,
+    Oklab,
+    Oklch,
+    Hsl,
+}
+
+/// How `color-mix()` interpolates a hue (CSS Color 4 "hue-interpolation").
+#[derive(Clone, Copy)]
+enum HueMethod {
+    Shorter,
+    Longer,
+    Increasing,
+    Decreasing,
+}
+
+/// A chroma (OKLCh) or saturation (HSL) below which the hue is powerless:
+/// colors arrive packed to 8 bits, so a grey's chroma is float noise, not 0.
+const ACHROMATIC: f32 = 1e-4;
+
+/// `color-mix(in <space> [<hue-method> hue]?, <color> <pct>?, <color>
+/// <pct>?)`, as CSS Color 5 defines it: percentages normalized (both
+/// omitted 50 / 50, one omitted the rest of 100%, a sum other than 100%
+/// scaled to it and a sum below 100% kept as an alpha factor), channels
+/// interpolated with premultiplied alpha, a powerless hue taking the other
+/// color's.
+fn color_mix(args: &str) -> Option<Color> {
+    let [method, first, second] = split_top(args, ',')[..] else {
+        return None;
+    };
+    let (space, hue) = mix_method(method)?;
+    let (c1, p1) = mix_color(first)?;
+    let (c2, p2) = mix_color(second)?;
+    let (p1, p2) = match (p1, p2) {
+        (None, None) => (0.5, 0.5),
+        (Some(p1), None) => (p1, 1.0 - p1),
+        (None, Some(p2)) => (1.0 - p2, p2),
+        (Some(p1), Some(p2)) => (p1, p2),
+    };
+    let sum = p1 + p2;
+    if sum <= 0.0 {
+        return None;
+    }
+    let w1 = p1 / sum;
+    let (mut v1, a1, missing1) = to_mix_space(c1, space);
+    let (mut v2, a2, missing2) = to_mix_space(c2, space);
+    let alpha = a1 * w1 + a2 * (1.0 - w1);
+    let hue_index = match space {
+        MixSpace::Oklch => Some(2),
+        MixSpace::Hsl => Some(0),
+        _ => None,
+    };
+    let mut out = [0.0; 3];
+    for i in 0..3 {
+        out[i] = if hue_index == Some(i) {
+            // A missing hue takes the other color's, so mixing with a grey
+            // keeps the hue instead of sweeping from red (hue 0).
+            match (missing1, missing2) {
+                (true, false) => v1[i] = v2[i],
+                (false, true) => v2[i] = v1[i],
+                _ => {}
+            }
+            let (h1, h2) = fix_hues(v1[i], v2[i], hue.unwrap_or(HueMethod::Shorter));
+            (h1 * w1 + h2 * (1.0 - w1)).rem_euclid(360.0)
+        } else if alpha > 0.0 {
+            (v1[i] * a1 * w1 + v2[i] * a2 * (1.0 - w1)) / alpha
+        } else {
+            v1[i] * w1 + v2[i] * (1.0 - w1)
+        };
+    }
+    // A sum below 100% leaves the rest transparent.
+    let alpha = alpha * sum.min(1.0);
+    Some(from_mix_space(out, alpha, space))
+}
+
+/// `in <space> [<hue-method> hue]?`; a hue method only for polar spaces.
+fn mix_method(s: &str) -> Option<(MixSpace, Option<HueMethod>)> {
+    let lower = s.to_ascii_lowercase();
+    let w: Vec<&str> = lower.split_whitespace().collect();
+    let (space, rest) = match w.as_slice() {
+        ["in", space, rest @ ..] => (*space, rest),
+        _ => return None,
+    };
+    let space = match space {
+        "srgb" => MixSpace::Srgb,
+        "srgb-linear" | "xyz" | "xyz-d65" | "xyz-d50" => MixSpace::SrgbLinear,
+        "oklab" => MixSpace::Oklab,
+        "oklch" => MixSpace::Oklch,
+        "hsl" => MixSpace::Hsl,
+        _ => return None,
+    };
+    let hue = match rest {
+        [] => None,
+        [method, "hue"] if matches!(space, MixSpace::Oklch | MixSpace::Hsl) => {
+            Some(match *method {
+                "shorter" => HueMethod::Shorter,
+                "longer" => HueMethod::Longer,
+                "increasing" => HueMethod::Increasing,
+                "decreasing" => HueMethod::Decreasing,
+                _ => return None,
+            })
+        }
+        _ => return None,
+    };
+    Some((space, hue))
+}
+
+/// `<color> <percentage>?` in either order; the percentage as a fraction,
+/// only within `0%..=100%`.
+fn mix_color(s: &str) -> Option<(Color, Option<f32>)> {
+    let percent = |w: &str| -> Option<f32> {
+        let p = number(w.strip_suffix('%')?)?;
+        (0.0..=100.0).contains(&p).then_some(p / 100.0)
+    };
+    match words(s).as_slice() {
+        [c] => Some((color(c)?, None)),
+        [a, b] if a.ends_with('%') => Some((color(b)?, Some(percent(a)?))),
+        [a, b] => Some((color(a)?, Some(percent(b)?))),
+        _ => None,
+    }
+}
+
+/// A color's coordinates in `space` (the hue in degrees), its alpha, and
+/// whether its hue is powerless (missing, in CSS's terms).
+fn to_mix_space(c: Color, space: MixSpace) -> ([f32; 3], f32, bool) {
+    use crate::color::{Rgba, rgb_to_oklab, srgb_to_linear};
+    let rgba = Rgba::from(c);
+    let v = match space {
+        MixSpace::Srgb => [rgba.r, rgba.g, rgba.b],
+        MixSpace::SrgbLinear => [
+            srgb_to_linear(rgba.r),
+            srgb_to_linear(rgba.g),
+            srgb_to_linear(rgba.b),
+        ],
+        MixSpace::Oklab | MixSpace::Oklch => {
+            let (l, a, b) = rgb_to_oklab(rgba);
+            if space == MixSpace::Oklab {
+                [l, a, b]
+            } else {
+                let chroma = a.hypot(b);
+                let hue = b.atan2(a).to_degrees().rem_euclid(360.0);
+                return ([l, chroma, hue], rgba.a, chroma < ACHROMATIC);
+            }
+        }
+        MixSpace::Hsl => {
+            let hsla = rgba.to_hsla();
+            return (
+                [hsla.h * 360.0, hsla.s, hsla.l],
+                rgba.a,
+                hsla.s < ACHROMATIC,
+            );
+        }
+    };
+    (v, rgba.a, false)
+}
+
+/// The mixed coordinates back to a packed sRGB color, channels clamped.
+fn from_mix_space(v: [f32; 3], alpha: f32, space: MixSpace) -> Color {
+    use crate::color::linear_to_srgb;
+    match space {
+        MixSpace::Srgb => from_unit(v[0], v[1], v[2], alpha),
+        MixSpace::SrgbLinear => from_unit(
+            linear_to_srgb(v[0]),
+            linear_to_srgb(v[1]),
+            linear_to_srgb(v[2]),
+            alpha,
+        ),
+        MixSpace::Oklab => oklab_to_color(v[0], v[1], v[2], alpha),
+        MixSpace::Oklch => {
+            let h = v[2].to_radians();
+            oklab_to_color(v[0], v[1] * h.cos(), v[1] * h.sin(), alpha)
+        }
+        MixSpace::Hsl => {
+            let (r, g, b) = crate::color::hsl_to_rgb(v[0], v[1], v[2]);
+            from_unit(r, g, b, alpha)
+        }
+    }
+}
+
+/// Two hues (degrees in `0..360`) adjusted so a straight interpolation
+/// between them goes the way `method` asks (CSS Color 4 "hue-interpolation").
+fn fix_hues(mut h1: f32, mut h2: f32, method: HueMethod) -> (f32, f32) {
+    let d = h2 - h1;
+    match method {
+        HueMethod::Shorter if d > 180.0 => h1 += 360.0,
+        HueMethod::Shorter if d < -180.0 => h2 += 360.0,
+        HueMethod::Longer if 0.0 < d && d < 180.0 => h1 += 360.0,
+        HueMethod::Longer if -180.0 < d && d <= 0.0 => h2 += 360.0,
+        HueMethod::Increasing if h2 < h1 => h2 += 360.0,
+        HueMethod::Decreasing if h1 < h2 => h1 += 360.0,
+        _ => {}
+    }
+    (h1, h2)
 }
 
 impl Color {
@@ -666,6 +870,108 @@ mod tests {
         );
         assert_eq!(color("oklab(1 0 0)"), Some(Color(0xffff_ffff)));
         assert_eq!(color("nope"), None);
+    }
+
+    /// Whether two packed colors differ by at most one step per channel:
+    /// mixes of polar colors go through 8-bit inputs and `f32` math.
+    fn near(a: Option<Color>, b: Option<Color>) -> bool {
+        let (Some(Color(a)), Some(Color(b))) = (a, b) else {
+            return false;
+        };
+        (0..4).all(|i| ((a >> (i * 8)) & 0xff).abs_diff((b >> (i * 8)) & 0xff) <= 1)
+    }
+
+    /// `color-mix()`, against what CSS Color 5 and browsers compute.
+    #[test]
+    fn color_mix() {
+        for (css, packed) in [
+            // Both percentages omitted: 50 / 50.
+            ("color-mix(in srgb, red, blue)", 0x800080ff),
+            ("COLOR-MIX(IN SRGB, red, blue)", 0x800080ff),
+            // One omitted: the rest of 100%, before or after the color.
+            ("color-mix(in srgb, red 25%, blue)", 0x4000bfff),
+            ("color-mix(in srgb, 25% red, blue)", 0x4000bfff),
+            ("color-mix(in srgb, red, blue 75%)", 0x4000bfff),
+            ("color-mix(in srgb, red 100%, blue)", 0xff0000ff),
+            // A sum below 100%: scaled, and the result's alpha times the sum.
+            ("color-mix(in srgb, red 20%, blue 30%)", 0x66009980),
+            // A sum above 100%: scaled, alpha kept.
+            ("color-mix(in srgb, red 75%, blue 75%)", 0x800080ff),
+            // Premultiplied alpha: transparent only lowers the alpha.
+            ("color-mix(in srgb, #ff0000 30%, transparent)", 0xff00004d),
+            ("color-mix(in oklab, transparent, #3b82f6)", 0x3b82f680),
+            ("color-mix(in oklch, transparent, #3b82f6 40%)", 0x3b82f666),
+            (
+                "color-mix(in srgb, rgb(255 0 0 / 0.5), rgb(0 0 255))",
+                0x5500aabf,
+            ),
+            ("color-mix(in srgb-linear, red, blue)", 0xbc00bcff),
+            ("color-mix(in xyz, red, blue)", 0xbc00bcff),
+            ("color-mix(in oklab, white, black)", 0x636363ff),
+            // HSL hues: shorter and longer ways around.
+            (
+                "color-mix(in hsl, hsl(350 100% 50%), hsl(30 100% 50%))",
+                0xff2b00ff,
+            ),
+            (
+                "color-mix(in hsl longer hue, hsl(350 100% 50%), hsl(30 100% 50%))",
+                0x00d5ffff,
+            ),
+            // Nested.
+            (
+                "color-mix(in srgb, color-mix(in srgb, red, blue), black)",
+                0x400040ff,
+            ),
+        ] {
+            assert!(
+                near(color(css), Some(Color(packed))),
+                "{css}: {:x?}",
+                color(css)
+            );
+        }
+        // OKLCh hue interpolation, against the colors it should land on.
+        let a = "oklch(0.7 0.1 350)";
+        let b = "oklch(0.7 0.1 30)";
+        for (method, expected) in [
+            ("", "oklch(0.7 0.1 10)"),
+            (" shorter hue", "oklch(0.7 0.1 10)"),
+            (" longer hue", "oklch(0.7 0.1 190)"),
+            (" increasing hue", "oklch(0.7 0.1 10)"),
+            (" decreasing hue", "oklch(0.7 0.1 190)"),
+        ] {
+            let css = format!("color-mix(in oklch{method}, {a}, {b})");
+            assert!(
+                near(color(&css), color(expected)),
+                "{css}: {:x?}",
+                color(&css)
+            );
+        }
+        // A grey's hue is powerless: the mix keeps the other color's.
+        assert!(near(
+            color("color-mix(in oklch, white, oklch(0.7 0.1 30))"),
+            color("oklch(0.85 0.05 30)")
+        ));
+        assert!(near(
+            color("color-mix(in hsl, white, hsl(120 100% 50%))"),
+            color("hsl(120 50% 75%)")
+        ));
+        for css in [
+            "color-mix(in srgb, red 0%, blue 0%)",
+            "color-mix(in srgb, red -10%, blue)",
+            "color-mix(in srgb, red 120%, blue)",
+            "color-mix(in srgb, red 10% 20%, blue)",
+            "color-mix(in srgb, red 10, blue)",
+            "color-mix(srgb, red, blue)",
+            "color-mix(in nope, red, blue)",
+            "color-mix(in srgb shorter hue, red, blue)",
+            "color-mix(in oklch sideways hue, red, blue)",
+            "color-mix(in oklch shorter, red, blue)",
+            "color-mix(in srgb, red)",
+            "color-mix(in srgb, red, blue, green)",
+            "color-mix(in srgb, red, nope)",
+        ] {
+            assert_eq!(color(css), None, "{css}");
+        }
     }
 
     #[test]

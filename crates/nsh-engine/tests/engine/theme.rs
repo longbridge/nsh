@@ -27,7 +27,7 @@ fn default_primary() -> Color {
 
 fn themed(hex: &str) -> Theme {
     Theme::from_json(&format!(
-        r#"{{ "themes": [{{ "colors": {{ "primary.background": "{hex}" }} }}] }}"#
+        r#"{{ "cssVars": {{ "light": {{ "primary": "{hex}" }} }} }}"#
     ))
     .unwrap()
 }

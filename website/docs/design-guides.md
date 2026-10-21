@@ -127,17 +127,20 @@ user notices or does.
 Read colors from the theme (`theme()` in Rust, token classes in TSX) and use them by semantic role:
 
 - `background` and `foreground` for the main surface and text;
-- `group_box`, `popover`, `sidebar`, and their foreground tokens for their named surfaces;
-- `muted` and `muted.foreground` for supporting information;
-- `primary` for the principal action or selection emphasis;
-- `danger`, `warning`, `success`, and `info` only for their meanings;
-- `border`, `input.border`, and `ring` for structure and interaction.
+- `card`, `popover`, `sidebar`, and their foreground tokens for their named surfaces;
+- `muted` and `muted-foreground` for supporting information;
+- `primary` for the principal action or selection emphasis, `secondary` and `accent` for quieter emphasis and
+  hovered or focused rows;
+- `destructive` only for destructive actions and errors, and status colors the app adds to its theme (`success`,
+  `warning`) only for their meanings;
+- `chart-1` to `chart-5` for data series;
+- `border`, `input`, and `ring` for structure and interaction.
 
 ```rust tabs
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius_lg())
+    .rounded(move || theme().radius())
     .border_1()
     .border_color(move || theme().border())
     .bg(move || theme().background())
@@ -148,7 +151,7 @@ view()
 ```
 
 ```tsx tabs
-<View class="gap-1 rounded-(--radius-lg) border border-border bg-background p-4">
+<View class="gap-1 rounded-(--radius) border border-border bg-background p-4">
   <Text class="text-foreground">Balance</Text>
   <Text class="text-sm text-muted-foreground">Updated just now</Text>
 </View>
@@ -160,27 +163,27 @@ that foreground is black or background is white.
 
 Use a badge for a short state, count, or classification that benefits from rapid scanning—not for every label,
 metadata value, filter, or section title. Keep most badges neutral; reserve semantic colors for states that truly carry
-success, warning, danger, or informational meaning. A row of multicolored badges is usually a missing hierarchy or
+success, warning, destructive, or informational meaning. A row of multicolored badges is usually a missing hierarchy or
 grouping decision.
 
 Application UI should not contain raw hex, `rgb()`/`rgba()`, or `hsl()` colors, or palette classes such as
 `bg-zinc-100`. Resolve colors from the theme by semantic role. If the required role does not exist, define it in the
-app's theme file ([Theme tokens](./tailwind.md#theme-tokens): `"chart.up"` makes `text-chart-up` and
-`theme().color("chart.up")`) rather than embedding a palette value at the call site. Raw colors belong only inside
-theme definitions or in audited data/raster content whose color is itself the data.
+app's theme file ([Theme tokens](./tailwind.md#theme-tokens): `"up": "#16a34a"` in its `light` and `dark` makes
+`text-up`, `bg-up/30`, `token("up")` in TSX and `theme().color("up")` in Rust) rather than embedding a palette value
+at the call site. Raw colors belong only inside theme definitions or in audited data/raster content whose color is itself the data.
 
 ### Radius, spacing, and density
 
-Use a finite radius scale, as with type and control sizes. Choose from the theme's tiers (`radius` for controls,
-`radius.lg` for large surfaces, and Tailwind's `rounded-sm` … `rounded-2xl` between them) instead of inventing a
+Use a finite radius scale, as with type and control sizes. Choose from the theme's `radius` (for controls and
+surfaces alike, `rounded-(--radius)`), radii the app adds to its theme, and Tailwind's `rounded-sm` … `rounded-2xl` between them) instead of inventing a
 radius for each element. Large containers may use a softer tier than the controls they contain; compact controls and
 overlays use tighter tiers. For an ordinary rectangle, the radius should remain visibly smaller than half its shorter
 side. Use `rounded-full` (`.rounded_full()`) only for intentional circles and pills; a tooltip must not become a
 capsule by accident.
 
 Nested surfaces should read as concentric shapes. Use `inner radius ≈ max(0, outer radius − gap)` to choose the
-closest suitable theme tier; the visible band should remain even through the turn. Add a named token to the theme
-(`"radius.inset": 6`, `rounded-(--radius-inset)`) if a repeated composition needs an intermediate value. A segmented
+closest suitable radius; the visible band should remain even through the turn. Add a named token to the theme
+(`"radius-inset": "0.375rem"`, `rounded-(--radius-inset)`) if a repeated composition needs an intermediate value. A segmented
 control is one silhouette: its end segments follow the container's inner corners, its middle segments remain square,
 and each boundary has one divider of consistent thickness.
 
@@ -357,8 +360,8 @@ size—not merely when every object becomes larger.
 
 NSH's lengths are points, and the user's text size (Dynamic Type on iOS, font size on Android, the desktops' text
 scaling, a host app's own setting) scales text: every text and input that allows font scaling grows, while spacing,
-radii, borders and images keep their size ([Text size](./device-and-environment.md#text-size)). The theme's base font
-size (`font.size`, `theme().font_size()`) is the body size the type scale steps around.
+radii, borders and images keep their size ([Text size](./device-and-environment.md#text-size)). The app's base text
+size (Tailwind's `text-base`, 16 points) is the body size the type scale steps around.
 
 Design in ratios:
 
@@ -390,7 +393,7 @@ its regions. Popovers, menus, sheets, dialogs, and notifications may use progres
 sit above other content. Do not put a shadow on every card.
 
 All surfaces of the same kind should share one treatment. Give the popup families one themed surface (the `popover`
-tokens, the border, `radius.lg` and one shadow) so `Popover`, `Menu`, `ContextMenu` and `Tooltip` do not drift apart.
+tokens, the border, `radius` and one shadow) so `Popover`, `Menu`, `ContextMenu` and `Tooltip` do not drift apart.
 When an application invents another anchored surface, reuse that treatment instead of approximating it with unrelated
 border and shadow literals.
 
@@ -574,7 +577,7 @@ semantics.
 - Use component variants by meaning. Primary is reserved for the explicit default commit in a decision area—normally
   the action invoked by Return on the desktops. A lone, frequent, or desirable action is not automatically primary. An
   `Add` command in a management toolbar normally uses a default button; a form's default `Create` commit may use
-  primary. Use danger for destructive commitment and ghost for quiet toolbar actions.
+  primary. Use destructive for destructive commitment and ghost for quiet toolbar actions.
 - Prefer explicit parts and slots over styling arbitrary descendants.
 - Keep a repeated pattern consistent across the product. Wrap it in an application component when it carries domain
   language or policy.
@@ -615,7 +618,7 @@ fn form_actions(cancel: impl Fn() + 'static, create: impl Fn() + 'static) -> imp
                 .bg(move || theme().primary())
                 .px_4()
                 .py_2()
-                .active(|s| s.bg(move || theme().primary_active()))
+                .active(|s| s.bg(move || theme().primary().opacity(0.9)))
                 .child(text("Create").text_color(move || theme().primary_foreground())),
         )
 }
@@ -632,7 +635,7 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
       <Button onPress={props.onCancel} class="rounded-(--radius) border border-border px-4 py-2 active:bg-muted">
         <Text class="text-foreground">Cancel</Text>
       </Button>
-      <Button onPress={props.onCreate} class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
+      <Button onPress={props.onCreate} class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary/90">
         <Text class="text-primary-foreground">Create</Text>
       </Button>
     </View>
@@ -754,16 +757,16 @@ and is invisible to touch, keyboard-only, and many assistive technology workflow
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, theme};
-use nsh_core::ui::StyleRefinement;
+use nsh_core::{color::black, ui::StyleRefinement};
 
 /// The app's popup surface, shared by its menus, popovers and tooltips.
 fn popup(s: StyleRefinement) -> StyleRefinement {
     s.min_w(px(192.0))
         .p_1()
-        .rounded(move || theme().radius_lg())
+        .rounded(move || theme().radius())
         .border_1()
         .border_color(move || theme().border())
-        .bg(move || theme().color("popover.background").unwrap_or_else(|| theme().background()))
+        .bg(move || theme().popover())
         .shadow_lg()
 }
 
@@ -782,7 +785,7 @@ fn more_menu(rename: impl Fn() + 'static, duplicate: impl Fn() + 'static, delete
     menu()
         .offset(px(4.0))
         .popup_style(popup)
-        .backdrop_style(|s| s.bg(move || theme().overlay()))
+        .backdrop_style(|s| s.bg(black().opacity(0.5)))
         .trigger(
             view()
                 .label("More actions")
@@ -805,7 +808,7 @@ import { Text, View } from "nsh";
 import { Menu, MenuItem, MenuSeparator } from "nsh/base";
 
 /** The app's popup surface, shared by its menus, popovers and tooltips. */
-export const popup = "min-w-48 rounded-(--radius-lg) border border-border bg-popover p-1 shadow-lg";
+export const popup = "min-w-48 rounded-(--radius) border border-border bg-popover p-1 shadow-lg";
 const item = "rounded-(--radius) px-3 py-2 hover:bg-muted active:bg-muted";
 
 function MoreMenu(props: { onRename: () => void; onDuplicate: () => void; onDelete: () => void }) {
@@ -813,7 +816,7 @@ function MoreMenu(props: { onRename: () => void; onDuplicate: () => void; onDele
     <Menu
       offset={4}
       popupClass={popup}
-      backdropClass="bg-overlay"
+      backdropClass="bg-black/50"
       trigger={
         <View accessibilityLabel="More actions" class="size-11 items-center justify-center rounded-full active:bg-muted">
           <Text class="text-foreground">⋯</Text>

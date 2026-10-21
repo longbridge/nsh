@@ -1446,6 +1446,9 @@ static PREFIXES: &[(&str, Handler)] = &[
             });
         }
         let a = arbitrary(v)?;
+        if let Some(family) = arbitrary_hinted(&a, "family-name") {
+            return one(sets(K::FontFamily, family.trim_matches(['"', '\''])));
+        }
         match num(&a) {
             Some(w) => one(setn(K::FontWeight, w)),
             None => one(sets(K::FontFamily, a.trim_matches(['"', '\'']))),

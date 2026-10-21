@@ -130,15 +130,14 @@ import { SafeAreaView } from "nsh/base";
 function App() {
   const count = signal(0);
   return (
-    <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
-      <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
+    <SafeAreaView class="flex-1 items-center justify-center gap-4 bg-background">
+      <Text class="text-3xl font-semibold text-foreground">{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeStyle={{ opacity: 0.6 }}
         role="button"
-        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
+        class="rounded-(--radius) bg-primary px-5 py-3 active:bg-primary/90"
       >
-        <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
+        <Text class="text-lg text-primary-foreground">Tap</Text>
       </View>
     </SafeAreaView>
   );
@@ -173,11 +172,13 @@ In TSX:
   base components, as `nsh_base` does in Rust.
 - **`function App()`** is a component that runs **once**. **`{count()}`** reads the signal inside JSX: the compiler
   sees a call and makes this text follow the signal.
-- **`<View onPress>`** is a native view that reacts to presses; `activeStyle` is its style while pressed. `View`,
+- **`<View onPress>`** is a native view that reacts to presses; `active:` classes are its style while pressed. `View`,
   `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from `nsh`; only
   `If` and `Each` need no import.
-- **`style={{ … }}`** takes an object of camelCase style properties, with numbers in points; `class` takes
-  [Tailwind](./tailwind.md) classes.
+- **`class`** takes [Tailwind](./tailwind.md) classes; `style={{ … }}` takes an object of camelCase style
+  properties, with numbers in points. `bg-background`, `bg-primary`, `text-primary-foreground` and
+  `rounded-(--radius)` name the tokens of the app's theme ([Theme tokens](./tailwind.md#theme-tokens)): they follow
+  dark mode by themselves, and `"theme"` in `nsh.json` restyles them.
 - **`mount(App)`** renders the component into the app's surface.
 
 > [!IMPORTANT]

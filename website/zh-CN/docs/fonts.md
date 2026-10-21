@@ -18,7 +18,7 @@ group: ui
 | `"monospace"`、`"ui-monospace"` | 系统等宽字体（iOS 上是 SF Mono） |
 | `"ui-rounded"` | 系统圆体（SF Pro Rounded），仅限 iOS |
 
-系统字体支持 100 到 900 的所有字重。Tailwind 的 `font-sans`、`font-serif` 和 `font-mono` 分别对应前三行。
+系统字体支持 100 到 900 的所有字重。Tailwind 的 `font-sans`、`font-serif` 和 `font-mono` 分别对应前三行；主题设置了字体时，`font-sans` 和 `font-mono` 对应主题的字体（[应用的默认字体](#应用的默认字体)）。
 
 设备上已安装的字体族可以直接用名称指定（iOS 上的 `"Georgia"`、`"Avenir Next"`）。不同平台和系统版本安装的字体各不相同，所以设计依赖的字体请随应用发布。在 iOS 上，不存在的字体族会回退到系统字体，并在日志中输出警告（`font family 'X' is not available`）。
 
@@ -129,7 +129,20 @@ import "./fonts/Inter-Bold.ttf";
 
 ## 应用的默认字体
 
-应用的字体设置在容器上，内部的文字会继承它。
+主题的 `font-sans` 是应用的字体：没有设置自己字体族的文字都用它绘制，Rust 组件和 TSX 都一样，就像网页使用 Tailwind 的 `--font-sans`。`font-mono` 是等宽字体，用于 `font-mono` 类和 `TextView` 中的代码。在应用的主题（`nsh.json` 的 `"theme"`，[用 Rust 开发](./rust.md#主题)）中设置它们，并像上文那样发布字体文件：
+
+```json
+{
+  "cssVars": {
+    "theme": {
+      "font-sans": "Inter, sans-serif",
+      "font-mono": "JetBrains Mono, monospace"
+    }
+  }
+}
+```
+
+列表中第一个非通用的字体族就是所用的字体；第一个是通用字体族（`system-ui`、`sans-serif`）时使用系统字体。字体也可以设置在容器上，内部的文字会继承它。
 
 ```rust tabs
 #[component]

@@ -126,7 +126,7 @@ mount(App);
 | `minRuntime` | string | `publish` | 能运行该签名包的最低 NSH 运行时版本，例如 `0.2.0`。默认：CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 | `icon` | string | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
-| `theme` | string 或 object | 每次构建 | 应用的 Rust 组件绘制时使用的主题：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)）。 |
+| `theme` | string 或 object | 每次构建 | 应用的设计令牌（shadcn/ui 的 `cssVars`，叠加在默认的 `neutral` 主题之上），供 token 类名、`token()` 和 Rust 组件绘制时使用：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[用 Rust 开发](./rust.md#主题)、[主题 token](./tailwind.md#主题-token)）。 |
 | `statusBar` | object | 每次构建、`package` | 所有页面和对话框之下的状态栏默认值（iOS 和 Android）：`{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`，两个字段都可省略。打包的 iOS 应用从启动屏起就使用它（[状态栏](../modules/nsh-base.md#status-bar)）。 |
 | `capabilities` | object | 每次构建 | 应用可以访问 VM 之外的哪些资源：网络主机、网页视图主机、状态栏（[沙箱与权限](./sandbox-and-capabilities.md)）。 |
 | `resolve` | object | 每次构建 | 裸导入如何解析：npm 包的导出条件和别名（[npm 包](#npm-包)）。 |
@@ -171,7 +171,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 }
 ```
 
-`.nsh/tsconfig.json` 把 `nsh` 的导入和应用自己的 crate 指向 `.nsh/types`，包含全局声明和资源声明，并设置 NSH 应用使用的编译选项（`lib`、`jsx`、`strict` 等）。NSH 会让它保持最新：新版本增加了库或路径时，应用在下一次构建时就会得到，而你的 `tsconfig.json` 保持你写的样子。你在 `tsconfig.json` 中添加的选项会覆盖 NSH 的设置。
+`.nsh/tsconfig.json` 把 `nsh` 的导入和应用自己的 crate 指向 `.nsh/types`，包含全局声明、资源声明和令牌声明，并设置 NSH 应用使用的编译选项（`lib`、`jsx`、`strict` 等）。NSH 会让它保持最新：新版本增加了库或路径时，应用在下一次构建时就会得到，而你的 `tsconfig.json` 保持你写的样子。你在 `tsconfig.json` 中添加的选项会覆盖 NSH 的设置。
 
 | `.nsh/types/nsh/` 中的文件 | 声明的内容 |
 |---|---|
@@ -180,6 +180,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 | `jsx-runtime.d.ts` | TypeScript 通过 `jsxImportSource` 解析的 JSX 运行时（`JSX` 命名空间） |
 | `globals.d.ts` | `If` 和 `Each`；`console`、定时器、`requestAnimationFrame`、`fetch` 及其他[全局 API](../modules/globals.md) |
 | `assets.d.ts` | 导入图片或字体得到的值 |
+| `tokens.d.ts` | `Tokens`：应用的设计令牌，来自它的 `"theme"`，为 [`token()`](../modules/nsh.md#token) 提供类型 |
 | `animated.d.ts`、`device.d.ts` 等 | 每个模块一个文件（`nsh/animated`、`nsh/device` 等） |
 | `base.d.ts` | `nsh/base` |
 

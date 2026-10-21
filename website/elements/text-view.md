@@ -14,9 +14,9 @@ is made for the replies of AI models in a chat: the reply streams in as Markdown
 formatting in place. Parsing happens in Rust, and the document is drawn with [`Text`](./text.md) elements and views.
 
 It owns behavior and comes with a reading typography of its own: 15pt text in generous 25.5pt lines, semibold
-headings with room above them, links underlined in the theme's link color, code in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
-alerts as tinted boxes with an icon. Its colors are the theme's tokens (`foreground`, `muted.foreground`, `border`,
-`muted.background`, `link`, `list.head.background` and the status colors), so a theme and the dark appearance reach
+headings with room above them, links underlined in the theme's `primary` color, code in the theme's `font-mono` in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
+alerts as tinted boxes with an icon in GitHub's alert colors. Its colors are the theme's tokens (`foreground`, `muted-foreground`, `border`,
+`muted`, `primary`, and `destructive` for a caution), so a theme and the dark appearance reach
 it. Each part takes the app's styles over these defaults: `classes` and `styles` in TSX, typed styles by part
 (`TextViewParts`) in Rust. Rust makes one with `nsh_base::text_view()`, TSX with `<TextView>` from `nsh/base`.
 
@@ -246,7 +246,7 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `underline` | `Underline` | Underlined text (`<u>`, `<ins>`). |
 | `highlight` | `Highlight` | Highlighted text (`<mark>`, on a rounded yellow). |
 | `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
-| `link` | `Link` | Links (in the link color, underlined). |
+| `link` | `Link` | Links (in the theme's `primary` color, underlined). |
 | `image` | `Image` | Images. |
 | `math` | `Math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
 | `mathBlock` | `MathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |

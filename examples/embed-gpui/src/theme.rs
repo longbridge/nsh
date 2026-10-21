@@ -1,11 +1,11 @@
-//! GPUI Kit's theme as nsh's: the host's theme for its embedded apps.
+//! GPUI Kit's theme as NSH's: the host's theme for its embedded apps.
 //!
-//! nsh's theme (`nsh/base`'s) has gpui-kit's color names and JSON format, so the
-//! conversion is short: both modes come from the host's theme configs
-//! (serialized as gpui-kit theme JSON, where the colors a theme leaves out
-//! are null and nsh keeps its own), then the current mode's colors are
-//! taken as GPUI Kit resolved them (with its fallbacks), so the embedded
-//! components match the host's widgets exactly.
+//! NSH's theme has shadcn/ui's tokens, and GPUI Kit's colors have the same
+//! roles under its own names, so the conversion maps each of shadcn's
+//! tokens to the GPUI Kit color of its role, as GPUI Kit resolved it (with
+//! its fallbacks), so the embedded components match the host's widgets
+//! exactly. It runs again on every change of the host's theme or mode, so
+//! both appearances take the current mode's colors.
 
 use gpui_kit::{
     Hsla,
@@ -32,92 +32,55 @@ pub fn appearance(mode: ThemeMode) -> Appearance {
     }
 }
 
-/// `theme` (GPUI Kit's active theme) as nsh's theme, for
+/// `theme` (GPUI Kit's active theme) as NSH's theme, for
 /// [`nsh_platform_gpui::AppView::set_theme`].
 pub fn nsh_theme(theme: &Theme) -> nsh_platform_gpui::Theme {
-    let configs = serde_json::json!({ "themes": [&*theme.light_theme, &*theme.dark_theme] });
-    let mut nsh = match nsh_platform_gpui::Theme::from_json(&configs.to_string()) {
-        Ok(nsh) => nsh,
-        Err(err) => {
-            log::warn!("the host's theme configs: {err}");
-            nsh_platform_gpui::Theme::default()
-        }
-    };
-    let dark = theme.mode.is_dark();
-    let mut set = |key: &str, c: Hsla| {
-        let mut slot = nsh.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
-        if dark {
-            slot.dark = color(c);
-        } else {
-            slot.light = color(c);
-        }
-        nsh.set_color(key, slot);
-    };
-    // GPUI Kit's colors by the keys of its theme files, which nsh's theme
-    // reads.
-    macro_rules! resolved {
-        ($($field:ident = $key:literal),* $(,)?) => {
-            $( set($key, theme.colors.$field); )*
-        };
+    let mut nsh = nsh_platform_gpui::Theme::default();
+    let colors = &theme.colors;
+    for (name, c) in [
+        ("background", colors.background),
+        ("foreground", colors.foreground),
+        ("card", colors.group_box),
+        ("card-foreground", colors.group_box_foreground),
+        ("popover", colors.popover),
+        ("popover-foreground", colors.popover_foreground),
+        ("primary", colors.primary),
+        ("primary-foreground", colors.primary_foreground),
+        ("secondary", colors.secondary),
+        ("secondary-foreground", colors.secondary_foreground),
+        ("muted", colors.muted),
+        ("muted-foreground", colors.muted_foreground),
+        ("accent", colors.accent),
+        ("accent-foreground", colors.accent_foreground),
+        ("destructive", colors.danger),
+        ("border", colors.border),
+        ("input", colors.input),
+        ("ring", colors.ring),
+        ("chart-1", colors.chart_1),
+        ("chart-2", colors.chart_2),
+        ("chart-3", colors.chart_3),
+        ("chart-4", colors.chart_4),
+        ("chart-5", colors.chart_5),
+        ("sidebar", colors.sidebar),
+        ("sidebar-foreground", colors.sidebar_foreground),
+        ("sidebar-primary", colors.sidebar_primary),
+        (
+            "sidebar-primary-foreground",
+            colors.sidebar_primary_foreground,
+        ),
+        ("sidebar-accent", colors.sidebar_accent),
+        (
+            "sidebar-accent-foreground",
+            colors.sidebar_accent_foreground,
+        ),
+        ("sidebar-border", colors.sidebar_border),
+        ("sidebar-ring", colors.ring),
+    ] {
+        nsh.set_color(name, AdaptiveColor::from(color(c)));
     }
-    resolved!(
-        accent = "accent.background",
-        accent_foreground = "accent.foreground",
-        background = "background",
-        foreground = "foreground",
-        border = "border",
-        caret = "caret",
-        danger = "danger.background",
-        danger_active = "danger.active.background",
-        danger_foreground = "danger.foreground",
-        group_box = "group_box.background",
-        group_box_foreground = "group_box.foreground",
-        info = "info.background",
-        info_active = "info.active.background",
-        info_foreground = "info.foreground",
-        input = "input.border",
-        link = "link",
-        link_active = "link.active",
-        list = "list.background",
-        list_active = "list.active.background",
-        list_active_border = "list.active.border",
-        list_even = "list.even.background",
-        list_head = "list.head.background",
-        muted = "muted.background",
-        muted_foreground = "muted.foreground",
-        overlay = "overlay",
-        popover = "popover.background",
-        popover_foreground = "popover.foreground",
-        primary = "primary.background",
-        primary_active = "primary.active.background",
-        primary_foreground = "primary.foreground",
-        progress_bar = "progress.bar.background",
-        ring = "ring",
-        secondary = "secondary.background",
-        secondary_active = "secondary.active.background",
-        secondary_foreground = "secondary.foreground",
-        selection = "selection.background",
-        skeleton = "skeleton.background",
-        slider_bar = "slider.background",
-        slider_thumb = "slider.thumb.background",
-        success = "success.background",
-        success_active = "success.active.background",
-        success_foreground = "success.foreground",
-        switch = "switch.background",
-        switch_thumb = "switch.thumb.background",
-        tab = "tab.background",
-        tab_active = "tab.active.background",
-        tab_active_foreground = "tab.active.foreground",
-        tab_bar = "tab_bar.background",
-        tab_bar_segmented = "tab_bar.segmented.background",
-        tab_foreground = "tab.foreground",
-        warning = "warning.background",
-        warning_active = "warning.active.background",
-        warning_foreground = "warning.foreground",
-    );
     nsh.set_number("radius", f32::from(theme.radius));
-    nsh.set_number("radius.lg", f32::from(theme.radius_lg));
-    nsh.set_number("font.size", f32::from(theme.font_size));
+    nsh.set_font("font-sans", theme.font_family.to_string());
+    nsh.set_font("font-mono", theme.mono_font_family.to_string());
     nsh
 }
 
@@ -140,7 +103,7 @@ mod tests {
     }
 
     #[test]
-    fn the_current_modes_resolved_colors_win() {
+    fn the_current_modes_resolved_colors_are_shadcns_tokens() {
         let mut theme = Theme {
             mode: ThemeMode::Dark,
             radius: gpui_kit::px(6.0),
@@ -149,11 +112,8 @@ mod tests {
         theme.colors.primary = gpui_kit::rgb(0x7c3aed).into();
         let nsh = nsh_theme(&theme);
         assert_eq!(Color::from(nsh.primary().dark), Color(0x7c3aedff));
-        // The other mode keeps nsh's (the configs set nothing here).
-        assert_eq!(
-            nsh.primary().light,
-            nsh_platform_gpui::Theme::default().primary().light
-        );
+        // Both appearances: the host's current mode.
+        assert_eq!(Color::from(nsh.primary().light), Color(0x7c3aedff));
         assert_eq!(nsh.radius(), nsh_core::Points(6.0));
     }
 }

@@ -93,17 +93,18 @@ NSH 通过 `nsh` 的原语、`nsh/base` 的无样式基础组件，以及属于�
 从主题读取颜色（Rust 中为 `theme()`，TSX 中为 token 类名），并按语义角色使用：
 
 - `background` / `foreground`：主表面和正文；
-- `group_box`、`popover`、`sidebar` 及对应 foreground：具名表面；
-- `muted` / `muted.foreground`：辅助信息；
-- `primary`：当前决策区域的主要操作或选中强调；
-- `danger`、`warning`、`success`、`info`：只表达对应语义；
-- `border`、`input.border` 和 `ring`：结构与交互。
+- `card`、`popover`、`sidebar` 及对应 foreground：具名表面；
+- `muted` / `muted-foreground`：辅助信息；
+- `primary`：当前决策区域的主要操作或选中强调，`secondary` 和 `accent`：较弱的强调以及悬停或聚焦的行；
+- `destructive`：只用于破坏性操作和错误，应用加入主题的状态色（`success`、`warning`）只表达对应语义；
+- `chart-1` 到 `chart-5`：数据序列；
+- `border`、`input` 和 `ring`：结构与交互。
 
 ```rust tabs
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius_lg())
+    .rounded(move || theme().radius())
     .border_1()
     .border_color(move || theme().border())
     .bg(move || theme().background())
@@ -114,7 +115,7 @@ view()
 ```
 
 ```tsx tabs
-<View class="gap-1 rounded-(--radius-lg) border border-border bg-background p-4">
+<View class="gap-1 rounded-(--radius) border border-border bg-background p-4">
   <Text class="text-foreground">余额</Text>
   <Text class="text-sm text-muted-foreground">刚刚更新</Text>
 </View>
@@ -122,15 +123,15 @@ view()
 
 不要把状态色当装饰，也不要只依赖颜色表达含义。自定义表面必须在明暗主题和自定义主题（包括嵌入你的应用的宿主应用主题）中验证；不能假设 foreground 一定是黑色或 background 一定是白色。
 
-Badge 只用于有助快速扫描的短 state、count 或 classification，不能套在每个 label、metadata value、filter 或 section title 上。大多数 Badge 保持 neutral；只有真实表达 success、warning、danger 或 info 时才使用语义颜色。满屏多色 Badge 通常说明 hierarchy 或 grouping 尚未设计完成。
+Badge 只用于有助快速扫描的短 state、count 或 classification，不能套在每个 label、metadata value、filter 或 section title 上。大多数 Badge 保持 neutral；只有真实表达 success、warning、destructive 或 info 时才使用语义颜色。满屏多色 Badge 通常说明 hierarchy 或 grouping 尚未设计完成。
 
-应用界面不应出现 raw hex、`rgb()`/`rgba()` 或 `hsl()` 颜色，也不应出现 `bg-zinc-100` 这样的调色板类名。颜色必须按语义角色从主题解析。需要的 role 不存在时，在应用的主题文件中定义（[主题 token](./tailwind.md#主题-token)：`"chart.up"` 会生成 `text-chart-up` 和 `theme().color("chart.up")`），而不是在 call site 嵌入 palette value。Raw color 只属于 theme definition，或颜色本身就是数据的、经过审查的 data/raster content。
+应用界面不应出现 raw hex、`rgb()`/`rgba()` 或 `hsl()` 颜色，也不应出现 `bg-zinc-100` 这样的调色板类名。颜色必须按语义角色从主题解析。需要的 role 不存在时，在应用的主题文件中定义（[主题 token](./tailwind.md#主题-token)：在它的 `light` 和 `dark` 中写 `"up": "#16a34a"`，会生成 `text-up`、`bg-up/30`、TSX 中的 `token("up")` 和 Rust 中的 `theme().color("up")`），而不是在 call site 嵌入 palette value。Raw color 只属于 theme definition，或颜色本身就是数据的、经过审查的 data/raster content。
 
 ### 圆角、间距与密度
 
-圆角应像字号和控件尺寸一样，使用有限的主题档位（控件用 `radius`，大表面用 `radius.lg`，其间用 Tailwind 的 `rounded-sm` … `rounded-2xl`），不要为每个元素发明新数值。大型容器可比内部控件使用更柔和的档位；紧凑控件与浮层则使用更小的档位。普通矩形的圆角应明显小于短边的一半。`rounded-full`（`.rounded_full()`）只用于有意设计的圆形与胶囊，提示框不应意外变成胶囊。
+圆角应像字号和控件尺寸一样，使用有限的档位（主题的 `radius`，控件和表面都可用，即 `rounded-(--radius)`；应用加入主题的圆角；以及 Tailwind 的 `rounded-sm` … `rounded-2xl`），不要为每个元素发明新数值。大型容器可比内部控件使用更柔和的档位；紧凑控件与浮层则使用更小的档位。普通矩形的圆角应明显小于短边的一半。`rounded-full`（`.rounded_full()`）只用于有意设计的圆形与胶囊，提示框不应意外变成胶囊。
 
-嵌套表面应呈现同心的曲线关系。用 `inner radius ≈ max(0, outer radius − inset)` 选择最接近且合适的主题档位，让转角处的边带保持均匀；重复出现的特殊组合若需要中间值，应在主题中定义具名 token（`"radius.inset": 6`，`rounded-(--radius-inset)`）。分段控件是一个完整轮廓：两端的分段顺着容器内侧圆角，中间分段保持直角，每处边界只保留一道等宽分隔线。
+嵌套表面应呈现同心的曲线关系。用 `inner radius ≈ max(0, outer radius − inset)` 选择最接近且合适的圆角，让转角处的边带保持均匀；重复出现的特殊组合若需要中间值，应在主题中定义具名 token（`"radius-inset": "0.375rem"`，`rounded-(--radius-inset)`）。分段控件是一个完整轮廓：两端的分段顺着容器内侧圆角，中间分段保持直角，每处边界只保留一道等宽分隔线。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/radius-hierarchy-light.svg" alt="浅色主题的聊天输入框：内缩表面、两侧按钮及提示文字的间距一起变化；红色参考圆显示转角共用圆心。">
@@ -240,7 +241,7 @@ Medium 是默认值。密度应在局部上下文整体变化，而不是只改�
 
 良好的 scale 能在文字变大时保持设计层次。成功的放大不只是每个对象都变大，而是在每一种文字大小下，title/body、control/icon、inner/outer spacing、primary/secondary region 之间仍保持相同关系。
 
-NSH 的长度单位是点，用户的文字大小（iOS 的动态字体、Android 的字体大小、桌面的文字缩放、宿主应用自己的设置）缩放的是文字：每个允许字体缩放的文字和输入框都会变大，间距、圆角、边框和图片保持原有尺寸（[文字大小](./device-and-environment.md#文字大小)）。主题的基础字号（`font.size`、`theme().font_size()`）是字号 scale 围绕的正文字号。
+NSH 的长度单位是点，用户的文字大小（iOS 的动态字体、Android 的字体大小、桌面的文字缩放、宿主应用自己的设置）缩放的是文字：每个允许字体缩放的文字和输入框都会变大，间距、圆角、边框和图片保持原有尺寸（[文字大小](./device-and-environment.md#文字大小)）。应用的基础字号（Tailwind 的 `text-base`，16 点）是字号 scale 围绕的正文字号。
 
 设计时关注比例：
 
@@ -260,7 +261,7 @@ NSH 的长度单位是点，用户的文字大小（iOS 的动态字体、Androi
 
 Elevation 用于解释叠放关系，而不是表达重要程度。基础表面保持平面；区域由背景差异和 separator 划分。Popover、menu、sheet、dialog、notification 因处于内容上方，可以逐级增强阴影。不要给每张 card 都加阴影。
 
-同类 surface 必须采用同一种处理。让弹出层家族共用一种主题化表面（`popover` token、边框、`radius.lg` 和一种阴影），这样 `Popover`、`Menu`、`ContextMenu` 和 `Tooltip` 不会逐渐漂移。应用新增 anchored surface 时应复用该处理，而不是用无关的 border/shadow 字面量近似。
+同类 surface 必须采用同一种处理。让弹出层家族共用一种主题化表面（`popover` token、边框、`radius` 和一种阴影），这样 `Popover`、`Menu`、`ContextMenu` 和 `Tooltip` 不会逐渐漂移。应用新增 anchored surface 时应复用该处理，而不是用无关的 border/shadow 字面量近似。
 
 ### 字体与图标
 
@@ -416,7 +417,7 @@ function SelectAll(props: { selected: number; total: number; onChange: (all: boo
 
 采用 Shadcn 的核心思想：组件是构建材料，不是封闭设计系统。`nsh/base` 提供行为，应用在自己的组件中提供一致默认值，并拥有组合和产品语义。
 
-- 变体按语义使用。主按钮只留给决策区域中明确的默认提交，通常也是在桌面上按回车执行的操作。操作唯一、使用频繁或希望用户注意，都不会使它自动成为主按钮。管理工具栏中的“添加”通常使用默认按钮；表单中默认提交的“创建”可以使用主按钮。danger 表示破坏性提交，ghost 用于低强调的工具栏操作。
+- 变体按语义使用。主按钮只留给决策区域中明确的默认提交，通常也是在桌面上按回车执行的操作。操作唯一、使用频繁或希望用户注意，都不会使它自动成为主按钮。管理工具栏中的“添加”通常使用默认按钮；表单中默认提交的“创建”可以使用主按钮。destructive 表示破坏性提交，ghost 用于低强调的工具栏操作。
 - 优先使用明确的部件与插槽，不要穿透任意后代设置样式。
 - 跨产品重复且带有领域语言或规则的模式，应封装为应用组件。
 - 按语义角色使用标准组件。`Menu`、`ContextMenu`、`Popover`、`Sheet`、`Dialog` 与 `AlertDialog` 不是可以互换的容器；它们分别拥有选择、焦点、键盘操作、关闭方式和布局契约，在每种设备上也有各自的形式。
@@ -451,7 +452,7 @@ fn form_actions(cancel: impl Fn() + 'static, create: impl Fn() + 'static) -> imp
                 .bg(move || theme().primary())
                 .px_4()
                 .py_2()
-                .active(|s| s.bg(move || theme().primary_active()))
+                .active(|s| s.bg(move || theme().primary().opacity(0.9)))
                 .child(text("创建").text_color(move || theme().primary_foreground())),
         )
 }
@@ -468,7 +469,7 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
       <Button onPress={props.onCancel} class="rounded-(--radius) border border-border px-4 py-2 active:bg-muted">
         <Text class="text-foreground">取消</Text>
       </Button>
-      <Button onPress={props.onCreate} class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
+      <Button onPress={props.onCreate} class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary/90">
         <Text class="text-primary-foreground">创建</Text>
       </Button>
     </View>
@@ -563,16 +564,16 @@ Hover 应克制，因为触摸、键盘和 accessibility 操作没有 hover。�
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, theme};
-use nsh_core::ui::StyleRefinement;
+use nsh_core::{color::black, ui::StyleRefinement};
 
 /// 应用的弹出层表面，菜单、弹出框和工具提示共用。
 fn popup(s: StyleRefinement) -> StyleRefinement {
     s.min_w(px(192.0))
         .p_1()
-        .rounded(move || theme().radius_lg())
+        .rounded(move || theme().radius())
         .border_1()
         .border_color(move || theme().border())
-        .bg(move || theme().color("popover.background").unwrap_or_else(|| theme().background()))
+        .bg(move || theme().popover())
         .shadow_lg()
 }
 
@@ -591,7 +592,7 @@ fn more_menu(rename: impl Fn() + 'static, duplicate: impl Fn() + 'static, delete
     menu()
         .offset(px(4.0))
         .popup_style(popup)
-        .backdrop_style(|s| s.bg(move || theme().overlay()))
+        .backdrop_style(|s| s.bg(black().opacity(0.5)))
         .trigger(
             view()
                 .label("更多操作")
@@ -614,7 +615,7 @@ import { Text, View } from "nsh";
 import { Menu, MenuItem, MenuSeparator } from "nsh/base";
 
 /** 应用的弹出层表面，菜单、弹出框和工具提示共用。 */
-export const popup = "min-w-48 rounded-(--radius-lg) border border-border bg-popover p-1 shadow-lg";
+export const popup = "min-w-48 rounded-(--radius) border border-border bg-popover p-1 shadow-lg";
 const item = "rounded-(--radius) px-3 py-2 hover:bg-muted active:bg-muted";
 
 function MoreMenu(props: { onRename: () => void; onDuplicate: () => void; onDelete: () => void }) {
@@ -622,7 +623,7 @@ function MoreMenu(props: { onRename: () => void; onDuplicate: () => void; onDele
     <Menu
       offset={4}
       popupClass={popup}
-      backdropClass="bg-overlay"
+      backdropClass="bg-black/50"
       trigger={
         <View accessibilityLabel="更多操作" class="size-11 items-center justify-center rounded-full active:bg-muted">
           <Text class="text-foreground">⋯</Text>
@@ -640,7 +641,7 @@ function MoreMenu(props: { onRename: () => void; onDuplicate: () => void; onDele
 
 用户需要明确知道“这里还有更多命令”时使用 `Menu`，例如 toolbar overflow、document action、account menu。命令只作用于当前 selection 或指针下对象时使用 `ContextMenu`，例如 rename、duplicate、reveal、remove。Context menu 不能是 essential command 的唯一入口；按场景同时提供 menu bar、toolbar、keyboard 或 detail view 路径。
 
-不要为了视觉极简把所有 action 都藏入 menu。Discovery 与速度同样重要：主要 action 保持可见；danger item 有清楚 label 并与普通命令分隔；同一 command 在所有入口使用一致 verb、icon、shortcut、enabled state 与执行结果。
+不要为了视觉极简把所有 action 都藏入 menu。Discovery 与速度同样重要：主要 action 保持可见；destructive item 有清楚 label 并与普通命令分隔；同一 command 在所有入口使用一致 verb、icon、shortcut、enabled state 与执行结果。
 
 ### 按钮表示应用操作，链接只表示外部资源
 

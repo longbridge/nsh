@@ -70,29 +70,25 @@ pub(crate) enum ButtonEvent {
 fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColor) {
     let theme = theme();
     match variant {
+        // shadcn's buttons: the role's color, 90% (80%) of it pressed.
         ButtonVariant::Primary => (
             theme.primary(),
-            theme.primary_active(),
+            theme.primary().opacity(0.9),
             theme.primary_foreground(),
         ),
-        ButtonVariant::Secondary => {
-            let color = |key| theme.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
-            (
-                color("secondary.background"),
-                color("secondary.active.background"),
-                color("secondary.foreground"),
-            )
-        }
+        ButtonVariant::Secondary => (
+            theme.secondary(),
+            theme.secondary().opacity(0.8),
+            theme.secondary_foreground(),
+        ),
         ButtonVariant::Danger => (
-            theme.danger(),
-            theme.danger_active(),
-            theme.danger_foreground(),
+            theme.destructive(),
+            theme.destructive().opacity(0.9),
+            AdaptiveColor::rgb(0xffffff, 0xffffff),
         ),
         ButtonVariant::Plain => (
             AdaptiveColor::TRANSPARENT,
-            theme
-                .color("accent.background")
-                .unwrap_or(AdaptiveColor::TRANSPARENT),
+            theme.accent(),
             theme.foreground(),
         ),
     }
@@ -123,7 +119,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .child(
             text(props.title)
-                .text_size(move || theme().font_size())
+                .text_size(px(16.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(move || colors.get().2),
         )

@@ -13,15 +13,14 @@ import { SafeAreaView } from "nsh/base";
 function App() {
   const count = signal(0);
   return (
-    <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
-      <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
+    <SafeAreaView class="flex-1 items-center justify-center gap-4 bg-background">
+      <Text class="text-3xl font-semibold text-foreground">{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeStyle={{ opacity: 0.6 }}
         role="button"
-        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
+        class="rounded-(--radius) bg-primary px-5 py-3 active:bg-primary/90"
       >
-        <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
+        <Text class="text-lg text-primary-foreground">Tap</Text>
       </View>
     </SafeAreaView>
   );
@@ -357,6 +356,14 @@ pub(crate) fn write_types(dir: &Path) {
     ));
     let mut definitions = nsh_js::type_definitions(&sets);
     definitions.extend(nsh_bundler::type_definitions());
+    // The theme's errors are the build's to report: its names are the
+    // default's meanwhile.
+    let tokens =
+        nsh_bundler::theme_tokens(dir).unwrap_or_else(|_| nsh_base::Theme::default().into_tokens());
+    definitions.push((
+        "nsh/tokens.d.ts".to_owned(),
+        nsh_bundler::tokens_declaration(&tokens),
+    ));
     remove_stale(&types, &types, &definitions);
     let files = definitions
         .iter()

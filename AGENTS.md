@@ -49,8 +49,8 @@ crates/
                        bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md),
                        the popups on the core's overlays (`Popover`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
                        `Tooltip`, `Sheet`; presented per device: docs/dev/components.md "Popups"), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
-                       the theme (`theme.rs`, as `gpui-base`'s: gpui-kit's theme files, semantic tokens and their defaults, which
-                       the core keeps as design tokens and no component of `nsh-base` draws with)
+                       the theme (`theme.rs`: shadcn/ui's tokens and their defaults, `neutral`, read from shadcn's `cssVars` theme
+                       files, which the core keeps as design tokens and no component of `nsh-base` draws with)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
@@ -313,8 +313,9 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
   (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
-  in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are; the one
-  exception is `TextView`'s default reading typography, its colors the theme's tokens, every part overridable by the
+  in `nsh-base`'s components (its theme's default tokens, shadcn/ui's, are the app's to draw with; the one
+  exception is `TextView`'s default reading typography, its colors the theme's shadcn tokens (alerts GitHub's alert
+  colors, highlights a marker's yellow), every part overridable by the
   app's `classes` / `styles` / `TextViewParts`, and its built-in syntax highlighting colors, Allsum's code palette, which an app's
   `CodeHighlighter` or `renderCodeBlock` replaces); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms

@@ -123,15 +123,14 @@ import { SafeAreaView } from "nsh/base";
 function App() {
   const count = signal(0);
   return (
-    <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
-      <Text style={{ fontSize: 28, fontWeight: "600" }}>{count()}</Text>
+    <SafeAreaView class="flex-1 items-center justify-center gap-4 bg-background">
+      <Text class="text-3xl font-semibold text-foreground">{count()}</Text>
       <View
         onPress={() => count.update((c) => c + 1)}
-        activeStyle={{ opacity: 0.6 }}
         role="button"
-        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0969da" }}
+        class="rounded-(--radius) bg-primary px-5 py-3 active:bg-primary/90"
       >
-        <Text style={{ color: "white", fontSize: 17 }}>Tap</Text>
+        <Text class="text-lg text-primary-foreground">Tap</Text>
       </View>
     </SafeAreaView>
   );
@@ -160,9 +159,11 @@ TSX 版：
 - **`import { mount, signal, Text, View } from "nsh"`**：`nsh` 是核心模块，提供 signal、`mount`、其他响应式原语以及宿主元素。它由原生运行时提供，不会被打包。**`nsh/base`**
   提供基础组件，相当于 Rust 中的 `nsh_base`。
 - **`function App()`** 是一个只运行**一次**的组件。**`{count()}`** 在 JSX 中读取 signal：编译器看到这是一次调用，就让这段文本跟随该 signal。
-- **`<View onPress>`** 是一个响应按压的原生视图；`activeStyle` 是它按下时的样式。`View`、`Text`、`Image`、`Scroll`、`Input`
+- **`<View onPress>`** 是一个响应按压的原生视图；`active:` 类是它按下时的样式。`View`、`Text`、`Image`、`Scroll`、`Input`
   等[宿主元素](../elements/index.md)都从 `nsh` 导入；只有 `If` 和 `Each` 无需导入。
-- **`style={{ … }}`** 接受由 camelCase 样式属性组成的对象，数字的单位是点；`class` 接受 [Tailwind](./tailwind.md) 类。
+- **`class`** 接受 [Tailwind](./tailwind.md) 类；`style={{ … }}` 接受由 camelCase 样式属性组成的对象，数字的单位是点。
+  `bg-background`、`bg-primary`、`text-primary-foreground` 和 `rounded-(--radius)` 引用应用主题的令牌（[主题 token](./tailwind.md#主题-token)）：
+  它们自动跟随深色模式，`nsh.json` 中的 `"theme"` 可以改变它们的样式。
 - **`mount(App)`** 把组件渲染到应用的界面上。
 
 > [!IMPORTANT]

@@ -17,6 +17,7 @@ highlight = ["dep:syntect", "dep:two-face"]
 
 [dependencies]
 nsh-core.workspace = true
+rustc-hash.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 markdown.workspace = true

@@ -643,9 +643,10 @@ Rules:
 The effective precedence is the element's own style, then the state styles, later states winning, with `disabled`
 over all. Later layers only replace fields they set.
 
-Prefer the theme's semantic tokens for new app-owned presentation. Every key of the app's theme file is a token
-(`theme().color("chart.up")`, `text-chart-up`), and the theme has light and dark values, so a token follows the
-appearance with no `dark:` class. Name tokens after roles, not components, so they do not become the extension point
+Prefer the theme's semantic tokens for new app-owned presentation. Every name in the app's theme file is a token, as a
+variable of Tailwind's `@theme` is (`"up": "#16a34a"` gives `text-up`, `bg-up/30`, `token("up")` in TSX and
+`theme().color("up")` in Rust), and the theme has light and dark values, so a token follows the appearance with no
+`dark:` class. Name tokens after roles, not components, so they do not become the extension point
 for every widget.
 
 Change the theme through the app's theme file (`nsh.json` `"theme"`), or let the embedding app give its own: classes
@@ -659,8 +660,8 @@ hiding all keyboard focus.
 ### The user's text size is the app's zoom
 
 Text follows the user's text size (Dynamic Type, Android's font scale, the desktops' settings): `fontScale()` in TSX,
-`font_scale()` in Rust, both reactive. The type scale (`text-sm`, `text-base`) and the theme's base font size
-(`font.size`, `theme().font_size()`) set the reference, and the user's setting scales it. This deliberately follows
+`font_scale()` in Rust, both reactive. The type scale (`text-sm`, `text-base`: 16 points, the body size) sets
+the reference, and the user's setting scales it. This deliberately follows
 the useful part of Tailwind's model: named type, spacing and size steps instead of unrelated point constants.
 
 Let text containers grow with their text: give them minimum heights and padding rather than fixed heights. A custom

@@ -43,7 +43,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
     view()
         .gap_2()
         .p_4()
-        .rounded(move || theme().radius_lg())
+        .rounded(move || theme().radius())
         .bg(move || theme().muted())
         .border_1()
         .border_color(move || theme().border())
@@ -88,7 +88,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
                         .w(move || relative(fraction()))
                         .bg(move || {
                             if fraction() >= 1.0 {
-                                theme().danger()
+                                theme().destructive()
                             } else {
                                 theme().primary()
                             }

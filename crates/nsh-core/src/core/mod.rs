@@ -678,6 +678,10 @@ pub struct Core<M: TextEngine> {
     status_bars_moved: bool,
     /// The user's preferred text size (1.0 is the default).
     font_scale: f32,
+    /// The font text is drawn with unless it sets its own: the tokens'
+    /// `font-sans` (`None`: the system's), as a page's is Tailwind's
+    /// `--font-sans`.
+    default_font: Option<crate::style::FontFamily>,
     queue: Vec<Key>,
     needs_layout: bool,
     /// Parsed classes and the theme.
@@ -764,6 +768,7 @@ impl<M: TextEngine> Core<M> {
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             font_scale: 1.0,
+            default_font: None,
             queue: Vec::new(),
             needs_layout: true,
             tailwind: Tailwind::new(),
@@ -832,6 +837,21 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         self.font_scale = scale;
+        self.relayout_text();
+    }
+
+    /// Sets the font text is drawn with unless it sets its own (the
+    /// tokens' `font-sans`): text is laid out again.
+    pub(crate) fn set_default_font(&mut self, family: Option<crate::style::FontFamily>) {
+        if family == self.default_font {
+            return;
+        }
+        self.default_font = family;
+        self.relayout_text();
+    }
+
+    /// Lays every text and input out again.
+    fn relayout_text(&mut self) {
         let blocks: Vec<(Key, Kind)> = self
             .nodes
             .iter()
@@ -3630,6 +3650,15 @@ impl<M: TextEngine> Core<M> {
     /// The text style `key` inherits from the views around it, as CSS
     /// does: `color` / `text-white` on a container styles the text in it
     /// (React Native views ignore text styles).
+    /// The style text inherits at the root: React Native's defaults with
+    /// the app's font.
+    fn base_text_style(&self) -> ResolvedTextStyle {
+        ResolvedTextStyle {
+            font_family: self.default_font,
+            ..ResolvedTextStyle::default()
+        }
+    }
+
     fn inherited_text_style(&self, key: Key) -> ResolvedTextStyle {
         let mut chain: Vec<Key> = Vec::new();
         let mut k = self.nodes[key as usize].parent;
@@ -3643,7 +3672,7 @@ impl<M: TextEngine> Core<M> {
         chain
             .iter()
             .rev()
-            .fold(ResolvedTextStyle::default(), |style, &k| {
+            .fold(self.base_text_style(), |style, &k| {
                 style.inherit(&self.nodes[k as usize].text_style)
             })
     }

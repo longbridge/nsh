@@ -454,7 +454,7 @@ fn Sections() -> impl IntoElement {
                 .self_start()
                 .gap_1()
                 .p_1()
-                .rounded(move || nsh_base::theme().radius_lg())
+                .rounded(move || nsh_base::theme().radius())
                 .bg(move || nsh_base::theme().muted())
                 .child(section("overview", "Overview"))
                 .child(section("activity", "Activity")),

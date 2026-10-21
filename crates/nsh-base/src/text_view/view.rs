@@ -573,7 +573,7 @@ impl Cx {
                             .bg(move || theme().muted())
                             .child(
                                 text(tex.clone())
-                                    .font_family("monospace")
+                                    .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
                                     .when(self.selectable, |t| t.selectable(true)),
@@ -814,7 +814,7 @@ impl Cx {
         // scrolls to the edges, and the scroll bar sits in the bottom
         // padding rather than over the last line.
         let body = self.caret_after(
-            body.font_family("monospace")
+            body.font_family(mono_font)
                 .px(px(16.0))
                 .py(px(14.0))
                 .when(self.selectable, |t| t.selectable(true)),
@@ -965,7 +965,7 @@ impl Cx {
             let row = view()
                 .row_start(line)
                 .col_span_full()
-                .when(head, |v| v.bg(move || theme().list_head()));
+                .when(head, |v| v.bg(move || theme().muted()));
             grid.push(self.parts(row, row_parts).into_element());
             // Each cell where it starts, as wide as it spans; the columns no
             // cell covers (a short row) are empty cells.
@@ -1156,9 +1156,7 @@ impl Cx {
                 let color = color.as_deref().and_then(|c| c.parse::<Hsla>().ok());
                 let span = self
                     .span(content, key)
-                    .bg(move || {
-                        color.map_or_else(|| theme().warning().opacity(0.4), AdaptiveColor::from)
-                    })
+                    .bg(move || color.map_or_else(|| HIGHLIGHT.opacity(0.4), AdaptiveColor::from))
                     .rounded(px(3.0));
                 // A solid color of the document's is the same in both
                 // appearances: its text takes the ink that reads on it
@@ -1202,9 +1200,9 @@ impl Cx {
                 let span = self.span(content, key);
                 self.link.replace(outer);
                 let el = span
-                    .text_color(move || theme().link())
+                    .text_color(move || theme().primary())
                     .underline()
-                    .text_decoration_color(move || theme().link().opacity(0.4))
+                    .text_decoration_color(move || theme().primary().opacity(0.4))
                     .text_decoration_thickness(px(1.0))
                     .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
@@ -1241,7 +1239,7 @@ impl Cx {
                 self.part(
                     text(index.to_string())
                         .text_size(rems(0.75))
-                        .text_color(move || theme().link())
+                        .text_color(move || theme().primary())
                         .role(AccessibilityRole::Link)
                         .on_press(move || {
                             scope.emit(TextViewEvent::LinkPress(TextViewLinkPressEvent {
@@ -1512,25 +1510,33 @@ fn strong_border() -> AdaptiveColor {
 /// Code in text: monospace, smaller, on a rounded background (the text's
 /// color, faint, so it shows on any surface).
 fn code_span(span: Text) -> Text {
-    span.font_family("monospace")
+    span.font_family(mono_font)
         .text_size(px(CODE_SIZE))
         .bg(move || theme().foreground().opacity(0.06))
         .rounded(px(4.0))
 }
 
-/// The color of an alert of kind `alert`: the theme's status colors; an
-/// important one is violet (no token names it).
+/// The color of an alert of kind `alert`: GitHub's alert colors (shadcn's
+/// tokens have no status colors), a caution the theme's `destructive`.
 fn alert_color(alert: Alert) -> AdaptiveColor {
-    let t = theme();
     match alert {
-        Alert::Note => t.info(),
-        Alert::Tip => t.success(),
-        Alert::Important => t
-            .color("important.background")
-            .unwrap_or(AdaptiveColor::rgb(0x8b5cf6, 0xa78bfa)),
-        Alert::Warning => t.warning(),
-        Alert::Caution => t.danger(),
+        Alert::Note => AdaptiveColor::rgb(0x0969da, 0x4493f8),
+        Alert::Tip => AdaptiveColor::rgb(0x1a7f37, 0x3fb950),
+        Alert::Important => AdaptiveColor::rgb(0x8250df, 0xab7df8),
+        Alert::Warning => AdaptiveColor::rgb(0x9a6700, 0xd29922),
+        Alert::Caution => theme().destructive(),
     }
+}
+
+/// Highlighted text's background, at 40% (`==text==`, `<mark>`): a
+/// marker's yellow.
+const HIGHLIGHT: AdaptiveColor = AdaptiveColor::rgb(0xfde047, 0xca8a04);
+
+/// The theme's monospaced font (`font-mono`), else the system's.
+fn mono_font() -> SharedString {
+    theme()
+        .font_mono()
+        .map_or_else(|| SharedString::from("monospace"), SharedString::from)
 }
 
 // The reading typography (sizes in points), after Allsum's documents.
@@ -1682,7 +1688,7 @@ fn text_width(line: &str) -> f32 {
 /// and shrinks away as a check springs in once `done` goes to 1.
 fn copy_icon(done: &AnimatedValue) -> AnyElement {
     let muted = theme().muted_foreground();
-    let ok = theme().success();
+    let ok = theme().foreground();
     // The gallery's copy and check glyphs, drawn on a 20 unit grid scaled
     // to the icon's 14 pt.
     const K: f32 = 14.0 / 20.0;

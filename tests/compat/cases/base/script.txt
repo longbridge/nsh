@@ -954,3 +954,12 @@ covers [props] disabled
 covers [props] Tab.selectedStyle
 covers [props] accessibilityLabel
 covers [events] onPress
+
+# The app's design tokens: shadcn's `neutral` with the app's theme over it.
+tap id:case-base-token
+expect token up #138a5aff
+expect token primary #171717ff
+expect token radius-card 14
+style id:up backgroundColor #138a5aff
+style id:primary backgroundColor #17171780
+covers [nsh] token

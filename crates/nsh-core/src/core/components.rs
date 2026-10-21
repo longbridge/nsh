@@ -694,6 +694,12 @@ impl<M: TextEngine> Core<M> {
         self.tokens_changed();
     }
 
+    /// The design tokens the app is drawn with now: the app's, under the
+    /// embedding app's. A new value (not the same `Arc`) when they change.
+    pub fn tokens(&self) -> &Arc<Tokens> {
+        &self.components.tokens
+    }
+
     /// The tokens drawn with now: a signal of the surface, so only the
     /// bindings that read them run again, and only when they changed.
     fn tokens_changed(&mut self) {
@@ -713,6 +719,12 @@ impl<M: TextEngine> Core<M> {
                 .runtime
                 .set_tokens(self.components.tokens.clone());
         }
+        let font = self
+            .components
+            .tokens
+            .font(crate::ui::FONT_SANS)
+            .map(|f| crate::style::FontFamily::new(f));
+        self.set_default_font(font);
         self.class_tokens_changed();
     }
 

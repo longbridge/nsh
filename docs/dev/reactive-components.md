@@ -386,7 +386,7 @@ impl Component for Stepper {
                 .label(name)
                 .on_press_in(move |_| press(direction))
                 .on_press_out(move |_| repeat.set(None))
-                .child(text(label).text_size(theme().font_size() + px(4.0)))
+                .child(text(label).text_size(px(21.0)))
         };
         view()
             .flex_row()
