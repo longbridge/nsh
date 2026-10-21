@@ -86,9 +86,9 @@ export function StorageDemo() {
             borderRadius: radius.control,
             borderCurve: "continuous",
             borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor: colors.inset,
-            ...finish.inset,
+            borderColor: colors.fieldBorder,
+            backgroundColor: colors.field,
+            ...finish.field,
           }}
         >
           <Input

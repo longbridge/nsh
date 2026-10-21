@@ -34,6 +34,10 @@ export interface Palette {
   inset: string;
   /** A control on a card (buttons, fields, tracks). */
   raised: string;
+  /** An input's well: below the card and the insets it sits on. */
+  field: string;
+  /** An input's edge. */
+  fieldBorder: string;
   border: string;
   /** Hairlines inside insets. */
   line: string;
@@ -76,6 +80,8 @@ export const colors: Palette = themed<Palette>(
     surface: "#18191c",
     inset: "#0c0d0f",
     raised: "#24262a",
+    field: "#0c0d0f",
+    fieldBorder: "#2c2e33",
     border: "#2c2e33",
     line: "#1f2124",
     text: "#eceef1",
@@ -100,6 +106,8 @@ export const colors: Palette = themed<Palette>(
     surface: "#ffffff",
     inset: "#f0f0ec",
     raised: "#fbfbf9",
+    field: "#e8e8e3",
+    fieldBorder: "#cfcfc8",
     border: "#e2e2dd",
     line: "#ecece8",
     text: "#16171a",
@@ -160,13 +168,14 @@ export interface Finish {
  * Light and depth: gentle top-to-bottom gradients, a highlight along top
  * edges and soft shadows, so cards, controls and buttons read as surfaces.
  */
-export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "accent" | "track" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>>(
+export const finish = themed<Record<"card" | "inset" | "field" | "raised" | "light" | "accent" | "track" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>>(
   {
     card: {
       backgroundImage: "linear-gradient(180deg, #1d1e22 0%, #17181b 100%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.38)",
     },
     inset: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.55)" },
+    field: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.55)" },
     raised: {
       backgroundImage: "linear-gradient(180deg, #2d2f34 0%, #222428 100%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.45)",
@@ -217,6 +226,7 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
       boxShadow: "inset 0 1px 0 #ffffff, 0 6px 20px rgba(20,20,10,0.08)",
     },
     inset: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.07)" },
+    field: { boxShadow: "inset 0 1px 1px rgba(20,20,10,0.10)" },
     raised: {
       backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f2f2ee 100%)",
       boxShadow: "inset 0 1px 0 #ffffff, 0 1px 2px rgba(20,20,10,0.12)",

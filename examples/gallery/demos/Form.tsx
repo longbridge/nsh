@@ -44,10 +44,10 @@ function Field(
           borderRadius: radius.control,
           borderCurve: "continuous",
           borderWidth: 1,
-          borderColor: own.error ? colors.danger : props.readonly ? colors.line : colors.border,
-          backgroundColor: colors.inset,
+          borderColor: own.error ? colors.danger : props.readonly ? colors.line : colors.fieldBorder,
+          backgroundColor: colors.field,
           // Recessed while editable; a read-only field lies flat.
-          ...(props.readonly ? {} : finish.inset),
+          ...(props.readonly ? {} : finish.field),
         }}
       >
         <If when={own.prefix}>

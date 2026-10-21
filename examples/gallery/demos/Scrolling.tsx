@@ -442,10 +442,10 @@ export function Scrolling() {
                 height: 44,
                 fontSize: 15,
                 color: colors.text,
-                backgroundColor: colors.surface,
-                ...finish.inset,
+                backgroundColor: colors.field,
+                ...finish.field,
                 borderWidth: 1,
-                borderColor: colors.border,
+                borderColor: colors.fieldBorder,
                 borderRadius: radius.control,
                 paddingHorizontal: 14,
               }}

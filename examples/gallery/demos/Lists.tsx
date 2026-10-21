@@ -325,10 +325,10 @@ function Chat() {
             height: 44,
             fontSize: 15,
             color: colors.text,
-            backgroundColor: colors.inset,
-            ...finish.inset,
+            backgroundColor: colors.field,
+            ...finish.field,
             borderWidth: 1,
-            borderColor: colors.border,
+            borderColor: colors.fieldBorder,
             borderRadius: 22,
             paddingHorizontal: 16,
           }}

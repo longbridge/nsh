@@ -51,11 +51,11 @@ function Field(props: InputProps) {
         paddingHorizontal: 14,
         fontSize: 15,
         color: colors.text,
-        backgroundColor: colors.inset,
+        backgroundColor: colors.field,
         borderWidth: 1,
-        borderColor: focused() ? colors.accent : colors.border,
+        borderColor: focused() ? colors.accent : colors.fieldBorder,
         borderRadius: radius.control,
-        ...finish.inset,
+        ...finish.field,
       }}
     />
   );
