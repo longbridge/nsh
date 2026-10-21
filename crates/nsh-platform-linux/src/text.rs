@@ -122,9 +122,14 @@ pub(crate) fn font_description(
         None => desc.set_family(ui_family),
     }
     desc.set_weight(weight(style.font_weight));
-    if style.italic {
-        desc.set_style(pango::Style::Italic);
-    }
+    // Always set: a run's font attribute leaves unset fields to the
+    // layout's base font, which is the first run's (an italic comment
+    // first would make the whole text italic).
+    desc.set_style(if style.italic {
+        pango::Style::Italic
+    } else {
+        pango::Style::Normal
+    });
     desc.set_absolute_size(f64::from(style.font_size.0) * f64::from(pango::SCALE));
     desc
 }
