@@ -566,6 +566,13 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     // crate, through wasm-bindgen) asks the page to pump, as input does.
     engine.set_wake(std::sync::Arc::new(ffi::request_pump));
     let control = engine.control();
+    // The test moves its clock through the engine.
+    #[cfg(feature = "dev")]
+    TEST_MODEL.with(|m| {
+        if let Some(model) = &*m.borrow() {
+            model.engine_started(control.clone());
+        }
+    });
     APP.with(|a| {
         *a.borrow_mut() = Some(Running {
             engine,
@@ -823,11 +830,21 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
         }
         Ok(step) => {
             let model = TEST_MODEL.with(|m| m.borrow().clone());
-            match model.and_then(|m| nsh_testing::agent::answer(&m, &step)) {
+            let answer = match model.and_then(|m| nsh_testing::agent::answer(&m, &step)) {
                 Some(Ok(value)) => serde_json::json!({ "done": value }),
                 Some(Err(message)) => serde_json::json!({ "failed": message }),
                 None => serde_json::json!({ "page": true }),
+            };
+            // The engine runs on this thread: the clock gets there before the
+            // step is answered, and the page then waits for what comes next.
+            if let nsh_dev::protocol::TestStep::Scene {
+                query: nsh_dev::protocol::SceneQuery::Clock { .. },
+            } = step
+            {
+                pump();
+                ffi::request_pump();
             }
+            answer
         }
     };
     TEST_ANSWER.with(|a| {

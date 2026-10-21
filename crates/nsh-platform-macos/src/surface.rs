@@ -314,6 +314,11 @@ impl Surface {
         *self.pending.borrow_mut() = pending;
         match Engine::start(config, CoreTextEngine::default, sink) {
             Ok(engine) => {
+                // The test moves its clock through the engine.
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.borrow() {
+                    model.engine_started(engine.control());
+                }
                 if let Some(monitor) = &*self.perf.borrow() {
                     engine.control().set_perf_monitor(Some(monitor.clone()));
                 }

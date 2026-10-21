@@ -47,6 +47,10 @@ pub fn manual() -> bool {
     CURRENT.with(|current| current.borrow().as_ref().is_some_and(Clock::is_manual))
 }
 
+/// A display frame's time at 60 Hz: what a manual clock that moves with
+/// the display's frames moves by each frame ([`Clock::with_frames`]).
+pub const FRAME: Duration = Duration::from_nanos(16_666_667);
+
 thread_local! {
     /// The clock of the engine on this thread.
     static CURRENT: RefCell<Option<Clock>> = const { RefCell::new(None) };
@@ -68,6 +72,8 @@ struct Manual {
     unix_origin: f64,
     /// What runs once it reaches a time ([`Clock::at`]), soonest first.
     alarms: Vec<(Instant, Box<dyn FnOnce() + Send>)>,
+    /// It also moves with the display's frames ([`Clock::with_frames`]).
+    frames: bool,
 }
 
 impl std::fmt::Debug for Clock {
@@ -94,7 +100,26 @@ impl Clock {
             elapsed: Duration::ZERO,
             unix_origin: epoch_ms(start),
             alarms: Vec::new(),
+            frames: false,
         }))))
+    }
+
+    /// A manual clock that also moves by a frame's time
+    /// ([`FRAME`]) with each frame the display shows its engine, before
+    /// the frame runs: a test's app on a real platform, whose time passes
+    /// while it animates and stands still while it is idle, as a headless
+    /// run's does. Nothing for the system's clock.
+    pub fn with_frames(self) -> Clock {
+        if let Some(mut m) = self.manual_state() {
+            m.frames = true;
+        }
+        self
+    }
+
+    /// Whether it is a manual clock that moves with the display's frames
+    /// ([`Clock::with_frames`]).
+    pub fn moves_with_frames(&self) -> bool {
+        self.manual_state().is_some_and(|m| m.frames)
     }
 
     /// Whether it is manual.

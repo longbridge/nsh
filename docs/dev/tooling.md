@@ -412,8 +412,17 @@ takes no made-up keys; the phones, without app shortcuts, refuse them),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
-test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
-`runFor` waits, and `fastForward` and `setSystemTime` fail. `open`'s locale, reduced motion and safe area reach the
+test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
+test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
+`Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
+test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
+`SceneQuery::Clock`, after which the page pumps its engine), which `Model::move_clock` takes as the headless driver
+does, through `EngineControl::advance_clock`; `wait` moves the clock by its time too (`driver.rs`'s `Remote`). A
+clock that moves with frames (`Clock::moves_with_frames`) is the display's pace on a real platform: each frame the
+platform shows moves it to a frame after the last (`nsh_core::time::FRAME`, 1/60 s) before it runs, and while the
+engine moves it (`Driver::advance` with `frames`) the frames the app waits for run on the way, a frame apart, as a
+headless display's do; the platform's own animations run in real time, as do stubbed responses' delays (the test's
+side holds them, outside the app's clock). `open`'s locale, reduced motion and safe area reach the
 host in the test's setup (`TestEnvironment`, `DevServer::set_test_environment`) and its engine pins them
 (`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports); its clipboard is the
 test's (`EngineConfig::clipboard`: the core serves the app's clipboard commands from a `ClipboardBackend`, here a
