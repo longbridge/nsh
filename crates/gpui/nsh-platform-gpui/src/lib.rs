@@ -79,3 +79,5 @@ pub use crate::{
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };
+#[cfg(feature = "dev")]
+pub use crate::app::set_root;

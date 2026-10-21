@@ -8,7 +8,9 @@
 //! An app this command line serves runs in its process. An app with Rust
 //! crates of its own runs in the headless runner built with them
 //! (`rust_app.rs`, `nsh_testing::runner`), which asks this process to build
-//! each entry ([`RunnerMessage::Build`]): the runner links no bundler.
+//! each entry ([`RunnerMessage::Build`]): the runner links no bundler. On a
+//! real platform (`--target`) the apps run in its hosts, built with the
+//! app's crates (`test_host.rs`), and the test files in this process.
 
 use std::{
     collections::HashMap,
@@ -74,18 +76,15 @@ pub(crate) fn test(
     };
     let start = Instant::now();
     let mut tally = Tally::default();
-    if target.is_some() && crate::rust_app::current().is_some() {
-        bail!(
-            "an app with Rust crates of its own runs its tests headless for now: leave out --target"
-        )
-    }
     if browser.is_some() && target.is_none() {
         bail!("--browser goes with --target web");
     }
     let host = target
         .map(|target| crate::test_host::starter(target, browser, &work_dir))
         .transpose()?;
-    match crate::rust_app::current() {
+    // On a real platform the apps run in hosts built with the app's crates:
+    // the test files run here, whatever the app is.
+    match crate::rust_app::current().filter(|_| host.is_none()) {
         Some(app) => {
             let request = TestRequest {
                 protocol: nsh_testing::PROTOCOL,

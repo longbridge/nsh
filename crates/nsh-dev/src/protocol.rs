@@ -150,6 +150,9 @@ pub enum ServerMessage {
         /// What to do.
         step: TestStep,
     },
+    /// A test session's app is the host's own Rust root (`nsh.json`
+    /// `"root"`, an app of Rust only), which it runs in place of a bundle.
+    Root,
     /// A rebuild started.
     Building,
     /// The host cannot run the app: the latest bundle imports UI sets it

@@ -169,7 +169,9 @@
           // starts before its first bundle.
           if (message.test) player.testStart();
           showStatus("");
-          if (RUST && !running) {
+          // A test session's Rust app starts when the server says so,
+          // after what the test sets it up with.
+          if (RUST && !running && !message.test) {
             running = { session, version: 0 };
             player.runRust();
           }
@@ -183,6 +185,12 @@
           break;
         case "step":
           send({ type: "step_done", id: message.id, outcome: player.testStep(message.step) });
+          break;
+        case "root":
+          // The app is this runtime's own Rust root (a test session's).
+          running = { session, version: 0 };
+          showStatus("");
+          player.runRust();
           break;
         case "building":
           showStatus("Building…");

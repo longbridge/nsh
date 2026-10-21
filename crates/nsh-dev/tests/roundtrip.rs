@@ -380,3 +380,17 @@ fn a_test_session_asks_its_host_for_steps_and_hears_their_outcomes() {
         Err("cannot Back".into())
     );
 }
+
+#[test]
+fn an_app_of_rust_only_runs_as_its_hosts_root() {
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.publish_root();
+    let url = format!("ws://{}{WS_PATH}", server.local_addr());
+    let (tx, rx) = mpsc::channel();
+    let _client = DevClient::start(url, host("test-device", "bc-1"), move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    // A host connecting later hears it too: it is the latest state.
+    assert!(matches!(next_non_status(&rx), DevEvent::Root));
+}

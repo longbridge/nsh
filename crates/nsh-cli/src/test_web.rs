@@ -13,7 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context as _;
 use nsh_core::{
     NodeId,
     geometry::{Bounds, Point, Points, Size, point},
@@ -46,8 +45,7 @@ const SCROLL_STEP: f32 = 20.0;
 pub(crate) fn starter(browser: Option<&Path>) -> anyhow::Result<StartHost> {
     let exe = cdp::find(browser)?;
     // Built (in a checkout) or found once, before the first test.
-    let runtime =
-        crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
+    let runtime = crate::runtime::test_web()?;
     let host = Arc::new(crate::web::dev_host(&runtime, false)?);
     // One browser for the run, started with the first app.
     let running = Arc::new(Mutex::new(None::<Arc<Browser>>));

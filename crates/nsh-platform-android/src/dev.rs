@@ -136,6 +136,25 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}
+        DevEvent::Root => {
+            host.dev_status(None);
+            let Some(root) = crate::app_root() else {
+                return host.dev_error(
+                    Some((
+                        "This host cannot run the app",
+                        "The app is of Rust only, and this host was not built with its root.",
+                    )),
+                    true,
+                );
+            };
+            {
+                let mut state = state.lock().expect("dev state");
+                state.latest = None;
+                state.running = None;
+            }
+            host.dev_error(None, false);
+            host.load(root);
+        }
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => host.dev_error(Some(("Build failed", &message)), false),
         DevEvent::CannotRun { message, .. } => {

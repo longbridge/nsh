@@ -17,7 +17,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{BYTECODE_VERSION, Bundle, Limits, Policy};
+use nsh_engine::{App, BYTECODE_VERSION, Bundle, Limits, Policy};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
@@ -255,6 +255,25 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         | DevEvent::Step { .. }
         | DevEvent::TestSetup { .. }
         | DevEvent::Fetch { .. } => {}
+        DevEvent::Root => {
+            hide_status(ui);
+            let Some(root) = crate::root() else {
+                return show_error(
+                    ui,
+                    container,
+                    "This host cannot run the app",
+                    "The app is of Rust only, and this host was not built with its root.",
+                    true,
+                );
+            };
+            {
+                let mut ui = ui.borrow_mut();
+                ui.latest = None;
+                ui.running = None;
+            }
+            hide_error(ui);
+            Inner::load(view, App::Rust(root));
+        }
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => {
             show_error(ui, container, "Build failed", &message, false)

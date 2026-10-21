@@ -27,7 +27,7 @@ const CONNECT: Duration = Duration::from_secs(90);
 /// Starts the apps tests open in a simulator (a booted one, else the
 /// newest iPhone, booted first), installing the development host there.
 pub(crate) fn starter(work: &Path) -> anyhow::Result<StartHost> {
-    let host = crate::runtime::file(crate::runtime::Platform::IphoneSimulator, false)?;
+    let host = crate::runtime::test_host(crate::runtime::Platform::IphoneSimulator)?;
     let udid = crate::run::simulator(None)?;
     let app = crate::run::package_ios(&work.join("ios"), &host)?;
     let step = crate::ui::Step::start("installing the development host in the simulator");
