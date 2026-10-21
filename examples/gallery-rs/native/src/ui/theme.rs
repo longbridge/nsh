@@ -44,9 +44,9 @@ pub(crate) mod colors {
     /// A control on a card (buttons, fields, tracks).
     pub(crate) const RAISED: AdaptiveColor = tone(rgb(0xfbfbf9), rgb(0x24262a));
     /// Borders of cards and controls.
-    pub(crate) const BORDER: AdaptiveColor = tone(rgb(0xe2e2dd), rgb(0x2c2e33));
+    pub(crate) const BORDER: AdaptiveColor = tone(rgb(0xd8d8d1), rgb(0x2c2e33));
     /// Hairlines inside insets.
-    pub(crate) const LINE: AdaptiveColor = tone(rgb(0xecece8), rgb(0x1f2124));
+    pub(crate) const LINE: AdaptiveColor = tone(rgb(0xe2e2dc), rgb(0x24262a));
     /// Text.
     pub(crate) const TEXT: AdaptiveColor = tone(rgb(0x16171a), rgb(0xeceef1));
     /// Secondary text.
@@ -270,8 +270,8 @@ const fn stop(light: Rgba, dark: Rgba, at: f32) -> (AdaptiveColor, f32) {
 const CARD: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xffffff), rgb(0x1d1e22), 0.0),
-        stop(rgb(0xfafaf8), rgb(0x17181b), 1.0),
+        stop(rgb(0xfdfdfd), rgb(0x1b1c20), 0.0),
+        stop(rgb(0xfcfcfa), rgb(0x191a1d), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
@@ -297,8 +297,8 @@ const INSET: Look = Look {
 const RAISED: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xffffff), rgb(0x2d2f34), 0.0),
-        stop(rgb(0xf2f2ee), rgb(0x222428), 1.0),
+        stop(rgb(0xfbfbf9), rgb(0x292b30), 0.0),
+        stop(rgb(0xf6f6f4), rgb(0x26282c), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
@@ -315,8 +315,8 @@ const RAISED: Look = Look {
 const LIGHT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0x2c2e33), rgb(0xfbfbfc), 0.0),
-        stop(rgb(0x16171a), rgb(0xd4d6d9), 1.0),
+        stop(rgb(0x25272b), rgb(0xeeeff1), 0.0),
+        stop(rgb(0x1d1e22), rgb(0xe1e2e4), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.14)),
@@ -333,8 +333,8 @@ const LIGHT: Look = Look {
 const ACCENT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xd8f88f), rgb(0xdbf893), 0.0),
-        stop(rgb(0xbde65a), rgb(0xb3dd4e), 1.0),
+        stop(rgb(0xcff27e), rgb(0xceef7d), 0.0),
+        stop(rgb(0xc6ec6b), rgb(0xc0e664), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.6)),
@@ -375,9 +375,9 @@ const KNOB: Look = Look {
 const PILL: Look = Look {
     fill: Some(tone(rgb(0xffffff), rgb(0x2a2c31))),
     stops: &[
-        stop(rgb(0xffffff), rgb(0x383a40), 0.0),
-        stop(rgb(0xfcfcfa), rgb(0x2a2c31), 0.52),
-        stop(rgb(0xf3f3ef), rgb(0x24262a), 1.0),
+        stop(rgb(0xfcfcfa), rgb(0x313338), 0.0),
+        stop(rgb(0xfbfbf9), rgb(0x2c2e33), 0.52),
+        stop(rgb(0xf8f8f5), rgb(0x2a2c30), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
