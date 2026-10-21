@@ -206,13 +206,15 @@ enum Pumped {
 /// it rendered nothing for 100 ms and no native animation runs (2 s at
 /// most), and fail when the app threw meanwhile (an exception that
 /// escaped a callback, a bundle that did not load, a VM that was stopped)
-/// or asked what only a real platform answers (an image's size).
+/// or asked what only a real platform answers (an image from the
+/// clipboard).
 ///
 /// It plays the platform's part the NSH protocol defines and nothing
 /// else: the native animation graph runs frame by frame (nsh-core's `animation`),
 /// a back pops screens and closes modals, dialogs are answered (by the
 /// test, else [`default_answer`]), the clipboard holds text. Images are
-/// not loaded: no `onLoad` comes.
+/// not loaded: no `onLoad` comes, and `Image.getSize` / `Image.prefetch`
+/// fail.
 pub struct Headless {
     engine: Engine,
     batches: Receiver<MountBatch>,
@@ -505,6 +507,16 @@ impl Headless {
                 fields.push(("text", PayloadValue::Str(text)));
             }
             control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(fields));
+        }
+        for id in self.screen.take_image_infos() {
+            let fields = vec![
+                ("id", PayloadValue::Number(f64::from(id))),
+                (
+                    "error",
+                    PayloadValue::Str("headless runs load no images".into()),
+                ),
+            ];
+            control.dispatch_event(ROOT_ID, EventKind::ImageInfo, EventPayload::Map(fields));
         }
         if self.screen.take_back_asked() {
             self.go_back();

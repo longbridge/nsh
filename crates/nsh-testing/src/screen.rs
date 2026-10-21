@@ -77,6 +77,8 @@ pub struct Screen {
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
+    /// The `Image.getSize` / `Image.prefetch` requests to answer.
+    image_infos: Vec<u32>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -276,10 +278,9 @@ impl Screen {
             Command::ReadClipboardFiles { .. } => {
                 self.unsupported.push("reading files from the clipboard");
             }
-            Command::ImageInfo { .. } => {
-                self.unsupported
-                    .push("an image's size (`Image.getSize`, `Image.prefetch`)");
-            }
+            // Headless runs load no images: the size is answered as a
+            // failed load (a `TextView` asks for its images' sizes).
+            Command::ImageInfo { id, .. } => self.image_infos.push(*id),
             Command::Back => self.back_asked = true,
             Command::Focus if self.input(id).is_some() => self.focused = Some(id),
             Command::Blur if id == ROOT || self.focused == Some(id) => self.focused = None,
@@ -455,6 +456,10 @@ impl Screen {
 
     /// What the app asked that only a real platform answers, since the
     /// last call.
+    pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.image_infos)
+    }
+
     pub(crate) fn take_unsupported(&mut self) -> Vec<&'static str> {
         std::mem::take(&mut self.unsupported)
     }

@@ -322,8 +322,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
-- **图片不会加载**：不会有 `onLoad` 或 `onError`。
-- **只有真实平台才能回答的请求会让步骤失败**：图片尺寸（`Image.getSize`、`Image.prefetch`）、剪贴板里的图片或文件。
+- **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
+- **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
 
 ### 断言
 

@@ -339,9 +339,8 @@ that only a real platform can do:
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
 - **Modals show at once**: `onShow` comes when one is presented.
-- **Images are not loaded**: no `onLoad` or `onError` comes.
-- **What only a real platform answers fails the step**: an image's size (`Image.getSize`, `Image.prefetch`), an image
-  or files on the clipboard.
+- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
+- **What only a real platform answers fails the step**: an image or files on the clipboard.
 
 ### Expectations
 
