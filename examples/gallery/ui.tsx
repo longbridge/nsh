@@ -3,7 +3,7 @@ import { computed, effect, Image, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch, Tab, Tabs } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 import logoDark from "./logo-dark.svg";
@@ -437,6 +437,17 @@ export function Press(props: {
 }
 
 /**
+ * `Press`'s feedback for a `Tab` of `nsh/base`, which reports no press down
+ * to spring with: it sinks a little while pressed and eases back, and takes
+ * presses 4 pt around it without taking more room (a hit slop). Spread
+ * `style` and `activeStyle` into the tab's.
+ */
+export const tabPress = {
+  style: { margin: -4, padding: 4, transitionProperty: "transform", transitionDuration: 150, transitionTimingFunction: "ease-out" },
+  activeStyle: { transform: [{ scale: 0.97 }] },
+} satisfies { style: ViewStyle; activeStyle: ViewStyle };
+
+/**
  * Fades and lifts its content in once mounted; `index` staggers siblings
  * (40 ms apart). `flex` lets it wrap a page that fills its parent.
  */
@@ -847,7 +858,8 @@ export function switchLook(on: () => boolean): { readonly trackStyle: ViewStyle;
 
 /**
  * Equal segments with an indicator that springs to the selected one
- * (`count` shows a quiet number after a label).
+ * (`count` shows a quiet number after a label): `nsh/base`'s `Tabs`, a tab
+ * per segment, in the gallery's look.
  */
 export function Segmented<T extends string>(props: {
   options: readonly { value: T; label: string; count?: number }[];
@@ -875,9 +887,8 @@ export function Segmented<T extends string>(props: {
     placed = true;
   });
   return (
-    <View
+    <Tabs
       onLayout={(e) => width.set(e.size.width)}
-      role="tablist"
       style={{
         height,
         flexDirection: "row",
@@ -905,10 +916,9 @@ export function Segmented<T extends string>(props: {
       />
       <Each of={props.options}>
         {(option) => (
-          <View
+          <Tab
+            selected={props.value === option().value}
             onPress={() => props.onChange(option().value)}
-            role="tab"
-            accessibilityState={{ selected: props.value === option().value }}
             style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 }}
           >
             <Text
@@ -924,10 +934,10 @@ export function Segmented<T extends string>(props: {
             <If when={option().count !== undefined}>
               <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{option().count}</Text>
             </If>
-          </View>
+          </Tab>
         )}
       </Each>
-    </View>
+    </Tabs>
   );
 }
 

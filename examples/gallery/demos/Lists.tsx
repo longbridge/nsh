@@ -1,9 +1,9 @@
 import { computed, Input, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { LayoutAnimation } from "nsh/animated";
 import { platform } from "nsh/device";
-import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
+import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, Tab, Tabs } from "nsh/base";
 import { Icon, type IconName } from "../icons";
-import { Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, type Tone, toneColor, toneTint } from "../ui";
+import { Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, type Tone, toneColor, toneTint } from "../ui";
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger", "neutral"];
 
@@ -384,10 +384,10 @@ function More() {
         <Section title="Horizontal scroll view" note={range()}>
           <View style={{ marginHorizontal: -14 }}>
             <Scroll horizontal scrollbar={false}>
-              <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 14 }}>
+              <Tabs style={{ flexDirection: "row", gap: 8, paddingHorizontal: 14 }}>
                 <Each of={ranges}>
                   {(label) => (
-                    <Press onPress={() => range.set(label())} hitSlop={4} role="tab" accessibilityState={{ selected: range() === label() }}>
+                    <Tab selected={range() === label()} onPress={() => range.set(label())} style={tabPress.style} activeStyle={tabPress.activeStyle}>
                       <View
                         style={{
                           height: 36,
@@ -402,10 +402,10 @@ function More() {
                       >
                         <Text style={{ fontSize: 13, fontWeight: "600", color: range() === label() ? colors.onLight : colors.muted }}>{label()}</Text>
                       </View>
-                    </Press>
+                    </Tab>
                   )}
                 </Each>
-              </View>
+              </Tabs>
             </Scroll>
           </View>
         </Section>
@@ -487,7 +487,7 @@ function More() {
   );
 }
 
-type Tab = "grid" | "sections" | "chat" | "more";
+type ListTab = "grid" | "sections" | "chat" | "more";
 
 const tabs = [
   { value: "grid", label: "Grid" },
@@ -497,7 +497,7 @@ const tabs = [
 ] as const;
 
 export function Lists() {
-  const tab = signal<Tab>("grid");
+  const tab = signal<ListTab>("grid");
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={desktop() ? { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 4, width: "100%", maxWidth: 600 } : { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 }}>
