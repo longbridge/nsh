@@ -32,55 +32,42 @@ downward: higher layers own domain meaning and orchestration, lower layers own r
 
 | Layer | Where it lives | Owns |
 | --- | --- | --- |
-| App shell | The entry (`mount(App)`, or `nsh.json` `"root"`) | The root, the navigation stacks, the features it composes |
-| Feature | A directory of TSX modules, or a crate of the app's | One capability's state, services, screens, dialogs and workflow |
+| App shell | The entry (`mount(App)`, or `nsh.json` `"root"`) | The root, the navigation stacks, the pages it shows |
+| Page | A file in `pages/` | One `NavPage`: its content, its dialogs, the work it starts |
 | App component | The app's component library | A repeated, domain-aware pattern with the product's look |
 | Component library | The app's, or one from the community | Styled, general-purpose components built on `nsh/base` |
 | `nsh/base` (`nsh_base`) | Native Shell | Unstyled behavior: navigation, dialogs, a press target, safe areas, the keyboard, the theme's tokens |
 | `nsh` (`nsh_core::ui::prelude`) | Native Shell | The primitives, styles, layout, reactivity, the environment |
 
-A reusable component never depends on an app screen, and a component library never depends on a feature. `nsh/base`
+A reusable component never depends on an app screen, and a component library never depends on a page. `nsh/base`
 draws nothing of its own: the look is always the app's or its library's.
 
-### Organize large apps by capability
+### Lay out an app's files
 
-Keep one capability's state, services, screens, dialogs and commands together, behind one public boundary. A dialog
-that renames a workspace belongs to the workspace feature; only the reusable dialog behavior belongs to the component
-library. A small capability can stay one module until a boundary has a concrete benefit.
+An app's files follow NSH's conventions, so there is nothing to configure: `App.tsx` is the entry and `nsh.json`
+sits beside it, and both are found by convention.
 
 ```text
-App.tsx                      # mount(App): composes the features
-features/
-├── workspace/
-│   ├── index.ts             # The feature's public boundary
-│   ├── store.ts             # Its signals and the functions that change them
-│   ├── WorkspaceScreen.tsx
-│   └── RenameDialog.tsx
-├── search/
-│   ├── index.ts
-│   ├── store.ts
-│   ├── SearchScreen.tsx
-│   └── filters.ts
-└── settings/
-    ├── index.ts
-    └── SettingsScreen.tsx
-ui/                          # The app's component library
-├── Switch.tsx
-└── Card.tsx
-native/                      # Rust crates, listed in nsh.json "rust"
-├── charts/                  # #[native_module("app/charts")]
-└── ledger/                  # #[native_module("app/ledger")]
+App.tsx            # the entry, by convention: mount(App)
+nsh.json
+pages/             # one file per NavPage
+  Inbox.tsx
+  Compose.tsx
+  Settings.tsx
+components/        # the app's reusable components
+  Card.tsx
+store.ts           # the app's state: signals and the functions that change them
+native/            # the app's Rust crate (nsh.json "rust": "native", the mixed template)
 ```
 
-Do not invert this into global `components/`, `screens/`, `dialogs/` and `stores/` directories: they sort files by
-their role and scatter every feature across the app. In Rust, a capability that has its own state, lifecycle and
-public boundary merits a crate of its own ([Several crates](./rust.md#several-crates)); crates share code through path
-dependencies, and only the crates listed in `"rust"` export to TSX.
-
-Across a feature boundary, expose a deliberately public function, component, domain id or event, and keep the
-feature's signals and modules private. Features depend on shared contracts below them, never on the shell or a
-sibling's private modules; when one must call another, make the dependency explicit and one-way. These boundaries let
-several engineers or agents work on separate capabilities in parallel with fewer conflicts.
+- `pages/` holds one file per `NavPage`. A page grows into more files only when it needs them.
+- `components/` holds the app's reusable components, the ones several pages use.
+- `store.ts` holds the app's state: its signals and the functions that change them. Pages read the signals and call
+  the functions.
+- Tests are `*.test.tsx` files beside what they test (`App.test.tsx`, `pages/Inbox.test.tsx`).
+- `native/` is the app's Rust crate, as the `mixed` template makes it. An app written only in Rust (the `rust`
+  template) is a Cargo project instead, with its root component in `src/lib.rs`
+  ([Project structure](./project-structure.md)).
 
 ## Bootstrap and root ownership
 
@@ -110,8 +97,8 @@ mount(() => (
 One surface is one engine: each `NshAppView`, `NshView` or `AppView` a native app embeds runs its own VM, its own
 module state and its own reactive graph. Code written for NSH keeps its state in the app's modules and components,
 so several surfaces in one host app never share it by accident. A navigation flow has one `NavStack` and its state;
-a `Dialog` presents over everything else, the stack's header included, so a dialog belongs to the feature that opens
-it, not to a page's layout.
+a `Dialog` presents over everything else, the stack's header included, so a dialog is part of the page that opens
+it, whatever the page's layout.
 
 ## What runs once and what runs again
 
@@ -161,8 +148,7 @@ Put each state in the narrowest owner that can keep it correct:
 
 - transient UI state (a field's draft, whether a disclosure is open) is a signal in the component that renders it;
 - state a subtree shares is a signal provided through [context](./reactivity.md#context);
-- a feature's domain state lives in the feature's store module (TSX) or its crate (Rust), changed through named
-  functions;
+- the app's domain state lives in `store.ts` (TSX) or the app's crate (Rust), changed through named functions;
 - what outlives a run belongs in [storage](../modules/nsh-storage.md) or on a server;
 - behavior a reusable component owns stays inside it; its value does not (below).
 
@@ -237,7 +223,7 @@ switch()
 
 ```tsx tabs
 import { signal } from "nsh";
-import { Switch } from "app/ui";   // the Rust component, from the crate's #[native_module("app/ui")]
+import { Switch } from "my-app/native";   // the Rust component in native/: #[native_module("my-app/native")]
 
 function WifiRow() {
   const wifi = signal(true);
@@ -332,7 +318,7 @@ each(projects, |p| p.id, |project, _index| {
 ## Rendering and composition
 
 Keep a component declarative: read state, derive presentation values, compose elements. Move domain operations,
-parsing and requests to named functions of the feature. Extract a helper when it names a meaningful region and
+parsing and requests to named functions of `store.ts` or the app's crate. Extract a helper when it names a meaningful region and
 reduces what a reader holds at once; extract a component when the region has its own reusable contract, not merely
 because a builder chain or a JSX block is long.
 
@@ -432,7 +418,7 @@ nav_page()
 ```
 
 Model one command once. A button, a menu item of `nsh/desktop` and a keyboard shortcut (`keymap.bind("mod+s", save)`)
-call the same function of the feature, so their entry points cannot disagree; derive their labels and their disabled
+call the same function of `store.ts`, so their entry points cannot disagree; derive their labels and their disabled
 state from one place.
 
 Use presses for activation: `onPress`, `onLongPress`, `onPressDown` and `onPressUp` mean the same with a finger, a pen,
@@ -737,7 +723,7 @@ of waiting on real ones. Add a regression test before fixing a bug whenever the 
 Avoid these patterns:
 
 - reading a prop or signal in a component body and expecting it to update;
-- one store holding the whole app's unrelated state;
+- one signal holding the app's unrelated state;
 - requests and business logic inside a long component body;
 - index or random keys for reorderable rows;
 - per-row state in signals created inside a `List` row;

@@ -28,51 +28,38 @@ NSH 应用分层构建，与 GPUI Kit 相同（[三层结构](./architecture.md#
 
 | 层 | 位置 | 负责 |
 | --- | --- | --- |
-| 应用外壳 | 入口（`mount(App)`，或 `nsh.json` 的 `"root"`） | 根视图、导航栈、它组合的各个功能 |
-| 功能 | 一个 TSX 模块目录，或应用的一个 crate | 一项能力的状态、服务、页面、对话框和流程 |
+| 应用外壳 | 入口（`mount(App)`，或 `nsh.json` 的 `"root"`） | 根视图、导航栈、它显示的各个页面 |
+| 页面 | `pages/` 中的一个文件 | 一个 `NavPage`：它的内容、对话框以及它发起的工作 |
 | 应用组件 | 应用的组件库 | 重复出现、了解领域、带有产品外观的模式 |
 | 组件库 | 应用自己的，或社区的 | 构建在 `nsh/base` 之上、带样式的通用组件 |
 | `nsh/base`（`nsh_base`） | Native Shell | 无样式的行为：导航、对话框、按压目标、安全区域、键盘、主题 token |
 | `nsh`（`nsh_core::ui::prelude`） | Native Shell | 原语、样式、布局、响应式、环境 |
 
-可复用组件从不依赖应用页面，组件库从不依赖某个功能。`nsh/base` 自身不绘制任何外观：外观总是属于应用或它的组件库。
+可复用组件从不依赖应用页面，组件库从不依赖某个页面。`nsh/base` 自身不绘制任何外观：外观总是属于应用或它的组件库。
 
-### 按能力组织大型应用
+### 应用文件的布局
 
-把一项能力的状态、服务、页面、对话框和命令放在一起，置于一个公开边界之后。重命名工作区的对话框属于工作区功能；只有可复用的
-对话框行为属于组件库。小的能力可以一直是一个模块，直到边界带来具体的好处。
+应用的文件遵循 NSH 的约定，因此无需任何配置：`App.tsx` 是入口，`nsh.json` 在它旁边，两者都按约定找到。
 
 ```text
-App.tsx                      # mount(App)：组合各个功能
-features/
-├── workspace/
-│   ├── index.ts             # 功能的公开边界
-│   ├── store.ts             # 它的 signal 以及修改它们的函数
-│   ├── WorkspaceScreen.tsx
-│   └── RenameDialog.tsx
-├── search/
-│   ├── index.ts
-│   ├── store.ts
-│   ├── SearchScreen.tsx
-│   └── filters.ts
-└── settings/
-    ├── index.ts
-    └── SettingsScreen.tsx
-ui/                          # 应用的组件库
-├── Switch.tsx
-└── Card.tsx
-native/                      # Rust crate，列在 nsh.json 的 "rust" 中
-├── charts/                  # #[native_module("app/charts")]
-└── ledger/                  # #[native_module("app/ledger")]
+App.tsx            # 入口，按约定：mount(App)
+nsh.json
+pages/             # 每个 NavPage 一个文件
+  Inbox.tsx
+  Compose.tsx
+  Settings.tsx
+components/        # 应用的可复用组件
+  Card.tsx
+store.ts           # 应用的状态：signal 以及修改它们的函数
+native/            # 应用的 Rust crate（nsh.json "rust": "native"，mixed 模板）
 ```
 
-不要反过来建立全局的 `components/`、`screens/`、`dialogs/` 和 `stores/` 目录：它们按文件的角色分类，把每个功能分散到整个
-应用中。在 Rust 中，拥有自己的状态、生命周期和公开边界的能力值得单独成为一个 crate（[多个 crate](./rust.md#多个-crate)）；
-crate 之间通过路径依赖共享代码，只有列在 `"rust"` 中的 crate 向 TSX 导出。
-
-跨越功能边界时，只暴露有意公开的函数、组件、领域 id 或事件，功能的 signal 和模块保持私有。功能依赖位于其下方的共享契约，
-从不依赖外壳或兄弟功能的私有模块；一个功能必须调用另一个时，让依赖显式且单向。这些边界让多位工程师或智能体并行开发不同的
-能力，冲突更少。
+- `pages/` 中每个 `NavPage` 一个文件。页面只在需要时才拆成更多文件。
+- `components/` 存放应用的可复用组件，即多个页面都用到的组件。
+- `store.ts` 存放应用的状态：它的 signal 以及修改它们的函数。页面读取这些 signal 并调用这些函数。
+- 测试是放在被测代码旁边的 `*.test.tsx` 文件（`App.test.tsx`、`pages/Inbox.test.tsx`）。
+- `native/` 是应用的 Rust crate，与 `mixed` 模板生成的一样。只用 Rust 编写的应用（`rust` 模板）则是一个 Cargo 项目，根组件
+  位于 `src/lib.rs`（[项目结构](./project-structure.md)）。
 
 ## 启动与根视图的归属
 
@@ -101,7 +88,7 @@ mount(() => (
 
 一个界面对应一个引擎：原生应用嵌入的每个 `NshAppView`、`NshView` 或 `AppView` 都运行自己的 VM、自己的模块状态和自己的
 响应式图。为 NSH 编写的代码把状态放在应用的模块和组件中，因此同一宿主应用中的多个界面不会意外共享状态。一个导航流程有一个
-`NavStack` 及其状态；`Dialog` 呈现在所有内容之上，包括栈的标题栏，所以对话框属于打开它的功能，而不属于某个页面的布局。
+`NavStack` 及其状态；`Dialog` 呈现在所有内容之上，包括栈的标题栏，所以对话框是打开它的页面的一部分，无论页面如何布局。
 
 ## 什么只运行一次，什么会再次运行
 
@@ -149,7 +136,7 @@ Rust 组件从头到尾都是原生代码；TSX 在解释器 QuickJS 中运行�
 
 - 临时界面状态（一个字段的草稿、某个展开区域是否打开）是渲染它的组件中的 signal；
 - 子树共享的状态是通过 [context](./reactivity.md#context) 提供的 signal；
-- 功能的领域状态放在功能的 store 模块（TSX）或它的 crate（Rust）中，通过具名函数修改；
+- 应用的领域状态放在 `store.ts`（TSX）或应用的 crate（Rust）中，通过具名函数修改；
 - 跨越一次运行的数据放在[存储](../modules/nsh-storage.md)或服务器上；
 - 可复用组件负责的行为留在组件内部；它的值不在其中（见下文）。
 
@@ -223,7 +210,7 @@ switch()
 
 ```tsx tabs
 import { signal } from "nsh";
-import { Switch } from "app/ui";   // Rust 组件，来自 crate 的 #[native_module("app/ui")]
+import { Switch } from "my-app/native";   // native/ 中的 Rust 组件：#[native_module("my-app/native")]
 
 function WifiRow() {
   const wifi = signal(true);
@@ -312,7 +299,7 @@ each(projects, |p| p.id, |project, _index| {
 
 ## 渲染与组合
 
-让组件保持声明式：读取状态，派生展示值，组合元素。把领域操作、解析和请求移到功能的具名函数中。当一个辅助函数能命名一块有
+让组件保持声明式：读取状态，派生展示值，组合元素。把领域操作、解析和请求移到 `store.ts` 或应用 crate 的具名函数中。当一个辅助函数能命名一块有
 意义的区域、减少读者需要同时记住的内容时，就提取它；当一块区域有自己可复用的契约时，才提取为组件，而不仅仅因为构建器链或
 JSX 块很长。
 
@@ -401,7 +388,7 @@ nav_page()
 </NavPage>
 ```
 
-一个命令只建模一次。按钮、`nsh/desktop` 的菜单项和键盘快捷键（`keymap.bind("mod+s", save)`）调用功能的同一个函数，这样
+一个命令只建模一次。按钮、`nsh/desktop` 的菜单项和键盘快捷键（`keymap.bind("mod+s", save)`）调用 `store.ts` 的同一个函数，这样
 各个入口不会不一致；它们的标签和禁用状态从同一处派生。
 
 激活使用按压：`onPress`、`onLongPress`、`onPressDown` 和 `onPressUp` 对手指、笔、鼠标和键盘含义相同。原始触摸处理函数和
@@ -675,7 +662,7 @@ test("a tap counts", async () => {
 避免这些模式：
 
 - 在组件函数体中读取 prop 或 signal，却期望它会更新；
-- 一个 store 容纳整个应用互不相关的状态；
+- 一个 signal 容纳应用互不相关的状态；
 - 在很长的组件函数体中发请求、写业务逻辑；
 - 用索引或随机值作可重排行的 key；
 - 每行的状态放在 `List` 行内创建的 signal 中；
