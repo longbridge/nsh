@@ -88,8 +88,7 @@ go elsewhere under these rules rather than into them.
   `source` or `{ uri }` wrappers. `onFileDrop({ uris })` keeps its name (decided by the user, 2026-10-21). Inline content has its own prop (`html`,
   with `baseUrl`, as `srcdoc`).
 - **Environment**: a value that can change while the app runs is an accessor (`colorScheme()`, `pixelRatio()`,
-  `layoutDirection()`), with `set<Value>(value | "system")` when the app may override it (`setColorScheme`,
-  `setLayoutDirection`); a value fixed for the life of the engine is a constant (`platform.os`). Never React Native's
+  `locale()`), with `set<Value>(value | "system")` when the app may override it (`setColorScheme`, `setLocale`); a value fixed for the life of the engine is a constant (`platform.os`). Never React Native's
   static objects (`Platform.OS`, `PixelRatio.get()`, `I18nManager.isRTL`).
 - **Parts**: a component's own `class` / `style` style its main part; every other part gets `<part>Class` /
   `<part>Style`, named after `gpui-base`'s part (`Dialog::backdrop` / `Dialog::popup`; `gpui-component`
@@ -176,9 +175,7 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
 | `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
-| `I18nManager.isRTL`, `getConstants()` | `layoutDirection(): "ltr" \| "rtl"` (accessor) | Environment | |
-| `I18nManager.forceRTL`, `allowRTL` | `setLayoutDirection("ltr" \| "rtl" \| "system")` | Environment | As `setColorScheme`; `allowRTL(false)` is `"ltr"` |
-| `I18nManager.doLeftAndRightSwapInRTL` | (dropped) | | Always true, documented with `direction` |
+| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale (`setLocale` of `nsh/i18n`, translations by rust-i18n), a view's `direction` style overrides it |
 | `OS` (type) | unchanged | | `platform.os`'s type |
 | **`nsh/accessibility`** | | | |
 | `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
