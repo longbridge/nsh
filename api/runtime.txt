@@ -269,6 +269,7 @@ SafeAreaView function
 SelectionArea function
 Sheet function
 Submenu function
+Switch function
 TextView function
 TextView.parse function
 TextView.parseHtml function

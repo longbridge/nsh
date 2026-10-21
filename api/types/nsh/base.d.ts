@@ -689,6 +689,32 @@ export interface SubmenuProps extends ComponentHostProps {
 /** A menu inside a menu: on the desktops its items are a popup beside its trigger, opened as the pointer comes over the trigger or presses it; on touch screens pressing the trigger shows its items in the sheet instead of the ones around it, with its `back` row first. Its popups take the menu's `popupClass` / `popupStyle`. */
 export declare const Submenu: ((props: SubmenuProps) => JSX.Element);
 
+export interface SwitchProps extends ComponentHostProps {
+  /** On or off. The app owns the value: a press reports the next one with `onChange`, and the switch shows the value the app passes back. */
+  checked?: boolean;
+  /** No presses, no press feedback; `disabled:` styles apply to the switch and its parts, and screen readers say it is dimmed. */
+  disabled?: boolean;
+  /** The style while `checked` (and not disabled), as `checked:` classes. */
+  checkedStyle?: StyleProp<ViewStyle>;
+  /** What screen readers say: what the switch turns on, when its children have no text that says it. */
+  accessibilityLabel?: string | null;
+  /** The Tailwind classes of the track, the part the thumb moves along; `checked:` and `disabled:` follow the switch. */
+  trackClass?: string | null;
+  /** The style of the track, over `trackClass`. */
+  trackStyle?: StyleProp<ViewStyle>;
+  /** The Tailwind classes of the thumb, inside the track (`checked:` moves it: `checked:translate-x-4`); `checked:` and `disabled:` follow the switch. */
+  thumbClass?: string | null;
+  /** The style of the thumb, over `thumbClass`. */
+  thumbStyle?: StyleProp<ViewStyle>;
+  /** The content after the track: a label, which screen readers say. */
+  children?: JSX.Element;
+  /** The switch was pressed (a tap, a click, Space or Return): the value it asks for, the opposite of `checked`. */
+  onChange?: (checked: boolean) => void;
+}
+
+/** A control that is on or off and takes effect at once (a setting). It owns its behavior (presses, keyboard activation, the disabled state, the switch role and its value for screen readers) and leaves its look to the app: no colors, sizes, motion or label of its own. Its parts are a track and a thumb inside it, then its children; the app's `class` and `style` style the switch, `trackClass` / `trackStyle` and `thumbClass` / `thumbStyle` the parts, and `checked:` and `disabled:` classes on each follow the switch's state (or `checkedStyle` and `disabledStyle` on the switch). */
+export declare const Switch: ((props: SwitchProps) => JSX.Element);
+
 export interface TextViewProps extends ComponentHostProps {
   /** The document as Markdown (CommonMark and GitHub's: tables, task lists, footnotes, alerts; formulas; HTML inside). A reply streamed by an AI model can be passed as it grows (with `options={{ streaming: true }}`): only the blocks that changed are shown again. */
   markdown?: string | null;

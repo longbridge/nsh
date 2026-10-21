@@ -1,0 +1,795 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+# base-status-bar
+tap id:case-base-status-bar
+# platform is told to show: nsh.json's default under the layers of the
+# pages and dialogs in the tree, the latest winning field by field.
+expect Plain page
+# nsh.json's default alone: the root page sets none.
+statusbar foreground=dark hidden=true animated=false
+# A page over it sets `foreground` only: `hidden` stays nsh.json's.
+tap text:Push first
+expect First page
+statusbar foreground=light hidden=true animated=false
+# The next sets `hidden` only: the page below's `foreground` stays.
+tap text:Push second
+expect Second page
+statusbar foreground=light hidden=false animated=false
+# A dialog over the pages, animated.
+tap text:Open dialog
+expect Dialog content
+statusbar foreground=auto hidden=false animated=true
+# Closing it takes its layer away.
+tap text:Close dialog
+absent Dialog content
+statusbar foreground=light hidden=false animated=false
+# Popping takes the pages' away, down to nsh.json's default.
+tap text:Pop
+expect Routes: plain > first
+statusbar foreground=light hidden=true animated=false
+tap text:Pop
+expect Routes: plain
+statusbar foreground=dark hidden=true animated=false
+covers [props] statusBar
+covers [nsh:rt] setup
+# base-alert-dialog
+tap id:case-base-alert-dialog
+# headless: its promise stays pending.
+expect Alert: not shown
+tap text:Alert
+expect Alert: pending
+tap text:Sheet
+expect Sheet: pending
+tap text:Empty
+expect Empty: rejected for actions
+wait 300
+expect Alert: pending
+expect Sheet: pending
+covers [nsh/base] AlertDialog
+# base-button
+tap id:case-base-button
+# events the platform reports.
+expect Presses: 0
+prop id:plain role button
+prop id:plain accessibilityState {}
+style id:plain backgroundColor #336699ff
+frame id:plain 0 20 390 40
+listens id:plain onPress
+listens id:plain onPressDown
+listens id:plain onPressUp
+tap text:Press me
+expect Presses: 1
+event text:"Press me" onPressDown
+expect Downs: 1, ups: 0
+event text:"Press me" onPressUp
+expect Downs: 1, ups: 1
+# A role, `selected`, and `selectedStyle` over `class` while selected.
+prop id:tab role tab
+prop id:tab accessibilityState {}
+style id:tab backgroundColor #ccccccff
+frame id:tab 0 106 390 30
+tap text:Tab
+prop id:tab accessibilityState selected=true
+style id:tab backgroundColor #00ff00ff
+tap text:Tab
+prop id:tab accessibilityState {}
+style id:tab backgroundColor #ccccccff
+# `accessibilityLabel`: what screen readers say, and what a label finds.
+prop id:icon accessibilityLabel Close the panel
+tap label:Close the panel
+expect Presses: 11
+# `disabled`: screen readers say so, `disabledStyle` applies, presses do
+# nothing (the platform gets no press to report).
+prop id:blocked accessibilityState disabled=true
+style id:blocked opacity 0.5
+expect Blocked presses: 0
+tap text:Toggle blocked
+prop id:blocked accessibilityState {}
+style id:blocked opacity 1
+tap text:Blocked
+expect Blocked presses: 1
+prop id:off accessibilityState disabled=true
+style id:off opacity 1
+covers [nsh/base] Button
+covers [props] role
+covers [props] accessibilityLabel
+covers [props] disabled
+covers [props] disabledStyle
+covers [events] onPressDown
+covers [events] onPressUp
+covers [events] onPress
+covers [props] Button.selected
+covers [props] Button.selectedStyle
+# base-dialog
+tap id:case-base-dialog
+# (appearing, going away, Escape / back and swipes) are events here: the
+# headless runtime presents nothing.
+# Open by default, with the defaults.
+expect Plain dialog
+prop id:plain animation slide
+prop id:plain presentation fullScreen
+prop id:plain closeOnEscape true
+prop id:plain closeOnBackdropPress true
+prop id:plain closeOnSwipe true
+noprop id:plain supportedOrientations
+# Closed while `open` is false.
+absent Synced dialog
+absent Guarded dialog
+tap text:Open synced
+expect Synced dialog
+prop id:synced animation fade
+prop id:synced presentation pageSheet
+listens id:synced onOpen
+listens id:synced onCancel
+# `style` styles the popup around the children.
+frame id:synced-body 20 20 350 30
+event text:"Synced dialog" onOpen
+expect Log: synced opened
+# Escape / back: onCancel, then onOpenChange(false, "cancel").
+event text:"Synced dialog" onCancel reason=cancel
+expect Log: synced opened, synced cancel, synced change false cancel
+absent Synced dialog
+tap text:Clear log
+# Opens again when `open` goes from false to true.
+tap text:Open synced
+expect Synced dialog
+event text:"Synced dialog" onClose
+expect Log: synced closed
+tap text:Close synced
+absent Synced dialog
+# `class` styles the popup; the iOS props.
+expect Stubborn dialog
+prop id:stubborn animation none
+prop id:stubborn presentation formSheet
+prop id:stubborn ios.supportedOrientations portrait, landscape-left
+frame id:stubborn-body 12 12 366 30
+# Closed by the user, it stays closed while `open` stays true.
+tap text:Clear log
+event text:"Stubborn dialog" onCancel reason=swipe
+expect Log: stubborn change false swipe
+absent Stubborn dialog
+wait 100
+absent Stubborn dialog
+tap text:Stubborn off
+absent Stubborn dialog
+tap text:Stubborn on
+expect Stubborn dialog
+# A `closeOn*` flag set to false keeps it open: onCancel only.
+tap text:Clear log
+tap text:Open guarded
+expect Guarded dialog
+prop id:guarded closeOnEscape false
+prop id:guarded closeOnBackdropPress false
+prop id:guarded closeOnSwipe false
+event text:"Guarded dialog" onCancel reason=cancel
+expect Log: guarded cancel
+event text:"Guarded dialog" onCancel reason=swipe
+expect Log: guarded cancel, guarded cancel
+expect Guarded dialog
+tap text:Close guarded
+absent Guarded dialog
+# Each reason by its own flag: Escape kept, a swipe closes.
+tap text:Clear log
+tap text:Open swipes
+expect Swipes dialog
+event text:"Swipes dialog" onCancel reason=cancel
+expect Swipes dialog
+event text:"Swipes dialog" onCancel reason=swipe
+expect Log: swipes change false swipe
+absent Swipes dialog
+covers [nsh/base] Dialog
+covers [props] presentation
+covers [props] animation
+covers [props] closeOnEscape
+covers [props] closeOnSwipe
+covers [props] closeOnBackdropPress
+covers [props] ios.supportedOrientations
+covers [props] Dialog.open
+covers [events] Dialog.onOpen
+covers [events] Dialog.onClose
+covers [events] Dialog.onCancel
+covers [events] Dialog.onOpenChange
+# base-dialog-backdrop
+tap id:case-base-dialog-backdrop
+expect Styled dialog
+expect Classed dialog
+# The backdrops, styled by `backdropStyle` and `backdropClass`.
+style id:shade backgroundColor #00000080
+style id:tinted backgroundColor #ff0000ff
+frame id:shade 0 0 390 844
+# A press on the backdrop is a close attempt.
+tap id:shade
+expect Log: styled cancel, styled change false backdropPress
+absent Styled dialog
+expect Classed dialog
+covers [nsh/base] Dialog
+covers [props] Dialog.backdropStyle
+covers [props] Dialog.backdropClass
+covers [props] Dialog.backdropTestID
+# base-nav-page
+tap id:case-base-nav-page
+# pop and header are events and props here: the headless runtime has no
+# system header.
+expect First content
+# A page's defaults, and `headerClass` as the header's colors.
+prop id:first title First title
+prop id:first headerShown true
+prop id:first headerLargeTitle false
+prop id:first headerTransparent false
+prop id:first headerBackVisible true
+noprop id:first headerBackTitle
+prop id:first popOnSwipe true
+prop id:first popOnBack true
+prop id:first animation default
+prop id:first headerStyle backgroundColor=#112233ff color=#445566ff tintColor=#778899ff
+# Props follow signals.
+tap text:Rename
+prop id:first title Renamed
+# Every option set; `headerStyle` wins over `headerClass`.
+tap text:Open second
+expect Routes: first > second
+expect Second content
+prop id:second title Second title
+prop id:second headerShown false
+prop id:second headerLargeTitle true
+prop id:second headerTransparent true
+prop id:second headerBackTitle Back to second
+prop id:second headerBackVisible false
+prop id:second popOnSwipe false
+prop id:second popOnBack true
+prop id:second animation fade
+prop id:second headerStyle backgroundColor=#00ff00ff color=#ff0000ff tintColor=#0000ffff
+frame id:second-content 10 10 370 40
+# The header's slots.
+expect Desktop header
+expect Left item
+expect Right item
+expect Title item
+tap text:Toggle right
+absent Right item
+expect Left item
+tap text:Toggle right
+expect Right item
+# popOnBack follows its signal; a back press reaches the app either way and
+# leaves the route to the platform.
+tap text:Keep
+prop id:second popOnBack false
+listens id:second onBackPress
+event text:"Second content" onBackPress
+expect Backs: 1
+expect Routes: first > second
+tap text:Keep
+prop id:second popOnBack true
+event text:"Second content" onBackPress
+expect Backs: 2
+# The user popped it: its route is gone before the app hears.
+event text:"Second content" onDismiss
+expect Dismissed: second, routes first
+expect Routes: first
+absent Second content
+absent Left item
+# Each animation as written.
+tap text:Open thirds
+expect Third default
+prop id:third-none animation none
+# "slide" is the platform's push transition, as "default".
+prop id:third-slide animation default
+prop id:third-default animation default
+prop id:third-none popOnBack false
+covers [nsh/base] NavPage
+covers [nsh/base] NavStack
+covers [nsh/base] createNavStack
+covers [props] title
+covers [props] headerShown
+covers [props] headerLargeTitle
+covers [props] headerTransparent
+covers [props] headerBackTitle
+covers [props] headerBackVisible
+covers [props] popOnSwipe
+covers [props] popOnBack
+covers [props] animation
+covers [props] NavPage.header
+covers [props] NavPage.headerLeft
+covers [props] NavPage.headerRight
+covers [props] NavPage.headerTitle
+covers [props] NavPage.headerStyle
+covers [props] NavPage.headerClass
+covers [events] NavPage.onBackPress
+covers [events] NavPage.onDismiss
+# base-nav-stack
+tap id:case-base-nav-stack
+# on screen headless (no platform hides the covered ones).
+expect Routes: home
+expect Depth: 1
+expect Renders: 1
+expect Page home at 0
+frame id:stack 0 292 390 300
+# A page keeps its state while covered.
+tap text:Bump home
+expect Bumps of home: 1
+tap text:Push
+expect Routes: home > p1
+expect Page p1 at 1
+expect Renders: 2
+tap text:Push
+expect Page p2 at 2
+expect Routes: home > p1 > p2
+expect Bumps of home: 1
+# pop: one page.
+tap text:Pop
+expect Routes: home > p1
+absent Page p2 at 2
+expect Cleanups: p2
+expect Renders: 3
+# The same route twice is two pages; remove takes the topmost.
+tap text:Push twice
+expect Routes: home > p1 > twice > twice
+expect Page twice at 2
+expect Page twice at 3
+expect Renders: 5
+tap text:Remove twice
+expect Routes: home > p1 > twice
+expect Page twice at 2
+absent Page twice at 3
+expect Cleanups: p2 twice
+# A route not in the stack: nothing changes.
+tap text:Remove unknown
+expect Depth: 3
+# pop(count).
+tap text:Pop two
+expect Routes: home
+absent Page p1 at 1
+absent Page twice at 2
+expect Cleanups: p1 p2 twice twice
+# One page always stays.
+tap text:Pop
+expect Routes: home
+expect Page home at 0
+tap text:Push
+tap text:Push
+expect Routes: home > p3 > p4
+tap text:Pop many
+expect Routes: home
+absent Page p3 at 1
+expect Cleanups: p1 p2 p3 p4 twice twice
+expect Page home at 0
+expect Bumps of home: 1
+# replace: the top page.
+tap text:Push
+expect Page p5 at 1
+tap text:Replace
+expect Routes: home > swapped
+expect Page swapped at 1
+absent Page p5 at 1
+expect Cleanups: p1 p2 p3 p4 p5 twice twice
+# setRoutes: all pages.
+tap text:Set routes
+expect Routes: home > a > b
+expect Page a at 1
+expect Page b at 2
+absent Page swapped at 1
+# remove below: the pages above follow with their index.
+tap text:Remove second
+expect Routes: home > b
+expect Page b at 1
+absent Page a at 1
+# popToRoot.
+tap text:Push
+expect Depth: 3
+tap text:Pop to root
+expect Routes: home
+absent Page b at 1
+expect Page home at 0
+# A route rendered without a NavPage is a page too.
+tap text:Push plain
+expect Plain page at 1
+expect Routes: home > plain
+tap text:Pop
+absent Plain page at 1
+covers [nsh/base] createNavStack
+covers [nsh/base] NavStack
+covers [nsh/base] NavPage
+covers [nsh/base] Button
+covers [props] NavStack.state
+# base-safe-area-keyboard
+tap id:case-base-safe-area-keyboard
+# insets and no keyboard; a page's and a dialog's insets are what the
+# platform reports (`onInsets`).
+expect Safe area: 0 0 0 0
+expect Root insets: 0 0 0 0
+expect Keyboard: 0, duration a number
+frame id:root-inner 2 2 386 36
+# A page's top is its header's, 0 until the platform reports it.
+expect Page insets: 0 0 0 0
+frame id:page-all-inner 2 2 386 96
+event text:"Page insets: 0 0 0 0" onInsets top=40 right=5 bottom=30 left=7
+expect Page insets: 40 5 30 7
+expect Root insets: 0 0 0 0
+frame id:page-all-inner 9 42 374 26
+frame id:page-vertical-inner 0 40 390 30
+frame id:page-left-inner 7 0 383 20
+# A dialog's.
+expect Dialog insets: 0 0 0 0
+event text:"Dialog insets: 0 0 0 0" onInsets top=10 right=11 bottom=12 left=13
+expect Dialog insets: 10 11 12 13
+frame id:dialog-inner 0 0 379 88
+expect Page insets: 40 5 30 7
+# No keyboard: no room made.
+frame id:avoid-padding-inner 0 0 390 30
+frame id:avoid-height-inner 0 0 390 30
+frame id:avoid-off-inner 0 0 390 30
+# A keyboard 5 points tall: `padding` pads the bottom by it and the
+# `offset`, `height` makes a margin of as much below it, and a disabled
+# one makes no room.
+keyboard 5 0
+expect Keyboard: 5, duration a number
+frame id:avoid-padding-inner 0 0 390 5
+frame id:avoid-height-inner 0 0 390 30
+frame id:avoid-off-inner 0 0 390 30
+frame id:avoid-off 0 210 390 30
+# It hides: no room again.
+keyboard 0 0
+frame id:avoid-padding-inner 0 0 390 30
+frame id:avoid-off 0 185 390 30
+tap text:Dismiss the keyboard
+expect Dismiss: called
+covers [nsh/base] safeArea
+covers [nsh/base] safeAreaInsets
+covers [nsh/base] SafeAreaView
+covers [nsh/base] keyboardFrame
+covers [nsh/base] Keyboard
+covers [nsh/base] KeyboardAvoidingView
+covers [props] SafeAreaView.edges
+covers [props] KeyboardAvoidingView.enabled
+covers [props] KeyboardAvoidingView.behavior
+covers [props] KeyboardAvoidingView.offset
+# base-text-view
+tap id:case-base-text-view
+# Markdown: a heading, a link, a list, a table with the app's actions
+# above it, code with the app's actions in its header.
+expect Markdown title
+style text:"Markdown title" fontWeight 600
+prop text:"Markdown title" role header
+expect Read the guide now.
+expect First item
+expect Second item
+expect Name
+expect Alpha
+expect 12
+expect Rows: 1, columns: 2
+expect let a = 1;
+expect Action run
+tap label:Run code
+expect Code action: run ts
+tap label:Copy code
+expect Code action: copy ts
+# The code's scroll view without its indicator; the root's color
+# passes to every part.
+prop scroll:text:"let a = 1;" horizontal true
+prop scroll:text:"let a = 1;" showsIndicator false
+# The table's scroll view without its indicator.
+prop scroll:text:"Alpha" horizontal true
+prop scroll:text:"Alpha" showsIndicator false
+style text:"First item" color #0000ffff
+# A press on the link reports its URL; nothing opens it.
+expect Link: none
+tap span:the guide
+expect Link: https://example.com/guide
+# HTML.
+expect From HTML
+expect An hypertext paragraph.
+style span:hypertext fontWeight 600
+# The app's own blocks.
+expect From a document
+# Streaming: the `**` left open shows closed, the caret after the text.
+style span:stream-bold fontWeight 600
+expect CARET
+# An extension of each kind, shown by `renderCustom`.
+expect Mention maya
+expect Chart 1 2 3
+expect Callout tip
+expect Note Heads up
+# The other render functions.
+expect Code js: const b = 2;
+expect Math inline: E=mc^2
+expect Math block: x^2
+expect Image Logo: https://example.com/logo.png
+tap label:Logo
+expect Image pressed: Logo
+# Parts styled by `classes` and `styles`; `selectable`.
+style text:"Classed heading" color #ff0000ff
+style text:"Classed heading" fontWeight 600
+style text:"Styled paragraph." color #00ff00ff
+prop text:"Styled paragraph." selectable true
+# The static functions.
+expect Plain: a b
+expect Parsed: 1 paragraph
+expect Extended: text,custom
+expect Math off: Math $x$
+expect From HTML: Hi there
+covers [nsh/base] TextView
+covers [props] TextView.markdown
+covers [props] TextView.html
+covers [props] TextView.document
+covers [props] TextView.options
+covers [props] TextView.extensions
+covers [props] TextView.classes
+covers [props] TextView.styles
+covers [props] selectable
+covers [props] TextView.codeBlockScrollIndicator
+covers [props] TextView.tableScrollIndicator
+covers [props] TextView.caret
+covers [props] TextView.renderCustom
+covers [props] TextView.renderCodeBlock
+covers [props] TextView.codeBlockActions
+covers [props] TextView.renderCodeBlockAction
+covers [props] TextView.renderTableActions
+covers [props] TextView.renderMath
+covers [props] TextView.renderImage
+covers [events] TextView.onLinkPress
+covers [events] TextView.onCodeBlockAction
+covers [events] TextView.onImagePress
+# base-selection-area
+tap id:case-base-selection-area
+# One area around a text, a TextView, a label kept out and an inner
+# area; a selectable TextView an area of its own; a text outside.
+expect Area first text
+expect Area document
+expect Area item
+expect Area label
+expect Inner text
+expect Own selection
+expect Outside text
+prop id:area selectionArea true
+prop id:inner selectionArea true
+prop id:own selectionArea true
+noprop id:area-doc selectionArea
+# Texts join the area unless they say `selectable={false}`.
+noprop text:"Area first text" selectable
+noprop text:"Area item" selectable
+prop text:"Area label" selectable false
+noprop text:"Inner text" selectable
+prop text:"Own selection" selectable true
+noprop text:"Outside text" selectable
+covers [nsh/base] SelectionArea
+# base-popups
+tap id:case-base-popups
+# Shown at first: a controlled popover, one with `defaultOpen`, a tooltip
+# with `defaultOpen`, a sheet and a menu with `defaultOpen`.
+expect PopoverBody
+expect OwnBody
+expect ShownTip
+expect StuckSheet
+expect OpenAtStart
+expect Life: popover open
+# The popover: above its trigger (20, 85, 350 × 30), 6 points away, its end
+# at the trigger's but kept 30 points from the edge; 80 wide; the app's
+# class.
+frame parent:text:PopoverBody 280 45 80 34
+style parent:text:PopoverBody backgroundColor #123456ff
+# Escape or back: heard, and with `closeOnEscape={false}` it stays.
+event text:PopoverBody onCancel
+expect Log: popover cancel
+expect PopoverBody
+# The trigger closes it.
+tap text:PopTrigger
+expect Log: popover false triggerPress
+absent PopoverBody
+expect Life: popover closed
+covers [nsh/base] Popover
+covers [props] Popover.open
+covers [props] Popover.defaultOpen
+covers [props] Popover.placement
+covers [props] Popover.align
+covers [props] Popover.offset
+covers [props] Popover.margin
+covers [props] Popover.popupClass
+covers [props] Popover.popupStyle
+covers [props] Popover.trigger
+covers [events] Popover.onOpenChange
+covers [events] Popover.onCancel
+# The menu, a sheet on a phone: its items, a separator, submenus.
+tap text:MenuTrigger
+expect NewItem
+expect Log: menu true triggerPress
+expect Life: menu open
+style parent:parent:text:NewItem backgroundColor #00ff00ff
+frame parent:text:NewItem 4 4 382 17
+style below:parent:parent:text:NewItem backgroundColor #000000ff
+style below:parent:parent:text:NewItem opacity 0.5
+frame id:separator 4 55 382 1
+prop parent:text:OffItem accessibilityState disabled=true
+prop parent:text:KeepItem accessibilityLabel Keep the menu
+tap text:KeepItem
+expect Log: chose Keep
+expect KeepItem
+# A submenu shows its items in place of the menu's, its back row first.
+tap text:ShareItem
+expect MailItem
+expect BackRow
+absent NewItem
+tap text:BackRow
+expect NewItem
+absent MailItem
+# A disabled one does not open.
+tap text:LockedItem
+absent HiddenItem
+expect NewItem
+# Choosing an item closes the menu.
+tap text:NewItem
+expect Log: menu false select
+absent NewItem
+expect Life: menu closed
+# The app opens it; Escape or back is heard, and closes it.
+tap text:ShowMenu
+expect NewItem
+event text:NewItem onCancel
+expect Heard: menu cancel
+expect Log: menu false cancel
+absent NewItem
+covers [nsh/base] Menu
+covers [nsh/base] MenuItem
+covers [nsh/base] MenuSeparator
+covers [nsh/base] Submenu
+covers [props] Menu.open
+covers [props] Menu.defaultOpen
+covers [props] Menu.popupClass
+covers [props] Menu.popupStyle
+covers [props] Menu.backdropClass
+covers [props] Menu.backdropStyle
+covers [props] Menu.trigger
+covers [events] Menu.onOpenChange
+covers [props] MenuItem.closeOnSelect
+covers [events] MenuItem.onSelect
+covers [props] Submenu.trigger
+covers [props] Submenu.back
+# The context menu: a finger held on its trigger.
+touch start text:HoldArea 5 5
+wait 600
+touch end
+expect CopyItem
+expect Log: context true longPress
+expect Life: context open
+style parent:parent:text:CopyItem backgroundColor #ff0000ff
+frame parent:text:CopyItem 2 2 386 17
+style below:parent:parent:text:CopyItem backgroundColor #0000ffff
+style below:parent:parent:text:CopyItem opacity 0.25
+tap text:CopyItem
+expect Log: context false select
+absent CopyItem
+expect Life: context closed
+# Disabled, a held finger does nothing; the app still opens it.
+tap text:ToggleContext
+touch start text:HoldArea 5 5
+wait 600
+touch end
+absent CopyItem
+tap text:ShowContext
+expect CopyItem
+event text:CopyItem onCancel
+expect Heard: context cancel
+expect Log: context false cancel
+absent CopyItem
+covers [nsh/base] ContextMenu
+covers [props] ContextMenu.open
+covers [props] ContextMenu.popupClass
+covers [props] ContextMenu.popupStyle
+covers [props] ContextMenu.backdropClass
+covers [props] ContextMenu.backdropStyle
+covers [props] ContextMenu.trigger
+covers [events] ContextMenu.onOpenChange
+# The tooltips: a touch screen shows none of its own, nor an element's
+# `tooltip`; one the app opens shows below its trigger (20, 287, 350 × 30),
+# 4 points away, from its start but 30 points from the edge; 60 wide; the
+# app's class.
+touch start text:TipTrigger 5 5
+wait 1000
+touch end
+absent PropTip
+tap text:TipTrigger
+expect TipText
+frame parent:text:TipText 30 321 60 17
+style parent:text:TipText backgroundColor #333333ff
+tap text:TipTrigger
+absent TipText
+touch start text:PropTrigger 5 5
+wait 1000
+touch end
+absent PropTip
+# Disabled: never shown.
+absent NeverTip
+tap text:ShowTip
+expect AskedTip
+covers [nsh/base] Tooltip
+covers [events] Popover.onOpen
+covers [events] Popover.onClose
+covers [events] Menu.onOpen
+covers [events] Menu.onClose
+covers [events] Menu.onCancel
+covers [events] ContextMenu.onOpen
+covers [events] ContextMenu.onClose
+covers [events] ContextMenu.onCancel
+covers [events] Sheet.onOpen
+covers [events] Sheet.onClose
+covers [props] Tooltip.open
+covers [props] Tooltip.defaultOpen
+covers [props] Tooltip.placement
+covers [props] Tooltip.align
+covers [props] Tooltip.offset
+covers [props] Tooltip.margin
+# The sheet: at the top, 50 tall, over a backdrop.
+tap text:OpenSheet
+expect SheetBody
+expect Life: sheet open
+frame parent:text:SheetBody 0 0 390 50
+style parent:text:SheetBody backgroundColor #abcdefff
+style below:parent:text:SheetBody backgroundColor #111111ff
+style below:parent:text:SheetBody opacity 0.75
+event text:SheetBody onCancel
+expect Log: sheet cancel
+expect SheetBody
+tap below:parent:text:SheetBody
+expect Log: sheet false backdropPress
+absent SheetBody
+expect Life: sheet closed
+# `closeOnBackdropPress={false}`: its backdrop keeps it.
+tap below:parent:text:StuckSheet
+expect StuckSheet
+covers [nsh/base] Sheet
+covers [props] Sheet.open
+covers [props] Sheet.defaultOpen
+covers [props] Sheet.side
+covers [props] Sheet.popupClass
+covers [props] Sheet.popupStyle
+covers [props] Sheet.backdropClass
+covers [props] Sheet.backdropStyle
+covers [events] Sheet.onOpenChange
+covers [events] Sheet.onCancel
+# base-switch
+tap id:case-base-switch
+# The switch role and its value for screen readers, on the switch alone;
+# the track (2 + 20 + 2 wide, a margin of 8) puts the label at 32.
+expect Changes: 0
+prop id:wifi role switch
+prop id:wifi accessibilityState checked=false
+nostyle id:wifi backgroundColor
+frame id:wifi 0 20 390 24
+frame text:Wi-Fi 32 4 39 17
+listens id:wifi onPress
+# A press reports the next value; the app sets it: `checkedStyle`, and
+# `checked:` of the track (12 on the left) and thumb (30 wide).
+tap text:Wi-Fi
+expect Changes: 1
+prop id:wifi accessibilityState checked=true
+style id:wifi backgroundColor #00ff00ff
+frame text:Wi-Fi 52 4 39 17
+tap id:wifi
+expect Changes: 2
+prop id:wifi accessibilityState checked=false
+frame text:Wi-Fi 32 4 39 17
+# The app owns the value: a switch it keeps on asks for off and stays on.
+prop id:lights accessibilityLabel Lights
+prop id:lights accessibilityState checked=true
+tap label:Lights
+expect Asked: false
+prop id:lights accessibilityState checked=true
+# `disabled`: dimmed for screen readers, `disabled:` on the thumb (10
+# wide), presses do nothing (the platform gets no press to report).
+prop id:locked accessibilityState disabled=true checked=false
+frame text:Locked 22 4 47 17
+expect Changes: 2
+tap id:enable
+prop id:locked accessibilityState checked=false
+frame text:Locked 32 4 47 17
+listens id:locked onPress
+tap text:Locked
+expect Changes: 12
+covers [nsh/base] Switch
+covers [props] Switch.checked
+covers [props] disabled
+covers [props] checkedStyle
+covers [props] accessibilityLabel
+covers [props] Switch.trackClass
+covers [props] Switch.trackStyle
+covers [props] Switch.thumbClass
+covers [props] Switch.thumbStyle
+covers [events] onChange
