@@ -1,0 +1,80 @@
+// The Controls demo: `nsh/base`'s switches in a settings list (one that
+// needs another on), checkboxes under a "select all" that shows a partial
+// selection, a plan picker of radios with a disabled plan. Every row is the
+// control, its label included. Also the gallery's own `Toggle`, a `Switch`.
+import { beforeEach, expect, open, test } from "nsh/test";
+import type { App } from "nsh/test";
+
+let app: App;
+beforeEach(async () => {
+  app = await open("../App.tsx", { clock: {} });
+  await app.press("role:button[Controls]");
+  await app.waitFor("Select all");
+});
+
+test("a switch turns a setting on and off, and one that needs it is disabled while it is off", async () => {
+  expect(app.count("role:switch")).toBe(4);
+  await app.press("Notifications");
+  await app.waitFor("Notifications: off");
+  expect(app.texts()).toContain("Turn on notifications first");
+  expect(app.enabled("Badges")).toBe(false);
+  await expect(() => app.press("Badges")).rejects.toThrow("is disabled");
+  // The track is pressable too, not only the label.
+  await app.press("role:switch[/^Notifications/]");
+  await app.waitFor("Notifications: on");
+  expect(app.enabled("Badges")).toBe(true);
+  await app.press("Badges");
+  await app.waitFor("Badges: off");
+  await app.press("Low data mode");
+  await app.waitFor("Images load at a lower quality");
+});
+
+test("select all checks every item, from a partial selection, and unchecks them all", async () => {
+  expect(app.count("role:checkbox")).toBe(5);
+  expect(app.texts()).toContain("3 of 4");
+  expect(app.texts()).toContain("Showing 1,338 items");
+  // Indeterminate asks for checked.
+  await app.press("Select all");
+  await app.waitFor("Select all: true");
+  expect(app.texts()).toContain("4 of 4");
+  expect(app.texts()).toContain("Showing 1,650 items");
+  await app.press("Select all");
+  await app.waitFor("Select all: false");
+  expect(app.texts()).toContain("0 of 4");
+  expect(app.texts()).toContain("Nothing to show");
+  // One item: a partial selection again.
+  await app.press("Videos");
+  await app.waitFor("Videos: true");
+  expect(app.texts()).toContain("1 of 4");
+  expect(app.texts()).toContain("Showing 86 items");
+  await app.press("Videos");
+  await app.waitFor("Videos: false");
+  expect(app.texts()).toContain("Nothing to show");
+});
+
+test("a radio picks one plan of the set, and a disabled plan takes no press", async () => {
+  expect(app.count("role:radio")).toBe(4);
+  expect(app.texts()).toContain("Continue with Plus");
+  await app.press("Team");
+  await app.waitFor("Plan: Team");
+  expect(app.texts()).toContain("Continue with Team");
+  await expect(() => app.press("Enterprise")).rejects.toThrow("is disabled");
+  await app.press("Continue with Team");
+  await app.waitFor("Continue: Team, $12 / mo");
+  // A checked radio stays checked and reports nothing.
+  await app.press("Team");
+  expect(app.texts()).toContain("Continue: Team, $12 / mo");
+  await app.press("Free");
+  await app.waitFor("Continue with Free");
+});
+
+test("the gallery's toggle is a switch", async () => {
+  await app.back();
+  await app.press("role:button[Styles]");
+  await app.waitFor("Clipping and layers");
+  expect(app.texts()).toContain("overflow: hidden");
+  await app.press("role:switch[Clip]");
+  await app.waitFor("overflow: visible");
+  await app.press("label:Clip");
+  await app.waitFor("overflow: hidden");
+});
