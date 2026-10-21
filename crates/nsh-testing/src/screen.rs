@@ -14,7 +14,7 @@ use std::{
 
 use nsh_core::{
     AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
-    MountBatch, MountItem, NodeId, PanActivation, Points, Size, ViewKind, ui::PropEnum,
+    MountBatch, MountItem, NodeId, PanActivation, Point, Points, Size, ViewKind, ui::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -29,6 +29,16 @@ fn shows_text(v: &View, want: &TextMatch) -> bool {
         || v.input.as_ref().is_some_and(|i| {
             want.matches(&i.text) || (i.text.is_empty() && want.matches(&i.config.placeholder))
         })
+}
+
+/// Why a [`Pick::Disabled`] match takes no step on `what` (the kind of
+/// view the step looks for).
+pub(crate) fn disabled(what: &str) -> &'static str {
+    if what == "scroll view" {
+        "does not scroll: the user cannot scroll it (`scrollEnabled` is false)"
+    } else {
+        "is disabled"
+    }
 }
 
 /// What a back does ([`Screen::back_target`]).
@@ -98,6 +108,9 @@ pub struct Screen {
     /// The context menu the app showed (`Menu.popup`), until it is chosen
     /// from or closed.
     menu: Option<Arc<[nsh_core::desktop::MenuItem]>>,
+    /// The window's size, when the driver knows it: what lies outside it
+    /// (and no scroll view brings in) is not on screen.
+    viewport: Option<Size<Points>>,
 }
 
 #[derive(Debug, Default)]
@@ -133,6 +146,36 @@ struct View {
     gestures: GestureValues,
     /// When a drag on it activates its JS responder (`panActivation`).
     pan_activation: Option<PanActivation>,
+    /// Neither it nor what it holds shows (`visibility: hidden`).
+    hidden: bool,
+    /// It clips what it holds to its bounds (`overflow: hidden`).
+    clips: bool,
+}
+
+/// Where the views around a view let it show, in the root's points.
+#[derive(Debug, Clone, Copy)]
+enum Clip {
+    /// Anywhere: no view around it clips, or a scroll view brings any part
+    /// of its content in.
+    All,
+    /// Inside these bounds.
+    Within(Bounds<Points>),
+}
+
+impl Clip {
+    fn shows(self, bounds: &Bounds<Points>) -> bool {
+        match self {
+            Clip::All => true,
+            Clip::Within(clip) => clip.intersects(bounds),
+        }
+    }
+
+    fn within(self, bounds: Bounds<Points>) -> Clip {
+        match self {
+            Clip::All => Clip::Within(bounds),
+            Clip::Within(clip) => Clip::Within(clip.intersect(&bounds)),
+        }
+    }
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -145,7 +188,8 @@ pub enum Pick {
     /// Several did: how many.
     Many(usize),
     /// The match takes no presses (it, or the view between it and the one
-    /// that would hear them, is disabled).
+    /// that would hear them, is disabled), or no scrolling (a scroll view
+    /// the user cannot scroll).
     Disabled,
 }
 
@@ -168,6 +212,8 @@ pub(crate) struct Scroll {
     pub(crate) applied: u32,
     pub(crate) horizontal: bool,
     content: Option<Size<Points>>,
+    /// The user cannot scroll it (`scrollEnabled={false}`).
+    pub(crate) locked: bool,
 }
 
 impl Screen {
@@ -227,6 +273,16 @@ impl Screen {
                 self.nodes.entry(*id).or_default().close_on_escape = config.close_on_escape;
             }
             MountItem::Frame { id, frame } => self.nodes.entry(*id).or_default().frame = *frame,
+            MountItem::ViewStyle { id, style } => {
+                let view = self.nodes.entry(*id).or_default();
+                view.hidden = style.hidden;
+                view.clips = style.overflow_hidden;
+            }
+            MountItem::ScrollBehavior { id, behavior } => {
+                if let Some(scroll) = self.scroll_mut(*id) {
+                    scroll.locked = !behavior.enabled;
+                }
+            }
             MountItem::Events { id, events } => self.nodes.entry(*id).or_default().events = *events,
             MountItem::ViewProps { id, props } => {
                 let view = self.nodes.entry(*id).or_default();
@@ -382,6 +438,95 @@ impl Screen {
         out
     }
 
+    /// The views of [`Screen::attached`] a user sees, in tree order: those
+    /// with an area that no view around them hides (`visibility: hidden`)
+    /// or clips away (`overflow: hidden`, a scroll view the user cannot
+    /// scroll, the window), transforms aside. A scroll view the user can
+    /// scroll shows all of its content: it scrolls into view. The views a
+    /// platform places show where it puts them: modals over the window,
+    /// screens in their stack, header items and input accessories
+    /// anywhere.
+    fn shown(&self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let window = self.viewport.map_or(Clip::All, |size| {
+            Clip::Within(Bounds::new(Point::default(), size))
+        });
+        // A view, the origin of its parent's content and its clip in the
+        // root's points, and whether a view around it is hidden.
+        let mut stack = vec![(ROOT, Point::default(), window, false)];
+        while let Some((id, origin, clip, hidden)) = stack.pop() {
+            if self.closed.contains(&id) {
+                continue;
+            }
+            // The root is the platform's: no batch creates it.
+            let root = View::default();
+            let view = match self.nodes.get(&id) {
+                Some(view) => view,
+                None if id == ROOT => &root,
+                None => continue,
+            };
+            let hidden = hidden || view.hidden;
+            // A modal is presented over the window, wherever it is in the
+            // tree.
+            let (origin, clip) = if view.kind == Some(ViewKind::Modal) {
+                (Point::default(), window)
+            } else {
+                (origin, clip)
+            };
+            let bounds = Bounds::new(origin + view.frame.origin, view.frame.size);
+            let placed = matches!(
+                view.kind,
+                Some(
+                    ViewKind::Screen
+                        | ViewKind::Modal
+                        | ViewKind::HeaderItem
+                        | ViewKind::InputAccessory
+                )
+            );
+            if id != ROOT && !hidden && (placed || (!bounds.is_empty() && clip.shows(&bounds))) {
+                out.push(id);
+            }
+            let mut inner = if matches!(
+                view.kind,
+                Some(ViewKind::HeaderItem | ViewKind::InputAccessory)
+            ) {
+                Clip::All
+            } else {
+                clip
+            };
+            let mut content = bounds.origin;
+            if let Some(scroll) = &view.scroll {
+                content -= Point::new(scroll.x, scroll.y);
+                inner = if scroll.locked {
+                    inner.within(bounds)
+                } else if inner.shows(&bounds) {
+                    Clip::All
+                } else {
+                    Clip::Within(Bounds::default())
+                };
+            } else if view.clips && id != ROOT {
+                inner = inner.within(bounds);
+            }
+            let children: Vec<NodeId> = if self.kind(id) == Some(ViewKind::Stack) {
+                self.screens(id).last().copied().into_iter().collect()
+            } else {
+                self.children.get(&id).cloned().unwrap_or_default()
+            };
+            stack.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, content, inner, hidden)),
+            );
+        }
+        out
+    }
+
+    /// The window is `size` (what lies outside it is not on screen).
+    pub(crate) fn set_viewport(&mut self, size: Size<Points>) {
+        self.viewport = Some(size);
+    }
+
     /// The screens stack `id` shows, bottom to top (without those a back
     /// popped).
     fn screens(&self, id: NodeId) -> Vec<NodeId> {
@@ -507,7 +652,7 @@ impl Screen {
     /// The views on screen in the order a user's eyes find them: the
     /// topmost modal's first (the last presented), then the rest.
     fn by_layer(&self) -> Vec<NodeId> {
-        let attached = self.attached();
+        let attached = self.shown();
         let modals: Vec<NodeId> = attached
             .iter()
             .copied()
@@ -539,7 +684,7 @@ impl Screen {
 
     /// The texts on screen, in tree order.
     pub fn texts(&self) -> Vec<&str> {
-        self.attached()
+        self.shown()
             .into_iter()
             .filter_map(|id| self.nodes.get(&id)?.text.as_deref())
             .collect()
@@ -776,13 +921,16 @@ impl Screen {
 
     /// The scroll view the selector names: the matching view, or the
     /// nearest scroll view around it (a row of a list), else the first in
-    /// it.
+    /// it; [`Pick::Disabled`] when the user cannot scroll it.
     pub(crate) fn scroll_view(&self, selector: &Selector) -> Pick {
         let is_scroll = |v: &View| v.scroll.is_some();
-        self.pick(selector, |id| {
+        match self.pick(selector, |id| {
             self.up_to(id, is_scroll)
                 .or_else(|| self.down_to(id, is_scroll))
-        })
+        }) {
+            Pick::One(id) if self.scroll(id).is_some_and(|s| s.locked) => Pick::Disabled,
+            pick => pick,
+        }
     }
 
     /// The view the selector names, for a drag: the finger lands on it.
@@ -1091,6 +1239,37 @@ mod tests {
         MountBatch { items }
     }
 
+    fn create(id: NodeId, kind: ViewKind) -> MountItem {
+        MountItem::Create { id, kind }
+    }
+
+    fn insert(parent: NodeId, child: NodeId) -> MountItem {
+        MountItem::Insert {
+            parent,
+            child,
+            before: None,
+        }
+    }
+
+    fn frame(id: NodeId, x: f32, y: f32, width: f32, height: f32) -> MountItem {
+        MountItem::Frame {
+            id,
+            frame: Bounds::new(
+                Point::new(Points(x), Points(y)),
+                Size::new(Points(width), Points(height)),
+            ),
+        }
+    }
+
+    fn style(id: NodeId, change: impl FnOnce(&mut nsh_core::ViewStyle)) -> MountItem {
+        let mut style = nsh_core::ViewStyle::default();
+        change(&mut style);
+        MountItem::ViewStyle {
+            id,
+            style: Box::new(style),
+        }
+    }
+
     fn text(id: NodeId, value: &str) -> MountItem {
         MountItem::Text {
             id,
@@ -1106,12 +1285,6 @@ mod tests {
     #[test]
     fn only_the_top_screen_of_a_stack_and_the_top_modal_first_are_seen() {
         let mut screen = Screen::default();
-        let create = |id, kind| MountItem::Create { id, kind };
-        let insert = |parent, child| MountItem::Insert {
-            parent,
-            child,
-            before: None,
-        };
         screen.apply(&batch(vec![
             create(2, ViewKind::Stack),
             create(4, ViewKind::Screen),
@@ -1123,6 +1296,9 @@ mod tests {
             text(6, "Home"),
             text(10, "Details"),
             text(14, "Close"),
+            frame(6, 0.0, 0.0, 100.0, 20.0),
+            frame(10, 0.0, 0.0, 100.0, 20.0),
+            frame(14, 0.0, 0.0, 100.0, 20.0),
             insert(1, 2),
             insert(2, 4),
             insert(4, 6),
@@ -1143,5 +1319,65 @@ mod tests {
         );
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(screen.texts(), ["Home", "Close"]);
+    }
+
+    #[test]
+    fn hidden_collapsed_and_clipped_views_are_not_on_screen() {
+        let mut screen = Screen::default();
+        screen.set_viewport(Size::new(Points(400.0), Points(800.0)));
+        let shown = |screen: &Screen| screen.texts().join(" ");
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Text),
+            create(6, ViewKind::Text),
+            create(8, ViewKind::Text),
+            create(10, ViewKind::View),
+            create(12, ViewKind::Text),
+            create(14, ViewKind::Scroll),
+            create(16, ViewKind::Text),
+            text(4, "shown"),
+            text(6, "collapsed"),
+            text(8, "outside"),
+            text(12, "clipped"),
+            text(16, "row"),
+            frame(2, 0.0, 0.0, 400.0, 800.0),
+            frame(4, 0.0, 0.0, 100.0, 20.0),
+            // `display: none`: no area.
+            frame(6, 0.0, 0.0, 0.0, 0.0),
+            frame(8, 5000.0, 0.0, 100.0, 20.0),
+            frame(10, 0.0, 100.0, 400.0, 0.0),
+            frame(12, 0.0, 0.0, 100.0, 20.0),
+            frame(14, 0.0, 200.0, 400.0, 100.0),
+            frame(16, 0.0, 1000.0, 100.0, 20.0),
+            insert(1, 2),
+            insert(2, 4),
+            insert(2, 6),
+            insert(2, 8),
+            insert(2, 10),
+            insert(10, 12),
+            insert(2, 14),
+            insert(14, 16),
+        ]));
+        // Without `overflow: hidden` a view of no height shows what it
+        // holds; a row far down a scroll view scrolls into view.
+        assert_eq!(shown(&screen), "shown clipped row");
+        screen.apply(&batch(vec![style(10, |s| s.overflow_hidden = true)]));
+        assert_eq!(shown(&screen), "shown row");
+        // A scroll view the user cannot scroll clips as a box does.
+        let locked = nsh_core::ScrollBehavior {
+            enabled: false,
+            ..Default::default()
+        };
+        screen.apply(&batch(vec![MountItem::ScrollBehavior {
+            id: 14,
+            behavior: Box::new(locked),
+        }]));
+        assert_eq!(shown(&screen), "shown");
+        assert_eq!(
+            screen.scroll_view(&Selector::parse("view:14").unwrap()),
+            Pick::Disabled
+        );
+        screen.apply(&batch(vec![style(2, |s| s.hidden = true)]));
+        assert_eq!(shown(&screen), "");
     }
 }

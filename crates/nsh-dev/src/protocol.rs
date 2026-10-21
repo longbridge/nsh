@@ -457,6 +457,14 @@ pub enum SceneQuery {
     MenuClosed,
     /// The app's storage: its entries.
     Storage,
+    /// The window's content is this size: what lies outside it, and no
+    /// scroll view brings in, is not on screen.
+    SetViewport {
+        /// Width in points.
+        width: f32,
+        /// Height in points.
+        height: f32,
+    },
     /// View `id`'s bounds on screen, in points from the viewport's top left.
     Bounds {
         /// The view.

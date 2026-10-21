@@ -63,7 +63,7 @@ pub use self::{
     stub::{RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse, StubRoute},
 };
 use crate::{
-    screen::{Back, Pick, Screen},
+    screen::{self, Back, Pick, Screen},
     selector::Selector,
 };
 
@@ -252,12 +252,14 @@ impl Headless {
             errors,
             wanted,
         } = launch(config)?;
+        let mut screen = Screen::default();
+        screen.set_viewport(viewport);
         Ok(Headless {
             engine,
             batches,
             errors,
             seen: Vec::new(),
-            screen: Screen::default(),
+            screen,
             animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
             step: "open".to_owned(),
@@ -378,6 +380,7 @@ impl Headless {
     pub fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String> {
         self.step(format!("setViewport({}, {})", size.width, size.height));
         self.viewport = size;
+        self.screen.set_viewport(size);
         self.environment.window = size;
         self.engine.control().resize(size);
         self.engine.control().set_environment(self.environment);
@@ -897,7 +900,11 @@ impl Headless {
                 "`{selector}` matches {n} {what}s: say which (`{selector} >> nth=0`), or look inside \
                  a view around it (`id:list >> {selector}`)"
             )),
-            Pick::Disabled => Err(format!("`{selector}` is disabled; {}", self.on_screen())),
+            Pick::Disabled => Err(format!(
+                "`{selector}` {}; {}",
+                screen::disabled(what),
+                self.on_screen()
+            )),
         }
     }
 
@@ -1142,7 +1149,8 @@ impl Headless {
     /// `selector` names (the matching view, the nearest scroll view around
     /// it, else the first in it) by `distance` points along its axis
     /// (negative: back), 10 points per display frame, within its content.
-    /// Fails if it cannot move that way at all.
+    /// Fails if it cannot move that way at all, or the user cannot scroll it
+    /// (`scrollEnabled={false}`).
     pub fn scroll(&mut self, selector: &str, distance: Points) -> Result<(), String> {
         let parsed = Selector::parse(selector)?;
         self.step(format!("scroll({selector}, {distance})"));

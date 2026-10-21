@@ -220,7 +220,13 @@ The steps name views with selectors (`headless/selector.rs`, Playwright's manner
 with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
 text); `label:`, `text:` and names take `/regex/flags`, ` >> ` looks inside the previous part's matches, `nth=<n>`
 keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
-order below the root, of a stack only its top screen. Steps acting on a view are strict, as Playwright's: the matches
+order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
+visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
+clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`ScrollBehavior::enabled`) or the window
+(`Screen::set_viewport`: the headless viewport; on a host the platform's, which `Agent::sync_viewport` tells the model
+before each step). A scroll view the user can scroll shows all of its content (scrolling brings it in), a modal shows
+over the window wherever it is in the tree, header items and input accessories wherever the platform puts them;
+`opacity` and transforms aside. Steps acting on a view are strict, as Playwright's: the matches
 are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
 and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
 (the accessibility state) fails too. Each step sends what a platform would, to the views that report it:
@@ -236,7 +242,7 @@ and more than one fails the step; a press whose match, or a view between it and 
   `SubmitEditing` (then `Blur` for blur-and-submit), or a line break;
 - `scroll`: the scroll view (the match, the nearest one around it, else the first in it) moves along its axis 10
   points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
-  `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
+  `ScrollEndDrag`, `ScrollEnd`), and fails on one the user cannot scroll (`scrollEnabled={false}`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
 - `drag` (`headless/pointer.rs`): a finger lands on the match's middle (`Screen::bounds_in_root`), rests 100 ms,
   moves 10 points a frame and lifts, and what takes it is decided as the desktop backends decide it, with

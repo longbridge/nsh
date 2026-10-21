@@ -283,6 +283,9 @@ pub trait Scene: Send + Sync {
     fn clipboard(&self) -> Result<Option<String>, String>;
     /// The app's storage's entries.
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String>;
+    /// The window's content is `size` ([`Native::viewport`]): what lies
+    /// outside it, and no scroll view brings in, is not on screen.
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String>;
 }
 
 impl Scene for Model {
@@ -366,6 +369,10 @@ impl Scene for Model {
     }
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Ok(self.storage_entries())
+    }
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
+        self.lock().screen.set_viewport(size);
+        Ok(())
     }
 }
 
@@ -504,6 +511,9 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::MenuClosed => model.menu_closed().map(|()| Value::Null),
             SceneQuery::Clipboard => Ok(Value::from(model.clipboard_text())),
             SceneQuery::Storage => json(to_value(model.storage_entries())),
+            SceneQuery::SetViewport { width, height } => model
+                .set_viewport(Size::new(Points(*width), Points(*height)))
+                .map(|()| Value::Null),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
             | SceneQuery::InputText { .. }
@@ -619,6 +629,13 @@ impl Scene for RemoteScene {
     }
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         self.query(SceneQuery::Storage)
+    }
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::SetViewport {
+            width: size.width.0,
+            height: size.height.0,
+        })
+        .map(drop)
     }
 }
 
@@ -889,12 +906,18 @@ fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
     native: Box<dyn Native>,
+    /// The window's size the scene was told last.
+    viewport: Mutex<Option<Size<Points>>>,
 }
 
 impl Agent {
     /// An agent on the app `scene` sees, acting through `native`.
     pub fn new(scene: std::sync::Arc<dyn Scene>, native: Box<dyn Native>) -> Agent {
-        Agent { scene, native }
+        Agent {
+            scene,
+            native,
+            viewport: Mutex::new(None),
+        }
     }
 
     /// Takes `step`; blocks until it is done and the app is quiet.
@@ -908,6 +931,11 @@ impl Agent {
     fn run(&self, step: TestStep) -> Result<serde_json::Value, String> {
         use serde_json::Value;
         let done = |r: Result<(), String>| r.map(|()| Value::Null);
+        // What is on screen depends on the window: the scene knows it before
+        // it answers.
+        if !matches!(step, TestStep::Scene { .. }) {
+            self.sync_viewport()?;
+        }
         match step {
             TestStep::Ready { timeout_ms } => done(self.ready(Duration::from_millis(timeout_ms))),
             TestStep::Press { selector } => done(self.press(&selector)),
@@ -986,6 +1014,17 @@ impl Agent {
         }
     }
 
+    /// Tells the scene the window's size when it changed.
+    fn sync_viewport(&self) -> Result<(), String> {
+        let size = self.native.viewport();
+        let mut told = self.viewport.lock().unwrap_or_else(|e| e.into_inner());
+        if *told != Some(size) {
+            self.scene.set_viewport(size)?;
+            *told = Some(size);
+        }
+        Ok(())
+    }
+
     /// Answers an agent elsewhere with this one's scene and platform.
     fn scene_query(&self, query: SceneQuery) -> Result<serde_json::Value, String> {
         use serde_json::{Value, to_value};
@@ -1011,6 +1050,9 @@ impl Agent {
             SceneQuery::MenuClosed => scene.menu_closed().map(|()| Value::Null),
             SceneQuery::Clipboard => scene.clipboard().map(Value::from),
             SceneQuery::Storage => scene.storage().and_then(|e| json(to_value(e))),
+            SceneQuery::SetViewport { width, height } => scene
+                .set_viewport(Size::new(Points(width), Points(height)))
+                .map(|()| Value::Null),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
                     [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
@@ -1057,7 +1099,11 @@ impl Agent {
                 "`{selector}` matches {n} {what}s: say which (`{selector} >> nth=0`), or look inside \
                  a view around it (`id:list >> {selector}`)"
             )),
-            Pick::Disabled => Err(format!("`{selector}` is disabled; {}", self.on_screen())),
+            Pick::Disabled => Err(format!(
+                "`{selector}` {}; {}",
+                crate::screen::disabled(what),
+                self.on_screen()
+            )),
         }
     }
 
@@ -1093,11 +1139,7 @@ impl Agent {
 
     /// [`Agent::scroll_into_view`]'s gestures: the view's middle, and
     /// whether a gesture moved anything.
-    fn bring_into_view(
-        &self,
-        id: NodeId,
-        selector: &str,
-    ) -> Result<(Point<Points>, bool), String> {
+    fn bring_into_view(&self, id: NodeId, selector: &str) -> Result<(Point<Points>, bool), String> {
         let not_on_screen = || {
             format!(
                 "`{selector}` is not on screen (it has no native view); {}",
