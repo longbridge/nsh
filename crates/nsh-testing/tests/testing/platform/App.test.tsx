@@ -57,7 +57,8 @@ test("native animations run to their end", async () => {
   await app.waitFor("Moved: done");
 });
 
-test("what only a real platform answers fails the step", async () => {
+test("an image's size is answered as a failed load", async () => {
   const app = await open("./App.tsx");
-  await expect(() => app.press("Measure")).rejects.toThrow("only a real platform answers");
+  await app.press("Measure");
+  await app.waitFor("Size: not loaded");
 });
