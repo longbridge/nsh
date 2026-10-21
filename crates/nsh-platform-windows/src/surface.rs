@@ -285,13 +285,10 @@ impl Surface {
         let env = self.environment.get();
         config.viewport = env.window;
         config.environment = env;
-        // A test session's app: the test's storage and network.
+        // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.borrow() {
-            config.network = model.engine_network(config.network.take());
-            if let Some(storage) = model.engine_storage() {
-                config.storage = Some(storage);
-            }
+            model.set_up_engine(&mut config);
         }
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));

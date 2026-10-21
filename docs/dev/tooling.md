@@ -229,6 +229,23 @@ and more than one fails the step; a press whose match, or a view between it and 
   points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
   `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
+- `drag` (`headless/pointer.rs`): a finger lands on the match's middle (`Screen::bounds_in_root`), rests 100 ms,
+  moves 10 points a frame and lifts, and what takes it is decided as the desktop backends decide it, with
+  `nsh_core::input` over the views from the match out (`Screen::link`: events, tracked states, gesture values, the
+  scroll axis, `panActivation`): the views listening to touches hear `Touch` (start, moves, end; the JS responder's
+  `SetJsResponder` block keeps native drags from starting), past the slop a pan (`PanStart`, its `pan` values moved
+  through nsh-core's `animation::Animator`, which the headless animator wraps, `PanEnd` with the velocity) or a
+  scroll view (dragged within its content; past its top only when it listens to `Refresh`, rubber-banded, refreshing
+  when released past `scroll::refreshes`) takes it, and the press under it is cancelled once it moves away;
+- `hover` (`headless/pointer.rs`): on a desktop environment the mouse comes over the match's middle: the views from it
+  out that hovering matters to (`input::hoverable`: `hover:` styles or hover events) replace those hovered before
+  (`Screen::set_hovered`), `input::hover_changes` says which hear `HoverOut` and `HoverIn` (with their `HOVERED` state
+  reported, `EngineControl::set_states`), and the hovered views hear `HoverMove`;
+- `press_key` (`headless/keyboard.rs`, `app.keyboard.press`): the keystroke as `nsh/keymap` parses it for the
+  environment's OS; on a desktop environment (`open`'s `platform`: `Environment::desktop`) the root's keymap
+  (`MountItem::Keymap`, `Screen::keymap`) finds the binding that fires where the focus is (`Keymap::find`) and the
+  root hears `KeyCommand`; else the focused input takes a character, Backspace or the return key, else Escape goes
+  back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
   of its JS condition), `idle` (until quiet for a while).
@@ -331,6 +348,12 @@ runners have no dev server client). A Rust app's hosts know its root (the platfo
 web runtime's `rust_app!`); for its `nsh.json` the test session's server publishes no bundle but
 `DevServer::publish_root` (`ServerMessage::Root`, after the test's setup), and the host runs the root.
 
+`--trace` on a real platform is the host's: the test's setup says so (`DevServer::set_test_trace`,
+`ServerMessage::TestSetup`'s `trace`), the host's engine runs with `EngineConfig::trace` (`Model::set_up_engine`), so
+its commit and event timings come as its log lines, and the agent's `Model::apply` sends each batch's items, formatted
+as headless runs print them (`trace.rs`), as a `ClientMessage::Trace`, before the outcome of the step it came in. The
+test's side prints them under the step `Remote` took last (named as `Headless` names its steps).
+
 ### On a real platform (`--target`)
 
 `nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
@@ -348,7 +371,12 @@ The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
-(`Native`: press, long press, scroll, typed keys, `back`, dialogs, screenshots, the window's size and appearance),
+(`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
+the mouse's hover (`hover`, when `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
+moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
+`keymap::Key::virtual_key`, the web's CDP key events, Linux's bindings fired as its shortcut controller would, as GTK
+takes no made-up keys; the phones, without app shortcuts, refuse them),
+`back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
@@ -358,8 +386,8 @@ locale, reduced motion, safe area).
 
 Routes and storage reach the host through the dev server (`HostOptions`, `DevServer::set_test_storage` and
 `set_test_network`). Before the first bundle, the server sends the test host a `ServerMessage::TestSetup` with the
-seeded storage; the host's `Tester` hands it to `Model::set_up`, and the engine starts with `Model::engine_storage`
-(a `MemoryStorage` holding those entries) and `Model::engine_network` (`agent/forward.rs`'s `ForwardNetwork`). Each
+seeded storage; the host's `Tester` hands it to `Model::set_up`, and `Model::set_up_engine` starts the engine on a
+`MemoryStorage` holding those entries and on `agent/forward.rs`'s `ForwardNetwork`. Each
 request the app makes goes back as a `ClientMessage::Fetch` with an id (`FetchCancel` when the app drops it); the
 test's side answers it from its routes (`protocol::TestNetwork`, `run.rs`'s `HostRoutes` over the same
 `StubNetwork` headless runs use, recording every request for `app.requests()`) with `ServerMessage::Fetch` replies:

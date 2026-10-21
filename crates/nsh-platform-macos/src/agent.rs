@@ -161,6 +161,27 @@ impl Native for MacNative {
         gesture(0, 0, 4);
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.activate();
+        let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
+        self.on_main(move |_, window| {
+            synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
+            synth::mouse(window, NSEventType::LeftMouseDown, x, y, 1);
+        });
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(nsh_testing::agent::FRAME);
+            let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+            self.on_main(move |_, window| {
+                synth::mouse(window, NSEventType::LeftMouseDragged, x, y, 1);
+            });
+            last = at;
+        }
+        let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
+        self.on_main(move |_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, 1));
+    }
+
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         self.on_main(move |_, window| synth::type_text(window, &text));
@@ -173,6 +194,71 @@ impl Native for MacNative {
             Key::SelectAll => "cmd+a",
         };
         self.on_main(move |_, window| synth::key(window, name));
+    }
+
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        // Straight to the surface's input: AppKit hands a posted mouse
+        // move to the first responder only, not to the view under it.
+        self.on_main(move |surface, window| {
+            let event = synth::mouse_event(
+                window,
+                NSEventType::MouseMoved,
+                x,
+                y,
+                0,
+                objc2_app_kit::NSEventModifierFlags::empty(),
+            );
+            if let Some(event) = event {
+                crate::input::event(surface, &event);
+            }
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::{Key, Keystroke};
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::MacOs).map_err(|e| e.to_string())?;
+        // As `synth::key` names keys: modifiers, then the key.
+        let mut name = String::new();
+        let m = stroke.modifiers;
+        for (on, prefix) in [
+            (m.cmd, "cmd+"),
+            (m.ctrl, "ctrl+"),
+            (m.alt, "alt+"),
+            (m.shift, "shift+"),
+        ] {
+            if on {
+                name.push_str(prefix);
+            }
+        }
+        name.push_str(&match stroke.key {
+            Key::Char(' ') => "space".into(),
+            Key::Char(c) => c.to_string(),
+            Key::Enter => "Return".into(),
+            Key::Escape => "Escape".into(),
+            Key::Tab => "Tab".into(),
+            Key::Backspace => "BackSpace".into(),
+            Key::Delete => "Delete".into(),
+            Key::Insert => "Help".into(),
+            Key::Up => "Up".into(),
+            Key::Down => "Down".into(),
+            Key::Left => "Left".into(),
+            Key::Right => "Right".into(),
+            Key::Home => "Home".into(),
+            Key::End => "End".into(),
+            Key::PageUp => "Page_Up".into(),
+            Key::PageDown => "Page_Down".into(),
+            Key::F(n) => format!("F{n}"),
+        });
+        self.activate();
+        self.on_main(move |_, window| synth::key(window, &name))
+            .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn input_text(&self, id: NodeId) -> Option<String> {

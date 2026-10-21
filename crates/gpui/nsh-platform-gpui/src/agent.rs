@@ -194,6 +194,19 @@ impl Native for GpuiNative {
         }
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.mouse(PointerKind::Move, from, 0);
+        self.mouse(PointerKind::Down, from, 0);
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            self.mouse(PointerKind::Move, at, 0);
+            last = at;
+        }
+        self.mouse(PointerKind::Up, last, 0);
+    }
+
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         self.with_surface(move |surface| crate::text_input::char_input(surface, &text));
@@ -212,6 +225,41 @@ impl Native for GpuiNative {
             ..Modifiers::default()
         };
         self.with_surface(move |surface| synth::press(surface, vk, modifiers));
+    }
+
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        self.mouse(PointerKind::Move, at, 0);
+        Ok(())
+    }
+
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::platform::Os;
+        let os = if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else if cfg!(windows) {
+            Os::Windows
+        } else {
+            Os::Linux
+        };
+        let stroke =
+            nsh_core::keymap::Keystroke::parse(keys, os).map_err(|e| e.to_string())?;
+        let vk = stroke
+            .key
+            .virtual_key()
+            .ok_or_else(|| format!("{keys:?} has no key on this keyboard"))?;
+        let m = stroke.modifiers;
+        let modifiers = Modifiers {
+            shift: m.shift,
+            ctrl: m.ctrl,
+            alt: m.alt,
+            meta: m.cmd,
+        };
+        self.with_surface(move |surface| synth::press(surface, vk, modifiers))
+            .ok_or_else(|| "the window is gone".to_owned())
     }
 
     fn input_text(&self, id: NodeId) -> Option<String> {

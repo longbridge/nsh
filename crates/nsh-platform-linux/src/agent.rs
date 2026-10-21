@@ -114,6 +114,24 @@ impl Native for LinuxNative {
         }
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let (x, y) = (from.x.0, from.y.0);
+        self.on_main(move |s| {
+            crate::input::simulate(s, Simulated::Hover(x, y));
+            crate::input::simulate(s, Simulated::Down(x, y));
+        });
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            let (x, y) = (at.x.0, at.y.0);
+            self.on_main(move |s| crate::input::simulate(s, Simulated::Move(x, y)));
+            last = at;
+        }
+        let (x, y) = (last.x.0, last.y.0);
+        self.on_main(move |s| crate::input::simulate(s, Simulated::Up(x, y)));
+    }
+
     fn type_text(&self, text: &str) {
         // Key by key, as a keyboard's characters come.
         for ch in text.chars() {
@@ -127,6 +145,72 @@ impl Native for LinuxNative {
             Key::Backspace => synth::backspace(w),
             Key::SelectAll => synth::select_all(w),
         });
+    }
+
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        self.on_main(move |s| crate::input::simulate(s, Simulated::Hover(x, y)))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        use nsh_core::keymap::{Key as K, Keystroke};
+        let stroke =
+            Keystroke::parse(keys, nsh_core::platform::Os::Linux).map_err(|e| e.to_string())?;
+        // The app's shortcuts first, as GTK's shortcut controller (capture
+        // phase) runs before the focus.
+        if self
+            .on_main(move |surface| crate::keymap::press(surface, stroke))
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        let m = stroke.modifiers;
+        let plain = !(m.ctrl || m.alt || m.cmd);
+        let mut modifiers = gdk::ModifierType::empty();
+        for (on, mask) in [
+            (m.ctrl, gdk::ModifierType::CONTROL_MASK),
+            (m.alt, gdk::ModifierType::ALT_MASK),
+            (m.shift, gdk::ModifierType::SHIFT_MASK),
+            (m.cmd, gdk::ModifierType::SUPER_MASK),
+        ] {
+            if on {
+                modifiers |= mask;
+            }
+        }
+        match stroke.key {
+            // The focused field's own keys, through its signals.
+            K::Enter if plain => {
+                self.with_window(|_, w| synth::enter(w));
+            }
+            K::Backspace if plain => {
+                self.with_window(|_, w| synth::backspace(w));
+            }
+            K::Char('a') if m.ctrl && !m.alt && !m.cmd => {
+                self.with_window(|_, w| synth::select_all(w));
+            }
+            K::Char(c) if plain => {
+                let c = if m.shift { c.to_ascii_uppercase() } else { c };
+                self.with_window(move |_, w| synth::type_text(w, &c.to_string()));
+            }
+            // The root's keys: going back.
+            K::Escape | K::Left => {
+                let key = if stroke.key == K::Escape {
+                    gdk::Key::Escape
+                } else {
+                    gdk::Key::Left
+                };
+                self.on_main(move |surface| {
+                    crate::navigation::key_pressed(surface, key, modifiers);
+                });
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn input_text(&self, id: NodeId) -> Option<String> {

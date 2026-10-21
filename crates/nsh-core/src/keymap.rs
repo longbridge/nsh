@@ -73,6 +73,86 @@ pub enum Key {
     F(u8),
 }
 
+/// The US layout's punctuation keys' Windows virtual-key codes
+/// (`VK_OEM_*`).
+const OEM_KEYS: &[(u16, char)] = &[
+    (0xBA, ';'),
+    (0xBB, '='),
+    (0xBC, ','),
+    (0xBD, '-'),
+    (0xBE, '.'),
+    (0xBF, '/'),
+    (0xC0, '`'),
+    (0xDB, '['),
+    (0xDC, '\\'),
+    (0xDD, ']'),
+    (0xDE, '\''),
+];
+
+impl Key {
+    /// The key of Windows virtual-key code `vk` (`VK_*`, which the Windows
+    /// and GPUI backends get); punctuation by the US layout's keys.
+    pub fn from_virtual_key(vk: u16) -> Option<Key> {
+        Some(match vk {
+            0x08 => Key::Backspace,
+            0x09 => Key::Tab,
+            0x0D => Key::Enter,
+            0x1B => Key::Escape,
+            0x20 => Key::Char(' '),
+            0x21 => Key::PageUp,
+            0x22 => Key::PageDown,
+            0x23 => Key::End,
+            0x24 => Key::Home,
+            0x25 => Key::Left,
+            0x26 => Key::Up,
+            0x27 => Key::Right,
+            0x28 => Key::Down,
+            0x2D => Key::Insert,
+            0x2E => Key::Delete,
+            // `0`-`9`, `A`-`Z`.
+            0x30..=0x39 => Key::Char(char::from(vk as u8)),
+            0x41..=0x5A => Key::Char(char::from(vk as u8).to_ascii_lowercase()),
+            // The keypad's digits.
+            0x60..=0x69 => Key::Char(char::from(b'0' + (vk - 0x60) as u8)),
+            // F1 to F24.
+            0x70..=0x87 => Key::F((vk - 0x6F) as u8),
+            _ => {
+                return OEM_KEYS
+                    .iter()
+                    .find(|(k, _)| *k == vk)
+                    .map(|&(_, c)| Key::Char(c));
+            }
+        })
+    }
+
+    /// The Windows virtual-key code of this key (the main keyboard's, not
+    /// the keypad's): what a key event for it carries.
+    pub fn virtual_key(self) -> Option<u16> {
+        Some(match self {
+            Key::Backspace => 0x08,
+            Key::Tab => 0x09,
+            Key::Enter => 0x0D,
+            Key::Escape => 0x1B,
+            Key::Char(' ') => 0x20,
+            Key::PageUp => 0x21,
+            Key::PageDown => 0x22,
+            Key::End => 0x23,
+            Key::Home => 0x24,
+            Key::Left => 0x25,
+            Key::Up => 0x26,
+            Key::Right => 0x27,
+            Key::Down => 0x28,
+            Key::Insert => 0x2D,
+            Key::Delete => 0x2E,
+            Key::Char(c @ '0'..='9') => c as u16,
+            Key::Char(c @ 'a'..='z') => c.to_ascii_uppercase() as u16,
+            Key::F(n @ 1..=24) => 0x6F + u16::from(n),
+            Key::Char(c) => return OEM_KEYS.iter().find(|(_, k)| *k == c).map(|&(vk, _)| vk),
+            Key::F(_) => return None,
+        })
+    }
+}
+
 /// One key with its modifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Keystroke {
@@ -544,6 +624,23 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_have_windows_virtual_key_codes_both_ways() {
+        assert_eq!(Key::from_virtual_key(0x4B), Some(Key::Char('k')));
+        assert_eq!(Key::from_virtual_key(0x31), Some(Key::Char('1')));
+        assert_eq!(Key::from_virtual_key(0x74), Some(Key::F(5)));
+        assert_eq!(Key::from_virtual_key(0xBF), Some(Key::Char('/')));
+        assert_eq!(Key::from_virtual_key(0x62), Some(Key::Char('2')));
+        assert_eq!(Key::from_virtual_key(0x10), None);
+        for vk in (0..=0xFF).filter(|vk| !(0x60..=0x69).contains(vk)) {
+            if let Some(key) = Key::from_virtual_key(vk) {
+                assert_eq!(key.virtual_key(), Some(vk), "{key:?}");
+            }
+        }
+        assert_eq!(Key::Char('?').virtual_key(), None);
+        assert_eq!(Key::F(25).virtual_key(), None);
+    }
 
     fn parse(text: &str) -> Result<Keystroke, KeystrokeError> {
         Keystroke::parse(text, Os::MacOs)

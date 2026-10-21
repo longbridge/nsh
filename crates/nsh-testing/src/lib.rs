@@ -44,6 +44,7 @@ mod runner;
 mod screen;
 mod selector;
 mod storage;
+mod trace;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};
@@ -63,11 +64,14 @@ pub use self::headless::{
     StubResponse, StubRoute, WAIT, default_answer, print_batch, start,
 };
 #[cfg(feature = "js")]
+#[allow(deprecated)]
+pub use self::module::MobilePlatform;
+#[cfg(feature = "js")]
 pub use self::{
     driver::Host,
     module::{
-        App, ClockOptions, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption,
-        OpenOptions, RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
+        App, ClockOptions, ColorScheme, Entries, Expectation, NetworkOption, OpenOptions, Platform,
+        RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
     },
     run::{
         Built, Compile, Entry, Failure, HostOptions, Output, StartHost, TestResult, TestRun,

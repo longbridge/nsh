@@ -160,8 +160,54 @@ struct WebNative {
 }
 
 /// Modifier bits of the protocol's input events.
+const ALT: u32 = 1;
 const CTRL: u32 = 2;
 const META: u32 = 4;
+const SHIFT: u32 = 8;
+
+/// A key's DOM `key` and `code` names, as the browser's events carry them.
+fn dom_key(key: nsh_core::keymap::Key, shift: bool) -> Option<(String, String)> {
+    use nsh_core::keymap::Key;
+    let named = |key: &str, code: &str| Some((key.to_owned(), code.to_owned()));
+    match key {
+        Key::Enter => named("Enter", "Enter"),
+        Key::Escape => named("Escape", "Escape"),
+        Key::Tab => named("Tab", "Tab"),
+        Key::Backspace => named("Backspace", "Backspace"),
+        Key::Delete => named("Delete", "Delete"),
+        Key::Insert => named("Insert", "Insert"),
+        Key::Up => named("ArrowUp", "ArrowUp"),
+        Key::Down => named("ArrowDown", "ArrowDown"),
+        Key::Left => named("ArrowLeft", "ArrowLeft"),
+        Key::Right => named("ArrowRight", "ArrowRight"),
+        Key::Home => named("Home", "Home"),
+        Key::End => named("End", "End"),
+        Key::PageUp => named("PageUp", "PageUp"),
+        Key::PageDown => named("PageDown", "PageDown"),
+        Key::F(n) => Some((format!("F{n}"), format!("F{n}"))),
+        Key::Char(' ') => named(" ", "Space"),
+        Key::Char(c) => {
+            let code = match c {
+                'a'..='z' => format!("Key{}", c.to_ascii_uppercase()),
+                '0'..='9' => format!("Digit{c}"),
+                ';' => "Semicolon".into(),
+                '=' => "Equal".into(),
+                ',' => "Comma".into(),
+                '-' => "Minus".into(),
+                '.' => "Period".into(),
+                '/' => "Slash".into(),
+                '`' => "Backquote".into(),
+                '[' => "BracketLeft".into(),
+                '\\' => "Backslash".into(),
+                ']' => "BracketRight".into(),
+                '\'' => "Quote".into(),
+                _ => return None,
+            };
+            let typed = if shift { c.to_ascii_uppercase() } else { c };
+            Some((typed.to_string(), code))
+        }
+    }
+}
 
 impl WebNative {
     /// What the page answers of `query`.
@@ -183,7 +229,9 @@ impl WebNative {
                 "type": kind,
                 "x": at.x.0,
                 "y": at.y.0,
-                "button": if kind == "mouseMoved" { "none" } else { "left" },
+                // A move with the button down is a drag of it, as
+                // Playwright sends it.
+                "button": if kind == "mouseMoved" && buttons == 0 { "none" } else { "left" },
                 "buttons": buttons,
                 "clickCount": 1,
             }),
@@ -273,6 +321,64 @@ impl Native for WebNative {
             );
             std::thread::sleep(FRAME);
         }
+    }
+
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.mouse("mouseMoved", from, 0);
+        self.mouse("mousePressed", from, 1);
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            self.mouse("mouseMoved", at, 1);
+            last = at;
+        }
+        self.mouse("mouseReleased", last, 0);
+    }
+
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        // From next to it, as a mouse arrives: the browser reports no move
+        // to where the mouse already is (scrolling into view can leave it
+        // there, the page moving under it).
+        let near = Point::new(at.x - Points(1.0), at.y - Points(1.0));
+        self.mouse("mouseMoved", near, 0);
+        self.mouse("mouseMoved", at, 0);
+        Ok(())
+    }
+
+    fn press_keys(&self, keys: &str) -> Result<(), String> {
+        // `mod` is the browser's platform's command key.
+        let stroke = nsh_core::keymap::Keystroke::parse_with(keys, cfg!(target_os = "macos"))
+            .map_err(|e| e.to_string())?;
+        let m = stroke.modifiers;
+        if !(m.ctrl || m.alt || m.cmd)
+            && let nsh_core::keymap::Key::Char(c) = stroke.key
+        {
+            // A character's key types it.
+            let typed = if m.shift { c.to_ascii_uppercase() } else { c };
+            self.type_text(&typed.to_string());
+            return Ok(());
+        }
+        let (key, code) = dom_key(stroke.key, m.shift)
+            .ok_or_else(|| format!("{keys:?} has no key on a browser's keyboard"))?;
+        let vk = u32::from(stroke.key.virtual_key().unwrap_or(0));
+        let mut modifiers = 0;
+        for (on, bit) in [
+            (m.alt, ALT),
+            (m.ctrl, CTRL),
+            (m.cmd, META),
+            (m.shift, SHIFT),
+        ] {
+            if on {
+                modifiers |= bit;
+            }
+        }
+        self.press_key(&key, &code, vk, modifiers, &[]);
+        Ok(())
     }
 
     fn type_text(&self, text: &str) {

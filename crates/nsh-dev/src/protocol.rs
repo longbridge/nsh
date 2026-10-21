@@ -70,6 +70,13 @@ pub enum ClientMessage {
         /// The request's id.
         id: u64,
     },
+    /// A batch a traced test session's app applied
+    /// ([`ServerMessage::TestSetup`]): its mount items, a line each, as
+    /// `nsh test --trace` prints them.
+    Trace {
+        /// The items.
+        items: Vec<String>,
+    },
     /// A log line from the host (JS console or native).
     Log {
         /// Severity.
@@ -133,6 +140,11 @@ pub enum ServerMessage {
         /// The storage's entries.
         #[serde(default)]
         storage: Vec<(String, String)>,
+        /// Trace the app (`nsh test --trace`): its engine logs each
+        /// commit's timings, and the host sends each batch it applies
+        /// ([`ClientMessage::Trace`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        trace: bool,
     },
     /// What the test answers to the app's request `id`
     /// ([`ClientMessage::Fetch`]), a message per event, in order.
@@ -254,6 +266,27 @@ pub enum TestStep {
         selector: String,
         /// Points; negative scrolls back.
         distance: f32,
+    },
+    /// Drags the view: a finger (or the mouse) on its middle moves by
+    /// `x`, `y` points and lifts (`app.drag`).
+    Drag {
+        /// The view.
+        selector: String,
+        /// Points rightwards.
+        x: f32,
+        /// Points downwards.
+        y: f32,
+    },
+    /// Moves the mouse over the view (`app.hover`).
+    Hover {
+        /// The view.
+        selector: String,
+    },
+    /// Presses a key with its modifiers, as `nsh/keymap` names it
+    /// (`app.keyboard.press`).
+    PressKey {
+        /// The keystroke: `"mod+k"`, `"escape"`.
+        keys: String,
     },
     /// Goes back as the user does (`app.back`).
     Back,
@@ -492,6 +525,8 @@ pub enum PickTarget {
     Input,
     /// A scroll view.
     ScrollView,
+    /// The view itself (a drag lands on it).
+    View,
 }
 
 /// How a [`TestStep`] ended.

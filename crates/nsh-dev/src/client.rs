@@ -37,6 +37,9 @@ pub enum DevEvent {
     TestSetup {
         /// The storage's entries.
         storage: Vec<(String, String)>,
+        /// Trace the app: log each commit's timings and send each batch
+        /// ([`DevClient::trace`]).
+        trace: bool,
     },
     /// The test's answer to request `id` ([`DevClient::fetch`]): one
     /// event of it.
@@ -184,6 +187,12 @@ impl DevClient {
         let _ = self.replies.send(ClientMessage::FetchCancel { id });
     }
 
+    /// Sends the mount items of a batch the traced app applied, a line
+    /// each ([`DevEvent::TestSetup`]), in order with the steps' outcomes.
+    pub fn trace(&self, items: Vec<String>) {
+        let _ = self.replies.send(ClientMessage::Trace { items });
+    }
+
     /// Sends the outcome of the step `id` ([`DevEvent::Step`]).
     pub fn step_done(&self, id: u64, outcome: StepOutcome) {
         let _ = self.replies.send(ClientMessage::StepDone { id, outcome });
@@ -261,8 +270,8 @@ fn session(
                     }
                 }
                 Ok(ServerMessage::Step { id, step }) => on_event(DevEvent::Step { id, step }),
-                Ok(ServerMessage::TestSetup { storage }) => {
-                    on_event(DevEvent::TestSetup { storage })
+                Ok(ServerMessage::TestSetup { storage, trace }) => {
+                    on_event(DevEvent::TestSetup { storage, trace })
                 }
                 Ok(ServerMessage::Fetch { id, reply }) => on_event(DevEvent::Fetch { id, reply }),
                 Ok(ServerMessage::Root) => on_event(DevEvent::Root),

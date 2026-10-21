@@ -222,6 +222,13 @@ fn drag_position(raw: f32, min: f32, max: f32, dim: f32, bounces: bool) -> f32 {
     }
 }
 
+/// Whether a vertical scroll view dragged to `offset` (negative: pulled
+/// past its top) refreshes when the finger lifts, if it listens to
+/// `onRefresh` and is not refreshing yet.
+pub fn refreshes(offset: Points) -> bool {
+    offset.0 <= -REFRESH_PULL
+}
+
 /// The deceleration rate: velocity kept per ms.
 pub fn rate(behavior: &ScrollBehavior) -> f32 {
     if behavior.deceleration > 0.0 && behavior.deceleration < 1.0 {
