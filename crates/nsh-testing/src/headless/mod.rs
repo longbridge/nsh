@@ -1308,6 +1308,59 @@ mod tests {
         assert!(steps.iter().any(|s| s == "press(text:Add)"), "{steps:?}");
     }
 
+    /// A pad under a canvas that takes no touches and draws two cells it
+    /// names as nodes. A press on a cell reaches the pad.
+    #[component]
+    fn Cells() -> impl IntoElement {
+        let pressed = signal(0_u32);
+        let cell = |x: f32, label: &str, id: &str| {
+            nsh_core::canvas::CanvasNode::new(
+                Bounds::new(point(px(x), px(0.0)), size(px(100.0), px(40.0))),
+                nsh_core::AccessibilityRole::Text,
+                label,
+            )
+            .test_id(id)
+        };
+        let drawing = Painter::new()
+            .fill_text("12", 4.0, 20.0)
+            .fill_text("Total", 104.0, 20.0)
+            .node(cell(0.0, "12", "cell-a1"))
+            .node(cell(100.0, "Total", "cell-b1").selected(true));
+        view()
+            .child(text(move || format!("pressed: {}", pressed.get())))
+            .child(
+                view()
+                    .w(px(200.0))
+                    .h(px(40.0))
+                    .child(
+                        view()
+                            .test_id("pad")
+                            .absolute()
+                            .size_full()
+                            .on_press(move || pressed.update(|n| *n += 1)),
+                    )
+                    .child(
+                        canvas(drawing)
+                            .absolute()
+                            .size_full()
+                            .pointer_events(PointerEvents::None),
+                    ),
+            )
+    }
+
+    #[test]
+    fn a_canvas_nodes_are_found_and_a_press_on_one_reaches_the_view_under_it() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Cells>())).unwrap();
+        app.first_render().unwrap();
+        app.wait_for("id:cell-b1").unwrap();
+        assert_eq!(app.screen().count("label:Total"), Ok(1));
+        assert!(app.shows("12"));
+        app.press("id:cell-b1").unwrap();
+        app.wait_for("pressed: 1").unwrap();
+        app.press("text:12").unwrap();
+        app.wait_for("pressed: 2").unwrap();
+    }
+
     /// The metrics of a line of text in a canvas font.
     #[component]
     fn Metrics() -> impl IntoElement {

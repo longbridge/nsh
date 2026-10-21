@@ -62,3 +62,12 @@ height, from the first line the core's text engine lays it out in: `canvas::line
 `path_contains` / `stroke_contains` for a `Path`; animated values count as 0 there too).
 
 The drawing format is documented in `crates/nsh-core/src/canvas.rs`.
+
+**Nodes** (Rust components). A drawing can name parts of what it draws as elements of their own
+(`Painter::node(CanvasNode::new(bounds, role, label))`, with `test_id` and `selected`): a grid's cells, a chart's bars.
+They are the canvas's children to assistive technologies and UI tests, at their bounds in the canvas, with their role,
+name, test id and selected state (`Drawing::nodes`, sent with the drawing). A press on one is a press at its center, as
+a pointer there makes it: it goes to the view under that point that takes presses, so a canvas drawn over the view that
+handles presses (`pointerEvents: "none"`) keeps working. The GPUI backend makes them AccessKit nodes (`access.rs`
+`canvas_nodes`, no actions of their own) and the headless driver views of its model (`label:`, `text:`, `id:` and
+`role:` find them, `press` presses under them); the other backends do not show them yet.
