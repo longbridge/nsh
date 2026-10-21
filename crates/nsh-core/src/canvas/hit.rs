@@ -12,7 +12,8 @@
 
 use std::f32::consts::{PI, TAU};
 
-use super::{CanvasOp, FillRule, LineCap, Num, PathOp, arc_sweep, fit_radii};
+use super::{CanvasOp, FillRule, LineCap, Num, PathOp, fit, sweep};
+use crate::geometry::{Point, Points};
 
 /// How far flattened curves may stray from the true ones, in points.
 const TOLERANCE: f32 = 0.25;
@@ -23,7 +24,7 @@ pub(super) type Matrix = [f32; 6];
 
 pub(super) const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
-/// `m` after `n` (`n` applies first): what `ctx.transform(n)` makes of `m`.
+/// `m` after `n` (`n` applies first): what `cx.transform(n)` makes of `m`.
 pub(super) fn mul(m: Matrix, n: Matrix) -> Matrix {
     [
         m[0] * n[0] + m[2] * n[1],
@@ -216,7 +217,7 @@ impl Outline {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start, n(*end), *ccw);
+                let sweep = sweep(start, n(*end), *ccw);
                 self.arc(m, [n(*x), n(*y)], [r, r], 0.0, start, sweep);
             }
             PathOp::Ellipse {
@@ -230,7 +231,7 @@ impl Outline {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start, n(*end), *ccw);
+                let sweep = sweep(start, n(*end), *ccw);
                 self.arc(m, [x, y], [rx, ry], rotation, start, sweep);
             }
             PathOp::ArcTo(v) => {
@@ -247,7 +248,7 @@ impl Outline {
             }
             PathOp::RoundRect(rect, radii) => {
                 let [x, y, w, h] = rect.map(n);
-                let [tl, tr, br, bl] = fit_radii(w, h, radii.map(n));
+                let [tl, tr, br, bl] = fit(w, h, radii.map(n));
                 // A box with positive sides (the radii keep their corners).
                 let (x, w) = if w < 0.0 { (x + w, -w) } else { (x, w) };
                 let (y, h) = if h < 0.0 { (y + h, -h) } else { (y, h) };
@@ -495,7 +496,7 @@ fn outline(
     }
 }
 
-/// `ctx.isPointInPath([path,] x, y, rule)`: whether (`x`, `y`) (view
+/// `cx.isPointInPath([path,] x, y, rule)`: whether `point` (view
 /// coordinates, untransformed) is inside `path` (transformed by the
 /// transform after `ops`) or, without one, the current path after `ops`.
 /// Animated values (`Num::Slot`) are read through `slot`.
@@ -503,29 +504,27 @@ pub fn point_in_path(
     ops: &[CanvasOp],
     path: Option<&[PathOp]>,
     rule: FillRule,
-    x: f32,
-    y: f32,
+    point: Point<Points>,
     slot: impl Fn(u16) -> f32,
 ) -> bool {
     let n = |v: Num| v.get(&slot);
     let (state, current) = replay(ops, &n);
-    outline(&state, current, path, &n).contains([x, y], rule)
+    outline(&state, current, path, &n).contains([point.x.0, point.y.0], rule)
 }
 
-/// `ctx.isPointInStroke([path,] x, y)`: whether (`x`, `y`) is on the
+/// `cx.isPointInStroke([path,] x, y)`: whether `point` is on the
 /// stroke of `path` or the current path with the `lineWidth` and `lineCap`
 /// after `ops` ([`point_in_path`]'s coordinates).
 pub fn point_in_stroke(
     ops: &[CanvasOp],
     path: Option<&[PathOp]>,
-    x: f32,
-    y: f32,
+    point: Point<Points>,
     slot: impl Fn(u16) -> f32,
 ) -> bool {
     let n = |v: Num| v.get(&slot);
     let (state, current) = replay(ops, &n);
     let half = state.line_width * scale_of(&state.ctm) / 2.0;
-    outline(&state, current, path, &n).stroke_contains([x, y], half, state.cap)
+    outline(&state, current, path, &n).stroke_contains([point.x.0, point.y.0], half, state.cap)
 }
 
 #[cfg(test)]
@@ -534,6 +533,10 @@ mod tests {
 
     fn c(v: f32) -> Num {
         Num::Const(v)
+    }
+
+    fn pt(x: f32, y: f32) -> Point<Points> {
+        crate::geometry::point(Points(x), Points(y))
     }
 
     fn zero(_: u16) -> f32 {
@@ -547,7 +550,7 @@ mod tests {
             PathOp::Rect([c(0.0), c(0.0), c(100.0), c(100.0)]),
             PathOp::Rect([c(25.0), c(25.0), c(50.0), c(50.0)]),
         ];
-        let hit = |rule, x, y| point_in_path(&[], Some(&path), rule, x, y, zero);
+        let hit = |rule, x, y| point_in_path(&[], Some(&path), rule, pt(x, y), zero);
         assert!(hit(FillRule::NonZero, 50.0, 50.0));
         assert!(!hit(FillRule::EvenOdd, 50.0, 50.0));
         assert!(hit(FillRule::EvenOdd, 10.0, 10.0));
@@ -566,8 +569,9 @@ mod tests {
             end: c(TAU),
             ccw: false,
         }];
-        let hit =
-            |path: &[PathOp], x, y| point_in_path(&[], Some(path), FillRule::NonZero, x, y, zero);
+        let hit = |path: &[PathOp], x, y| {
+            point_in_path(&[], Some(path), FillRule::NonZero, pt(x, y), zero)
+        };
         assert!(hit(&circle, 50.0, 69.0));
         assert!(!hit(&circle, 64.5, 64.5));
         let rounded = [PathOp::RoundRect(
@@ -597,7 +601,7 @@ mod tests {
             CanvasOp::Restore,
         ];
         // The current path was transformed when it was added.
-        let hit = |x, y| point_in_path(&ops, None, FillRule::NonZero, x, y, zero);
+        let hit = |x, y| point_in_path(&ops, None, FillRule::NonZero, pt(x, y), zero);
         assert!(hit(115.0, 15.0));
         assert!(!hit(5.0, 5.0));
         // A path is transformed by the transform now.
@@ -606,8 +610,7 @@ mod tests {
             &ops,
             Some(&path),
             FillRule::NonZero,
-            119.0,
-            19.0,
+            pt(119.0, 19.0),
             zero
         ));
         // Animated values read through `slot`.
@@ -616,8 +619,7 @@ mod tests {
             &[],
             Some(&path),
             FillRule::NonZero,
-            55.0,
-            5.0,
+            pt(55.0, 5.0),
             |_| 50.0
         ));
     }
@@ -629,7 +631,7 @@ mod tests {
             PathOp::LineTo(c(100.0), c(0.0)),
         ];
         let width = |w| [CanvasOp::LineWidth(c(w))];
-        let hit = |ops: &[CanvasOp], x, y| point_in_stroke(ops, Some(&line), x, y, zero);
+        let hit = |ops: &[CanvasOp], x, y| point_in_stroke(ops, Some(&line), pt(x, y), zero);
         assert!(hit(&width(10.0), 50.0, 4.0));
         assert!(!hit(&width(10.0), 50.0, 6.0));
         assert!(!hit(&width(1.0), 50.0, 4.0));
@@ -647,7 +649,7 @@ mod tests {
             PathOp::MoveTo(c(0.0), c(0.0)),
             PathOp::ArcTo([c(100.0), c(0.0), c(100.0), c(100.0), c(50.0)]),
         ];
-        let hit = |x, y| point_in_stroke(&[], Some(&corner), x, y, zero);
+        let hit = |x, y| point_in_stroke(&[], Some(&corner), pt(x, y), zero);
         assert!(hit(50.0, 0.0));
         assert!(hit(
             50.0 + 50.0 * (PI / 4.0).cos(),

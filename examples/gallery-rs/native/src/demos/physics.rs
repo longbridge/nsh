@@ -5,12 +5,12 @@
 
 use std::f32::consts::TAU;
 
-use nsh_core::{Rect, ui::prelude::*};
+use nsh_core::{Bounds, Points, ui::prelude::*};
 
 use crate::ui::{
     Badge, Finish, Finished, IconName, IconTile, MONO, Segment, Segmented, SegmentedEvent,
-    SegmentedProps, SegmentedSize, Stat, Tone, appear, colors, hint, icon, radius, segmented,
-    tints,
+    SegmentedProps, SegmentedSize, Stat, Tone, appear, colors, hint, icon, lengths, radius, rect,
+    segmented, tints,
 };
 
 /// The card's width and height.
@@ -88,7 +88,7 @@ fn backdrop(stage: (f32, f32), mode: Mode, x: &AnimatedValue, y: &AnimatedValue)
         gx += 16.0;
     }
     p = p
-        .line_dash(&[3.0, 5.0])
+        .line_dash(&lengths([3.0, 5.0]))
         .stroke_color(color(colors::BORDER))
         .line_width(1.0)
         .begin_path()
@@ -105,11 +105,13 @@ fn backdrop(stage: (f32, f32), mode: Mode, x: &AnimatedValue, y: &AnimatedValue)
                 p = p
                     .begin_path()
                     .round_rect(
-                        mx + sx * cx - CARD / 2.0,
-                        my + sy * cy - CARD / 2.0,
-                        CARD,
-                        CARD,
-                        26.0,
+                        rect(
+                            mx + sx * cx - CARD / 2.0,
+                            my + sy * cy - CARD / 2.0,
+                            CARD,
+                            CARD,
+                        ),
+                        px(26.0),
                     )
                     .stroke();
             }
@@ -272,7 +274,9 @@ pub(crate) fn Physics() -> impl IntoElement {
                 .finish(Finish::Inset)
                 .items_center()
                 .justify_center()
-                .on_layout(move |frame: &Rect| stage.set((frame.width, frame.height)))
+                .on_layout(move |frame: &Bounds<Points>| {
+                    stage.set((frame.size.width.0, frame.size.height.0))
+                })
                 .child(
                     canvas(move || backdrop(stage.get(), mode.get(), &x, &y))
                         .pointer_events(PointerEvents::None)

@@ -17,7 +17,7 @@ default = ["js"]
 # Rust app and links no QuickJS.
 js = ["nsh-engine/js"]
 # Development support: dev server client, log forwarding, error overlay.
-dev = ["js", "dep:nsh-dev"]
+dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
 # Web views with WebKitGTK 6.0 (`libwebkitgtk-6.0-dev` to build,
 # `libwebkitgtk-6.0-4` to run); without it a web view shows a placeholder.
 webview = ["dep:webkit6"]
@@ -28,9 +28,8 @@ log.workspace = true
 # Empty off Linux (like the other platform crates off their targets).
 [target.'cfg(target_os = "linux")'.dependencies]
 nsh-core.workspace = true
-nsh-animation.workspace = true
-nsh-engine.workspace = true
-nsh-ui-mobile.workspace = true
+nsh-engine = { workspace = true, features = ["net"] }
+nsh-base = { workspace = true, features = ["highlight"] }
 gtk4.workspace = true
 # GIF and WebP (first frame), which GDK cannot decode without gdk-pixbuf loaders.
 image = { workspace = true, features = ["gif", "webp"] }
@@ -42,4 +41,5 @@ ttf-parser.workspace = true
 ureq.workspace = true
 crossbeam-channel.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }
+nsh-testing = { workspace = true, features = ["agent"], optional = true }
 webkit6 = { workspace = true, optional = true }

@@ -92,7 +92,7 @@ use gpui::{
 };
 use nsh_core::{
     Accessibility, AccessibilityRole as AxRole, Checked, Command, EventKind, EventMask, LiveRegion,
-    MountBatch, NodeId, ViewKind,
+    MountBatch, NodeId, ViewKind, geometry::Points,
 };
 use rustc_hash::FxHashMap;
 
@@ -490,11 +490,12 @@ fn describe(
     }
     let mut actions = vec![Action::ScrollIntoView];
     if let Some(sc) = &s.scroll {
-        let (mx, my) = sc.max((s.frame.width, s.frame.height));
-        node.set_scroll_x(sc.x as f64);
+        let max = sc.max(s.frame.size);
+        let (mx, my) = (max.x.0, max.y.0);
+        node.set_scroll_x(sc.x.0 as f64);
         node.set_scroll_x_min(0.0);
         node.set_scroll_x_max(mx as f64);
-        node.set_scroll_y(sc.y as f64);
+        node.set_scroll_y(sc.y.0 as f64);
         node.set_scroll_y_min(0.0);
         node.set_scroll_y_max(my as f64);
         if my > 0.0 {
@@ -676,7 +677,9 @@ fn walk(
         walk(w, child, &cm, folds, live, &mut sub);
         let s = child.state();
         let (mut node, actions) = describe(child, &s, role, field.as_ref(), live);
-        if let Some((x, y, bw, bh)) = cm.bounds(0.0, 0.0, s.frame.width, s.frame.height) {
+        if let Some((x, y, bw, bh)) =
+            cm.bounds(0.0, 0.0, s.frame.size.width.0, s.frame.size.height.0)
+        {
             let k = w.scale as f64;
             node.set_bounds(accesskit::Rect {
                 x0: x as f64 * k,
@@ -1098,15 +1101,16 @@ fn perform(
             let target = {
                 let s = view.state();
                 s.scroll.as_ref().map(|sc| {
-                    let (w, h) = (s.frame.width, s.frame.height);
-                    let (mx, my) = sc.max((w, h));
+                    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
+                    let max = sc.max(s.frame.size);
+                    let (mx, my) = (max.x.0, max.y.0);
                     let (dx, dy) = match action {
                         Action::ScrollUp => (0.0, -scroll_step(data, h)),
                         Action::ScrollDown => (0.0, scroll_step(data, h)),
                         Action::ScrollLeft => (-scroll_step(data, w), 0.0),
                         _ => (scroll_step(data, w), 0.0),
                     };
-                    ((sc.x + dx).clamp(0.0, mx), (sc.y + dy).clamp(0.0, my))
+                    ((sc.x.0 + dx).clamp(0.0, mx), (sc.y.0 + dy).clamp(0.0, my))
                 })
             };
             if let Some((x, y)) = target {
@@ -1127,8 +1131,8 @@ fn perform(
 /// Scrolls the scroll view `view` to the offset.
 fn scroll_to(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) {
     let command = Command::ScrollTo {
-        x,
-        y,
+        x: Points(x),
+        y: Points(y),
         animated: false,
     };
     crate::scroll::command(surface, view, &command);

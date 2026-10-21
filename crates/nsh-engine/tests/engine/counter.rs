@@ -4,7 +4,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crossbeam_channel::Receiver;
-use nsh_core::{ApproxTextEngine, EventKind, MountBatch, MountItem, Size};
+use nsh_core::{ApproxTextEngine, EventKind, MountBatch, MountItem, Points, Size, geometry::px};
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
 use crate::ChannelSink;
@@ -24,24 +24,27 @@ fn config() -> EngineConfig {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
     EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     }
 }
 
@@ -92,7 +95,7 @@ fn tap_after_idle_gc_updates_the_ui() {
 #[derive(Debug)]
 enum Sent {
     Batch(MountBatch),
-    Resized(Size),
+    Resized(Size<Points>),
 }
 
 /// Hands batches and resize reports to the test, in order.
@@ -103,7 +106,7 @@ impl nsh_engine::MountSink for ResizeSink {
         let _ = self.0.send(Sent::Batch(batch));
     }
 
-    fn resized(&self, size: Size) {
+    fn resized(&self, size: Size<Points>) {
         let _ = self.0.send(Sent::Resized(size));
     }
 }
@@ -116,7 +119,7 @@ fn resize_is_reported_after_its_layout() {
     assert!(matches!(next(), Sent::Batch(_)), "first frame");
 
     // The layout at the new size comes first, then the report.
-    let size = Size::new(500.0, 700.0);
+    let size = Size::new(px(500.0), px(700.0));
     engine.control().resize(size);
     let Sent::Batch(batch) = next() else {
         panic!("the layout at the new size first");
@@ -124,7 +127,7 @@ fn resize_is_reported_after_its_layout() {
     assert!(
         batch.items.iter().any(|i| matches!(
             i,
-            MountItem::Frame { frame, .. } if frame.width == 500.0 && frame.height == 700.0
+            MountItem::Frame { frame, .. } if frame.size.width.0 == 500.0 && frame.size.height.0 == 700.0
         )),
         "the app's root view takes the size"
     );

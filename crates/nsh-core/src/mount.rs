@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use nsh_animation::{AnimationOp, AnimationProp};
-
 use crate::{
-    geometry::{Rect, Size},
+    animation::{AnimationOp, AnimationProp},
+    geometry::{Bounds, Points, Size},
     ops::{
         AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, ResizeMode,
@@ -142,9 +141,9 @@ pub struct ScrollBehavior {
     /// Stops at multiples of the viewport.
     pub paging: bool,
     /// Stops at multiples of this length (0: off).
-    pub snap_interval: f32,
+    pub snap_interval: Points,
     /// Stops at these offsets.
-    pub snap_offsets: Vec<f32>,
+    pub snap_offsets: Vec<Points>,
     /// Which point of a snap page aligns with the viewport.
     pub snap_alignment: SnapAlignment,
     /// Velocity kept per millisecond after a fling (0: platform default).
@@ -176,7 +175,7 @@ impl Default for ScrollBehavior {
     fn default() -> Self {
         Self {
             paging: false,
-            snap_interval: 0.0,
+            snap_interval: Points::ZERO,
             snap_offsets: Vec::new(),
             snap_alignment: SnapAlignment::Start,
             deceleration: 0.0,
@@ -202,7 +201,7 @@ impl ScrollBehavior {
 
     /// Whether flings end at snap points.
     pub fn snaps(&self) -> bool {
-        self.snap_interval > 0.0 || !self.snap_offsets.is_empty()
+        self.snap_interval.0 > 0.0 || !self.snap_offsets.is_empty()
     }
 
     /// The snap point a fling ends at, as in React Native: `offset` is
@@ -214,15 +213,16 @@ impl ScrollBehavior {
     /// `None` without snapping.
     pub fn snap_target(
         &self,
-        offset: f32,
-        projected: f32,
+        offset: Points,
+        projected: Points,
         velocity: f32,
-        viewport: f32,
-        content: f32,
-    ) -> Option<f32> {
-        let max = (content - viewport).max(0.0);
-        let points: Vec<f32> = if self.snap_interval > 0.0 {
-            let interval = self.snap_interval;
+        viewport: Points,
+        content: Points,
+    ) -> Option<Points> {
+        let (offset, projected, viewport) = (offset.0, projected.0, viewport.0);
+        let max = (content.0 - viewport).max(0.0);
+        let points: Vec<f32> = if self.snap_interval.0 > 0.0 {
+            let interval = self.snap_interval.0;
             // Aligns the item at `k * interval` with the viewport.
             let shift = match self.snap_alignment {
                 SnapAlignment::Start => 0.0,
@@ -236,7 +236,7 @@ impl ScrollBehavior {
         } else if !self.snap_offsets.is_empty() {
             self.snap_offsets
                 .iter()
-                .map(|o| o.clamp(0.0, max))
+                .map(|o| o.0.clamp(0.0, max))
                 .collect()
         } else if self.paging {
             let page = viewport.max(1.0);
@@ -264,7 +264,11 @@ impl ScrollBehavior {
         } else {
             nearest(&points, projected)
         };
-        Some(target.unwrap_or(if velocity > 0.0 { max } else { 0.0 }))
+        Some(Points(target.unwrap_or(if velocity > 0.0 {
+            max
+        } else {
+            0.0
+        })))
     }
 }
 
@@ -281,12 +285,24 @@ pub struct StickyCell {
     /// The cell.
     pub cell: NodeId,
     /// Its position along the main axis (content coordinates).
-    pub start: f32,
+    pub start: Points,
     /// Where the next sticky cell pushes it out (may be infinite).
-    pub end: f32,
+    pub end: Points,
 }
 
+/// The header heights a platform without a native header gives the core
+/// ([`crate::Core::set_header_heights`]; the desktops, the web): NSH draws
+/// no header there. A page's `header` slot ([`ScreenConfig::header_view`])
+/// is placed at its top instead, as wide as the page and as tall as it lays
+/// out, and the content starts below it; the native header's options
+/// (`title`, `headerLeft`, `headerStyle`, ...) are ignored.
+pub const NO_NATIVE_HEADER: (Points, Points) = (Points::ZERO, Points::ZERO);
+
 /// Options of a screen: its header and transitions.
+///
+/// The header options are the native header's (iOS, Android); a platform
+/// without one ([`NO_NATIVE_HEADER`]) reads only `header_view`,
+/// `header_height`, `prevent_back`, `gesture_enabled` and `animation`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScreenConfig {
     /// Title in the header.
@@ -308,11 +324,13 @@ pub struct ScreenConfig {
     /// Show the back button.
     pub back_visible: bool,
     /// The interactive back gesture (iOS swipe back, Android predictive back
-    /// following the finger) is on; the back button pops either way.
+    /// following the finger) is on; the back button pops either way
+    /// (`popOnSwipe`).
     pub gesture_enabled: bool,
-    /// The user cannot leave the screen (no swipe, the back buttons send
-    /// [`crate::EventKind::BackRequest`] instead of popping): answered by the
-    /// platform when the system asks, without JS.
+    /// The user cannot leave the screen (`popOnBack` false: no swipe, the
+    /// back buttons do not pop): answered by the platform when the system
+    /// asks, without JS. Every back press sends
+    /// [`crate::EventKind::BackRequest`] either way.
     pub prevent_back: bool,
     /// Push / pop transition.
     pub animation: ScreenAnimation,
@@ -322,9 +340,15 @@ pub struct ScreenConfig {
     pub right: Option<NodeId>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
-    /// Height of the header area at the top of the screen (status bar
-    /// included), as the core laid the content out below it.
-    pub header_height: f32,
+    /// The app's header (`header`): on a platform without a native header
+    /// ([`NO_NATIVE_HEADER`]), a view at the top of the screen whose frame
+    /// the core sets (as wide as the screen, as tall as it lays out),
+    /// above the content.
+    pub header_view: Option<NodeId>,
+    /// Height of the header area at the top of the screen, as the core laid
+    /// the content out below it: the native header's (status bar included),
+    /// or the `header` view's without a native header.
+    pub header_height: Points,
 }
 
 impl Default for ScreenConfig {
@@ -345,29 +369,54 @@ impl Default for ScreenConfig {
             left: None,
             right: None,
             title_view: None,
-            header_height: 0.0,
+            header_view: None,
+            header_height: Points::ZERO,
         }
     }
 }
 
-/// Options of a modal.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Options of a modal (`Dialog`).
+///
+/// The modal itself has no look: on the desktops and the web it is a
+/// transparent layer over the whole window (no card, scrim, shadow or
+/// background; `presentation` is ignored), and what shows is the app's
+/// popup and backdrop, which the runtime renders inside it.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModalConfig {
     /// How it appears.
     pub animation: ModalAnimation,
-    /// How it covers the screen.
+    /// How it covers the screen (iOS).
     pub presentation: ModalPresentation,
-    /// The background shows what is behind.
-    pub transparent: bool,
     /// Android: the content reaches under the status bar.
     pub status_bar_translucent: bool,
     /// iOS: the orientations it allows ([`ModalConfig::PORTRAIT`], ...);
     /// 0 keeps the presenter's.
     pub orientations: u8,
-    /// The user can close it natively (iOS sheets swiped down, the Android
-    /// back button), reported as `onRequestClose` and `onDismiss` afterwards;
-    /// otherwise those only send `onRequestClose` and `visible` decides.
-    pub dismissible: bool,
+    /// Escape and the Android back button close it natively
+    /// (`closeOnEscape`); either way they report
+    /// [`crate::EventKind::RequestClose`] (reason `"cancel"`), and
+    /// [`crate::EventKind::Dismiss`] after closing.
+    pub close_on_escape: bool,
+    /// A press on the backdrop closes it (`closeOnBackdropPress`): the
+    /// runtime handles presses on the app's backdrop part; a platform
+    /// reads it only for a backdrop of its own (a native sheet's).
+    pub close_on_backdrop_press: bool,
+    /// Swiping a sheet down closes it natively (`closeOnSwipe`).
+    pub close_on_swipe: bool,
+}
+
+impl Default for ModalConfig {
+    fn default() -> Self {
+        Self {
+            animation: ModalAnimation::default(),
+            presentation: ModalPresentation::default(),
+            status_bar_translucent: false,
+            orientations: 0,
+            close_on_escape: true,
+            close_on_backdrop_press: true,
+            close_on_swipe: true,
+        }
+    }
 }
 
 impl ModalConfig {
@@ -410,8 +459,8 @@ pub struct InputConfig {
     pub max_length: Option<u32>,
     /// The user can edit the text.
     pub editable: bool,
-    /// Return unfocuses a single-line input (React Native's
-    /// `blurOnSubmit`); [`InputConfig::submit`] resolves it.
+    /// Return unfocuses a single-line input without a `submitBehavior`
+    /// (always true from TS); [`InputConfig::submit`] resolves it.
     pub blur_on_submit: bool,
     /// `submitBehavior` as set; [`InputConfig::submit`] resolves it.
     pub submit_behavior: Option<SubmitBehavior>,
@@ -432,11 +481,10 @@ pub struct InputConfig {
 }
 
 impl InputConfig {
-    /// What return does, as `submitBehavior`, `blurOnSubmit` and
-    /// `multiline` say together (React Native's resolution): the set
-    /// behavior (a single line never takes line breaks), else a line break
-    /// in a multiline input, else a submit that unfocuses unless
-    /// `blurOnSubmit` is false.
+    /// What return does, as `submitBehavior` and `multiline` say
+    /// together: the set behavior (a single line never takes line breaks),
+    /// else a line break in a multiline input, else a submit that
+    /// unfocuses unless [`InputConfig::blur_on_submit`] is false (Rust).
     pub fn submit(&self) -> SubmitBehavior {
         match self.submit_behavior {
             Some(SubmitBehavior::Newline) if !self.multiline => SubmitBehavior::BlurAndSubmit,
@@ -483,7 +531,7 @@ pub struct ImageOptions {
     /// `defaultSource`: shown until the image loads (and if it fails).
     pub placeholder: Option<ImageSource>,
     /// `blurRadius` in points (0: sharp).
-    pub blur_radius: f32,
+    pub blur_radius: Points,
     /// `fadeDuration` in milliseconds; the platform's default when `None`
     /// (React Native: 300 on Android, none on iOS).
     pub fade_ms: Option<f32>,
@@ -540,7 +588,7 @@ pub enum MountItem {
         /// View.
         id: NodeId,
         /// New frame.
-        frame: Rect,
+        frame: Bounds<Points>,
     },
     /// The area the view's descendants cover outside its bounds, in its
     /// own coordinates (it contains the bounds), while overflow is visible;
@@ -553,7 +601,7 @@ pub enum MountItem {
         /// View.
         id: NodeId,
         /// The area, or `None`.
-        extent: Option<Rect>,
+        extent: Option<Bounds<Points>>,
     },
     /// Set the visual style of a view.
     ViewStyle {
@@ -571,7 +619,7 @@ pub enum MountItem {
         /// The final layout, ready to draw.
         layout: TextLayout,
         /// Where `layout` goes inside the view (inside padding and border).
-        content: Rect,
+        content: Bounds<Points>,
     },
     /// Set which events the view must report.
     Events {
@@ -600,7 +648,7 @@ pub enum MountItem {
         /// Shows the scroll indicator.
         shows_indicator: bool,
         /// Native animation value fed with the main-axis offset.
-        scroll_value: Option<nsh_animation::NodeId>,
+        scroll_value: Option<crate::animation::NodeId>,
         /// When dragging dismisses the keyboard.
         keyboard_dismiss: KeyboardDismissMode,
         /// A horizontal list laid out right to left: the platform mirrors
@@ -613,7 +661,7 @@ pub enum MountItem {
         /// Scroll view.
         id: NodeId,
         /// Content size.
-        size: Size,
+        size: Size<Points>,
     },
     /// Shift the scroll position, keeping visible content in place when
     /// items above the viewport change size.
@@ -621,9 +669,9 @@ pub enum MountItem {
         /// Scroll view.
         id: NodeId,
         /// Horizontal shift.
-        dx: f32,
+        dx: Points,
         /// Vertical shift.
-        dy: f32,
+        dy: Points,
     },
     /// The surface lays out right to left (or no longer): native controls
     /// mirror.
@@ -668,7 +716,7 @@ pub enum MountItem {
         refreshing: bool,
     },
     /// What a canvas draws; its animated values come as
-    /// [`nsh_animation::AnimationProp::CanvasArg`] bindings.
+    /// [`crate::animation::AnimationProp::CanvasArg`] bindings.
     Canvas {
         /// The canvas.
         id: NodeId,
@@ -680,7 +728,7 @@ pub enum MountItem {
         /// View.
         id: NodeId,
         /// Property bindings (replaces the previous set).
-        bindings: Vec<(AnimationProp, nsh_animation::NodeId)>,
+        bindings: Vec<(AnimationProp, crate::animation::NodeId)>,
     },
     /// Drive native animation values from gestures on the view.
     Gestures {
@@ -732,7 +780,7 @@ pub enum MountItem {
         /// Input view.
         id: NodeId,
         /// Content box relative to the view.
-        content: Rect,
+        content: Bounds<Points>,
     },
     /// Configure a screen (sent before the screen is inserted into its
     /// stack, and on every change).
@@ -792,6 +840,7 @@ pub struct MountBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::px;
 
     #[test]
     fn snap_targets() {
@@ -802,58 +851,58 @@ mod tests {
         // Pages of 300 in 1000 points of content (the last page is short):
         // one page per fling, wherever the fling would glide.
         assert_eq!(
-            paging.snap_target(100.0, 100.0, 0.0, 300.0, 1000.0),
-            Some(0.0)
+            paging.snap_target(px(100.0), px(100.0), 0.0, px(300.0), px(1000.0)),
+            Some(px(0.0))
         );
         assert_eq!(
-            paging.snap_target(100.0, 900.0, 1.0, 300.0, 1000.0),
-            Some(300.0)
+            paging.snap_target(px(100.0), px(900.0), 1.0, px(300.0), px(1000.0)),
+            Some(px(300.0))
         );
         assert_eq!(
-            paging.snap_target(650.0, 900.0, 1.0, 300.0, 1000.0),
-            Some(700.0)
+            paging.snap_target(px(650.0), px(900.0), 1.0, px(300.0), px(1000.0)),
+            Some(px(700.0))
         );
         assert_eq!(
-            paging.snap_target(250.0, 0.0, -1.0, 300.0, 1000.0),
-            Some(0.0)
+            paging.snap_target(px(250.0), px(0.0), -1.0, px(300.0), px(1000.0)),
+            Some(px(0.0))
         );
         let interval = ScrollBehavior {
-            snap_interval: 120.0,
+            snap_interval: px(120.0),
             snap_alignment: SnapAlignment::Center,
             ..Default::default()
         };
         // Items of 120 centered in a 300 viewport: k * 120 - 90.
         assert_eq!(
-            interval.snap_target(200.0, 200.0, 0.0, 300.0, 2000.0),
-            Some(150.0)
+            interval.snap_target(px(200.0), px(200.0), 0.0, px(300.0), px(2000.0)),
+            Some(px(150.0))
         );
         // A fast fling glides past several items, rounded forward.
         assert_eq!(
-            interval.snap_target(200.0, 700.0, 2.0, 300.0, 2000.0),
-            Some(750.0)
+            interval.snap_target(px(200.0), px(700.0), 2.0, px(300.0), px(2000.0)),
+            Some(px(750.0))
         );
         let one = ScrollBehavior {
             one_step: true,
             ..interval.clone()
         };
         assert_eq!(
-            one.snap_target(200.0, 700.0, 2.0, 300.0, 2000.0),
-            Some(270.0)
+            one.snap_target(px(200.0), px(700.0), 2.0, px(300.0), px(2000.0)),
+            Some(px(270.0))
         );
         let offsets = ScrollBehavior {
-            snap_offsets: vec![0.0, 500.0, 900.0],
+            snap_offsets: vec![px(0.0), px(500.0), px(900.0)],
             ..Default::default()
         };
         assert_eq!(
-            offsets.snap_target(520.0, 600.0, 2.0, 300.0, 2000.0),
-            Some(900.0)
+            offsets.snap_target(px(520.0), px(600.0), 2.0, px(300.0), px(2000.0)),
+            Some(px(900.0))
         );
         assert_eq!(
-            offsets.snap_target(520.0, 520.0, 0.0, 300.0, 2000.0),
-            Some(500.0)
+            offsets.snap_target(px(520.0), px(520.0), 0.0, px(300.0), px(2000.0)),
+            Some(px(500.0))
         );
         assert_eq!(
-            ScrollBehavior::default().snap_target(10.0, 10.0, 1.0, 300.0, 2000.0),
+            ScrollBehavior::default().snap_target(px(10.0), px(10.0), 1.0, px(300.0), px(2000.0)),
             None
         );
     }

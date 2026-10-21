@@ -1,9 +1,11 @@
 //! The platform's services for Rust components on the engine: the fonts
 //! the UI sets' crates ship are registered before the first render, tasks
 //! wait for display frames, components set the layout direction and read
-//! the pixel ratio, the device and the locale.
+//! the pixel ratio, the device and the locale; they speak, move the screen
+//! reader, show toasts and set the status bar with their dialogs.
 
 use std::{
+    collections::HashMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -13,8 +15,8 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    ApproxTextEngine, AttributedText, EventKind, EventPayload, MountBatch, MountItem, Size,
-    TextEngine, TextLayout,
+    ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
+    Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
     platform::{Idiom, Locale, Os},
     ui::{AssetFile, AssetKind, Registry, Root, prelude::*},
 };
@@ -39,17 +41,20 @@ impl MountSink for FrameSink {
 fn config(app: App) -> EngineConfig {
     EngineConfig {
         app,
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     }
 }
 
@@ -107,11 +112,11 @@ impl TextEngine for Fonts {
         self.0.prepare(text)
     }
 
-    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size {
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
         self.0.measure(prepared, max_width)
     }
 
-    fn layout(&self, prepared: &Self::Prepared, size: Size) -> TextLayout {
+    fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         self.0.layout(prepared, size)
     }
 
@@ -284,7 +289,7 @@ fn Device() -> impl IntoElement {
             os().name(),
             idiom(),
             pixel_ratio(),
-            round_to_nearest_pixel(10.3),
+            round_to_nearest_pixel(px(10.3)).0,
             locale(),
         )
     }))
@@ -322,4 +327,100 @@ fn components_read_the_pixel_ratio_the_device_and_the_locale() {
     let shown = "android 34.0 Pad ×2 10.5 zh-Hans-CN";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");
+}
+
+/// Speaks, moves the screen reader, shows a toast, and opens a dialog
+/// that sets the status bar.
+#[component]
+fn Services() -> impl IntoElement {
+    let note = element_ref();
+    let open = signal(false);
+    view()
+        .flex_1()
+        .child(text("Announce").on_press(|_: &()| announce_for_accessibility("Saved")))
+        .child(text("Focus").on_press(move |_: &()| note.set_accessibility_focus()))
+        .child(text("Toast").on_press(|_: &()| toast("Hello", ToastDuration::Long)))
+        .child(text("Open").on_press(move |_: &()| open.set(true)))
+        .child(text("The note").element_ref(&note))
+        .child(dynamic(move || {
+            open.get().then(|| {
+                modal()
+                    .status_bar(|| {
+                        StatusBarSetting::default()
+                            .foreground(StatusBarStyle::Light)
+                            .hidden(true)
+                    })
+                    .child(text("Close").on_press(move |_: &()| open.set(false)))
+            })
+        }))
+}
+
+#[test]
+fn components_speak_move_the_reader_toast_and_set_the_status_bar() {
+    let (engine, rx, _) = start::<Services>(Environment::default());
+    let mut texts = HashMap::new();
+    // Presses the text `label` (none: only the first render) and returns
+    // the commands that follow.
+    let mut step = |press: Option<&str>| {
+        if let Some(label) = press {
+            engine
+                .control()
+                .dispatch_event(texts[label], EventKind::Press, EventPayload::None);
+        }
+        let mut commands = Vec::new();
+        while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
+            for item in batch.items {
+                match item {
+                    MountItem::Text { id, text, .. } => {
+                        texts.insert(text.text.clone(), id);
+                    }
+                    MountItem::Command { id, command } => commands.push((id, command)),
+                    _ => {}
+                }
+            }
+        }
+        commands
+    };
+    let status_bars = |commands: &[(u32, Command)]| -> Vec<(StatusBarStyle, bool)> {
+        commands
+            .iter()
+            .filter_map(|(_, c)| match c {
+                Command::StatusBar(config) => Some((config.style, config.hidden)),
+                _ => None,
+            })
+            .collect()
+    };
+    // Nothing sets the status bar until the dialog opens.
+    assert_eq!(status_bars(&step(None)), []);
+    assert_eq!(
+        step(Some("Announce")),
+        [(ROOT_ID, Command::Announce("Saved".into()))]
+    );
+    let focused = step(Some("Focus"));
+    assert_eq!(
+        focused.iter().map(|c| &c.1).collect::<Vec<_>>(),
+        [&Command::AccessibilityFocus]
+    );
+    assert_eq!(
+        step(Some("Toast")),
+        [(
+            ROOT_ID,
+            Command::Toast {
+                text: "Hello".into(),
+                long: true
+            }
+        )]
+    );
+    // The dialog's setting while it shows; the default again once it
+    // closed.
+    assert_eq!(
+        status_bars(&step(Some("Open"))),
+        [(StatusBarStyle::Light, true)]
+    );
+    assert_eq!(
+        status_bars(&step(Some("Close"))),
+        [(StatusBarStyle::Default, false)]
+    );
+    // The reader's focus went to the note's view.
+    assert_eq!(focused[0].0, texts["The note"]);
 }

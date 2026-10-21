@@ -2,7 +2,7 @@
 //!
 //! [`frame`] draws the whole tree of a surface into its window's swap
 //! chain and presents it; [`snapshot`] draws it into an offscreen bitmap
-//! and reads the pixels back (`--script` screenshots). Both go through
+//! and reads the pixels back (`nsh test`'s screenshots). Both go through
 //! [`draw_view`], which draws one view and its subtree in this order:
 //!
 //! 1. shadows and background ([`crate::decor::draw_background`]),
@@ -30,7 +30,10 @@
 
 use std::rc::Rc;
 
-use nsh_core::{Color, Rect};
+use nsh_core::{
+    Bounds, Color, Points,
+    geometry::{Point, Size},
+};
 use windows::{
     Win32::{
         Foundation::{D2DERR_RECREATE_TARGET, RECT},
@@ -490,13 +493,23 @@ impl<'a> DrawCx<'a> {
 
     /// Clips what follows to the rounded rectangle `rect` with `radii`
     /// (clockwise from the top left).
-    pub(crate) fn push_clip_rounded(&mut self, rect: Rect, radii: [f32; 4]) {
+    pub(crate) fn push_clip_rounded(&mut self, rect: Bounds<Points>, radii: [f32; 4]) {
         if radii.iter().all(|r| *r <= 0.0) {
-            return self.push_clip_rect(rect.x, rect.y, rect.width, rect.height);
+            return self.push_clip_rect(
+                rect.origin.x.0,
+                rect.origin.y.0,
+                rect.size.width.0,
+                rect.size.height.0,
+            );
         }
         match self.rounded_geometry(rect, radii) {
             Some(g) => self.push_clip_geometry(&g),
-            None => self.push_clip_rect(rect.x, rect.y, rect.width, rect.height),
+            None => self.push_clip_rect(
+                rect.origin.x.0,
+                rect.origin.y.0,
+                rect.size.width.0,
+                rect.size.height.0,
+            ),
         }
     }
 
@@ -513,19 +526,31 @@ impl<'a> DrawCx<'a> {
 
     /// The rounded rectangle `rect` with corner radii clockwise from the
     /// top left, as a geometry.
-    pub(crate) fn rounded_geometry(&self, rect: Rect, radii: [f32; 4]) -> Option<ID2D1Geometry> {
+    pub(crate) fn rounded_geometry(
+        &self,
+        rect: Bounds<Points>,
+        radii: [f32; 4],
+    ) -> Option<ID2D1Geometry> {
         rounded_geometry(self.gfx, rect, radii)
     }
 }
 
 /// The rounded rectangle `rect` with corner radii clockwise from the top
 /// left (each clamped to half the box), as a geometry.
-pub(crate) fn rounded_geometry(gfx: &Gfx, rect: Rect, radii: [f32; 4]) -> Option<ID2D1Geometry> {
-    let Rect {
-        x,
-        y,
-        width: w,
-        height: h,
+pub(crate) fn rounded_geometry(
+    gfx: &Gfx,
+    rect: Bounds<Points>,
+    radii: [f32; 4],
+) -> Option<ID2D1Geometry> {
+    let Bounds {
+        origin: Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: Size {
+            width: Points(w),
+            height: Points(h),
+        },
     } = rect;
     let max = (w.min(h) / 2.0).max(0.0);
     let r = radii.map(|r| r.clamp(0.0, max));
@@ -633,7 +658,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     crate::decor::draw_backdrop(cx, &state);
     crate::decor::draw_background(cx, &state);
     let clip = state.clips();
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if clip {
         cx.push_clip_rounded(crate::geom::rect(0.0, 0.0, w, h), state.radii());
     } else {
@@ -661,19 +686,21 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
     cx.set_transform(world);
     for native in &natives {
         let r = native.rect;
-        let m = Mat4::new().translate(r.x, r.y).then(&world);
+        let m = Mat4::new()
+            .translate(r.origin.x.0, r.origin.y.0)
+            .then(&world);
         if native.item.composed() {
             let radii = {
                 let s = view.state();
                 if s.clips() { s.radii() } else { [0.0; 4] }
             };
-            cx.compose(&native.item, m, (r.width, r.height), radii);
+            cx.compose(&native.item, m, (r.size.width.0, r.size.height.0), radii);
             continue;
         }
         cx.realize();
         cx.set_transform(m);
-        native.item.draw(cx, (r.width, r.height));
-        if let Some((x, y, bw, bh)) = m.bounds(0.0, 0.0, r.width, r.height) {
+        native.item.draw(cx, (r.size.width.0, r.size.height.0));
+        if let Some((x, y, bw, bh)) = m.bounds(0.0, 0.0, r.size.width.0, r.size.height.0) {
             let s = cx.scale;
             let rect = RECT {
                 left: (x * s).round() as i32,
@@ -709,8 +736,8 @@ fn draw_projected(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, opacity: f32
     let (w, h, overflow, outset) = {
         let s = view.state();
         (
-            s.frame.width,
-            s.frame.height,
+            s.frame.size.width.0,
+            s.frame.size.height.0,
             s.overflow,
             crate::decor::outset(&s),
         )
@@ -719,23 +746,23 @@ fn draw_projected(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, opacity: f32
     // shadows and outline.
     let area = overflow.unwrap_or(crate::geom::rect(0.0, 0.0, w, h));
     let area = crate::geom::rect(
-        area.x - outset,
-        area.y - outset,
-        area.width + 2.0 * outset,
-        area.height + 2.0 * outset,
+        area.origin.x.0 - outset,
+        area.origin.y.0 - outset,
+        area.size.width.0 + 2.0 * outset,
+        area.size.height.0 + 2.0 * outset,
     );
-    if area.width <= 0.0 || area.height <= 0.0 {
+    if area.size.width.0 <= 0.0 || area.size.height.0 <= 0.0 {
         return;
     }
     // Drawn at the window's scale, less for a huge subtree (the bitmap's
     // DIPs stay the view's points).
     let scale = cx
         .scale
-        .min(MAX_PROJECTED / area.width)
-        .min(MAX_PROJECTED / area.height);
+        .min(MAX_PROJECTED / area.size.width.0)
+        .min(MAX_PROJECTED / area.size.height.0);
     let px = (
-        (area.width * scale).ceil().max(1.0) as u32,
-        (area.height * scale).ceil().max(1.0) as u32,
+        (area.size.width.0 * scale).ceil().max(1.0) as u32,
+        (area.size.height.0 * scale).ceil().max(1.0) as u32,
     );
     let props = gfx::target_properties(scale, true);
     // SAFETY: a COM call on the live context with valid properties.
@@ -765,7 +792,7 @@ fn draw_projected(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, opacity: f32
     };
     // The subtree as if untransformed, at the bitmap's origin, drawn by
     // another context: layers pushed on this one stay as they are.
-    let base = Mat4::new().translate(-area.x, -area.y);
+    let base = Mat4::new().translate(-area.origin.x.0, -area.origin.y.0);
     let mut flat = view.clone();
     let composed = cx.composed.len();
     let drawn = crate::decor::layer::draw_into(cx, &image, scale, true, |inner| {
@@ -779,8 +806,10 @@ fn draw_projected(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4, opacity: f32
     }
     // The bitmap's DIPs map to the view's coordinates (offset by the
     // area's origin), then through the view's world transform.
-    let m = Mat4::new().translate(area.x, area.y).then(&world);
-    let dest = rect_f(0.0, 0.0, area.width, area.height);
+    let m = Mat4::new()
+        .translate(area.origin.x.0, area.origin.y.0)
+        .then(&world);
+    let dest = rect_f(0.0, 0.0, area.size.width.0, area.size.height.0);
     let saved = cx.transform;
     // SAFETY: COM calls on the live context and bitmap.
     unsafe {
@@ -978,6 +1007,7 @@ fn draw_into(
 }
 
 /// Pixels of a snapshot: BGRA, premultiplied, `width * 4` bytes per row.
+#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub(crate) struct Pixels {
     /// Width in pixels.
     pub(crate) width: u32,
@@ -989,6 +1019,7 @@ pub(crate) struct Pixels {
 
 /// Draws the surface offscreen at `scale` and reads the pixels back,
 /// whatever covers the window.
+#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub(crate) fn snapshot(surface: &Rc<Surface>, scale: f32) -> windows::core::Result<Pixels> {
     let gfx = gfx::get()?;
     let (w, h) = surface.size();

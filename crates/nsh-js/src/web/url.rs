@@ -29,12 +29,12 @@ trace!(Params { list, url });
 
 impl Object for Params {}
 
-fn url_of<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, UrlData>> {
-    data::<UrlData>(ctx, v, "URL")
+fn url_of<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, UrlData>> {
+    data::<UrlData>(cx, v, "URL")
 }
 
-fn params<'a>(ctx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Params>> {
-    data::<Params>(ctx, v, "URLSearchParams")
+fn params<'a>(cx: Ctx, v: Raw) -> R<std::cell::RefMut<'a, Params>> {
+    data::<Params>(cx, v, "URLSearchParams")
 }
 
 /// Parses `input` against `base`.
@@ -46,9 +46,9 @@ fn parse(input: &str, base: Option<&str>) -> Option<Url> {
 }
 
 /// `input` (and optional `base`) of the URL constructors, as strings.
-fn inputs(ctx: Ctx, args: js::Args<'_>) -> R<(String, Option<String>)> {
-    let input = js::to_string(ctx, args.get(0))?;
-    let base = js::opt_string(ctx, args.get(1))?;
+fn inputs(cx: Ctx, args: js::Args<'_>) -> R<(String, Option<String>)> {
+    let input = js::to_string(cx, args.get(0))?;
+    let base = js::opt_string(cx, args.get(1))?;
     Ok((input, base))
 }
 
@@ -70,10 +70,10 @@ pub(crate) fn serialize(list: &[(String, String)]) -> String {
 }
 
 /// A new URL object for `url`, with its parameters.
-pub(crate) fn new_url(ctx: Ctx, new_target: Raw, url: Url) -> R<V> {
+pub(crate) fn new_url(cx: Ctx, new_target: Raw, url: Url) -> R<V> {
     let list = parse_query(url.query().unwrap_or_default());
     let params = instance(
-        ctx,
+        cx,
         js::UNDEFINED,
         Class::UrlSearchParams,
         Params {
@@ -82,7 +82,7 @@ pub(crate) fn new_url(ctx: Ctx, new_target: Raw, url: Url) -> R<V> {
         },
     )?;
     let obj = instance(
-        ctx,
+        cx,
         new_target,
         Class::Url,
         UrlData {
@@ -90,58 +90,58 @@ pub(crate) fn new_url(ctx: Ctx, new_target: Raw, url: Url) -> R<V> {
             params: params.clone_ref(),
         },
     )?;
-    self::params(ctx, params.raw())?.url = obj.clone_ref();
+    self::params(cx, params.raw())?.url = obj.clone_ref();
     Ok(obj)
 }
 
 native!(
-    fn url_constructor(ctx, this, args) {
-        let (input, base) = inputs(ctx, args)?;
+    fn url_constructor(cx, this, args) {
+        let (input, base) = inputs(cx, args)?;
         let url = parse(&input, base.as_deref())
-            .ok_or_else(|| js::type_error(ctx, &format!("Invalid URL: {input}")))?;
-        new_url(ctx, this, url)
+            .ok_or_else(|| js::type_error(cx, &format!("Invalid URL: {input}")))?;
+        new_url(cx, this, url)
     }
 );
 
 native!(
-    fn url_can_parse(ctx, this, args) {
-        let (input, base) = inputs(ctx, args)?;
+    fn url_can_parse(cx, this, args) {
+        let (input, base) = inputs(cx, args)?;
         Ok(V::bool(parse(&input, base.as_deref()).is_some()))
     }
 );
 
 native!(
-    fn url_parse(ctx, this, args) {
-        let (input, base) = inputs(ctx, args)?;
+    fn url_parse(cx, this, args) {
+        let (input, base) = inputs(cx, args)?;
         match parse(&input, base.as_deref()) {
-            Some(url) => new_url(ctx, js::UNDEFINED, url),
+            Some(url) => new_url(cx, js::UNDEFINED, url),
             None => Ok(V::null()),
         }
     }
 );
 
 /// After the query changed: the parameters again.
-fn reparse(ctx: Ctx, this: Raw) -> R<()> {
+fn reparse(cx: Ctx, this: Raw) -> R<()> {
     let (params_obj, query) = {
-        let u = url_of(ctx, this)?;
+        let u = url_of(cx, this)?;
         (
             u.params.clone_ref(),
             u.url.query().unwrap_or_default().to_owned(),
         )
     };
-    params(ctx, params_obj.raw())?.list = parse_query(&query);
+    params(cx, params_obj.raw())?.list = parse_query(&query);
     Ok(())
 }
 
 macro_rules! url_getter {
     ($name:ident, $f:expr) => {
         native!(
-            fn $name(ctx, this, args) {
+            fn $name(cx, this, args) {
                 let s: String = {
-                    let u = url_of(ctx, this)?;
+                    let u = url_of(cx, this)?;
                     ($f)(&u.url)
                 };
-                js::string(ctx, &s)
+                js::string(cx, &s)
             }
         );
     };
@@ -162,10 +162,10 @@ url_getter!(url_hash, |u: &Url| quirks::hash(u).to_owned());
 macro_rules! url_setter {
     ($name:ident, |$u:ident, $v:ident| $set:expr) => {
         native!(
-            fn $name(ctx, this, args) {
-                let $v = js::to_string(ctx, args.get(0))?;
+            fn $name(cx, this, args) {
+                let $v = js::to_string(cx, args.get(0))?;
                 {
-                    let mut guard = url_of(ctx, this)?;
+                    let mut guard = url_of(cx, this)?;
                     let $u = &mut guard.url;
                     // Invalid values leave the URL as it was.
                     let _ = $set;
@@ -186,57 +186,57 @@ url_setter!(url_set_pathname, |u, v| quirks::set_pathname(u, &v));
 url_setter!(url_set_hash, |u, v| quirks::set_hash(u, &v));
 
 native!(
-    fn url_set_href(ctx, this, args) {
-        let v = js::to_string(ctx, args.get(0))?;
+    fn url_set_href(cx, this, args) {
+        let v = js::to_string(cx, args.get(0))?;
         {
-            let mut u = url_of(ctx, this)?;
+            let mut u = url_of(cx, this)?;
             if quirks::set_href(&mut u.url, &v).is_err() {
                 drop(u);
-                return Err(js::type_error(ctx, &format!("Invalid URL: {v}")));
+                return Err(js::type_error(cx, &format!("Invalid URL: {v}")));
             }
         }
-        reparse(ctx, this)?;
+        reparse(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn url_set_search(ctx, this, args) {
-        let v = js::to_string(ctx, args.get(0))?;
-        quirks::set_search(&mut url_of(ctx, this)?.url, &v);
-        reparse(ctx, this)?;
+    fn url_set_search(cx, this, args) {
+        let v = js::to_string(cx, args.get(0))?;
+        quirks::set_search(&mut url_of(cx, this)?.url, &v);
+        reparse(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn url_search_params(ctx, this, args) {
-        Ok(url_of(ctx, this)?.params.clone_ref())
+    fn url_search_params(cx, this, args) {
+        Ok(url_of(cx, this)?.params.clone_ref())
     }
 );
 
 /// Whether `v` is a `URLSearchParams`.
-pub(crate) fn is_params(ctx: Ctx, v: Raw) -> bool {
-    super::is::<Params>(ctx, v)
+pub(crate) fn is_params(cx: Ctx, v: Raw) -> bool {
+    super::is::<Params>(cx, v)
 }
 
 /// The serialization of `URLSearchParams` `v`.
-pub(crate) fn params_string(ctx: Ctx, v: Raw) -> R<String> {
-    Ok(serialize(&params(ctx, v)?.list))
+pub(crate) fn params_string(cx: Ctx, v: Raw) -> R<String> {
+    Ok(serialize(&params(cx, v)?.list))
 }
 
 // --- URLSearchParams ------------------------------------------------------
 
 /// After the parameters changed: the URL's query.
-fn update(ctx: Ctx, this: Raw) -> R<()> {
+fn update(cx: Ctx, this: Raw) -> R<()> {
     let (url, query) = {
-        let p = params(ctx, this)?;
+        let p = params(cx, this)?;
         (p.url.clone_ref(), serialize(&p.list))
     };
     if url.is_undefined() {
         return Ok(());
     }
-    let mut u = url_of(ctx, url.raw())?;
+    let mut u = url_of(cx, url.raw())?;
     if query.is_empty() {
         u.url.set_query(None);
     } else {
@@ -247,43 +247,43 @@ fn update(ctx: Ctx, this: Raw) -> R<()> {
 
 /// The pairs of a URLSearchParams init (string, pairs, record or
 /// another URLSearchParams).
-pub(crate) fn init_list(ctx: Ctx, init: Raw) -> R<Vec<(String, String)>> {
+pub(crate) fn init_list(cx: Ctx, init: Raw) -> R<Vec<(String, String)>> {
     if js::is_undefined(init) {
         return Ok(Vec::new());
     }
-    if super::is::<Params>(ctx, init) {
-        return Ok(params(ctx, init)?.list.clone());
+    if super::is::<Params>(cx, init) {
+        return Ok(params(cx, init)?.list.clone());
     }
     if js::is_object(init) {
-        if js::is_iterable(ctx, init)? {
+        if js::is_iterable(cx, init)? {
             let mut list = Vec::new();
-            js::for_each(ctx, init, |pair| {
+            js::for_each(cx, init, |pair| {
                 let mut items = Vec::new();
-                js::for_each(ctx, pair.raw(), |x| {
-                    items.push(js::to_string(ctx, x.raw())?);
+                js::for_each(cx, pair.raw(), |x| {
+                    items.push(js::to_string(cx, x.raw())?);
                     Ok(())
                 })?;
                 let [k, v]: [String; 2] = items
                     .try_into()
-                    .map_err(|_| js::type_error(ctx, "Each pair must have two items"))?;
+                    .map_err(|_| js::type_error(cx, "Each pair must have two items"))?;
                 list.push((k, v));
                 Ok(())
             })?;
             return Ok(list);
         }
-        return js::record(ctx, init)?
+        return js::record(cx, init)?
             .into_iter()
-            .map(|(k, v)| Ok((k, js::to_string(ctx, v.raw())?)))
+            .map(|(k, v)| Ok((k, js::to_string(cx, v.raw())?)))
             .collect();
     }
-    Ok(parse_query(&js::to_string(ctx, init)?))
+    Ok(parse_query(&js::to_string(cx, init)?))
 }
 
 native!(
-    fn params_constructor(ctx, this, args) {
-        let list = init_list(ctx, args.get(0))?;
+    fn params_constructor(cx, this, args) {
+        let list = init_list(cx, args.get(0))?;
         instance(
-            ctx,
+            cx,
             this,
             Class::UrlSearchParams,
             Params {
@@ -295,66 +295,66 @@ native!(
 );
 
 native!(
-    fn params_size(ctx, this, args) {
-        Ok(V::num(params(ctx, this)?.list.len() as f64))
+    fn params_size(cx, this, args) {
+        Ok(V::num(params(cx, this)?.list.len() as f64))
     }
 );
 
 native!(
-    fn params_append(ctx, this, args) {
-        let (k, v) = (js::to_string(ctx, args.get(0))?, js::to_string(ctx, args.get(1))?);
-        params(ctx, this)?.list.push((k, v));
-        update(ctx, this)?;
+    fn params_append(cx, this, args) {
+        let (k, v) = (js::to_string(cx, args.get(0))?, js::to_string(cx, args.get(1))?);
+        params(cx, this)?.list.push((k, v));
+        update(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn params_delete(ctx, this, args) {
-        let k = js::to_string(ctx, args.get(0))?;
-        let value = js::opt_string(ctx, args.get(1))?;
-        params(ctx, this)?
+    fn params_delete(cx, this, args) {
+        let k = js::to_string(cx, args.get(0))?;
+        let value = js::opt_string(cx, args.get(1))?;
+        params(cx, this)?
             .list
             .retain(|(n, v)| *n != k || value.as_ref().is_some_and(|x| x != v));
-        update(ctx, this)?;
+        update(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn params_get(ctx, this, args) {
-        let k = js::to_string(ctx, args.get(0))?;
-        let found = params(ctx, this)?
+    fn params_get(cx, this, args) {
+        let k = js::to_string(cx, args.get(0))?;
+        let found = params(cx, this)?
             .list
             .iter()
             .find(|(n, _)| *n == k)
             .map(|(_, v)| v.clone());
         match found {
-            Some(v) => js::string(ctx, &v),
+            Some(v) => js::string(cx, &v),
             None => Ok(V::null()),
         }
     }
 );
 
 native!(
-    fn params_get_all(ctx, this, args) {
-        let k = js::to_string(ctx, args.get(0))?;
-        let all: Vec<String> = params(ctx, this)?
+    fn params_get_all(cx, this, args) {
+        let k = js::to_string(cx, args.get(0))?;
+        let all: Vec<String> = params(cx, this)?
             .list
             .iter()
             .filter(|(n, _)| *n == k)
             .map(|(_, v)| v.clone())
             .collect();
-        let items = all.iter().map(|v| js::string(ctx, v)).collect::<R<Vec<_>>>()?;
-        js::new_array(ctx, items)
+        let items = all.iter().map(|v| js::string(cx, v)).collect::<R<Vec<_>>>()?;
+        js::new_array(cx, items)
     }
 );
 
 native!(
-    fn params_has(ctx, this, args) {
-        let k = js::to_string(ctx, args.get(0))?;
-        let value = js::opt_string(ctx, args.get(1))?;
-        let has = params(ctx, this)?
+    fn params_has(cx, this, args) {
+        let k = js::to_string(cx, args.get(0))?;
+        let value = js::opt_string(cx, args.get(1))?;
+        let has = params(cx, this)?
             .list
             .iter()
             .any(|(n, v)| *n == k && value.as_ref().is_none_or(|x| x == v));
@@ -363,10 +363,10 @@ native!(
 );
 
 native!(
-    fn params_set(ctx, this, args) {
-        let (k, v) = (js::to_string(ctx, args.get(0))?, js::to_string(ctx, args.get(1))?);
+    fn params_set(cx, this, args) {
+        let (k, v) = (js::to_string(cx, args.get(0))?, js::to_string(cx, args.get(1))?);
         {
-            let mut p = params(ctx, this)?;
+            let mut p = params(cx, this)?;
             match p.list.iter().position(|(n, _)| *n == k) {
                 Some(i) => {
                     p.list[i].1 = v;
@@ -379,41 +379,41 @@ native!(
                 None => p.list.push((k, v)),
             }
         }
-        update(ctx, this)?;
+        update(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn params_sort(ctx, this, args) {
+    fn params_sort(cx, this, args) {
         // Stable, by UTF-16 code units of the names.
-        params(ctx, this)?
+        params(cx, this)?
             .list
             .sort_by(|a, b| a.0.encode_utf16().cmp(b.0.encode_utf16()));
-        update(ctx, this)?;
+        update(cx, this)?;
         Ok(V::undefined())
     }
 );
 
 native!(
-    fn params_to_string(ctx, this, args) {
-        let s = serialize(&params(ctx, this)?.list);
-        js::string(ctx, &s)
+    fn params_to_string(cx, this, args) {
+        let s = serialize(&params(cx, this)?.list);
+        js::string(cx, &s)
     }
 );
 
 native!(
-    fn params_for_each(ctx, this, args) {
+    fn params_for_each(cx, this, args) {
         let f = args.get(0);
-        if !js::is_function(ctx, f) {
-            return Err(js::type_error(ctx, "the callback is not a function"));
+        if !js::is_function(cx, f) {
+            return Err(js::type_error(cx, "the callback is not a function"));
         }
         let mut i = 0;
         loop {
-            let pair = params(ctx, this)?.list.get(i).cloned();
+            let pair = params(cx, this)?.list.get(i).cloned();
             let Some((k, v)) = pair else { break };
-            let (k, v) = (js::string(ctx, &k)?, js::string(ctx, &v)?);
-            js::call(ctx, f, args.get(1), &[v.raw(), k.raw(), this])?;
+            let (k, v) = (js::string(cx, &k)?, js::string(cx, &v)?);
+            js::call(cx, f, args.get(1), &[v.raw(), k.raw(), this])?;
             i += 1;
         }
         Ok(V::undefined())
@@ -421,32 +421,32 @@ native!(
 );
 
 /// An iterator over the pairs: `[name, value]`, names or values.
-fn params_iterator(ctx: Ctx, this: Raw, part: Part) -> R<V> {
-    let list = params(ctx, this)?.list.clone();
+fn params_iterator(cx: Ctx, this: Raw, part: Part) -> R<V> {
+    let list = params(cx, this)?.list.clone();
     let items = list
         .iter()
-        .map(|(k, v)| super::iterator::pair_item(ctx, k, v, part))
+        .map(|(k, v)| super::iterator::pair_item(cx, k, v, part))
         .collect::<R<Vec<_>>>()?;
-    super::iterator::new(ctx, items)
+    super::iterator::new(cx, items)
 }
 
 use super::iterator::Part;
 
 native!(
-    fn params_entries(ctx, this, args) {
-        params_iterator(ctx, this, Part::Entries)
+    fn params_entries(cx, this, args) {
+        params_iterator(cx, this, Part::Entries)
     }
 );
 
 native!(
-    fn params_keys(ctx, this, args) {
-        params_iterator(ctx, this, Part::Keys)
+    fn params_keys(cx, this, args) {
+        params_iterator(cx, this, Part::Keys)
     }
 );
 
 native!(
-    fn params_values(ctx, this, args) {
-        params_iterator(ctx, this, Part::Values)
+    fn params_values(cx, this, args) {
+        params_iterator(cx, this, Part::Values)
     }
 );
 

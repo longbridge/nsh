@@ -1,7 +1,6 @@
 // The nsh app examples/embed-gpui runs, several times at once, inside a GPUI
-// Kit window. It sets no theme of its own: the components of nsh/ui/mobile
-// take the host's (`AppView::set_theme`), in its light or dark mode
-// (`AppView::set_appearance`), and change with it.
+// Kit window. Its controls are its own (`ui.tsx`) and follow the host's
+// light or dark mode (`AppView::set_appearance`).
 //
 // The host provides the rest by name, at run time, so this app builds with
 // the stock `nsh build`: its desk (`nativeModule("host/trading")`, Rust
@@ -11,7 +10,7 @@
 
 import { effect, mount, Scroll, signal, Text, View } from "nsh";
 import { nativeComponent, nativeModule } from "nsh/native";
-import { Button, Card, Group, Stepper, TextField } from "nsh/ui/mobile";
+import { Button, Card, Stepper, TextField } from "./ui";
 
 type Side = "buy" | "sell";
 interface Order { id: number; side: Side; symbol: string; quantity: number; price: number; extended: boolean }
@@ -106,7 +105,7 @@ function App() {
               <Text style={muted}>{`${desk().symbol} · held ${held()}`}</Text>
             </View>
           </View>
-          <TextField label="Symbol" value={draft()} onChange={edit} clearable />
+          <TextField label="Symbol" value={draft()} onChange={edit} />
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text>Quantity</Text>
             <Stepper value={quantity()} min={1} max={1000} onChange={(v) => quantity.set(v)} />
@@ -117,7 +116,7 @@ function App() {
             onChange={(e) => extended.set(e.checked)}
             style={{ alignSelf: "flex-start" }}
           />
-          {error() ? <Text accessibilityRole="alert" style={{ fontWeight: "600" }}>{error()}</Text> : null}
+          {error() ? <Text role="alert" style={{ fontWeight: "600" }}>{error()}</Text> : null}
           <View style={{ flexDirection: "row", gap: 8 }}>
             <View style={{ flex: 1 }}>
               <Button title="Buy" onPress={() => place("buy")} />
@@ -127,7 +126,7 @@ function App() {
             </View>
           </View>
         </Card>
-        <Group header={<Text style={muted}>Desk orders, all tickets</Text>}>
+        <Card title="Desk orders, all tickets">
           {desk().orders.length === 0 ? (
             <Text style={muted}>None yet</Text>
           ) : (
@@ -139,7 +138,7 @@ function App() {
               </Text>
             ))
           )}
-        </Group>
+        </Card>
       </View>
     </Scroll>
   );

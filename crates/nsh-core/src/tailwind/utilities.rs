@@ -11,6 +11,7 @@ use crate::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
         Keyframes, Transition, TransitionProps,
     },
+    geometry::{DefiniteLength, Points, REM_SIZE, Size, deg, percentage, point, px},
     ops::ResizeMode,
     props::PointerEvents,
     style::{
@@ -391,14 +392,14 @@ impl Parts {
         style: &mut Style,
         props: &mut ClassProps,
         theme: &Theme,
-        window: (f32, f32),
+        window: Size<Points>,
         only: u16,
     ) {
         let has = |group: u16| only & group != 0;
         for &(key, fw, fh) in self.screen.iter().filter(|_| has(touched::SCREEN)) {
             let _ = style.set_key(
                 key,
-                crate::style::StyleValue::Number(fw * window.0 + fh * window.1),
+                crate::style::StyleValue::Number(fw * window.width.0 + fh * window.height.0),
             );
         }
         if self.transform_set && has(touched::TRANSFORM) {
@@ -471,7 +472,7 @@ impl Parts {
             }
             if let Some(w) = self.inset_ring {
                 list.push(BoxShadow {
-                    spread: w,
+                    spread: px(w),
                     color: self.inset_ring_color.unwrap_or(current),
                     inset: true,
                     ..BoxShadow::default()
@@ -481,14 +482,14 @@ impl Parts {
             if let Some(w) = self.ring {
                 if offset > 0.0 {
                     list.push(BoxShadow {
-                        spread: offset,
+                        spread: px(offset),
                         color: self.ring_offset_color.unwrap_or(Color(0xffff_ffff)),
                         inset: self.ring_inset,
                         ..BoxShadow::default()
                     });
                 }
                 list.push(BoxShadow {
-                    spread: w + offset,
+                    spread: px(w + offset),
                     color: self.ring_color.unwrap_or(current),
                     inset: self.ring_inset,
                     ..BoxShadow::default()
@@ -507,17 +508,17 @@ impl Parts {
                     let [fp, vp, tp] = self.stop_positions;
                     let mut stops = vec![ColorStop {
                         color: from.unwrap_or(Color::TRANSPARENT),
-                        position: Some(fp.unwrap_or(0.0)),
+                        position: Some(percentage(fp.unwrap_or(0.0)).into()),
                     }];
                     if let Some(via) = via {
                         stops.push(ColorStop {
                             color: via,
-                            position: Some(vp.unwrap_or(0.5)),
+                            position: Some(percentage(vp.unwrap_or(0.5)).into()),
                         });
                     }
                     stops.push(ColorStop {
                         color: to.unwrap_or(Color::TRANSPARENT),
-                        position: Some(tp.unwrap_or(1.0)),
+                        position: Some(percentage(tp.unwrap_or(1.0)).into()),
                     });
                     style.set_background_images(vec![Gradient {
                         kind,
@@ -566,7 +567,7 @@ impl Parts {
             let mut shadow = layers
                 .iter()
                 .copied()
-                .max_by(|a, b| a.radius.total_cmp(&b.radius));
+                .max_by(|a, b| a.radius.0.total_cmp(&b.radius.0));
             if let (Some(s), Some((c, own))) = (shadow.as_mut(), self.text_shadow_color) {
                 s.color = if own {
                     c
@@ -577,7 +578,7 @@ impl Parts {
             match shadow {
                 Some(s) => {
                     style.text.shadow_color = Some(s.color);
-                    style.text.shadow_offset = Some((s.offset_x, s.offset_y));
+                    style.text.shadow_offset = Some(point(s.offset_x, s.offset_y));
                     style.text.shadow_radius = Some(s.radius);
                 }
                 None => {
@@ -653,8 +654,10 @@ fn length_value(theme: &Theme, v: &str, neg: bool, auto: bool) -> Option<PatchVa
             let a = arbitrary(v)?;
             let a = arbitrary_hinted(&a, "length").unwrap_or(&a).to_string();
             match css::length_or_percent(&a)? {
-                Ok(points) => PatchValue::Number(sign * points),
-                Err(f) => PatchValue::Str(format!("{}%", sign * f * 100.0).into()),
+                DefiniteLength::Absolute(l) => PatchValue::Number(sign * l.to_points(REM_SIZE).0),
+                DefiniteLength::Fraction(f) => {
+                    PatchValue::Str(format!("{}%", sign * f.0 * 100.0).into())
+                }
             }
         }
     })
@@ -854,23 +857,34 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "grow" => setn(K::FlexGrow, 1.0),
         "shrink" => setn(K::FlexShrink, 1.0),
-        "justify-start" | "justify-normal" => sets(K::JustifyContent, "flex-start"),
+        // Alignment: each class sets what Tailwind CSS's does (its generated
+        // CSS is the reference), and the value means what it means in a
+        // browser: `start` / `end` are the writing direction's, `flex-start`
+        // / `flex-end` the flex direction's, `normal` CSS's `normal`.
+        "justify-start" => sets(K::JustifyContent, "flex-start"),
+        "justify-normal" => sets(K::JustifyContent, "normal"),
         "justify-end" => sets(K::JustifyContent, "flex-end"),
         "justify-center" => sets(K::JustifyContent, "center"),
         "justify-between" => sets(K::JustifyContent, "space-between"),
         "justify-around" => sets(K::JustifyContent, "space-around"),
         "justify-evenly" => sets(K::JustifyContent, "space-evenly"),
         "justify-stretch" => sets(K::JustifyContent, "stretch"),
-        "justify-items-start" => sets(K::JustifyItems, "flex-start"),
-        "justify-items-end" => sets(K::JustifyItems, "flex-end"),
+        "justify-items-start" => sets(K::JustifyItems, "start"),
+        "justify-items-end" => sets(K::JustifyItems, "end"),
         "justify-items-center" => sets(K::JustifyItems, "center"),
-        "justify-items-stretch" | "justify-items-normal" => sets(K::JustifyItems, "stretch"),
+        "justify-items-stretch" => sets(K::JustifyItems, "stretch"),
+        "justify-items-normal" => sets(K::JustifyItems, "normal"),
         "justify-self-auto" => sets(K::JustifySelf, "auto"),
         "justify-self-start" => sets(K::JustifySelf, "flex-start"),
         "justify-self-end" => sets(K::JustifySelf, "flex-end"),
         "justify-self-center" => sets(K::JustifySelf, "center"),
         "justify-self-stretch" => sets(K::JustifySelf, "stretch"),
-        "content-start" | "content-normal" => sets(K::AlignContent, "flex-start"),
+        // CSS's `normal` behaves as `stretch` in flex and grid containers
+        // alike; the style's `normal` is also what an unset `alignContent`
+        // is, which stays React Native's `flex-start` outside grids
+        // (`resolve_normal_alignment`), so the class sets `stretch`.
+        "content-normal" => sets(K::AlignContent, "stretch"),
+        "content-start" => sets(K::AlignContent, "flex-start"),
         "content-end" => sets(K::AlignContent, "flex-end"),
         "content-center" => sets(K::AlignContent, "center"),
         "content-between" => sets(K::AlignContent, "space-between"),
@@ -896,14 +910,14 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "place-content-start" => {
             return Some(vec![
-                sets(K::AlignContent, "flex-start"),
-                sets(K::JustifyContent, "flex-start"),
+                sets(K::AlignContent, "start"),
+                sets(K::JustifyContent, "start"),
             ]);
         }
         "place-content-end" => {
             return Some(vec![
-                sets(K::AlignContent, "flex-end"),
-                sets(K::JustifyContent, "flex-end"),
+                sets(K::AlignContent, "end"),
+                sets(K::JustifyContent, "end"),
             ]);
         }
         "place-content-between" => {
@@ -926,14 +940,14 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "place-items-start" => {
             return Some(vec![
-                sets(K::AlignItems, "flex-start"),
-                sets(K::JustifyItems, "flex-start"),
+                sets(K::AlignItems, "start"),
+                sets(K::JustifyItems, "start"),
             ]);
         }
         "place-items-end" => {
             return Some(vec![
-                sets(K::AlignItems, "flex-end"),
-                sets(K::JustifyItems, "flex-end"),
+                sets(K::AlignItems, "end"),
+                sets(K::JustifyItems, "end"),
             ]);
         }
         "place-items-stretch" => {
@@ -956,15 +970,12 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         }
         "place-self-start" => {
             return Some(vec![
-                sets(K::AlignSelf, "flex-start"),
-                sets(K::JustifySelf, "flex-start"),
+                sets(K::AlignSelf, "start"),
+                sets(K::JustifySelf, "start"),
             ]);
         }
         "place-self-end" => {
-            return Some(vec![
-                sets(K::AlignSelf, "flex-end"),
-                sets(K::JustifySelf, "flex-end"),
-            ]);
+            return Some(vec![sets(K::AlignSelf, "end"), sets(K::JustifySelf, "end")]);
         }
         "place-self-stretch" => {
             return Some(vec![
@@ -1056,16 +1067,16 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         // Backgrounds.
         "bg-none" => Decl::Part(Part::GradientNone),
         "bg-linear-to-t" | "bg-gradient-to-t" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 0.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(0.0) }))
         }
         "bg-linear-to-r" | "bg-gradient-to-r" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 90.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(90.0) }))
         }
         "bg-linear-to-b" | "bg-gradient-to-b" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 180.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(180.0) }))
         }
         "bg-linear-to-l" | "bg-gradient-to-l" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 270.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(270.0) }))
         }
         "bg-linear-to-tr" | "bg-gradient-to-tr" => {
             Decl::Part(Part::Gradient(GradientKind::LinearCorner {
@@ -1094,13 +1105,13 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         "bg-radial" => Decl::Part(Part::Gradient(GradientKind::Radial {
             circle: false,
             size: GradientSize::FarthestCorner,
-            x: 0.5,
-            y: 0.5,
+            x: percentage(0.5),
+            y: percentage(0.5),
         })),
         "bg-conic" => Decl::Part(Part::Gradient(GradientKind::Conic {
-            from: 0.0,
-            x: 0.5,
-            y: 0.5,
+            from: deg(0.0),
+            x: percentage(0.5),
+            y: percentage(0.5),
         })),
         // Borders and outlines.
         "border-solid" | "border-double" => sets(K::BorderStyle, "solid"),
@@ -1360,23 +1371,20 @@ static PREFIXES: &[(&str, Handler)] = &[
             num(v).or_else(|| arbitrary(v).and_then(|a| num(&a)))?,
         ))
     }),
-    ("grid-cols", |_, v, _| {
-        one(set(K::GridTemplateColumns, grid_template(v)?))
+    // Tailwind CSS has no negative grid templates, spans or auto tracks.
+    ("grid-cols", |_, v, n| {
+        one(set(K::GridTemplateColumns, grid_template(v, n)?))
     }),
-    ("grid-rows", |_, v, _| {
-        one(set(K::GridTemplateRows, grid_template(v)?))
+    ("grid-rows", |_, v, n| {
+        one(set(K::GridTemplateRows, grid_template(v, n)?))
     }),
-    ("col-span", |_, v, _| {
-        one(sets(
-            K::GridColumn,
-            &format!("span {} / span {}", count(v)?, count(v)?),
-        ))
+    ("col-span", |_, v, n| {
+        let c = count(v, n)?;
+        one(sets(K::GridColumn, &format!("span {c} / span {c}")))
     }),
-    ("row-span", |_, v, _| {
-        one(sets(
-            K::GridRow,
-            &format!("span {} / span {}", count(v)?, count(v)?),
-        ))
+    ("row-span", |_, v, n| {
+        let c = count(v, n)?;
+        one(sets(K::GridRow, &format!("span {c} / span {c}")))
     }),
     ("col-start", |_, v, n| {
         one(sets(K::GridColumnStart, &line_index(v, n)?))
@@ -1392,24 +1400,35 @@ static PREFIXES: &[(&str, Handler)] = &[
     }),
     ("col", |_, v, n| {
         let line = match arbitrary(v) {
-            Some(a) => a,
+            // Left to the style, which logs an invalid one and sets
+            // nothing, as a browser drops an invalid declaration.
+            Some(a) if !n => unhinted(&a).to_string(),
+            // `-col-[2]`: Tailwind CSS's `calc(2 * -1)`; anything else
+            // negated is a declaration a browser drops.
+            Some(_) => {
+                return Some(
+                    line_index(v, n).map_or_else(Vec::new, |l| vec![sets(K::GridColumn, &l)]),
+                );
+            }
             None => line_index(v, n)?,
         };
         one(sets(K::GridColumn, &line))
     }),
     ("row", |_, v, n| {
         let line = match arbitrary(v) {
-            Some(a) => a,
+            // As `col`.
+            Some(a) if !n => unhinted(&a).to_string(),
+            Some(_) => {
+                return Some(
+                    line_index(v, n).map_or_else(Vec::new, |l| vec![sets(K::GridRow, &l)]),
+                );
+            }
             None => line_index(v, n)?,
         };
         one(sets(K::GridRow, &line))
     }),
-    ("auto-cols", |_, v, _| {
-        one(sets(K::GridAutoColumns, &arbitrary(v)?))
-    }),
-    ("auto-rows", |_, v, _| {
-        one(sets(K::GridAutoRows, &arbitrary(v)?))
-    }),
+    ("auto-cols", |_, v, n| auto_tracks(K::GridAutoColumns, v, n)),
+    ("auto-rows", |_, v, n| auto_tracks(K::GridAutoRows, v, n)),
     ("order", |_, _, _| Some(Vec::new())),
     // Typography.
     ("font", |t, v, _| {
@@ -1481,21 +1500,27 @@ static PREFIXES: &[(&str, Handler)] = &[
     ("bg-linear", |_, v, n| {
         let a = degrees(v)?;
         part(Part::Gradient(GradientKind::Linear {
-            angle: if n { -a } else { a },
+            angle: deg(if n { -a } else { a }),
         }))
     }),
     ("bg-conic", |_, v, n| {
         let a = degrees(v)?;
         part(Part::Gradient(GradientKind::Conic {
-            from: if n { -a } else { a },
-            x: 0.5,
-            y: 0.5,
+            from: deg(if n { -a } else { a }),
+            x: percentage(0.5),
+            y: percentage(0.5),
         }))
     }),
     ("bg", |t, v, _| {
         if let Some(a) = arbitrary(v)
-            && css::gradient(&a).is_some()
+            && a.contains("gradient(")
         {
+            if css::gradient(&a).is_none() {
+                // Reported here: the class is also unknown, but that does
+                // not say the gradient is what was rejected.
+                log::warn!("invalid gradient in class `bg-{v}`: {a}");
+                return None;
+            }
             return one(Decl::Style(StyleDecl::Set(
                 K::BackgroundImage,
                 PatchValue::Str(a.into()),
@@ -1687,7 +1712,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(filter(
             true,
             4,
-            Filter::HueRotate(if n { -degrees(v)? } else { degrees(v)? }),
+            Filter::HueRotate(deg(if n { -degrees(v)? } else { degrees(v)? })),
         ))
     }),
     ("backdrop-invert", |_, v, _| {
@@ -1716,7 +1741,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(filter(
             false,
             4,
-            Filter::HueRotate(if n { -degrees(v)? } else { degrees(v)? }),
+            Filter::HueRotate(deg(if n { -degrees(v)? } else { degrees(v)? })),
         ))
     }),
     ("invert", |_, v, _| {
@@ -1908,31 +1933,79 @@ fn signed(v: f32, neg: bool) -> f32 {
     if neg { -v } else { v }
 }
 
-fn count(v: &str) -> Option<u32> {
+fn count(v: &str, neg: bool) -> Option<u32> {
+    if neg {
+        return None;
+    }
     match arbitrary(v) {
-        Some(a) => a.trim().parse().ok().filter(|&n| n > 0),
+        Some(a) => unhinted(&a).trim().parse().ok().filter(|&n| n > 0),
         None => v.parse().ok().filter(|&n| n > 0),
     }
 }
 
 fn line_index(v: &str, neg: bool) -> Option<String> {
     if v == "auto" {
-        return Some("auto".into());
+        return (!neg).then(|| "auto".into());
     }
     let n: i32 = match arbitrary(v) {
-        Some(a) => a.trim().parse().ok()?,
+        Some(a) => match unhinted(&a).trim().parse() {
+            Ok(n) => n,
+            // A named line (`col-start-[content-start]`).
+            Err(_) if !neg => {
+                let a = unhinted(&a);
+                return crate::grid::placement(a).map(|_| a.to_string());
+            }
+            Err(_) => return None,
+        },
         None => v.parse().ok()?,
     };
     Some((if neg { -n } else { n }).to_string())
 }
 
-fn grid_template(v: &str) -> Option<PatchValue> {
+fn grid_template(v: &str, neg: bool) -> Option<PatchValue> {
+    if neg {
+        return None;
+    }
     if let Ok(n) = v.parse::<u16>() {
         return (n > 0).then(|| PatchValue::Str(format!("repeat({n}, minmax(0, 1fr))").into()));
     }
     let a = arbitrary(v)?;
-    crate::grid::template(&a)?;
+    let a = track_list(&a)?;
+    crate::grid::template(a)?;
     Some(PatchValue::Str(a.into()))
+}
+
+/// `auto-cols-[…]` / `auto-rows-[…]`: an invalid value is the style's to
+/// log, and sets nothing, as a browser drops the declaration.
+fn auto_tracks(key: StyleKey, v: &str, neg: bool) -> Option<Vec<Decl>> {
+    let a = arbitrary(v).filter(|_| !neg)?;
+    Some(track_list(&a).map_or_else(Vec::new, |a| vec![sets(key, a)]))
+}
+
+/// An arbitrary track list without its type hint; `None` when the hint
+/// makes it a bare number, which CSS has no track size for (unlike a
+/// bare number without a hint, NSH's length in points).
+fn track_list(a: &str) -> Option<&str> {
+    match hint(a) {
+        (Some("number" | "integer"), _) => None,
+        (_, a) => Some(a),
+    }
+}
+
+/// An arbitrary value's type hint and the value without it (`[number:2]`
+/// -> `2`), as Tailwind CSS writes the value into the declaration
+/// whatever the hint.
+fn hint(a: &str) -> (Option<&str>, &str) {
+    match a.split_once(':') {
+        Some((h, v)) if !h.is_empty() && h.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') => {
+            (Some(h), v)
+        }
+        _ => (None, a),
+    }
+}
+
+fn unhinted(a: &str) -> &str {
+    hint(a).1
 }
 
 fn stop_position(v: &str) -> Option<f32> {
@@ -2010,7 +2083,7 @@ fn blur(theme: &Theme, v: &str, backdrop: bool) -> Option<Vec<Decl>> {
             None => css::length(&arbitrary(v)?)?,
         },
     };
-    one(filter(backdrop, 0, Filter::Blur(r)))
+    one(filter(backdrop, 0, Filter::Blur(px(r))))
 }
 
 fn translate(theme: &Theme, v: &str, neg: bool) -> Option<Len> {

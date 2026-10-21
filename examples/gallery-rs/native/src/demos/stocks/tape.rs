@@ -4,9 +4,9 @@
 use std::f32::consts::TAU;
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
+    animation::{Curve, EaseMode},
     canvas::{CanvasTextAlign, CanvasTextBaseline},
-    nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
 };
 
@@ -17,7 +17,7 @@ use super::{
     market::{self, BLOCK, BUCKETS, TAPE, TAPE_HELD, Trade, compact, price, time},
     parts::{Block, Col, GRID, SpringBar, SpringBarProps, head, spring_bar},
 };
-use crate::ui::{colors, legend, tints};
+use crate::ui::{colors, legend, rect, tints};
 
 /// Rows shown.
 const SHOWN: usize = 8;
@@ -30,7 +30,7 @@ fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &AnimatedValue)
     let mut p = Painter::new()
         .save()
         .begin_path()
-        .rect(0.0, 0.0, width, height)
+        .rect(rect(0.0, 0.0, width, height))
         .clip()
         .translate(0.0, offset)
         .text_baseline(CanvasTextBaseline::Middle);
@@ -47,7 +47,7 @@ fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &AnimatedValue)
             p = p
                 .fill_color(color(tints::ACCENT))
                 .begin_path()
-                .round_rect(0.0, top + 2.0, width, ROW - 4.0, 8.0)
+                .round_rect(rect(0.0, top + 2.0, width, ROW - 4.0), px(8.0))
                 .fill();
         } else if i > 0 {
             p = p
@@ -133,7 +133,7 @@ pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
         })
         .h(px(SHOWN as f32 * ROW))
         .label("Recent trades")
-        .on_layout(move |frame: &Rect| width.set(frame.width)),
+        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
     )
 }
 

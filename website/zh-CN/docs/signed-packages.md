@@ -10,6 +10,10 @@ group: delivery
 签名包（`.nshpkg`）让宿主应用能够运行并非随应用一起发布的 NSH 代码：可以是应用自身 NSH 页面的更新，也可以是第三方
 小程序。`nsh publish` 负责构建并签名应用；宿主应用在运行任何代码之前，会依次验证签名、证书链、吊销状态和构建号。
 
+包里装的是 TSX。宿主应用的 Rust 代码（用 Rust 编写的应用，以及它的 crate 中的组件、模块和类）属于宿主应用本身，随它一起发布；
+包里的 TSX 像任何 TSX 一样按说明符导入它们（[用 Rust 开发](./rust.md#用-tsx-扩展-rust-应用)）。因此 Rust 应用可以把核心留在 Rust 中，
+把经常变化的页面作为签名包发布。
+
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/signed-packages-light.svg" alt="签名包：离线的根密钥为发布密钥签发证书，限定应用 ID；nsh publish 用发布密钥签名包；在设备上，NshTrust 只信任根密钥和最新的吊销列表，依次检查证书、吊销、签名、应用 ID、文件哈希和构建号，然后运行模块或拒绝它。">
 <img class="diagram diagram-dark" src="/diagrams/signed-packages-dark.svg" alt="签名包：离线的根密钥为发布密钥签发证书，限定应用 ID；nsh publish 用发布密钥签名包；在设备上，NshTrust 只信任根密钥和最新的吊销列表，依次检查证书、吊销、签名、应用 ID、文件哈希和构建号，然后运行模块或拒绝它。">
@@ -80,7 +84,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 ```
 
 ```text
-out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee
+.nsh/out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
 ```
 
 `nsh publish` 以 release 模式构建应用并签名。app id、名称、版本和构建号取自入口文件旁的 `nsh.json`，可以用下列参数覆盖：
@@ -89,12 +93,13 @@ out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets,
 |---|---|
 | `--key <file>` | 发布密钥的私钥。 |
 | `--cert <file>` | 它的证书。 |
-| `-o, --out <file>` | 要写入的包。默认 `out/<id>-<build>.nshpkg`。 |
+| `-o, --out <file>` | 要写入的包。默认 `.nsh/out/<id>-<build>.nshpkg`。 |
 | `--id <id>` | app id，例如 `com.example.app`。 |
 | `--app-version <version>` | 版本，例如 `1.2.0`。 |
 | `--build <n>` | 构建号。必填（在此处或 `nsh.json` 中指定）；每次发布都必须递增。 |
 | `--source-map <where>` | `package`（默认）：放进包里。`file`：写到包旁边的 `<package>.map`，不放进包里。`none`：不输出。见[已发布包的报错](#已发布包的报错)。 |
 | `--strip-debug` | 字节码中不保留行号和列号表：包更小，但报错调用栈里没有位置。 |
+| `--min-runtime <version>` | 能运行该包的最低运行时版本，例如 `0.2.0`（`nsh.json` 中的 `minRuntime`）。默认：本 CLI 的版本。见[哪些运行时能运行包](#哪些运行时能运行包)。 |
 
 凡是设备会拒绝的包，`nsh publish` 也拒绝签名：证书必须覆盖该 app id 和当前时间。
 
@@ -102,9 +107,27 @@ out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets,
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
 ```
 
+### 哪些运行时能运行包
+
+包里写明了能运行它的最低 NSH 运行时版本，运行时比它旧的宿主应用会在运行任何代码之前拒绝它：
+
+```text
+error the package needs runtime 0.2.0 or newer; this runtime is 0.1.1
+```
+
+默认值是构建该包的 CLI 的版本：bundle 是按这个 CLI 的模块编译的，所以已知能运行它的就是这个版本的运行时。如果线上的宿主
+应用运行时更旧，而应用只用到了那个运行时已有的功能，就用 `--min-runtime`（或 `nsh.json` 中的 `minRuntime`）为它发布：
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-runtime 0.1.0
+```
+
+版本号的格式是 `MAJOR.MINOR.PATCH`；带预发布后缀的版本（`0.2.0-beta.1`）按去掉后缀的版本计算。它不能比 CLI 更新。
+上传之前，先在带有该运行时的宿主应用上试一下这个包：旧运行时缺少的导入或函数，会在模块加载时报错。
+
 ### 包里有什么
 
-包是单个文件：先是一个 JSON 头（app id、名称、版本、构建号、声明的能力、字节码版本、签名时间、发布密钥的证书，以及
+包是单个文件：先是一个 JSON 头（app id、名称、版本、构建号、声明的能力、字节码版本、最低运行时版本、签名时间、发布密钥的证书，以及
 一张列出各文件及其 SHA-256 的文件表），然后是各个文件，最后是发布密钥对前面所有内容的 Ed25519 签名。其中的文件包括：
 
 - 应用的 JS 源码（始终包含）；
@@ -114,12 +137,24 @@ error the release key's certificate does not cover this package: it does not cov
 
 包的标识（用于吊销）是整个文件的 SHA-256。
 
+### 由更新版本的 NSH 签名的包
+
+只要宿主应用的运行时不低于包的[最低运行时版本](#哪些运行时能运行包)，它就能运行由更新的 `nsh publish` 签名的包。新版本新增、而宿主运行时
+不认识的内容会被略过，且绝不会扩大包能做的事：
+
+- 不认识的头字段和文件会被忽略（它们依然受签名和哈希保护），除非包把某个字段标记为运行时必须理解的字段：这时更旧的
+  运行时会拒绝该包；
+- 不认识的[能力](./sandbox-and-capabilities.md)不会被授予；某项能力或某条 `http` 授权中出现不认识的键时，会整个被丢弃，
+  因为这个键可能是对它的限制。
+
+包加载时会把略过的内容记录到日志。
+
 ## 验证包
 
 `nsh verify` 检查包的方式，与信任指定根密钥的宿主应用完全一致：
 
 ```sh
-nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub
+nsh verify .nsh/out/com.example.counter-2.nshpkg --root keys/root.pub
 ```
 
 ```text
@@ -172,12 +207,28 @@ nsh revoke --root keys/root.secret --extend revocations.json --key 3428d7136788c
 ## 回滚保护
 
 宿主应用接受一个包后，其信任存储会记录该 app id 的构建号，此后拒绝更旧的构建。即使攻击者拿到了一个存在已知漏洞的
-旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。
+旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。在 GPUI 上，宿主应用可以等新包被证明健康之后再记录（先
+`verify_package`，再 `accept_package`，见下文）。
 
 ## 在宿主应用中加载包
 
 验证需要对整个包做哈希并解出其资源（每个包只解一次，放在信任存储的目录下），因此应在 UI 线程之外执行；运行结果则在
 UI 线程上进行。
+
+**GPUI（Rust）**，宿主应用还可以等包被证明健康之后再接受它：
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
 
 **iOS（Swift）**：
 
@@ -200,9 +251,13 @@ NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws N
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
 
+包被接受之前，此前接受过的构建依然能通过验证，所以新包出问题时宿主应用可以退回它之前运行的包（信号可以是
+`AppView::on_error` 收到的致命错误，或者在接受之前崩溃）。比已接受构建更旧的包仍会被拒绝，期间被吊销的包也不会被接受。
+`load_package` 会一次完成验证和接受，与 iOS、Android 上的 `openPackage` 相同。
+
 包声明的[能力](./sandbox-and-capabilities.md)随包一起传递：包只能做它声明的事，并且还要在宿主应用授予的范围之内。
 
-完整 API：[嵌入 iOS 应用](./embedding-ios.md)、
+完整 API：[GPUI](./gpui.md#嵌入-gpui-应用)、[嵌入 iOS 应用](./embedding-ios.md)、
 [嵌入 Android 应用](./embedding-android.md)。
 
 ## 已发布包的报错
@@ -223,14 +278,14 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-
 ```
 
 ```text
-✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+✓ wrote the source map to .nsh/out/com.example.counter-2.nshpkg.map (6.1 KB)
 ```
 
 这时设备上报的是 bundle 中的位置（`at n (bundle.js:1:80)`）。把 source map 和对应的包一起保存好，再用 `nsh symbolicate`
 映射宿主应用上报的内容：
 
 ```sh
-nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+nsh symbolicate .nsh/out/com.example.counter-2.nshpkg.map report.txt
 ```
 
 ```text
@@ -251,14 +306,14 @@ Error: boom
 
 ```sh
 xcrun simctl launch booted com.longbridge.nsh.host \
-  --package "$PWD/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
+  --package "$PWD/.nsh/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
 ```
 
 在 Android 上，开发宿主（`DevActivity`，由 `nsh run --target android` 安装）接受 extras `package`（设备上的路径）和
 `root`（base64 公钥，以逗号分隔）：
 
 ```sh
-adb push out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
+adb push .nsh/out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
 adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity \
   --es package /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg \
   --es root "$(cat keys/root.pub)"

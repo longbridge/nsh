@@ -10,16 +10,18 @@ use std::sync::Arc;
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
-    events::{self, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
+    events::{self, Composition, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
 };
 use crate::{
-    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, JsonValue, KeyboardAppearance,
-    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Prop, ResizeMode,
-    ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, Size, SubmitBehavior, Tag, WebSource,
+    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
+    KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Points, Prop,
+    ResizeMode, ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size,
+    StatusBarSetting, SubmitBehavior, Tag, WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
     },
+    geometry::{Bounds, Corners, Point, Radians, ScaledPixels},
     js::host::HostProps,
 };
 
@@ -48,6 +50,8 @@ pub(crate) fn set(node: &mut ElNode, prop: Prop) {
 }
 
 crate::static_reactive!(Color: Color);
+crate::static_reactive!(Hsla: Hsla, Rgba, Color);
+crate::static_reactive!(crate::AccessibilityRole: crate::AccessibilityRole);
 crate::static_reactive!(AutoCapitalize: AutoCapitalize);
 crate::static_reactive!(AutoFill: AutoFill);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
@@ -150,7 +154,8 @@ host_element! {
 }
 
 host_element! {
-    /// A native navigation stack (`<stack>`), made by [`stack`]:
+    /// A native navigation stack (`<stack>`, TS: `NavStack` of `nsh/base`),
+    /// made by `nsh_base::nav_stack`:
     /// UINavigationController on iOS (swipe back, native header), a stack
     /// with a toolbar and predictive back on Android. Its children are its
     /// [`Screen`]s, bottom to top.
@@ -158,14 +163,16 @@ host_element! {
 }
 
 host_element! {
-    /// One screen of a [`Stack`] (`<screen>`), made by [`screen`]: its
-    /// header options and its content (its children).
+    /// One page of a [`Stack`] (`<screen>`, TS: `NavPage` of `nsh/base`),
+    /// made by `nsh_base::nav_page`: its header options and its content (its
+    /// children).
     Screen
 }
 
 host_element! {
-    /// A modal (`<modal>`), made by [`modal`]: presented while it is in the
-    /// view, over everything else; its children are its content.
+    /// A dialog (`<modal>`, TS: `Dialog` of `nsh/base`), made by
+    /// `nsh_base::dialog`: presented while it is in the view, over everything
+    /// else; its children are its content.
     Modal
 }
 
@@ -234,12 +241,14 @@ pub fn scroll() -> Scroll {
 /// A native navigation stack of [`screen`]s: put a screen in to push it,
 /// leave it out to pop it. Give each screen a [`Element::key`] (its route)
 /// so the screens below keep their state.
+#[deprecated(note = "use nsh_base::nav_stack, as TSX's `NavStack` of `nsh/base`")]
 pub fn stack() -> Stack {
     Stack(ElNode::new(Tag::Stack))
 }
 
 /// A screen of a [`stack`]. What it shows reads its insets below the
 /// header ([`super::Scope::insets`]).
+#[deprecated(note = "use nsh_base::nav_page, as TSX's `NavPage` of `nsh/base`")]
 pub fn screen() -> Screen {
     let mut node = ElNode::new(Tag::Screen);
     // Its insets come with this event.
@@ -249,6 +258,7 @@ pub fn screen() -> Screen {
 
 /// A modal presenting its children. Put it in the view to present it (in
 /// a region: [`super::If`]), leave it out to dismiss it.
+#[deprecated(note = "use nsh_base::dialog, as TSX's `Dialog` of `nsh/base`")]
 pub fn modal() -> Modal {
     let mut node = ElNode::new(Tag::Modal);
     // Its insets (`Scope::insets` inside it) come with this event.
@@ -315,7 +325,7 @@ pub fn native(name: &str) -> NativeView {
 
 impl Input {
     /// The text, when the component controls it (update it from
-    /// [`Self::on_change_text`]).
+    /// [`Self::on_change`]).
     pub fn value(self, text: impl IntoReactive<String>) -> Self {
         self.bind_prop(text, |text: String| Prop::Value(text))
     }
@@ -331,17 +341,21 @@ impl Input {
     }
 
     /// The placeholder's color (`cx.color(theme.muted_foreground)`).
-    pub fn placeholder_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |color: Color| Prop::PlaceholderColor(Some(color)))
+    pub fn placeholder_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |color: Hsla| {
+            Prop::PlaceholderColor(Some(color.into()))
+        })
     }
 
     /// The caret's and the selection's color.
-    pub fn selection_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |color: Color| Prop::SelectionColor(Some(color)))
+    pub fn selection_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |color: Hsla| {
+            Prop::SelectionColor(Some(color.into()))
+        })
     }
 
-    /// Hides what is typed (passwords).
-    pub fn secure(self, secure: impl IntoReactive<bool>) -> Self {
+    /// Hides what is typed (passwords; TS: `masked`).
+    pub fn masked(self, secure: impl IntoReactive<bool>) -> Self {
         self.bind_prop(secure, |secure: bool| Prop::Secure(secure))
     }
 
@@ -388,14 +402,9 @@ impl Input {
         self.bind_prop(length, |length: u32| Prop::MaxLength(Some(length)))
     }
 
-    /// Editable (default yes).
-    pub fn editable(self, editable: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(editable, |editable: bool| Prop::Editable(editable))
-    }
-
-    /// The return key unfocuses it (default yes, for one line).
-    pub fn blur_on_submit(self, blur: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(blur, |blur: bool| Prop::BlurOnSubmit(blur))
+    /// The text can be selected and copied but not changed.
+    pub fn readonly(self, readonly: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(readonly, |readonly: bool| Prop::Readonly(readonly))
     }
 
     /// What return does (`submitBehavior`; default: submit and unfocus for
@@ -426,16 +435,16 @@ impl Input {
 
     /// Selects `(start, end)` (UTF-16 units; a caret when equal) when the
     /// input is made and whenever the value changes (TS: the controlled
-    /// `selection`); the user moves it on from there
+    /// `selectedRange`); the user moves it on from there
     /// ([`Self::on_selection_change`]).
-    pub fn selection(self, range: impl IntoReactive<(u32, u32)>) -> Self {
+    pub fn selected_range(self, range: impl IntoReactive<(u32, u32)>) -> Self {
         self.bind_prop(range, |(start, end): (u32, u32)| {
             Prop::Selection(start, end)
         })
     }
 
     /// The text changed (the new text).
-    pub fn on_change_text<M>(self, listener: impl IntoListener<str, M>) -> Self {
+    pub fn on_change<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(
             EventKind::ChangeText,
             listener.into_listener(),
@@ -443,8 +452,8 @@ impl Input {
         )
     }
 
-    /// The return key was pressed (the text).
-    pub fn on_submit_editing<M>(self, listener: impl IntoListener<str, M>) -> Self {
+    /// The return (enter) key was pressed (the text).
+    pub fn on_submit<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(
             EventKind::SubmitEditing,
             listener.into_listener(),
@@ -476,8 +485,19 @@ impl Input {
         self.listen(EventKind::KeyPress, listener.into_listener(), events::key)
     }
 
+    /// An input method's composition started, changed or ended (the text
+    /// being composed, empty once it ends): the text is the input's only
+    /// once committed, reported by [`Self::on_change`] first.
+    pub fn on_composition_change<M>(self, listener: impl IntoListener<Composition, M>) -> Self {
+        self.listen(
+            EventKind::CompositionChange,
+            listener.into_listener(),
+            events::composition,
+        )
+    }
+
     /// The text's size changed (multiline inputs growing).
-    pub fn on_content_size_change<M>(self, listener: impl IntoListener<Size, M>) -> Self {
+    pub fn on_content_size_change<M>(self, listener: impl IntoListener<Size<Points>, M>) -> Self {
         self.listen(
             EventKind::ContentSizeChange,
             listener.into_listener(),
@@ -567,25 +587,11 @@ impl Screen {
         })
     }
 
-    /// The back button's and bar buttons' color.
-    pub fn header_tint_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderTintColor(Some(c)))
-        })
-    }
-
-    /// The header's background.
-    pub fn header_background_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderBackgroundColor(Some(c)))
-        })
-    }
-
-    /// The title's color.
-    pub fn header_title_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderTitleColor(Some(c)))
-        })
+    /// The header's colors: `backgroundColor`, `color` (the title's) and
+    /// `tintColor` (the buttons'), as [`super::Style::from_decls`] makes
+    /// them (TS: `headerStyle`).
+    pub fn header_style(self, style: impl IntoReactive<super::Style>) -> Self {
+        self.bind_prop(style, |s: super::Style| Prop::HeaderStyle(s.0))
     }
 
     /// The label of the back button leading back to this screen (iOS).
@@ -600,22 +606,29 @@ impl Screen {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
     }
 
-    /// The interactive back gesture (iOS swipe back, Android predictive
-    /// back); the back buttons pop either way (default true).
-    pub fn gesture_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(enabled, |v| Prop::Screen(ScreenProp::GestureEnabled(v)))
+    /// The interactive back gesture pops (iOS swipe back, Android
+    /// predictive back); the back buttons pop either way (default true).
+    pub fn pop_on_swipe(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |v| Prop::Screen(ScreenProp::PopOnSwipe(v)))
     }
 
-    /// The user cannot leave the screen: no swipe back, and the back
-    /// buttons report [`Self::on_back_request`] instead of popping. Decided
+    /// The back buttons and the swipe back pop the screen (default true);
+    /// false keeps it, reporting [`Self::on_back_press`] instead. Decided
     /// natively when the system asks, so set it before the user acts.
-    pub fn prevent_back(self, prevent: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(prevent, |v| Prop::Screen(ScreenProp::PreventBack(v)))
+    pub fn pop_on_back(self, pop: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(pop, |v| Prop::Screen(ScreenProp::PopOnBack(v)))
     }
 
     /// How the screen enters and leaves.
     pub fn animation(self, animation: impl IntoReactive<ScreenAnimation>) -> Self {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
+    }
+
+    /// What the status bar shows while the screen is up (iOS and Android;
+    /// TS: `statusBar`): over the screens below it and the app's default,
+    /// field by field, as a view controller's `preferredStatusBarStyle`.
+    pub fn status_bar(self, setting: impl IntoReactive<StatusBarSetting>) -> Self {
+        self.bind_prop(setting, |s| Prop::Screen(ScreenProp::StatusBar(Some(s))))
     }
 
     /// An element at the header's start (instead of the back button).
@@ -633,14 +646,22 @@ impl Screen {
         self.header_item(HeaderSlot::Title, "header-title", item)
     }
 
+    /// The app's header on platforms without a system header (desktops,
+    /// the web): placed at the top of the screen, as wide as it and as tall
+    /// as it lays out, with the content below it (TS: `header`).
+    pub fn header(self, item: impl IntoElement) -> Self {
+        self.header_item(HeaderSlot::Header, "header", item)
+    }
+
     /// The user popped the screen natively (back button, swipe): leave it
     /// out of the view (its region).
     pub fn on_dismiss<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
     }
 
-    /// The user tried to leave a screen that [`Self::prevent_back`]s.
-    pub fn on_back_request<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The user pressed back on the screen (every back press, whether or
+    /// not [`Self::pop_on_back`] let it pop).
+    pub fn on_back_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(
             EventKind::BackRequest,
             listener.into_listener(),
@@ -664,11 +685,10 @@ impl Modal {
         })
     }
 
-    /// What is behind shows through (its content draws the dimming).
-    pub fn transparent(self, transparent: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(transparent, |transparent: bool| {
-            Prop::Modal(ModalProp::Transparent(transparent))
-        })
+    /// What the status bar shows while it is presented (iOS and Android;
+    /// TS: `statusBar`): over what is below it, field by field.
+    pub fn status_bar(self, setting: impl IntoReactive<StatusBarSetting>) -> Self {
+        self.bind_prop(setting, |s| Prop::Screen(ScreenProp::StatusBar(Some(s))))
     }
 
     /// Under the status bar (Android).
@@ -688,18 +708,30 @@ impl Modal {
         self.set(Prop::Modal(ModalProp::Orientations(bits)))
     }
 
-    /// Swipes down and the back button dismiss it, reporting
-    /// [`Self::on_dismiss`] (default: they ask with
-    /// [`Self::on_request_close`]).
-    pub fn dismissible(self, dismissible: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(dismissible, |dismissible: bool| {
-            Prop::Modal(ModalProp::Dismissible(dismissible))
+    /// Escape and the Android back button close it natively (default
+    /// true); either way they report [`Self::on_cancel`].
+    pub fn close_on_escape(self, close: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(close, |v: bool| Prop::Modal(ModalProp::CloseOnEscape(v)))
+    }
+
+    /// A press on a backdrop the platform presents itself (a native
+    /// sheet's) closes it (default true); a backdrop the app renders is
+    /// the app's to handle.
+    pub fn close_on_backdrop_press(self, close: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(close, |v: bool| {
+            Prop::Modal(ModalProp::CloseOnBackdropPress(v))
         })
     }
 
-    /// The user asked to close it (back button, swipe down): leave it out
-    /// of the view (its region) to close it.
-    pub fn on_request_close<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// Swiping a sheet down closes it natively (default true).
+    pub fn close_on_swipe(self, close: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(close, |v: bool| Prop::Modal(ModalProp::CloseOnSwipe(v)))
+    }
+
+    /// The user tried to close it (Escape or back, a backdrop press, a
+    /// swipe down), whether or not it closed: leave it out of the view
+    /// (its region) to close it.
+    pub fn on_cancel<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(
             EventKind::RequestClose,
             listener.into_listener(),
@@ -708,12 +740,12 @@ impl Modal {
     }
 
     /// It finished appearing.
-    pub fn on_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    pub fn on_open<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::Show, listener.into_listener(), events::unit)
     }
 
-    /// The user or the system dismissed it.
-    pub fn on_dismiss<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The user or the system closed it.
+    pub fn on_close<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
     }
 }
@@ -965,6 +997,20 @@ impl From<f32> for CanvasArg {
     }
 }
 
+/// A length (coordinates, sizes, line widths, radii).
+impl From<Points> for CanvasArg {
+    fn from(n: Points) -> Self {
+        Self(CanvasArgKind::Const(n.0))
+    }
+}
+
+/// An angle (arcs, rotations).
+impl From<Radians> for CanvasArg {
+    fn from(n: Radians) -> Self {
+        Self(CanvasArgKind::Const(n.0))
+    }
+}
+
 /// An animated value whose owner is gone counts as 0.
 impl<A: super::Animated> From<&A> for CanvasArg {
     fn from(a: &A) -> Self {
@@ -995,6 +1041,18 @@ impl From<Color> for CanvasPaint {
     }
 }
 
+impl From<Hsla> for CanvasPaint {
+    fn from(color: Hsla) -> Self {
+        Color::from(color).into()
+    }
+}
+
+impl From<Rgba> for CanvasPaint {
+    fn from(color: Rgba) -> Self {
+        Color::from(color).into()
+    }
+}
+
 impl From<CanvasGradient> for CanvasPaint {
     fn from(gradient: CanvasGradient) -> Self {
         Self(CanvasPaintKind::Gradient(Arc::new(gradient)))
@@ -1018,7 +1076,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 }
 
 /// Records a [`Drawing`] with the HTML Canvas 2D operations (Rust names):
-/// `Painter::new().fill_color(red).fill_rect(0.0, 0.0, w, h).finish()`.
+/// `Painter::new().fill_color(red).fill_rect(px(0.0), px(0.0), w, h).finish()`.
 /// Coordinates are points from the canvas's top left. Numbers and paints
 /// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
@@ -1079,37 +1137,36 @@ impl Painter {
         self.op(CanvasOp::Path(op))
     }
 
-    /// Whether point (`x`, `y`) (canvas points, as a touch's `location_x` /
-    /// `location_y`) is inside the current path by `rule`, with the
-    /// transform, as recorded so far (TS: `ctx.isPointInPath(x, y, rule)`).
-    /// Answered from the geometry here, with no platform round trip; a
-    /// number given as an animated value counts as 0, as in TS. To find what
-    /// is under a tap, build the canvas's painter in a function the press
-    /// handler calls too.
-    pub fn is_point_in_path(&self, x: f32, y: f32, rule: FillRule) -> bool {
-        crate::canvas::point_in_path(&self.drawing.ops, None, rule, x, y, |_| 0.0)
+    /// Whether `point` (in the canvas, as a touch's location) is inside the
+    /// current path by `rule`, with the transform, as recorded so far (TS:
+    /// `cx.isPointInPath(x, y, rule)`). Answered from the geometry here,
+    /// with no platform round trip; a number given as an animated value
+    /// counts as 0, as in TS. To find what is under a tap, build the
+    /// canvas's painter in a function the press handler calls too.
+    pub fn is_point_in_path(&self, point: Point<Points>, rule: FillRule) -> bool {
+        crate::canvas::point_in_path(&self.drawing.ops, None, rule, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is on the stroke of the current path with
-    /// the line width and cap recorded so far (TS: `ctx.isPointInStroke(x,
-    /// y)`; round joins, no dashes). See [`Self::is_point_in_path`].
-    pub fn is_point_in_stroke(&self, x: f32, y: f32) -> bool {
-        crate::canvas::point_in_stroke(&self.drawing.ops, None, x, y, |_| 0.0)
+    /// Whether `point` is on the stroke of the current path with the line
+    /// width and cap recorded so far (TS: `cx.isPointInStroke(x, y)`;
+    /// round joins, no dashes). See [`Self::is_point_in_path`].
+    pub fn is_point_in_stroke(&self, point: Point<Points>) -> bool {
+        crate::canvas::point_in_stroke(&self.drawing.ops, None, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is inside `path` by `rule`, with the
-    /// transform recorded so far (TS: `ctx.isPointInPath(path2d, x, y,
-    /// rule)`): the shape [`Self::fill_path`] drew under a tap. See
+    /// Whether `point` is inside `path` by `rule`, with the transform
+    /// recorded so far (TS: `cx.isPointInPath(path2d, x, y, rule)`): the
+    /// shape [`Self::fill_path`] drew under a tap. See
     /// [`Self::is_point_in_path`].
-    pub fn path_contains(&self, path: &Path, x: f32, y: f32, rule: FillRule) -> bool {
-        crate::canvas::point_in_path(&self.drawing.ops, Some(path), rule, x, y, |_| 0.0)
+    pub fn path_contains(&self, path: &Path, point: Point<Points>, rule: FillRule) -> bool {
+        crate::canvas::point_in_path(&self.drawing.ops, Some(path), rule, point, |_| 0.0)
     }
 
-    /// Whether point (`x`, `y`) is on the stroke of `path` with the
-    /// transform, line width and cap recorded so far (TS:
-    /// `ctx.isPointInStroke(path2d, x, y)`). See [`Self::is_point_in_path`].
-    pub fn stroke_contains(&self, path: &Path, x: f32, y: f32) -> bool {
-        crate::canvas::point_in_stroke(&self.drawing.ops, Some(path), x, y, |_| 0.0)
+    /// Whether `point` is on the stroke of `path` with the transform, line
+    /// width and cap recorded so far (TS: `cx.isPointInStroke(path2d, x,
+    /// y)`). See [`Self::is_point_in_path`].
+    pub fn stroke_contains(&self, path: &Path, point: Point<Points>) -> bool {
+        crate::canvas::point_in_stroke(&self.drawing.ops, Some(path), point, |_| 0.0)
     }
 
     /// Saves the state (styles, transform, clip).
@@ -1134,7 +1191,8 @@ impl Painter {
         self.op(CanvasOp::Scale(x, y))
     }
 
-    /// Rotates the axes (radians, clockwise).
+    /// Rotates the axes, clockwise (a [`Radians`], or an animated value of
+    /// radians).
     pub fn rotate(mut self, angle: impl Into<CanvasArg>) -> Self {
         let a = self.num(angle);
         self.op(CanvasOp::Rotate(a))
@@ -1177,31 +1235,31 @@ impl Painter {
     }
 
     /// A quadratic Bézier curve to `to` (`quadraticCurveTo`).
-    pub fn quadratic_curve_to(self, control: (f32, f32), to: (f32, f32)) -> Self {
-        let c = Num::Const;
+    pub fn quadratic_curve_to(self, control: Point<Points>, to: Point<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
         self.path(PathOp::QuadTo([
-            c(control.0),
-            c(control.1),
-            c(to.0),
-            c(to.1),
+            c(control.x),
+            c(control.y),
+            c(to.x),
+            c(to.y),
         ]))
     }
 
-    /// A cubic Bézier curve to (`x`, `y`).
-    pub fn bezier_curve_to(self, c1: (f32, f32), c2: (f32, f32), to: (f32, f32)) -> Self {
-        let c = Num::Const;
+    /// A cubic Bézier curve to `to` (`bezierCurveTo`).
+    pub fn bezier_curve_to(self, c1: Point<Points>, c2: Point<Points>, to: Point<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
         self.path(PathOp::CubicTo([
-            c(c1.0),
-            c(c1.1),
-            c(c2.0),
-            c(c2.1),
-            c(to.0),
-            c(to.1),
+            c(c1.x),
+            c(c1.y),
+            c(c2.x),
+            c(c2.y),
+            c(to.x),
+            c(to.y),
         ]))
     }
 
-    /// A circular arc around (`x`, `y`); angles in radians, clockwise from
-    /// the x axis.
+    /// A circular arc around (`x`, `y`); angles clockwise from the x axis
+    /// ([`Radians`], or animated values of radians).
     pub fn arc(
         self,
         x: impl Into<CanvasArg>,
@@ -1251,52 +1309,68 @@ impl Painter {
         })
     }
 
-    /// An arc of `radius` tangent to the lines to (`x1`, `y1`) and on to
-    /// (`x2`, `y2`) (`arcTo`): a rounded corner.
-    pub fn arc_to(self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::ArcTo([c(x1), c(y1), c(x2), c(y2), c(radius)]))
+    /// An arc of `radius` tangent to the lines to `p1` and on to `p2`
+    /// (`arcTo`): a rounded corner.
+    pub fn arc_to(self, p1: Point<Points>, p2: Point<Points>, radius: Points) -> Self {
+        let c = |v: Points| Num::Const(v.0);
+        self.path(PathOp::ArcTo([
+            c(p1.x),
+            c(p1.y),
+            c(p2.x),
+            c(p2.y),
+            c(radius),
+        ]))
     }
 
-    /// An elliptical arc around (`x`, `y`) with radii `radius` turned by
-    /// `rotation`; angles in radians, clockwise (`counterclockwise` draws
-    /// the other way).
-    #[allow(clippy::too_many_arguments)]
+    /// An elliptical arc around `center` with radii `radii` turned by
+    /// `rotation`; angles clockwise (`counterclockwise` draws the other
+    /// way).
     pub fn ellipse(
         self,
-        x: f32,
-        y: f32,
-        radius: (f32, f32),
-        rotation: f32,
-        start: f32,
-        end: f32,
+        center: Point<Points>,
+        radii: Size<Points>,
+        rotation: Radians,
+        start: Radians,
+        end: Radians,
         counterclockwise: bool,
     ) -> Self {
         let c = Num::Const;
         self.path(PathOp::Ellipse {
-            geometry: [c(x), c(y), c(radius.0), c(radius.1), c(rotation)],
-            start: c(start),
-            end: c(end),
+            geometry: [
+                c(center.x.0),
+                c(center.y.0),
+                c(radii.width.0),
+                c(radii.height.0),
+                c(rotation.0),
+            ],
+            start: c(start.0),
+            end: c(end.0),
             ccw: counterclockwise,
         })
     }
 
     /// A rectangle subpath.
-    pub fn rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::Rect([c(x), c(y), c(w), c(h)]))
+    pub fn rect(self, rect: Bounds<Points>) -> Self {
+        self.path(PathOp::Rect(nums(rect)))
     }
 
     /// A rectangle subpath with round corners (one radius for all).
-    pub fn round_rect(self, x: f32, y: f32, w: f32, h: f32, radius: f32) -> Self {
-        self.round_rect_corners(x, y, w, h, [radius; 4])
+    pub fn round_rect(self, rect: Bounds<Points>, radius: Points) -> Self {
+        self.round_rect_corners(rect, Corners::all(radius))
     }
 
-    /// A rectangle subpath with round corners: top left, top right, bottom
-    /// right, bottom left.
-    pub fn round_rect_corners(self, x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Self {
-        let c = Num::Const;
-        self.path(PathOp::RoundRect([c(x), c(y), c(w), c(h)], radii.map(c)))
+    /// A rectangle subpath with round corners.
+    pub fn round_rect_corners(self, rect: Bounds<Points>, radii: Corners<Points>) -> Self {
+        let c = |v: Points| Num::Const(v.0);
+        self.path(PathOp::RoundRect(
+            nums(rect),
+            [
+                c(radii.top_left),
+                c(radii.top_right),
+                c(radii.bottom_right),
+                c(radii.bottom_left),
+            ],
+        ))
     }
 
     /// A straight line back to the subpath's start.
@@ -1356,38 +1430,36 @@ impl Painter {
         self.op(CanvasOp::Clip(Some(path.clone()), rule))
     }
 
-    /// Fills a rectangle.
+    /// Fills a rectangle (its numbers [`Points`], or animated values).
     pub fn fill_rect(
         mut self,
-        x: f32,
-        y: f32,
+        x: impl Into<CanvasArg>,
+        y: impl Into<CanvasArg>,
         w: impl Into<CanvasArg>,
         h: impl Into<CanvasArg>,
     ) -> Self {
-        let (w, h) = (self.num(w), self.num(h));
-        self.op(CanvasOp::FillRect([Num::Const(x), Num::Const(y), w, h]))
+        let (x, y, w, h) = (self.num(x), self.num(y), self.num(w), self.num(h));
+        self.op(CanvasOp::FillRect([x, y, w, h]))
     }
 
     /// Strokes a rectangle.
-    pub fn stroke_rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.op(CanvasOp::StrokeRect([c(x), c(y), c(w), c(h)]))
+    pub fn stroke_rect(self, rect: Bounds<Points>) -> Self {
+        self.op(CanvasOp::StrokeRect(nums(rect)))
     }
 
     /// Makes a rectangle transparent.
-    pub fn clear_rect(self, x: f32, y: f32, w: f32, h: f32) -> Self {
-        let c = Num::Const;
-        self.op(CanvasOp::ClearRect([c(x), c(y), c(w), c(h)]))
+    pub fn clear_rect(self, rect: Bounds<Points>) -> Self {
+        self.op(CanvasOp::ClearRect(nums(rect)))
     }
 
     /// Fills with `color`.
-    pub fn fill_color(self, color: Color) -> Self {
-        self.fill_style(color)
+    pub fn fill_color(self, color: impl Into<Hsla>) -> Self {
+        self.fill_style(color.into())
     }
 
     /// Strokes with `color`.
-    pub fn stroke_color(self, color: Color) -> Self {
-        self.stroke_style(color)
+    pub fn stroke_color(self, color: impl Into<Hsla>) -> Self {
+        self.stroke_style(color.into())
     }
 
     /// Fills with `paint`: a color, a gradient or an animated value of colors
@@ -1426,7 +1498,7 @@ impl Painter {
     }
 
     /// Dashes: lengths of dashes and gaps.
-    pub fn line_dash(self, segments: &[f32]) -> Self {
+    pub fn line_dash(self, segments: &[Points]) -> Self {
         self.op(CanvasOp::LineDash(segments.into()))
     }
 
@@ -1449,10 +1521,10 @@ impl Painter {
     }
 
     /// Shadows of what is drawn next.
-    pub fn shadow(self, color: Color, blur: f32, offset: (f32, f32)) -> Self {
-        self.op(CanvasOp::ShadowColor(color))
-            .op(CanvasOp::ShadowBlur(blur.max(0.0)))
-            .op(CanvasOp::ShadowOffset(offset.0, offset.1))
+    pub fn shadow(self, color: impl Into<Hsla>, blur: Points, offset: Point<Points>) -> Self {
+        self.op(CanvasOp::ShadowColor(Color::from(color.into())))
+            .op(CanvasOp::ShadowBlur(blur.max(Points::ZERO)))
+            .op(CanvasOp::ShadowOffset(offset))
     }
 
     /// The font (CSS `font` shorthand: `"600 14px Inter"`); an invalid one
@@ -1494,7 +1566,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: f32,
+        max_width: Points,
     ) -> Self {
         self.text(text, x, y, Some(max_width), false)
     }
@@ -1511,7 +1583,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: f32,
+        max_width: Points,
     ) -> Self {
         self.text(text, x, y, Some(max_width), true)
     }
@@ -1521,7 +1593,7 @@ impl Painter {
         text: &str,
         x: impl Into<CanvasArg>,
         y: impl Into<CanvasArg>,
-        max_width: Option<f32>,
+        max_width: Option<Points>,
         stroke: bool,
     ) -> Self {
         let (text, x, y) = (text.into(), self.num(x), self.num(y));
@@ -1542,20 +1614,36 @@ impl Painter {
         })
     }
 
-    /// Draws the image at `uri` (a URL or `asset:/path`) into the rectangle.
-    pub fn draw_image(self, uri: &str, x: f32, y: f32, w: f32, h: f32) -> Self {
-        self.draw_image_part(uri, None, [x, y, w, h])
+    /// Draws the image at `uri` (a URL or `asset:/path`) into `dest`.
+    pub fn draw_image(self, uri: &str, dest: Bounds<Points>) -> Self {
+        self.draw_image_part(uri, None, dest)
     }
 
-    /// Draws the part `source` of the image at `uri` (`[x, y, w, h]` in
-    /// image pixels; `None`: all of it) into `dest` (`[x, y, w, h]`).
-    pub fn draw_image_part(self, uri: &str, source: Option<[f32; 4]>, dest: [f32; 4]) -> Self {
+    /// Draws the part `source` of the image at `uri` (in the image's
+    /// pixels; `None`: all of it) into `dest`.
+    pub fn draw_image_part(
+        self,
+        uri: &str,
+        source: Option<Bounds<ScaledPixels>>,
+        dest: Bounds<Points>,
+    ) -> Self {
         self.op(CanvasOp::DrawImage {
             image: CanvasImage { uri: uri.into() },
             source,
-            dest: dest.map(Num::Const),
+            dest: nums(dest),
         })
     }
+}
+
+/// `[x, y, w, h]` of `rect`, as a recorded rectangle's numbers.
+fn nums(rect: Bounds<Points>) -> [Num; 4] {
+    [
+        rect.origin.x,
+        rect.origin.y,
+        rect.size.width,
+        rect.size.height,
+    ]
+    .map(|v| Num::Const(v.0))
 }
 
 impl From<Drawing> for Painter {

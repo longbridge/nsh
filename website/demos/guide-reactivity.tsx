@@ -23,10 +23,10 @@ function Stopwatch() {
       <Text style={{ flex: 1, fontSize: 28, fontWeight: "600", fontVariant: ["tabular-nums"], color: ui().text }}>
         {(tenths() / 10).toFixed(1)} s
       </Text>
-      <View onPress={() => running.set(!running())} activeOpacity={0.6} style={{ backgroundColor: ui()[accent()], borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}>
+      <View onPress={() => running.set(!running())} activeStyle={{ opacity: 0.6 }} style={{ backgroundColor: ui()[accent()], borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}>
         <Text style={{ color: ui().page, fontWeight: "600" }}>{running() ? "Stop" : "Start"}</Text>
       </View>
-      <View onPress={() => tenths.set(0)} activeOpacity={0.6} style={{ ...raised(), paddingHorizontal: 14, paddingVertical: 8 }}>
+      <View onPress={() => tenths.set(0)} activeStyle={{ opacity: 0.6 }} style={{ ...raised(), paddingHorizontal: 14, paddingVertical: 8 }}>
         <Text style={{ color: ui().text }}>Reset</Text>
       </View>
     </View>
@@ -75,13 +75,13 @@ function App() {
             {price()} × {quantity()} = <Text style={{ fontWeight: "700", color: ui()[accent()] }}>{total()}</Text>
           </Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <View onPress={() => step(1, 0)} activeOpacity={0.6} style={{ ...raised(), padding: 8 }}>
+            <View onPress={() => step(1, 0)} activeStyle={{ opacity: 0.6 }} style={{ ...raised(), padding: 8 }}>
               <Text style={{ color: ui().text }}>price +1</Text>
             </View>
-            <View onPress={() => step(0, 1)} activeOpacity={0.6} style={{ ...raised(), padding: 8 }}>
+            <View onPress={() => step(0, 1)} activeStyle={{ opacity: 0.6 }} style={{ ...raised(), padding: 8 }}>
               <Text style={{ color: ui().text }}>qty +1</Text>
             </View>
-            <View onPress={() => step(1, 1)} activeOpacity={0.6} style={{ backgroundColor: tint(ui().warn, 0.14), borderWidth: 1, borderColor: tint(ui().warn, 0.3), borderRadius: 10, padding: 8 }}>
+            <View onPress={() => step(1, 1)} activeStyle={{ opacity: 0.6 }} style={{ backgroundColor: tint(ui().warn, 0.14), borderWidth: 1, borderColor: tint(ui().warn, 0.3), borderRadius: 10, padding: 8 }}>
               <Text style={{ color: ui().warn }}>both (batch)</Text>
             </View>
           </View>

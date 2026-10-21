@@ -4,7 +4,11 @@
 use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
-use crate::{EventPayload, JsonValue, PayloadValue, Rect, Size, TouchEvent};
+use crate::{
+    Bounds, ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Point, Points,
+    Size, TouchEvent,
+    geometry::{DevicePixels, Radians, point, px},
+};
 
 /// Local files or directories dropped on an element (`on_file_drop`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,18 +20,12 @@ pub struct FileDropEvent {
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollEvent {
-    /// Horizontal content offset.
-    pub x: f32,
-    /// Vertical content offset.
-    pub y: f32,
-    /// The content's width.
-    pub content_width: f32,
-    /// The content's height.
-    pub content_height: f32,
-    /// The scroll view's width.
-    pub width: f32,
-    /// The scroll view's height.
-    pub height: f32,
+    /// The content offset (TS: `contentOffset`).
+    pub offset: Point<Points>,
+    /// The content's size (TS: `contentSize`).
+    pub content_size: Size<Points>,
+    /// The scroll view's size (TS: `layoutMeasurement`).
+    pub size: Size<Points>,
     /// How far a zooming scroll view is zoomed (1: not zoomed; the content
     /// sizes are the zoomed ones).
     pub zoom_scale: f32,
@@ -36,49 +34,38 @@ pub struct ScrollEvent {
 impl Default for ScrollEvent {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            content_width: 0.0,
-            content_height: 0.0,
-            width: 0.0,
-            height: 0.0,
+            offset: Point::default(),
+            content_size: Size::default(),
+            size: Size::default(),
             zoom_scale: 1.0,
         }
     }
-}
-
-/// A scroll view's offset (drags, momentum, rest).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct ScrollOffset {
-    /// Horizontal content offset.
-    pub x: f32,
-    /// Vertical content offset.
-    pub y: f32,
 }
 
 /// A drag (`on_pan_start` / `on_pan_end`): translation since it started and
 /// velocity, in points (per second).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PanEvent {
-    /// Horizontal translation.
-    pub translation_x: f32,
-    /// Vertical translation.
-    pub translation_y: f32,
+    /// The translation.
+    pub translation: Point<Points>,
     /// Horizontal velocity.
     pub velocity_x: f32,
     /// Vertical velocity.
     pub velocity_y: f32,
-    /// The bound horizontal animated value now (`Interactive::pan`).
+    /// The bound horizontal animated value now (`Interactive::pan`; the
+    /// values an app binds are of any quantity).
     pub value_x: Option<f32>,
     /// The bound vertical animated value now.
     pub value_y: Option<f32>,
 }
 
-/// A pinch or a rotation: its amount (scale, or radians) and velocity.
+/// A pinch or a rotation: its amount and velocity. A pinch's amount is
+/// its scale (`GestureEvent<f32>`), a rotation's an angle
+/// (`GestureEvent<Radians>`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct GestureEvent {
-    /// The scale (pinches) or the rotation in radians.
-    pub value: f32,
+pub struct GestureEvent<T = f32> {
+    /// The scale (pinches) or the rotation (rotations).
+    pub value: T,
     /// Per second.
     pub velocity: f32,
 }
@@ -90,6 +77,18 @@ pub struct Selection {
     pub start: u32,
     /// End.
     pub end: u32,
+}
+
+/// An input method's composition in an input (`on_composition_change`):
+/// the text being composed (pinyin before a character is chosen, kana
+/// before conversion), not yet the input's text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Composition {
+    /// A composition is in progress.
+    pub composing: bool,
+    /// The text being composed, empty once the composition ends.
+    pub text: String,
 }
 
 /// Where a web view is (`on_navigation_state_change`, `on_load`).
@@ -112,10 +111,9 @@ pub struct WebNavigation {
 pub struct VideoInfo {
     /// Seconds.
     pub duration: f32,
-    /// Width.
-    pub width: f32,
-    /// Height.
-    pub height: f32,
+    /// Its frames' size in pixels, as decoded (GPUI's images' sizes are
+    /// [`DevicePixels`] too).
+    pub size: Size<DevicePixels>,
 }
 
 /// A video played on (`on_progress`).
@@ -193,19 +191,9 @@ pub(crate) fn unit(_: &EventPayload) -> Option<Cow<'_, ()>> {
     Some(Cow::Owned(()))
 }
 
-pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Rect>> {
+pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Bounds<Points>>> {
     match *p {
-        EventPayload::Layout {
-            x,
-            y,
-            width,
-            height,
-        } => Some(Cow::Owned(Rect {
-            x,
-            y,
-            width,
-            height,
-        })),
+        EventPayload::Layout(frame) => Some(Cow::Owned(frame)),
         _ => None,
     }
 }
@@ -243,10 +231,20 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     }))
 }
 
-pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size>> {
+pub(crate) fn composition(p: &EventPayload) -> Option<Cow<'_, Composition>> {
+    Some(Cow::Owned(Composition {
+        composing: flag(p, "composing"),
+        text: string(p, "text").unwrap_or_default().to_owned(),
+    }))
+}
+
+pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size<Points>>> {
     match *p {
-        EventPayload::Image { width, height } => Some(Cow::Owned(Size::new(width, height))),
-        _ => Some(Cow::Owned(Size::new(
+        EventPayload::Image(size) => Some(Cow::Owned(crate::geometry::size_pt(
+            size.width.0 as f32,
+            size.height.0 as f32,
+        ))),
+        _ => Some(Cow::Owned(crate::geometry::size_pt(
             number(p, "width"),
             number(p, "height"),
         ))),
@@ -255,18 +253,17 @@ pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size>> {
 
 pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
     Some(Cow::Owned(match *p {
-        EventPayload::Scroll { x, y } => ScrollEvent {
-            x,
-            y,
+        EventPayload::Scroll(offset) => ScrollEvent {
+            offset,
             ..ScrollEvent::default()
         },
         _ => ScrollEvent {
-            x: number(p, "x"),
-            y: number(p, "y"),
-            content_width: number(p, "contentWidth"),
-            content_height: number(p, "contentHeight"),
-            width: number(p, "width"),
-            height: number(p, "height"),
+            offset: point(px(number(p, "x")), px(number(p, "y"))),
+            content_size: Size::new(
+                px(number(p, "contentWidth")),
+                px(number(p, "contentHeight")),
+            ),
+            size: Size::new(px(number(p, "width")), px(number(p, "height"))),
             zoom_scale: match field(p, "zoomScale") {
                 Some(PayloadValue::Number(n)) => *n as f32,
                 _ => 1.0,
@@ -275,32 +272,27 @@ pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
     }))
 }
 
-pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, ScrollOffset>> {
+pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
     Some(Cow::Owned(match *p {
-        EventPayload::Scroll { x, y } => ScrollOffset { x, y },
-        _ => ScrollOffset {
-            x: number(p, "x"),
-            y: number(p, "y"),
-        },
+        EventPayload::Scroll(offset) => offset,
+        _ => point(px(number(p, "x")), px(number(p, "y"))),
     }))
 }
 
 pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
     match *p {
         EventPayload::Pan {
-            translation_x,
-            translation_y,
+            translation,
             velocity_x,
             velocity_y,
             value_x,
             value_y,
         } => Some(Cow::Owned(PanEvent {
-            translation_x,
-            translation_y,
+            translation,
             velocity_x,
             velocity_y,
-            value_x,
-            value_y,
+            value_x: value_x.map(|v| v.0),
+            value_y: value_y.map(|v| v.0),
         })),
         _ => None,
     }
@@ -313,9 +305,9 @@ pub(crate) fn pinch(p: &EventPayload) -> Option<Cow<'_, GestureEvent>> {
     }))
 }
 
-pub(crate) fn rotation(p: &EventPayload) -> Option<Cow<'_, GestureEvent>> {
+pub(crate) fn rotation(p: &EventPayload) -> Option<Cow<'_, GestureEvent<Radians>>> {
     Some(Cow::Owned(GestureEvent {
-        value: number(p, "rotation"),
+        value: Radians(number(p, "rotation")),
         velocity: number(p, "velocity"),
     }))
 }
@@ -340,8 +332,10 @@ pub(crate) fn navigation(p: &EventPayload) -> Option<Cow<'_, WebNavigation>> {
 pub(crate) fn video(p: &EventPayload) -> Option<Cow<'_, VideoInfo>> {
     Some(Cow::Owned(VideoInfo {
         duration: number(p, "duration"),
-        width: number(p, "width"),
-        height: number(p, "height"),
+        size: Size::new(
+            DevicePixels(number(p, "width").round() as i32),
+            DevicePixels(number(p, "height").round() as i32),
+        ),
     }))
 }
 
@@ -377,6 +371,20 @@ pub(crate) fn native(p: &EventPayload) -> Option<Cow<'_, NativeEvent>> {
     }
 }
 
+pub(crate) fn hover(p: &EventPayload) -> Option<Cow<'_, HoverEvent>> {
+    match p {
+        EventPayload::Hover(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
+pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>> {
+    match p {
+        EventPayload::ContextMenu(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
 pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
     match p {
         EventPayload::FileDrop(uris) => Some(Cow::Owned(FileDropEvent { uris: uris.clone() })),
@@ -395,6 +403,26 @@ mod tests {
                 .unwrap()
                 .uris,
             uris
+        );
+    }
+
+    #[test]
+    fn composition_reads_its_state_and_text() {
+        use crate::{EventPayload, PayloadValue};
+        let composing = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(true)),
+            ("text", PayloadValue::Str("teng".into())),
+        ]);
+        let c = super::composition(&composing).unwrap();
+        assert!(c.composing);
+        assert_eq!(c.text, "teng");
+        let ended = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(false)),
+            ("text", PayloadValue::Str(String::new())),
+        ]);
+        assert_eq!(
+            super::composition(&ended).unwrap().into_owned(),
+            super::Composition::default()
         );
     }
 }

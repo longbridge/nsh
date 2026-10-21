@@ -3,7 +3,10 @@
 //! calls and display link ticks. Views are identified by their `tag` (the node id).
 
 use dispatch2::DispatchQueue;
-use nsh_core::{EventKind, EventPayload, KeyboardTaps, NodeId, SubmitBehavior};
+use nsh_core::{
+    EventKind, EventPayload, KeyboardTaps, NodeId, SubmitBehavior,
+    geometry::{point, px},
+};
 use nsh_engine::EngineControl;
 use objc2::{
     ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -60,11 +63,26 @@ define_class!(
         fn handle_hover(&self, recognizer: &objc2_ui_kit::UIHoverGestureRecognizer) {
             let Some(view) = recognizer.view() else { return };
             let id = view.tag() as NodeId;
-            let on = matches!(
-                recognizer.state(),
-                UIGestureRecognizerState::Began | UIGestureRecognizerState::Changed
-            );
-            self.with_mounter(move |m| m.hover_changed(id, on));
+            let state = recognizer.state();
+            let in_window = recognizer.locationInView(None);
+            // SAFETY: UIGestureRecognizer's `modifierFlags` (iOS 13.4), a
+            // UIKeyModifierFlags (NSInteger).
+            let modifiers: isize = unsafe { msg_send![recognizer, modifierFlags] };
+            self.with_mounter(move |m| m.hover(id, state, in_window, modifiers));
+        }
+
+        #[unsafe(method(handleContextMenu:))]
+        fn handle_context_menu(&self, recognizer: &UITapGestureRecognizer) {
+            if recognizer.state() != UIGestureRecognizerState::Ended {
+                return;
+            }
+            let Some(view) = recognizer.view() else { return };
+            let id = view.tag() as NodeId;
+            let in_window = recognizer.locationInView(None);
+            // SAFETY: UIGestureRecognizer's `modifierFlags` (iOS 13.4), a
+            // UIKeyModifierFlags (NSInteger).
+            let modifiers: isize = unsafe { msg_send![recognizer, modifierFlags] };
+            self.with_mounter(move |m| m.context_menu(id, in_window, modifiers));
         }
 
         #[unsafe(method(handlePinch:))]
@@ -120,8 +138,9 @@ define_class!(
         fn handle_editing_changed(&self, field: &UITextField) {
             // Read now: a deferred call must report this edit's text.
             let text = field.text().map(|t| t.to_string()).unwrap_or_default();
+            let marked = input::marked_text(field);
             let id = field.tag() as NodeId;
-            self.with_mounter(move |m| m.input_changed(id, text));
+            self.with_mounter(move |m| m.input_edited(id, text, marked));
         }
     }
 
@@ -156,6 +175,9 @@ define_class!(
         #[unsafe(method(textFieldDidChangeSelection:))]
         fn text_field_did_change_selection(&self, field: &UITextField) {
             self.selection_changed(field);
+            // Unmarking keeps the text and only moves the selection.
+            let text = field.text().map(|t| t.to_string()).unwrap_or_default();
+            self.composition(field, text);
         }
 
         #[unsafe(method(textFieldShouldReturn:))]
@@ -187,13 +209,15 @@ define_class!(
         #[unsafe(method(textViewDidChange:))]
         fn text_view_did_change(&self, view: &UITextView) {
             let text = view.text().to_string();
+            let marked = input::marked_text(view);
             let id = view.tag() as NodeId;
-            self.with_mounter(move |m| m.input_changed(id, text));
+            self.with_mounter(move |m| m.input_edited(id, text, marked));
         }
 
         #[unsafe(method(textViewDidChangeSelection:))]
         fn text_view_did_change_selection(&self, view: &UITextView) {
             self.selection_changed(view);
+            self.composition(view, view.text().to_string());
         }
 
         #[unsafe(method(textViewDidBeginEditing:))]
@@ -271,7 +295,7 @@ define_class!(
             let applied = self.ivars().scrolls_applied.borrow().get(&id).copied().unwrap_or(0);
             self.ivars()
                 .control
-                .scroll(id, offset.x as f32, offset.y as f32, applied);
+                .scroll(id, point(px(offset.x as f32), px(offset.y as f32)), applied);
             self.with_mounter(move |m| m.scrolled(id, offset));
         }
 
@@ -291,7 +315,7 @@ define_class!(
             let applied = self.ivars().scrolls_applied.borrow().get(&id).copied().unwrap_or(0);
             self.ivars()
                 .control
-                .scroll(id, offset.x as f32, offset.y as f32, applied);
+                .scroll(id, point(px(offset.x as f32), px(offset.y as f32)), applied);
         }
 
         #[unsafe(method(scrollViewDidEndZooming:withView:atScale:))]
@@ -538,6 +562,14 @@ impl EventTarget {
         });
     }
 
+    /// The composition of the input `view` belongs to, as it is with
+    /// `text` in it.
+    fn composition(&self, view: &UIView, text: String) {
+        let id = view.tag() as NodeId;
+        let marked = input::marked_text(view);
+        self.with_mounter(move |m| m.input_composition(id, text, marked));
+    }
+
     /// A press event on a pressable text span.
     pub(crate) fn link_event(&self, link: &nsh_core::TextLink, kind: EventKind) {
         if link.events.contains(kind) {
@@ -586,10 +618,10 @@ impl EventTarget {
         self.dispatch(
             scroll.tag() as NodeId,
             event,
-            EventPayload::Scroll {
-                x: offset.x as f32,
-                y: offset.y as f32,
-            },
+            EventPayload::Scroll(nsh_core::geometry::point(
+                nsh_core::Points(offset.x as f32),
+                nsh_core::Points(offset.y as f32),
+            )),
         );
     }
 

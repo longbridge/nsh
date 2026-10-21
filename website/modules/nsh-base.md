@@ -1,0 +1,297 @@
+---
+title: nsh/base
+description: "Unstyled base components for an app's UI: buttons, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+order: 2.5
+demo: ui-navigation
+---
+
+# nsh/base
+
+`nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
+accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
+app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
+[Modules](./index.md#three-layers)). It provides controls (`Button`), documents of Markdown or HTML (`TextView`), selections across texts
+(`SelectionArea`), navigation (a `NavStack` of `NavPage`s driven
+by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
+(`SafeAreaView`, `safeArea()` and `safeAreaInsets()`), the system's alert dialogs (`AlertDialog`), the software
+keyboard (`Keyboard`, `keyboardFrame()` and `KeyboardAvoidingView`). Pages and dialogs also decide the status bar
+(`statusBar`).
+
+The look is the app's: what goes inside a page, a dialog or a header is your own JSX, drawn from the primitives with
+styles, [Tailwind](../docs/tailwind.md) classes and your theme, Rust components from [your own crate](../docs/rust.md),
+or a component library the community builds on `nsh/base`. Every host serves `nsh/base`; Rust apps use the same API
+from the `nsh-base` crate (`nsh_base::{button, safe_area_view, …}`).
+
+```rust tabs
+use nsh_base::{
+    AvoidBehavior, Edge, alert_dialog, button, dialog, keyboard_avoiding_view, nav_page, nav_stack, safe_area_view,
+    theme,
+};
+```
+
+```tsx tabs
+import {
+  AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
+  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
+} from "nsh/base";
+import type {
+  AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
+  DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
+  SelectionAreaProps, StatusBarForeground, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
+} from "nsh/base";
+```
+
+This page is the module's index: each component has an element page with its examples, props and platform notes. For
+walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and keyboard](../docs/forms-and-keyboard.md).
+
+| TSX | Rust | What it is |
+|---|---|---|
+| [`Button`](../elements/button.md) | `button()` | A press target with the disabled and selected states and a role for screen readers. |
+| [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
+| [`Dialog`](../elements/dialog.md) | `dialog()` | Content presented over everything else: sheets, full-screen flows, dialogs. |
+| [`SafeAreaView`](../elements/safe-area-view.md) | `safe_area_view()` | A view padded clear of system UI and headers. |
+| [`safeArea()`, `safeAreaInsets()`](../elements/safe-area-view.md#safearea-and-safeareainsets) | `safe_area()`, `cx.insets()` | The insets themselves, reactive. |
+| [`KeyboardAvoidingView`](../elements/keyboard-avoiding-view.md) | `keyboard_avoiding_view()` | A view that keeps its content above the software keyboard. |
+| [`Keyboard.dismiss()`, `keyboardFrame()`](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) | `dismiss_keyboard()`, `keyboard_height()` | Hides the keyboard; its height over the surface. |
+| [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | The platform's alert or action sheet. |
+| `statusBar` on pages and dialogs | `.status_bar(..)` | The status bar while a page or dialog is up. See [Status bar](#status-bar). |
+
+In Rust, `theme()` reads the app's theme as design tokens (`theme().primary()`, `theme().radius()`), the same tokens
+TSX's [theme classes](../docs/tailwind.md#theme-tokens) use.
+
+## Controls
+
+### Button
+
+A press target that owns its behavior and has no look: presses, the disabled and selected states and its role for
+screen readers. Its look is the app's `class` and `style` with state variants, its content is its children. See
+[Button](../elements/button.md).
+
+## Documents
+
+### TextView
+
+`TextView` shows a document of Markdown, HTML or blocks the app builds, drawn with [`Text`](../elements/text.md) elements and views: headings,
+lists, code, tables, images, formulas, footnotes and the app's own syntax. It is made for AI chat replies that stream
+in (`options={{ streaming: true }}` and a `caret`). It comes with a reading typography in the theme's colors, which
+the app restyles part by part (`classes`, `styles`).
+Links report presses (`onLinkPress`), and render functions put the app's content in place: code blocks and their
+actions, tables' actions, formulas, images and custom nodes.
+
+```tsx
+<TextView
+  markdown={reply()}
+  options={{ streaming: true }}
+  classes={{ heading: "font-semibold", code: "rounded bg-neutral-100 px-1", link: "text-blue-600" }}
+  onLinkPress={(url) => openLink(url)}
+/>
+```
+
+See [TextView](../elements/text-view.md) for its parts, streaming, render functions, Markdown extensions, the
+document model and its use from Rust.
+
+## Selection
+
+### SelectionArea
+
+`SelectionArea` makes the texts inside it select together, as a web page's do: one selection runs from a place in one
+text to a place in another, across views, [`Text`](../elements/text.md) elements and [`TextView`](../elements/text-view.md)s,
+in reading order. Wrap a chat transcript in it and a selection can start in one message and end in the next; Copy
+puts the selected text on the clipboard, with texts side by side joined by a tab and the others by a line break.
+
+```tsx
+import { Text, View } from "nsh";
+import { SelectionArea, TextView } from "nsh/base";
+
+<SelectionArea class="gap-3 p-4">
+  <Text class="font-semibold">Release notes</Text>
+  <TextView markdown={notes} />
+  <View class="flex-row gap-2">
+    <Text selectable={false} class="text-neutral-500">Updated</Text>
+    <Text>October 21</Text>
+  </View>
+</SelectionArea>
+```
+
+| Platform | How a selection is made |
+|---|---|
+| macOS, Windows, Linux, GPUI | Drag across the texts; a double click selects a word, a triple click a paragraph, and a drag after them goes on by words or paragraphs. Shift+click extends the selection. Ctrl / Cmd+A selects everything in the area, Ctrl / Cmd+C copies, Escape or a press outside clears. |
+| iOS, Android | A long press selects a word; the platform's handles extend it, and its edit menu has Copy and Select All. |
+| Web | The browser's own selection, with its gestures, menu and shortcuts. |
+
+| Prop | Type | |
+|---|---|---|
+| `children` | `JSX.Element` | The content: any views, with texts at any depth. |
+| `class`, `style` | | Its layout and look, as a [View](../elements/view.md)'s. |
+
+- **Texts that stay out**: a text with `selectable={false}` (a label, a button's caption) is skipped by the selection
+  and its gestures.
+- **Nested areas**: an area inside another is part of the outer one, so one selection covers both.
+- **TextView**: a `TextView` with `selectable` is a selection area of its own: its paragraphs, list items, cells and
+  code blocks select together. Inside a `SelectionArea` it joins the outer selection.
+- **Outside areas**: a `selectable` text that is in no area selects on its own, as [Text](../elements/text.md#props)
+  describes.
+- **The look** is the platform's highlight in each text's `selectionColor` (`selection:text-*`); the area draws
+  nothing of its own.
+- **Lists**: in a virtualized [List](../elements/list.md), a selection covers the rows that are mounted; rows recycled
+  out of view leave it.
+
+## Navigation
+
+A `NavStack` of `NavPage`s is `UINavigationController` on iOS and a stack with a toolbar and predictive back on
+Android; on the desktops and the web each page shows the app's own `header`. See
+[NavStack](../elements/nav-stack.md), which also covers `createNavStack` and leaving a page.
+
+### Dialog
+
+`Dialog` presents content over everything else, including the stack's header, in its own native window layer. Its
+popup and backdrop are styled by the app. See [Dialog](../elements/dialog.md).
+
+## Safe areas
+
+### SafeAreaView
+
+`SafeAreaView` pads its content by the insets where it renders: the nearest page's (below its header), the nearest
+dialog's, or else the surface's safe area. See [SafeAreaView](../elements/safe-area-view.md).
+
+### safeArea and safeAreaInsets
+
+`safeArea()` is the surface's safe area; `safeAreaInsets()` the insets where a component renders. Both are reactive
+`Insets` (`{ top, right, bottom, left }` in points). See
+[safeArea and safeAreaInsets](../elements/safe-area-view.md#safearea-and-safeareainsets).
+
+## Alert dialogs
+
+### AlertDialog
+
+`AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with the action the user
+chose. See [AlertDialog](../elements/alert-dialog.md).
+
+## Keyboard
+
+`Keyboard.dismiss()` hides the software keyboard and `keyboardFrame()` tells you how much of the screen it covers. See
+[Hiding the keyboard](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) and
+[The keyboard's height](../elements/keyboard-avoiding-view.md#the-keyboards-height).
+
+### KeyboardAvoidingView
+
+`KeyboardAvoidingView` keeps its content above the software keyboard, moving with it. See
+[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md).
+
+## Status bar
+
+The status bar belongs to what is on screen, as in UIKit, where each view controller declares its
+`preferredStatusBarStyle` and the topmost one decides. In NSH the pages and dialogs are those view controllers: a
+`NavPage` or a `Dialog` declares the status bar it wants with `statusBar`, and the app declares its default in
+`nsh.json`.
+
+```rust tabs
+use nsh_base::nav_page;
+use nsh_core::ui::prelude::*;
+
+fn photo_viewer() -> Screen {
+    nav_page().header_shown(false).status_bar(
+        StatusBarSetting::default()
+            .foreground(StatusBarStyle::Light)
+            .hidden(true)
+            .animated(true),
+    )
+}
+```
+
+```tsx tabs
+import { NavPage } from "nsh/base";
+
+function PhotoViewer() {
+  return (
+    <NavPage headerShown={false} statusBar={{ foreground: "light", hidden: true, animated: true }}>
+      …
+    </NavPage>
+  );
+}
+```
+
+`statusBar` takes these fields, each optional (in Rust, a `StatusBarStyle` alone, or `StatusBarSetting`'s builder
+methods of the same names):
+
+| Field | Type | Description |
+|---|---|---|
+| `foreground` | `"auto" \| "light" \| "dark"` (Rust: `StatusBarStyle::Default`, `Light`, `Dark`) | The color of the content (time, battery, signal): `"light"` for dark backgrounds, `"dark"` for light ones, `"auto"` the platform's for the current appearance. |
+| `hidden` | `boolean` | Hides the status bar. |
+| `animated` | `boolean` | Animates the change when the page or dialog comes and goes. |
+
+The value is reactive: `statusBar={{ foreground: dark() ? "light" : "dark" }}` follows the signal, as does a Rust
+closure that reads one.
+
+### Which one applies
+
+The page or dialog shown **most recently** decides, **field by field**: a page pushed onto a stack is over the pages
+below it, and an open dialog is over the pages. A field it leaves out comes from the one below it, and in the end
+from the app's default. When the page is popped or the dialog closes, the one below it applies again.
+
+```rust tabs
+nav_page()
+    .title("Inbox")
+    .status_bar(StatusBarStyle::Dark);
+
+// Pushed over it: hidden, with the inbox's dark content when it shows again.
+nav_page()
+    .title("Photo")
+    .status_bar(StatusBarSetting::default().hidden(true));
+```
+
+```tsx tabs
+<NavPage title="Inbox" statusBar={{ foreground: "dark" }}>…</NavPage>
+
+// Pushed over it: hidden, with the inbox's dark content when it shows again.
+<NavPage title="Photo" statusBar={{ hidden: true }}>…</NavPage>
+```
+
+### The app's default
+
+`nsh.json`'s `"statusBar"` is the setting under every page and dialog, as Info.plist's `UIStatusBarStyle` and
+`UIStatusBarHidden` are in a UIKit app:
+
+```json
+{
+  "statusBar": { "foreground": "light", "hidden": false }
+}
+```
+
+Both fields are optional. Without it the content is `"auto"` and the bar shows. Packaged iOS apps also show it on the
+launch screen.
+
+### The status bar on each platform
+
+- **iOS**: hiding and showing animate with a fade. In an app [embedded](../docs/embedding-ios.md) in a native one,
+  the host app's view controller decides how the status bar looks. The host applies NSH's setting by returning
+  `NshAppView.preferredStatusBarStyle`, `NshAppView.prefersStatusBarHidden` and
+  `NshAppView.preferredStatusBarUpdateAnimation` from its view controller.
+- **Android**: apps draw edge to edge, behind the status bar (Android 15, API 35): the app's own background is the
+  bar's, and `foreground` keeps its content readable on it.
+- **Desktops and the web**: the window's title bar and the browser's bars are the system's and the browser's;
+  `statusBar` and `nsh.json`'s `"statusBar"` are for the phones.
+
+> [!IMPORTANT]
+> When your `nsh.json` declares `"capabilities"`, the status bar changes only when they include
+> `"statusBar": true`; other changes are refused and logged. See
+> [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+
+```json
+{
+  "capabilities": {
+    "statusBar": true
+  }
+}
+```
+
+## Related
+
+- [Navigation guide](../docs/navigation.md).
+- [Forms and keyboard](../docs/forms-and-keyboard.md).
+- [Button](../elements/button.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+  [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
+  [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Text](../elements/text.md) and
+  [Input](../elements/input.md).
+- [Device and environment](../docs/device-and-environment.md).
+- [nsh/android](./nsh-android.md): `BackHandler`, `Toast.show` for short messages and other Android-only APIs.

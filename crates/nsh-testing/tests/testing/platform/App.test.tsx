@@ -1,0 +1,64 @@
+import { expect, open, test } from "nsh/test";
+
+test("back pops the screen pushed last", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Open");
+  await app.waitFor("Detail body");
+  await app.back();
+  expect(app.shows("Detail body")).toBe(false);
+  expect(app.texts()).toContain("Answer: none");
+  await expect(() => app.back()).rejects.toThrow("nothing to go back from");
+});
+
+test("a screen that prevents going back is asked", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Draft");
+  await app.back();
+  await app.waitFor("Asked: yes");
+});
+
+test("back closes a modal", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Sheet");
+  await app.waitFor("In the sheet");
+  expect(app.texts()).toContain("Shown: 1");
+  await app.back();
+  expect(app.shows("In the sheet")).toBe(false);
+});
+
+test("a dialog is cancelled unless the test answers it", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Delete");
+  await app.waitFor("Answer: Cancel");
+  expect(app.dialogs()[0].message).toBe("It is gone after.");
+  app.onDialog((dialog) => (dialog.title === "Delete?" ? "Delete" : null));
+  await app.press("Delete");
+  await app.waitFor("Answer: Delete");
+  // Closing it without a button is the user's choice only when it can be.
+  await expect(() => app.press("Update")).rejects.toThrow("cannot be dismissed");
+});
+
+test("a dialog without a cancel button needs an answer", async () => {
+  const app = await open("./App.tsx");
+  await expect(() => app.press("Update")).rejects.toThrow("needs an answer");
+});
+
+test("the clipboard holds what was copied", async () => {
+  const app = await open("./App.tsx", { clipboard: "seed" });
+  await app.press("Paste");
+  await app.waitFor("Pasted: seed");
+  await app.press("Copy");
+  expect(app.clipboard()).toBe("copied text");
+});
+
+test("native animations run to their end", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Move");
+  await app.waitFor("Moved: done");
+});
+
+test("an image's size is answered as a failed load", async () => {
+  const app = await open("./App.tsx");
+  await app.press("Measure");
+  await app.waitFor("Size: not loaded");
+});

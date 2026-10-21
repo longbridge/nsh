@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{
     CellSlot, EventKind, EventPayload, ListContentStyle, PayloadValue, Prop, Tag, Viewability,
+    geometry::Points,
 };
 
 /// How a list lays out its rows: [`super::ListElement`] (the app's rows)
@@ -45,9 +46,9 @@ pub trait ListLayout: Sized {
         self
     }
 
-    /// The size of rows not measured yet, in points (default 50).
-    fn estimated_item_size(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| c.estimated = Some(points))
+    /// The size of rows not measured yet (default 50 points).
+    fn estimated_item_size(self, size: impl IntoReactive<Points>) -> Self {
+        self.layout(size, |c, size: Points| c.estimated = Some(size.0))
     }
 
     /// Rows side by side (vertical lists).
@@ -67,16 +68,16 @@ pub trait ListLayout: Sized {
         self
     }
 
-    /// Stays at the end of its content while it is within `threshold`
-    /// points of it, as the content grows or the viewport shrinks (a reply
+    /// Stays at the end of its content while it is within `threshold` of
+    /// it, as the content grows or the viewport shrinks (a reply
     /// streaming into the last row, the keyboard showing); scrolled further
     /// up, what is visible stays where it is (TS:
     /// `maintainVisibleContentPosition={{ autoscrollToBottomThreshold }}`).
     /// For lists that are not [`Self::inverted`], which keep their distance
     /// from the end anyway.
-    fn follow_end(self, threshold: impl IntoReactive<f32>) -> Self {
-        self.layout(threshold, |c, threshold| {
-            c.follow_end = Some(threshold.max(0.0));
+    fn follow_end(self, threshold: impl IntoReactive<Points>) -> Self {
+        self.layout(threshold, |c, threshold: Points| {
+            c.follow_end = Some(threshold.0.max(0.0));
         })
     }
 
@@ -85,47 +86,51 @@ pub trait ListLayout: Sized {
         self.layout(shows, |c, shows| c.shows_indicator = Some(shows))
     }
 
-    /// Padding around the rows, in points.
-    fn content_padding(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| {
-            content(c).padding = crate::EdgeInsets::all(points);
+    /// Padding around the rows.
+    fn content_padding(self, padding: impl IntoReactive<Points>) -> Self {
+        self.layout(padding, |c, padding: Points| {
+            content(c).padding = crate::EdgeInsets::all(padding);
         })
     }
 
     /// Horizontal padding around the rows.
-    fn content_padding_x(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| {
+    fn content_padding_x(self, padding: impl IntoReactive<Points>) -> Self {
+        self.layout(padding, |c, padding: Points| {
             let p = &mut content(c).padding;
-            (p.left, p.right) = (points, points);
+            (p.left, p.right) = (padding, padding);
         })
     }
 
     /// Vertical padding around the rows.
-    fn content_padding_y(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| {
+    fn content_padding_y(self, padding: impl IntoReactive<Points>) -> Self {
+        self.layout(padding, |c, padding: Points| {
             let p = &mut content(c).padding;
-            (p.top, p.bottom) = (points, points);
+            (p.top, p.bottom) = (padding, padding);
         })
     }
 
     /// Padding above the rows.
-    fn content_padding_top(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).padding.top = points)
+    fn content_padding_top(self, padding: impl IntoReactive<Points>) -> Self {
+        self.layout(padding, |c, padding: Points| {
+            content(c).padding.top = padding
+        })
     }
 
     /// Padding below the rows.
-    fn content_padding_bottom(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).padding.bottom = points)
+    fn content_padding_bottom(self, padding: impl IntoReactive<Points>) -> Self {
+        self.layout(padding, |c, padding: Points| {
+            content(c).padding.bottom = padding
+        })
     }
 
     /// Space between rows (columns in horizontal lists).
-    fn row_gap(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).row_gap = points)
+    fn row_gap(self, gap: impl IntoReactive<Points>) -> Self {
+        self.layout(gap, |c, gap: Points| content(c).row_gap = gap)
     }
 
     /// Space between columns ([`Self::columns`]).
-    fn column_gap(self, points: impl IntoReactive<f32>) -> Self {
-        self.layout(points, |c, points| content(c).column_gap = points)
+    fn column_gap(self, gap: impl IntoReactive<Points>) -> Self {
+        self.layout(gap, |c, gap: Points| content(c).column_gap = gap)
     }
 }
 
@@ -240,20 +245,20 @@ impl VirtualList {
         self
     }
 
-    /// Above the rows, scrolling with them (TS: `ListHeaderComponent`):
+    /// Above the rows, scrolling with them (TS: `header`):
     /// part of this view, so its state and handlers are the
     /// component's, and it is never recycled.
     pub fn header(self, header: impl IntoElement) -> Self {
         self.extra(CellSlot::Header, "\0header", header.into_element())
     }
 
-    /// Below the rows, scrolling with them (TS: `ListFooterComponent`).
+    /// Below the rows, scrolling with them (TS: `footer`).
     pub fn footer(self, footer: impl IntoElement) -> Self {
         self.extra(CellSlot::Footer, "\0footer", footer.into_element())
     }
 
     /// Shown instead of the rows while there are none (TS:
-    /// `ListEmptyComponent`).
+    /// `empty`).
     pub fn empty(mut self, empty: impl IntoElement) -> Self {
         let empty = empty.into_element();
         match self.list().count.clone() {
@@ -269,7 +274,7 @@ impl VirtualList {
         }
     }
 
-    /// Between rows (TS: `ItemSeparatorComponent`): `separator()` renders
+    /// Between rows (TS: `separator`): `separator()` renders
     /// one after each row but the last (before it in an inverted list), in
     /// the row's cell.
     pub fn separator<R: IntoElement>(mut self, separator: impl Fn() -> R + 'static) -> Self {

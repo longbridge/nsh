@@ -506,6 +506,21 @@ impl<H: Host> Graph<H> {
         Ok(())
     }
 
+    /// Removes from owner `id` the first cleanup `matches` accepts, which
+    /// then never runs: what it was to undo ended by itself.
+    pub fn remove_cleanup(
+        &mut self,
+        id: u32,
+        matches: impl Fn(&H::Cleanup) -> bool,
+    ) -> Option<H::Cleanup> {
+        if !is_node(id) {
+            return None;
+        }
+        let cleanups = &mut self.nodes.get_mut(id as usize)?.cleanups;
+        let at = cleanups.iter().position(matches)?;
+        Some(cleanups.remove(at))
+    }
+
     /// Whether a round is running (its end reports errors).
     pub fn in_round(&self) -> bool {
         self.updates.is_some()

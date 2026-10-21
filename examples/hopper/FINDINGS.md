@@ -8,8 +8,12 @@ workaround here in the same change.
 
 | # | Area | Finding | Workaround in the app |
 |---|---|---|---|
-| 1 | Mobile UI | `nsh/ui/mobile` has no switch, slider, segmented control, stepper styled for dark themes, menu or tab bar; each app writes them. | `ui.tsx` and the tab bar in `App.tsx` (about 500 lines). |
-| 2 | Touch, layout | There is no popover / anchored overlay primitive: a menu renders inside its anchor's parent, and nothing closes it on a tap elsewhere on the screen. | The easing menu hangs under the picker's row, which has a `zIndex` over the curve; a backdrop over the curve closes it (`cards/ThrottleProfile.tsx`). |
+| 1 | Touch, layout | There is no popover / anchored overlay primitive: a menu renders inside its anchor's parent, and nothing closes it on a tap elsewhere on the screen. | The easing menu hangs under the picker's row, which has a `zIndex` over the curve; a backdrop over the curve closes it (`cards/ThrottleProfile.tsx`). |
+
+## By design
+
+- Styled controls (switch, slider, segmented control, stepper, menu, tab bar) are the app's own: NSH ships
+  primitives and capabilities, and the app draws its controls with them (`ui.tsx` and the tab bar in `App.tsx`).
 
 ## Fixed
 
@@ -25,7 +29,7 @@ workaround here in the same change.
 - `borderColor` could not be animated natively: `borderColor`, `color` and shadows bind to animated values; the
   switch's knob ring animates.
 - QuickJS had no `Intl`: `Intl.NumberFormat` / `DateTimeFormat` and `toLocaleString` are formatted in Rust.
-- No `isPointInPath`: `ctx.isPointInPath` / `isPointInStroke` are answered in Rust; the RCS quads and the tank in
+- No `isPointInPath`: `cx.isPointInPath` / `isPointInStroke` are answered in Rust; the RCS quads and the tank in
   the mass section are hit-tested with paths.
 - A hot update of the entry popped pushed screens and reset state: top-level signals and navigators keep their state,
   and an unchanged `mount(App)` is kept (editing `App` itself still resets the state inside it).

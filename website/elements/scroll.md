@@ -2,15 +2,29 @@
 title: Scroll
 description: "The native scroll view: vertical and horizontal scrolling, paging and snapping, pull to refresh, zooming and scroll events."
 order: 5
+group: primitives
 demo: el-scroll
 ---
 
 # Scroll
 
-`<Scroll>` is a native scroll view (UIScrollView on iOS and Mac Catalyst, a ScrollView on Android). It lays out all its
-children as its content and scrolls them natively: scrolling, flinging, bouncing and snapping never wait for JS.
+`Scroll` is a native scroll view (UIScrollView on iOS and Mac Catalyst, a ScrollView on Android). It lays out all its
+children as its content and scrolls them natively: scrolling, flinging, bouncing and snapping run on the platform, at
+the display's rate. Rust makes one with `scroll()`, TSX with `<Scroll>` from `nsh`.
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+scroll().flex_1().child(
+    view().p_4().gap_2().child(each(
+        rows,
+        |row: &Row| row.id,
+        |row, _index| text(move || row.get().title),
+    )),
+)
+```
+
+```tsx tabs
 <Scroll style={{ flex: 1 }}>
   <View style={{ padding: 16, gap: 8 }}>
     <Each of={rows}>{(row) => <Text>{row().title}</Text>}</Each>
@@ -18,45 +32,64 @@ children as its content and scrolls them natively: scrolling, flinging, bouncing
 </Scroll>
 ```
 
-`<Scroll>` creates every child, which suits pages of moderate size. For long or unbounded data use a
-[list](./list.md): it creates only the rows near the viewport and recycles them.
+A scroll view creates every child, which suits pages of moderate size. For long or unbounded data use a
+[list](./list.md): it creates the rows near the viewport and recycles them.
 
-A scroll view must have a bounded size along its axis: give it `flex: 1` (or a `height`) inside a container that has
-one. Its content is laid out at the scroll view's width (height when `horizontal`) and as tall (wide) as it needs.
+A scroll view needs a bounded size along its axis: give it `flex: 1` (`.flex_1()`) or a height inside a container that
+has one. Its content is laid out at the scroll view's width (height when horizontal) and as tall (wide) as it needs.
 
 ## Props
 
-Besides the [common props](./index.md#common-props) (with `style` typed as `ViewStyle`):
+Besides the [common props](./index.md#common-props) (with `style` typed as `ViewStyle`). In Rust, the scrolling props
+are methods of the `Scrollable` trait, which lists share.
 
 ### Scrolling
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `horizontal` | `boolean` | `false` | Scrolls sideways. |
-| `scrollEnabled` | `boolean` | `true` | The user can scroll it. |
-| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
-| `bounces` | `boolean` | `true` | Overscroll past the edges. |
-| `pagingEnabled` | `boolean` | `false` | Stops at multiples of the viewport. |
-| `snapToInterval` | `number` | `0` | Stops at multiples of this length (0: off). |
-| `snapToOffsets` | `number[]` | | Stops at these offsets. |
-| `snapToAlignment` | `"start" \| "center" \| "end"` | `"start"` | Which point of an item aligns with the viewport with `snapToInterval`. |
-| `disableIntervalMomentum` | `boolean` | `false` | A fling moves one snap point at most. |
-| `decelerationRate` | `"normal" \| "fast" \| number` | platform | How fast a fling slows down: the velocity kept per millisecond (`normal` 0.998, `fast` 0.99). |
-| `contentInset` | `{ top?, right?, bottom?, left? }` | | Room around the content. |
-| `contentOffset` | `{ x?, y? }` | | Where it starts. |
-| `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
-| `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard: `never` (the tap only dismisses it), `always` (it stays up), `handled` (it stays up when something handles the tap). |
-| `scrollValue` | `AnimatedValue` | | An animated value fed with the scroll offset (main axis), for scroll-linked animations. |
-| `scrollEventThrottle` | `number` | | Minimum milliseconds between `onScroll` events (at most one per frame anyway). |
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
+| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | The user can scroll it. |
+| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
+| `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
+| `pagingEnabled` | `.paging(..)` | `boolean` | `false` | Stops at multiples of the viewport. |
+| `snapToInterval` | `.snap_interval(px(..))` | `number` | `0` | Stops at multiples of this length (0: off). |
+| `snapToOffsets` | `.snap_offsets(..)` | `number[]` | | Stops at these offsets. |
+| `snapToAlignment` | `.snap_alignment(SnapAlignment::Center)` | `"start" \| "center" \| "end"` | `"start"` | Which point of an item aligns with the viewport with `snapToInterval`. |
+| `disableIntervalMomentum` | `.disable_interval_momentum(..)` | `boolean` | `false` | A fling moves one snap point at most. |
+| `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | platform | How fast a fling slows down: the velocity kept per millisecond (`normal` 0.998, `fast` 0.99). |
+| `contentInset` | `.content_inset(EdgeInsets { .. })` | `{ top?, right?, bottom?, left? }` | | Room around the content. |
+| `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | Where it starts. |
+| `contentStyle` | the content view's own styles | `ViewStyle` | | The style of a view around the children that scrolls with them; `flexGrow: 1` makes it at least as tall as the viewport (a centered empty state). |
+| `contentClass` | the content view's own styles | `string` | | The same as classes, e.g. `"grow justify-center p-4"`. |
+| `keyboardDismissMode` | `.keyboard_dismiss_mode(KeyboardDismissMode::OnDrag)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
+| `keyboardShouldPersistTaps` | `.keyboard_taps(KeyboardTaps::Handled)` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard: `never` (the tap only dismisses it), `always` (it stays up), `handled` (it stays up when something handles the tap). |
+| `scrollValue` | `.scroll_value(&value)` | `AnimatedValue` | | An animated value fed with the scroll offset (main axis), for scroll-linked animations. |
+| `scrollEventThrottle` | `.event_throttle(ms)` | `number` | | Minimum milliseconds between `onScroll` events (at most one per frame anyway). |
 
 ### Pull to refresh
 
-| Prop | Type | Description |
-|---|---|---|
-| `refreshing` | `boolean` | The refresh spinner shows. |
-| `onRefresh` | `() => void` | The user pulled to refresh: start loading and set `refreshing` until it ends. |
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `refreshing` | `.refreshing(..)` | `boolean` | The refresh spinner shows. |
+| `onRefresh` | `.on_refresh(..)` | `() => void` | The user pulled to refresh: start loading and set `refreshing` until it ends. |
 
-```tsx
+```rust tabs
+let refreshing = signal(false);
+
+scroll()
+    .flex_1()
+    .refreshing(refreshing)
+    .on_refresh(move || {
+        refreshing.set(true);
+        spawn(async move {
+            load().await;
+            refreshing.set(false);
+        });
+    })
+    .child(content())
+```
+
+```tsx tabs
 const refreshing = signal(false);
 async function reload() {
   refreshing.set(true);
@@ -71,19 +104,36 @@ async function reload() {
 
 ### Zooming
 
-Setting `maximumZoomScale` above `minimumZoomScale` makes the content zoomable with a pinch; zoomed in, it scrolls both
-ways. Lists do not zoom.
+Setting `maximumZoomScale` above `minimumZoomScale` (`.zoom_range(min, max)` in Rust) makes the content zoomable with a
+pinch; zoomed in, it scrolls both ways. Lists keep their scale.
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `minimumZoomScale` | `number` | `1` | The smallest zoom. |
-| `maximumZoomScale` | `number` | `1` | The largest zoom. |
-| `zoomScale` | `number` | | Zooms to this scale when it changes; otherwise the user's zoom is kept. |
-| `bouncesZoom` | `boolean` | `true` | Pinching may go past the limits and springs back. |
-| `pinchGestureEnabled` | `boolean` | `true` | The user can pinch to zoom. |
-| `centerContent` | `boolean` | `false` | Content smaller than the viewport (zoomed out) is centered. |
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `minimumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | The smallest zoom. |
+| `maximumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | The largest zoom. |
+| `zoomScale` | `.zoom(..)` | `number` | | Zooms to this scale when it changes; otherwise the user's zoom is kept. |
+| `bouncesZoom` | `.bounces_zoom(..)` | `boolean` | `true` | Pinching may go past the limits and springs back. |
+| `pinchGestureEnabled` | `.pinch_gesture_enabled(..)` | `boolean` | `true` | The user can pinch to zoom. |
+| `centerContent` | `.center_content(..)` | `boolean` | `false` | Content smaller than the viewport (zoomed out) is centered. |
 
-```tsx
+```rust tabs
+let photo = element_ref();
+
+scroll()
+    .element_ref(&photo)
+    .zoom_range(1.0, 4.0)
+    .center_content(true)
+    .flex_1()
+    .bg(black())
+    .child(
+        image(PICTURE)
+            .w(px(390.0))
+            .h(px(520.0))
+            .on_press(move || photo.zoom_to(1.0, None, true)),
+    )
+```
+
+```tsx tabs
 let photo!: YNode;
 <Scroll ref={photo} maximumZoomScale={4} centerContent style={{ flex: 1, backgroundColor: "#000" }}>
   <Image src={picture} style={{ width: 390, height: 520 }} onPress={() => photo.zoomTo({ scale: 1, animated: true })} />
@@ -92,30 +142,38 @@ let photo!: YNode;
 
 ## Events
 
-| Event | Payload | When |
-|---|---|---|
-| `onScroll` | `ScrollEvent` | The offset changed (at most once per frame, and no more often than `scrollEventThrottle`). |
-| `onScrollBeginDrag` / `onScrollEndDrag` | `{ x, y }` | The user started / stopped dragging. |
-| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `{ x, y }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumScrollEnd`. |
-| `onScrollEnd` | `{ x, y }` | Scrolling came to rest. |
-| `onRefresh` | none | Pulled to refresh. |
+| Event | Rust | Payload | When |
+|---|---|---|---|
+| `onScroll` | `.on_scroll` | `ScrollEvent` | The offset changed (at most once per frame, and no more often than `scrollEventThrottle`). |
+| `onScrollBeginDrag` / `onScrollEndDrag` | `.on_scroll_begin_drag` / `.on_scroll_end_drag` | `{ x, y }` (`Point<Points>`) | The user started / stopped dragging. |
+| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `.on_momentum_scroll_begin` / `.on_momentum_scroll_end` | `{ x, y }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumScrollEnd`. |
+| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
+| `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 
-`ScrollEvent` is `{ x, y, contentWidth, contentHeight, width, height, zoomScale }`: the offset, the (zoomed) content
-size, the viewport size and the zoom scale (1 unless the view zooms).
+`ScrollEvent` is `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` (in Rust `offset`, `content_size`,
+`size`, `zoom_scale`): the offset, the (zoomed) content size, the viewport size and the zoom scale (1 unless the view
+zooms).
 
 > [!TIP]
 > To move something with the scroll position (a shrinking header, a parallax image), bind `scrollValue` to a native
-> value and interpolate it in a style. It runs on the UI thread at the display's rate, which `onScroll` (a JS event per
-> frame) cannot guarantee. See [animation](../docs/animation.md).
+> value and interpolate it in a style. It runs on the UI thread at the display's rate, while `onScroll` is an event per
+> frame in the app's code. See [animation](../docs/animation.md).
 
 ## Ref methods
 
-| Method | Description |
-|---|---|
-| `scrollTo({ x?, y?, animated? })` | Scrolls to an offset. |
-| `zoomTo({ scale, x?, y?, animated? })` | Zooms to `scale` (clamped to the limits) with the content point (`x`, `y`, unzoomed points) in the middle of the viewport, or around the middle. E.g. a double tap zooming in on the tapped point. |
+| Method | Rust | Description |
+|---|---|---|
+| `scrollTo({ x?, y?, animated? })` | `scroll_to(point(x, y), animated)` | Scrolls to an offset. |
+| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, Some(point(x, y)), animated)` | Zooms to `scale` (clamped to the limits) with the content point (`x`, `y`, unzoomed points) in the middle of the viewport, or around the middle. E.g. a double tap zooming in on the tapped point. |
 
-```tsx
+```rust tabs
+let scroller = element_ref();
+scroll().element_ref(&scroller).child(content());
+
+scroller.scroll_to(point(px(0.0), px(0.0)), true);
+```
+
+```tsx tabs
 let scroller!: YNode;
 <Scroll ref={scroller}>…</Scroll>;
 scroller.scrollTo({ y: 0, animated: true });
@@ -124,8 +182,8 @@ scroller.scrollTo({ y: 0, animated: true });
 ## Keyboard
 
 Inputs inside a scroll view are kept clear of the keyboard natively: the scroll view gets a bottom inset and scrolls to
-the focused input, with no JS involved. For content outside scroll views use `KeyboardAvoidingView` from
-[`nsh/ui/mobile`](../components/keyboard-avoiding-view.md). See [forms and the keyboard](../docs/forms-and-keyboard.md).
+the focused input on its own. For content outside scroll views use [`KeyboardAvoidingView`](./keyboard-avoiding-view.md)
+from `nsh/base`. See [forms and the keyboard](../docs/forms-and-keyboard.md).
 
 ## Right to left
 
@@ -135,8 +193,8 @@ changes; their children are mirrored.
 ## Platform notes
 
 - Android: pull to refresh is drawn by NSH (overscroll stays native), `contentInset` is applied as padding, and
-  `decelerationRate` only shapes snapping glides.
-- Android has no zooming scroll view: NSH switches to its own, which scales the content around its top left and scrolls
-  both ways. Pinches start after Android's minimum span between the fingers (about 27 mm).
-- Mac Catalyst (Mac idiom) has no system refresh control; NSH detects the pull and shows a spinner.
+  `decelerationRate` shapes snapping glides.
+- Android zooms with NSH's own scroll view, which scales the content around its top left and scrolls both ways.
+  Pinches start after Android's minimum span between the fingers (about 27 mm).
+- On Mac Catalyst (Mac idiom), NSH detects the pull and shows its spinner.
 - iOS redraws texts and canvases at the zoomed resolution when a zoom ends.

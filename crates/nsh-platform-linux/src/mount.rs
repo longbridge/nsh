@@ -56,6 +56,7 @@ impl Mounter {
         self.layout_animation = None;
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
+        crate::selection_area::end_batch(surface);
     }
 
     fn get(&self, id: NodeId) -> Option<&NshView> {
@@ -120,9 +121,11 @@ impl Mounter {
                 if parent.kind() == ViewKind::Scroll {
                     crate::scroll::child_inserted(parent);
                 }
+                crate::selection_area::touched(surface, child);
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
+                    crate::selection_area::touched(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
                         self.detach(surface, view);
@@ -132,6 +135,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
+                    crate::selection_area::touched(surface, &view);
                     crate::native::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
@@ -150,7 +154,7 @@ impl Mounter {
                     // Where a modal sits is the platform's (a sheet is a
                     // card inside the window): the core only sizes it.
                     let old = view.state().frame;
-                    (frame.x, frame.y) = (old.x, old.y);
+                    (frame.origin.x.0, frame.origin.y.0) = (old.origin.x.0, old.origin.y.0);
                 }
                 let frame = &frame;
                 // Compared with where a running layout animation is headed,
@@ -161,7 +165,9 @@ impl Mounter {
                     return;
                 }
                 let old = std::mem::replace(&mut view.state_mut().frame, *frame);
-                if old.width != frame.width || old.height != frame.height {
+                if old.size.width.0 != frame.size.width.0
+                    || old.size.height.0 != frame.size.height.0
+                {
                     view.queue_allocate();
                 }
                 view.moved();
@@ -192,6 +198,7 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     crate::text::set(view, text, layout, *content);
+                    crate::selection_area::touched(surface, view);
                     crate::access::text_changed(view);
                 }
             }
@@ -231,7 +238,7 @@ impl Mounter {
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 if let Some(view) = self.get(*id) {
-                    crate::scroll::scroll_by(surface, view, *dx, *dy);
+                    crate::scroll::scroll_by(surface, view, dx.0, dy.0);
                 }
             }
             MountItem::LayoutDirection { rtl } => self.rtl = *rtl,
@@ -279,6 +286,7 @@ impl Mounter {
                 view.set_can_target(!matches!(props.pointer_events, PointerEvents::None));
                 view.state_mut().props = props.clone();
                 crate::input::props_changed(surface, view);
+                crate::selection_area::props_changed(surface, view);
                 crate::access::props_changed(view);
             }
             MountItem::LayoutAnimation(a) => self.layout_animation = Some(*a),

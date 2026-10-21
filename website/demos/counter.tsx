@@ -5,7 +5,7 @@ function Button(props: { label: string; accent?: boolean; onPress: () => void })
   return (
     <View
       onPress={props.onPress}
-      activeOpacity={0.75}
+      activeStyle={{ opacity: 0.75 }}
       style={{
         ...(props.accent ? ui().accentFill : ui().raised),
         borderRadius: 12,

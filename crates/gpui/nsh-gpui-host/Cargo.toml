@@ -11,6 +11,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Compile GPUI's Metal shaders at run time: builds on macOS without a Metal Toolchain.
+runtime-shaders = ["nsh-platform-gpui/runtime-shaders"]
+
 [dependencies]
 log.workspace = true
 

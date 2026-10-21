@@ -1,5 +1,6 @@
 //! GPUI backend for nsh: apps drawn by GPUI (GPUI Fast), on macOS, Windows
-//! and Linux alike, and embeddable in any GPUI or GPUI Kit app.
+//! and Linux alike, for embedding in GPUI and GPUI Kit apps (standalone
+//! apps run on each OS's own backend: AppKit, Win32, GTK 4).
 //!
 //! - Each node is an [`view::NshView`], a retained view the core placed at
 //!   its frame. A surface is one GPUI element ([`render::SurfaceElement`])
@@ -18,13 +19,15 @@
 //!
 //! [`AppView`] is one surface as a GPUI view (`Entity<AppView>`), to put
 //! anywhere in a GPUI app's element tree; [`run_app`] opens one in a
-//! window. The input, scrolling, transition and editing logic is the
+//! window, as the development host does. The input, scrolling, transition and editing logic is the
 //! Windows backend's (its virtual key codes included, [`keys`]). Off the
 //! desktop this crate is empty.
 
 #![cfg(any(target_os = "linux", target_os = "macos", windows))]
 
 mod access;
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod canvas;
@@ -41,13 +44,14 @@ mod keys;
 mod mount;
 mod native;
 mod navigation;
-mod net;
 mod render;
 mod rt;
-mod script;
 mod scroll;
+mod selection_area;
 mod stats;
 mod surface;
+#[cfg(feature = "dev")]
+mod synth;
 mod system;
 mod text;
 mod text_input;
@@ -59,11 +63,16 @@ mod view;
 mod tests;
 
 pub use gpui;
+pub use nsh_base::{Theme, ThemeError};
 pub use nsh_core::{
-    platform::Appearance,
-    ui::{AdaptiveColor, Color, Theme, ThemeColors, ThemeError},
+    platform::{Appearance, Locale},
+    ui::{AdaptiveColor, Color, Hsla, Rgba},
 };
-pub use nsh_engine::{App, Bundle, Limits, Root};
+pub use nsh_engine::{App, AppError, AppErrorKind, Bundle, Limits, PackageInfo, Root};
+/// Signed packages: verifying, unpacking and accepting them
+/// (`docs/dev/signed-packages.md`).
+#[cfg(feature = "js")]
+pub use nsh_engine::{LoadedPackage, accept_package, load_package, package, verify_package};
 
 pub use crate::{
     app::{AppOptions, AppSource, AppView, open_app_window, run_app, set_ui_sets},

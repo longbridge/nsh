@@ -2,7 +2,7 @@
 //! user's settings ([`super::ambient::window`] and the like).
 
 use crate::{
-    EdgeInsets, Size,
+    EdgeInsets, Points, Size,
     platform::{Idiom, Locale, Os},
 };
 
@@ -10,13 +10,13 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
     /// The surface's size in points.
-    pub window: Size,
+    pub window: Size<Points>,
     /// The edges system UI covers.
     pub safe_area: EdgeInsets,
     /// Space reserved for system controls in a custom desktop title bar.
-    pub title_bar: crate::platform::Insets,
+    pub title_bar: crate::geometry::Edges<crate::geometry::Points>,
     /// The software keyboard's height, 0 when hidden.
-    pub keyboard_height: f32,
+    pub keyboard_height: Points,
     /// How long the keyboard's show / hide animation takes, in seconds.
     pub keyboard_duration: f32,
     /// Dark appearance.
@@ -48,10 +48,10 @@ pub struct Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
-            window: Size::new(0.0, 0.0),
+            window: crate::geometry::size_pt(0.0, 0.0),
             safe_area: EdgeInsets::default(),
-            title_bar: crate::platform::Insets::default(),
-            keyboard_height: 0.0,
+            title_bar: crate::geometry::Edges::default(),
+            keyboard_height: Points(0.0),
             keyboard_duration: 0.0,
             dark: false,
             font_scale: 1.0,

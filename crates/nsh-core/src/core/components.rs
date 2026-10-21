@@ -19,12 +19,13 @@ use super::{Core, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
+    geometry::Points,
     tailwind::ClassList,
     ui::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
         ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
         JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
-        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Theme,
+        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
         view,
@@ -117,8 +118,8 @@ pub(super) struct Instance {
     inner: Inner,
     spec: Option<Arc<ComponentSpec>>,
     /// The app's `class` and `classList` on the host.
-    class: Box<str>,
-    class_list: Vec<Box<str>>,
+    pub(super) class: Box<str>,
+    pub(super) class_list: Vec<Box<str>>,
     /// The app's classes, or the styles the view this one is in gives it:
     /// applied after the root's own.
     pub(super) user: Option<Arc<ClassList>>,
@@ -302,6 +303,10 @@ pub(super) enum Part {
     Filled(&'static str),
 }
 
+/// A node's app classes ([`Components::app_classes`]): its own rules, the
+/// classes, and what goes after them.
+pub(super) type AppClass = (Option<Arc<ClassList>>, SharedString, Option<Arc<ClassList>>);
+
 /// The node's classes: its styles lowered, and what was merged after them.
 pub(super) type Classes = (Option<Arc<ClassList>>, Option<Arc<ClassList>>);
 
@@ -361,6 +366,57 @@ enum Awaited {
     Value(AnswerSlot<f32>),
 }
 
+/// What the platform answered a clipboard read with (the root's
+/// `Clipboard` event).
+#[derive(Default)]
+pub(super) struct ClipboardAnswer {
+    /// Whether it holds what was asked.
+    pub(super) has: bool,
+    /// The text, for a text read.
+    pub(super) text: Option<String>,
+    /// The image, for an image read.
+    pub(super) image: Option<crate::ui::ClipboardImage>,
+    /// The files' `file:` URLs, for a files read.
+    pub(super) files: Vec<String>,
+}
+
+impl ClipboardAnswer {
+    pub(super) fn from_payload(payload: &EventPayload) -> ClipboardAnswer {
+        let mut answer = ClipboardAnswer::default();
+        let EventPayload::Map(entries) = payload else {
+            return answer;
+        };
+        let (mut uri, mut width, mut height) = (None, 0.0, 0.0);
+        for (k, v) in entries {
+            match (*k, v) {
+                ("has", crate::PayloadValue::Bool(b)) => answer.has = *b,
+                ("text", crate::PayloadValue::Str(t)) => answer.text = Some(t.clone()),
+                ("uri", crate::PayloadValue::Str(u)) => uri = Some(u.clone()),
+                ("width", crate::PayloadValue::Number(n)) => width = *n,
+                ("height", crate::PayloadValue::Number(n)) => height = *n,
+                ("files", crate::PayloadValue::Str(f)) => {
+                    answer.files = f
+                        .lines()
+                        .filter(|l| !l.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                }
+                _ => {}
+            }
+        }
+        // Only an image NSH can show, a `data:` URI, and only one the VM
+        // can hold (the web's player encodes its own).
+        answer.image = uri
+            .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
+            .map(|uri| crate::ui::ClipboardImage {
+                uri,
+                width: pixels(width),
+                height: pixels(height),
+            });
+        answer
+    }
+}
+
 /// An HTTP request of a task in flight ([`Core::fetch_event`]).
 struct PendingFetch {
     /// What arrived so far.
@@ -374,12 +430,14 @@ pub(super) struct Components {
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
     specs: FxHashMap<&'static str, Arc<ComponentSpec>>,
-    theme: Arc<Theme>,
-    /// The app's theme (`nsh.json`, a Rust app's root): drawn with while
-    /// the embedding app sets none ([`Core::set_host_theme`]).
-    app_theme: Arc<Theme>,
-    /// The embedding app's theme: wins over [`Self::app_theme`].
-    host_theme: Option<Arc<Theme>>,
+    /// The design tokens drawn with.
+    pub(super) tokens: Arc<Tokens>,
+    /// The app's tokens (a UI set's defaults, `nsh.json`'s theme, a Rust
+    /// app's root): drawn with while the embedding app sets none
+    /// ([`Core::set_host_tokens`]).
+    app_tokens: Arc<Tokens>,
+    /// The embedding app's tokens: win over [`Self::app_tokens`].
+    host_tokens: Option<Arc<Tokens>>,
     /// Boxed: making a view (or applying its patches) takes its instance
     /// out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
@@ -388,7 +446,7 @@ pub(super) struct Components {
     /// Slot nodes (`componentSlot`) -> their slot's name.
     slot_names: FxHashMap<NodeId, Arc<str>>,
     /// Slot nodes in a host -> the host.
-    slot_hosts: FxHashMap<NodeId, NodeId>,
+    pub(super) slot_hosts: FxHashMap<NodeId, NodeId>,
     styles: FxHashMap<StyleRefinement, Arc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).
@@ -404,7 +462,7 @@ pub(super) struct Components {
     /// Runs the components' async tasks and timers.
     pub(super) executor: Rc<Executor>,
     /// The status bar's settings, shared by components, modules and tasks.
-    pub(super) status_bars: crate::ui::status_bar::SharedStatusBars,
+    pub(super) status_bars: crate::ui::status_bar::StatusBars,
     /// Dialogs components show, by id: their answers.
     dialogs: FxHashMap<u32, AnswerSlot<i32>>,
     next_dialog: u32,
@@ -423,7 +481,7 @@ pub(super) struct Components {
     next_fetch: u32,
     /// The ends of the animations components started and the values they
     /// read, by id.
-    animations: FxHashMap<nsh_animation::AnimationId, Awaited>,
+    animations: FxHashMap<crate::animation::AnimationId, Awaited>,
     /// Elements to measure once this commit is laid out
     /// ([`crate::ui::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
@@ -464,6 +522,13 @@ pub(super) struct Components {
     /// script): a call posted during a synchronous call from JS waits for
     /// its op ([`RustCall::Post`]).
     posts: Posts,
+    /// What the app's JS functions render for the views
+    /// ([`crate::ui::Renderer`]).
+    pub(super) renders: super::renders::Renders,
+    /// Nodes of views with the app's classes (`Element::app_class`): their
+    /// own rules, the classes and what goes after them, resolved again
+    /// when the tokens change.
+    pub(super) app_classes: FxHashMap<NodeId, AppClass>,
 }
 
 impl Default for Components {
@@ -471,9 +536,9 @@ impl Default for Components {
         Self {
             registry: Registry::default(),
             specs: FxHashMap::default(),
-            theme: Arc::new(Theme::default()),
-            app_theme: Arc::new(Theme::default()),
-            host_theme: None,
+            tokens: Arc::new(Tokens::default()),
+            app_tokens: Arc::new(Tokens::default()),
+            host_tokens: None,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
             slot_names: FxHashMap::default(),
@@ -515,20 +580,20 @@ impl Default for Components {
             regions: FxHashMap::default(),
             next_region: 1,
             posts: Posts::default(),
+            renders: Default::default(),
+            app_classes: FxHashMap::default(),
         }
     }
 }
 
 impl Components {
-    pub(super) fn for_viewport(viewport: crate::Size) -> Self {
+    pub(super) fn for_viewport(viewport: crate::Size<crate::Points>) -> Self {
         let mut components = Self::default();
         components.environment.window = viewport;
         // What components that run once read of the core.
-        components
-            .runtime
-            .set_services(components.executor.clone(), components.status_bars.clone());
+        components.runtime.set_services(components.executor.clone());
         components.runtime.set_environment(components.environment);
-        components.runtime.set_theme(components.theme.clone());
+        components.runtime.set_tokens(components.tokens.clone());
         components
     }
 
@@ -596,58 +661,68 @@ fn same(a: &Option<Arc<ClassList>>, b: &Option<Arc<ClassList>>) -> bool {
 }
 
 impl<M: TextEngine> Core<M> {
-    /// The components this core can render (from `nsh-ui-mobile` and the
-    /// like); set before the first op.
+    /// The components this core can render (from `nsh-base` and the
+    /// like), and the design tokens their sets bring
+    /// ([`Registry::tokens_from`]); set before the first op.
     pub fn set_components(&mut self, registry: Registry) {
+        if let Some(Ok(tokens)) = registry.tokens(None) {
+            self.set_tokens(tokens);
+        }
         self.components.registry = registry;
     }
 
-    /// `uiTheme` on the root: the app's theme (`nsh.json`).
+    /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
+    /// UI set that reads themes makes tokens of.
     pub(super) fn set_ui_theme(&mut self, json: &str) {
-        match Theme::from_json(json) {
-            Ok(theme) => self.set_theme(theme),
-            Err(e) => log::warn!("theme: {e}"),
+        match self.components.registry.tokens(Some(json)) {
+            Some(Ok(tokens)) => self.set_tokens(tokens),
+            Some(Err(e)) => log::warn!("theme: {e}"),
+            None => log::warn!("theme: no UI set reads themes"),
         }
     }
 
-    /// The app's theme; components are drawn with it unless the
-    /// embedding app set one ([`Core::set_host_theme`]).
-    pub fn set_theme(&mut self, theme: Theme) {
-        self.components.app_theme = Arc::new(theme);
-        self.theme_changed();
+    /// The app's design tokens; it is drawn with them unless the
+    /// embedding app set its own ([`Core::set_host_tokens`]).
+    pub fn set_tokens(&mut self, tokens: Tokens) {
+        self.components.app_tokens = Arc::new(tokens);
+        self.tokens_changed();
     }
 
-    /// The embedding app's theme (`None`: the app's again): an app
-    /// embedded in a native app looks like it, whatever theme the app
-    /// itself sets.
-    pub fn set_host_theme(&mut self, theme: Option<Theme>) {
-        self.components.host_theme = theme.map(Arc::new);
-        self.theme_changed();
+    /// The embedding app's design tokens (`None`: the app's again): an app
+    /// embedded in a native app looks like it, whatever the app sets.
+    pub fn set_host_tokens(&mut self, tokens: Option<Tokens>) {
+        self.components.host_tokens = tokens.map(Arc::new);
+        self.tokens_changed();
     }
 
-    /// The theme components are drawn with now: a signal of the surface,
-    /// so only the bindings that read it run again, and only when it
-    /// changed.
-    fn theme_changed(&mut self) {
-        let theme = self
-            .components
-            .host_theme
-            .clone()
-            .unwrap_or_else(|| self.components.app_theme.clone());
-        if *theme == *self.components.theme {
-            self.components.theme = theme;
+    /// The tokens drawn with now: a signal of the surface, so only the
+    /// bindings that read them run again, and only when they changed.
+    fn tokens_changed(&mut self) {
+        let tokens = match &self.components.host_tokens {
+            // The app's own tokens the host's do not have stay.
+            Some(host) => Arc::new(host.over(&self.components.app_tokens)),
+            None => self.components.app_tokens.clone(),
+        };
+        if *tokens == *self.components.tokens {
+            self.components.tokens = tokens;
             return;
         }
-        let _entered = self.components.runtime.enter();
-        self.components.theme = theme;
-        self.components
-            .runtime
-            .set_theme(self.components.theme.clone());
+        {
+            let _entered = self.components.runtime.enter();
+            self.components.tokens = tokens;
+            self.components
+                .runtime
+                .set_tokens(self.components.tokens.clone());
+        }
+        self.class_tokens_changed();
     }
 
     /// Mounts a Rust app's root component as the content of the root view;
     /// its view is made in the next commit.
     pub fn mount_root(&mut self, root: &Root) {
+        if let Some(setting) = root.status_bar_ref() {
+            self.components.status_bars.set_base(setting);
+        }
         let _entered = self.components.runtime.enter();
         let mut el = root.element().0;
         let ElKind::Component(c) = std::mem::replace(&mut el.kind, ElKind::Plain) else {
@@ -693,7 +768,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The surface's size changed (the environment's window).
-    pub(super) fn components_viewport(&mut self, size: crate::Size) {
+    pub(super) fn components_viewport(&mut self, size: crate::Size<crate::Points>) {
         let environment = Environment {
             window: size,
             ..self.components.environment
@@ -745,7 +820,7 @@ impl<M: TextEngine> Core<M> {
     pub fn run_component_tasks(&mut self) {
         let _entered = self.components.runtime.enter();
         let executor = self.components.executor.clone();
-        executor.fire_timers(crate::time::Instant::now());
+        executor.fire_timers(crate::time::now());
         // A task that keeps waking itself cannot hold the engine.
         for _ in 0..MAX_TASK_ROUNDS {
             let polled = executor.poll_ready();
@@ -778,9 +853,9 @@ impl<M: TextEngine> Core<M> {
                 // The node's own style is the view's that makes it, then
                 // what is given it.
                 let base = self.base_of(id);
-                let ctx = self.root_context_of(base).expect("a host");
-                let app = if ctx.combined {
-                    ctx.app
+                let cx = self.root_context_of(base).expect("a host");
+                let app = if cx.combined {
+                    cx.app
                 } else {
                     self.components.instances[&base].app_style.clone()
                 };
@@ -794,6 +869,23 @@ impl<M: TextEngine> Core<M> {
                     &animated,
                     app.as_ref(),
                 )))
+            }
+            // A render's holder joins its host: placed in its placeholder.
+            Op::Insert { parent, child, .. }
+                if self.is_host(parent) && self.is_render_holder(child) =>
+            {
+                self.insert_render_holder(parent, child);
+                Ok(None)
+            }
+            Op::Remove { parent, child }
+                if self.is_host(parent) && self.is_render_holder(child) =>
+            {
+                self.remove_render_holder(child, false);
+                Ok(None)
+            }
+            Op::Release { id } if self.is_render_holder(id) => {
+                self.remove_render_holder(id, true);
+                Ok(Some(Op::Release { id }))
             }
             // A slot's node joins its host: the view places it.
             Op::Insert { parent, child, .. }
@@ -1127,7 +1219,7 @@ impl<M: TextEngine> Core<M> {
                         }
                         result
                     }
-                    Err(message) => Err(message),
+                    Err(message) => Err(message.into()),
                 };
                 self.apply_actions();
                 self.settle(call, result);
@@ -1154,7 +1246,7 @@ impl<M: TextEngine> Core<M> {
                         }),
                     );
                 }
-                Err(message) => self.settle(call, Err(message)),
+                Err(message) => self.settle(call, Err(message.into())),
             },
             RustCall::Method(host, method) => {
                 let mut failed = None;
@@ -1167,16 +1259,16 @@ impl<M: TextEngine> Core<M> {
                     Some(Inner::Component(inner)) => match caught(|| inner.call(method)) {
                         Ok(Some(result)) => result,
                         Ok(None) => {
-                            Err(format!("{} has no ref of this method's type", inner.name()))
+                            Err(format!("{} has no ref of this method's type", inner.name()).into())
                         }
                         Err(message) => {
                             failed = Some(message.clone());
-                            Err(message)
+                            Err(message.into())
                         }
                     },
                     _ => {
                         drop_caught(method);
-                        Err(format!("node {host} hosts no Rust component"))
+                        Err(format!("node {host} hosts no Rust component").into())
                     }
                 };
                 self.apply_actions();
@@ -1204,7 +1296,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The app's classes on `host` changed.
-    fn update_user_class(&mut self, host: NodeId) {
+    pub(super) fn update_user_class(&mut self, host: NodeId) {
         let inst = &self.components.instances[&host];
         let mut combined = String::with_capacity(inst.class.len() + 16 * inst.class_list.len());
         combined.push_str(&inst.class);
@@ -1338,6 +1430,18 @@ impl<M: TextEngine> Core<M> {
                 break;
             }
         }
+        self.flush_renders();
+    }
+
+    /// Node `id` goes: what the views' renders and the app's classes knew
+    /// of it goes too.
+    fn forget_node_extras(&mut self, id: NodeId) {
+        if !self.components.renders.is_empty() {
+            self.forget_render_place(id);
+        }
+        if !self.components.app_classes.is_empty() {
+            self.components.app_classes.remove(&id);
+        }
     }
 
     /// Sends the failures of views' code (bindings, effects, listeners) to
@@ -1415,11 +1519,19 @@ impl<M: TextEngine> Core<M> {
             self.components.mark(rooted);
             return;
         }
-        let ctx = self.root_context(inst);
+        let cx = self.root_context(inst);
         let given_changed = std::mem::take(&mut inst.given_changed);
         let attrs = if let Some(node) = inst.bound.get_mut(&host) {
             let (style, classes) = (node.style.clone(), node.classes.clone());
-            let classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
+            let class = node.attrs.class.clone();
+            let classes = self.apply_el_styles(
+                host,
+                &style,
+                &style,
+                classes,
+                class.as_ref(),
+                cx.user.clone(),
+            );
             if let Some(node) = inst.bound.get_mut(&host) {
                 node.classes = classes;
                 given_changed.then(|| node.attrs.clone())
@@ -1428,7 +1540,15 @@ impl<M: TextEngine> Core<M> {
             }
         } else if let Some(root) = inst.root.as_mut() {
             let (style, classes) = (root.style.clone(), root.classes.clone());
-            root.classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
+            let class = root.attrs.class.clone();
+            root.classes = self.apply_el_styles(
+                host,
+                &style,
+                &style,
+                classes,
+                class.as_ref(),
+                cx.user.clone(),
+            );
             given_changed.then(|| root.attrs.clone())
         } else {
             None
@@ -1436,8 +1556,8 @@ impl<M: TextEngine> Core<M> {
         // What the views above give it changed: applied again over its
         // root's own.
         if let Some(attrs) = attrs {
-            let app = if ctx.combined {
-                ctx.app.as_ref()
+            let app = if cx.combined {
+                cx.app.as_ref()
             } else {
                 inst.app_style.as_ref()
             };
@@ -1449,8 +1569,8 @@ impl<M: TextEngine> Core<M> {
             ));
             let applied = inst.root_insets_applied;
             let insets = (
-                ctx.inset_padding.or(attrs.inset_padding),
-                ctx.inset_margin.or(attrs.inset_margin),
+                cx.inset_padding.or(attrs.inset_padding),
+                cx.inset_margin.or(attrs.inset_margin),
             );
             if insets.0 != applied.0 {
                 let _ = self.apply_op(Op::SetProp {
@@ -1836,13 +1956,13 @@ impl<M: TextEngine> Core<M> {
             };
         // What the views above give it and the components on its host, the
         // outer last.
-        let ctx = self.root_context(inst);
-        let app = if ctx.combined {
-            ctx.app.as_ref()
+        let cx = self.root_context(inst);
+        let app = if cx.combined {
+            cx.app.as_ref()
         } else {
             inst.app_style.as_ref()
         };
-        let attrs = ctx.over(el.attrs.clone());
+        let attrs = cx.over(el.attrs.clone());
         // As it was applied: with the insets its node got.
         let mut old_over = old_attrs.clone();
         (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
@@ -1851,7 +1971,7 @@ impl<M: TextEngine> Core<M> {
         // Given an inline style or animated values while its own did not
         // change: they go now.
         let given_changed = std::mem::take(&mut inst.given_changed) || first;
-        if ctx.given
+        if cx.given
             && given_changed
             && attrs.inline == old_over.inline
             && attrs.animated == old_over.animated
@@ -1863,9 +1983,16 @@ impl<M: TextEngine> Core<M> {
                 app,
             ));
         }
-        let user = ctx.user.clone();
-        let top_js = ctx.js;
-        let classes = self.apply_styles(host, &el.style, &old_style, old_classes, user);
+        let user = cx.user.clone();
+        let top_js = cx.js;
+        let classes = self.apply_el_styles(
+            host,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            user,
+        );
         let text = self.reconcile_text(host, host, el.text.take(), old_text);
         if bound.is_some() {
             Self::keep_bound(
@@ -1970,7 +2097,7 @@ impl<M: TextEngine> Core<M> {
     /// components whose views' roots it is (the outer last), the app's
     /// style and JS's events on the top host.
     pub(super) fn root_context(&mut self, inst: &Instance) -> RootContext {
-        let mut ctx = RootContext {
+        let mut cx = RootContext {
             user: inst.user.clone(),
             combined: false,
             app: None,
@@ -1980,21 +2107,21 @@ impl<M: TextEngine> Core<M> {
             given: false,
         };
         if inst.above.is_none() && inst.given.is_none() {
-            return ctx;
+            return cx;
         }
-        ctx.combined = true;
+        cx.combined = true;
         let mut decls: Vec<crate::StyleDecl> = Vec::new();
-        let mut take = |ctx: &mut RootContext, given: &Attrs| {
-            ctx.given = true;
+        let mut take = |cx: &mut RootContext, given: &Attrs| {
+            cx.given = true;
             if let Some(inline) = &given.inline {
                 decls.extend(inline.decls().iter().cloned());
             }
             decls.extend(given.animated.iter().map(|(d, _)| d.clone()));
-            ctx.inset_padding = given.inset_padding.or(ctx.inset_padding);
-            ctx.inset_margin = given.inset_margin.or(ctx.inset_margin);
+            cx.inset_padding = given.inset_padding.or(cx.inset_padding);
+            cx.inset_margin = given.inset_margin.or(cx.inset_margin);
         };
         if let Some(given) = &inst.given {
-            take(&mut ctx, given);
+            take(&mut cx, given);
         }
         let mut app = inst.app_style.clone();
         let mut at = inst.above;
@@ -2004,12 +2131,12 @@ impl<M: TextEngine> Core<M> {
             };
             let (outer, given) = (above.user.clone(), above.given.clone());
             app = above.app_style.clone();
-            ctx.js = Some(above.js_events);
+            cx.js = Some(above.js_events);
             at = above.above;
             if let Some(given) = &given {
-                take(&mut ctx, given);
+                take(&mut cx, given);
             }
-            ctx.user = self.merge_user(ctx.user.take(), outer);
+            cx.user = self.merge_user(cx.user.take(), outer);
         }
         if let Some(app) = &app {
             decls.extend(app.decls().iter().cloned());
@@ -2020,17 +2147,17 @@ impl<M: TextEngine> Core<M> {
             for decl in decls {
                 let _ = patch.push(&mut style, decl);
             }
-            ctx.app = Some(patch);
+            cx.app = Some(patch);
         }
-        ctx
+        cx
     }
 
     /// [`Self::root_context`] of the component hosted by `host`.
     pub(super) fn root_context_of(&mut self, host: NodeId) -> Option<RootContext> {
         let inst = self.components.instances.remove(&host)?;
-        let ctx = self.root_context(&inst);
+        let cx = self.root_context(&inst);
         self.components.instances.insert(host, inst);
-        Some(ctx)
+        Some(cx)
     }
 
     /// What the view `host` is in gives its element besides styles is `attrs`:
@@ -2049,7 +2176,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// `inner`'s rules, then `outer`'s (one list per pair, kept).
-    fn merge_user(
+    pub(super) fn merge_user(
         &mut self,
         inner: Option<Arc<ClassList>>,
         outer: Option<Arc<ClassList>>,
@@ -2131,7 +2258,7 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    fn detach_id(&mut self, id: NodeId) {
+    pub(super) fn detach_id(&mut self, id: NodeId) {
         if let Ok(key) = self.key(id)
             && self.nodes[key as usize].parent != NO_KEY
         {
@@ -2161,6 +2288,9 @@ impl<M: TextEngine> Core<M> {
         }
         if let Some(r) = &new.element_ref {
             r.attach(node);
+        }
+        if new.render != old.render {
+            self.update_render(node, old.render.as_ref(), new.render.as_ref());
         }
         let mut props = std::mem::take(&mut self.components.props);
         new.changes(old, &mut props);
@@ -2209,6 +2339,51 @@ impl<M: TextEngine> Core<M> {
             }
         }
         (own, user)
+    }
+
+    /// [`Self::apply_styles`] for an element of a view: the app's classes
+    /// it carries (`class`, [`crate::ui::Element::app_class`]) go after its
+    /// own styles, then `outer` (a root's: what the views and the app give
+    /// its host).
+    pub(super) fn apply_el_styles(
+        &mut self,
+        id: NodeId,
+        style: &StyleRefinement,
+        old_style: &StyleRefinement,
+        old: Classes,
+        class: Option<&SharedString>,
+        outer: Option<Arc<ClassList>>,
+    ) -> Classes {
+        let Some(class) = class.filter(|c| !c.trim().is_empty()) else {
+            if !self.components.app_classes.is_empty() {
+                self.components.app_classes.remove(&id);
+            }
+            return self.apply_styles(id, style, old_style, old, outer);
+        };
+        let app = self.app_class_list(class);
+        let user = self.merge_user(Some(app), outer.clone());
+        let classes = self.apply_styles(id, style, old_style, old, user);
+        self.components
+            .app_classes
+            .insert(id, (classes.0.clone(), class.clone(), outer));
+        classes
+    }
+
+    /// The rules of the app's classes `class` (the unknown ones warned of
+    /// once, as a host's).
+    pub(super) fn app_class_list(&mut self, class: &str) -> Arc<ClassList> {
+        let (list, fresh) = self.tailwind.get(class);
+        if fresh && !list.unknown().is_empty() {
+            log::warn!(
+                "unknown classes: {}",
+                list.unknown()
+                    .iter()
+                    .map(|s| &**s)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        list
     }
 
     /// Registers `el`'s handlers for node `id` and listens to their events
@@ -3152,7 +3327,14 @@ impl<M: TextEngine> Core<M> {
             ),
         };
         self.apply_attrs(node, &el.attrs, &old_attrs);
-        let classes = self.apply_styles(node, &el.style, &old_style, old_classes, None);
+        let classes = self.apply_el_styles(
+            node,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            None,
+        );
         // Its events are the component's first (`component_event` finds it
         // by its host); the node stays JS's or the placing view's.
         let events = self.apply_handlers(node, &el, old_events, EventMask::default(), inst);
@@ -3343,7 +3525,14 @@ impl<M: TextEngine> Core<M> {
             };
         }
         self.apply_attrs(id, &el.attrs, &old_attrs);
-        let classes = self.apply_styles(id, &el.style, &old_style, old_classes, None);
+        let classes = self.apply_el_styles(
+            id,
+            &el.style,
+            &old_style,
+            old_classes,
+            el.attrs.class.as_ref(),
+            None,
+        );
         let text = self.reconcile_text(id, host, el.text.take(), old_text);
         if bound.is_some() {
             Self::keep_bound(
@@ -3517,8 +3706,8 @@ impl<M: TextEngine> Core<M> {
                 command: Command::ScrollToIndex {
                     index,
                     animated: false,
-                    view_position: 0.0,
-                    view_offset: 0.0,
+                    view_position: crate::geometry::Percentage(0.0),
+                    view_offset: Points::ZERO,
                 },
             });
         }
@@ -3780,6 +3969,7 @@ impl<M: TextEngine> Core<M> {
 
     fn release_id(&mut self, id: NodeId) {
         self.components.owners.remove(&id);
+        self.forget_node_extras(id);
         // A root component's host is its view's: only the name goes.
         if self.is_alias(id) {
             self.unalias(id);
@@ -3855,6 +4045,8 @@ impl<M: TextEngine> Core<M> {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
+        // Its root's (a render or classes of the app's) on the host.
+        self.forget_node_extras(host);
         if let Inner::Component(inner) = &mut inst.inner {
             if let Err(message) = caught(|| inner.cleanup()) {
                 log::error!(target: "js", "{} failed in its cleanup: {message}", inner.name());
@@ -4141,7 +4333,7 @@ impl<M: TextEngine> Core<M> {
                 self.components
                     .animations
                     .insert(request, Awaited::Value(value));
-                let _ = self.apply_op(Op::Animation(nsh_animation::AnimationOp::Read {
+                let _ = self.apply_op(Op::Animation(crate::animation::AnimationOp::Read {
                     node,
                     request,
                 }));
@@ -4175,11 +4367,25 @@ impl<M: TextEngine> Core<M> {
             Action::ReadClipboard(read) => {
                 let id = self.components.next_clipboard_read;
                 self.components.next_clipboard_read += 1;
-                let has_only = matches!(read, ClipboardRead::Has(_));
+                let command = match &read {
+                    ClipboardRead::Text(_) => Command::ReadClipboard {
+                        id,
+                        has_only: false,
+                    },
+                    ClipboardRead::Has(_) => Command::ReadClipboard { id, has_only: true },
+                    ClipboardRead::Image(_) => Command::ReadClipboardImage {
+                        id,
+                        has_only: false,
+                    },
+                    ClipboardRead::HasImage(_) => {
+                        Command::ReadClipboardImage { id, has_only: true }
+                    }
+                    ClipboardRead::Files(_) => Command::ReadClipboardFiles { id },
+                };
                 self.components.clipboard_reads.insert(id, read);
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
-                    command: Command::ReadClipboard { id, has_only },
+                    command,
                 });
             }
         }
@@ -4187,7 +4393,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Native animations that ended: the components' resolve their
     /// [`crate::ui::AnimationEnd`]s; JS's stay in `finished`.
-    pub fn animations_finished(&mut self, finished: &mut Vec<nsh_animation::Finished>) {
+    pub fn animations_finished(&mut self, finished: &mut Vec<crate::animation::Finished>) {
         finished.retain(|f| match self.components.animations.remove(&f.animation) {
             Some(Awaited::End(end)) => {
                 end.borrow_mut().deliver(f.finished);
@@ -4267,14 +4473,24 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
-    /// The answer to clipboard read `id`: the text, `None` when it holds
-    /// none.
-    pub(super) fn answer_clipboard(&mut self, id: u32, text: Option<String>, has: bool) {
+    /// Resolves clipboard read `id` with the platform's answer (an empty
+    /// one when the clipboard is not granted).
+    pub(super) fn answer_clipboard(&mut self, id: u32, answer: ClipboardAnswer) {
+        let ClipboardAnswer {
+            has,
+            text,
+            image,
+            files,
+        } = answer;
         match self.components.clipboard_reads.remove(&id) {
-            Some(ClipboardRead::Text(answer)) => {
-                answer.borrow_mut().deliver(text.unwrap_or_default())
+            Some(ClipboardRead::Text(slot)) => slot.borrow_mut().deliver(text.unwrap_or_default()),
+            Some(ClipboardRead::Has(slot) | ClipboardRead::HasImage(slot)) => {
+                slot.borrow_mut().deliver(has)
             }
-            Some(ClipboardRead::Has(answer)) => answer.borrow_mut().deliver(has),
+            Some(ClipboardRead::Image(slot)) => slot
+                .borrow_mut()
+                .deliver(image.filter(|i| !i.uri.is_empty())),
+            Some(ClipboardRead::Files(slot)) => slot.borrow_mut().deliver(files),
             None => {}
         }
     }
@@ -4352,7 +4568,10 @@ impl<M: TextEngine> Core<M> {
                     _ => None,
                 };
                 let size = match (number("width"), number("height"), error) {
-                    (Some(width), Some(height), None) => Ok(ImageSize { width, height }),
+                    (Some(width), Some(height), None) => Ok(ImageSize {
+                        width: pixels(width),
+                        height: pixels(height),
+                    }),
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
@@ -4362,25 +4581,16 @@ impl<M: TextEngine> Core<M> {
                 let Some(request) = number("id") else {
                     return false;
                 };
-                let (mut text, mut has) = (None, false);
-                if let EventPayload::Map(entries) = payload {
-                    for (k, v) in entries {
-                        match (*k, v) {
-                            ("text", crate::PayloadValue::Str(t)) => text = Some(t.clone()),
-                            ("has", crate::PayloadValue::Bool(b)) => has = *b,
-                            _ => {}
-                        }
-                    }
-                }
-                self.answer_clipboard(request as u32, text, has);
+                let answer = ClipboardAnswer::from_payload(payload);
+                self.answer_clipboard(request as u32, answer);
                 true
             }
             EventKind::Insets => {
                 let insets = EdgeInsets {
-                    top: number("top").unwrap_or(0.0) as f32,
-                    right: number("right").unwrap_or(0.0) as f32,
-                    bottom: number("bottom").unwrap_or(0.0) as f32,
-                    left: number("left").unwrap_or(0.0) as f32,
+                    top: Points(number("top").unwrap_or(0.0) as f32),
+                    right: Points(number("right").unwrap_or(0.0) as f32),
+                    bottom: Points(number("bottom").unwrap_or(0.0) as f32),
+                    left: Points(number("left").unwrap_or(0.0) as f32),
                 };
                 // The views reading them follow (`drain_views`).
                 self.components.insets.insert(id, insets);
@@ -4470,7 +4680,12 @@ impl<M: TextEngine> Core<M> {
             }
             match node.kind {
                 // Not reported yet: a screen's header covers the top.
-                Kind::Screen => return EdgeInsets { top: 0.0, ..safe },
+                Kind::Screen => {
+                    return EdgeInsets {
+                        top: Points::ZERO,
+                        ..safe
+                    };
+                }
                 Kind::Modal => return safe,
                 _ => {}
             }
@@ -4592,4 +4807,10 @@ fn row_position(
         }
         None => Position::fixed(index, count),
     }
+}
+
+/// A pixel count a platform reports as a number (whole for what it
+/// decodes).
+fn pixels(n: f64) -> crate::geometry::DevicePixels {
+    crate::geometry::DevicePixels(n.round() as i32)
 }

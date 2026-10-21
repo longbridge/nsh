@@ -1,7 +1,7 @@
 # Canvas
 
-- **Canvas** (`Canvas` from `nsh/canvas`, the `canvas` host element): an HTML Canvas 2D subset, recorded and replayed natively
-  (`nsh_core::canvas`: `Drawing { ops, slots }`). `draw={(ctx, { width, height }) => ...}` runs again when the signals it reads
+- **Canvas** (`Canvas` from `nsh`, the `canvas` host element): an HTML Canvas 2D subset, recorded and replayed natively
+  (`nsh_core::canvas`: `Drawing { ops, slots }`). `draw={(cx, { width, height }) => ...}` runs again when the signals it reads
   change (sizes come from `onLayout`). `CanvasRenderingContext2D`: state (`save` / `restore`, `globalAlpha`,
   `globalCompositeOperation`, line styles and dashes, shadows, `font` (CSS shorthand; besides `small-caps` it takes the
   number forms `tabular-nums` / `proportional-nums` / `oldstyle-nums` / `lining-nums`), `fontVariantNumeric` (CSS's

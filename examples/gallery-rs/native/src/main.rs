@@ -14,15 +14,15 @@ fn main() -> impl std::process::Termination {
     env_logger::init();
     let gallery = gallery_native::registry();
     let assets = asset_directory(&gallery).expect("copy the gallery's registered assets");
-    platform::set_ui_sets(vec![nsh_ui_mobile::registry(), gallery]);
-    let theme = nsh_core::ui::Theme::from_json(include_str!("../../theme.json"))
+    platform::set_ui_sets(vec![nsh_base::registry(), gallery]);
+    let theme = nsh_base::Theme::from_json(include_str!("../../theme.json"))
         .expect("the gallery theme is valid");
     // nsh.json's id: the window's and where the app keeps its data.
     let app_id = "com.longbridge.nsh.galleryrs";
     platform::run_app(
         platform::AppSource::Rust(
             platform::Root::of::<gallery_native::Gallery>()
-                .theme(theme)
+                .tokens(theme.into_tokens())
                 .app_id(app_id),
         ),
         platform::AppOptions {
@@ -30,7 +30,6 @@ fn main() -> impl std::process::Termination {
             asset_base: Some(platform::AssetBase::Directory(assets)),
             app_id: app_id.to_owned(),
             size: (1200, 800),
-            script: std::env::var("NSH_SCRIPT").ok(),
             ..Default::default()
         },
     )

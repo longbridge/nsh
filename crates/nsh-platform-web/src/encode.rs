@@ -14,8 +14,10 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
-    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::PropEnum,
+    Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind, TransitionProps,
+    ViewKind, ViewProps, ViewStyle, WebSource,
+    geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
+    ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
 
@@ -317,24 +319,42 @@ pub(crate) fn css_transform(t: &Transform, value: impl Fn(usize) -> Option<f32>)
     out
 }
 
-fn origin(o: OriginLen) -> String {
+fn origin(o: DefiniteLength) -> String {
     match o {
-        OriginLen::Px(v) => format!("{v}px"),
-        OriginLen::Fraction(f) => format!("{}%", f * 100.0),
+        DefiniteLength::Absolute(v) => format!("{}px", v.to_points(REM_SIZE).0),
+        DefiniteLength::Fraction(f) => format!("{}%", f.0 * 100.0),
     }
 }
 
+/// The CSS of `g`. Without lengths, the stops the core resolves, so the
+/// browser places them as every platform does (a negative stop at 0);
+/// with lengths, the stops as written (lengths in pixels), which only the
+/// box resolves.
 fn gradient(g: &Gradient) -> String {
-    let stops: Vec<String> = g
-        .resolved_stops()
-        .iter()
-        .map(|(c, p)| format!("{} {}%", css_color(*c), p * 100.0))
-        .collect();
+    let stops: Vec<String> = if g.has_lengths() {
+        g.stops
+            .iter()
+            .map(|s| match s.position {
+                Some(DefiniteLength::Fraction(p)) => {
+                    format!("{} {}%", css_color(s.color), p.0 * 100.0)
+                }
+                Some(DefiniteLength::Absolute(a)) => {
+                    format!("{} {}px", css_color(s.color), a.to_points(REM_SIZE).0)
+                }
+                None => css_color(s.color),
+            })
+            .collect()
+    } else {
+        g.resolved_stops(Size::default())
+            .iter()
+            .map(|(c, p)| format!("{} {}%", css_color(*c), p.0 * 100.0))
+            .collect()
+    };
     let stops = stops.join(", ");
     let repeating = if g.repeating { "repeating-" } else { "" };
     match g.kind {
         GradientKind::Linear { angle } => {
-            format!("{repeating}linear-gradient({angle}deg, {stops})")
+            format!("{repeating}linear-gradient({}deg, {stops})", degrees(angle))
         }
         GradientKind::LinearCorner { right, bottom } => format!(
             "{repeating}linear-gradient(to {} {}, {stops})",
@@ -351,27 +371,35 @@ fn gradient(g: &Gradient) -> String {
             format!(
                 "{repeating}radial-gradient({} {size} at {}% {}%, {stops})",
                 if circle { "circle" } else { "ellipse" },
-                x * 100.0,
-                y * 100.0
+                x.0 * 100.0,
+                y.0 * 100.0
             )
         }
         GradientKind::Conic { from, x, y } => format!(
-            "{repeating}conic-gradient(from {from}deg at {}% {}%, {stops})",
-            x * 100.0,
-            y * 100.0
+            "{repeating}conic-gradient(from {}deg at {}% {}%, {stops})",
+            degrees(from),
+            x.0 * 100.0,
+            y.0 * 100.0
         ),
     }
+}
+
+/// An angle in CSS degrees, rounded to 1e-4 so that whole degrees are
+/// written as the style wrote them (radians to degrees in `f32` can be an
+/// ulp off).
+fn degrees(a: Radians) -> f32 {
+    (a.to_degrees() * 1e4).round() / 1e4
 }
 
 fn filters(list: &[Filter]) -> String {
     let mut out = String::new();
     for f in list {
         let _ = match *f {
-            Filter::Blur(v) => write!(out, "blur({v}px) "),
+            Filter::Blur(v) => write!(out, "blur({}px) ", v.0),
             Filter::Brightness(v) => write!(out, "brightness({v}) "),
             Filter::Contrast(v) => write!(out, "contrast({v}) "),
             Filter::Grayscale(v) => write!(out, "grayscale({v}) "),
-            Filter::HueRotate(v) => write!(out, "hue-rotate({v}deg) "),
+            Filter::HueRotate(v) => write!(out, "hue-rotate({}deg) ", degrees(v)),
             Filter::Invert(v) => write!(out, "invert({v}) "),
             Filter::Opacity(v) => write!(out, "opacity({v}) "),
             Filter::Saturate(v) => write!(out, "saturate({v}) "),
@@ -383,7 +411,10 @@ fn filters(list: &[Filter]) -> String {
                 color,
             } => write!(
                 out,
-                "drop-shadow({offset_x}px {offset_y}px {blur}px {}) ",
+                "drop-shadow({}px {}px {}px {}) ",
+                offset_x.0,
+                offset_y.0,
+                blur.0,
                 css_color(color)
             ),
         };
@@ -403,7 +434,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if !s.background_color.is_transparent() {
         let _ = write!(css, "background-color:{};", css_color(s.background_color));
     }
-    let radii: [f32; 4] = std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
+    let radii: [f32; 4] = s
+        .corner_radius
+        .to_array()
+        .map(|r| r.unwrap_or(s.border_radius).0);
     let radius = if radii.iter().any(|&r| r > 0.0) {
         format!(
             "border-radius:{}px {}px {}px {}px;",
@@ -429,9 +463,9 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if s.shadow.opacity > 0.0 && !s.shadow.color.is_transparent() {
         shadows.push(format!(
             "{}px {}px {}px {}",
-            s.shadow.offset_x,
-            s.shadow.offset_y,
-            s.shadow.radius,
+            s.shadow.offset_x.0,
+            s.shadow.offset_y.0,
+            s.shadow.radius.0,
             css_color(with_alpha(s.shadow.color, s.shadow.opacity))
         ));
     }
@@ -440,10 +474,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             shadows.push(format!(
                 "{}{}px {}px {}px {}px {}",
                 if b.inset { "inset " } else { "" },
-                b.offset_x,
-                b.offset_y,
-                b.blur,
-                b.spread,
+                b.offset_x.0,
+                b.offset_y.0,
+                b.blur.0,
+                b.spread.0,
                 css_color(b.color)
             ));
         }
@@ -470,7 +504,7 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         );
     }
     let o = s.transform_origin;
-    if o.x != OriginLen::Fraction(0.5) || o.y != OriginLen::Fraction(0.5) {
+    if o.x != relative(0.5) || o.y != relative(0.5) {
         let _ = write!(css, "transform-origin:{} {};", origin(o.x), origin(o.y));
     }
     if s.backface_hidden {
@@ -484,10 +518,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         let _ = write!(
             css,
             "outline:{}px {} {};outline-offset:{}px;",
-            s.outline.width,
+            s.outline.width.0,
             border_style(s.outline.style),
             css_color(s.outline.color),
-            s.outline.offset
+            s.outline.offset.0
         );
     }
     if s.hidden {
@@ -556,11 +590,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         );
     }
     let b = &s.borders;
-    let border = if b.widths.iter().any(|&w| w > 0.0) {
+    let border = if b.widths.any(|&w| w > Points::ZERO) {
         let style = border_style(b.style);
         let sides = ["top", "right", "bottom", "left"];
         let mut out = String::new();
-        for ((side, width), color) in sides.iter().zip(b.widths).zip(b.colors) {
+        for ((side, width), color) in sides.iter().zip(b.widths.to_array()).zip(b.colors) {
+            let width = width.0;
             let _ = write!(
                 out,
                 "border-{side}-width:{width}px;border-{side}-style:{style};border-{side}-color:{};",
@@ -619,8 +654,8 @@ fn resize_mode(m: ResizeMode) -> &'static str {
 
 fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextShadow>) -> String {
     let mut css = format!("font:{};color:{};", css_font(style), css_color(style.color));
-    if style.letter_spacing != 0.0 {
-        let _ = write!(css, "letter-spacing:{}px;", style.letter_spacing);
+    if style.letter_spacing.0 != 0.0 {
+        let _ = write!(css, "letter-spacing:{}px;", style.letter_spacing.0);
     }
     let d = style.decoration;
     if !d.is_none() {
@@ -637,10 +672,10 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
         if let Some(c) = style.decoration_color {
             let _ = write!(css, "text-decoration-color:{};", css_color(c));
         }
-        if let Some(t) = style.decoration_thickness {
+        if let Some(t) = style.decoration_thickness.map(|t| t.0) {
             let _ = write!(css, "text-decoration-thickness:{t}px;");
         }
-        if let Some(o) = style.underline_offset {
+        if let Some(o) = style.underline_offset.map(|o| o.0) {
             let _ = write!(css, "text-underline-offset:{o}px;");
         }
     }
@@ -670,9 +705,9 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
         let _ = write!(
             css,
             "text-shadow:{}px {}px {}px {};",
-            s.offset_x,
-            s.offset_y,
-            s.radius,
+            s.offset_x.0,
+            s.offset_y.0,
+            s.radius.0,
             css_color(s.color)
         );
     }
@@ -691,11 +726,8 @@ fn props_json(p: &ViewProps) -> String {
     let _ = write!(
         s,
         ",\"hitSlop\":[{},{},{},{}]",
-        h.top, h.right, h.bottom, h.left
+        h.top.0, h.right.0, h.bottom.0, h.left.0
     );
-    if let Some(o) = p.active_opacity {
-        let _ = write!(s, ",\"activeOpacity\":{o}");
-    }
     if let Some(d) = p.long_press_delay {
         let _ = write!(s, ",\"longPressDelay\":{d}");
     }
@@ -704,10 +736,10 @@ fn props_json(p: &ViewProps) -> String {
         let _ = write!(
             s,
             ",\"panActivation\":[{},{},{},{}]",
-            n(a.active_offset_x),
-            n(a.active_offset_y),
-            n(a.fail_offset_x),
-            n(a.fail_offset_y)
+            n(a.active_offset_x.map(|v| v.0)),
+            n(a.active_offset_y.map(|v| v.0)),
+            n(a.fail_offset_x.map(|v| v.0)),
+            n(a.fail_offset_y.map(|v| v.0))
         );
     }
     if let Some(l) = &a.label {
@@ -763,6 +795,9 @@ fn props_json(p: &ViewProps) -> String {
     if p.focusable == Some(false) {
         s.push_str(",\"focusable\":false");
     }
+    if p.selection_area {
+        s.push_str(",\"selectionArea\":true");
+    }
     s.push('}');
     s
 }
@@ -800,8 +835,8 @@ fn field_css(c: &InputConfig) -> String {
         nsh_core::TextAlign::Right => css.push_str("text-align:right;"),
         _ => css.push_str("text-align:left;"),
     }
-    if c.style.line_height > 0.0 {
-        let _ = write!(css, "line-height:{}px;", c.style.line_height);
+    if c.style.line_height.0 > 0.0 {
+        let _ = write!(css, "line-height:{}px;", c.style.line_height.0);
     }
     if let Some(c) = c.placeholder_color {
         let _ = write!(css, "--ph:{};", css_color(c));
@@ -813,19 +848,19 @@ fn field_css(c: &InputConfig) -> String {
 }
 
 fn behavior_json(b: &ScrollBehavior) -> String {
-    let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.to_string()).collect();
+    let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.0.to_string()).collect();
     format!(
         "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{},\"bouncesZoom\":{},\"pinch\":{},\"centerContent\":{}}}",
         b.paging,
-        b.snap_interval,
+        b.snap_interval.0,
         offsets.join(","),
         json_str(enum_name(&b.snap_alignment)),
         b.enabled,
         b.bounces,
-        b.content_inset.top,
-        b.content_inset.right,
-        b.content_inset.bottom,
-        b.content_inset.left,
+        b.content_inset.top.0,
+        b.content_inset.right.0,
+        b.content_inset.bottom.0,
+        b.content_inset.left.0,
         b.min_zoom,
         b.max_zoom,
         b.bounces_zoom,
@@ -924,10 +959,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::Frame { id, frame } => {
             out.item("f")
                 .num(*id)
-                .num(frame.x)
-                .num(frame.y)
-                .num(frame.width)
-                .num(frame.height)
+                .num(frame.origin.x.0)
+                .num(frame.origin.y.0)
+                .num(frame.size.width.0)
+                .num(frame.size.height.0)
                 .end();
         }
         MountItem::ViewStyle { id, style } => {
@@ -979,10 +1014,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             };
             out.item("t")
                 .num(*id)
-                .num(content.x)
-                .num(content.y)
-                .num(content.width)
-                .num(content.height);
+                .num(content.origin.x.0)
+                .num(content.origin.y.0)
+                .num(content.size.width.0)
+                .num(content.size.height.0);
             let Some(layout) = layout else {
                 out.raw("[]").raw("[]").end();
                 return;
@@ -1013,7 +1048,25 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(on) => out.bool(on),
                 None => out.raw("null"),
             };
-            out.class_arg(selection).end();
+            out.class_arg(selection);
+            if !layout.backgrounds.is_empty() {
+                // Span backgrounds: `[x, y, width, height, radius, color]`.
+                out.s.push_str(",[");
+                for (i, b) in layout.backgrounds.iter().enumerate() {
+                    if i > 0 {
+                        out.s.push(',');
+                    }
+                    let _ = write!(
+                        out.s,
+                        "[{},{},{},{},{},",
+                        b.x, b.y, b.width, b.height, b.radius
+                    );
+                    push_str(&mut out.s, &css_color(b.color));
+                    out.s.push(']');
+                }
+                out.s.push(']');
+            }
+            out.end();
         }
         MountItem::Events { id, events } => {
             out.item("e").num(*id);
@@ -1042,7 +1095,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .opt_str(image_uri(source))
                 .str(resize_mode(*mode))
                 .opt_str(image_uri(&options.placeholder))
-                .num(options.blur_radius)
+                .num(options.blur_radius.0)
                 .num(options.fade_ms.unwrap_or(0.0))
                 .end();
         }
@@ -1063,12 +1116,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ScrollContent { id, size } => {
             out.item("scs")
                 .num(*id)
-                .num(size.width)
-                .num(size.height)
+                .num(size.width.0)
+                .num(size.height.0)
                 .end();
         }
         MountItem::ScrollBy { id, dx, dy } => {
-            out.item("sb").num(*id).num(*dx).num(*dy).end();
+            out.item("sb").num(*id).num(dx.0).num(dy.0).end();
         }
         MountItem::LayoutDirection { rtl } => out.item("dir").bool(*rtl).end(),
         MountItem::Appearance { appearance } => out.item("appearance").num(*appearance as u8).end(),
@@ -1079,8 +1132,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 if i > 0 {
                     out.s.push(',');
                 }
-                let end = if c.end.is_finite() { c.end } else { 1e9 };
-                let _ = write!(out.s, "[{},{},{}]", c.cell, c.start, end);
+                let end = if c.end.is_finite() { c.end.0 } else { 1e9 };
+                let _ = write!(out.s, "[{},{},{}]", c.cell, c.start.0, end);
             }
             out.s.push(']');
             out.end();
@@ -1132,29 +1185,23 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::InputContent { id, content } => {
             out.item("ic")
                 .num(*id)
-                .num(content.x)
-                .num(content.y)
-                .num(content.width)
-                .num(content.height)
+                .num(content.origin.x.0)
+                .num(content.origin.y.0)
+                .num(content.size.width.0)
+                .num(content.size.height.0)
                 .end();
         }
         MountItem::ScreenConfig { id, config } => {
+            // NSH draws no header: the page's `header` view, placed by the
+            // core, is all there is.
             out.item("scr")
                 .num(*id)
-                .opt_str(config.title.as_deref())
-                .bool(config.header_shown)
-                .num(config.header_height)
-                .opt_str(config.background_color.map(css_color).as_deref())
-                .opt_str(config.title_color.map(css_color).as_deref())
-                .opt_str(config.tint_color.map(css_color).as_deref())
-                .bool(config.back_visible)
+                .num(config.header_height.0)
                 .bool(config.prevent_back);
-            for slot in [config.left, config.right, config.title_view] {
-                match slot {
-                    Some(n) => out.num(n),
-                    None => out.raw("null"),
-                };
-            }
+            match config.header_view {
+                Some(n) => out.num(n),
+                None => out.raw("null"),
+            };
             out.str(match config.animation {
                 ScreenAnimation::Default => "default",
                 ScreenAnimation::Fade => "fade",
@@ -1166,9 +1213,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.item("mc")
                 .num(*id)
                 .str(enum_name(&config.animation))
-                .bool(config.transparent)
-                .bool(config.dismissible)
-                .str(enum_name(&config.presentation))
+                .bool(config.close_on_escape)
                 .end();
         }
         MountItem::NativeProps { id, props } => match props {
@@ -1226,8 +1271,8 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.item("cmd")
                 .num(id)
                 .str("scrollTo")
-                .num(*x)
-                .num(*y)
+                .num(x.0)
+                .num(y.0)
                 .bool(*animated)
                 .end();
         }
@@ -1283,6 +1328,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             out.item("cmd").num(id).str("injectJavaScript").str(s).end();
         }
         Command::Back => out.item("cmd").num(id).str("back").end(),
+        Command::ExitApp => out.item("cmd").num(id).str("exitApp").end(),
         Command::Announce(text) => out.item("cmd").num(id).str("announce").str(text).end(),
         Command::AccessibilityFocus => out.item("cmd").num(id).str("a11yFocus").end(),
         Command::Seek(t) => out.item("cmd").num(id).str("seek").num(*t).end(),
@@ -1293,7 +1339,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         } => {
             out.item("cmd").num(id).str("zoomTo").num(*scale);
             match center {
-                Some((x, y)) => out.num(*x).num(*y),
+                Some(c) => out.num(c.x.0).num(c.y.0),
                 None => out.raw("null").raw("null"),
             };
             out.bool(*animated).end();
@@ -1318,6 +1364,30 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .bool(*has_only)
                 .end();
         }
+        Command::SetClipboardImage(uri) => out
+            .item("cmd")
+            .num(id)
+            .str("setClipboardImage")
+            .str(uri)
+            .end(),
+        Command::ReadClipboardImage {
+            id: request,
+            has_only,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardImage")
+                .num(*request)
+                .bool(*has_only)
+                .end();
+        }
+        Command::ReadClipboardFiles { id: request } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardFiles")
+                .num(*request)
+                .end();
+        }
         Command::ImageInfo { id: request, uri } => {
             out.item("cmd")
                 .num(id)
@@ -1326,12 +1396,8 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .str(uri)
                 .end();
         }
-        // The bar's color is the page's theme color; the browser keeps
-        // its bars' content and visibility.
-        Command::StatusBar(c) => {
-            let color = c.background.map(css_color).unwrap_or_default();
-            out.item("cmd").num(id).str("statusBar").str(&color).end();
-        }
+        // A browser's bars are the browser's.
+        Command::StatusBar(_) => {}
         other => log::debug!("web: command {other:?} is not supported"),
     }
 }

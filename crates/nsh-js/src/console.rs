@@ -1,8 +1,8 @@
 use rquickjs::{Ctx, Function, Object, Type, Value, function::Rest, prelude::Coerced};
 
 /// Installs `console`, routed to the `log` facade with target `js`.
-pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
-    let console = Object::new(ctx.clone())?;
+pub(crate) fn install(cx: &Ctx<'_>) -> rquickjs::Result<()> {
+    let console = Object::new(cx.clone())?;
     for (name, level) in [
         ("log", log::Level::Info),
         ("info", log::Level::Info),
@@ -10,7 +10,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         ("warn", log::Level::Warn),
         ("error", log::Level::Error),
     ] {
-        let f = Function::new(ctx.clone(), move |args: Rest<Value<'_>>| {
+        let f = Function::new(cx.clone(), move |args: Rest<Value<'_>>| {
             if !log::log_enabled!(target: "js", level) {
                 return;
             }
@@ -25,12 +25,12 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         })?;
         console.set(name, f)?;
     }
-    ctx.globals().set("console", console)
+    cx.globals().set("console", console)
 }
 
 /// Formats like a browser console: strings verbatim, errors with their
 /// stack, functions by name, objects and arrays as JSON.
-fn format_value(value: &Value<'_>, out: &mut String) {
+pub(crate) fn format_value(value: &Value<'_>, out: &mut String) {
     match value.type_of() {
         Type::String => {
             if let Some(Ok(s)) = value.as_string().map(|s| s.to_string()) {
@@ -77,9 +77,9 @@ mod tests {
 
     fn fmt(src: &str) -> String {
         let rt = Runtime::new().unwrap();
-        let ctx = Context::full(&rt).unwrap();
-        ctx.with(|ctx| {
-            let value: Value = ctx.eval(src).unwrap();
+        let cx = Context::full(&rt).unwrap();
+        cx.with(|cx| {
+            let value: Value = cx.eval(src).unwrap();
             let mut out = String::new();
             format_value(&value, &mut out);
             out

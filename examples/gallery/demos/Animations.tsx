@@ -1,6 +1,5 @@
-import { cleanup, Scroll, signal, Text, View } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
 import { Animated, type CompositeAnimation, createAnimatedValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type AnimatedNode } from "nsh/animated";
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, Press, radius, Segmented, tints } from "../ui";
 
@@ -166,20 +165,20 @@ const curves: { name: string; easing: Easing; f: Fn }[] = [
 ];
 
 /** Diagonal hatching inside a rectangle. */
-function hatch(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.strokeStyle = alpha(colors.text, 0.06);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
+function hatch(cx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  cx.save();
+  cx.beginPath();
+  cx.rect(x, y, w, h);
+  cx.clip();
+  cx.strokeStyle = alpha(colors.text, 0.06);
+  cx.lineWidth = 1;
+  cx.beginPath();
   for (let i = -h; i < w; i += 7) {
-    ctx.moveTo(x + i, y + h);
-    ctx.lineTo(x + i + h, y);
+    cx.moveTo(x + i, y + h);
+    cx.lineTo(x + i + h, y);
   }
-  ctx.stroke();
-  ctx.restore();
+  cx.stroke();
+  cx.restore();
 }
 
 /** One curve plotted, with a dot that rides it: x runs linearly, y with the curve, both native. */
@@ -208,7 +207,7 @@ function EasingPlot() {
     <Card icon="spark" title="Easing" subtitle="Curves are data, evaluated natively">
       <Canvas
         style={{ height: 196 }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const l = 30;
           const r = width - 12;
           const t = 8;
@@ -216,76 +215,76 @@ function EasingPlot() {
           const y = (v: number) => b - ((v - lo) / (hi - lo)) * (b - t);
           const x = (v: number) => l + v * (r - l);
           // Zones outside 0..1: where a curve overshoots.
-          hatch(ctx, l, t, r - l, y(1) - t);
-          hatch(ctx, l, y(0), r - l, b - y(0));
-          ctx.strokeStyle = colors.line;
-          ctx.lineWidth = 1;
+          hatch(cx, l, t, r - l, y(1) - t);
+          hatch(cx, l, y(0), r - l, b - y(0));
+          cx.strokeStyle = colors.line;
+          cx.lineWidth = 1;
           for (const q of [0.25, 0.5, 0.75]) {
-            ctx.beginPath();
-            ctx.moveTo(x(q), t);
-            ctx.lineTo(x(q), b);
-            ctx.stroke();
+            cx.beginPath();
+            cx.moveTo(x(q), t);
+            cx.lineTo(x(q), b);
+            cx.stroke();
           }
-          ctx.setLineDash([3, 4]);
-          ctx.strokeStyle = colors.faint;
+          cx.setLineDash([3, 4]);
+          cx.strokeStyle = colors.faint;
           for (const v of [0, 1]) {
-            ctx.beginPath();
-            ctx.moveTo(l, y(v));
-            ctx.lineTo(r, y(v));
-            ctx.stroke();
+            cx.beginPath();
+            cx.moveTo(l, y(v));
+            cx.lineTo(r, y(v));
+            cx.stroke();
           }
-          ctx.setLineDash([]);
-          ctx.font = "11px system-ui";
-          ctx.fillStyle = colors.faint;
-          ctx.textBaseline = "middle";
-          ctx.fillText("1.0", 2, y(1));
-          ctx.fillText("0", 2, y(0));
+          cx.setLineDash([]);
+          cx.font = "11px system-ui";
+          cx.fillStyle = colors.faint;
+          cx.textBaseline = "middle";
+          cx.fillText("1.0", 2, y(1));
+          cx.fillText("0", 2, y(0));
           // The curve, filled faintly beneath.
           const f = curves[selected()].f;
           const n = 96;
-          ctx.beginPath();
-          ctx.moveTo(x(0), y(0));
-          for (let i = 0; i <= n; i++) ctx.lineTo(x(i / n), y(f(i / n)));
-          ctx.lineTo(x(1), y(0));
-          ctx.closePath();
-          ctx.fillStyle = tints.accent;
-          ctx.globalAlpha = 0.6;
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.beginPath();
-          ctx.moveTo(x(0), y(f(0)));
-          for (let i = 1; i <= n; i++) ctx.lineTo(x(i / n), y(f(i / n)));
-          ctx.strokeStyle = colors.accent;
-          ctx.lineWidth = 2;
-          ctx.lineJoin = "round";
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(x(0), y(0));
+          for (let i = 0; i <= n; i++) cx.lineTo(x(i / n), y(f(i / n)));
+          cx.lineTo(x(1), y(0));
+          cx.closePath();
+          cx.fillStyle = tints.accent;
+          cx.globalAlpha = 0.6;
+          cx.fill();
+          cx.globalAlpha = 1;
+          cx.beginPath();
+          cx.moveTo(x(0), y(f(0)));
+          for (let i = 1; i <= n; i++) cx.lineTo(x(i / n), y(f(i / n)));
+          cx.strokeStyle = colors.accent;
+          cx.lineWidth = 2;
+          cx.lineJoin = "round";
+          cx.stroke();
           // The playhead and the dot, from animated values.
           const hx = px.mul(r - l).add(l);
           const hy = py.mul(-(b - t) / (hi - lo)).add(b + (lo * (b - t)) / (hi - lo));
-          ctx.strokeStyle = alpha(colors.text, 0.22);
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(hx, t);
-          ctx.lineTo(hx, b);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(l, hy);
-          ctx.lineTo(hx, hy);
-          ctx.setLineDash([2, 3]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = colors.light;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = colors.accent;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 9, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.fillStyle = colors.accent;
-          ctx.beginPath();
-          ctx.arc(l, hy, 3.5, 0, Math.PI * 2);
-          ctx.fill();
+          cx.strokeStyle = alpha(colors.text, 0.22);
+          cx.lineWidth = 1;
+          cx.beginPath();
+          cx.moveTo(hx, t);
+          cx.lineTo(hx, b);
+          cx.stroke();
+          cx.beginPath();
+          cx.moveTo(l, hy);
+          cx.lineTo(hx, hy);
+          cx.setLineDash([2, 3]);
+          cx.stroke();
+          cx.setLineDash([]);
+          cx.fillStyle = colors.light;
+          cx.beginPath();
+          cx.arc(hx, hy, 5, 0, Math.PI * 2);
+          cx.fill();
+          cx.strokeStyle = colors.accent;
+          cx.beginPath();
+          cx.arc(hx, hy, 9, 0, Math.PI * 2);
+          cx.stroke();
+          cx.fillStyle = colors.accent;
+          cx.beginPath();
+          cx.arc(l, hy, 3.5, 0, Math.PI * 2);
+          cx.fill();
         }}
       />
       <Scroll horizontal showsIndicator={false}>
@@ -356,7 +355,7 @@ function EasingRace() {
 /** A selectable capsule (36 pt, with hit slop up to 44). */
 function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
   return (
-    <Press onPress={props.onPress} hitSlop={4} accessibilityRole="tab" accessibilityState={{ selected: !!props.active }}>
+    <Press onPress={props.onPress} hitSlop={4} role="tab" accessibilityState={{ selected: !!props.active }}>
       <View
         style={{
           height: 36,
@@ -511,42 +510,42 @@ function Springs() {
     <Card icon="physics" title="Springs" subtitle="Stiffness and damping, mass 1">
       <Canvas
         style={{ height: 150 }}
-        draw={(ctx, { width: cw, height }) => {
+        draw={(cx, { width: cw, height }) => {
           const l = 4;
           const r = cw - 4;
           const t = 10;
           const b = height - 10;
           const y = (v: number) => b - (v / 1.5) * (b - t);
           // A dot matrix behind, then the target.
-          ctx.fillStyle = colors.line;
-          for (let gx = l; gx <= r; gx += 12) for (let gy = t; gy <= b; gy += 12) ctx.fillRect(gx, gy, 1.5, 1.5);
-          ctx.setLineDash([3, 4]);
-          ctx.strokeStyle = colors.faint;
-          ctx.beginPath();
-          ctx.moveTo(l, y(1));
-          ctx.lineTo(r, y(1));
-          ctx.stroke();
-          ctx.setLineDash([]);
+          cx.fillStyle = colors.line;
+          for (let gx = l; gx <= r; gx += 12) for (let gy = t; gy <= b; gy += 12) cx.fillRect(gx, gy, 1.5, 1.5);
+          cx.setLineDash([3, 4]);
+          cx.strokeStyle = colors.faint;
+          cx.beginPath();
+          cx.moveTo(l, y(1));
+          cx.lineTo(r, y(1));
+          cx.stroke();
+          cx.setLineDash([]);
           const n = 120;
           const w = Math.max(1, width() - 28);
           const fromEnd = !there();
           springs.forEach((s, i) => {
             const pts = response(s.stiffness, s.damping, n);
-            ctx.strokeStyle = colors[s.tone];
-            ctx.lineWidth = 1.75;
-            ctx.beginPath();
+            cx.strokeStyle = colors[s.tone];
+            cx.lineWidth = 1.75;
+            cx.beginPath();
             pts.forEach((p, k) => {
               const v = fromEnd ? 1 - p : p;
               const px = l + (k / n) * (r - l);
-              if (k === 0) ctx.moveTo(px, y(v));
-              else ctx.lineTo(px, y(v));
+              if (k === 0) cx.moveTo(px, y(v));
+              else cx.lineTo(px, y(v));
             });
-            ctx.stroke();
+            cx.stroke();
             // The live spring value, at the clock's x.
-            ctx.fillStyle = colors[s.tone];
-            ctx.beginPath();
-            ctx.arc(clock.mul(r - l).add(l), xs[i].div(w).mul(-(b - t) / 1.5).add(b), 4, 0, Math.PI * 2);
-            ctx.fill();
+            cx.fillStyle = colors[s.tone];
+            cx.beginPath();
+            cx.arc(clock.mul(r - l).add(l), xs[i].div(w).mul(-(b - t) / 1.5).add(b), 4, 0, Math.PI * 2);
+            cx.fill();
           });
         }}
       />
@@ -586,26 +585,26 @@ function DialFace(props: { size: number }) {
   return (
     <Canvas
       style={{ width: props.size, height: props.size }}
-      draw={(ctx, { width }) => {
+      draw={(cx, { width }) => {
         const c = width / 2;
         for (let i = 0; i <= 40; i++) {
           const a = ((-120 + i * 6) * Math.PI) / 180 - Math.PI / 2;
           const major = i % 10 === 0;
           const r0 = c - (major ? 12 : 7);
-          ctx.strokeStyle = major ? colors.muted : colors.border;
-          ctx.lineWidth = major ? 1.5 : 1;
-          ctx.beginPath();
-          ctx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
-          ctx.lineTo(c + Math.cos(a) * (c - 2), c + Math.sin(a) * (c - 2));
-          ctx.stroke();
+          cx.strokeStyle = major ? colors.muted : colors.border;
+          cx.lineWidth = major ? 1.5 : 1;
+          cx.beginPath();
+          cx.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
+          cx.lineTo(c + Math.cos(a) * (c - 2), c + Math.sin(a) * (c - 2));
+          cx.stroke();
         }
-        ctx.font = "11px system-ui";
-        ctx.fillStyle = colors.faint;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
+        cx.font = "11px system-ui";
+        cx.fillStyle = colors.faint;
+        cx.textAlign = "center";
+        cx.textBaseline = "middle";
         ["0", "1", "2"].forEach((label, i) => {
           const a = ((-120 + i * 120) * Math.PI) / 180 - Math.PI / 2;
-          ctx.fillText(label, c + Math.cos(a) * (c - 24), c + Math.sin(a) * (c - 24));
+          cx.fillText(label, c + Math.cos(a) * (c - 24), c + Math.sin(a) * (c - 24));
         });
       }}
     />

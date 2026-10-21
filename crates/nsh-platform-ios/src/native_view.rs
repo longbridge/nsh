@@ -192,8 +192,8 @@ impl NshView {
     }
 
     fn inside(&self, point: CGPoint, event: Option<&UIEvent>) -> bool {
-        let slop = self.ivars().props.borrow().hit_slop;
-        if slop.is_zero() {
+        let slop = self.ivars().props.borrow().hit_slop.map(|v| v.0);
+        if slop == Default::default() {
             // SAFETY: calling the superclass implementation.
             return unsafe { msg_send![super(self), pointInside: point, withEvent: event] };
         }
@@ -297,6 +297,11 @@ impl NshView {
     pub(crate) fn set_props(&self, props: ViewProps, control: &EngineControl) {
         *self.ivars().props.borrow_mut() = props;
         *self.ivars().control.borrow_mut() = Some(control.clone());
+    }
+
+    /// The view is a selection area (`ViewProps::selection_area`).
+    pub(crate) fn is_selection_area(&self) -> bool {
+        self.ivars().props.borrow().selection_area
     }
 
     /// The area descendants cover outside the bounds, in the view's

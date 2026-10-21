@@ -6,9 +6,13 @@ order: 9
 
 # nsh/native
 
-`nsh/native` 在运行时按名称把你的应用与宿主应用提供的能力连接起来。嵌入了 NSH 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 NSH 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 NSH 布局，随父视图裁剪和滚动，层叠关系也正确。用 Rust 嵌入 NSH 的应用还可以注册函数、类和 Rust 组件；`nativeModule` 把它们作为一个带类型的对象交给你。两种方式下应用都用标准的 `nsh build` 构建：宿主在运行应用时接上它提供的内容。
+`nsh/native` 在运行时按名称把你的应用与宿主应用提供的能力连接起来。嵌入了 NSH 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 NSH 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 NSH 布局，随父视图裁剪和滚动，层叠关系也正确。用 Rust 嵌入 NSH 的应用还可以注册函数、类和 Rust 组件；`nativeModule` 把它们作为一个带类型的对象交给你。两种方式下应用都用标准的 `nsh build` 构建：宿主在运行应用时接上它提供的内容。Rust 代码用 `nsh_core::ui::prelude` 中的 `native(name)` 放置已注册的视图，用 `.prop(name, value)` 设置它的属性（一个 JSON 值，或给出 JSON 值的信号或闭包），用 `.on_native_event(…)` 接收它的事件，并通过 `ElementRef` 调用它的命令；TSX 导入 `nsh/native`。
 
-```ts
+```rust tabs
+use nsh_core::ui::prelude::*; // native、NativeEvent、element_ref
+```
+
+```tsx tabs
 import { nativeComponent, nativeModule } from "nsh/native";
 ```
 
@@ -30,7 +34,7 @@ interface NativeComponentSpec<P, E> {
 }
 ```
 
-返回一个组件，对应宿主应用以 `name` 注册的原生组件（Swift `NshAppView.register(component:)`，Java `NshView.registerComponent`）。
+返回一个组件，对应宿主应用以 `name` 注册的原生组件（Swift `NshAppView.register(component:)`，Java `NshView.registerComponent`）。Rust：`native(name)`，一个属性为 JSON 值（`.prop("text", json!(…))`）、事件以 `NativeEvent { name, data }` 送达的视图。
 
 - `P` 是组件自身属性的类型。`spec.props` 中列出的每个属性变化时都会以 JSON 发送到原生侧；设为 `undefined` 会移除该属性。
 - `E` 把事件名映射到事件数据。事件 `regionChange` 对应处理属性 `onRegionChange`。
@@ -47,9 +51,13 @@ type NativeEventHandlers<E> = { [K in keyof E & string as `on${Capitalize<K>}`]?
 
 ### 命令
 
-它的 `ref` 拿到一个 `YNode`；`ref.command(name, args)` 调用原生组件的 `name` 命令，参数 `args` 为任意 JSON 值：
+它的 `ref` 拿到一个 `YNode`；`ref.command(name, args)` 调用原生组件的 `name` 命令，参数 `args` 为任意 JSON 值。Rust：`ElementRef::command(name, args)`。
 
-```ts
+```rust tabs
+map.command("zoomTo", json!({ "level": 3 }));
+```
+
+```tsx tabs
 map.command("zoomTo", { level: 3 });
 ```
 
@@ -61,10 +69,41 @@ map.command("zoomTo", { level: 3 });
 
 这里的徽标是宿主应用的原生视图，注册名为 `embed.badge`。NSH 负责布局，向它发送 `text` 和 `color`，接收它的 `tap` 事件，并调用它的 `pulse` 命令：
 
-```tsx
+```rust tabs
+use nsh_core::ui::prelude::*;
+use serde_json::json;
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let taps = signal(0_u64);
+    let badge = element_ref();
+    view()
+        .flex_1()
+        .p_5()
+        .gap_4()
+        .child(
+            native("embed.badge")
+                .prop("text", json!("Tap the native badge"))
+                .prop("color", json!("#8250df"))
+                .element_ref(&badge)
+                .on_native_event(move |e: &NativeEvent| {
+                    if &*e.name == "tap" {
+                        taps.set(e.data["count"].as_u64().unwrap_or(0));
+                        badge.command("pulse", json!(null));
+                    }
+                })
+                .self_start()
+                .rounded(px(8.0))
+                .overflow_hidden(),
+        )
+        .child(text(move || format!("Tapped {}×", taps.get())))
+}
+```
+
+```tsx tabs
 import { mount, signal, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
   props: ["text", "color"],
@@ -99,7 +138,7 @@ mount(App);
 function nativeModule<T extends object>(specifier: string): T;
 ```
 
-返回嵌入应用以 `specifier` 注册的套件的导出：其中的模块、类、函数和 Rust 组件，合成一个对象。类型 `T` 由应用自己声明，因此构建应用时不需要了解宿主。
+返回嵌入应用以 `specifier` 注册的套件的导出：其中的模块、类、函数和 Rust 组件，合成一个对象。类型 `T` 由应用自己声明，因此构建应用时不需要了解宿主。与宿主的 crate 一起构建的 Rust 代码直接以 Rust 调用这些函数；`nativeModule` 是 TSX 访问它们的方式。
 
 ```ts
 import { nativeModule } from "nsh/native";
@@ -145,7 +184,7 @@ impl Trading {
 
 let mut trading = Registry::ui_set("host/trading");
 trading.module::<Trading>();
-nsh_platform_gpui::set_ui_sets(vec![nsh_ui_mobile::registry(), trading]);
+nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
 `subscribe` 让宿主的数据与每个应用保持同步：它的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有订阅了的应用。

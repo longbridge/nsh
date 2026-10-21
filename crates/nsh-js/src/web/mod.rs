@@ -15,7 +15,7 @@
 
 pub(crate) mod js;
 
-mod blob;
+pub(crate) mod blob;
 mod encoding;
 mod event;
 mod fetch;
@@ -23,6 +23,7 @@ mod intl;
 mod iterator;
 mod streams;
 mod url;
+mod websocket;
 
 use std::{
     any::Any,
@@ -89,6 +90,7 @@ pub(crate) enum Class {
     Headers,
     Request,
     Response,
+    WebSocket,
     NumberFormat,
     DateTimeFormat,
 }
@@ -164,6 +166,7 @@ fn specs() -> impl Iterator<Item = &'static Spec> {
         encoding::SPECS,
         blob::SPECS,
         fetch::SPECS,
+        websocket::SPECS,
         intl::SPECS,
     ]
     .into_iter()
@@ -208,6 +211,7 @@ pub(crate) const TYPES: &[&str] = &[
     streams::writable::TYPES,
     streams::transform::TYPES,
     fetch::TYPES,
+    websocket::TYPES,
 ];
 
 /// The per-context state: the classes and the prototypes.
@@ -230,6 +234,10 @@ pub(crate) struct Web {
     /// What relative request URLs resolve against ([`crate::HostOptions`]
     /// `base_url`).
     pub(crate) base_url: Option<::url::Url>,
+    /// The intrinsic `Date`, under a manual clock (`crate::clock`).
+    pub(crate) date: V,
+    /// When `performance.now()` is 0 under a manual clock.
+    pub(crate) clock_origin: Option<nsh_core::time::Instant>,
 }
 
 impl Web {
@@ -241,13 +249,14 @@ impl Web {
         self.blob_urls = Default::default();
         self.cached.clear();
         self.fetches.clear();
+        self.date = V::undefined();
     }
 }
 
-pub(crate) fn web<'a>(ctx: Ctx) -> &'a mut Web {
+pub(crate) fn web<'a>(cx: Ctx) -> &'a mut Web {
     // SAFETY: a projection of the state's field; callers hold it briefly
     // and never across JS.
-    unsafe { &mut (*crate::state::state(ctx)).web }
+    unsafe { &mut (*crate::state::state(cx)).web }
 }
 
 /// What an object's opaque points to.
@@ -350,7 +359,7 @@ unsafe extern "C" fn mark_closure(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::
 }
 
 unsafe extern "C" fn call_closure(
-    ctx: Ctx,
+    cx: Ctx,
     func: Raw,
     _this: Raw,
     argc: c_int,
@@ -368,30 +377,30 @@ unsafe extern "C" fn call_closure(
         // throws instead of unwinding into QuickJS.
         let args = Args::new(argc, argv);
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            (c.f)(ctx, &c.captures, args)
+            (c.f)(cx, &c.captures, args)
         })) {
             Ok(Ok(v)) => v.take(),
             Ok(Err(Throw)) => qjs::JS_EXCEPTION,
             Err(_) => {
-                let e = qjs::JS_NewError(ctx);
-                if let Ok(m) = js::string(ctx, "a Rust function panicked") {
-                    qjs::JS_SetPropertyStr(ctx, e, c"message".as_ptr(), m.take());
+                let e = qjs::JS_NewError(cx);
+                if let Ok(m) = js::string(cx, "a Rust function panicked") {
+                    qjs::JS_SetPropertyStr(cx, e, c"message".as_ptr(), m.take());
                 }
-                qjs::JS_Throw(ctx, e)
+                qjs::JS_Throw(cx, e)
             }
         }
     }
 }
 
 /// Registers the two classes (once per context).
-fn register(ctx: Ctx) {
-    let w = web(ctx);
+fn register(cx: Ctx) {
+    let w = web(cx);
     if w.object_class != 0 {
         return;
     }
     // SAFETY: registering classes on the context's runtime.
     unsafe {
-        let rt = qjs::JS_GetRuntime(ctx);
+        let rt = qjs::JS_GetRuntime(cx);
         let class = |name: &'static CStr, finalizer, gc_mark, call| {
             let mut id: qjs::JSClassID = 0;
             qjs::JS_NewClassID(rt, &mut id);
@@ -416,33 +425,44 @@ fn register(ctx: Ctx) {
 }
 
 /// A function object running `closure`.
-pub(crate) fn new_closure(ctx: Ctx, closure: Closure) -> R<V> {
-    register(ctx);
-    let class = web(ctx).closure_class;
+pub(crate) fn new_closure(cx: Ctx, closure: Closure) -> R<V> {
+    register(cx);
+    let class = web(cx).closure_class;
     // SAFETY: a function prototype for the callable object; it owns the
     // closure.
     unsafe {
-        let proto = qjs::JS_GetFunctionProto(ctx);
-        let obj = V::checked(ctx, qjs::JS_NewObjectProtoClass(ctx, proto, class))?;
-        qjs::JS_FreeValue(ctx, proto);
+        let proto = qjs::JS_GetFunctionProto(cx);
+        let obj = V::checked(cx, qjs::JS_NewObjectProtoClass(cx, proto, class))?;
+        qjs::JS_FreeValue(cx, proto);
         qjs::JS_SetOpaque(obj.raw(), Box::into_raw(Box::new(closure)) as *mut c_void);
         Ok(obj)
     }
 }
 
+/// A new `AbortSignal` (owned): a resource's load gets one, aborted when the
+/// load no longer counts.
+pub(crate) fn new_abort_signal(cx: Ctx) -> R<Raw> {
+    event::new_signal(cx).map(V::take)
+}
+
+/// Aborts `signal` with an `AbortError` (nothing when it is aborted).
+pub(crate) fn abort_signal(cx: Ctx, signal: Raw) -> R<()> {
+    event::abort(cx, signal, UNDEFINED)
+}
+
 /// The intrinsic `Promise.prototype.then`.
-pub(crate) fn intrinsic_then(ctx: Ctx) -> R<V> {
-    build(ctx)?;
-    Ok(web(ctx).then.clone_ref())
+pub(crate) fn intrinsic_then(cx: Ctx) -> R<V> {
+    build(cx)?;
+    Ok(web(cx).then.clone_ref())
 }
 
 /// The function cached at `index` (made on first use).
-pub(crate) fn cached_function(ctx: Ctx, index: usize, name: &CStr, f: Native) -> R<V> {
-    if let Some(v) = web(ctx).cached.get(index).filter(|v| !v.is_undefined()) {
+pub(crate) fn cached_function(cx: Ctx, index: usize, name: &CStr, f: Native) -> R<V> {
+    if let Some(v) = web(cx).cached.get(index).filter(|v| !v.is_undefined()) {
         return Ok(v.clone_ref());
     }
-    let func = js::function(ctx, name, f, 1)?;
-    let w = web(ctx);
+    let func = js::function(cx, name, f, 1)?;
+    let w = web(cx);
     if w.cached.len() <= index {
         w.cached.resize_with(index + 1, V::undefined);
     }
@@ -451,49 +471,49 @@ pub(crate) fn cached_function(ctx: Ctx, index: usize, name: &CStr, f: Native) ->
 }
 
 /// The prototype of `class`.
-pub(crate) fn proto(ctx: Ctx, class: Class) -> R<V> {
-    build(ctx)?;
-    Ok(web(ctx).protos[class as usize].clone_ref())
+pub(crate) fn proto(cx: Ctx, class: Class) -> R<V> {
+    build(cx)?;
+    Ok(web(cx).protos[class as usize].clone_ref())
 }
 
 /// The constructor of `class`.
-pub(crate) fn constructor(ctx: Ctx, class: Class) -> R<V> {
-    build(ctx)?;
-    Ok(web(ctx).ctors[class as usize].clone_ref())
+pub(crate) fn constructor(cx: Ctx, class: Class) -> R<V> {
+    build(cx)?;
+    Ok(web(cx).ctors[class as usize].clone_ref())
 }
 
 /// A new object of `class` holding `data`: with `new_target`'s prototype
 /// when constructed (`undefined`: made internally).
-pub(crate) fn instance(ctx: Ctx, new_target: Raw, class: Class, data: impl Object) -> R<V> {
+pub(crate) fn instance(cx: Ctx, new_target: Raw, class: Class, data: impl Object) -> R<V> {
     let proto = if js::is_object(new_target) {
-        let p = js::get(ctx, new_target, "prototype")?;
+        let p = js::get(cx, new_target, "prototype")?;
         if js::is_object(p.raw()) {
             p
         } else {
-            proto(ctx, class)?
+            proto(cx, class)?
         }
     } else {
-        proto(ctx, class)?
+        proto(cx, class)?
     };
-    instance_of_proto(ctx, proto.raw(), data)
+    instance_of_proto(cx, proto.raw(), data)
 }
 
 /// A new object holding `data` with prototype `proto` (the classes of
 /// Rust's `#[class]`, `classes.rs`, whose prototypes are made at run time).
-pub(crate) fn instance_of_proto(ctx: Ctx, proto: Raw, data: impl Object) -> R<V> {
-    register(ctx);
-    let id = web(ctx).object_class;
+pub(crate) fn instance_of_proto(cx: Ctx, proto: Raw, data: impl Object) -> R<V> {
+    register(cx);
+    let id = web(cx).object_class;
     // SAFETY: an object of the web class owning its slot.
     unsafe {
-        let obj = V::checked(ctx, qjs::JS_NewObjectProtoClass(ctx, proto, id))?;
+        let obj = V::checked(cx, qjs::JS_NewObjectProtoClass(cx, proto, id))?;
         let slot: Box<Slot> = Box::new(Slot(RefCell::new(Box::new(data))));
         qjs::JS_SetOpaque(obj.raw(), Box::into_raw(slot) as *mut c_void);
         Ok(obj)
     }
 }
 
-fn slot<'a>(ctx: Ctx, v: Raw) -> Option<&'a Slot> {
-    let id = web(ctx).object_class;
+fn slot<'a>(cx: Ctx, v: Raw) -> Option<&'a Slot> {
+    let id = web(cx).object_class;
     if id == 0 {
         return None;
     }
@@ -504,28 +524,28 @@ fn slot<'a>(ctx: Ctx, v: Raw) -> Option<&'a Slot> {
 
 /// The data of `v` as a `T`, borrowed (`TypeError` for other values, and
 /// for a re-entrant use).
-pub(crate) fn data<'a, T: Object>(ctx: Ctx, v: Raw, what: &str) -> R<RefMut<'a, T>> {
-    let illegal = |ctx| js::type_error(ctx, &format!("Illegal invocation: not a {what}"));
-    let slot = slot(ctx, v).ok_or_else(|| illegal(ctx))?;
+pub(crate) fn data<'a, T: Object>(cx: Ctx, v: Raw, what: &str) -> R<RefMut<'a, T>> {
+    let illegal = |cx| js::type_error(cx, &format!("Illegal invocation: not a {what}"));
+    let slot = slot(cx, v).ok_or_else(|| illegal(cx))?;
     let b = slot
         .0
         .try_borrow_mut()
-        .map_err(|_| js::type_error(ctx, &format!("{what} used re-entrantly")))?;
+        .map_err(|_| js::type_error(cx, &format!("{what} used re-entrantly")))?;
     RefMut::filter_map(b, |d| (d.as_mut() as &mut dyn Any).downcast_mut::<T>())
-        .map_err(|_| illegal(ctx))
+        .map_err(|_| illegal(cx))
 }
 
 /// `f` of the data of `v` as a `T`, without throwing (`None`: another
 /// value, or one in use).
-pub(crate) fn peek<T: Object, R>(ctx: Ctx, v: Raw, f: impl FnOnce(&T) -> R) -> Option<R> {
-    let slot = slot(ctx, v)?;
+pub(crate) fn peek<T: Object, R>(cx: Ctx, v: Raw, f: impl FnOnce(&T) -> R) -> Option<R> {
+    let slot = slot(cx, v)?;
     let data = slot.0.try_borrow().ok()?;
     (data.as_ref() as &dyn Any).downcast_ref::<T>().map(f)
 }
 
 /// Whether `v` holds a `T`.
-pub(crate) fn is<T: Object>(ctx: Ctx, v: Raw) -> bool {
-    slot(ctx, v).is_some_and(|s| {
+pub(crate) fn is<T: Object>(cx: Ctx, v: Raw) -> bool {
+    slot(cx, v).is_some_and(|s| {
         s.0.try_borrow()
             .is_ok_and(|d| (d.as_ref() as &dyn Any).is::<T>())
     })
@@ -533,76 +553,76 @@ pub(crate) fn is<T: Object>(ctx: Ctx, v: Raw) -> bool {
 
 /// The data of `v` through a role (`EventTarget` of subclasses).
 pub(crate) fn role<'a, T>(
-    ctx: Ctx,
+    cx: Ctx,
     v: Raw,
     what: &str,
     f: impl FnOnce(&mut dyn Object) -> Option<&mut T>,
 ) -> R<RefMut<'a, T>> {
-    let illegal = |ctx| js::type_error(ctx, &format!("Illegal invocation: not a {what}"));
-    let slot = slot(ctx, v).ok_or_else(|| illegal(ctx))?;
+    let illegal = |cx| js::type_error(cx, &format!("Illegal invocation: not a {what}"));
+    let slot = slot(cx, v).ok_or_else(|| illegal(cx))?;
     let b = slot
         .0
         .try_borrow_mut()
-        .map_err(|_| js::type_error(ctx, &format!("{what} used re-entrantly")))?;
-    RefMut::filter_map(b, |d| f(d.as_mut())).map_err(|_| illegal(ctx))
+        .map_err(|_| js::type_error(cx, &format!("{what} used re-entrantly")))?;
+    RefMut::filter_map(b, |d| f(d.as_mut())).map_err(|_| illegal(cx))
 }
 
 native!(
     /// The constructor of a class made only internally.
-    fn illegal_constructor(ctx, this, args) {
-        Err(js::type_error(ctx, "Illegal constructor"))
+    fn illegal_constructor(cx, this, args) {
+        Err(js::type_error(cx, "Illegal constructor"))
     }
 );
 use js::native;
 
 /// Makes the classes and functions (once per context).
-fn build(ctx: Ctx) -> R<()> {
-    register(ctx);
-    if web(ctx).built {
+fn build(cx: Ctx) -> R<()> {
+    register(cx);
+    if web(cx).built {
         return Ok(());
     }
-    web(ctx).built = true;
-    let g = js::global(ctx);
-    let promise = js::get(ctx, g.raw(), "Promise")?;
-    let promise_proto = js::get(ctx, promise.raw(), "prototype")?;
-    let then = js::get(ctx, promise_proto.raw(), "then")?;
+    web(cx).built = true;
+    let g = js::global(cx);
+    let promise = js::get(cx, g.raw(), "Promise")?;
+    let promise_proto = js::get(cx, promise.raw(), "prototype")?;
+    let then = js::get(cx, promise_proto.raw(), "then")?;
     let mut protos: Vec<Option<V>> = (0..CLASS_COUNT).map(|_| None).collect();
     let mut ctors: Vec<Option<V>> = (0..CLASS_COUNT).map(|_| None).collect();
     for spec in specs() {
-        let (proto, ctor) = make_class(ctx, spec, &protos, &ctors)?;
+        let (proto, ctor) = make_class(cx, spec, &protos, &ctors)?;
         protos[spec.class as usize] = Some(proto);
         ctors[spec.class as usize] = Some(ctor);
     }
     // The iterators inherit `%IteratorPrototype%`'s helpers.
-    let array = js::new_array(ctx, Vec::new())?;
-    let array_iterator = js::invoke(ctx, array.raw(), "values", &[])?;
+    let array = js::new_array(cx, Vec::new())?;
+    let array_iterator = js::invoke(cx, array.raw(), "values", &[])?;
     // SAFETY: live objects; the prototypes are borrowed.
     unsafe {
-        let array_iterator_proto = V::own(ctx, qjs::JS_GetPrototype(ctx, array_iterator.raw()));
-        let iterator_proto = V::own(ctx, qjs::JS_GetPrototype(ctx, array_iterator_proto.raw()));
+        let array_iterator_proto = V::own(cx, qjs::JS_GetPrototype(cx, array_iterator.raw()));
+        let iterator_proto = V::own(cx, qjs::JS_GetPrototype(cx, array_iterator_proto.raw()));
         if let Some(p) = &protos[Class::Iterator as usize] {
-            qjs::JS_SetPrototype(ctx, p.raw(), iterator_proto.raw());
+            qjs::JS_SetPrototype(cx, p.raw(), iterator_proto.raw());
         }
     }
-    let w = web(ctx);
+    let w = web(cx);
     w.protos = protos.into_iter().map(Option::unwrap_or_default).collect();
     w.ctors = ctors.into_iter().map(Option::unwrap_or_default).collect();
     w.then = then;
     Ok(())
 }
 
-fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) -> R<(V, V)> {
+fn make_class(cx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) -> R<(V, V)> {
     let parent = spec.parent.map(|p| p as usize);
-    let proto = js::new_object(ctx)?;
+    let proto = js::new_object(cx)?;
     if let Some(p) = parent.and_then(|p| protos[p].as_ref()) {
         // SAFETY: live objects.
-        unsafe { qjs::JS_SetPrototype(ctx, proto.raw(), p.raw()) };
+        unsafe { qjs::JS_SetPrototype(cx, proto.raw(), p.raw()) };
     }
     let (f, length) = spec.constructor.unwrap_or((illegal_constructor, 0));
     // SAFETY: a constructor-only C function (`this` is `new.target`).
-    let ctor = V::checked(ctx, unsafe {
+    let ctor = V::checked(cx, unsafe {
         qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(f),
             spec.name.as_ptr(),
             length,
@@ -611,10 +631,10 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
         )
     })?;
     // SAFETY: links `prototype` / `constructor` both ways.
-    unsafe { qjs::JS_SetConstructor(ctx, ctor.raw(), proto.raw()) };
+    unsafe { qjs::JS_SetConstructor(cx, ctor.raw(), proto.raw()) };
     if let Some(c) = parent.and_then(|p| ctors[p].as_ref()) {
         // SAFETY: static members are inherited too.
-        unsafe { qjs::JS_SetPrototype(ctx, ctor.raw(), c.raw()) };
+        unsafe { qjs::JS_SetPrototype(cx, ctor.raw(), c.raw()) };
     }
     for (key, f, length) in spec.methods {
         let (name, atom) = match key {
@@ -625,17 +645,17 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
                 Some(qjs::JS_ATOM_Symbol_asyncIterator),
             ),
         };
-        let func = js::function(ctx, name, *f, *length)?;
+        let func = js::function(cx, name, *f, *length)?;
         let flags = (qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE) as c_int;
         // SAFETY: the property takes the function.
         unsafe {
             match atom {
                 Some(atom) => {
-                    qjs::JS_DefinePropertyValue(ctx, proto.raw(), atom as _, func.take(), flags);
+                    qjs::JS_DefinePropertyValue(cx, proto.raw(), atom as _, func.take(), flags);
                 }
                 None => {
                     qjs::JS_DefinePropertyValueStr(
-                        ctx,
+                        cx,
                         proto.raw(),
                         name.as_ptr(),
                         func.take(),
@@ -646,31 +666,31 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
         }
     }
     for (name, getter, setter) in spec.accessors {
-        let get = js::function(ctx, name, *getter, 0)?;
+        let get = js::function(cx, name, *getter, 0)?;
         let set = match setter {
-            Some(s) => js::function(ctx, name, *s, 1)?,
+            Some(s) => js::function(cx, name, *s, 1)?,
             None => V::undefined(),
         };
         // SAFETY: the property takes the functions.
         unsafe {
-            let atom = qjs::JS_NewAtom(ctx, name.as_ptr());
+            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
             qjs::JS_DefinePropertyGetSet(
-                ctx,
+                cx,
                 proto.raw(),
                 atom,
                 get.take(),
                 set.take(),
                 (qjs::JS_PROP_CONFIGURABLE | qjs::JS_PROP_ENUMERABLE) as c_int,
             );
-            qjs::JS_FreeAtom(ctx, atom);
+            qjs::JS_FreeAtom(cx, atom);
         }
     }
     for (name, f, length) in spec.statics {
-        let func = js::function(ctx, name, *f, *length)?;
+        let func = js::function(cx, name, *f, *length)?;
         // SAFETY: the property takes the function.
         unsafe {
             qjs::JS_DefinePropertyValueStr(
-                ctx,
+                cx,
                 ctor.raw(),
                 name.as_ptr(),
                 func.take(),
@@ -683,7 +703,7 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
             // SAFETY: a read-only, enumerable number.
             unsafe {
                 qjs::JS_DefinePropertyValueStr(
-                    ctx,
+                    cx,
                     target,
                     name.as_ptr(),
                     qjs::JS_NewFloat64(*value),
@@ -694,11 +714,11 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
     }
     // `Object.prototype.toString` gives `[object Name]`, as in browsers
     // (libraries test kinds this way).
-    let tag = js::string(ctx, &spec.name.to_string_lossy())?;
+    let tag = js::string(cx, &spec.name.to_string_lossy())?;
     // SAFETY: the property takes the string.
     unsafe {
         qjs::JS_DefinePropertyValue(
-            ctx,
+            cx,
             proto.raw(),
             qjs::JS_ATOM_Symbol_toStringTag as _,
             tag.take(),
@@ -709,18 +729,18 @@ fn make_class(ctx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) 
 }
 
 /// The value of global `name` (a class or a function).
-fn global_value(ctx: Ctx, name: &CStr) -> R<V> {
-    build(ctx)?;
+fn global_value(cx: Ctx, name: &CStr) -> R<V> {
+    build(cx)?;
     if name == INTL {
-        return intl::namespace(ctx);
+        return intl::namespace(cx);
     }
     if let Some(spec) = specs().find(|s| s.global && s.name == name) {
-        return constructor(ctx, spec.class);
+        return constructor(cx, spec.class);
     }
     let f = functions()
         .find(|f| f.name == name)
-        .ok_or_else(|| js::type_error(ctx, "unknown global"))?;
-    js::function(ctx, f.name, f.native, f.length)
+        .ok_or_else(|| js::type_error(cx, "unknown global"))?;
+    js::function(cx, f.name, f.native, f.length)
 }
 
 /// `Intl`: a namespace, not a class.
@@ -740,29 +760,29 @@ fn global_names() -> impl Iterator<Item = &'static CStr> {
 }
 
 /// Replaces the lazy accessors still in place with the values.
-fn materialize(ctx: Ctx) -> R<()> {
-    let g = js::global(ctx);
+fn materialize(cx: Ctx) -> R<()> {
+    let g = js::global(cx);
     for name in global_names() {
         // SAFETY: reading an own property's descriptor of the global.
         let accessor = unsafe {
-            let atom = qjs::JS_NewAtom(ctx, name.as_ptr());
+            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
             let mut desc = std::mem::zeroed::<qjs::JSPropertyDescriptor>();
-            let r = qjs::JS_GetOwnProperty(ctx, &mut desc, g.raw(), atom);
-            qjs::JS_FreeAtom(ctx, atom);
+            let r = qjs::JS_GetOwnProperty(cx, &mut desc, g.raw(), atom);
+            qjs::JS_FreeAtom(cx, atom);
             if r < 0 {
                 return Err(Throw);
             }
             let accessor = r == 1 && (desc.flags & qjs::JS_PROP_GETSET as c_int) != 0;
             if r == 1 {
-                qjs::JS_FreeValue(ctx, desc.value);
-                qjs::JS_FreeValue(ctx, desc.getter);
-                qjs::JS_FreeValue(ctx, desc.setter);
+                qjs::JS_FreeValue(cx, desc.value);
+                qjs::JS_FreeValue(cx, desc.getter);
+                qjs::JS_FreeValue(cx, desc.setter);
             }
             accessor
         };
         if accessor {
-            let value = global_value(ctx, name)?;
-            js::define(ctx, g.raw(), &name.to_string_lossy(), value, false)?;
+            let value = global_value(cx, name)?;
+            js::define(cx, g.raw(), &name.to_string_lossy(), value, false)?;
         }
     }
     Ok(())
@@ -771,7 +791,7 @@ fn materialize(ctx: Ctx) -> R<()> {
 /// The lazy accessor of the globals: makes everything, then returns
 /// global `magic`.
 unsafe extern "C" fn lazy_get(
-    ctx: Ctx,
+    cx: Ctx,
     _this: Raw,
     _argc: c_int,
     _argv: *mut Raw,
@@ -782,9 +802,9 @@ unsafe extern "C" fn lazy_get(
         return UNDEFINED;
     };
     let result = (|| {
-        materialize(ctx)?;
-        let g = js::global(ctx);
-        js::get(ctx, g.raw(), &name.to_string_lossy())
+        materialize(cx)?;
+        let g = js::global(cx);
+        js::get(cx, g.raw(), &name.to_string_lossy())
     })();
     match result {
         Ok(v) => v.take(),
@@ -794,7 +814,7 @@ unsafe extern "C" fn lazy_get(
 
 /// An app assigning a global before reading it: its value wins.
 unsafe extern "C" fn lazy_set(
-    ctx: Ctx,
+    cx: Ctx,
     _this: Raw,
     argc: c_int,
     argv: *mut Raw,
@@ -806,12 +826,12 @@ unsafe extern "C" fn lazy_set(
     };
     // SAFETY: QuickJS passes `argc` live arguments.
     let value = unsafe { Args::new(argc, argv) }.get(0);
-    let g = js::global(ctx);
+    let g = js::global(cx);
     match js::define(
-        ctx,
+        cx,
         g.raw(),
         &name.to_string_lossy(),
-        V::dup(ctx, value),
+        V::dup(cx, value),
         false,
     ) {
         Ok(()) => UNDEFINED,
@@ -821,44 +841,44 @@ unsafe extern "C" fn lazy_set(
 
 /// Delivers an event of request `id` (from the network stack).
 pub(crate) fn fetch_event(
-    ctx: Ctx,
+    cx: Ctx,
     id: crate::net::RequestId,
     event: crate::net::FetchEvent,
 ) -> R<()> {
     // Events of requests made before the classes were (none) need nothing.
-    if !web(ctx).built {
+    if !web(cx).built {
         return Ok(());
     }
-    fetch::event(ctx, id, event)
+    fetch::event(cx, id, event)
 }
 
 /// Cancels the requests whose response bodies were collected unread.
-pub(crate) fn forget_dropped_fetches(ctx: Ctx) {
-    fetch::forget_dropped(ctx);
+pub(crate) fn forget_dropped_fetches(cx: Ctx) {
+    fetch::forget_dropped(cx);
 }
 
 /// Defines the globals as accessors that make the classes on first use
 /// (an app that uses none pays nothing).
-pub(crate) fn install(ctx: Ctx) -> rquickjs::Result<()> {
-    intl::install(ctx).map_err(|Throw| rquickjs::Error::Exception)?;
-    let g = js::global(ctx);
+pub(crate) fn install(cx: Ctx) -> rquickjs::Result<()> {
+    intl::install(cx).map_err(|Throw| rquickjs::Error::Exception)?;
+    let g = js::global(cx);
     for (i, name) in global_names().enumerate() {
         // SAFETY: new functions the property takes.
         unsafe {
             let get =
-                qjs::JS_NewCFunctionData(ctx, Some(lazy_get), 0, i as c_int, 0, ptr::null_mut());
+                qjs::JS_NewCFunctionData(cx, Some(lazy_get), 0, i as c_int, 0, ptr::null_mut());
             let set =
-                qjs::JS_NewCFunctionData(ctx, Some(lazy_set), 1, i as c_int, 0, ptr::null_mut());
-            let atom = qjs::JS_NewAtom(ctx, name.as_ptr());
+                qjs::JS_NewCFunctionData(cx, Some(lazy_set), 1, i as c_int, 0, ptr::null_mut());
+            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
             let r = qjs::JS_DefinePropertyGetSet(
-                ctx,
+                cx,
                 g.raw(),
                 atom,
                 get,
                 set,
                 qjs::JS_PROP_CONFIGURABLE as c_int,
             );
-            qjs::JS_FreeAtom(ctx, atom);
+            qjs::JS_FreeAtom(cx, atom);
             if r < 0 {
                 return Err(rquickjs::Error::Exception);
             }

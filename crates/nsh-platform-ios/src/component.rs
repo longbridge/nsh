@@ -13,7 +13,7 @@
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use nsh_core::{EventKind, EventPayload, JsonValue, NodeId, Size};
+use nsh_core::{EventKind, EventPayload, JsonValue, NodeId, Points, Size};
 use nsh_engine::EngineControl;
 use objc2_ui_kit::UIView;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -66,7 +66,7 @@ impl ComponentContext {
     /// dimension open.
     pub fn set_size(&self, width: f32, height: f32) {
         self.control
-            .set_component_size(self.id, Size::new(width, height));
+            .set_component_size(self.id, Size::new(Points(width), Points(height)));
     }
 }
 

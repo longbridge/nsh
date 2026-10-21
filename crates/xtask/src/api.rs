@@ -1,0 +1,258 @@
+//! `cargo xtask api`: records the API this checkout offers apps in
+//! `api/runtime.txt` and `api/types/` (the engine's `compat` tests compare
+//! them with what the runtime makes). The record is append-only, as the web
+//! platform's is: what a merged change recorded stays, and nothing is frozen
+//! per release.
+//!
+//! It also removes from `api/uncovered.txt` what the fixture apps exercise
+//! now (the list only shrinks).
+//!
+//! `--keep <app>...` only adds fixtures (recording would check the coverage
+//! before a new API's fixture has its script): `--keep`, write the scripts,
+//! then `cargo xtask api`. It adds, `api/apps/<app>-<version>/`: apps as
+//! this checkout's `nsh build --release` writes them, when what it writes
+//! differs from the app's newest fixture: a JSX compiler whose output
+//! changed (new `nsh:rt` calls) or a new API's case. The record then keeps
+//! what the new compiler writes next to what the older ones wrote; an app
+//! this checkout builds as its newest fixture holds is not kept again, so
+//! keeping every app after a compiler change adds only those it changed.
+//! A second fixture of one version is `<app>-<version>.2`, and so on. An
+//! app is an example's name (`counter`) or the path of an app's directory
+//! or entry module, as the domains of `api/cases/<domain>/`
+//! (docs/dev/compatibility.md).
+
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+use anyhow::Context as _;
+
+use crate::{android::root, term};
+
+pub(crate) fn api(keep: &[String]) -> anyhow::Result<()> {
+    let root = root();
+    if keep.is_empty() {
+        return record(&root);
+    }
+    let apps = root.join("api/apps");
+    let version = env!("CARGO_PKG_VERSION");
+    // Check every app first, so a refused one leaves no fixture half added.
+    let kept: Vec<_> = keep
+        .iter()
+        .map(|app| source(&root, app))
+        .collect::<anyhow::Result<_>>()?;
+    term::cargo(
+        Command::new("cargo")
+            .current_dir(&root)
+            .args(["build", "-p", "nsh-cli"]),
+        "nsh",
+    )?;
+    for (app, source) in kept {
+        let app = app.as_str();
+        let out = root.join("target/api").join(app);
+        let _ = std::fs::remove_dir_all(&out);
+        term::run(
+            Command::new(root.join("target/debug/nsh"))
+                .current_dir(&root)
+                .args(["build", "--release", "-o"])
+                .arg(&out)
+                .arg(&source),
+        )?;
+        let previous = newest_fixture(&apps, app)?;
+        if let Some(previous) = &previous
+            && same_build(&out, previous)?
+        {
+            term::done(format!(
+                "{app}: built as {} holds it, nothing kept",
+                shown(&root, previous)
+            ));
+            continue;
+        }
+        // Fixtures are what apps built then call: never rewritten.
+        let dir = (1..)
+            .map(|n| match n {
+                1 => apps.join(format!("{app}-{version}")),
+                n => apps.join(format!("{app}-{version}.{n}")),
+            })
+            .find(|dir| !dir.exists())
+            .expect("a free name");
+        std::fs::create_dir_all(&dir)?;
+        for file in BUILD_FILES {
+            if out.join(file).exists() {
+                std::fs::copy(out.join(file), dir.join(file))
+                    .with_context(|| format!("{app}'s {file}"))?;
+            }
+        }
+        if out.join("assets").exists() {
+            copy_dir(&out.join("assets"), &dir.join("assets"))?;
+        }
+        // The script comes before the new fixture exists, so it is the
+        // newest older one's.
+        let script = dir.join("script.txt");
+        match previous.map(|p| p.join("script.txt")) {
+            Some(from) if from.exists() => {
+                std::fs::copy(from, &script)?;
+            }
+            _ => {
+                std::fs::write(&script, "# What a user does and sees (compat/apps.rs).\n")?;
+                term::warn(format!(
+                    "{}: write what a user does and sees",
+                    shown(&root, &script)
+                ));
+            }
+        }
+        term::done(format!("kept {}", shown(&root, &dir)));
+    }
+    // Recording comes after the scripts: the coverage check needs the
+    // `covers` steps of a new API's fixture, which are written next.
+    term::done(
+        "write what the fixtures' scripts check, then run `cargo xtask api` to record the API \
+         (`cargo test -p nsh-engine --test engine compat::apps_still_run` runs the scripts)",
+    );
+    Ok(())
+}
+
+/// Records `api/runtime.txt`, `api/types` and `api/tailwind.txt`, and
+/// shrinks `api/uncovered.txt` to what no fixture's script checks.
+fn record(root: &Path) -> anyhow::Result<()> {
+    term::cargo(
+        Command::new("cargo")
+            .current_dir(root)
+            .args(["test", "-p", "nsh-engine", "--test", "engine", "--"])
+            .args([
+                "--exact",
+                "compat::surface_is_recorded",
+                "compat::coverage::every_api_is_tested",
+            ])
+            .env("NSH_API_UPDATE", "1"),
+        "and recording the API",
+    )?;
+    term::done("recorded api/runtime.txt, api/types, api/tailwind.txt and api/uncovered.txt");
+    Ok(())
+}
+
+/// The fixture's name and the app `keep` names: an example of `examples/`
+/// by its name, or the path of an app's directory or entry module (from
+/// the current directory or the repository's root), named after the
+/// directory or the module's file stem.
+fn source(root: &Path, keep: &str) -> anyhow::Result<(String, PathBuf)> {
+    let example = root.join("examples").join(keep);
+    if !keep.contains(['/', '\\']) && example.is_dir() {
+        return Ok((keep.to_owned(), example));
+    }
+    let path = [Path::new(keep).to_path_buf(), root.join(keep)]
+        .into_iter()
+        .find(|p| p.exists())
+        .with_context(|| format!("{keep}: no such example app, directory or module"))?;
+    let path = path.canonicalize()?;
+    let name = if path.is_dir() {
+        path.file_name()
+    } else {
+        path.file_stem()
+    };
+    let name = name
+        .and_then(|n| n.to_str())
+        .filter(|n| {
+            !n.is_empty()
+                && n.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        })
+        .with_context(|| {
+            format!(
+                "{}: a fixture's name is lower case letters, digits, `-` and `_`",
+                path.display()
+            )
+        })?;
+    Ok((name.to_owned(), path))
+}
+
+/// What a fixture holds of a build: the bundle, and what an app that
+/// declares capabilities runs with, as a package carries it (the fixture
+/// runs with them, `compat/apps.rs`).
+const BUILD_FILES: [&str; 3] = ["bundle.js", "capabilities.json", "app.json"];
+
+/// Whether the build in `out` is what the fixture `dir` holds: its bundle,
+/// capabilities and assets, byte for byte.
+fn same_build(out: &Path, dir: &Path) -> anyhow::Result<bool> {
+    for file in BUILD_FILES {
+        if std::fs::read(out.join(file)).ok() != std::fs::read(dir.join(file)).ok() {
+            return Ok(false);
+        }
+    }
+    Ok(files(&out.join("assets"))? == files(&dir.join("assets"))?)
+}
+
+/// The files under `dir` (none when it does not exist), by their path in it.
+fn files(dir: &Path) -> anyhow::Result<Vec<(PathBuf, Vec<u8>)>> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) -> anyhow::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                walk(root, &path, out)?;
+            } else {
+                out.push((
+                    path.strip_prefix(root)?.to_path_buf(),
+                    std::fs::read(&path)?,
+                ));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    if dir.exists() {
+        walk(dir, dir, &mut out)?;
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn shown(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let path = entry?.path();
+        let dest = to.join(path.file_name().unwrap());
+        if path.is_dir() {
+            copy_dir(&path, &dest)?;
+        } else {
+            std::fs::copy(&path, &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// The fixture of `app` with the latest version: `<app>-<version>` (a
+/// second of one version `<app>-<version>.2`), where a bare `<app>` (the
+/// first fixtures, kept before they had versions) is the oldest.
+fn newest_fixture(apps: &Path, app: &str) -> anyhow::Result<Option<PathBuf>> {
+    if !apps.exists() {
+        return Ok(None);
+    }
+    let version = |name: &str| -> Option<Vec<u32>> {
+        if name == app {
+            return Some(Vec::new());
+        }
+        // `gallery-rs` is not a version of `gallery`: only numbers count.
+        name.strip_prefix(app)?
+            .strip_prefix('-')?
+            .split('.')
+            .map(|p| p.parse().ok())
+            .collect()
+    };
+    let mut fixtures: Vec<_> = std::fs::read_dir(apps)?
+        .filter_map(|e| {
+            let path = e.ok()?.path();
+            let v = version(&path.file_name()?.to_string_lossy())?;
+            path.is_dir().then_some((v, path))
+        })
+        .collect();
+    fixtures.sort();
+    Ok(fixtures.pop().map(|(_, p)| p))
+}

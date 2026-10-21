@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D } from "nsh";
 
 /** The chat's own line glyphs, drawn like `Icon`'s in a 20 × 20 box. */
 export type GlyphName =
@@ -19,28 +19,28 @@ export type GlyphName =
   | "brain"
   | "file";
 
-type Draw = (ctx: CanvasRenderingContext2D) => void;
+type Draw = (cx: CanvasRenderingContext2D) => void;
 
-const line = (ctx: CanvasRenderingContext2D, points: number[]) => {
-  ctx.beginPath();
-  ctx.moveTo(points[0], points[1]);
-  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
-  ctx.stroke();
+const line = (cx: CanvasRenderingContext2D, points: number[]) => {
+  cx.beginPath();
+  cx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) cx.lineTo(points[i], points[i + 1]);
+  cx.stroke();
 };
-const rect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, fill = false) => {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-  if (fill) ctx.fill();
-  else ctx.stroke();
+const rect = (cx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, fill = false) => {
+  cx.beginPath();
+  cx.roundRect(x, y, w, h, r);
+  if (fill) cx.fill();
+  else cx.stroke();
 };
-const arc = (ctx: CanvasRenderingContext2D, x: number, y: number, r: number, from = 0, to = Math.PI * 2) => {
-  ctx.beginPath();
-  ctx.arc(x, y, r, from, to);
-  ctx.stroke();
+const arc = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, from = 0, to = Math.PI * 2) => {
+  cx.beginPath();
+  cx.arc(x, y, r, from, to);
+  cx.stroke();
 };
-const thumb = (ctx: CanvasRenderingContext2D) => {
-  rect(ctx, 3, 9, 3.2, 8, 1);
-  line(ctx, [6.2, 9.5, 9.5, 3.5, 11.2, 4, 10.6, 8, 15.4, 8, 16.6, 9.4, 15.4, 16, 14.2, 17, 6.2, 17]);
+const thumb = (cx: CanvasRenderingContext2D) => {
+  rect(cx, 3, 9, 3.2, 8, 1);
+  line(cx, [6.2, 9.5, 9.5, 3.5, 11.2, 4, 10.6, 8, 15.4, 8, 16.6, 9.4, 15.4, 16, 14.2, 17, 6.2, 17]);
 };
 
 const glyphs: Record<GlyphName, Draw> = {
@@ -119,14 +119,14 @@ export function Glyph(props: { name: GlyphName; size?: number; tint: string }) {
     <Canvas
       pointerEvents="none"
       style={{ width: size, height: size }}
-      draw={(ctx, { width }) => {
-        ctx.scale(width / 20, width / 20);
-        ctx.strokeStyle = props.tint;
-        ctx.fillStyle = props.tint;
-        ctx.lineWidth = 1.6;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        glyphs[props.name](ctx);
+      draw={(cx, { width }) => {
+        cx.scale(width / 20, width / 20);
+        cx.strokeStyle = props.tint;
+        cx.fillStyle = props.tint;
+        cx.lineWidth = 1.6;
+        cx.lineCap = "round";
+        cx.lineJoin = "round";
+        glyphs[props.name](cx);
       }}
     />
   );

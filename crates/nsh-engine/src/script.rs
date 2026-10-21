@@ -3,6 +3,20 @@
 //! none; without feature `js` the engine cannot make one (the type is
 //! uninhabited, so the loop needs no `cfg`).
 
+/// Host-owned permissions, data root and event wakeup for native system modules.
+#[cfg(feature = "js")]
+pub(crate) struct SystemConfig {
+    pub(crate) access: nsh_core::access::Access,
+    pub(crate) websocket: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    pub(crate) filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
+    pub(crate) data_dir: Option<std::path::PathBuf>,
+    pub(crate) paths: nsh_core::access::TrustedPaths,
+    pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
+#[cfg(not(feature = "js"))]
+pub(crate) struct SystemConfig;
+
 #[cfg(feature = "js")]
 pub(crate) use imp::Script;
 #[cfg(not(feature = "js"))]
@@ -11,7 +25,7 @@ pub(crate) use stub::Script;
 #[cfg(feature = "js")]
 mod imp {
     use std::{
-        cell::RefCell,
+        cell::{Cell, RefCell},
         rc::Rc,
         sync::{
             Arc,
@@ -23,17 +37,21 @@ mod imp {
     use nsh_js::{Host, HostOptions, JsError, NetworkQueue, RequestId};
 
     use crate::{
-        Bundle, BundleCode, Chunk, Environment, FetchEvent, HotUpdate, Limits, MountSink,
-        symbolicate::Symbolicator,
+        AppError, AppErrorKind, Bundle, BundleCode, Chunk, Environment, FetchEvent, HotUpdate,
+        Limits, MountSink, PackageInfo, symbolicate::Symbolicator,
     };
 
     /// A JS app's VM.
     pub(crate) struct Script {
         host: Host,
+        /// An explicit app exit is delivered through the normal platform command path.
+        exit_requested: Rc<Cell<bool>>,
         symbolicator: Rc<RefCell<Symbolicator>>,
         /// Set when the engine stops: what JS was running is interrupted
         /// on purpose, which is not the app's error.
         stop: Arc<AtomicBool>,
+        /// The package the bundle came from, named in its errors.
+        package: Option<Arc<PackageInfo>>,
     }
 
     impl Script {
@@ -53,6 +71,7 @@ mod imp {
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
+            system: super::SystemConfig,
         ) -> Option<(Script, u128)> {
             let options = HostOptions {
                 limits,
@@ -66,20 +85,44 @@ mod imp {
                 Ok(host) => host,
                 Err(err) => {
                     log::error!("failed to start JS: {err}");
-                    sink.report_error(&err.message);
+                    sink.report(
+                        &AppError::new(AppErrorKind::Load, &err.message)
+                            .with_package(bundle.package.clone()),
+                    );
                     return None;
                 }
             };
+            host.set_system_access(system.access, system.data_dir);
+            host.set_system_paths(system.paths);
+            host.set_websocket_transport(system.websocket);
+            host.set_filesystem(system.filesystem);
+            host.set_system_wake(system.wake);
             host.set_stop_flag(stop.clone());
+            let exit_requested = Rc::new(Cell::new(false));
+            let request = exit_requested.clone();
+            host.set_exit_handler(Rc::new(move |_code| request.set(true)));
             let symbolicator = Rc::new(RefCell::new(Symbolicator::new(bundle.source_map.clone())));
             let (map, errors, stopping) = (symbolicator.clone(), sink.clone(), stop.clone());
+            let package = bundle.package.clone();
             host.set_error_handler(Box::new(move |err| {
                 if stopping.load(Ordering::Relaxed) {
                     return;
                 }
                 let message = map.borrow_mut().rewrite(&err.message);
                 log::error!(target: "js", "uncaught exception: {message}");
-                errors.report_error(&message);
+                errors.report(
+                    &AppError::new(AppErrorKind::Uncaught, &message).with_package(package.clone()),
+                );
+            }));
+            // Unhandled rejections are logged only, as browsers do: the
+            // app's error handler and the overlay get exceptions.
+            let (map, stopping) = (symbolicator.clone(), stop.clone());
+            host.set_rejection_handler(Box::new(move |err| {
+                if stopping.load(Ordering::Relaxed) {
+                    return;
+                }
+                let message = map.borrow_mut().rewrite(&err.message);
+                log::error!(target: "js", "unhandled rejection: {message}");
             }));
             // Canvas `measureText` measures on this thread.
             host.set_text_measurer(Box::new(move |font, text| {
@@ -88,8 +131,10 @@ mod imp {
             host.set_environment(environment);
             let script = Script {
                 host,
+                exit_requested,
                 symbolicator,
                 stop,
+                package: bundle.package.clone(),
             };
             // The chunks that come with the bundle: the entry may import
             // them statically, `import()` without waiting.
@@ -102,20 +147,26 @@ mod imp {
                 BundleCode::Source(code) => script.host.eval_source(code),
             };
             if let Err(err) = loaded {
-                script.report(&*sink, "bundle failed", &err.message);
+                script.report(&*sink, AppErrorKind::Load, "bundle failed", &err.message);
             }
             let eval_us = start.elapsed().as_micros();
             Some((script, eval_us))
         }
 
         /// Reports an error of the app, its stack mapped to the sources.
-        pub(crate) fn report(&self, sink: &dyn MountSink, what: &str, message: &str) {
+        pub(crate) fn report(
+            &self,
+            sink: &dyn MountSink,
+            kind: AppErrorKind,
+            what: &str,
+            message: &str,
+        ) {
             if self.stop.load(Ordering::Relaxed) {
                 return;
             }
             let message = self.symbolicator.borrow_mut().rewrite(message);
             log::error!(target: "js", "{what}: {message}");
-            sink.report_error(&message);
+            sink.report(&AppError::new(kind, &message).with_package(self.package.clone()));
         }
 
         /// Gives the VM a chunk it imports, or tells it the chunk could not
@@ -153,7 +204,12 @@ mod imp {
                 Ok(false) => sink.hot_update_failed(),
                 // The app keeps the modules that ran; the next update can
                 // fix the rest.
-                Err(err) => self.report(sink, "hot update failed", &err.message),
+                Err(err) => self.report(
+                    sink,
+                    AppErrorKind::HotUpdate,
+                    "hot update failed",
+                    &err.message,
+                ),
             }
         }
 
@@ -169,12 +225,18 @@ mod imp {
             self.host.bind_list(list, binds);
         }
 
-        pub(crate) fn animations_finished(&self, finished: &[nsh_animation::Finished]) {
+        pub(crate) fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
             self.host.animations_finished(finished);
         }
 
         pub(crate) fn take_ops(&self, out: &mut Vec<Op>) {
             self.host.take_ops(out);
+            if self.exit_requested.replace(false) {
+                out.push(Op::Command {
+                    id: nsh_core::ROOT_ID,
+                    command: nsh_core::Command::ExitApp,
+                });
+            }
         }
 
         pub(crate) fn run_posted(&self) {
@@ -191,6 +253,10 @@ mod imp {
 
         pub(crate) fn run_timers(&self, now: Instant) {
             self.host.run_timers(now);
+        }
+
+        pub(crate) fn run_system(&self) {
+            self.host.run_system();
         }
 
         pub(crate) fn wants_frame(&self) -> bool {
@@ -240,7 +306,7 @@ mod stub {
 
     use nsh_core::{EventKind, EventPayload, NodeId, Op, TextEngine, time::Instant};
 
-    use crate::{Bundle, Chunk, Environment, HotUpdate, Limits, MountSink};
+    use crate::{AppError, AppErrorKind, Bundle, Chunk, Environment, HotUpdate, Limits, MountSink};
 
     /// No JS in this build: never made.
     pub(crate) enum Script {}
@@ -262,14 +328,15 @@ mod stub {
             _: Rc<M>,
             _: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
+            _: super::SystemConfig,
         ) -> Option<(Script, u128)> {
             let message = "this build of nsh runs Rust apps only (feature `js` is off)";
             log::error!("{message}");
-            sink.report_error(message);
+            sink.report(&AppError::new(AppErrorKind::Load, message));
             None
         }
 
-        pub(crate) fn report(&self, _: &dyn MountSink, _: &str, _: &str) {
+        pub(crate) fn report(&self, _: &dyn MountSink, _: AppErrorKind, _: &str, _: &str) {
             match *self {}
         }
 
@@ -297,7 +364,7 @@ mod stub {
             match *self {}
         }
 
-        pub(crate) fn animations_finished(&self, _: &[nsh_animation::Finished]) {
+        pub(crate) fn animations_finished(&self, _: &[nsh_core::animation::Finished]) {
             match *self {}
         }
 
@@ -318,6 +385,10 @@ mod stub {
         }
 
         pub(crate) fn run_timers(&self, _: Instant) {
+            match *self {}
+        }
+
+        pub(crate) fn run_system(&self) {
             match *self {}
         }
 

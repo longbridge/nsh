@@ -72,6 +72,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_ios::AppOptions) {
     let options = AppOptions {
         trace: false,
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
+        ..AppOptions::default()
     };
     (dir, options)
 }

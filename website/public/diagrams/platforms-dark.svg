@@ -105,7 +105,7 @@
   <text class="note" x="832" y="105" text-anchor="end">one bundle for every platform</text>
 
   <text class="band-name" x="192" y="203">QuickJS · reactive graph · renderer · Taffy · text</text>
-  <text class="note" x="192" y="221">nsh-js, nsh-core and the nsh/ui/mobile components, the same on every backend</text>
+  <text class="note" x="192" y="221">nsh-js, nsh-core and the native modules, the same on every backend</text>
 
   <!-- flow -->
   <path class="flow" d="M504,150 L504,168" marker-end="url(#arrow)"/>

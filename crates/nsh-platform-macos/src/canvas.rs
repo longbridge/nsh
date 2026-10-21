@@ -15,14 +15,15 @@
 
 use std::{f64::consts::TAU, rc::Rc, sync::Arc};
 
-use nsh_animation::AnimationValue;
 use nsh_core::{
     Color, FontVariant,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Damage, DamageScan, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint,
         PathOp, arc_sweep, fit_radii,
     },
+    geometry::{Corners, Points, Radians, size},
 };
 use objc2_core_foundation::{
     CFAttributedString, CFMutableAttributedString, CFRange, CFRetained, CFString, CFType,
@@ -159,7 +160,7 @@ fn slot_number(args: &[Option<AnimationValue>], s: u16) -> f32 {
 /// Draws a canvas view's drawing (in its content layer's
 /// `drawLayer:inContext:`; the context is y down, in points) where it is
 /// `dirty`: Core Graphics skips the rest.
-pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
+pub(crate) fn draw(cx: &CGContext, state: &ViewState, dirty: CGRect) {
     let Some(canvas) = state.canvas.as_ref() else {
         return;
     };
@@ -170,7 +171,7 @@ pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
         return;
     }
     let mut replay = Replay {
-        c: ctx,
+        c: cx,
         args: &canvas.args,
         images: &canvas.images,
         state: State::default(),
@@ -184,21 +185,21 @@ pub(crate) fn draw(ctx: &CGContext, state: &ViewState, dirty: CGRect) {
         matches!(op, CanvasOp::ClearRect(_))
             || matches!(op, CanvasOp::Composite(c) if *c != Composite::SourceOver)
     });
-    CGContext::save_g_state(Some(ctx));
+    CGContext::save_g_state(Some(cx));
     // Core Animation clips to what it redraws already; said again for the
     // transparency layer, which takes the clip's size.
-    CGContext::clip_to_rect(Some(ctx), dirty);
+    CGContext::clip_to_rect(Some(cx), dirty);
     if isolated {
         // SAFETY: no auxiliary info.
-        unsafe { CGContext::begin_transparency_layer(Some(ctx), None) };
+        unsafe { CGContext::begin_transparency_layer(Some(cx), None) };
     }
     for op in &drawing.ops {
         replay.op(op);
     }
     if isolated {
-        CGContext::end_transparency_layer(Some(ctx));
+        CGContext::end_transparency_layer(Some(cx));
     }
-    CGContext::restore_g_state(Some(ctx));
+    CGContext::restore_g_state(Some(cx));
 }
 
 /// An affine transform `[a, b, c, d, e, f]` (canvas order: `x' = a x + c y
@@ -253,7 +254,7 @@ struct State {
     cap: LineCap,
     join: LineJoin,
     miter: f64,
-    dash: Arc<[f32]>,
+    dash: Arc<[Points]>,
     dash_offset: f64,
     alpha: f64,
     composite: Composite,
@@ -307,7 +308,7 @@ enum Mode {
 }
 
 impl<'a> Replay<'a> {
-    fn ctx(&self) -> Option<&'a CGContext> {
+    fn cx(&self) -> Option<&'a CGContext> {
         Some(self.c)
     }
 
@@ -327,7 +328,7 @@ impl<'a> Replay<'a> {
     }
 
     fn op(&mut self, op: &CanvasOp) {
-        let c = self.ctx();
+        let c = self.cx();
         match op {
             CanvasOp::Save => {
                 self.stack.push(self.state.clone());
@@ -418,10 +419,10 @@ impl<'a> Replay<'a> {
             }
             CanvasOp::Composite(m) => self.state.composite = *m,
             CanvasOp::ShadowColor(color) => self.state.shadow.0 = *color,
-            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = *b as f64,
-            CanvasOp::ShadowOffset(x, y) => {
-                self.state.shadow.2 = *x as f64;
-                self.state.shadow.3 = *y as f64;
+            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = b.0 as f64,
+            CanvasOp::ShadowOffset(offset) => {
+                self.state.shadow.2 = offset.x.0 as f64;
+                self.state.shadow.3 = offset.y.0 as f64;
             }
             CanvasOp::Font(f) => self.state.font = f.clone(),
             CanvasOp::FontVariantNumeric(v) => self.state.numeric = *v,
@@ -432,18 +433,22 @@ impl<'a> Replay<'a> {
                 x,
                 y,
                 max_width,
-            } => self.text(text, self.n(*x), self.n(*y), *max_width, false),
+            } => self.text(text, self.n(*x), self.n(*y), max_width.map(|m| m.0), false),
             CanvasOp::StrokeText {
                 text,
                 x,
                 y,
                 max_width,
-            } => self.text(text, self.n(*x), self.n(*y), *max_width, true),
+            } => self.text(text, self.n(*x), self.n(*y), max_width.map(|m| m.0), true),
             CanvasOp::DrawImage {
                 image,
                 source,
                 dest,
-            } => self.image(&image.uri, *source, dest),
+            } => self.image(
+                &image.uri,
+                source.map(|b| [b.origin.x, b.origin.y, b.size.width, b.size.height].map(|v| v.0)),
+                dest,
+            ),
         }
     }
 
@@ -513,7 +518,8 @@ impl<'a> Replay<'a> {
                 } => {
                     let r = n(*radius).max(0.0);
                     let start = n(*start);
-                    let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                    let sweep =
+                        arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                     // Increasing angles turn clockwise on a y-down screen,
                     // which is CoreGraphics' counterclockwise.
                     CGMutablePath::add_arc(
@@ -552,7 +558,8 @@ impl<'a> Replay<'a> {
                         .then([rx.max(1e-9), 0.0, 0.0, ry.max(1e-9), 0.0, 0.0])
                         .cg();
                     let start = n(*start);
-                    let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                    let sweep =
+                        arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                     CGMutablePath::add_arc(
                         p,
                         &unit,
@@ -574,8 +581,7 @@ impl<'a> Replay<'a> {
                 }
                 PathOp::RoundRect(rect, radii) => {
                     let [x, y, w, h] = rect.map(n);
-                    let [tl, tr, br, bl] =
-                        fit_radii(w as f32, h as f32, radii.map(|r| n(r) as f32)).map(f64::from);
+                    let [tl, tr, br, bl] = fit_corners(w, h, radii.map(n));
                     CGMutablePath::move_to_point(p, &m, x + tl, y);
                     CGMutablePath::add_arc_to_point(p, &m, x + w, y, x + w, y + h, tr);
                     CGMutablePath::add_arc_to_point(p, &m, x + w, y + h, x, y + h, br);
@@ -606,7 +612,7 @@ impl<'a> Replay<'a> {
 
     /// Alpha, blend mode and shadow of the current state, for one draw.
     fn compositing(&self) {
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         CGContext::set_alpha(c, s.alpha);
         CGContext::set_blend_mode(c, blend(s.composite));
@@ -621,7 +627,7 @@ impl<'a> Replay<'a> {
 
     /// Fills or strokes `path` (in the view's space) with the state's paint.
     fn paint(&self, path: &CGMutablePath, mode: Mode) {
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         CGContext::save_g_state(c);
         self.compositing();
@@ -693,7 +699,7 @@ impl<'a> Replay<'a> {
                 );
                 CGContext::set_miter_limit(c, s.miter);
                 if !s.dash.is_empty() {
-                    let lengths: Vec<CGFloat> = s.dash.iter().map(|&d| d as CGFloat).collect();
+                    let lengths: Vec<CGFloat> = s.dash.iter().map(|&d| d.0 as CGFloat).collect();
                     // SAFETY: `lengths` outlives the call.
                     unsafe {
                         CGContext::set_line_dash(c, s.dash_offset, lengths.as_ptr(), lengths.len())
@@ -724,14 +730,15 @@ impl<'a> Replay<'a> {
     /// Draws a gradient paint over the clip (in user space).
     fn gradient(&self, paint: &Paint) {
         let Paint::Gradient(g) = paint else { return };
-        let c = self.ctx();
+        let c = self.cx();
         if g.stops.is_empty() {
             return;
         }
         let options = CGGradientDrawingOptions::DrawsBeforeStartLocation
             | CGGradientDrawingOptions::DrawsAfterEndLocation;
         match g.shape {
-            GradientShape::Linear([x0, y0, x1, y1]) => {
+            GradientShape::Linear { start, end } => {
+                let [x0, y0, x1, y1] = [start.x, start.y, end.x, end.y].map(|v| v.0);
                 let Some(gradient) = cg_gradient(g) else {
                     return;
                 };
@@ -743,7 +750,14 @@ impl<'a> Replay<'a> {
                     options,
                 );
             }
-            GradientShape::Radial([x0, y0, r0, x1, y1, r1]) => {
+            GradientShape::Radial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+            } => {
+                let [x0, y0, r0, x1, y1, r1] =
+                    [start.x, start.y, start_radius, end.x, end.y, end_radius].map(|v| v.0);
                 let Some(gradient) = cg_gradient(g) else {
                     return;
                 };
@@ -757,7 +771,16 @@ impl<'a> Replay<'a> {
                     options,
                 );
             }
-            GradientShape::Conic([angle, x, y]) => conic(c, g, angle as f64, x as f64, y as f64),
+            GradientShape::Conic {
+                start_angle,
+                center,
+            } => conic(
+                c,
+                g,
+                start_angle.0 as f64,
+                center.x.0 as f64,
+                center.y.0 as f64,
+            ),
         }
     }
 
@@ -765,7 +788,7 @@ impl<'a> Replay<'a> {
         if text.is_empty() {
             return;
         }
-        let c = self.ctx();
+        let c = self.cx();
         let s = &self.state;
         let font = crate::text::make_font(&s.font.with_numeric(s.numeric).text_style());
         let string =
@@ -898,7 +921,7 @@ impl<'a> Replay<'a> {
         if dh.is_nan() {
             dh = size.1;
         }
-        let c = self.ctx();
+        let c = self.cx();
         CGContext::save_g_state(c);
         self.compositing();
         CGContext::concat_ctm(c, self.state.ctm.cg());
@@ -955,7 +978,7 @@ fn cg_gradient(g: &CanvasGradient) -> Option<CFRetained<CGGradient>> {
     for (offset, color) in &g.stops {
         let (r, gr, b, a) = color.to_f64();
         components.extend_from_slice(&[r, gr, b, a]);
-        locations.push(*offset as CGFloat);
+        locations.push(offset.0 as CGFloat);
     }
     // SAFETY: four components per location, both arrays live for the call.
     unsafe {
@@ -971,11 +994,12 @@ fn cg_gradient(g: &CanvasGradient) -> Option<CFRetained<CGGradient>> {
 /// The gradient's color at `t` (0..1).
 fn stop_color(g: &CanvasGradient, t: f32) -> Color {
     let stops = &g.stops;
-    if t <= stops[0].0 {
+    if t <= stops[0].0.0 {
         return stops[0].1;
     }
     for w in stops.windows(2) {
         let ((o0, c0), (o1, c1)) = (w[0], w[1]);
+        let (o0, o1) = (o0.0, o1.0);
         if t <= o1 {
             let f = if o1 > o0 { (t - o0) / (o1 - o0) } else { 1.0 };
             return lerp(c0, c1, f);
@@ -1027,4 +1051,26 @@ fn conic(c: Option<&CGContext>, g: &CanvasGradient, angle: f64, x: f64, y: f64) 
         CGContext::set_fill_color_with_color(c, Some(&crate::text::cg_color(color)));
         CGContext::fill_path(c);
     }
+}
+
+/// [`fit_radii`] on CoreGraphics' numbers: top left, top right, bottom
+/// right, bottom left.
+fn fit_corners(w: f64, h: f64, radii: [f64; 4]) -> [f64; 4] {
+    let [top_left, top_right, bottom_right, bottom_left] = radii.map(|r| Points(r as f32));
+    let fit = fit_radii(
+        size(Points(w as f32), Points(h as f32)),
+        Corners {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        },
+    );
+    [
+        fit.top_left,
+        fit.top_right,
+        fit.bottom_right,
+        fit.bottom_left,
+    ]
+    .map(|r| f64::from(r.0))
 }

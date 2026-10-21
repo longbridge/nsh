@@ -5,7 +5,7 @@
 # `target/` (`.cargo/config.toml`).
 [workspace]
 resolver = "3"
-members = ["nsh-platform-gpui", "nsh-gpui-host", "nsh-gpui-app"]
+members = ["nsh-platform-gpui", "nsh-gpui-host"]
 
 [workspace.package]
 version = "0.1.1"
@@ -14,9 +14,9 @@ license = "Apache-2.0"
 homepage = "https://nsh.dev"
 readme = "../../README.md"
 repository = "https://github.com/longbridge/nsh"
-# The crates published to crates.io (the libraries embedders and apps depend
-# on, and the development hosts and release runners the CLI builds an app
-# with Rust crates of its own from) do not inherit this; they set
+# The crates published to crates.io (the library embedders and apps depend
+# on, and the development host the CLI builds an app with Rust crates of its
+# own from) do not inherit this; they set
 # `homepage`, `readme` and `repository` instead.
 publish = false
 
@@ -27,11 +27,11 @@ private_interfaces = "deny"
 
 [workspace.dependencies]
 # nsh's crates, from the main workspace.
-nsh-animation = { version = "0.1.1", path = "../nsh-animation" }
 nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
+nsh-testing = { version = "0.1.1", path = "../nsh-testing", default-features = false }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }
-nsh-ui-mobile = { version = "0.1.1", path = "../nsh-ui-mobile" }
+nsh-base = { version = "0.1.1", path = "../nsh-base", default-features = false }
 # The JSX compiler alone (tests compile their apps).
 nsh-bundler = { version = "0.1.1", path = "../nsh-bundler", default-features = false }
 nsh-platform-gpui = { version = "0.1.1", path = "nsh-platform-gpui", default-features = false }
@@ -85,7 +85,16 @@ lto = "fat"
 codegen-units = 1
 
 # Keep the interpreter and layout fast even in debug builds; they dominate runtime cost.
-[profile.dev.package.rquickjs-sys]
+[profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
+opt-level = 3
+[profile.dev.package.syntect]
+opt-level = 3
+[profile.dev.package.fancy-regex]
+opt-level = 3
+# What fancy-regex runs its regexes with (also `regex`'s).
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
 opt-level = 3

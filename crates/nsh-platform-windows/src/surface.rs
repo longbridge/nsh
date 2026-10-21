@@ -20,7 +20,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
+use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
 use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
 use rustc_hash::FxHashMap;
 use windows::Win32::Foundation::{HWND, RECT};
@@ -136,6 +136,9 @@ pub(crate) struct Surface {
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
     /// scheme is the system's resolved with it ([`crate::system`]).
     pub(crate) appearance: Cell<nsh_core::platform::Appearance>,
+    /// The embedding app's locale and text size, standing in for the
+    /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
+    pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Paces animation frames while something animates.
@@ -143,6 +146,9 @@ pub(crate) struct Surface {
     /// Extra frame clients (transitions, glides, spinners): called on every
     /// frame until they return false ([`Surface::on_frame`]).
     frame_clients: RefCell<Vec<FrameClient>>,
+    /// The model of a test session's app (`nsh test --target windows`).
+    #[cfg(feature = "dev")]
+    test_model: RefCell<Option<std::sync::Arc<nsh_testing::agent::Model>>>,
     /// The time of the current frame (seconds since the surface was made).
     now: Cell<f64>,
     epoch: std::time::Instant,
@@ -196,9 +202,12 @@ impl Surface {
             invalid: Cell::new(false),
             environment: Cell::new(environment),
             appearance: Cell::default(),
+            host_environment: Cell::default(),
             js_frame: Cell::new(false),
             ticker: RefCell::new(None),
             frame_clients: RefCell::default(),
+            #[cfg(feature = "dev")]
+            test_model: RefCell::default(),
             now: Cell::new(0.0),
             epoch: std::time::Instant::now(),
             on_error: RefCell::new(None),
@@ -257,7 +266,7 @@ impl Surface {
     /// The surface's size in points.
     pub(crate) fn size(&self) -> (f32, f32) {
         let s = self.root.state();
-        (s.frame.width, s.frame.height)
+        (s.frame.size.width.0, s.frame.size.height.0)
     }
 
     /// The current frame's time (seconds, the animation clock).
@@ -274,7 +283,7 @@ impl Surface {
     pub(crate) fn start(self: &Rc<Self>, mut config: EngineConfig) {
         self.stop();
         let env = self.environment.get();
-        config.viewport = Size::new(env.window.0, env.window.1);
+        config.viewport = env.window;
         config.environment = env;
         let (tx, rx) = crossbeam_channel::unbounded();
         let pending = Arc::new(AtomicBool::new(false));
@@ -343,7 +352,9 @@ impl Surface {
     }
 
     /// Updates the environment and tells the engine.
-    pub(crate) fn set_environment(&self, environment: Environment) {
+    pub(crate) fn set_environment(&self, mut environment: Environment) {
+        // The embedding app's settings over the system's.
+        self.host_environment.get().apply(&mut environment);
         if self.environment.replace(environment) != environment {
             self.control(|c| c.set_environment(environment));
             crate::system::environment_applied(self);
@@ -358,18 +369,18 @@ impl Surface {
         let height = pixels.1 as f32 / scale;
         {
             let mut s = self.root.state_mut();
-            if !scale_changed && s.frame.width == width && s.frame.height == height {
+            if !scale_changed && s.frame.size.width.0 == width && s.frame.size.height.0 == height {
                 return;
             }
-            s.frame.width = width;
-            s.frame.height = height;
+            s.frame.size.width.0 = width;
+            s.frame.size.height.0 = height;
         }
         let mut env = self.environment.get();
-        env.window = (width, height);
+        env.window = Size::new(Points(width), Points(height));
         env.pixel_ratio = scale;
         self.environment.set(env);
         self.control(|c| {
-            c.resize(Size::new(width, height));
+            c.resize(Size::new(Points(width), Points(height)));
             c.set_environment(env);
         });
         crate::navigation::surface_resized(self, width, height);
@@ -480,6 +491,10 @@ impl Surface {
                 }
                 Message::Error(message) => {
                     log::error!("{message}");
+                    #[cfg(feature = "dev")]
+                    if let Some(model) = &*self.test_model.borrow() {
+                        model.error(message.to_string());
+                    }
                     if let Some(f) = &*self.on_error.borrow() {
                         f(&message);
                     }
@@ -510,6 +525,10 @@ impl Surface {
             }
         }
         self.mounter.borrow_mut().end_batch(self);
+        #[cfg(feature = "dev")]
+        if let Some(model) = &*self.test_model.borrow() {
+            model.apply(batch);
+        }
         crate::access::batch_applied(self);
     }
 
@@ -531,6 +550,21 @@ impl Surface {
     pub(crate) fn on_frame(self: &Rc<Self>, f: impl FnMut(&Rc<Surface>, f64) -> bool + 'static) {
         self.frame_clients.borrow_mut().push(Box::new(f));
         self.ensure_ticking();
+    }
+
+    /// Whether a native animation runs: the graph's, or the platform's own
+    /// (transitions, scroll glides).
+    #[cfg(feature = "dev")]
+    pub(crate) fn animating(&self) -> bool {
+        self.anim.borrow().animating() || !self.frame_clients.borrow().is_empty()
+    }
+
+    /// Keeps the model `nsh test --target` steps see of the app
+    /// ([`nsh_testing::agent::Model`]): every batch applied and every error
+    /// go to it from now on.
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_test_model(&self, model: Option<std::sync::Arc<nsh_testing::agent::Model>>) {
+        *self.test_model.borrow_mut() = model;
     }
 
     fn wants_frames(&self) -> bool {

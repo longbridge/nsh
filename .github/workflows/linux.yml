@@ -7,7 +7,22 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/**"
+      - "crates/nsh-bundler/**"
+      - "crates/nsh-cli/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-js/**"
+      - "crates/nsh-linux-app/**"
+      - "crates/nsh-linux-host/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-package/**"
+      - "crates/nsh-platform-linux/**"
+      - "crates/nsh-testing/**"
+      - "crates/nsh-base/**"
+      - "crates/xtask/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -15,7 +30,22 @@ on:
       - ".github/workflows/linux.yml"
   pull_request:
     paths:
-      - "crates/**"
+      - "crates/nsh-bundler/**"
+      - "crates/nsh-cli/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-js/**"
+      - "crates/nsh-linux-app/**"
+      - "crates/nsh-linux-host/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-package/**"
+      - "crates/nsh-platform-linux/**"
+      - "crates/nsh-testing/**"
+      - "crates/nsh-base/**"
+      - "crates/xtask/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -30,6 +60,14 @@ concurrency:
   group: linux-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # CI builds each crate once: no incremental state and no debug info
+  # (faster builds, smaller caches; panics still name their file and line).
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # The toolchain file's iOS and Android targets are only the release's.
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   check:
     # 24.04 has GTK 4.14 and Pango 1.52+, what `nsh-platform-linux` needs.
@@ -38,25 +76,21 @@ jobs:
       - uses: actions/checkout@v4
 
       # QuickJS is C (bindgen needs libclang); the backend links GTK 4 and
-      # Pango, and WebKitGTK 6.0 for web views (the hosts' default).
+      # Pango, and WebKitGTK 6.0 for web views (the hosts' default); Xvfb
+      # is the display the examples' tests open their windows on.
       - name: Install clang, GTK 4 and WebKitGTK
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev xvfb
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
+      # Dependencies only: main's runs save it, pull requests restore it.
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-linux-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-linux-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         run: >
@@ -75,3 +109,18 @@ jobs:
         run: >
           cargo test -p nsh-platform-linux -p nsh-cli -p nsh-dev
           && cargo test -p nsh-platform-linux --features webview
+
+      # The examples' tests in GTK windows on a virtual display, with the
+      # platform's input (`nsh test --target linux`): those a real platform
+      # runs (no stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in GTK windows
+        run: |
+          cargo build -p nsh-cli
+          # A session bus of its own: without one, GTK's portal and
+          # accessibility lookups wait for D-Bus autolaunch on each display.
+          run() { dbus-run-session -- xvfb-run -a ./target/debug/nsh test "$@" --target linux; }
+          run examples/counter
+          for file in form navigation photos; do
+            run "examples/gallery/tests/$file.test.tsx"
+          done
+          run examples/gallery/tests/environment.test.tsx --filter appearance

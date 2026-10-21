@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
-    PanActivation, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint,
+    PanActivation, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, geometry::px,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -59,7 +59,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         entry: dir.join("App.tsx"),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
@@ -67,17 +67,20 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -105,10 +108,8 @@ fn touch(
             } else {
                 Vec::new()
             },
-            page_x: x,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     }))
@@ -167,8 +168,8 @@ fn a_js_view_waits_for_its_pan_and_negotiations_get_the_gesture() {
     assert_eq!(
         activation,
         Some(PanActivation {
-            active_offset_x: Some(10.0),
-            fail_offset_y: Some(10.0),
+            active_offset_x: Some(px(10.0)),
+            fail_offset_y: Some(px(10.0)),
             ..PanActivation::default()
         }),
         "the platform gets the offsets"

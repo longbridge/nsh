@@ -9,7 +9,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use nsh_core::platform::Appearance;
+use nsh_core::{
+    geometry::{Size, px},
+    platform::{Appearance, Locale},
+};
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use windows::{
     Win32::{
@@ -30,7 +33,7 @@ use crate::{
 
 static UI_SETS: RwLock<Option<Vec<nsh_core::ui::Registry>>> = RwLock::new(None);
 
-/// Sets the UI sets every engine serves (default: `nsh/ui/mobile`); an app
+/// Sets the UI sets every engine serves (default: `nsh/base`); an app
 /// with Rust components of its own calls this before [`run_app`].
 pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
@@ -42,11 +45,15 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+        .unwrap_or_else(|| vec![nsh_base::registry()])
 }
 
 /// What [`run_app`] runs.
 #[derive(Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one source per view; keep the public constructor API without allocation"
+)]
 pub enum AppSource {
     /// A Rust app: its root component.
     Rust(Root),
@@ -73,10 +80,6 @@ pub struct AppOptions {
     pub title: String,
     /// The initial window size in points.
     pub size: (i32, i32),
-    /// Steps run once the window shows (`wait 500; shot a.png; tap 10 20;
-    /// quit`): for checking a backend change without touching the screen.
-    /// See [`crate::script`].
-    pub script: Option<String>,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
     pub components: crate::native::Components,
@@ -87,8 +90,8 @@ pub struct AppOptions {
     pub appearance: Appearance,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
     /// embedded in a host app) unless set; the development host and the
-    /// release runner run apps on their own, with
-    /// [`Limits::standalone_desktop`].
+    /// release runner run apps on their own, with none
+    /// ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
     /// Where the apps it runs keep their data, each in `<dir>/<app id>`
     /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the
@@ -108,7 +111,6 @@ impl Default for AppOptions {
             app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
             size: (1200, 800),
-            script: None,
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
@@ -183,6 +185,14 @@ impl AppView {
         crate::window::show(self.hwnd);
     }
 
+    /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now
+    /// on: the JS heap, the stack, the time budgets of loading and of every
+    /// other call into JS, and the quotas (nodes, ops). The running app
+    /// keeps the limits it was loaded with.
+    pub fn set_limits(&self, limits: Limits) {
+        self.options.borrow_mut().limits = limits;
+    }
+
     /// Runs `app`, replacing what ran.
     pub fn load(&self, app: App) {
         let access = match &app {
@@ -194,17 +204,21 @@ impl AppView {
         let options = self.options.borrow();
         let config = EngineConfig {
             app,
-            viewport: nsh_core::Size::new(0.0, 0.0),
+            viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
-            network: Some(crate::net::network()),
+            network: Some(nsh_engine::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
-            header_heights: crate::navigation::HEADER_HEIGHTS,
+            // NSH draws no header: a page's `header` sits at its top.
+            header_heights: nsh_core::NO_NATIVE_HEADER,
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
+            clock: Default::default(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -225,6 +239,31 @@ impl AppView {
         self.surface.native.components().register(name, factory);
     }
 
+    /// The embedding app's locale, which stands in for the user's: what
+    /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
+    /// Rust components' `locale()` read, at once and for every app loaded
+    /// later. `None` follows the system's again.
+    pub fn set_locale(&self, locale: Option<Locale>) {
+        let mut host = self.surface.host_environment.get();
+        host.locale = locale;
+        self.surface.host_environment.set(host);
+        crate::system::host_environment_changed(&self.surface);
+    }
+
+    /// The embedding app's text size relative to the default (1.0), which
+    /// stands in for the user's: every text that allows font scaling (texts,
+    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// at it, and `fontScale()` reads it, at once and for every app loaded
+    /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
+    /// boxes sized by their text grow with it. `None` follows the system's
+    /// again.
+    pub fn set_font_scale(&self, scale: Option<f32>) {
+        let mut host = self.surface.host_environment.get();
+        host.font_scale = scale;
+        self.surface.host_environment.set(host);
+        crate::system::host_environment_changed(&self.surface);
+    }
+
     /// Stops the app.
     pub fn stop(&self) {
         self.surface.stop();
@@ -237,7 +276,7 @@ impl AppView {
 
 fn initial_environment() -> Environment {
     Environment {
-        window: (0.0, 0.0),
+        window: Size::new(px(0.0), px(0.0)),
         color_scheme: ColorScheme::Light,
         os: Os::Windows,
         idiom: Idiom::Desktop,
@@ -308,9 +347,6 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::system::environment_applied(view.surface());
     install_shortcuts(&view);
     view.show();
-    if let Some(script) = &options.script {
-        crate::script::run(view.surface().clone(), script);
-    }
     let code = crate::window::run_loop();
     view.stop();
     drop(view);

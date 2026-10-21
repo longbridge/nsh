@@ -1,15 +1,15 @@
 ---
-title: nsh/webview
+title: WebView
 description: WebView：原生网页视图（WKWebView、android.webkit.WebView），以及它的属性、事件和 ref 方法。
-order: 13
+order: 2.35
 ---
 
-# nsh/webview
+# WebView
 
-`nsh/webview` 导出 `WebView`：由平台自带的浏览器引擎显示的网页（iOS 和 Mac Catalyst 上是 `WKWebView`，Android 上是 `android.webkit.WebView`）。它是一个和其他视图一样布局的原生视图，因此滚动、裁剪以及与其他视图的层叠都是正确的。
+`nsh` 导出 `WebView`：由平台自带的浏览器引擎显示的网页（iOS 和 Mac Catalyst 上是 `WKWebView`，Android 上是 `android.webkit.WebView`）。它是一个和其他视图一样布局的原生视图，因此滚动、裁剪以及与其他视图的层叠都是正确的。
 
 ```ts
-import { WebView, type WebViewNavigation, type WebViewProps } from "nsh/webview";
+import { WebView, type WebViewNavigation, type WebViewProps } from "nsh";
 ```
 
 教程见[网页视图与视频](../docs/web-view-and-video.md)，属性见 [`<WebView>`](../elements/web-view.md)。
@@ -27,8 +27,7 @@ interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desktop">, 
 ```
 
 ```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { WebView, type WebViewNavigation } from "nsh/webview";
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
 
 function Browser() {
   const nav = signal<WebViewNavigation | null>(null);

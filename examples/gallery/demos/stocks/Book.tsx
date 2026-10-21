@@ -1,6 +1,5 @@
-import { computed, effect, signal, Text, untracked, View } from "nsh";
+import { Canvas, computed, effect, signal, Text, untracked, View } from "nsh";
 import { LayoutAnimation } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
 import { colors, Legend, Press, radius } from "../../ui";
 import { compact, type Level, LEVELS, type Market, price, type Stock, toneOf } from "./market";
 import { alpha, Block, calm, grid, Head, hatch, SpringBar } from "./parts";
@@ -41,7 +40,7 @@ export function Depth(props: { market: Market; stock: Stock }) {
       <Canvas
         style={{ height: 120 }}
         accessibilityLabel="Depth chart"
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const b = book();
           if (!b.bids.length) return;
           const bids = cumulative(b.bids), asks = cumulative(b.asks);
@@ -53,55 +52,55 @@ export function Depth(props: { market: Market; stock: Stock }) {
           const h = height - pad.top - pad.bottom;
           const X = (p: number) => ((p - lo) / (hi - lo)) * width;
           const Y = (v: number) => pad.top + h - (v / ymax) * h;
-          ctx.strokeStyle = grid();
-          ctx.lineWidth = 1;
+          cx.strokeStyle = grid();
+          cx.lineWidth = 1;
           for (let k = 1; k <= 3; k++) {
-            ctx.beginPath();
-            ctx.moveTo(0, pad.top + (h * k) / 4);
-            ctx.lineTo(width, pad.top + (h * k) / 4);
-            ctx.stroke();
+            cx.beginPath();
+            cx.moveTo(0, pad.top + (h * k) / 4);
+            cx.lineTo(width, pad.top + (h * k) / 4);
+            cx.stroke();
           }
           const bx = X(b.bids[0].price), ax = X(b.asks[0].price);
-          hatch(ctx, bx, pad.top, ax - bx, h, colors.border, 4);
+          hatch(cx, bx, pad.top, ax - bx, h, colors.border, 4);
           // A side: a step line out from the best price, filled below.
           const side = (levels: Level[], sums: number[], color: string, dir: number) => {
-            ctx.beginPath();
-            ctx.moveTo(X(levels[0].price), pad.top + h);
+            cx.beginPath();
+            cx.moveTo(X(levels[0].price), pad.top + h);
             let y = Y(sums[0]);
-            ctx.lineTo(X(levels[0].price), y);
+            cx.lineTo(X(levels[0].price), y);
             for (let i = 1; i < levels.length; i++) {
-              ctx.lineTo(X(levels[i].price), y);
+              cx.lineTo(X(levels[i].price), y);
               y = Y(sums[i]);
-              ctx.lineTo(X(levels[i].price), y);
+              cx.lineTo(X(levels[i].price), y);
             }
-            ctx.lineTo(dir < 0 ? 0 : width, y);
-            ctx.lineTo(dir < 0 ? 0 : width, pad.top + h);
-            ctx.closePath();
-            ctx.fillStyle = alpha(color, 0.16);
-            ctx.fill();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            cx.lineTo(dir < 0 ? 0 : width, y);
+            cx.lineTo(dir < 0 ? 0 : width, pad.top + h);
+            cx.closePath();
+            cx.fillStyle = alpha(color, 0.16);
+            cx.fill();
+            cx.strokeStyle = color;
+            cx.lineWidth = 1.5;
+            cx.stroke();
           };
           side(b.bids, bids, colors.up, -1);
           side(b.asks, asks, colors.down, 1);
-          ctx.strokeStyle = colors.muted;
-          ctx.setLineDash([2, 3]);
-          ctx.beginPath();
-          ctx.moveTo(X(mid), pad.top);
-          ctx.lineTo(X(mid), pad.top + h);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.font = "11px system-ui";
-          ctx.fillStyle = colors.faint;
-          ctx.textBaseline = "top";
-          ctx.textAlign = "left";
-          ctx.fillText(price(lo, props.stock), 0, pad.top + h + 5);
-          ctx.textAlign = "right";
-          ctx.fillText(price(hi, props.stock), width, pad.top + h + 5);
-          ctx.textAlign = "center";
-          ctx.fillStyle = colors.text;
-          ctx.fillText(`mid ${price(mid, props.stock)}`, width / 2, pad.top + h + 5);
+          cx.strokeStyle = colors.muted;
+          cx.setLineDash([2, 3]);
+          cx.beginPath();
+          cx.moveTo(X(mid), pad.top);
+          cx.lineTo(X(mid), pad.top + h);
+          cx.stroke();
+          cx.setLineDash([]);
+          cx.font = "11px system-ui";
+          cx.fillStyle = colors.faint;
+          cx.textBaseline = "top";
+          cx.textAlign = "left";
+          cx.fillText(price(lo, props.stock), 0, pad.top + h + 5);
+          cx.textAlign = "right";
+          cx.fillText(price(hi, props.stock), width, pad.top + h + 5);
+          cx.textAlign = "center";
+          cx.fillStyle = colors.text;
+          cx.fillText(`mid ${price(mid, props.stock)}`, width / 2, pad.top + h + 5);
         }}
       />
       <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 6 }}>

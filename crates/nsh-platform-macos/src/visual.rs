@@ -18,6 +18,7 @@
 use nsh_core::{
     BorderStyle, BoxShadow, Color, CornerRadii, Filter, Gradient, GradientKind, GradientSize,
     ViewStyle,
+    geometry::{Points, px},
 };
 use objc2::{MainThreadOnly as _, rc::Retained};
 use objc2_app_kit::{
@@ -90,7 +91,7 @@ pub(crate) fn has_backdrop(style: &ViewStyle) -> bool {
     style.effects.as_ref().is_some_and(|e| {
         e.backdrop_filters
             .iter()
-            .any(|f| matches!(*f, Filter::Blur(r) if r > 0.0))
+            .any(|f| matches!(*f, Filter::Blur(r) if r.0 > 0.0))
     })
 }
 
@@ -125,7 +126,7 @@ pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
                 offset_y,
                 blur,
                 color,
-            } => Some((offset_x, offset_y, blur, color)),
+            } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         })
 }
@@ -167,7 +168,7 @@ impl Visual {
         // Text draws in the layer's own contents, below every sublayer:
         // effects inside the box would cover it.
         let inner: &[&BoxShadow] = if text { &[] } else { &inner };
-        let border = style.borders.uniform().map_or(0.0, |(w, _)| w);
+        let border = style.borders.uniform().map_or(0.0, |(w, _)| w.0);
         self.set_insets(layer, inner, local, radii, border);
         let gradients = if text {
             &[][..]
@@ -190,7 +191,7 @@ impl Visual {
             e.backdrop_filters
                 .iter()
                 .map(|f| match *f {
-                    Filter::Blur(r) => r,
+                    Filter::Blur(r) => r.0,
                     _ => 0.0,
                 })
                 .sum::<f32>()
@@ -221,7 +222,9 @@ impl Visual {
         // Everything but the box, as far as the farthest shadow reaches.
         let reach = shadows
             .iter()
-            .map(|s| s.offset_x.abs().max(s.offset_y.abs()) + s.spread.abs() + s.blur * 2.0 + 4.0)
+            .map(|s| {
+                s.offset_x.0.abs().max(s.offset_y.0.abs()) + s.spread.0.abs() + s.blur.0 * 2.0 + 4.0
+            })
             .fold(0.0, f32::max) as CGFloat;
         let around = grow(local, reach);
         holder.setFrame(local);
@@ -251,10 +254,10 @@ impl Visual {
         let content = rounded(local, radii);
         // CSS order is top first; later sublayers draw on top.
         for (l, s) in casters.iter().zip(shadows.iter().rev()) {
-            let shape = grow(local, s.spread as CGFloat);
+            let shape = grow(local, s.spread.0 as CGFloat);
             l.setFrame(local);
             let path = rounded(shape, grown(radii, s.spread));
-            cast(l, &path, &content, s, s.offset_x, s.offset_y);
+            cast(l, &path, &content, s, s.offset_x.0, s.offset_y.0);
             if covered {
                 // Nothing to hide the stand-in content: the shadow only.
                 l.setFillColor(None);
@@ -284,7 +287,7 @@ impl Visual {
         });
         // Inside the padding box.
         let padding = inset(local, border as CGFloat);
-        let inner_radii = radii.inset(border);
+        let inner_radii = radii.inset(px(border));
         match crate::decor::shared(&inner_radii) {
             Some(r) => {
                 // Rounded bounds clip at no cost per frame (a mask has one):
@@ -315,15 +318,16 @@ impl Visual {
             CGMutablePath::add_rect(Some(&content), std::ptr::null(), local);
         }
         for (l, s) in casters.iter().zip(shadows.iter().rev()) {
-            let reach =
-                (s.offset_x.abs().max(s.offset_y.abs()) + s.spread.abs() + s.blur * 2.0 + 4.0)
-                    as CGFloat;
+            let reach = (s.offset_x.0.abs().max(s.offset_y.0.abs())
+                + s.spread.0.abs()
+                + s.blur.0 * 2.0
+                + 4.0) as CGFloat;
             // The frame around the shifted, shrunk inner shape casts its
             // shadow inwards (non-zero winding: the hole runs backwards).
             let hole = offset(
-                grow(padding, -(s.spread as CGFloat)),
-                s.offset_x,
-                s.offset_y,
+                grow(padding, -(s.spread.0 as CGFloat)),
+                s.offset_x.0,
+                s.offset_y.0,
             );
             let path = CGMutablePath::new();
             // SAFETY: valid mutable paths, a null transform.
@@ -401,10 +405,10 @@ impl Visual {
             grown(radii, d)
         };
         l.setFrame(local);
-        l.setPath(Some(&rounded(grow(local, d as CGFloat), radii)));
-        l.setLineWidth(o.width as CGFloat);
+        l.setPath(Some(&rounded(grow(local, d.0 as CGFloat), radii)));
+        l.setLineWidth(o.width.0 as CGFloat);
         l.setStrokeColor(cg_color(o.color).as_deref());
-        let w = o.width as f64;
+        let w = o.width.0 as f64;
         let pattern: Option<Retained<NSArray<NSNumber>>> = match o.style {
             BorderStyle::Solid => None,
             BorderStyle::Dashed => Some(NSArray::from_retained_slice(&[
@@ -517,7 +521,7 @@ fn cast(
     l.setShadowOffset(CGSize::new(x as CGFloat, y as CGFloat));
     // CSS blur is twice the Gaussian's deviation; Core Animation's radius
     // is close to the deviation.
-    l.setShadowRadius(s.blur as CGFloat / 2.0);
+    l.setShadowRadius(s.blur.0 as CGFloat / 2.0);
 }
 
 /// Keeps `layers` at `n`, adding new ones from `make` to `parent`.
@@ -574,8 +578,14 @@ fn offset(rect: CGRect, x: f32, y: f32) -> CGRect {
 
 /// Radii grown by `d` (shrunk when negative), corners without a radius
 /// staying square.
-fn grown(radii: CornerRadii, d: f32) -> CornerRadii {
-    let g = |r: f32| if r > 0.0 { (r + d).max(0.0) } else { 0.0 };
+fn grown(radii: CornerRadii, d: Points) -> CornerRadii {
+    let g = |r: Points| {
+        if r > Points::ZERO {
+            (r + d).max(Points::ZERO)
+        } else {
+            Points::ZERO
+        }
+    };
     CornerRadii {
         top_left: g(radii.top_left),
         top_right: g(radii.top_right),
@@ -594,7 +604,10 @@ fn add_reversed(path: &CFRetained<CGMutablePath>, rect: CGRect, radii: CornerRad
 /// Configures `g` to draw `gradient` over a `size` box.
 fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
     let (w, h) = (size.width.max(1.0), size.height.max(1.0));
-    let stops = gradient.resolved_stops();
+    let stops = gradient.resolved_stops(nsh_core::Size::new(
+        nsh_core::Points(w as f32),
+        nsh_core::Points(h as f32),
+    ));
     // A transparent stop takes its neighbor's hue (as CSS's premultiplied
     // mixing does), so fades to transparent do not darken.
     let colors: Vec<Retained<objc2::runtime::AnyObject>> = (0..stops.len())
@@ -622,7 +635,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         .collect();
     let locations: Vec<Retained<NSNumber>> = stops
         .iter()
-        .map(|(_, p)| NSNumber::new_f64(*p as f64))
+        .map(|(_, p)| NSNumber::new_f64(p.0 as f64))
         .collect();
     // SAFETY: an array of CGColors, as `colors` documents.
     unsafe { g.setColors(Some(&NSArray::from_retained_slice(&colors))) };
@@ -636,7 +649,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         } => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerRadial });
-            let (cx, cy) = (x as CGFloat * w, y as CGFloat * h);
+            let (cx, cy) = (x.0 as CGFloat * w, y.0 as CGFloat * h);
             let (dx, dy) = match extent {
                 GradientSize::ClosestSide => (cx.min(w - cx), cy.min(h - cy)),
                 GradientSize::FarthestSide => (cx.max(w - cx), cy.max(h - cy)),
@@ -668,22 +681,24 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         GradientKind::Conic { from, x, y } => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerConic });
-            g.setStartPoint(CGPoint::new(x as CGFloat, y as CGFloat));
+            let (x, y) = (x.0 as CGFloat, y.0 as CGFloat);
+            g.setStartPoint(CGPoint::new(x, y));
             // Core Animation starts at the end point's direction, clockwise
             // from the right; CSS starts up.
-            let a = ((from as f64) - 90.0).to_radians();
-            g.setEndPoint(CGPoint::new(
-                x as CGFloat + a.cos() / 2.0,
-                y as CGFloat + a.sin() / 2.0,
-            ));
+            let a = from.0 as f64 - std::f64::consts::FRAC_PI_2;
+            g.setEndPoint(CGPoint::new(x + a.cos() / 2.0, y + a.sin() / 2.0));
         }
         kind => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerAxial });
-            let angle = kind.linear_angle(w as f32, h as f32).unwrap_or(180.0) as f64;
+            let box_size =
+                nsh_core::Size::new(nsh_core::Points(w as f32), nsh_core::Points(h as f32));
+            let angle = kind
+                .linear_angle(box_size)
+                .unwrap_or(nsh_core::geometry::deg(180.0));
             // CSS: the gradient line through the center at `angle` (0 up,
             // clockwise), long enough that corners get the end colors.
-            let (s, c) = angle.to_radians().sin_cos();
+            let (s, c) = (angle.0 as f64).sin_cos();
             let len = (w * s).abs() + (h * c).abs();
             let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
             let (cx, cy) = (w / 2.0, h / 2.0);

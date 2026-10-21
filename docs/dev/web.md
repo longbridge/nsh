@@ -35,7 +35,7 @@ builds keep their caches), and compiles each demo with `nsh build --release` int
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it; packaging builds `nsh.wasm`: `--target wasm32-unknown-unknown --profile web`, the release
 profile optimized for size, QuickJS still at `-O3`). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off
-WebAssembly it is empty. `.cargo/config.toml` gives wasm32 an 8 MiB stack (QuickJS recursion).
+WebAssembly it is empty. `.cargo/config.toml` gives wasm32 an 8 MiB stack (QuickJS recursion) and selects getrandom's custom entropy backend. The CLI passes that backend flag to generated Rust-app builds as well, retaining existing compiler flags.
 
 QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (CI: Ubuntu's `clang` and `llvm`, with
 `AR_wasm32_unknown_unknown=llvm-ar`). Apple's clang has no WebAssembly target: on macOS point
@@ -48,7 +48,7 @@ QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (C
 `Dev`): `runtime/web/nsh.wasm`, `nsh-dev.wasm` and `nsh.js` in the distribution (`cargo xtask dist` puts them there);
 in a checkout it builds `nsh-platform-web` with `--profile web --target wasm32-unknown-unknown` whatever its own
 profile (a debug build is several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-ar`), with
-`--features bytecode-only` for the release one, copies the result to `nsh.wasm` / `nsh-dev.wasm` next to it (both
+`--features bytecode-only` for the release one and `--features dev` for the development host's, copies the result to `nsh.wasm` / `nsh-dev.wasm` next to it (both
 build to the same file) and takes `nsh.js` from the crate.
 
 - **`nsh package --target web`** writes a static site. Every file but `index.html` and `manifest.webmanifest` is
@@ -59,9 +59,11 @@ build to the same file) and takes `nsh.js` from the crate.
   bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
   sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
   with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
-  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })` (`appId`: the
-  `nsh.json` id, the page's `app.id`; a Rust app's root carries its own); an app whose capabilities restrict `network`
-  gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
+  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
+  (`appId`: the `nsh.json` id, the page's `app.id`; a Rust app's root carries its own), without `limits`: a published
+  app runs on its own, with none (`sandbox.md`); an app whose capabilities restrict `network`
+  gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
+  (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode
   (`web::CODE`, `app.<digest>.nshc`), with the hardening's (`harden.<digest>.nshc`). The app is built split
@@ -77,6 +79,14 @@ build to the same file) and takes `nsh.js` from the crate.
   each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
+- **Tests** (`nsh test --target web`, `docs/dev/tooling.md` "On a real platform"): the CLI opens the development host
+  in a headless Chromium browser it drives over the DevTools protocol (`nsh-cli/src/cdp.rs`, `test_web.rs`). When the
+  server's hello says `test`, the page calls `player.testStart()` (`nsh_test_start`): from the next bundle on, every
+  batch and error of the app also goes to an `nsh_testing::agent::Model` in the module (feature `dev`, `Sink`). Its
+  hello says `tests` (`player.takesTests`), so the server sends it steps; each `step` is answered at once with
+  `player.testStep`: `nsh_test_answer` answers what the model knows (selectors, texts, dialogs, activity) and whether
+  an animation runs, `testPage` what only the DOM knows (`getBoundingClientRect` in CSS pixels, the viewport, an
+  input's value, where a dialog's button is). The input itself is the browser's trusted input, sent by the CLI.
 
 `nsh_bundle_options` sets how the next `nsh_start` / `nsh_start_bytecode` runs: development settings by default (the
 player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities,
@@ -141,13 +151,12 @@ Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `tw
 
 ### Apps with Rust components
 
-The prebuilt runtime serves `nsh/ui/mobile` only; an app with a Rust crate of its own (`nsh.json` `"rust"`,
+The prebuilt runtime serves the runtime's modules and `nsh/base`; an app with a Rust crate of its own (`nsh.json` `"rust"`,
 `docs/dev/tooling.md`) gets one built with its set, as it gets its own native hosts. `runtime::web` asks the app
 (`rust_app::RustApp::web`), whose generated workspace (`.nsh/rust`) has a member `web`: a `cdylib` of
-`nsh-platform-web` and the app's crate whose code is `nsh_platform_web::ui_sets!(vec![nsh_ui_mobile::registry(),
-app_set()])`. The macro exports `nsh_app_init`, which `nsh.js` calls right after instantiating the module (there is
+`nsh-platform-web` and the app's crate whose code is `nsh_platform_web::ui_sets!(vec![nsh_base::registry(), app_set()])`. The macro exports `nsh_app_init`, which `nsh.js` calls right after instantiating the module (there is
 no `main` to call `set_ui_sets` in a wasm module, nor a `dlsym` as Android's `ui_sets!` uses); a module without it
-(the prebuilt runtime) keeps the mobile UI. The `nsh_*` exports come from `nsh-platform-web`'s rlib: a `cdylib`
+(the prebuilt runtime) serves `nsh/base`. The `nsh_*` exports come from `nsh-platform-web`'s rlib: a `cdylib`
 exports its dependencies' `#[no_mangle]` functions. The workspace has the same `web` profile as nsh's `Cargo.toml`, and
 the crate's `build.rs` passes the 8 MiB stack as a link argument of its own (nsh's `.cargo/config.toml` may not apply
 where the app builds, and target-wide `rustflags` would rebuild every dependency instead of sharing nsh's builds).
@@ -197,6 +206,16 @@ prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5
   stores more than a pointer's worth of bits in an opaque must do the same.
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
 
+## Standard modules in the browser
+
+All eleven standard modules load in the web runtime. `quickjs-jit-stdlib` compiles its portable Rust hashing, buffers and compression into WebAssembly, preserving synchronous APIs; cryptographic entropy comes from the player's `crypto.getRandomValues` bridge. The `path` module uses POSIX paths with virtual working directory `/`. NSH's URL classes retain their identity.
+
+`filesystem.rs` implements `FileSystem` through the player's Origin Private File System bridge. Rust checks the app's file grants, normalizes paths relative to its configured data directory and enforces quotas before sending an operation. OPFS persists files in an app-specific namespace within the page's origin and requires a secure context. File modification time comes from browser metadata; unknown access/birth times and modes are zero. `rename` uses the browser handle's atomic `move` operation, reporting `ENOTSUP` when that operation is unavailable. OPFS entries are files and directories; `readlink` reports `EINVAL`.
+
+`websocket.rs` implements the shared `WebSocketTransport` with browser WebSocket. Both the global constructor and `websocket.WebSocket.connect` use it, with HTTP capability checks, Rust queue/message/connection limits, deadlines and cancellation. Custom handshake headers report an explicit unsupported-option error. NSH checks the initial normalized URL; browser policy controls WebSocket redirects, mixed content and connection access. Native WebSocket handshakes reject redirects. Raw TCP and subprocess calls return typed platform errors; their modules and metadata exports still load.
+
+A granted `process.exit(code?)` follows the engine's `ExitApp` command to the player. The player queues `Player.reset()` in a microtask after the current mount batch returns, stopping the app and clearing its surface while retaining the host page. Deferring disposal avoids reentering and freeing the VM during its batch callback; the queued action checks the app identity so it cannot reset a replacement app.
+
 ## The playground's compiler
 
 Feature `compiler` adds `nsh_compile` (and `nsh_compiled_ptr` / `_len`): `nsh_bundler::compile_module`, the one-module
@@ -224,9 +243,9 @@ The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` fo
 container at least 600 wide (headless Chromium has no pointer: it measures as a tablet or phone), `pad` for a screen
 whose short side is at least 600, else `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
 (desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `Platform.select`'s `desktop` key and
-`Platform.isDesktop`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). A
-desktop-idiom page gets the desktop backends' header heights (47 / 94). `Command::StatusBar`'s `background` (from
-`StatusBar`'s `web={{ themeColor }}`) becomes `<meta name="theme-color">`.
+`Platform.isDesktop`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
+desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
+there is at its top. The browser's bars are the browser's: the web ignores `Command::StatusBar` (pages' and dialogs' `statusBar`).
 
 ## The protocol
 
@@ -237,7 +256,8 @@ batch is being applied (a batch arrives inside a wasm call).
 
 A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, class,
 borderClass, tint]`, `["t", id, ...content, runs, styles, selectable, selectionClass]` (`styles`: a class per run
-style; `selectable` `null` when unset), `["in", id, config, class]`, `["css", class, text]`, and so on; `nsh.js` has one `op_<name>` method per
+style; `selectable` `null` when unset), `["vp", id, props]` (the view props as an object: `pointerEvents`, `hitSlop`,
+the accessibility props, `testID`, `focusable` when false, `selectionArea` when true), `["in", id, config, class]`, `["css", class, text]`, and so on; `nsh.js` has one `op_<name>` method per
 item. Views are absolutely positioned at the core's frames; borders are an overlay element (as UIKit draws layer
 borders) so they never move the content the core placed. Native animation items stay in Rust (`src/animation.rs`, a port
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
@@ -263,22 +283,25 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   views created in the batch appear (opacity from 0 to their own, or a scale added to their transform), removed and
   deleted ones disappear and are detached at the end (a view inside one that disappears goes with it; one inserted
   again comes back at once). Springs are CSS `linear()` easings sampled from the Linux backend's curve
-  (`spring_easing`). Navigation's views (stacks, screens, modals, header items) are left out.
-- **Screens** push and pop as on Linux: a slide of 300 ms with the screen under it moving by 30 % of the width, a
-  200 ms fade for `animation: "fade"` (and for every screen with reduced motion), nothing for `"none"`, easing out
-  cubically (`cubic-bezier(.333,1,.667,1)` is exactly 1 − (1 − t)³). Screens a batch removes stay until the stack is
-  reconciled after it (`reconcileStacks`): the top one slides out when the app popped it.
+  (`spring_easing`). Navigation's views (stacks, pages, dialogs, header items) are left out.
+- **Pages** push and pop as on Linux: a slide of 300 ms with the page under it moving by 30 % of the width, a
+  200 ms fade for `animation: "fade"` (and for every page with reduced motion), nothing for `"none"`, easing out
+  cubically (`cubic-bezier(.333,1,.667,1)` is exactly 1 − (1 − t)³). Pages a batch removes stay until the stack is
+  reconciled after it (`reconcileStacks`): the top one slides out when the app popped it. NSH draws no header: a
+  page's `header` (the app's view, which the core places at its top, full width, with the content below it) is
+  appended to the page above its content (`placeHeader`, class `nsh-page-header`), and the page's content insets
+  drop the safe area's top while it has one (`screenInsets`).
 - **Removed content stays while its container leaves**: views a batch removes leave the page at its end
-  (`finishRemovals`), unless they are inside a modal being dismissed, a screen sliding out or a view disappearing,
-  which takes them along (dropped when it is gone): an app removes a modal's or screen's content in the batch that
-  removes the modal or screen, and the content must still show while it slides out (Linux keeps an image of it).
-- **Press feedback** (`activeOpacity`) fades to that fraction of the view's opacity in 100 ms and back in 250 ms,
-  easing out quadratically, as an animation over the style (the style's own opacity is kept).
+  (`finishRemovals`), unless they are inside a dialog being dismissed, a page sliding out or a view disappearing,
+  which takes them along (dropped when it is gone): an app removes a dialog's or page's content in the batch that
+  removes the dialog or page, and the content must still show while it slides out (Linux keeps an image of it).
+- **Press feedback** is the app's (`activeStyle`, `active:` classes): the core restyles a pressed view as it does
+  on every backend, and the page adds no fade of its own.
 - **Release velocities** of drags (`nsh_pan`) are measured over the last 100 ms of pointer samples (zero after a
   pause), as on Linux, not from the last two events.
 - **Images** with `fadeDuration` fade in linearly, and only when they had to load (not from the cache).
 - **Reduced motion** (`prefers-reduced-motion`): no layout animations, style transitions or keyframes (root class
-  `nsh-reduce`), screens fade.
+  `nsh-reduce`), pages fade.
 
 A split bundle's chunks (`native-pipeline.md`) are fetched by the page: the engine asks through the `load_chunk`
 import (`Sink::load_chunk`), `nsh.js` fetches `chunks[id]` or `id` relative to `chunkBase` (`player.run(code,
@@ -294,7 +317,7 @@ put it.
 ## Styles as classes
 
 No element has an inline style but its geometry (frames, a field's content box, sticky offsets, a zoomed layer, snap
-markers) and animated values (`["a", …]`, layout and screen transitions, press feedback): the same text in every
+markers) and animated values (`["a", …]`, layout and page transitions): the same text in every
 element and every batch would be parsed again each time. Every visual style is a class. `src/encode.rs` turns a view's
 style, its border overlay's, each text run style (with its line height), a text's selection color and a field's text
 into CSS, and names each distinct text `nsh-` and 8 hex digits of its 32-bit FNV-1a hash (`class_key`; the mounter's
@@ -303,7 +326,7 @@ does not have comes after `["css", name, text]`; `nsh.js` inserts `.name.name{te
 shared by the document's players (the doubled class wins over the runtime's rules of a class and a pseudo-class,
 `.nsh-v:focus`, as inline styles did). What the mounter styles itself is fixed classes in its stylesheet (scroll axes,
 snapping, fits, hidden states, the press cursor `nsh-pointer`, `nsh-inert` for `pointerEvents`), or classes it names
-the same way from the CSS it makes (`cssClass`: header colors, a blur, an image's tint and mask, the latter over the
+the same way from the CSS it makes (`cssClass`: a blur, an image's tint and mask, the latter over the
 view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
 apart: the later one then gets a view's own rule.
 
@@ -377,7 +400,8 @@ browsers' touches into what phones report:
 - **Scroll bars** in the desktop idiom are nsh's own, as on the desktop backends (`showBar`): the browser's are hidden
   (they would take 6 px from content the core laid out for the whole view), and a 4 px thumb in a sticky, zero-size
   `.nsh-bar` at the view's top left (it stays put as the content scrolls, in step with the compositor) shows while
-  the view scrolls or the mouse moves over it and fades 700 ms after. Views along one axis with `showsIndicator`, and
+  the view scrolls or the mouse reaches its draggable thumb and fades 700 ms after.
+  Hovering content leaves its visibility and fade timer unchanged. Views along one axis with `showsIndicator`, and
   horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
   (`grabBar`: `onScrollBeginDrag` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
@@ -385,50 +409,55 @@ browsers' touches into what phones report:
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
   passed as the character they type without modifiers, else the US layout's character of their `code`; `mod` was
   resolved by the browser's platform, `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
-  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, Escape); a focused
+  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, in a selection area the whole area; Escape); a focused
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
 - **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled, hidden or
   `focusable={false}` (a focused one that stops being a stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
-  draws a ring inside the view; a popped screen gives the focus back to what had it when the screen was pushed
+  draws a ring inside the view; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
-  text and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
-  modal or dialog are `inert`; the focus a modal or dialog took comes back when it closes.
+  text, selection areas and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
+  `Dialog` or alert are `inert`; the focus one took comes back when it closes.
 - **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
   `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
   `Command::Announce` writes into a polite live region, `Command::AccessibilityFocus` focuses the view.
 - **Going back** (`back`) is decided from what is mounted, as on Android and the desktops: a stack inside the newest
-  modal pops, else the modal asks to close (`onRequestClose`; a `dismissible` one closes and reports `onDismiss`);
-  without a modal the root's `onBackPress` hears it when the app listens, else the innermost stack pops (a screen
-  with `preventBack` gets `onBackRequest`). `Command::Back` goes back as without the app's listeners.
-- **Modals** are children of the root above the app's views (`present` / `dismiss`); where one sits and its size are
-  the platform's (`placeModal`; the core's frames are ignored, it lays the modal out at the size `nsh_root_size`
-  reports). `fullScreen` (and every transparent modal) covers the root with its safe area; with the desktop or pad
-  idiom a `pageSheet` / `formSheet` (`desktop={{…}}` / `web={{…}}`) is a card centered over a scrim, as wide as the
-  root allows up to 720 (page) or 540 × 620 (form) with a margin of up to 32, the sizes of the Linux and macOS
-  backends (and iPad sheets), reporting no insets; in a phone browser it is a card from 10 below the safe area's
-  top to the bottom, with rounded top corners, as on iPhones (insets: the safe area's sides and bottom). Cards and
-  scrims are classes (`nsh-modal-sheet`, `nsh-modal-top`, `nsh-modal-scrim`, `nsh-modal-opaque`) that follow
-  `nsh-dark`. A click pressed on the scrim asks the sheet to close, as going back does. `slide` moves the modal up
-  from below the root's bottom edge (a fade with reduced motion), `fade` fades it; the scrim fades with it;
-  `onShow` follows the transition. A modal the app removes leaves the same way, then reports `onDismiss`.
-- **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every screen
-  above a stack's first and every modal is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
+  dialog pops, else the dialog gets the close attempt (`onCancel`, reason `"cancel"`) and closes natively when
+  `closeOnEscape` (the default), reporting `onOpenChange(false, "cancel")` and `onClose`; without a dialog the root's
+  `onBackPress` hears it when the app listens, else the innermost stack's top page gets `onBackPress` when it listens
+  and pops unless its `popOnBack` is false (`goBack`). `Command::Back` goes back as without the app's listeners.
+- **Dialogs** (`Dialog`) are children of the root above the app's views (`present` / `dismiss`), transparent layers
+  covering the root with its safe area, whatever their `presentation` (`placeModal`; the core's frames are ignored,
+  it lays the dialog out at the size `nsh_root_size` reports): only the app's popup and backdrop show, which the
+  runtime renders in it. `slide` moves the dialog up from below the root's bottom edge (a fade with reduced motion),
+  `fade` fades it; `onOpen` follows the transition. A dialog the app removes leaves the same way, then reports
+  `onClose`.
+- **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every page
+  above a stack's first and every dialog is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
   back button and the mouse's go back in the app; entries the app takes away itself are gone back over with
   `history.go`, whose `popstate` is ignored, and a back the app refuses gets its entry again; a new `run` goes back
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
-  which going back passes over (`history.back()` again) as if the app had been left from its first screen. In an
+  which going back passes over (`history.back()` again) as if the app had been left from its first page. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
 - **Text selection**: text is selectable when `selectable` is true (`nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
-  page; phones and tablets select only what asks for it. `editable` / `textAt` tell `pointerDown` (a drag there
+  page; phones and tablets select only what asks for it. `editable` (a field) / `textAt` tell `pointerDown` (a drag there
   selects instead of panning a zoomable view) and `mousedown` (not prevented there); a mouse press elsewhere clears the selection,
   which the browser would not, since presses outside select nothing. Copying (`copyText`) writes the selected runs in
   DOM order, each followed by its line's break when its end is selected (`Run::after`, the run tuple's fifth element:
   a newline, or the spaces a wrap dropped) and a newline between texts: the browser would run the absolutely placed
   runs together.
+- **Selection areas** (`SelectionArea`, `ViewProps::selection_area`): `op_vp` marks a view whose props have
+  `selectionArea` `nsh-area`, and the browser's own selection spans its texts (handles and long presses on phones
+  included). The area and everything in it is `user-select: text` in every idiom, inside views that take presses too,
+  except texts set off (`selectable={false}`: `nsh-noselect`, set by `op_t`), images and videos; an area inside
+  another is part of the outer one (`areaOf`). `textAt` takes the area's texts and `areaGap` its other places outside
+  views that take presses, so `mousedown` is not prevented there and a drag may start between texts, as between a
+  web page's paragraphs; pressables in the area keep their presses. Select all selects the whole area. Copying joins
+  the area's texts on one row (their boxes overlap vertically: a table's cells) with a tab instead of a newline and
+  leaves out attachments (U+FFFC), as `SelectionModel::text` does.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.
@@ -469,9 +498,9 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
   (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
   `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
   storage, private mode, quota) and hands failures back as messages.
-- **Dialogs** (`Alert`, `ActionSheet`) are drawn in the root: with the `desktop` idiom as the Linux and macOS
-  backends' cards (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert and
-  action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
+- **Alerts** (`AlertDialog`, both presentations) are drawn in the root: with the `desktop` idiom as the Linux and
+  macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
+  and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
 - **Toasts** (`Toast.show` from `nsh/android`, which the desktop backends also show) are a pill at the bottom of the
   root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.

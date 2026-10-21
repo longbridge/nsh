@@ -34,7 +34,7 @@ use nsh_core::{
         DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
         WindowLevel,
     },
-    platform::Insets,
+    geometry::{Edges, Points},
 };
 use windows::{
     Win32::{
@@ -188,14 +188,14 @@ fn frame_thickness(hwnd: HWND) -> i32 {
 fn update_area(surface: &Surface) {
     let mut env = surface.environment.get();
     env.title_bar = if hidden(surface) {
-        Insets {
-            top: caption_height(surface),
-            right: 3.0 * BUTTON_WIDTH,
-            bottom: 0.0,
-            left: 0.0,
+        Edges {
+            top: Points(caption_height(surface)),
+            right: Points(3.0 * BUTTON_WIDTH),
+            bottom: Points(0.0),
+            left: Points(0.0),
         }
     } else {
-        Insets::default()
+        Edges::default()
     };
     surface.set_environment(env);
 }
@@ -235,7 +235,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             let _ = unsafe { SetWindowTextW(hwnd, &windows::core::HSTRING::from(title.as_str())) };
         }
         DesktopCommand::SetTitleBar { style, height } => {
-            let changed = c.height.replace(*height) != *height;
+            let height = height.map(|h| h.0);
+            let changed = c.height.replace(height) != height;
             if c.style.replace(*style) != *style || changed {
                 show_menu_bar(surface);
                 frame_changed(hwnd);
@@ -271,7 +272,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             surface,
             Popup {
                 items: items.clone(),
-                at: *at,
+                at: at.map(|p| (p.x.0, p.y.0)),
                 actions: Vec::new(),
             },
         ),
@@ -289,14 +290,14 @@ fn set_frame(surface: &Surface, hwnd: HWND, frame: &WindowFrame) {
         return;
     }
     let scale = surface.scale();
-    let x = frame.x.map_or(rect.left, |v| (v * scale).round() as i32);
-    let y = frame.y.map_or(rect.top, |v| (v * scale).round() as i32);
+    let x = frame.x.map_or(rect.left, |v| (v.0 * scale).round() as i32);
+    let y = frame.y.map_or(rect.top, |v| (v.0 * scale).round() as i32);
     let width = frame
         .width
-        .map_or(rect.right - rect.left, |v| (v * scale).round() as i32);
+        .map_or(rect.right - rect.left, |v| (v.0 * scale).round() as i32);
     let height = frame
         .height
-        .map_or(rect.bottom - rect.top, |v| (v * scale).round() as i32);
+        .map_or(rect.bottom - rect.top, |v| (v.0 * scale).round() as i32);
     // SAFETY: a plain call on a live window; SWP_NOZORDER keeps the level
     // `set_level` may have set.
     let _ = unsafe {

@@ -4,8 +4,8 @@
 use std::{cell::RefCell, ffi::c_void, ptr::NonNull};
 
 use nsh_core::{
-    AttributedText, Color, EllipsizeMode, FontFamily, ResolvedTextStyle, Size, TextAlign,
-    TextEngine, TextLayout,
+    AttributedText, Color, EllipsizeMode, FontFamily, Point, Points, ResolvedTextStyle, Size,
+    TextAlign, TextEngine, TextLayout,
 };
 use objc2::rc::Retained;
 use objc2_app_kit::{
@@ -55,6 +55,15 @@ pub(crate) fn decoration_key() -> &'static CFString {
         .0
 }
 
+/// Attribute marking the characters of a span background (the node that
+/// set it, a `CFNumber`): CoreText splits runs where it changes, so
+/// [`draw`] fills each background behind its own runs.
+fn background_key() -> &'static CFString {
+    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
+    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshBackground")))
+        .0
+}
+
 struct CFStringKey(CFRetained<CFString>);
 // SAFETY: CFStrings are immutable and thread-safe.
 unsafe impl Send for CFStringKey {}
@@ -76,7 +85,7 @@ impl FontCache {
 
     fn get(&self, style: &ResolvedTextStyle) -> CFRetained<CTFont> {
         let key = (
-            style.font_size.to_bits(),
+            style.font_size.0.to_bits(),
             style.font_weight,
             style.font_family,
             style.italic,
@@ -100,7 +109,7 @@ impl FontCache {
 }
 
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
-    let size = style.font_size as CGFloat;
+    let size = style.font_size.0 as CGFloat;
     let font = style
         .font_family
         .and_then(|family| {
@@ -371,8 +380,8 @@ impl CoreTextEngine {
                 unsafe { kCTForegroundColorAttributeName },
                 cg_color(style.color).as_ref(),
             );
-            if style.letter_spacing != 0.0 {
-                let kern = CFNumber::new_cgfloat(style.letter_spacing as CGFloat);
+            if style.letter_spacing != Points::ZERO {
+                let kern = CFNumber::new_cgfloat(style.letter_spacing.0 as CGFloat);
                 set(range, unsafe { kCTKernAttributeName }, kern.as_ref());
             }
             let decoration = cg_color(style.decoration_color.unwrap_or(style.color));
@@ -389,11 +398,13 @@ impl CoreTextEngine {
                 };
                 let numbers = [
                     CFNumber::new_i32(code),
-                    CFNumber::new_cgfloat(style.decoration_thickness.unwrap_or(0.0) as CGFloat),
+                    CFNumber::new_cgfloat(
+                        style.decoration_thickness.unwrap_or(Points::ZERO).0 as CGFloat,
+                    ),
                     CFNumber::new_cgfloat(
                         style
                             .underline_offset
-                            .map_or(CGFloat::NAN, |o| o as CGFloat),
+                            .map_or(CGFloat::NAN, |o| o.0 as CGFloat),
                     ),
                 ];
                 let array = CFArray::from_retained_objects(&numbers);
@@ -418,6 +429,10 @@ impl CoreTextEngine {
             if style.decoration.line_through {
                 set(range, strikethrough_key(), decoration.as_ref());
             }
+            if let Some(b) = style.background {
+                let node = CFNumber::new_i64(b.node as i64);
+                set(range, background_key(), node.as_ref());
+            }
         }
         // Attachments: their placeholders take the attachment's size (on the
         // baseline) and draw nothing.
@@ -427,7 +442,7 @@ impl CoreTextEngine {
                 location: a.index as CFIndex,
                 length: 1,
             };
-            if let Some(delegate) = run_delegate(a.width as CGFloat, a.height as CGFloat) {
+            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, a.height.0 as CGFloat) {
                 set(
                     range,
                     unsafe { kCTRunDelegateAttributeName },
@@ -541,7 +556,7 @@ fn paragraph_style(text: &AttributedText) -> CFRetained<CTParagraphStyle> {
         TextAlign::Right => CTTextAlignment::Right,
         TextAlign::Justify => CTTextAlignment::Justified,
     };
-    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height) as CGFloat;
+    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat;
     let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
         spec,
         valueSize: size,
@@ -688,13 +703,13 @@ impl TextEngine for CoreTextEngine {
             attachments: text
                 .attachments
                 .iter()
-                .map(|a| (a.index as CFIndex, a.height as CGFloat))
+                .map(|a| (a.index as CFIndex, a.height.0 as CGFloat))
                 .collect(),
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size {
-        let width = max_width.map_or(CGFloat::MAX, |w| w as CGFloat);
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let width = max_width.map_or(CGFloat::MAX, |w| w.0 as CGFloat);
         let range = if prepared.max_lines > 0 {
             CFRange {
                 location: 0,
@@ -713,11 +728,11 @@ impl TextEngine for CoreTextEngine {
                 std::ptr::null_mut(),
             )
         };
-        Size::new(size.width as f32, size.height as f32)
+        Size::new(Points(size.width as f32), Points(size.height as f32))
     }
 
-    fn layout(&self, prepared: &Prepared, size: Size) -> TextLayout {
-        let (width, height) = (size.width as CGFloat, size.height as CGFloat);
+    fn layout(&self, prepared: &Prepared, size: Size<Points>) -> TextLayout {
+        let (width, height) = (size.width.0 as CGFloat, size.height.0 as CGFloat);
         let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height));
         // SAFETY: a valid rectangle path and whole-string range.
         let frame: CFRetained<CTFrame> = unsafe {
@@ -777,10 +792,15 @@ impl TextEngine for CoreTextEngine {
         }))
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
             .downcast::<CoreTextLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+            .map_or_else(Vec::new, |l| {
+                l.attachments
+                    .iter()
+                    .map(|a| a.map(|(x, y)| Point::new(Points(x), Points(y))))
+                    .collect()
+            })
     }
 
     fn lines(&self, layout: &TextLayout) -> Vec<nsh_core::TextLine> {
@@ -806,14 +826,14 @@ impl TextEngine for CoreTextEngine {
                     text: String::new(),
                     start: l.range.location as u32,
                     end: (l.range.location + l.range.length) as u32,
-                    x: l.origin.x as f32,
-                    y: (layout.height - l.origin.y - ascent) as f32,
-                    width: width as f32,
-                    height: (ascent + descent + leading) as f32,
-                    ascender: ascent as f32,
-                    descender: descent as f32,
-                    cap_height: cap as f32,
-                    x_height: x_height as f32,
+                    x: Points(l.origin.x as f32),
+                    y: Points((layout.height - l.origin.y - ascent) as f32),
+                    width: Points(width as f32),
+                    height: Points((ascent + descent + leading) as f32),
+                    ascender: Points(ascent as f32),
+                    descender: Points(descent as f32),
+                    cap_height: Points(cap as f32),
+                    x_height: Points(x_height as f32),
                 }
             })
             .collect()
@@ -903,13 +923,13 @@ pub(crate) fn prewarm() {
     for (size, weight) in [(14.0, 400), (17.0, 400), (17.0, 700)] {
         let mut text = AttributedText::default();
         let style = ResolvedTextStyle {
-            font_size: size,
+            font_size: Points(size),
             font_weight: weight,
             ..Default::default()
         };
         text.push("Hg 0123 ab", style);
         let prepared = engine.prepare(&text);
-        let measured = engine.measure(&prepared, Some(100.0));
+        let measured = engine.measure(&prepared, Some(Points(100.0)));
         let _ = engine.layout(&prepared, measured);
     }
 }
@@ -926,9 +946,12 @@ pub(crate) struct DrawnText {
     /// Its final layout ([`CoreTextLayout`]).
     pub(crate) layout: TextLayout,
     /// The content box in the view (inside padding and borders).
-    pub(crate) content: nsh_core::Rect,
+    pub(crate) content: nsh_core::Bounds<nsh_core::Points>,
     /// The selection of `selectable` text, kept across new content.
     selection: Option<Selection>,
+    /// The part of a selection area's selection in this text
+    /// ([`crate::selection_area`]).
+    area_range: std::cell::Cell<Option<(u32, u32)>>,
 }
 
 /// A text view got new text or a new layout.
@@ -936,10 +959,16 @@ pub(crate) fn set(
     view: &crate::view::NshView,
     text: &std::sync::Arc<AttributedText>,
     layout: &TextLayout,
-    content: nsh_core::Rect,
+    content: nsh_core::Bounds<nsh_core::Points>,
 ) {
     let old = view.state_mut().text.take();
     let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
+    // The area's selection is set again at the end of the batch; the same
+    // content keeps its part until then.
+    let area_range = old
+        .as_ref()
+        .filter(|o| o.text.text == text.text)
+        .and_then(|o| o.area_range.get());
     let selection = match old {
         Some(DrawnText {
             text: old,
@@ -960,6 +989,7 @@ pub(crate) fn set(
         layout: layout.clone(),
         content,
         selection,
+        area_range: std::cell::Cell::new(area_range),
     });
     if was != text.is_selectable() {
         // The I-beam.
@@ -976,16 +1006,20 @@ pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
 }
 
 /// Draws a text view's text (in `drawRect:`; the context is y down).
-pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
+pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
     use objc2_core_foundation::CGAffineTransform;
     let Some(drawn) = &state.text else { return };
     let Some(text) = drawn.layout.downcast::<CoreTextLayout>() else {
         return;
     };
     let content = drawn.content;
-    let c = Some(ctx);
+    let c = Some(cx);
     CGContext::save_g_state(c);
-    if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
+    if drawn.text.has_backgrounds() {
+        draw_backgrounds(cx, &drawn.text, text, content);
+    }
+    let range = drawn.selection.as_ref().and_then(|s| s.range.get());
+    if let Some(range) = range.or(drawn.area_range.get()) {
         // iOS tints the selection with the view's tint at about 30%.
         let tint = drawn.text.selection_color.unwrap_or(SYSTEM_BLUE);
         let alpha = (tint.0 & 0xff) as f32 / 255.0 * 0.3;
@@ -1010,8 +1044,8 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
     );
     CGContext::translate_ctm(
         c,
-        content.x as CGFloat,
-        (content.y + content.height) as CGFloat,
+        content.origin.x.0 as CGFloat,
+        (content.origin.y.0 + content.size.height.0) as CGFloat,
     );
     CGContext::scale_ctm(c, 1.0, -1.0);
     if let Some(shadow) = drawn.text.shadow {
@@ -1019,8 +1053,8 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
         // AppKit's flipped context: a positive offset must still go down.
         CGContext::set_shadow_with_color(
             c,
-            CGSize::new(shadow.offset_x as CGFloat, -shadow.offset_y as CGFloat),
-            shadow.radius as CGFloat,
+            CGSize::new(shadow.offset_x.0 as CGFloat, -shadow.offset_y.0 as CGFloat),
+            shadow.radius.0 as CGFloat,
             Some(&cg_color(shadow.color)),
         );
     }
@@ -1035,9 +1069,9 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
     for line in &text.lines {
         CGContext::set_text_position(c, line.origin.x, line.origin.y);
         // SAFETY: a valid line and context.
-        unsafe { line.line.draw(ctx) };
+        unsafe { line.line.draw(cx) };
         if text.strikethrough {
-            draw_decorations(ctx, line);
+            draw_decorations(cx, line);
         }
     }
     if let Some(color) = color {
@@ -1049,6 +1083,89 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
         CGContext::end_transparency_layer(c);
     }
     CGContext::restore_g_state(c);
+}
+
+/// Fills the span backgrounds of `layout` (view coordinates, y down),
+/// behind the selection and the glyphs: per line, its runs (CoreText
+/// splits them where a background starts or ends) joined by
+/// [`nsh_core::BackgroundBox::join`], as tall as their fonts.
+fn draw_backgrounds(
+    cx: &CGContext,
+    text: &AttributedText,
+    layout: &CoreTextLayout,
+    content: nsh_core::Bounds<nsh_core::Points>,
+) {
+    let c = Some(cx);
+    let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
+    let mut pieces = Vec::new();
+    for line in &layout.lines {
+        pieces.clear();
+        // SAFETY: the line's own run array (of CTRuns), valid out pointers
+        // and a one-glyph range inside each non-empty run.
+        let (width, trailing) = unsafe {
+            let runs = line.line.glyph_runs();
+            for i in 0..runs.count() {
+                let run = &*runs.value_at_index(i).cast::<CTRun>();
+                if run.glyph_count() == 0 {
+                    continue;
+                }
+                let mut first = CGPoint::new(0.0, 0.0);
+                run.positions(
+                    CFRange {
+                        location: 0,
+                        length: 1,
+                    },
+                    NonNull::from(&mut first),
+                );
+                let (mut ascent, mut descent) = (0.0, 0.0);
+                let width =
+                    run.typographic_bounds(WHOLE, &mut ascent, &mut descent, std::ptr::null_mut());
+                let index = run.string_range().location.max(0) as u32;
+                // An attachment's placeholder is as tall as it: the text
+                // around it sets the box.
+                if text.attachments.iter().any(|a| a.index == index) {
+                    (ascent, descent) = (0.0, 0.0);
+                }
+                pieces.push(nsh_core::LinePiece {
+                    x: Points((line.origin.x + first.x) as f32),
+                    width: Points(width as f32),
+                    background: text.background_at(index),
+                    ascent: Points(ascent as f32),
+                    descent: Points(descent as f32),
+                });
+            }
+            (
+                line.line.typographic_bounds(
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                line.line.trailing_whitespace_width(),
+            )
+        };
+        pieces.sort_by(|a, b| a.x.0.total_cmp(&b.x.0));
+        // Whitespace hanging past the line's end: on its left right to left.
+        let x = line.origin.x as f32;
+        let (left, right) = if text.rtl {
+            (x + trailing as f32, x + width as f32)
+        } else {
+            (x, x + (width - trailing) as f32)
+        };
+        let baseline = bottom - line.origin.y;
+        nsh_core::BackgroundBox::join(pieces.iter().copied(), (Points(left), Points(right)), |b| {
+            let rect = CGRect::new(
+                CGPoint::new(
+                    content.origin.x.0 as CGFloat + b.x.0 as CGFloat,
+                    baseline - b.ascent.0 as CGFloat,
+                ),
+                CGSize::new(b.width.0 as CGFloat, (b.ascent + b.descent).0 as CGFloat),
+            );
+            let path = crate::decor::rounded(rect, nsh_core::CornerRadii::all(b.radius()));
+            CGContext::set_fill_color_with_color(c, Some(&cg_color(b.background.color)));
+            CGContext::add_path(c, Some(&path));
+            CGContext::fill_path(c);
+        });
+    }
 }
 
 /// A laid out line in view coordinates (y down).
@@ -1098,8 +1215,11 @@ impl LineBox<'_> {
 }
 
 /// The lines of `layout` in view coordinates, its box at `content`.
-fn line_boxes(layout: &CoreTextLayout, content: nsh_core::Rect) -> Vec<LineBox<'_>> {
-    let bottom = (content.y + content.height) as CGFloat;
+fn line_boxes(
+    layout: &CoreTextLayout,
+    content: nsh_core::Bounds<nsh_core::Points>,
+) -> Vec<LineBox<'_>> {
+    let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
     layout
         .lines
         .iter()
@@ -1115,7 +1235,7 @@ fn line_boxes(layout: &CoreTextLayout, content: nsh_core::Rect) -> Vec<LineBox<'
                 line: &l.line,
                 start,
                 end: start + l.range.length.max(0),
-                x: content.x as CGFloat + l.origin.x,
+                x: content.origin.x.0 as CGFloat + l.origin.x,
                 top: bottom - (l.origin.y + ascent),
                 bottom: bottom - (l.origin.y - descent),
                 width,
@@ -1162,7 +1282,7 @@ pub(crate) fn link_at(
 
 /// The caret offset nearest `(x, y)` (view coordinates): on the nearest
 /// line, at the caret position nearest x.
-fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
+pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
     let Some(drawn) = state.text.as_ref() else {
         return 0;
     };
@@ -1180,7 +1300,7 @@ fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
 /// line.
 fn selection_rects(
     layout: &CoreTextLayout,
-    content: nsh_core::Rect,
+    content: nsh_core::Bounds<nsh_core::Points>,
     (a, b): (u32, u32),
 ) -> Vec<CGRect> {
     let (a, b) = (a as CFIndex, b as CFIndex);
@@ -1242,11 +1362,13 @@ pub(crate) struct Selection {
 
 /// The text selection of a surface: the view whose text was last pressed
 /// to select (it takes Cmd+A, and Cmd+C and Escape while it has a
-/// selection). Only one view has a selection at a time, as a window has
-/// one focus.
+/// selection), or the selection area last pressed (`area`). Only one view
+/// or area has a selection at a time, as a window has one focus.
 #[derive(Default)]
 pub(crate) struct Selected {
     view: RefCell<Option<objc2::rc::Weak<crate::view::ViewObj>>>,
+    /// The selection of the selection area last pressed.
+    pub(crate) area: crate::selection_area::AreaSelection,
 }
 
 impl Selected {
@@ -1284,12 +1406,27 @@ fn select(view: &crate::view::NshView, range: Option<(u32, u32)>) {
     }
 }
 
-/// Clears the surface's selection.
+/// Sets the part of a selection area's selection `view`'s text shows
+/// (`None` or empty clears it).
+pub(crate) fn set_area_range(view: &crate::view::NshView, range: Option<(u32, u32)>) {
+    let range = range.filter(|(a, b)| a < b);
+    let changed = view
+        .state()
+        .text
+        .as_ref()
+        .is_some_and(|t| t.area_range.replace(range) != range);
+    if changed {
+        crate::surface::quiet(|| view.redraw());
+    }
+}
+
+/// Clears the surface's selection (a text's or an area's).
 pub(crate) fn clear(surface: &crate::surface::Surface) {
     if let Some(view) = surface.selection.get() {
         select(&view, None);
     }
     surface.selection.set(None);
+    surface.selection.area.clear();
 }
 
 /// The primary button went down: on `view`'s selectable text at `(x, y)`
@@ -1308,6 +1445,8 @@ pub(crate) fn selection_down(
     over_press: bool,
 ) {
     let view = view.filter(|v| selectable(&v.state()));
+    // A press outside the area that has the selection.
+    surface.selection.area.clear();
     if surface.selection.get().as_ref() != view {
         clear(surface);
     }
@@ -1417,7 +1556,10 @@ pub(crate) fn selection_key(
         Some('c') if command => copy(surface),
         Some('a') if command => select_all(surface),
         // Escape.
-        _ if event.keyCode() == 53 && surface.selection.with_range().is_some() => {
+        _ if event.keyCode() == 53
+            && (surface.selection.with_range().is_some()
+                || surface.selection.area.has_selection()) =>
+        {
             clear(surface);
             true
         }
@@ -1428,11 +1570,12 @@ pub(crate) fn selection_key(
 /// Copies the selection to the general pasteboard (the Edit menu's Copy).
 /// False if there is none.
 pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
-    let Some(text) = surface
-        .selection
-        .with_range()
-        .and_then(|v| selected_text(&v))
-    else {
+    let Some(text) = surface.selection.area.text().or_else(|| {
+        surface
+            .selection
+            .with_range()
+            .and_then(|v| selected_text(&v))
+    }) else {
         return false;
     };
     let board = objc2_app_kit::NSPasteboard::generalPasteboard();
@@ -1443,9 +1586,12 @@ pub(crate) fn copy(surface: &crate::surface::Surface) -> bool {
     true
 }
 
-/// Selects all of the last pressed selectable text (the Edit menu's
-/// Select All). False if there is none.
+/// Selects all of the last pressed selectable text or selection area (the
+/// Edit menu's Select All). False if there is none.
 pub(crate) fn select_all(surface: &crate::surface::Surface) -> bool {
+    if surface.selection.area.select_all() {
+        return true;
+    }
     let Some(view) = surface.selection.get() else {
         return false;
     };
@@ -1561,7 +1707,7 @@ fn unit_at(text: &str, index: u32, unit: Unit) -> (u32, u32) {
 
 /// Draws the decoration lines CoreText does not: strikethroughs, and
 /// underlines with a style, thickness or offset (y-up text space).
-fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
+fn draw_decorations(cx: &CGContext, line: &LaidLine) {
     // SAFETY: the line's own run array (of CTRuns) and their attribute
     // dictionaries, whose values have the types set by the text engine.
     unsafe {
@@ -1618,7 +1764,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
             );
             if let Some(color) = strike {
                 let y = line.origin.y + font.x_height() / 2.0;
-                stroke_decoration(ctx, &color, style, x, y, width, thickness);
+                stroke_decoration(cx, &color, style, x, y, width, thickness);
             }
             if let Some(color) = under {
                 // Below the baseline: the font's position, or the offset.
@@ -1628,7 +1774,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
                     offset + thickness / 2.0
                 };
                 stroke_decoration(
-                    ctx,
+                    cx,
                     &color,
                     style,
                     x,
@@ -1644,7 +1790,7 @@ fn draw_decorations(ctx: &CGContext, line: &LaidLine) {
 /// One decoration line centered on `y` (y-up), `style` as encoded by the
 /// text engine: solid, double, dotted, dashed, wavy.
 fn stroke_decoration(
-    ctx: &CGContext,
+    cx: &CGContext,
     color: &CGColor,
     style: i32,
     x: CGFloat,
@@ -1652,7 +1798,7 @@ fn stroke_decoration(
     width: CGFloat,
     thickness: CGFloat,
 ) {
-    let c = Some(ctx);
+    let c = Some(cx);
     CGContext::save_g_state(c);
     CGContext::set_stroke_color_with_color(c, Some(color));
     CGContext::set_line_width(c, thickness);

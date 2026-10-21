@@ -11,6 +11,11 @@ A signed package (`.nshpkg`) is how a host app runs NSH code it did not ship wit
 or a third-party mini app. `nsh publish` builds the app and signs it; the host app verifies the signature, the
 certificate chain, revocations and the build number before anything runs.
 
+A package holds TSX. The host app's Rust code (an app written in Rust, its crates' components, modules and classes)
+is part of the host app itself and is delivered with it, and the TSX of a package imports it by its specifiers, as
+any TSX does ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). So a Rust app keeps its core in Rust and
+delivers the screens that change often as signed packages.
+
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/signed-packages-light.svg" alt="Signed packages: an offline root key certifies a release key for app ids; nsh publish signs the package with it; on the device, NshTrust trusts only the root and the newest revocation list, checks the certificate, revocations, signature, app id, file hashes and build number, then runs the module or refuses it.">
 <img class="diagram diagram-dark" src="/diagrams/signed-packages-dark.svg" alt="Signed packages: an offline root key certifies a release key for app ids; nsh publish signs the package with it; on the device, NshTrust trusts only the root and the newest revocation list, checks the certificate, revocations, signature, app id, file hashes and build number, then runs the module or refuses it.">
@@ -85,7 +90,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 ```
 
 ```text
-out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee
+.nsh/out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
 ```
 
 `nsh publish` builds the app in release mode and signs it. The app id, name, version and build come from `nsh.json`
@@ -95,12 +100,13 @@ next to the entry, overridden by the flags:
 |---|---|
 | `--key <file>` | The release key's secret key. |
 | `--cert <file>` | Its certificate. |
-| `-o, --out <file>` | The package to write. Default `out/<id>-<build>.nshpkg`. |
+| `-o, --out <file>` | The package to write. Default `.nsh/out/<id>-<build>.nshpkg`. |
 | `--id <id>` | App id, such as `com.example.app`. |
 | `--app-version <version>` | Version, such as `1.2.0`. |
 | `--build <n>` | Build number. Required (here or in `nsh.json`); it must grow with every release. |
 | `--source-map <where>` | `package` (the default): in the package. `file`: in `<package>.map` next to it, not in the package. `none`: left out. See [Errors from published packages](#errors-from-published-packages). |
 | `--strip-debug` | Leave the line and column tables out of the bytecode: a smaller package whose error stacks have no positions. |
+| `--min-runtime <version>` | The lowest runtime that runs the package, such as `0.2.0` (`nsh.json` `minRuntime`). Default: this CLI's version. See [Which runtimes run a package](#which-runtimes-run-a-package). |
 
 `nsh publish` refuses to sign what a device would refuse: the certificate must cover the app id and the current time.
 
@@ -108,11 +114,32 @@ next to the entry, overridden by the flags:
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
 ```
 
+### Which runtimes run a package
+
+A package names the lowest NSH runtime that runs it, and host apps with an older runtime refuse it before anything
+runs:
+
+```text
+error the package needs runtime 0.2.0 or newer; this runtime is 0.1.1
+```
+
+By default this is the version of the CLI that built the package: the bundle is compiled against that CLI's modules,
+so that runtime is the one known to run it. When host apps in the field have an older runtime and the app uses only
+what that runtime has, publish for it with `--min-runtime` (or `minRuntime` in `nsh.json`):
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-runtime 0.1.0
+```
+
+The version is `MAJOR.MINOR.PATCH`; a pre-release suffix (`0.2.0-beta.1`) counts as its version without it. It cannot
+be newer than the CLI. Try the package on a host app with that runtime before you upload it: an import or a function
+the older runtime lacks fails when the module loads.
+
 ### What a package holds
 
 A package is one file: a JSON header (app id, name, version, build, the declared capabilities, the bytecode version,
-the signing time, the release key's certificate and a table of files with their SHA-256), then the files, then the
-release key's Ed25519 signature over everything before it. The files are:
+the minimum runtime, the signing time, the release key's certificate and a table of files with their SHA-256), then
+the files, then the release key's Ed25519 signature over everything before it. The files are:
 
 - the app's JS source (always),
 - its bytecode, used only when the device's runtime has the same bytecode version (otherwise the source runs, so a
@@ -122,12 +149,25 @@ release key's Ed25519 signature over everything before it. The files are:
 
 The package's identity, used for revocation, is the SHA-256 of the whole file.
 
+### Packages from newer versions of NSH
+
+A host app runs packages that a newer `nsh publish` signed, as long as its runtime is at least the package's [minimum
+runtime](#which-runtimes-run-a-package). What a newer version adds and the host's runtime does not know is left out, and never widens what the
+package may do:
+
+- header fields and files it does not know are ignored (they are still covered by the signature and their hashes),
+  unless the package marks a field as one its runtime must understand: then older runtimes refuse it;
+- [capabilities](./sandbox-and-capabilities.md) it does not know are not granted, and a capability or `http` grant
+  with a key it does not know is dropped as a whole, since that key may restrict it.
+
+What was left out is logged when the package loads.
+
 ## Verify a package
 
 `nsh verify` checks a package exactly as a host app trusting the given roots would:
 
 ```sh
-nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub
+nsh verify .nsh/out/com.example.counter-2.nshpkg --root keys/root.pub
 ```
 
 ```text
@@ -182,12 +222,28 @@ replayed to un-revoke something. Publish the newest list where your apps fetch i
 
 When a host app accepts a package, its trust store records the build number for that app id and from then on refuses
 older builds. An attacker who obtained an older, signed package with a known vulnerability cannot make the app run it.
-The record persists in the store's state directory (`nsh-trust.json`), so it survives restarts.
+The record persists in the store's state directory (`nsh-trust.json`), so it survives restarts. On GPUI a host app may
+record it later, once the new package proved healthy (`verify_package`, then `accept_package`; see below).
 
 ## Loading packages in a host app
 
 Verification hashes the whole package and extracts its assets (once per package, under the trust store's directory),
 so it runs off the UI thread; running the result happens on it.
+
+**GPUI (Rust)**, where the host app can also accept a package only once it proved healthy:
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
 
 **iOS (Swift)**:
 
@@ -210,10 +266,15 @@ NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws N
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
 
+Until a package is accepted, the build accepted before still verifies, so a host app whose new package fails can go
+back to the one it ran (`AppView::on_error`'s fatal errors, or a crash before accepting, are the signals). Builds
+older than the accepted one stay refused, and a package revoked in between is not accepted. `load_package` verifies and
+accepts at once, as `openPackage` does on iOS and Android.
+
 The package's declared [capabilities](./sandbox-and-capabilities.md) travel with it: a package can do only what it
 declares, and only what the host app grants on top.
 
-Full API: [Embedding in iOS apps](./embedding-ios.md#signed-packages),
+Full API: [GPUI](./gpui.md#embedding-in-a-gpui-app), [Embedding in iOS apps](./embedding-ios.md#signed-packages),
 [Embedding in Android apps](./embedding-android.md#signed-packages).
 
 ## Errors from published packages
@@ -234,14 +295,14 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-
 ```
 
 ```text
-✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+✓ wrote the source map to .nsh/out/com.example.counter-2.nshpkg.map (6.1 KB)
 ```
 
 Devices then report the bundle's positions (`at n (bundle.js:1:80)`). Keep the map with the package it belongs to,
 and map what the host app reported with `nsh symbolicate`:
 
 ```sh
-nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+nsh symbolicate .nsh/out/com.example.counter-2.nshpkg.map report.txt
 ```
 
 ```text
@@ -262,14 +323,14 @@ installed the host in the simulator (`--target ios`):
 
 ```sh
 xcrun simctl launch booted com.longbridge.nsh.host \
-  --package "$PWD/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
+  --package "$PWD/.nsh/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
 ```
 
 On Android, the development host (`DevActivity`, installed by `nsh run --target android`) takes the extras `package`
 (a path on the device) and `root` (base64 public keys, comma-separated):
 
 ```sh
-adb push out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
+adb push .nsh/out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
 adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity \
   --es package /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg \
   --es root "$(cat keys/root.pub)"

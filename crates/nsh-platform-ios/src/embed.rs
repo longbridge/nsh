@@ -216,23 +216,16 @@ pub unsafe extern "C" fn nsh_app_set_limits(
 ) {
     // SAFETY: guaranteed by the caller.
     let app = unsafe { &*app };
-    let mut limits = nsh_engine::Limits::default();
-    if memory_mb > 0 {
-        limits.memory_bytes = (memory_mb as usize) << 20;
-    }
-    if stack_kb > 0 {
-        limits.stack_bytes = ((stack_kb as usize) << 10).min(limits.stack_bytes);
-    }
-    if load_ms > 0 {
-        limits.load_budget = std::time::Duration::from_millis(load_ms.into());
-    }
-    if call_ms > 0 {
-        limits.call_budget = std::time::Duration::from_millis(call_ms.into());
-    }
-    if max_nodes > 0 {
-        limits.max_nodes = max_nodes as usize;
-    }
-    app.view.set_limits(limits);
+    let set = |v: u32| (v > 0).then_some(v as usize);
+    let ms = |v: u32| (v > 0).then(|| std::time::Duration::from_millis(v.into()));
+    let limits = nsh_engine::HostLimits {
+        memory_bytes: set(memory_mb).map(|mb| mb << 20),
+        stack_bytes: set(stack_kb).map(|kb| kb << 10),
+        load_budget: ms(load_ms),
+        call_budget: ms(call_ms),
+        max_nodes: set(max_nodes),
+    };
+    app.view.set_limits(limits.limits());
 }
 
 /// The directory the storage (`nsh/storage`) of the apps `app` loads is
@@ -259,6 +252,47 @@ pub unsafe extern "C" fn nsh_app_set_storage_directory(
         unsafe { utf8(path, "the storage directory") }.map(|path| Some(PathBuf::from(path)))
     };
     status(dir.map(|dir| app.view.set_storage_directory(dir)))
+}
+
+/// The embedding app's locale, which stands in for the user's: a BCP 47
+/// tag or a platform identifier (`zh-Hans-CN`, `en_US`); `NULL` follows the
+/// system's again. Applies at once and to every app loaded later. Returns
+/// why `tag` is no locale (nothing changes), or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `tag` must be `NULL` or a
+/// NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_locale(app: *mut NshApp, tag: *const c_char) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let locale = if tag.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { utf8(tag, "the locale") }.and_then(|tag| {
+            nsh_engine::Locale::parse(tag)
+                .map(Some)
+                .ok_or_else(|| format!("not a locale: {tag}"))
+        })
+    };
+    status(locale.map(|locale| app.view.set_locale(locale)))
+}
+
+/// The embedding app's text size relative to the default (1.0), which
+/// stands in for Dynamic Type's; 0 (or less) follows the system's again.
+/// Applies at once and to every app loaded later.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_font_scale(app: *mut NshApp, scale: f32) {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    app.view
+        .set_font_scale((scale.is_finite() && scale > 0.0).then_some(scale));
 }
 
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and

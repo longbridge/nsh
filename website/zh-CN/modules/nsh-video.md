@@ -1,15 +1,15 @@
 ---
-title: nsh/video
+title: Video
 description: Video：原生视频播放器（AVPlayer、MediaPlayer），以及它的属性、事件和 ref 方法。
-order: 14
+order: 2.4
 ---
 
-# nsh/video
+# Video
 
-`nsh/video` 导出 `Video`：基于平台播放器构建的视频播放器（iOS 和 Mac Catalyst 上是 `AVPlayer`，Android 上是 `MediaPlayer`）。播放由属性控制，所以暂停只需改一个 signal。
+`nsh` 导出 `Video`：基于平台播放器构建的视频播放器（iOS 和 Mac Catalyst 上是 `AVPlayer`，Android 上是 `MediaPlayer`）。播放由属性控制，所以暂停只需改一个 signal。
 
 ```ts
-import { Video, type VideoProps } from "nsh/video";
+import { Video, type VideoProps } from "nsh";
 ```
 
 教程见[网页视图与视频](../docs/web-view-and-video.md)，属性见 [`<Video>`](../elements/video.md)。
@@ -25,8 +25,7 @@ interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
 ```
 
 ```tsx
-import { mount, signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
+import { mount, signal, Text, Video, View, type YNode } from "nsh";
 
 function Player() {
   const paused = signal(true);

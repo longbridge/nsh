@@ -57,29 +57,37 @@ pub(crate) enum Compiled {
     /// The renderer's list (`nsh:rt`'s `list`).
     List,
     /// A call of the export, a native component rendering the host element
-    /// of this core tag with more to it (`Canvas`'s drawing, `Modal`'s
-    /// `visible`, `InputAccessoryView` only on iOS).
+    /// of this core tag with more to it (`Canvas`'s drawing, `Dialog`'s
+    /// `open`, `InputAccessoryView` only on iOS).
     Component(&'static str),
 }
 
-/// nsh's primitives, by their one home (module, export), and what their
-/// tags compile to. Each host element apps can make is in here once.
+/// nsh's primitives, by their home (module, export), and what their tags
+/// compile to: `nsh`'s, `nsh/base`'s `Dialog` and `nsh/ios`'s
+/// `InputAccessoryView`, then the modules that exported them before `nsh`
+/// did (deprecated, still compiled alike). The first home of a name is the
+/// one hints name.
 pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "View", Compiled::Host("view")),
     ("nsh", "Text", Compiled::Host("text")),
     ("nsh", "Scroll", Compiled::Host("scroll")),
     ("nsh", "Input", Compiled::Host("input")),
-    ("nsh/image", "Image", Compiled::Host("image")),
-    ("nsh/webview", "WebView", Compiled::Host("webview")),
-    ("nsh/video", "Video", Compiled::Host("video")),
-    ("nsh/list", "List", Compiled::List),
-    ("nsh/canvas", "Canvas", Compiled::Component("canvas")),
-    ("nsh/ui/mobile", "Modal", Compiled::Component("modal")),
+    ("nsh", "Image", Compiled::Host("image")),
+    ("nsh", "WebView", Compiled::Host("webview")),
+    ("nsh", "Video", Compiled::Host("video")),
+    ("nsh", "List", Compiled::List),
+    ("nsh", "Canvas", Compiled::Component("canvas")),
+    ("nsh/base", "Dialog", Compiled::Component("modal")),
     (
         "nsh/ios",
         "InputAccessoryView",
         Compiled::Component("inputaccessory"),
     ),
+    ("nsh/image", "Image", Compiled::Host("image")),
+    ("nsh/webview", "WebView", Compiled::Host("webview")),
+    ("nsh/video", "Video", Compiled::Host("video")),
+    ("nsh/list", "List", Compiled::List),
+    ("nsh/canvas", "Canvas", Compiled::Component("canvas")),
 ];
 
 /// The control flow tags, global unless a binding of the name shadows them.
@@ -100,6 +108,8 @@ const HELPERS: &[&str] = &[
     "each",
     "merge",
     "setup",
+    "metaUrl",
+    "ref",
 ];
 
 /// Prefix of generated names; apps do not use it.
@@ -146,9 +156,11 @@ pub(crate) fn transform<'a>(
     scoping: &Scoping,
     source: &str,
     prologue: Option<&str>,
+    meta_path: Option<&str>,
     modules: &crate::compile::NativeModules,
 ) -> Result<(), String> {
     let mut compiler = Compiler {
+        meta_path,
         allocator,
         scoping,
         scopes: Vec::new(),
@@ -328,6 +340,45 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// How many values `children` give (text that is not only whitespace,
+/// elements, fragments and expressions).
+fn child_count(children: &[JSXChild<'_>]) -> usize {
+    children
+        .iter()
+        .filter(|c| match c {
+            JSXChild::Text(t) => clean_text(&t.value).is_some(),
+            JSXChild::ExpressionContainer(c) => {
+                !matches!(c.expression, JSXExpression::EmptyExpression(_))
+            }
+            JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
+        })
+        .count()
+}
+
+/// `e` without parentheses and TypeScript's assertions (`el!`, `el as
+/// T`), which leave what it names (a ref's target) as it is.
+fn without_wrappers(e: Expression<'_>) -> Expression<'_> {
+    match e {
+        Expression::ParenthesizedExpression(p) => without_wrappers(p.unbox().expression),
+        Expression::TSNonNullExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSAsExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSSatisfiesExpression(t) => without_wrappers(t.unbox().expression),
+        Expression::TSTypeAssertion(t) => without_wrappers(t.unbox().expression),
+        e => e,
+    }
+}
+
+/// The part of `span` (`raw`'s, the source text) without the whitespace
+/// around it: what a label points at.
+fn trimmed_span(span: Span, raw: &str) -> Span {
+    if span.size() as usize != raw.len() {
+        return span;
+    }
+    let lead = (raw.len() - raw.trim_start().len()) as u32;
+    let trail = (raw.len() - raw.trim_end().len()) as u32;
+    Span::new(span.start + lead, span.end - trail)
+}
+
 /// Whether an expression's value may change: it calls something or reads a
 /// member, outside nested functions.
 fn is_dynamic(e: &Expression<'_>) -> bool {
@@ -383,7 +434,7 @@ fn is_function(e: &Expression<'_>) -> bool {
     )
 }
 
-/// `onPress`, `onChangeText`: an event handler prop.
+/// `onPress`, `onChange`: an event handler prop.
 fn is_event(name: &str) -> bool {
     name.len() > 2 && name.starts_with("on") && name.as_bytes()[2].is_ascii_uppercase()
 }
@@ -431,6 +482,16 @@ struct Compiler<'a, 's> {
     components: &'s [(String, String)],
     /// The primitives the module imports, by local name.
     primitives: HashMap<String, Compiled>,
+    /// The module's path in the app: `import.meta.url` becomes its URL.
+    meta_path: Option<&'s str>,
+}
+
+/// Whether `e` is `import.meta.url`.
+fn is_import_meta_url(e: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(m) = e else {
+        return false;
+    };
+    m.property.name == "url" && matches!(&m.object, Expression::ImportMeta(_))
 }
 
 impl<'a> VisitMut<'a> for Compiler<'a, '_> {
@@ -446,7 +507,18 @@ impl<'a> VisitMut<'a> for Compiler<'a, '_> {
     }
 
     fn visit_expression(&mut self, e: &mut Expression<'a>) {
-        if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
+        if let Some(path) = self.meta_path
+            && is_import_meta_url(e)
+        {
+            // The module's own URL, which the runtime knows: the bundle
+            // shares one `import.meta`.
+            let call = format!(
+                "{}({})",
+                self.use_helper("metaUrl"),
+                serde_json::to_string(path).expect("a path is JSON")
+            );
+            *e = self.parse(&call, Vec::new(), e.span());
+        } else if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
             let span = e.span();
             let jsx = e.take_in(&AstBuilder::new(self.allocator));
             let mut g = Gen { holes: Vec::new() };
@@ -477,6 +549,22 @@ impl<'a> Compiler<'a, '_> {
         let n = self.vars.get();
         self.vars.set(n + 1);
         format!("{HOLE}v{n}")
+    }
+
+    /// Whether `name` names a binding here that code may assign: not a
+    /// `const`, an import or an undeclared global.
+    fn assignable(&self, name: &str) -> bool {
+        let scope = self
+            .scopes
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.scoping.root_scope_id());
+        self.scoping
+            .find_binding(scope, name.into())
+            .is_some_and(|symbol| {
+                let flags = self.scoping.symbol_flags(symbol);
+                !flags.is_const_variable() && !flags.is_import()
+            })
     }
 
     /// The binding `name` names here, if any: (whether it is the module's
@@ -719,8 +807,50 @@ impl<'a> Compiler<'a, '_> {
                 }
             }
         }
+        if core != "text" {
+            self.check_unshown_text(core, &el.children);
+        }
         self.host_children(&v, el.children, g, body);
         v
+    }
+
+    /// Text written in a host element other than `<Text>` (`<View>Hi</View>`,
+    /// `<View>{"Hi"}</View>`) is never shown: an error saying where it goes.
+    fn check_unshown_text(&mut self, core: &str, children: &[JSXChild<'a>]) {
+        let element = PRIMITIVES
+            .iter()
+            .find(|(.., c)| matches!(c, Compiled::Host(t) if *t == core))
+            .map_or(core, |(_, name, _)| name);
+        for child in children {
+            let (text, span) = match child {
+                JSXChild::Text(t) => match clean_text(&t.value) {
+                    Some(text) => (text, trimmed_span(t.span, &t.value)),
+                    None => continue,
+                },
+                JSXChild::ExpressionContainer(c) => match &c.expression {
+                    JSXExpression::StringLiteral(s) => (s.value.to_string(), s.span),
+                    JSXExpression::NumericLiteral(n) => (n.raw_str().to_string(), n.span),
+                    JSXExpression::TemplateLiteral(t) if t.expressions.is_empty() => (
+                        t.quasis
+                            .iter()
+                            .filter_map(|q| q.value.cooked.as_deref())
+                            .collect(),
+                        t.span,
+                    ),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let text = text.trim();
+            let shown: String = text.chars().take(24).collect();
+            let more = if shown.len() < text.len() { "…" } else { "" };
+            self.error(
+                format!(
+                    "text in <{element}> is not shown: text shows in a <Text> (`<Text>{shown}{more}</Text>`)"
+                ),
+                span,
+            );
+        }
     }
 
     fn attr_name(&mut self, name: &JSXAttributeName<'a>) -> Option<String> {
@@ -738,6 +868,52 @@ impl<'a> Compiler<'a, '_> {
         format!("{prop}({v}, {}, {value});", quote(name))
     }
 
+    /// The statement giving `node` (a generated name) to `ref={e}`: a
+    /// signal is set to it and a function called with it (`nsh:rt`'s
+    /// `ref`), else a variable or a field is assigned it. A binding that
+    /// cannot be assigned (a `const`, an import) must hold a signal or a
+    /// function, which `ref` checks with its name. Other expressions come
+    /// back, to be a prop (a function or a signal there works as well).
+    fn ref_target(
+        &mut self,
+        e: Expression<'a>,
+        node: &str,
+        g: &mut Gen<'a>,
+    ) -> Result<String, Expression<'a>> {
+        match without_wrappers(e) {
+            Expression::Identifier(id) => {
+                let ref_ = self.use_helper("ref");
+                let name = id.name.to_string();
+                Ok(if self.assignable(&name) {
+                    format!("{ref_}({name}, {node}) || ({name} = {node});")
+                } else {
+                    format!("{ref_}({name}, {node}, {});", quote(&name))
+                })
+            }
+            Expression::StaticMemberExpression(m) => {
+                let m = m.unbox();
+                let key = quote(&m.property.name);
+                let object = g.hole(m.object);
+                Ok(self.ref_field(&object, &key, node))
+            }
+            Expression::ComputedMemberExpression(m) => {
+                let m = m.unbox();
+                let object = g.hole(m.object);
+                let key = g.hole(m.expression);
+                Ok(self.ref_field(&object, &key, node))
+            }
+            e => Err(e),
+        }
+    }
+
+    /// `ref={object[key]}`: each evaluated once.
+    fn ref_field(&mut self, object: &str, key: &str, node: &str) -> String {
+        let ref_ = self.use_helper("ref");
+        format!(
+            "(({HOLE}o, {HOLE}k) => {ref_}({HOLE}o[{HOLE}k], {node}) || ({HOLE}o[{HOLE}k] = {node}))({object}, {key});"
+        )
+    }
+
     fn host_attr(
         &mut self,
         v: &str,
@@ -747,16 +923,13 @@ impl<'a> Compiler<'a, '_> {
         body: &mut String,
     ) {
         if name == "ref" {
-            // `ref={el}` assigns the variable, `ref={fn}` calls it.
-            if let Expression::Identifier(id) = e.without_parentheses() {
-                let id = id.name.to_string();
-                body.push_str(&format!(
-                    "typeof {id} === \"function\" ? {id}({v}) : ({id} = {v});"
-                ));
-                return;
+            match self.ref_target(e, v, g) {
+                Ok(statement) => body.push_str(&statement),
+                Err(e) => {
+                    let hole = g.hole(e);
+                    body.push_str(&self.prop(v, name, &hole));
+                }
             }
-            let hole = g.hole(e);
-            body.push_str(&self.prop(v, name, &hole));
             return;
         }
         let dynamic = if is_event(name) {
@@ -923,17 +1096,16 @@ impl<'a> Compiler<'a, '_> {
                             props.push(format!("{k}: {}", quote(&s.value)));
                         }
                         Some(JSXAttributeValue::ExpressionContainer(c)) => {
-                            if let Some(e) = self.expression(c.unbox().expression) {
-                                // `ref={el}` assigns the variable, `ref={fn}`
-                                // calls it, with what the component gives.
-                                if name == "ref"
-                                    && let Expression::Identifier(id) = e.without_parentheses()
-                                {
-                                    let id = id.name.to_string();
-                                    props.push(format!(
-                                        "ref({HOLE}r) {{ typeof {id} === \"function\" ? {id}({HOLE}r) : ({id} = {HOLE}r); }}"
-                                    ));
-                                    continue;
+                            if let Some(mut e) = self.expression(c.unbox().expression) {
+                                // The ref takes what the component gives.
+                                if name == "ref" {
+                                    match self.ref_target(e, &format!("{HOLE}r"), g) {
+                                        Ok(statement) => {
+                                            props.push(format!("ref({HOLE}r) {{ {statement} }}"));
+                                            continue;
+                                        }
+                                        Err(other) => e = other,
+                                    }
                                 }
                                 let dynamic = is_dynamic(&e);
                                 let hole = g.hole(e);
@@ -965,7 +1137,17 @@ impl<'a> Compiler<'a, '_> {
                 }
             }
         }
-        let values = self.children(el.children, g, Mode::Getter);
+        // A lone child is read through the getter alone; among siblings an
+        // expression that changes is a function of its own, which the insert
+        // of the children runs alone (`nsh:rt`'s `insert`): reading it in
+        // the getter would make the getter, and every sibling it makes,
+        // run again.
+        let mode = if child_count(&el.children) > 1 {
+            Mode::Value
+        } else {
+            Mode::Getter
+        };
+        let values = self.children(el.children, g, mode);
         if !values.is_empty() {
             let value = match values.as_slice() {
                 [one] => one.clone(),
@@ -1053,13 +1235,32 @@ impl<'a> Compiler<'a, '_> {
             self.error("<If> needs `when`", span);
             return "undefined".to_owned();
         };
+        let cond = self.use_helper("cond");
+        // `{(user) => …}`: the child is called with an accessor of `when`'s
+        // value, truthy while the branch shows (Solid's `<Show>`); `when`
+        // is read through it, once per read.
+        if lone_function_child(&el.children) {
+            let mut render = String::new();
+            for child in el.children {
+                if let JSXChild::ExpressionContainer(c) = child
+                    && let Some(e) = self.expression(c.unbox().expression)
+                {
+                    render = g.hole(e);
+                }
+            }
+            let then = format!("() => ({render})({HOLE}w)");
+            let branches = match get("else") {
+                Some(otherwise) => format!("{then}, () => {otherwise}"),
+                None => then,
+            };
+            return format!("(({HOLE}w) => {cond}({HOLE}w, {branches}))(() => {when})");
+        }
         let values = self.children(el.children, g, Mode::Value);
         let then = match values.as_slice() {
             [] => "undefined".to_owned(),
             [one] => one.clone(),
             many => format!("[{}]", many.join(", ")),
         };
-        let cond = self.use_helper("cond");
         match get("else") {
             Some(otherwise) => {
                 format!("{cond}(() => {when}, () => {then}, () => {otherwise})")
@@ -1116,6 +1317,21 @@ impl<'a> Compiler<'a, '_> {
     }
 }
 
+/// Whether `children` are one function written in place, whitespace aside
+/// (`<If>`'s `{(value) => …}`).
+fn lone_function_child(children: &[JSXChild<'_>]) -> bool {
+    let mut meaningful = children
+        .iter()
+        .filter(|c| !matches!(c, JSXChild::Text(t) if clean_text(&t.value).is_none()));
+    match (meaningful.next(), meaningful.next()) {
+        (Some(JSXChild::ExpressionContainer(c)), None) => matches!(
+            c.expression,
+            JSXExpression::ArrowFunctionExpression(_) | JSXExpression::FunctionExpression(_)
+        ),
+        _ => false,
+    }
+}
+
 fn member(m: &JSXMemberExpression<'_>) -> String {
     let object = match &m.object {
         JSXMemberExpressionObject::IdentifierReference(r) => r.name.to_string(),
@@ -1163,9 +1379,10 @@ mod tests {
             source,
             None,
             None,
-            &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry().into()]),
+            Some("App.tsx"),
+            &crate::compile::NativeModules::new(&[nsh_base::registry().into()]),
         )
-        .map(|(code, _)| code)
+        .map(|c| c.code)
     }
 
     /// A compile error's message on one line (the report wraps it).
@@ -1184,6 +1401,22 @@ mod tests {
     /// The code with whitespace collapsed, for comparisons.
     fn flat(code: &str) -> String {
         code.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn import_meta_url_is_the_module_s_own() {
+        let code =
+            compile("const here = new URL(\".\", import.meta.url); const meta = import.meta;")
+                .unwrap();
+        assert!(
+            code.starts_with(r#"import { metaUrl as _$metaUrl } from "nsh:rt";"#),
+            "{code}"
+        );
+        assert!(
+            code.contains(r#"new URL(".", _$metaUrl("App.tsx"))"#),
+            "{code}"
+        );
+        assert!(code.contains("const meta = import.meta;"), "{code}");
     }
 
     #[test]
@@ -1251,6 +1484,32 @@ mod tests {
         assert!(!code.contains("nsh/list"), "{code}");
     }
 
+    /// Every primitive compiles alike imported from `nsh`, where it lives
+    /// now, as from the module it was first exported from.
+    #[test]
+    fn primitives_from_nsh_compile_in_place() {
+        let code = flat(
+            &compile(
+                r#"import { Canvas, Image, List, Text, Video, View, WebView } from "nsh";
+            export const a = <View><Text>t</Text><Image src="x" /><WebView source="about:blank" /><Video source="v" /></View>;
+            export const b = <List each={[1]}>{(i) => <Text>{i()}</Text>}</List>;
+            export const c = <Canvas draw={() => {}} />;
+            Image.prefetch("x");"#,
+            )
+            .unwrap(),
+        );
+        for tag in ["view", "text", "image", "webview", "video"] {
+            assert!(code.contains(&format!(r#"_$element("{tag}")"#)), "{code}");
+        }
+        assert!(code.contains("_$component(_$list, {"), "{code}");
+        assert!(code.contains("_$component(Canvas, {"), "{code}");
+        // What is used as a value or called stays imported.
+        assert!(
+            code.contains(r#"import { Canvas, Image } from "nsh";"#),
+            "{code}"
+        );
+    }
+
     #[test]
     fn bindings_in_scope_win_over_primitives_and_globals() {
         let code = flat(
@@ -1291,16 +1550,16 @@ mod tests {
         );
         let err = error("export const a = <web-view />;");
         assert!(
-            err.contains(r#"write <WebView> and `import { WebView } from "nsh/webview"`"#),
+            err.contains(r#"write <WebView> and `import { WebView } from "nsh"`"#),
             "{err}"
         );
         let err = error("export const a = <input-accessory />;");
         assert!(err.contains("write <InputAccessoryView>"), "{err}");
         let err = error("export const a = <each of={[]}>{() => null}</each>;");
         assert!(err.contains("write <Each> (a global: no import)"), "{err}");
-        let err = error(r#"export const a = <button title="x" />;"#);
+        let err = error("export const a = <safe-area-view />;");
         assert!(
-            err.contains(r#"write <Button> and `import { Button } from "nsh/ui/mobile"`"#),
+            err.contains(r#"write <SafeAreaView> and `import { SafeAreaView } from "nsh/base"`"#),
             "{err}"
         );
         let err = error(
@@ -1340,19 +1599,28 @@ mod tests {
             "inputaccessory",
         ] {
             assert!(nsh_core::Tag::from_name(tag).is_some(), "{tag}");
-            let homes = PRIMITIVES
+            let names: std::collections::HashSet<&str> = PRIMITIVES
                 .iter()
                 .filter(
                     |(.., c)| matches!(c, Compiled::Host(t) | Compiled::Component(t) if *t == tag),
                 )
-                .count();
-            assert_eq!(homes, 1, "<{tag}>");
+                .map(|(_, export, _)| *export)
+                .collect();
+            assert_eq!(names.len(), 1, "<{tag}>");
         }
         let mut seen = std::collections::HashSet::new();
-        for (module, export, _) in PRIMITIVES {
-            assert!(seen.insert(*export), "{export} twice");
+        for (module, export, compiled) in PRIMITIVES {
+            assert!(seen.insert((*module, *export)), "{module} {export} twice");
+            // A name is one primitive in every module that exports it.
             assert!(
-                nsh_core::js::NATIVE_MODULES.contains(module) || *module == "nsh/ui/mobile",
+                PRIMITIVES
+                    .iter()
+                    .filter(|(_, e, _)| e == export)
+                    .all(|(.., c)| c == compiled),
+                "{export}"
+            );
+            assert!(
+                nsh_core::js::NATIVE_MODULES.contains(module) || *module == "nsh/base",
                 "{module}"
             );
         }
@@ -1371,10 +1639,20 @@ mod tests {
             "{code}"
         );
         assert!(code.contains("get footer() { return (() => {"), "{code}");
+        // Among siblings, what changes is a function of its own; a lone
+        // child is the getter's.
         assert!(
-            code.contains(r#"get children() { return ["one ", s()]; }"#),
+            code.contains(r#"get children() { return ["one ", () => s()]; }"#),
             "{code}"
         );
+        let code = flat(
+            &compile(
+                r#"declare const Card: any, s: () => number;
+            export const a = <Card>{s()}</Card>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(code.contains("get children() { return s(); }"), "{code}");
     }
 
     #[test]
@@ -1384,14 +1662,120 @@ mod tests {
             let el: unknown; export const a = <View ref={el} />; export const b = <View ref={(n) => (el = n)} />;"#,
         )
         .unwrap());
+        // A signal or a function takes the node (`ref`), else it is assigned.
         assert!(
-            code.contains(r#"typeof el === "function" ? el(__nsh_hv0) : el = __nsh_hv0;"#),
+            code.contains("_$ref(el, __nsh_hv0) || (el = __nsh_hv0);"),
             "{code}"
         );
         assert!(
             code.contains(r#"_$prop(__nsh_hv1, "ref", (n) => el = n);"#),
             "{code}"
         );
+    }
+
+    #[test]
+    fn refs_of_consts_fields_and_assertions() {
+        let code = flat(
+            &compile(
+                r#"import { View, signal } from "nsh";
+            import { shared } from "./refs";
+            const s = signal<unknown>(); const refs: { a?: unknown, [k: string]: unknown } = {};
+            declare const k: () => string; let el: unknown;
+            export const a = <View ref={s} />;
+            export const b = <View ref={shared} />;
+            export const c = <View ref={refs.a} />;
+            export const d = <View ref={refs[k()]} />;
+            export const e = <View ref={el!} />;"#,
+            )
+            .unwrap(),
+        );
+        // A const or an import cannot be assigned: `ref` checks it is a
+        // signal or a function, by name.
+        assert!(code.contains(r#"_$ref(s, __nsh_hv0, "s");"#), "{code}");
+        assert!(
+            code.contains(r#"_$ref(shared, __nsh_hv1, "shared");"#),
+            "{code}"
+        );
+        // A field is assigned, its object and key evaluated once.
+        assert!(
+            code.contains(
+                r#"((__nsh_ho, __nsh_hk) => _$ref(__nsh_ho[__nsh_hk], __nsh_hv2) || (__nsh_ho[__nsh_hk] = __nsh_hv2))(refs, "a");"#
+            ),
+            "{code}"
+        );
+        assert!(
+            code.contains("|| (__nsh_ho[__nsh_hk] = __nsh_hv3))(refs, k());"),
+            "{code}"
+        );
+        assert!(
+            code.contains("_$ref(el, __nsh_hv4) || (el = __nsh_hv4);"),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn text_outside_text_is_an_error() {
+        for (source, message) in [
+            (
+                "<View>Hello world <Text>shown</Text></View>",
+                "text in <View> is not shown: text shows in a <Text> (`<Text>Hello world</Text>`)",
+            ),
+            (
+                r#"<Scroll>{"a string"}</Scroll>"#,
+                "text in <Scroll> is not shown: text shows in a <Text> (`<Text>a string</Text>`)",
+            ),
+            (
+                "<View>{42}</View>",
+                "text in <View> is not shown: text shows in a <Text> (`<Text>42</Text>`)",
+            ),
+            (
+                "<View>a sentence far longer than what the message shows</View>",
+                "(`<Text>a sentence far longer th…</Text>`)",
+            ),
+        ] {
+            let err = compile(&format!(
+                r#"import {{ Scroll, Text, View }} from "nsh"; export const a = {source};"#
+            ))
+            .unwrap_err();
+            // The report wraps long messages: compared without whitespace.
+            let bare = |s: &str| {
+                s.replace("\n  | ", " ")
+                    .split_whitespace()
+                    .collect::<String>()
+            };
+            assert!(bare(&err).contains(&bare(message)), "{source}: {err}");
+        }
+        // Text in a <Text>, whitespace, expressions and components' children stay.
+        compile(
+            r#"import { Text, View } from "nsh"; declare const Card: any, name: string;
+            export const a = <View>
+              <Text>Hi {name}</Text>
+              {name}
+              <Card>words</Card>
+            </View>;"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_if_with_a_function_child_hands_it_an_accessor_of_when() {
+        let code = flat(
+            &compile(
+                r#"import { Text } from "nsh";
+            declare const user: () => { name: string } | null;
+            export const a = <If when={user()} else={<Text>out</Text>}>
+              {(u) => <Text>{u().name}</Text>}
+            </If>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            code.contains("((__nsh_hw) => _$cond(__nsh_hw, () => ((u) => (() => {"),
+            "{code}"
+        );
+        // Called with the accessor; `else` as it was; `when` read through it.
+        assert!(code.contains("})())(__nsh_hw), () => (() => {"), "{code}");
+        assert!(code.contains("))(() => user());"), "{code}");
     }
 
     #[test]
@@ -1429,20 +1813,18 @@ mod tests {
     fn imports_tags_use_stay_and_type_only_ones_go() {
         let code = flat(
             &compile(
-                r#"import { Stepper, StepperRef, Card } from "nsh/ui/mobile";
-            let r: StepperRef | undefined;
-            export const a = <Stepper ref={r} />;"#,
+                r#"import { SafeAreaView, Edge, Insets } from "nsh/base";
+            let r: Insets | undefined;
+            export const a = <SafeAreaView ref={r} />;"#,
             )
             .unwrap(),
         );
         assert!(
-            code.contains(r#"import { Stepper } from "nsh/ui/mobile";"#),
+            code.contains(r#"import { SafeAreaView } from "nsh/base";"#),
             "{code}"
         );
         assert!(
-            code.contains(
-                "ref(__nsh_hr) { typeof r === \"function\" ? r(__nsh_hr) : r = __nsh_hr; }"
-            ),
+            code.contains("ref(__nsh_hr) { _$ref(r, __nsh_hr) || (r = __nsh_hr); }"),
             "{code}"
         );
     }

@@ -24,6 +24,9 @@ compiler = ["js", "dep:nsh-bundler"]
 # and compiler, 0.18 MB smaller; it runs bytecode only (`nsh_start_bytecode`,
 # bytecode chunks). The player and the dev host without it run source.
 bytecode-only = ["js", "nsh-js/bytecode-only"]
+# The development host's (`nsh-dev.wasm`): the model of the app that
+# `nsh test --target web` asks about (`nsh_testing::agent`).
+dev = ["js", "dep:nsh-testing", "dep:nsh-dev"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -31,16 +34,17 @@ crate-type = ["cdylib", "rlib"]
 # Empty off WebAssembly (like the other platform crates off their targets).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 nsh-core.workspace = true
-nsh-animation.workspace = true
 nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true }
-nsh-ui-mobile.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
 nsh-bundler = { workspace = true, optional = true }
 # QuickJS without its internal `assert`s (NDEBUG): 37 KB smaller and a
 # little faster. They check QuickJS' own invariants, not app code; a broken
 # one stays inside the module's sandbox (the native platforms keep them).
 rquickjs = { workspace = true, features = ["disable-assertions"], optional = true }
 serde_json.workspace = true
+nsh-testing = { workspace = true, features = ["agent"], optional = true }
+nsh-dev = { workspace = true, optional = true }
 log.workspace = true
 rustc-hash.workspace = true
 ttf-parser.workspace = true

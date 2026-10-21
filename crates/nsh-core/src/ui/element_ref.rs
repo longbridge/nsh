@@ -26,7 +26,10 @@ use super::{
     reactive::Kept,
     task::{Action, Executor},
 };
-use crate::{Command, JsonValue, Measurement, NodeId};
+use crate::{
+    Command, JsonValue, Measurement, NodeId,
+    geometry::{Percentage, Point, Points},
+};
 
 /// An element of a view: made with [`super::ambient::element_ref`], put on
 /// the element ([`super::Element::element_ref`]). Its commands go to
@@ -134,13 +137,17 @@ impl ElementRef {
         self.send(Command::SetSelection { start, end });
     }
 
-    /// Scrolls a scroll view to an offset.
-    pub fn scroll_to(&self, x: f32, y: f32, animated: bool) {
-        self.send(Command::ScrollTo { x, y, animated });
+    /// Scrolls a scroll view to a content offset.
+    pub fn scroll_to(&self, offset: Point<Points>, animated: bool) {
+        self.send(Command::ScrollTo {
+            x: offset.x,
+            y: offset.y,
+            animated,
+        });
     }
 
     /// Scrolls a list to `offset` along its axis.
-    pub fn scroll_to_offset(&self, offset: f32, animated: bool) {
+    pub fn scroll_to_offset(&self, offset: Points, animated: bool) {
         self.send(Command::ScrollTo {
             x: offset,
             y: offset,
@@ -153,13 +160,13 @@ impl ElementRef {
         self.send(Command::ScrollToEnd { animated });
     }
 
-    /// Scrolls a list to row `index`: `view_position` 0 puts it at the
-    /// start of the viewport, 1 at the end, `view_offset` points further.
+    /// Scrolls a list to row `index`: `view_position` 0% puts it at the
+    /// start of the viewport, 100% at the end, `view_offset` further.
     pub fn scroll_to_index(
         &self,
         index: u32,
-        view_position: f32,
-        view_offset: f32,
+        view_position: Percentage,
+        view_offset: Points,
         animated: bool,
     ) {
         self.send(Command::ScrollToIndex {
@@ -170,9 +177,9 @@ impl ElementRef {
         });
     }
 
-    /// Zooms a scroll view to `scale`, around `center` (content points) or
+    /// Zooms a scroll view to `scale`, around `center` (in the content) or
     /// keeping the middle.
-    pub fn zoom_to(&self, scale: f32, center: Option<(f32, f32)>, animated: bool) {
+    pub fn zoom_to(&self, scale: f32, center: Option<Point<Points>>, animated: bool) {
         self.send(Command::ZoomTo {
             scale,
             center,
@@ -316,7 +323,10 @@ impl<C: Component> fmt::Debug for ComponentRef<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::reactive::{Runtime, create_root};
+    use crate::{
+        geometry::{point, px},
+        ui::reactive::{Runtime, create_root},
+    };
 
     fn commands(executor: &Executor) -> Vec<(NodeId, Command)> {
         executor
@@ -355,7 +365,7 @@ mod tests {
         owner.dispose();
         assert_eq!(field.node(), None);
         focus();
-        field.scroll_to(0.0, 10.0, false);
+        field.scroll_to(point(px(0.0), px(10.0)), false);
         assert_eq!(commands(&executor), []);
         assert!(field.target().is_none());
         carried.detach(7);

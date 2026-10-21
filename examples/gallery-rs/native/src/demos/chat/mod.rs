@@ -8,7 +8,7 @@
 //! The conversation is a signal of messages; its rows are a virtualized
 //! list whose cells bind to the message they show. The reply being written
 //! is [`Live`], signals only its row reads: a frame of tokens updates that
-//! row's last Markdown block, and in it the span the tokens lengthened.
+//! row's Markdown, whose view makes again only the last block.
 
 mod glyphs;
 mod markdown;
@@ -17,16 +17,18 @@ mod scripts;
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_core::{
-    LayoutAnimation, Size,
-    time::Instant,
-    ui::{AccessibilityState, ScrollEvent, ScrollOffset, View, prelude::*},
+use nsh_base::{
+    KeyboardAvoidingView, KeyboardAvoidingViewProps, SelectionArea, SelectionAreaProps,
 };
-use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
+use nsh_core::{
+    LayoutAnimation, Points, Size,
+    time::Instant,
+    ui::{AccessibilityState, ScrollEvent, View, prelude::*},
+};
 
 use self::{
     glyphs::{GlyphName, glyph},
-    markdown::{Block, markdown, parse},
+    markdown::markdown,
     parts::{
         action_button, avatar, caret, date_separator, error_row, file_chip, photo, spinner,
         tool_card,
@@ -59,8 +61,8 @@ struct Live {
     thinking: Signal<Option<(Instant, Option<u64>)>>,
     /// Its tool calls so far.
     tools: Signal<Vec<Tool>>,
-    /// Its text so far, parsed (the last block completed).
-    blocks: Signal<Vec<Block>>,
+    /// Its Markdown so far.
+    md: Signal<String>,
     /// Ticks once a second while thinking.
     now: Signal<Option<Instant>>,
 }
@@ -312,7 +314,7 @@ impl ChatState {
                 live.reason.set(reason);
             }
             if let Some(md) = md {
-                live.blocks.set(parse(&md, true));
+                live.md.set(md);
             }
         });
     }
@@ -370,7 +372,6 @@ impl ChatState {
                 }
             })
             .collect();
-        let blocks = parse(&run.md, false);
         let reply = Assistant {
             id: run.id.clone(),
             model: run.model,
@@ -382,7 +383,6 @@ impl ChatState {
             }),
             tools,
             md: run.md.clone(),
-            blocks,
             status,
             error,
             rating: None,
@@ -423,7 +423,6 @@ impl ChatState {
             reasoning: None,
             tools: Vec::new(),
             md: String::new(),
-            blocks: Vec::new(),
             status: Status::Done,
             error: None,
             rating: None,
@@ -434,7 +433,7 @@ impl ChatState {
             live.reason.set(String::new());
             live.thinking.set(None);
             live.tools.set(Vec::new());
-            live.blocks.set(Vec::new());
+            live.md.set(String::new());
             live.now.set(None);
             live.id.set(Some(id.clone()));
             self.messages.update(|messages| match at {
@@ -810,7 +809,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             reason: signal(String::new()),
             thinking: signal(None),
             tools: signal(Vec::new()),
-            blocks: signal(Vec::new()),
+            md: signal(String::new()),
             now: signal(None),
         },
         offline: stored(None),
@@ -841,9 +840,15 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .collect();
     let conversations = chips.clone();
 
+    // One selection across messages: in the list, over the rows that are
+    // mounted.
     let content = If::new(
         move || !messages.with(Vec::is_empty),
-        move || chat.list_view(list, wide),
+        move || {
+            SelectionArea::element(SelectionAreaProps::default())
+                .flex_1()
+                .child(chat.list_view(list, wide))
+        },
     )
     .otherwise(move || chat.empty());
 
@@ -1040,10 +1045,10 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .pt_2()
         .pb(move || {
             px(8.0
-                + if keyboard_height() > 0.0 {
+                + if keyboard_height() > px(0.0) {
                     0.0
                 } else {
-                    cx.insets().bottom
+                    cx.insets().bottom.0
                 })
         })
         .gap_2()
@@ -1084,7 +1089,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         } else {
                             SubmitBehavior::Newline
                         })
-                        .on_submit_editing(move |_: &str| {
+                        .on_submit(move |_: &str| {
                             if !streaming.get_untracked() {
                                 chat.send();
                             }
@@ -1093,10 +1098,10 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))
                         .on_focus(move |_: &()| menu.set(false))
-                        .on_content_size_change(move |size: &Size| {
-                            input_height.set(size.height.clamp(20.0, 100.0));
+                        .on_content_size_change(move |size: &Size<Points>| {
+                            input_height.set((size.height.clamp(px(20.0), px(100.0))).0);
                         })
-                        .on_change_text(move |text: &str| draft.set(text.to_owned()))
+                        .on_change(move |text: &str| draft.set(text.to_owned()))
                         .h(move || px(input_height.get() + 20.0))
                         .text_size(px(15.0))
                         .line_height(px(20.0))
@@ -1111,7 +1116,9 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .gap_2()
                         .child(
                             view()
-                                .style_with(move |s| s.rotate(if menu.get() { 45.0 } else { 0.0 }))
+                                .style_with(move |s| {
+                                    s.rotate(deg(if menu.get() { 45.0 } else { 0.0 }))
+                                })
                                 .transition_transform()
                                 .duration(200.0)
                                 .ease_out()
@@ -1288,7 +1295,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 .text_size(px(11.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors::FAINT)
-                .letter_spacing(0.6)
+                .letter_spacing(px(0.6))
                 .px_3()
                 .pt(px(18.0))
                 .pb(px(6.0)),
@@ -1327,7 +1334,7 @@ impl ChatState {
                             self.play(id);
                         }
                     })
-                    .underlay(|| color(colors::TEXT.opacity(0.06)), 0.85)
+                    .active(|s| s.bg(colors::TEXT.opacity(0.06)))
                     .role(AccessibilityRole::Button)
                     .label(label)
                     .flex_row()
@@ -1483,27 +1490,27 @@ impl ChatState {
             },
         )
         .keys(move || messages.with(|m| m.iter().map(|m| m.id().to_owned()).collect::<Vec<_>>()))
-        .estimated_item_size(140.0)
+        .estimated_item_size(px(140.0))
         .initial_scroll_index(count.saturating_sub(1))
         .flex_1()
-        .content_padding_top(8.0)
-        .content_padding_bottom(16.0)
+        .content_padding_top(px(8.0))
+        .content_padding_bottom(px(16.0))
         .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-        .follow_end(40.0)
+        .follow_end(px(40.0))
         .event_throttle(100.0)
         .element_ref(&list)
-        .on_scroll_begin_drag(move |_: &ScrollOffset| {
+        .on_scroll_begin_drag(move |_: &Point<Points>| {
             dragging.replace(true);
         })
         .on_scroll(move |e: &ScrollEvent| {
             if dragging.with(|d| *d) {
-                following.set(e.y + e.height >= e.content_height - 40.0);
+                following.set(e.offset.y + e.size.height >= e.content_size.height - px(40.0));
             }
         })
-        .on_momentum_scroll_end(move |_: &ScrollOffset| {
+        .on_momentum_scroll_end(move |_: &Point<Points>| {
             dragging.replace(false);
         })
-        .on_scroll_end(move |_: &ScrollOffset| {
+        .on_scroll_end(move |_: &Point<Points>| {
             dragging.replace(false);
         })
     }
@@ -1567,7 +1574,7 @@ impl ChatState {
         };
         let waiting = computed(move || {
             is_live.get()
-                && live.blocks.with(Vec::is_empty)
+                && live.md.with(String::is_empty)
                 && live.tools.with(Vec::is_empty)
                 && !thinking_now.get()
         });
@@ -1622,15 +1629,12 @@ impl ChatState {
             .child(markdown(
                 move || {
                     if is_live.get() {
-                        live.blocks.get()
+                        live.md.get()
                     } else {
-                        with_reply(item, |a| a.blocks.clone()).unwrap_or_default()
+                        with_reply(item, |a| a.md.clone()).unwrap_or_default()
                     }
                 },
-                move || id.get(),
                 move || is_live.get(),
-                copied,
-                Rc::new(move |key, text| self.act(Action::Copy(key, text))),
             ))
             .child(If::new(done(|s| s == Status::Error), move || {
                 error_row(
@@ -1811,7 +1815,7 @@ fn reasoning_toggle(
         )
         .child(
             view()
-                .style_with(move |s| s.rotate(if open.get() { 0.0 } else { -90.0 }))
+                .style_with(move |s| s.rotate(deg(if open.get() { 0.0 } else { -90.0 })))
                 .transition_transform()
                 .duration(220.0)
                 .ease_out()

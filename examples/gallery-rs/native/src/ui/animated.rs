@@ -95,11 +95,13 @@ pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElemen
             }),
             ..AccessibilityState::default()
         })
-        .when_some(props.hit_slop, |v, slop| v.hit_slop(EdgeInsets::all(slop)))
-        .on_press_in(move |_: &()| {
+        .when_some(props.hit_slop, |v, slop| {
+            v.hit_slop(EdgeInsets::all(px(slop)))
+        })
+        .on_press_down(move |_: &()| {
             scale.spring(props.scale.get_untracked(), motion::PRESS);
         })
-        .on_press_out(move |_: &()| {
+        .on_press_up(move |_: &()| {
             scale.spring(1.0, motion::PRESS);
         })
         .on_press(move |_: &()| cx.emit(PressEvent::Press))

@@ -2,7 +2,7 @@
 //! `demos/stocks/Book.tsx`).
 
 use nsh_core::{
-    LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Rect,
+    Bounds, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Points,
     canvas::{CanvasTextAlign, CanvasTextBaseline},
     ui::prelude::*,
 };
@@ -13,7 +13,7 @@ use super::{
     market::{Book, LEVELS, Level, compact, price, tone_of},
     parts::{Block, Calm, Col, GRID, SpringBar, SpringBarProps, hatch, head, spring_bar},
 };
-use crate::ui::{PressProps, colors, legend, press_with, radius};
+use crate::ui::{PressProps, colors, legend, lengths, press_with, radius};
 
 const ROW: f32 = 26.0;
 /// Ticks either side of the mid price the depth chart spans.
@@ -349,7 +349,7 @@ fn draw_depth(book: &Book, width: f32, ymax: f64, tick: f64, decimals: u32) -> P
     p = side(p, &book.asks, &asks, colors::DOWN, false);
     let label_y = pad_top + h + 5.0;
     p.stroke_color(c(colors::MUTED))
-        .line_dash(&[2.0, 3.0])
+        .line_dash(&lengths([2.0, 3.0]))
         .begin_path()
         .move_to(x_of(mid), pad_top)
         .line_to(x_of(mid), pad_top + h)
@@ -407,7 +407,7 @@ pub(crate) fn Depth(props: StockProps) -> impl IntoElement {
             })
             .h(px(120.0))
             .label("Depth chart")
-            .on_layout(move |frame: &Rect| width.set(frame.width)),
+            .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0)),
         )
         .child(
             view()

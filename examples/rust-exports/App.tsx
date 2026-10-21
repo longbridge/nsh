@@ -2,8 +2,8 @@
 // `Ledger` and the class `Account` all come from the app's crate
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
-import { mount, Scroll, signal, Text, View } from "nsh";
-import { Button, Card, SafeAreaView } from "nsh/ui/mobile";
+import { type JSX, mount, Scroll, signal, Text, View } from "nsh";
+import { Button as BaseButton, SafeAreaView } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
 // Each object owns an instance kept in Rust.
@@ -15,6 +15,33 @@ function preview(): string {
   using draft = Account.parse("Draft: 10");
   draft.deposit(5);
   return draft.statement();
+}
+
+/** A press target with a label: `nsh/base`'s Button, given the app's look. */
+function Button(props: { title: string; variant?: "primary" | "secondary" | "danger"; onPress: () => void }) {
+  const colors = { primary: "#2563eb", secondary: "#e5e7eb", danger: "#dc2626" };
+  const variant = () => props.variant ?? "primary";
+  return (
+    <BaseButton
+      onPress={props.onPress}
+      style={{ backgroundColor: colors[variant()], borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
+      activeStyle={{ opacity: 0.7 }}
+    >
+      <Text style={{ fontSize: 15, fontWeight: "600", color: variant() === "secondary" ? "#111827" : "#ffffff" }}>
+        {props.title}
+      </Text>
+    </BaseButton>
+  );
+}
+
+/** A titled group of lines. */
+function Card(props: { title: string; children: JSX.Element }) {
+  return (
+    <View style={{ gap: 8, padding: 16, borderRadius: 12, backgroundColor: "#f3f4f6" }}>
+      <Text style={{ fontSize: 13, fontWeight: "600", opacity: 0.6 }}>{props.title}</Text>
+      {props.children}
+    </View>
+  );
 }
 
 /** A line of text in the cards. */
@@ -51,8 +78,8 @@ function App() {
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
-      <Scroll contentContainerStyle={{ padding: 16, gap: 16 }}>
-        <Card header={<Text>Ledger · a module</Text>}>
+      <Scroll contentStyle={{ padding: 16, gap: 16 }}>
+        <Card title="Ledger · a module">
           <Line>{`Formatted at once: ${Ledger.format(1234.5)}`}</Line>
           <Line muted>{copied()}</Line>
           <Line muted>{rate() ? `Rate: ${rate() * 100}%` : "Rate not fetched"}</Line>
@@ -66,7 +93,7 @@ function App() {
           </View>
         </Card>
 
-        <Card header={<Text>Account · a class</Text>}>
+        <Card title="Account · a class">
           <Line>{`${name()}: ${Ledger.format(balance())}`}</Line>
           <Line>{`Checking: ${toChecking() === null ? "closed" : Ledger.format(toChecking()!)}`}</Line>
           <Line muted>{`Heard: ${heard().join(", ") || "nothing yet"}`}</Line>
@@ -107,7 +134,7 @@ function App() {
           </View>
         </Card>
 
-        <Card header={<Text>Gauge · a component</Text>}>
+        <Card title="Gauge · a component">
           <Gauge
             value={spent()}
             step={25}

@@ -15,6 +15,8 @@
 
 #![cfg(target_os = "ios")]
 
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod blur;
@@ -33,7 +35,10 @@ mod native_view;
 mod navigation;
 mod net;
 mod press;
+mod selection_area;
 mod surface;
+#[cfg(feature = "dev")]
+mod synth;
 mod system;
 mod target;
 mod text;
@@ -48,11 +53,11 @@ mod zoom;
 
 pub use nsh_engine::{Bundle, Root};
 
-/// The UI sets apps import ([`set_ui_sets`]; by default the mobile UI).
+/// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::ui::Registry>>> =
     std::sync::RwLock::new(None);
 
-/// Sets the UI sets the engines started from now on serve: the mobile UI
+/// Sets the UI sets the engines started from now on serve: `nsh/base`
 /// and an app's own Rust components (`nsh.json` `"rust"`), which a host
 /// built for the app passes before it starts.
 pub fn set_ui_sets(sets: Vec<nsh_core::ui::Registry>) {
@@ -65,7 +70,7 @@ fn ui_sets() -> Vec<nsh_core::ui::Registry> {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+        .unwrap_or_else(|| vec![nsh_base::registry()])
 }
 
 pub use crate::{

@@ -526,7 +526,7 @@ impl<M: TextEngine> Core<M> {
             Patch::Attrs { host, id, attrs } => {
                 // The root: what the views and components above give it
                 // goes after its own.
-                let ctx = if id == host {
+                let cx = if id == host {
                     self.root_context_of(host)
                 } else {
                     None
@@ -534,8 +534,8 @@ impl<M: TextEngine> Core<M> {
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let app = match &ctx {
-                    Some(ctx) if ctx.combined => ctx.app.clone(),
+                let app = match &cx {
+                    Some(cx) if cx.combined => cx.app.clone(),
                     Some(_) => inst.app_style.clone(),
                     None => None,
                 };
@@ -544,21 +544,42 @@ impl<M: TextEngine> Core<M> {
                 };
                 let attrs = *attrs;
                 let old = std::mem::replace(&mut node.attrs, attrs.clone());
-                let (attrs, old) = match &ctx {
-                    Some(ctx) => {
+                // The app's classes changed: the styles go again.
+                let restyle = (attrs.class != old.class).then(|| {
+                    (
+                        node.style.clone(),
+                        node.classes.clone(),
+                        attrs.class.clone(),
+                    )
+                });
+                let (attrs, old) = match &cx {
+                    Some(cx) => {
                         let mut old = old;
                         (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
-                        let attrs = ctx.over(attrs);
+                        let attrs = cx.over(attrs);
                         inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
                         (attrs, old)
                     }
                     None => (attrs, old),
                 };
                 self.apply_attrs_over(id, &attrs, &old, app.as_ref());
+                if let Some((style, classes, class)) = restyle {
+                    let outer = cx.and_then(|cx| cx.user);
+                    let classes =
+                        self.apply_el_styles(id, &style, &style, classes, class.as_ref(), outer);
+                    if let Some(node) = self
+                        .components
+                        .instances
+                        .get_mut(&host)
+                        .and_then(|i| i.bound.get_mut(&id))
+                    {
+                        node.classes = classes;
+                    }
+                }
             }
             Patch::Style { host, id, style } => {
                 let user = if id == host {
-                    self.root_context_of(host).and_then(|ctx| ctx.user)
+                    self.root_context_of(host).and_then(|cx| cx.user)
                 } else {
                     None
                 };
@@ -570,7 +591,9 @@ impl<M: TextEngine> Core<M> {
                 };
                 let old_style = std::mem::replace(&mut node.style, style.clone());
                 let old_classes = node.classes.clone();
-                let classes = self.apply_styles(id, &style, &old_style, old_classes, user);
+                let class = node.attrs.class.clone();
+                let classes =
+                    self.apply_el_styles(id, &style, &old_style, old_classes, class.as_ref(), user);
                 if let Some(node) = self
                     .components
                     .instances
@@ -700,7 +723,13 @@ impl<M: TextEngine> Core<M> {
     /// Forgets what `host`'s view knew of the nodes released since: their
     /// handlers, responders and bindings.
     fn forget_released(&self, host: NodeId, inst: &mut Instance) {
-        let live = |id: &NodeId| *id == host || self.components.owners.contains_key(id);
+        // The app's slot nodes are JS's, not the view's: they keep what the
+        // view gave them while they are its slots.
+        let live = |id: &NodeId| {
+            *id == host
+                || self.components.owners.contains_key(id)
+                || self.components.slot_hosts.get(id) == Some(&host)
+        };
         inst.handlers.retain(|(id, _, _)| live(id));
         inst.event_handlers.retain(|(id, _)| live(id));
         inst.responders.retain(|(id, _)| live(id));

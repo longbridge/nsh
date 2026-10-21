@@ -75,8 +75,8 @@
 
   function mount(canvas: HTMLCanvasElement) {
     const hero = (canvas.closest('.hero') as HTMLElement | null) ?? canvas.parentElement!;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const cx = canvas.getContext('2d');
+    if (!cx) return;
     const root = document.documentElement;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const perf = location.search.includes('fieldperf');
@@ -123,7 +123,7 @@
       dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
-      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx!.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       let s = SPACING;
       if ((w / s + 2) * (h / s + 2) > MAX_DOTS) s = Math.sqrt((w * h) / MAX_DOTS) + 1;
@@ -172,7 +172,7 @@
       qy += (py - qy) * kt;
       strength += ((active ? 1 : 0) - strength) * (1 - Math.exp(-dt * (active ? 4 : 1.6)));
 
-      const c = ctx!;
+      const c = cx!;
       c.clearRect(0, 0, w, h);
 
       // A small, faint halo under the dots.

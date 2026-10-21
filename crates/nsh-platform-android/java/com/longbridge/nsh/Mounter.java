@@ -64,10 +64,9 @@ final class Mounter {
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
     int appearance;
-    /** The status bar the app asked for last (style, hidden, background), applied again when the appearance changes. */
+    /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
-    private Integer barBackground;
 
     /** Dark appearance as shown: the app's, else the system's. */
     boolean night() {
@@ -78,7 +77,7 @@ final class Mounter {
 
     /** A screen's options (`encode.rs` `screen_config`). */
     static final class ScreenOptions {
-        String title;
+        String title, backTitle;
         boolean shown = true, transparent, backVisible = true, gesture = true, preventBack;
         int tint, background, titleColor, animation, left = -1, right = -1, titleView = -1;
         float headerHeight;
@@ -129,10 +128,27 @@ final class Mounter {
     final java.util.ArrayList<TouchTracker> touchTrackers = new java.util.ArrayList<>();
     /** The text with a selection (one at a time, as in TextView). */
     TextBox selectedText;
+    /** The selection area with a selection (one per surface, a text's or an area's). */
+    SelectionArea selectedArea;
+    /** Selection areas (`ViewProps.selection_area`), by view. */
+    private final SparseArray<SelectionArea> selectionAreas = new SparseArray<>();
 
     /** A finger went down at the screen point: a selection elsewhere ends. */
     void touchDown(float rawX, float rawY) {
         if (selectedText != null && !selectedText.selectionContains(rawX, rawY)) selectedText.clearSelection();
+        if (selectedArea != null && !selectedArea.selectionContains(rawX, rawY)) selectedArea.clear();
+    }
+
+    /** The outermost selection area {@code text} is in (an area inside another is part of it), or null. */
+    SelectionArea selectionAreaOf(TextBox text) {
+        if (selectionAreas.size() == 0) return null;
+        SelectionArea outer = null;
+        for (Object v = text; v instanceof View; v = ((View) v).getParent()) {
+            if (!(v instanceof Node)) continue;
+            SelectionArea area = selectionAreas.get(((Node) v).nodeId());
+            if (area != null && area.view == v) outer = area;
+        }
+        return outer;
     }
     /** Scroll views a JS responder keeps from scrolling. */
     private final java.util.ArrayList<ScrollBox> blockedScrolls = new java.util.ArrayList<>();
@@ -223,11 +239,12 @@ final class Mounter {
                         linkData[i * 3 + 2] = b.getInt();
                         linkEvents[i] = (b.getInt() & 0xffffffffL) | ((long) b.getInt() << 32);
                     }
-                    boolean selectable = b.getInt() != 0;
+                    // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
+                    int selectable = b.getInt();
                     Integer selectionColor = optColor(b);
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
-                        t.setSelectable(selectable, selectionColor);
+                        t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
                         t.setLinks(linkData, linkEvents);
                         if (links > 0 && t.press == null) t.press = new Pressable(t, this, t.id);
@@ -242,6 +259,7 @@ final class Mounter {
                     if ((events.get(id) & touch) != (mask & touch)) touchListeners += (mask & touch) != 0 ? 1 : -1;
                     events.put(id, mask);
                     View v = views.get(id);
+                    if (v != null) updateHover(id, v);
                     if (v instanceof Box) {
                         ((Box) v).events = mask;
                         v.setClickable((mask & (1L << Native.PRESS)) != 0);
@@ -305,7 +323,10 @@ final class Mounter {
                 }
                 case APPEARANCE: {
                     appearance = b.getInt();
-                    if (barStyle == 0) SystemUi.statusBar(context, barStyle, barHidden, barBackground, night());
+                    if (barStyle == 0) {
+                        SystemUi.statusBar(context, barStyle, barHidden, night());
+                        for (ModalHost m : shownModals) m.statusBar(barStyle, barHidden, night());
+                    }
                     break;
                 }
                 case LAYOUT_DIRECTION: {
@@ -406,13 +427,11 @@ final class Mounter {
                     ModalHost modal = modals.get(b.getInt());
                     int animation = b.getInt();
                     b.getInt(); // presentation: Android modals cover the window
-                    boolean transparent = b.getInt() != 0;
                     boolean translucent = b.getInt() != 0;
-                    boolean dismissible = b.getInt() != 0;
+                    boolean closeOnEscape = b.getInt() != 0;
                     if (modal != null) {
                         modal.animation = animation;
-                        modal.dismissible = dismissible;
-                        modal.transparent = transparent;
+                        modal.closeOnEscape = closeOnEscape;
                         modal.setStatusBarTranslucent(translucent);
                     }
                     break;
@@ -682,6 +701,11 @@ final class Mounter {
         }
         View v = views.get(id);
         if (v instanceof StackBox) stacks.remove(v);
+        SelectionArea area = selectionAreas.get(id);
+        if (area != null) {
+            area.clear();
+            selectionAreas.remove(id);
+        }
         screenOptions.remove(id);
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
@@ -1013,20 +1037,55 @@ final class Mounter {
         trackedStates.put(id, states);
         View v = views.get(id);
         if (v == null) return;
-        if ((states & STATE_HOVERED) != 0) {
-            v.setOnHoverListener((view, e) -> {
-                int action = e.getActionMasked();
-                if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) reportState(id, STATE_HOVERED, true);
-                else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) reportState(id, STATE_HOVERED, false);
-                return false;
-            });
-        } else {
-            v.setOnHoverListener(null);
-        }
+        updateHover(id, v);
         if ((states & STATE_PRESSED) != 0 && !v.isClickable()) {
             // Presses reach views that report them.
             v.setClickable(true);
         }
+    }
+
+    private static final long HOVER_EVENTS =
+            (1L << Native.HOVER_IN) | (1L << Native.HOVER_OUT) | (1L << Native.HOVER_MOVE);
+
+    /**
+     * Mice and styluses hovering `v`: its `hover:` state and its hover events
+     * (moves come with no button down).
+     */
+    private void updateHover(int id, View v) {
+        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & HOVER_EVENTS) == 0) {
+            v.setOnHoverListener(null);
+            return;
+        }
+        v.setOnHoverListener((view, e) -> {
+            int action = e.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) {
+                reportState(id, STATE_HOVERED, true);
+                if (wants(id, Native.HOVER_IN)) event(id, Native.HOVER_IN);
+            } else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) {
+                reportState(id, STATE_HOVERED, false);
+                if (wants(id, Native.HOVER_OUT)) event(id, Native.HOVER_OUT);
+                return false;
+            }
+            if (wants(id, Native.HOVER_MOVE)) hoverMove(id, view, e);
+            return false;
+        });
+    }
+
+    /** `onHoverMove`: where the pointer is in `v` and in its root view (dp). */
+    private void hoverMove(int id, View v, android.view.MotionEvent e) {
+        // The surface, or the window of the modal the view is in.
+        View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
+        int[] at = new int[2], rootAt = new int[2];
+        v.getLocationOnScreen(at);
+        root.getLocationOnScreen(rootAt);
+        int meta = e.getMetaState(), modifiers = 0;
+        if ((meta & android.view.KeyEvent.META_CTRL_ON) != 0) modifiers |= 1;
+        if ((meta & android.view.KeyEvent.META_ALT_ON) != 0) modifiers |= 2;
+        if ((meta & android.view.KeyEvent.META_SHIFT_ON) != 0) modifiers |= 4;
+        if ((meta & android.view.KeyEvent.META_META_ON) != 0) modifiers |= 8;
+        float d = density;
+        Native.hover(handle(), id, e.getX() / d, e.getY() / d,
+                (e.getX() + at[0] - rootAt[0]) / d, (e.getY() + at[1] - rootAt[1]) / d, modifiers);
     }
 
     /** An interaction state of `id` changed: tells the core if it reads it. */
@@ -1108,9 +1167,8 @@ final class Mounter {
         v.setCameraDistance(density * density * distance * (float) Math.sqrt(5));
     }
 
-    /** Press feedback of a view: `activeOpacity`, `delayLongPress`, `android_ripple`. */
+    /** Press feedback of a view: `delayLongPress`, `android_ripple`. */
     static final class Feedback {
-        float activeOpacity = Float.NaN;
         int longPressDelay = -1;
         android.graphics.drawable.RippleDrawable ripple;
         boolean rippleForeground;
@@ -1127,7 +1185,7 @@ final class Mounter {
     /** Whether presses on {@code id} show feedback (so the view takes them). */
     boolean hasPressFeedback(int id) {
         Feedback f = feedback.get(id);
-        return tracksPress(id) || f != null && (!Float.isNaN(f.activeOpacity) || f.ripple != null);
+        return tracksPress(id) || f != null && f.ripple != null;
     }
 
     /** Shows (or ends) the press feedback of view {@code id}, pressed at ({@code x}, {@code y}). */
@@ -1135,9 +1193,6 @@ final class Mounter {
         reportState(id, STATE_PRESSED, pressed);
         Feedback f = feedback.get(id);
         if (f == null) return;
-        if (!Float.isNaN(f.activeOpacity)) {
-            v.animate().alpha(pressed ? baseOpacity(id) * f.activeOpacity : baseOpacity(id)).setDuration(pressed ? 100 : 250).start();
-        }
         if (f.ripple != null) {
             if (pressed) f.ripple.setHotspot(x, y);
             f.ripple.setState(pressed
@@ -1201,12 +1256,6 @@ final class Mounter {
         return 0x1f000000;
     }
 
-    /** The opacity a view returns to after a press (`activeOpacity`). */
-    float baseOpacity(int id) {
-        Dynamic d = statics.get(id);
-        return d != null ? d.opacity : 1;
-    }
-
     boolean hasHitSlop() {
         return slops.size() > 0;
     }
@@ -1220,7 +1269,6 @@ final class Mounter {
         View v = views.get(id);
         int pointerEvents = b.getInt();
         float[] slop = {b.getFloat() * density, b.getFloat() * density, b.getFloat() * density, b.getFloat() * density};
-        float activeOpacity = b.getFloat();
         A11y a = new A11y(this, id);
         a.accessible = b.getInt();
         a.label = string(objects, b.getInt());
@@ -1257,10 +1305,18 @@ final class Mounter {
         } else {
             panActivations.remove(id);
         }
+        boolean selectionArea = b.getInt() != 0;
         if (v == null) return;
+        SelectionArea area = selectionAreas.get(id);
+        if (selectionArea && (area == null || area.view != v)) {
+            if (area != null) area.clear();
+            selectionAreas.put(id, new SelectionArea(this, v));
+        } else if (!selectionArea && area != null) {
+            area.clear();
+            selectionAreas.remove(id);
+        }
         Feedback f = feedback.get(id);
         if (f == null) feedback.put(id, f = new Feedback());
-        f.activeOpacity = activeOpacity;
         f.longPressDelay = longPressDelay >= 0 ? Math.round(longPressDelay) : -1;
         setRipple(v, f, ripple, rippleColor, rippleRadius);
         // Feedback alone makes text and images take presses.
@@ -1448,6 +1504,7 @@ final class Mounter {
         o.right = b.getInt();
         o.titleView = b.getInt();
         o.headerHeight = b.getFloat();
+        o.backTitle = string(objects, b.getInt());
         screenOptions.put(id, o);
         dirtyScreens.add(id);
         int stack = hosts.get(id, -1);
@@ -1475,10 +1532,13 @@ final class Mounter {
             ScreenOptions o = screenOptions.get(id);
             if (!(v instanceof StackBox.ScreenBox) || o == null) continue;
             View stack = views.get(hosts.get(id, -1));
-            boolean canGoBack = stack instanceof StackBox && ((StackBox) stack).screens.indexOf(id) > 0;
+            int index = stack instanceof StackBox ? ((StackBox) stack).screens.indexOf(id) : -1;
+            boolean canGoBack = index > 0;
+            // The up arrow is named after the screen it leads back to.
+            ScreenOptions below = canGoBack ? screenOptions.get(((StackBox) stack).screens.get(index - 1)) : null;
             ((StackBox.ScreenBox) v).configure(this, o.title, o.shown, o.transparent, o.tint, o.background,
                     o.titleColor, o.backVisible, o.gesture, o.preventBack, o.animation, o.left, o.right, o.titleView,
-                    o.headerHeight, canGoBack);
+                    o.headerHeight, canGoBack, below != null ? below.backTitle : null);
             reportScreenInsets(id, o);
         }
         dirtyScreens.clear();
@@ -1489,6 +1549,7 @@ final class Mounter {
                 modal.show();
                 shownModals.remove(modal);
                 shownModals.add(modal);
+                if (barStyle >= 0) modal.statusBar(barStyle, barHidden, night());
             } else {
                 modal.dismiss();
                 shownModals.remove(modal);
@@ -1498,7 +1559,7 @@ final class Mounter {
         updateBack();
     }
 
-    /** A screen's insets below its header, for `useSafeAreaInsets()`. */
+    /** A screen's insets below its header, for `safeAreaInsets()`. */
     private void reportScreenInsets(int id, ScreenOptions o) {
         float top = o.shown && !o.transparent ? 0 : host.safeTop();
         insets(id, top, host.safeRight(), host.safeBottom(), host.safeLeft());
@@ -1517,7 +1578,7 @@ final class Mounter {
 
     /**
      * Whether the back button means something to the app now. Decided from
-     * what is mounted (modals, stacks, `preventBack`, a `BackHandler`), never
+     * what is mounted (modals, stacks, `popOnBack`, a `BackHandler`), never
      * by asking JS: the system asks synchronously.
      */
     boolean wantsBack() {
@@ -1542,7 +1603,7 @@ final class Mounter {
         return null;
     }
 
-    /** A modal closed itself (`dismissible`): the back button no longer goes to it. */
+    /** A modal closed itself (`closeOnEscape`): the back button no longer goes to it. */
     void modalClosed(ModalHost modal) {
         shownModals.remove(modal);
         updateBack();
@@ -1753,11 +1814,10 @@ final class Mounter {
                 int style = b.getInt();
                 boolean hidden = b.getInt() != 0;
                 b.getInt(); // animated: the system animates bar changes
-                Integer background = optColor(b);
                 barStyle = style;
                 barHidden = hidden;
-                barBackground = background;
-                SystemUi.statusBar(context, style, hidden, background, night());
+                SystemUi.statusBar(context, style, hidden, night());
+                for (ModalHost m : shownModals) m.statusBar(style, hidden, night());
                 break;
             }
             case 12: {
@@ -2022,6 +2082,11 @@ final class Mounter {
 
     void event(int id, int kind) {
         Native.event(handle(), id, kind, null, 0, 0, 0);
+    }
+
+    /** `RequestClose` with what the user did (`cancel`, `swipe`). */
+    void requestClose(int id, String reason) {
+        eventMap(id, Native.REQUEST_CLOSE, new String[] {"reason"}, new Object[] {reason});
     }
 
     /** An event with an object payload. */

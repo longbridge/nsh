@@ -4,17 +4,20 @@
 //! of.
 
 use nsh_core::{
-    Rect,
-    nsh_animation::{Curve, EaseMode},
+    Bounds, Points,
+    animation::{Curve, EaseMode},
     ui::{AnyElement, prelude::*},
 };
 
 use super::live;
-use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with};
+use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with, rect};
 
 /// Grid lines of charts: the hairline color, a step darker on the light
 /// page.
-pub(crate) const GRID: AdaptiveColor = AdaptiveColor::new(colors::BORDER.light, colors::LINE.dark);
+pub(crate) const GRID: AdaptiveColor = AdaptiveColor {
+    light: colors::BORDER.light,
+    dark: colors::LINE.dark,
+};
 
 /// The props of [`SpringBar`].
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -74,8 +77,8 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
         .h(px(props.height))
         .overflow_hidden()
         .rounded(px(radius))
-        .on_layout(move |frame: &Rect| {
-            if width.replace(frame.width) != frame.width {
+        .on_layout(move |frame: &Bounds<Points>| {
+            if width.replace(frame.size.width.0) != frame.size.width.0 {
                 place(props.share.get_untracked());
             }
         })
@@ -263,14 +266,14 @@ impl Calm {
 
 /// Diagonal stripes over a rectangle (projections, zones).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Color, gap: f32) -> Painter {
+pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Hsla, gap: f32) -> Painter {
     if w <= 0.0 || h <= 0.0 {
         return p;
     }
     let mut p = p
         .save()
         .begin_path()
-        .rect(x, y, w, h)
+        .rect(rect(x, y, w, h))
         .clip()
         .stroke_color(color)
         .line_width(1.0)
@@ -284,7 +287,14 @@ pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Color, ga
 }
 
 /// A dashed horizontal line.
-pub(crate) fn dashed(p: Painter, x0: f32, x1: f32, y: f32, color: Color, dash: &[f32]) -> Painter {
+pub(crate) fn dashed(
+    p: Painter,
+    x0: f32,
+    x1: f32,
+    y: f32,
+    color: Hsla,
+    dash: &[Points],
+) -> Painter {
     p.stroke_color(color)
         .line_width(1.0)
         .line_dash(dash)
@@ -397,5 +407,5 @@ pub(crate) fn head(label: &'static str, col: Col, right: bool) -> Text {
         .text_size(px(11.0))
         .text_color(colors::FAINT)
         .tabular_nums()
-        .letter_spacing(0.6)
+        .letter_spacing(px(0.6))
 }

@@ -104,9 +104,9 @@ export function Panel(props: {
         <If when={props.onOpen}>
           <View
             onPress={props.onOpen}
-            activeOpacity={0.5}
+            activeStyle={{ opacity: 0.5 }}
             hitSlop={6}
-            accessibilityRole="button"
+            role="button"
             accessibilityLabel={`${props.title} details`}
             style={tile}
           >
@@ -259,7 +259,7 @@ export function Switch(props: { value: boolean; onChange: (v: boolean) => void; 
       onPress={() => props.onChange(!props.value)}
       disabled={props.disabled}
       hitSlop={8}
-      accessibilityRole="switch"
+      role="switch"
       accessibilityLabel={props.label}
       accessibilityState={{ checked: props.value, disabled: props.disabled }}
       style={{
@@ -306,7 +306,7 @@ export function Tabs<T extends string>(props: { options: readonly T[]; value: T;
           return (
             <View
               onPress={() => props.onChange(option())}
-              accessibilityRole="tab"
+              role="tab"
               accessibilityState={{ selected: on() }}
               style={{
                 flex: 1,
@@ -351,11 +351,11 @@ export function Counter(props: {
         stop();
         repeat = setInterval(() => nudge(d), 90);
       }}
-      onPressOut={stop}
+      onPressUp={stop}
       disabled={d < 0 ? props.value <= props.min : props.value >= props.max}
-      activeOpacity={0.5}
+      activeStyle={{ opacity: 0.5 }}
       hitSlop={6}
-      accessibilityRole="button"
+      role="button"
       accessibilityLabel={`${name} ${props.label}`}
       style={{
         width: 34,
@@ -418,7 +418,7 @@ export function Slider(props: {
     <View
       onLayout={(e) => width.set(e.width)}
       {...track((x) => pick(x))}
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel={props.label}
       accessibilityValue={{ min: props.min, max: props.max, now: props.value }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
@@ -496,8 +496,8 @@ export function Action(props: { label: string; primary?: boolean; disabled?: boo
     <View
       onPress={props.onPress}
       disabled={props.disabled}
-      activeOpacity={0.7}
-      accessibilityRole="button"
+      activeStyle={{ opacity: 0.7 }}
+      role="button"
       accessibilityState={{ disabled: props.disabled }}
       style={{
         flex: 1,

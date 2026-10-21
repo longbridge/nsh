@@ -3,9 +3,9 @@
 An app written in Rust: its UI is `src/lib.rs`, and `nsh.json` names the root component (`"root": "App"`).
 
 ```sh
-nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
-nsh trace                    # headless: what the root mounts, and the time of each commit
-nsh package --target web     # or ios, android, macos, linux, windows, gpui
+nsh run                      # this machine's backend; --target ios, android, web, macos, linux or windows
+nsh test nsh.json --trace    # headless: what the root mounts, and the time of each commit
+nsh package --target web     # or ios, android, macos, linux, windows
 ```
 
 `nsh run` and `nsh package` mount the root on every platform, the browser included, without QuickJS: the app is Rust
@@ -16,12 +16,7 @@ cargo run
 ```
 
 This starts the root directly on the machine's native desktop backend: GTK 4 on Linux, AppKit on macOS, Win32 on
-Windows. Install the backend's development libraries before building. The native entry accepts scripted window checks
-through `NSH_SCRIPT`, for example:
-
-```sh
-NSH_SCRIPT='wait 800; shot window.png; quit' cargo run
-```
+Windows. Install the backend's development libraries before building.
 
 The `nsh` commands build the app's runners from the NSH crates `Cargo.toml` depends on: crates.io's at the version of
 the `nsh` you run (keep the `nsh-*` dependencies at that version when you upgrade `nsh`), or an NSH checkout's by path.
@@ -42,3 +37,6 @@ and a `tsconfig.json` (copy one from `nsh init --template ts`), then run it with
 runs on QuickJS, while `nsh run` alone keeps running the Rust root. The first `nsh build App.tsx` writes the TypeScript
 declarations of `__SPECIFIER__` into `.nsh/types`. Register more with `registry.register::<…>()` (components),
 `registry.module::<…>()` and `registry.class::<…>()`.
+
+NSH-generated files stay in `.nsh/`: runner sources in `.nsh/rust/` and default packages in `.nsh/out/`.
+Cargo keeps its normal `target/` directory and respects your existing `CARGO_TARGET_DIR`.

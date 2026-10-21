@@ -10,7 +10,10 @@
 
 use std::time::{Duration, Instant};
 
-use nsh_core::{ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind};
+use nsh_core::{
+    ApproxTextEngine, Core, ListBind, MountItem, Size, ViewKind,
+    geometry::{point, px},
+};
 use nsh_js::Host;
 
 enum Gap {
@@ -30,18 +33,18 @@ fn bench_gallery_scroll() {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, true).unwrap();
     let host = Host::new().unwrap();
     // The runtime reads the environment while it loads.
     host.set_environment(&nsh_js::Environment {
-        window: (390.0, 844.0),
+        window: Size::new(px(390.0), px(844.0)),
         ..Default::default()
     });
     host.eval_bytecode(&bytecode).unwrap();
-    let mut core = Core::new(ApproxTextEngine, Size::new(390.0, 844.0));
+    let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
     let mut ops = Vec::new();
     let mut binds: Vec<ListBind> = Vec::new();
     let list = std::cell::Cell::new(None);
@@ -95,7 +98,7 @@ fn bench_gallery_scroll() {
         let mut y = 0.0;
         for _ in 0..2000 {
             y += 8.0;
-            core.set_scroll_offset(list, 0.0, y, u32::MAX);
+            core.set_scroll_offset(list, point(px(0.0), px(y)), u32::MAX);
             let Some((t, j)) = frame(&mut core, &mut binds) else {
                 continue;
             };
@@ -116,7 +119,7 @@ fn bench_gallery_scroll() {
             }
         }
         // Scroll back to the top for the next run.
-        core.set_scroll_offset(list, 0.0, 0.0, u32::MAX);
+        core.set_scroll_offset(list, point(px(0.0), px(0.0)), u32::MAX);
         frame(&mut core, &mut binds);
         println!(
             "{label}: {n} rebinding frames, {:?}/frame (js {:?})",

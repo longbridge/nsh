@@ -2,6 +2,7 @@
 //! TypeScript declarations are generated from these types into
 //! `.nsh/types/__SPECIFIER__.d.ts`.
 
+use nsh_base::theme;
 use nsh_core::ui::prelude::*;
 
 /// The crate's UI set (`nsh.json` `"rust"`).
@@ -36,10 +37,10 @@ pub fn Badge(props: BadgeProps, cx: Scope<BadgeEvent>) -> impl IntoElement {
         .px_4()
         .py_2()
         .rounded_full()
-        .bg(move || theme().primary)
-        .active(|s| s.bg(move || theme().primary_active))
+        .bg(move || theme().primary())
+        .active(|s| s.bg(move || theme().primary_active()))
         .on_press(move || cx.emit(BadgeEvent::Press))
-        .child(text(props.label).text_color(move || theme().primary_foreground))
+        .child(text(props.label).text_color(move || theme().primary_foreground()))
 }
 
 /// Text helpers.

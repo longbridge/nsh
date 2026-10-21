@@ -1,4 +1,4 @@
-//! Navigation stacks, screens with their headers, modals.
+//! Navigation stacks, screens, modals.
 //!
 //! A stack's screens are its child views; only the top one shows (and the
 //! one below it while a transition runs): the others are not child
@@ -10,36 +10,32 @@
 //! `gtk::WidgetPaintable` of the top screen keeps it when the view is
 //! unmapped, as the same batch tears its content down).
 //!
-//! The header is drawn by plain GTK widgets the screen hosts
-//! ([`NshView::set_native`]): a [`Layer`] for the bar, a label for the
-//! title and a flat button going back. The app's header items stay
-//! `NshView`s (they have events of their own): children of the screen,
-//! placed in the bar with their `shift`. The header goes over the
-//! screen's content, which the core laid out below `header_height`
-//! (or under the bar for transparent headers and large titles).
+//! NSH draws no header: a screen's `header` (the app's view,
+//! [`ScreenConfig::header_view`]) is a child of the screen whose frame the
+//! core sets at its top (as wide as the screen, as tall as it lays out),
+//! with the content laid out below it; it is kept above the content. The
+//! other header items (the native header's slots on iOS and Android) stay
+//! hidden. Under the app's content each screen has an opaque backdrop in
+//! the window's color, so a screen sliding over another hides it.
 //!
-//! Going back (the back button, Escape, Alt+Left, the Back key, the
-//! mouse's back button; Escape in a focused text field or page only
-//! leaves it; the others go back in a page's history first while the page
-//! has the focus, or the pointer for the mouse button)
-//! pops natively, then sends `onDismiss`, which
-//! removes the route in JS; until the app removes the screen it is
-//! `popped` and ignored. With `preventBack` the screen gets
-//! `onBackRequest` instead. The newest modal comes first: a stack inside it
-//! pops, else it gets `onRequestClose` (when `dismissible` it also closes
+//! Going back (Escape, Alt+Left, the Back key, the mouse's back button;
+//! Escape in a focused text field or page only leaves it; the others go
+//! back in a page's history first while the page has the focus, or the
+//! pointer for the mouse button) sends `onBackPress` (`BackRequest`) to the
+//! top screen when the app listens, then pops natively unless its
+//! `popOnBack` is false, then sends `onDismiss`, which removes the route in
+//! JS; until the app removes the screen it is `popped` and ignored. The
+//! answer comes from props mounted beforehand, never from JS. The newest
+//! modal comes first: a stack inside it pops, else it gets
+//! `onRequestClose` (reason `"cancel"`; with `closeOnEscape` it also closes
 //! natively, and gets `onDismiss` right after).
 //!
 //! Modals are children of the surface's root, kept above the app's views,
-//! at the size of the surface. They slide up or fade in, then get
-//! `onShow`; when the app removes one it leaves as an image of its last
-//! frame, then gets `onDismiss`. Page and form sheets are cards centered
-//! in the window (rounded, with a shadow and a width of their own) over a
-//! scrim that dims the window and takes its input: clicking it asks the
-//! sheet to close, as going back does.
-//!
-//! Headers have a fixed height on a desktop, reported to the core
-//! (`set_screen_header`) so screens lay their content out below the
-//! header actually shown rather than the core's estimate.
+//! at the size of the surface: transparent layers with no look of their own
+//! (the runtime renders the app's popup and backdrop in them; the
+//! presentation is ignored). They slide up or fade in, then get `onShow`;
+//! when the app removes one it leaves as an image of its last frame, then
+//! gets `onDismiss`.
 //!
 //! Transitions run on the root's frame clock and only move views
 //! (`shift`, `fade`): nothing is laid out again while they run.
@@ -47,96 +43,32 @@
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
-    sync::Arc,
+    time::Duration,
 };
 
-use gtk4::{self as gtk, gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
+use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use nsh_core::{
-    Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, ModalPresentation,
-    NodeId, PayloadValue, ROOT_ID, Rect, ScreenAnimation, ScreenConfig, Shadow, Size, ViewKind,
-    ViewStyle,
+    Bounds, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, NodeId, PayloadValue,
+    Point, Points, ROOT_ID, ScreenAnimation, ScreenConfig, Size, ViewKind,
+    navigation::{
+        Back, Reported, Stack, Tick, Transitions, back_target, innermost, insets_payload,
+        modal_in_offset, modal_out_offset, pop_offsets, push_offsets,
+    },
 };
 use nsh_engine::ColorScheme;
 use rustc_hash::FxHashMap;
 
-use crate::{decor::rgba, surface::Surface, view::NshView};
+use crate::{surface::Surface, view::NshView};
 
-/// Height of a screen's header bar, normal and with a large title (a
-/// GNOME header bar; a large title gets a second row).
-pub(crate) const HEADER_HEIGHTS: (f32, f32) = (47.0, 94.0);
-
-/// The row of the bar holding the buttons and a normal title.
-const BAR: f32 = HEADER_HEIGHTS.0;
-/// Space between the bar's edges and its buttons.
-const EDGE: f32 = 6.0;
-/// Space between the bar's items.
-const GAP: f32 = 8.0;
-/// Push and pop.
-const SLIDE_MS: f64 = 300.0;
-/// Cross-fades (and slides when the user asked for less motion).
-const FADE_MS: f64 = 200.0;
-/// Modals sliding up or down.
-const MODAL_MS: f64 = 300.0;
-/// How far the screen under a pushed one moves left, of the width.
-const PARALLAX: f32 = 0.3;
-/// The title's font size, normal and large (points).
-const TITLE_SIZE: (f64, f64) = (15.0, 26.0);
-/// Widest a page sheet and a form sheet get (a form sheet is also at most
-/// [`FORM_HEIGHT`] tall), as iPad sheets.
-const SHEET_WIDTH: (f32, f32) = (720.0, 540.0);
-const FORM_HEIGHT: f32 = 620.0;
-/// Space a sheet leaves to the window's edges (less in small windows).
-const SHEET_MARGIN: f32 = 32.0;
-/// Corner radius of a sheet.
-const SHEET_RADIUS: f32 = 12.0;
-
-/// Colors of the bars and backgrounds, light or dark (libadwaita's).
-#[derive(Clone, Copy)]
-struct Theme {
-    window: gdk::RGBA,
-    bar: gdk::RGBA,
-    line: gdk::RGBA,
-    fg: gdk::RGBA,
-    /// Dims what is behind a sheet.
-    scrim: gdk::RGBA,
-    /// A sheet's background and hairline edge (`window`, as the core's
-    /// color: it is the view's own background, under its rounded clip).
-    sheet: Color,
-    sheet_edge: Color,
-}
-
-fn theme(dark: bool) -> Theme {
+/// The window's color (libadwaita's), under a screen's content, so a screen
+/// moving over another hides it.
+fn window_color(dark: bool) -> gdk::RGBA {
     if dark {
-        Theme {
-            window: gdk::RGBA::new(0.141, 0.141, 0.141, 1.0),
-            bar: gdk::RGBA::new(0.188, 0.188, 0.188, 1.0),
-            line: gdk::RGBA::new(0.0, 0.0, 0.0, 0.36),
-            fg: gdk::RGBA::new(1.0, 1.0, 1.0, 1.0),
-            scrim: gdk::RGBA::new(0.0, 0.0, 0.0, 0.5),
-            sheet: Color::rgba(36, 36, 36, 255),
-            sheet_edge: Color::rgba(255, 255, 255, 20),
-        }
+        gdk::RGBA::new(0.141, 0.141, 0.141, 1.0)
     } else {
-        Theme {
-            window: gdk::RGBA::new(0.98, 0.98, 0.98, 1.0),
-            bar: gdk::RGBA::new(1.0, 1.0, 1.0, 1.0),
-            line: gdk::RGBA::new(0.0, 0.0, 0.0, 0.12),
-            fg: gdk::RGBA::new(0.0, 0.0, 0.024, 0.8),
-            scrim: gdk::RGBA::new(0.0, 0.0, 0.0, 0.32),
-            sheet: Color::rgba(250, 250, 250, 255),
-            sheet_edge: Color::rgba(0, 0, 0, 20),
-        }
+        gdk::RGBA::new(0.98, 0.98, 0.98, 1.0)
     }
 }
-
-const CSS: &str = "
-button.nsh-header-button { background: none; border: none; box-shadow: none; outline: none;
-  min-height: 0; min-width: 0; padding: 4px 8px; border-radius: 8px; }
-button.nsh-header-button:hover { background: rgba(0, 0, 0, 0.07); }
-button.nsh-header-button:active { background: rgba(0, 0, 0, 0.14); }
-button.nsh-header-button.nsh-dark:hover { background: rgba(255, 255, 255, 0.1); }
-button.nsh-header-button.nsh-dark:active { background: rgba(255, 255, 255, 0.18); }
-";
 
 mod imp {
     use super::*;
@@ -145,7 +77,6 @@ mod imp {
     #[derive(Default)]
     pub(crate) struct Layer {
         pub(crate) fill: Cell<Option<gdk::RGBA>>,
-        pub(crate) line: Cell<Option<gdk::RGBA>>,
         pub(crate) node: RefCell<Option<gsk::RenderNode>>,
     }
 
@@ -172,17 +103,13 @@ mod imp {
             if let Some(node) = &*self.node.borrow() {
                 snapshot.append_node(node);
             }
-            if let Some(c) = self.line.get() {
-                snapshot.append_color(&c, &graphene::Rect::new(0.0, h - 1.0, w, 1.0));
-            }
         }
     }
 }
 
 glib::wrapper! {
-    /// A plain drawing a view hosts: a fill (a screen's background, a
-    /// header bar) with a hairline at the bottom, or the last image of a
-    /// screen or modal that is leaving.
+    /// A plain drawing a view hosts: a fill (a screen's background) or the
+    /// last image of a screen or modal that is leaving.
     pub(crate) struct Layer(ObjectSubclass<imp::Layer>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
@@ -196,9 +123,8 @@ impl Layer {
         layer
     }
 
-    fn set_colors(&self, fill: Option<gdk::RGBA>, line: Option<gdk::RGBA>) {
-        let imp = self.imp();
-        if imp.fill.replace(fill) != fill || imp.line.replace(line) != line {
+    fn set_fill(&self, fill: Option<gdk::RGBA>) {
+        if self.imp().fill.replace(fill) != fill {
             self.queue_draw();
         }
     }
@@ -209,37 +135,16 @@ impl Layer {
     }
 }
 
-/// A screen's header widgets.
-struct Header {
-    bar: Layer,
-    title: gtk::Label,
-    back: gtk::Button,
-    back_label: gtk::Label,
-    chevron: Rc<Cell<gdk::RGBA>>,
-    chevron_area: gtk::DrawingArea,
-    /// What it was laid out for (width, header height, the items' frames):
-    /// unchanged, nothing moves.
-    laid_out: Option<(f32, f32, [Rect; 3])>,
-}
-
 /// One screen.
 struct ScreenNav {
     view: NshView,
     config: ScreenConfig,
     /// Its opaque background, under the app's content.
     backdrop: Layer,
-    header: Option<Header>,
-    /// The header items the app inserted.
+    /// The header items the app inserted (only the `header` one shows).
     items: Vec<NshView>,
-    /// The back button shows (not the bottom screen, `back_visible`).
-    can_go_back: bool,
-    /// The back button's label (the previous screen's `back_title`).
-    back_title: Option<Arc<str>>,
     /// The size and insets last reported.
-    reported: Option<(Size, EdgeInsets)>,
-    /// The header height last reported to the core (`None` inside: none
-    /// measured, the core estimates it); `None`: never reported.
-    header_reported: Option<Option<f32>>,
+    reported: Reported,
     /// The size the background was placed at.
     backdrop_size: (f32, f32),
 }
@@ -247,10 +152,8 @@ struct ScreenNav {
 /// One stack.
 struct StackNav {
     view: NshView,
-    /// Its screens as shown, bottom to top (without popped ones).
-    shown: Vec<NodeId>,
-    /// Screens the user popped, until the app removes them.
-    popped: Vec<NodeId>,
+    /// Its screens as shown, and those the user popped.
+    screens: Stack,
     /// Watches the top screen: keeps its last image when it is unmapped.
     paintable: Option<(NodeId, gtk::WidgetPaintable)>,
 }
@@ -261,13 +164,10 @@ struct ModalNav {
     config: ModalConfig,
     /// Its view while it is presented.
     view: Option<NshView>,
-    /// The user closed it (`dismissible`) and it was reported: the app's
-    /// removal only forgets it.
+    /// The user closed it natively (`closeOnEscape`) and it was reported:
+    /// the app's removal only forgets it.
     closed: bool,
-    backdrop: Option<Layer>,
-    /// Dims the window behind a sheet; clicking it asks to close.
-    scrim: Option<Layer>,
-    reported: Option<(Size, EdgeInsets)>,
+    reported: Reported,
     /// Watches it while it is presented: keeps its last image.
     paintable: Option<gtk::WidgetPaintable>,
     /// What had the keyboard focus when it was presented: it gets it back
@@ -300,7 +200,6 @@ enum Motion {
     },
     ModalIn {
         view: NshView,
-        scrim: Option<Layer>,
         fade: bool,
     },
     ModalOut {
@@ -308,32 +207,18 @@ enum Motion {
         /// reported when the user closed it).
         dismiss: Option<NodeId>,
         layer: Layer,
-        /// Where the modal was (a sheet's card, or the whole window).
-        frame: Rect,
-        scrim: Option<Layer>,
+        /// Where the modal was.
+        frame: Bounds<Points>,
         fade: bool,
     },
 }
 
-struct Transition {
-    /// Frame time of its first frame (µs).
-    start: Option<i64>,
-    duration: f64,
-    motion: Motion,
-}
-
-impl Transition {
+impl Motion {
     fn stack(&self) -> Option<NodeId> {
-        match &self.motion {
+        match self {
             Motion::Push { stack, .. } | Motion::Pop { stack, .. } => Some(stack.id()),
             _ => None,
         }
-    }
-
-    /// Its progress at `now` (0 to 1, not eased).
-    fn progress(&self, now: i64) -> f64 {
-        self.start
-            .map_or(0.0, |s| (now - s) as f64 / 1000.0 / self.duration)
     }
 }
 
@@ -349,10 +234,10 @@ pub(crate) struct Nav {
     dirty: Vec<NodeId>,
     /// Modals presented in this batch.
     presenting: Vec<NodeId>,
-    transitions: Vec<Transition>,
+    transitions: Transitions<Motion>,
     ticking: bool,
     keys_installed: bool,
-    /// The appearance the headers and backgrounds have.
+    /// The appearance the screens' backgrounds have.
     dark: Option<bool>,
 }
 
@@ -360,131 +245,47 @@ fn dark(surface: &Surface) -> bool {
     surface.environment.get().color_scheme == ColorScheme::Dark
 }
 
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
+fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(x),
+            y: Points(y),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
-}
-
-fn ease(t: f64) -> f32 {
-    let u = 1.0 - t.clamp(0.0, 1.0);
-    (1.0 - u * u * u) as f32
 }
 
 /// How a modal comes and goes: the duration and whether it fades;
 /// `None`: at once.
-fn modal_motion(surface: &Surface, animation: ModalAnimation) -> Option<(f64, bool)> {
-    match animation {
-        ModalAnimation::None => None,
-        ModalAnimation::Fade => Some((FADE_MS, true)),
-        ModalAnimation::Slide if surface.environment.get().reduce_motion => Some((FADE_MS, true)),
-        ModalAnimation::Slide => Some((MODAL_MS, false)),
-    }
+fn modal_motion(surface: &Surface, animation: ModalAnimation) -> Option<(Duration, bool)> {
+    nsh_core::navigation::modal_motion(animation, surface.environment.get().reduce_motion)
 }
 
-/// Where a modal with `config` sits in a `width` × `height` window when it
-/// is a sheet (`pageSheet` / `formSheet`, not transparent): a card centered
-/// over the dimmed window, as wide as the window allows up to its kind's
-/// width (a desktop window is no phone: a sheet sliding up over all of it
-/// would look like a new page). `None`: it covers the window.
-fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<Rect> {
-    let (max_w, max_h) = match config.presentation {
-        _ if !is_sheet(config) => return None,
-        ModalPresentation::FullScreen => return None,
-        ModalPresentation::PageSheet => (SHEET_WIDTH.0, f32::INFINITY),
-        ModalPresentation::FormSheet => (SHEET_WIDTH.1, FORM_HEIGHT),
-    };
-    // Small windows keep a smaller margin, so the sheet stays usable.
-    let margin = |extent: f32| SHEET_MARGIN.min((extent * 0.05).round()).max(8.0);
-    let w = (width - 2.0 * margin(width)).min(max_w).max(0.0).round();
-    let h = (height - 2.0 * margin(height)).min(max_h).max(0.0).round();
-    Some(rect(
-        ((width - w) / 2.0).round(),
-        ((height - h) / 2.0).round(),
-        w,
-        h,
-    ))
-}
-
-/// A modal with `config` is a sheet: a page or form sheet that is not
-/// transparent (a transparent one covers the window, as on iOS).
-fn is_sheet(config: &ModalConfig) -> bool {
-    !config.transparent && config.presentation != ModalPresentation::FullScreen
-}
-
-/// The style a sheet's view gets: its background, rounded corners that
-/// clip the content, a hairline edge and a soft shadow.
-fn sheet_style(t: &Theme) -> ViewStyle {
-    ViewStyle {
-        background_color: t.sheet,
-        border_radius: SHEET_RADIUS,
-        overflow_hidden: true,
-        borders: nsh_core::Borders {
-            widths: [1.0; 4],
-            colors: [t.sheet_edge; 4],
-            ..nsh_core::Borders::NONE
-        },
-        shadow: Shadow {
-            color: Color::BLACK,
-            offset_x: 0.0,
-            offset_y: 8.0,
-            opacity: 0.35,
-            radius: 24.0,
-        },
-        ..ViewStyle::default()
-    }
-}
-
-/// The insets of a screen's content covered by its header: the core lays
-/// the content out below a header, but under a transparent one or a large
-/// title.
-fn content_insets(c: &ScreenConfig) -> EdgeInsets {
-    let under = c.header_transparent || c.large_title;
-    let top = if c.header_shown && under {
-        c.header_height.max(0.0)
-    } else {
-        0.0
-    };
+/// The surface's safe-area insets.
+fn safe_area(surface: &Surface) -> EdgeInsets {
+    let safe = surface.environment.get().safe_area;
     EdgeInsets {
-        top,
-        ..EdgeInsets::default()
+        top: safe.top,
+        right: safe.right,
+        bottom: safe.bottom,
+        left: safe.left,
     }
-}
-
-/// The height of the header a screen shows, which its content starts
-/// below (the core's estimate adds the safe area, which a desktop window
-/// does not have, and stays a guess); `None` when the content is laid out
-/// under it (large titles, transparent headers) or there is none.
-fn measured_header(c: &ScreenConfig) -> Option<f32> {
-    (c.header_shown && !c.large_title && !c.header_transparent).then_some(BAR)
-}
-
-fn insets_payload(i: EdgeInsets) -> EventPayload {
-    let n = |v: f32| PayloadValue::Number(v as f64);
-    EventPayload::Map(vec![
-        ("top", n(i.top)),
-        ("right", n(i.right)),
-        ("bottom", n(i.bottom)),
-        ("left", n(i.left)),
-    ])
 }
 
 /// Reports root `id`'s size and insets when they changed.
 fn report(
     surface: &Surface,
     id: NodeId,
-    last: &mut Option<(Size, EdgeInsets)>,
-    size: Size,
+    last: &mut Reported,
+    size: Size<Points>,
     insets: EdgeInsets,
 ) {
-    if size.width <= 0.0 || *last == Some((size, insets)) {
+    let Some(insets_changed) = last.update(size, insets) else {
         return;
-    }
-    let insets_changed = last.is_none_or(|(_, i)| i != insets);
-    *last = Some((size, insets));
+    };
     surface.control(|c| c.set_root_size(id, size, insets));
     if insets_changed {
         surface.event(id, EventKind::Insets, insets_payload(insets));
@@ -528,59 +329,11 @@ fn set_fade(view: &NshView, fade: f32) {
     }
 }
 
-/// The header item of node `id`.
-fn find_item(items: &[NshView], id: Option<NodeId>) -> Option<&NshView> {
-    let id = id?;
-    items.iter().find(|v| v.id() == id)
-}
-
 /// What `paintable` shows now (its widget, or the image it kept of it).
 fn image_of(paintable: &gtk::WidgetPaintable, width: f32, height: f32) -> Option<gsk::RenderNode> {
     let snapshot = gtk::Snapshot::new();
     paintable.snapshot(&snapshot, width as f64, height as f64);
     snapshot.to_node()
-}
-
-fn label_attrs(color: gdk::RGBA, size: f64, bold: bool) -> pango::AttrList {
-    let list = pango::AttrList::new();
-    let c = |v: f32| (v.clamp(0.0, 1.0) * 65535.0) as u16;
-    list.insert(pango::AttrColor::new_foreground(
-        c(color.red()),
-        c(color.green()),
-        c(color.blue()),
-    ));
-    list.insert(pango::AttrInt::new_foreground_alpha(c(color.alpha())));
-    list.insert(pango::AttrSize::new_size_absolute(
-        (size * pango::SCALE as f64) as i32,
-    ));
-    if bold {
-        list.insert(pango::AttrInt::new_weight(pango::Weight::Bold));
-    }
-    list
-}
-
-/// The natural size of `widget`.
-fn natural(widget: &impl IsA<gtk::Widget>) -> (f32, f32) {
-    let (_, w, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
-    let (_, h, _, _) = widget.measure(gtk::Orientation::Vertical, w);
-    (w as f32, h as f32)
-}
-
-fn install_css() {
-    thread_local!(static DONE: Cell<bool> = const { Cell::new(false) });
-    if DONE.with(|d| d.replace(true)) {
-        return;
-    }
-    let Some(display) = gdk::Display::default() else {
-        return;
-    };
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(CSS);
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
 }
 
 /// Moves `tail` to the end of `parent`'s children (drawn last), unless it
@@ -599,72 +352,6 @@ fn keep_last(parent: &impl IsA<gtk::Widget>, tail: &[gtk::Widget]) {
     }
 }
 
-impl Header {
-    fn new(surface: &Rc<Surface>, screen: NodeId) -> Self {
-        install_css();
-        let bar = Layer::new();
-        let title = gtk::Label::new(None);
-        title.set_ellipsize(pango::EllipsizeMode::End);
-        title.set_single_line_mode(true);
-        title.set_can_target(false);
-        let chevron = Rc::new(Cell::new(gdk::RGBA::BLACK));
-        let chevron_area = gtk::DrawingArea::new();
-        chevron_area.set_content_width(10);
-        chevron_area.set_content_height(18);
-        let color = chevron.clone();
-        chevron_area.set_draw_func(move |_, cr, w, h| {
-            let c = color.get();
-            cr.set_source_rgba(
-                c.red() as f64,
-                c.green() as f64,
-                c.blue() as f64,
-                c.alpha() as f64,
-            );
-            let (w, h) = (w as f64, h as f64);
-            cr.set_line_width(2.0);
-            cr.set_line_cap(gtk::cairo::LineCap::Round);
-            cr.set_line_join(gtk::cairo::LineJoin::Round);
-            cr.move_to(w - 2.0, h * 0.5 - 6.0);
-            cr.line_to(w - 8.0, h * 0.5);
-            cr.line_to(w - 2.0, h * 0.5 + 6.0);
-            let _ = cr.stroke();
-        });
-        let back_label = gtk::Label::new(None);
-        back_label.set_single_line_mode(true);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        content.append(&chevron_area);
-        content.append(&back_label);
-        let back = gtk::Button::new();
-        back.set_child(Some(&content));
-        back.add_css_class("nsh-header-button");
-        back.set_focusable(false);
-        back.set_focus_on_click(false);
-        let weak = Rc::downgrade(surface);
-        back.connect_clicked(move |_| {
-            if let Some(surface) = weak.upgrade() {
-                go_back_from(&surface, screen);
-            }
-        });
-        Header {
-            bar,
-            title,
-            back,
-            back_label,
-            chevron,
-            chevron_area,
-            laid_out: None,
-        }
-    }
-
-    fn widgets(&self) -> [gtk::Widget; 3] {
-        [
-            self.bar.clone().upcast(),
-            self.back.clone().upcast(),
-            self.title.clone().upcast(),
-        ]
-    }
-}
-
 impl ScreenNav {
     fn new(view: &NshView) -> Self {
         let backdrop = Layer::new();
@@ -674,177 +361,60 @@ impl ScreenNav {
             view: view.clone(),
             config: ScreenConfig::default(),
             backdrop,
-            header: None,
             items: Vec::new(),
-            can_go_back: false,
-            back_title: None,
-            reported: None,
-            header_reported: None,
+            reported: Reported::default(),
             backdrop_size: (-1.0, -1.0),
         }
     }
 
-    fn header_shown(&self) -> bool {
-        self.config.header_shown && self.config.header_height > 0.0
-    }
-
+    /// Reports the screen's size (its stack's) and insets: the window's
+    /// safe area, but the top's when its `header` covers it.
     fn report(&mut self, surface: &Surface, stack: &NshView) {
-        let header = measured_header(&self.config);
-        if self.header_reported.replace(header) != Some(header) {
-            let id = self.view.id();
-            surface.control(|c| c.set_screen_header(id, header));
-        }
         let f = stack.state().frame;
-        let insets = content_insets(&self.config);
+        let mut insets = safe_area(surface);
+        if self.config.header_view.is_some() {
+            insets.top = Points::ZERO;
+        }
         let id = self.view.id();
-        let size = Size::new(f.width, f.height);
+        let size = f.size;
         report(surface, id, &mut self.reported, size, insets);
     }
 
-    /// Applies the config's colors and texts to the header (builds or
-    /// removes it) and the appearance to the background.
-    fn style(&mut self, surface: &Rc<Surface>, dark: bool) {
-        let t = theme(dark);
-        self.backdrop.set_colors(Some(t.window), None);
-        if !self.header_shown() {
-            if let Some(header) = self.header.take() {
-                for widget in header.widgets() {
-                    self.view.remove_native(&widget);
-                }
-            }
-            for item in &self.items {
-                hide(item);
-            }
-            self.layout();
-            return;
-        }
-        let id = self.view.id();
-        let header = self.header.get_or_insert_with(|| Header::new(surface, id));
-        let c = &self.config;
-        if c.header_transparent {
-            header.bar.set_colors(None, None);
-        } else {
-            let fill = c.background_color.map(rgba).unwrap_or(t.bar);
-            header.bar.set_colors(Some(fill), Some(t.line));
-        }
-        let fg = c.title_color.map(rgba).unwrap_or(t.fg);
-        let size = if c.large_title {
-            TITLE_SIZE.1
-        } else {
-            TITLE_SIZE.0
-        };
-        header
-            .title
-            .set_attributes(Some(&label_attrs(fg, size, true)));
-        header.title.set_text(c.title.as_deref().unwrap_or(""));
-        let tint = c.tint_color.map(rgba).unwrap_or(t.fg);
-        header.chevron.set(tint);
-        header.chevron_area.queue_draw();
-        header
-            .back_label
-            .set_attributes(Some(&label_attrs(tint, TITLE_SIZE.0, false)));
-        let back_title = self.back_title.as_deref().unwrap_or("");
-        header.back_label.set_text(back_title);
-        header.back_label.set_visible(!back_title.is_empty());
-        if dark {
-            header.back.add_css_class("nsh-dark");
-        } else {
-            header.back.remove_css_class("nsh-dark");
-        }
-        header.laid_out = None;
-        self.layout();
+    /// Gives the background the window's color in the appearance `dark`.
+    fn style(&self, dark: bool) {
+        self.backdrop.set_fill(Some(window_color(dark)));
     }
 
-    /// Places the background, the header's widgets and items (when
-    /// something changed).
+    /// Places the background, and shows the `header` item (where the core
+    /// put it) and only that one.
     fn layout(&mut self) {
         let (w, h) = {
             let f = self.view.state().frame;
-            (f.width, f.height)
+            (f.size.width.0, f.size.height.0)
         };
         if self.backdrop_size != (w, h) {
             self.backdrop_size = (w, h);
             self.view.set_native(&self.backdrop, rect(0.0, 0.0, w, h));
         }
-        let c = &self.config;
-        let frames = [c.left, c.right, c.title_view]
-            .map(|id| find_item(&self.items, id).map_or(Rect::default(), |v| v.state().frame));
-        let Some(header) = &mut self.header else {
-            return;
-        };
-        let key = (w, c.header_height, frames);
-        if header.laid_out == Some(key) {
-            return;
-        }
-        header.laid_out = Some(key);
-        let view = &self.view;
-        let height = c.header_height;
-        let rows = if c.large_title { 2.0 } else { 1.0 };
-        // The status area (none on desktops) is above the bar.
-        let top = (height - BAR * rows).max(0.0);
-        view.set_native(&header.bar, rect(0.0, 0.0, w, height));
-        let centered = |h: f32| top + ((BAR - h) / 2.0).max(0.0);
-        let place = |v: &NshView, x: f32| {
-            let f = v.state().frame;
-            v.set_child_visible(true);
-            set_shift(v, (x - f.x, centered(f.height) - f.y));
-        };
-        let mut left = EDGE;
-        header.back.set_visible(self.can_go_back);
-        if self.can_go_back {
-            let (bw, bh) = natural(&header.back);
-            view.set_native(&header.back, rect(EDGE, centered(bh), bw, bh));
-            left += bw;
-        } else {
-            view.set_native(&header.back, Rect::default());
-        }
-        if let Some(v) = find_item(&self.items, c.left) {
-            let x = left + GAP;
-            left = x + v.state().frame.width;
-            place(v, x);
-        }
-        let mut right = w;
-        if let Some(v) = find_item(&self.items, c.right) {
-            right = w - EDGE - GAP - v.state().frame.width;
-            place(v, right);
-        }
-        // Items no slot names stay hidden.
         for item in &self.items {
-            let id = Some(item.id());
-            if id != c.left && id != c.right && id != c.title_view {
+            if Some(item.id()) == self.config.header_view {
+                item.set_child_visible(true);
+            } else {
                 hide(item);
             }
         }
-        if let Some(v) = find_item(&self.items, c.title_view) {
-            let fw = v.state().frame.width;
-            place(v, ((w - fw) / 2.0).max(left));
-            header.title.set_visible(false);
-            view.set_native(&header.title, Rect::default());
-            return;
-        }
-        header.title.set_visible(true);
-        let (tw, th) = natural(&header.title);
-        if c.large_title {
-            let rect = rect(16.0, top + BAR + (BAR - th) / 2.0, (w - 32.0).max(0.0), th);
-            header.title.set_xalign(0.0);
-            view.set_native(&header.title, rect);
-        } else {
-            // Centered in the bar, as long as it fits between the items.
-            let side = left.max(w - right) + GAP;
-            let tw = tw.min((w - 2.0 * side).max(0.0));
-            header.title.set_xalign(0.5);
-            let rect = rect((w - tw) / 2.0, centered(th), tw, th);
-            view.set_native(&header.title, rect);
-        }
     }
 
-    /// Keeps the header over the app's content (which the app may insert
+    /// Keeps the `header` over the app's content (which the app may insert
     /// after it).
     fn raise_header(&self) {
-        let Some(header) = &self.header else { return };
-        let mut tail: Vec<gtk::Widget> = header.widgets().into();
-        tail.extend(self.items.iter().map(|v| v.clone().upcast()));
-        keep_last(&self.view, &tail);
+        let header = self
+            .items
+            .iter()
+            .find(|v| Some(v.id()) == self.config.header_view);
+        if let Some(header) = header {
+            keep_last(&self.view, &[header.clone().upcast()]);
+        }
     }
 }
 
@@ -865,16 +435,16 @@ impl Nav {
             .or_insert_with(|| ScreenNav::new(view))
     }
 
+    /// Whether a transition runs.
+    #[cfg(feature = "dev")]
+    pub(crate) fn transitioning(&self) -> bool {
+        !self.transitions.is_empty()
+    }
+
     /// Ends the transitions `which` selects at once.
-    fn finish(&mut self, surface: &Surface, which: impl Fn(&Transition) -> bool) {
-        let mut i = 0;
-        while i < self.transitions.len() {
-            if which(&self.transitions[i]) {
-                let t = self.transitions.remove(i);
-                self.end(surface, t);
-            } else {
-                i += 1;
-            }
+    fn finish(&mut self, surface: &Surface, which: impl Fn(&Motion) -> bool) {
+        for motion in self.transitions.take(which) {
+            self.end(surface, motion);
         }
     }
 
@@ -887,13 +457,13 @@ impl Nav {
                 below,
                 fade,
             } => {
-                let w = stack.state().frame.width;
+                let (x, below_x) = push_offsets(stack.state().frame.size.width, e);
                 if *fade {
                     set_fade(entering, e);
                 } else {
-                    set_shift(entering, (w * (1.0 - e), 0.0));
+                    set_shift(entering, (x.0, 0.0));
                     if let Some(below) = below {
-                        set_shift(below, (-PARALLAX * w * e, 0.0));
+                        set_shift(below, (below_x.0, 0.0));
                     }
                 }
             }
@@ -905,63 +475,55 @@ impl Nav {
                 ..
             } => {
                 let f = stack.state().frame;
+                let (x, below_x) = pop_offsets(f.size.width, e);
                 match leaving {
                     Leaving::View(v) if *fade => set_fade(v, 1.0 - e),
-                    Leaving::View(v) => set_shift(v, (f.width * e, 0.0)),
+                    Leaving::View(v) => set_shift(v, (x.0, 0.0)),
                     Leaving::Image(layer) => {
                         let x = if *fade {
                             layer.set_opacity((1.0 - e) as f64);
                             0.0
                         } else {
-                            f.width * e
+                            x.0
                         };
-                        stack.set_native(layer, rect(x, 0.0, f.width, f.height));
+                        stack.set_native(layer, rect(x, 0.0, f.size.width.0, f.size.height.0));
                     }
                 }
                 if let (Some(below), false) = (below, fade) {
-                    set_shift(below, (-PARALLAX * f.width * (1.0 - e), 0.0));
+                    set_shift(below, (below_x.0, 0.0));
                 }
             }
-            Motion::ModalIn { view, scrim, fade } => {
+            Motion::ModalIn { view, fade } => {
                 if *fade {
                     set_fade(view, e);
                 } else {
                     // From below the window's bottom edge.
-                    let h = surface.root.state().frame.height;
-                    let y = view.state().frame.y;
-                    set_shift(view, (0.0, (h - y) * (1.0 - e)));
-                }
-                if let Some(scrim) = scrim {
-                    scrim.set_opacity(e as f64);
+                    let h = surface.root.state().frame.size.height.0;
+                    let y = view.state().frame.origin.y.0;
+                    set_shift(view, (0.0, modal_in_offset(Points(h - y), e).0));
                 }
             }
             Motion::ModalOut {
-                layer,
-                frame,
-                scrim,
-                fade,
-                ..
+                layer, frame, fade, ..
             } => {
-                let h = surface.root.state().frame.height;
+                let h = surface.root.state().frame.size.height.0;
                 let y = if *fade {
                     layer.set_opacity((1.0 - e) as f64);
-                    frame.y
+                    frame.origin.y.0
                 } else {
-                    frame.y + (h - frame.y) * e
+                    frame.origin.y.0 + modal_out_offset(Points(h - frame.origin.y.0), e).0
                 };
-                surface
-                    .root
-                    .set_native(layer, rect(frame.x, y, frame.width, frame.height));
-                if let Some(scrim) = scrim {
-                    scrim.set_opacity((1.0 - e) as f64);
-                }
+                surface.root.set_native(
+                    layer,
+                    rect(frame.origin.x.0, y, frame.size.width.0, frame.size.height.0),
+                );
             }
         }
     }
 
-    fn end(&mut self, surface: &Surface, t: Transition) {
-        self.apply(surface, &t.motion, 1.0);
-        match t.motion {
+    fn end(&mut self, surface: &Surface, motion: Motion) {
+        self.apply(surface, &motion, 1.0);
+        match motion {
             Motion::Push { stack, .. } => self.settle(stack.id()),
             Motion::Pop {
                 stack,
@@ -987,16 +549,8 @@ impl Nav {
                 set_fade(&view, 1.0);
                 surface.event(view.id(), EventKind::Show, EventPayload::None);
             }
-            Motion::ModalOut {
-                dismiss,
-                layer,
-                scrim,
-                ..
-            } => {
+            Motion::ModalOut { dismiss, layer, .. } => {
                 surface.root.remove_native(&layer);
-                if let Some(scrim) = scrim {
-                    surface.root.remove_native(&scrim);
-                }
                 if let Some(id) = dismiss {
                     surface.event(id, EventKind::Dismiss, EventPayload::None);
                 }
@@ -1009,7 +563,7 @@ impl Nav {
         let Some(st) = self.stacks.get(&stack) else {
             return;
         };
-        let top = st.shown.last().copied();
+        let top = st.screens.top();
         for view in st.view.child_views() {
             if view.kind() != ViewKind::Screen {
                 continue;
@@ -1024,13 +578,9 @@ impl Nav {
         }
     }
 
-    fn start(&mut self, surface: &Rc<Surface>, duration: f64, motion: Motion) {
+    fn start(&mut self, surface: &Rc<Surface>, duration: Duration, motion: Motion) {
         self.apply(surface, &motion, 0.0);
-        self.transitions.push(Transition {
-            start: None,
-            duration,
-            motion,
-        });
+        self.transitions.push(duration, motion);
         if self.ticking {
             return;
         }
@@ -1043,7 +593,8 @@ impl Nav {
             let Ok(mut nav) = surface.nav.try_borrow_mut() else {
                 return glib::ControlFlow::Continue;
             };
-            nav.tick(&surface, clock.frame_time());
+            // Microseconds.
+            nav.tick(&surface, clock.frame_time() as f64 / 1_000_000.0);
             if nav.transitions.is_empty() {
                 nav.ticking = false;
                 glib::ControlFlow::Break
@@ -1053,38 +604,24 @@ impl Nav {
         });
     }
 
-    fn tick(&mut self, surface: &Surface, now: i64) {
-        for t in &mut self.transitions {
-            t.start.get_or_insert(now);
-        }
-        let mut i = 0;
-        while i < self.transitions.len() {
-            let p = self.transitions[i].progress(now);
-            if p >= 1.0 {
-                let t = self.transitions.remove(i);
-                self.end(surface, t);
-            } else {
-                self.apply(surface, &self.transitions[i].motion, ease(p));
-                i += 1;
+    /// A frame at `now` (seconds).
+    fn tick(&mut self, surface: &Surface, now: f64) {
+        for tick in self.transitions.tick(now) {
+            match tick {
+                Tick::Ended(motion) => self.end(surface, motion),
+                Tick::At(i, e) => self.apply(surface, &self.transitions[i], e),
             }
         }
     }
 
     /// The duration and whether it fades; `None`: no animation.
-    fn screen_motion(surface: &Surface, animation: ScreenAnimation) -> Option<(f64, bool)> {
-        match animation {
-            ScreenAnimation::None => None,
-            ScreenAnimation::Fade => Some((FADE_MS, true)),
-            ScreenAnimation::Default if surface.environment.get().reduce_motion => {
-                Some((FADE_MS, true))
-            }
-            ScreenAnimation::Default => Some((SLIDE_MS, false)),
-        }
+    fn screen_motion(surface: &Surface, animation: ScreenAnimation) -> Option<(Duration, bool)> {
+        nsh_core::navigation::screen_motion(animation, surface.environment.get().reduce_motion)
     }
 
     /// Shows the app's screens of `stack` after a batch changed them.
     fn reconcile(&mut self, surface: &Rc<Surface>, stack_id: NodeId) {
-        self.finish(surface, |t| t.stack() == Some(stack_id));
+        self.finish(surface, |m| m.stack() == Some(stack_id));
         let dark = dark(surface);
         let Some(st) = self.stacks.get_mut(&stack_id) else {
             return;
@@ -1096,13 +633,9 @@ impl Nav {
             .filter(|v| v.kind() == ViewKind::Screen)
             .collect();
         let find = |id: NodeId| children.iter().find(|c| c.id() == id).cloned();
-        st.popped.retain(|&id| find(id).is_some());
-        let desired: Vec<NodeId> = children
-            .iter()
-            .map(NshView::id)
-            .filter(|id| !st.popped.contains(id))
-            .collect();
-        let prev = std::mem::replace(&mut st.shown, desired.clone());
+        let ids: Vec<NodeId> = children.iter().map(NshView::id).collect();
+        let prev = st.screens.reconcile(&ids);
+        let desired = st.screens.shown().to_vec();
         let (old, new) = (prev.last().copied(), desired.last().copied());
         let frame = stack.state().frame;
         // The image the top screen showed when the app removed it.
@@ -1110,7 +643,7 @@ impl Nav {
             (Some(old), Some((watched, paintable)))
                 if Some(old) != new && *watched == old && find(old).is_none() =>
             {
-                image_of(paintable, frame.width, frame.height)
+                image_of(paintable, frame.size.width.0, frame.size.height.0)
             }
             _ => None,
         };
@@ -1134,20 +667,11 @@ impl Nav {
                 self.screens.remove(id);
             }
         }
-        // Back buttons and their labels follow the order.
-        let mut previous_back: Option<Arc<str>> = None;
-        for (i, &id) in desired.iter().enumerate() {
+        for &id in &desired {
             let Some(view) = find(id) else { continue };
             let s = self.screen(&view);
-            let can_go_back = i > 0 && s.config.back_visible;
-            let back_title = previous_back.take().filter(|_| i > 0);
-            previous_back = s.config.back_title.clone();
-            if s.can_go_back != can_go_back || s.back_title != back_title {
-                s.can_go_back = can_go_back;
-                s.back_title = back_title;
-                s.style(surface, dark);
-            }
             if !prev.contains(&id) {
+                s.style(dark);
                 s.report(surface, &stack);
             }
         }
@@ -1160,7 +684,7 @@ impl Nav {
         let (Some(old), Some(new)) = (old, new) else {
             return;
         };
-        if old == new || frame.width <= 0.0 {
+        if old == new || frame.size.width.0 <= 0.0 {
             return;
         }
         let pushing = !prev.contains(&new);
@@ -1210,31 +734,30 @@ impl Nav {
         }
     }
 
-    /// The user goes back in `stack`: tells the screen if it prevents it,
-    /// else pops it natively and tells the app once it is gone.
+    /// The user goes back in `stack`: tells the top screen when the app
+    /// listens (`onBackPress`), then pops it natively unless it prevents it
+    /// (`popOnBack` false), and tells the app once it is gone.
     fn back(&mut self, surface: &Rc<Surface>, stack_id: NodeId) {
-        self.finish(surface, |t| t.stack() == Some(stack_id));
+        self.finish(surface, |m| m.stack() == Some(stack_id));
         let Some(st) = self.stacks.get_mut(&stack_id) else {
             return;
         };
-        let Some(&top) = st.shown.last() else { return };
-        if self
-            .screens
-            .get(&top)
-            .is_some_and(|s| s.config.prevent_back)
-        {
-            surface.event(top, EventKind::BackRequest, EventPayload::None);
+        let Some(top) = st.screens.top() else { return };
+        if let Some(s) = self.screens.get(&top) {
+            if s.view.state().events.contains(EventKind::BackRequest) {
+                surface.event(top, EventKind::BackRequest, EventPayload::None);
+            }
+            if s.config.prevent_back {
+                return;
+            }
+        }
+        if st.screens.pop().is_none() {
             return;
         }
-        if st.shown.len() < 2 {
-            return;
-        }
-        st.shown.pop();
-        st.popped.push(top);
         let stack = st.view.clone();
         let children = stack.child_views();
         let find = |id: NodeId| children.iter().find(|c| c.id() == id).cloned();
-        let below = st.shown.last().copied().and_then(find);
+        let below = st.screens.top().and_then(find);
         if let (Some(below), Some((watched, paintable))) = (&below, &mut st.paintable) {
             *watched = below.id();
             paintable.set_widget(Some(below));
@@ -1270,20 +793,14 @@ impl Nav {
         let wants = |st: &StackNav| {
             st.view.is_mapped()
                 && within.is_none_or(|w| st.view.is_ancestor(w))
-                && (st.shown.len() > 1
-                    || st.shown.last().is_some_and(|top| {
-                        self.screens.get(top).is_some_and(|s| s.config.prevent_back)
-                    }))
+                && st.screens.takes_back(|top| {
+                    self.screens
+                        .get(&top)
+                        .is_some_and(|s| s.config.prevent_back)
+                })
         };
         let candidates: Vec<&StackNav> = self.stacks.values().filter(|s| wants(s)).collect();
-        candidates
-            .iter()
-            .find(|c| {
-                !candidates
-                    .iter()
-                    .any(|o| o.view != c.view && o.view.is_ancestor(&c.view))
-            })
-            .map(|c| c.view.id())
+        innermost(&candidates, |c, o| o.view.is_ancestor(&c.view)).map(|c| c.view.id())
     }
 
     /// Takes modal `id` away natively (it leaves as an image of its last
@@ -1291,7 +808,7 @@ impl Nav {
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
         self.finish(
             surface,
-            |t| matches!(&t.motion, Motion::ModalIn { view, .. } if view.id() == id),
+            |m| matches!(m, Motion::ModalIn { view, .. } if view.id() == id),
         );
         self.order.retain(|&m| m != id);
         let Some(m) = self.modals.get_mut(&id) else {
@@ -1299,10 +816,6 @@ impl Nav {
         };
         let Some(view) = m.view.take() else { return };
         let restore = m.restore.take().and_then(|w| w.upgrade());
-        if let Some(b) = m.backdrop.take() {
-            view.remove_native(&b);
-        }
-        let scrim = m.scrim.take();
         let frame = view.state().frame;
         let motion = modal_motion(surface, m.config.animation);
         // Unmapped, the paintable keeps the image the modal showed last.
@@ -1313,7 +826,9 @@ impl Nav {
             view.unparent();
         }
         let image = match (motion, paintable) {
-            (Some(_), Some(paintable)) if mapped => image_of(&paintable, frame.width, frame.height),
+            (Some(_), Some(paintable)) if mapped => {
+                image_of(&paintable, frame.size.width.0, frame.size.height.0)
+            }
             _ => None,
         };
         set_shift(&view, (0.0, 0.0));
@@ -1340,15 +855,11 @@ impl Nav {
                     dismiss: (!reported).then_some(id),
                     layer,
                     frame,
-                    scrim,
                     fade,
                 };
                 self.start(surface, duration, motion);
             }
             _ => {
-                if let Some(scrim) = scrim {
-                    surface.root.remove_native(&scrim);
-                }
                 if !reported {
                     surface.event(id, EventKind::Dismiss, EventPayload::None);
                 }
@@ -1362,23 +873,23 @@ impl Nav {
             return;
         };
         let Some(view) = m.view.clone() else { return };
-        let scrim = m.scrim.clone();
         match modal_motion(surface, m.config.animation) {
             Some((duration, fade)) => {
-                self.start(surface, duration, Motion::ModalIn { view, scrim, fade });
+                self.start(surface, duration, Motion::ModalIn { view, fade });
             }
             None => surface.event(id, EventKind::Show, EventPayload::None),
         }
     }
 
-    /// The user asks modal `id` to close (going back, its sheet's
-    /// backdrop): it hears `onRequestClose`. A `dismissible` one also
+    /// The user asks modal `id` to close (going back): it hears
+    /// `onRequestClose` (reason `"cancel"`). With `closeOnEscape` it also
     /// leaves natively and hears `onDismiss` right after, as on iOS (the
     /// runtime keeps the handler of a modal the app removed in between).
     fn request_close(&mut self, surface: &Rc<Surface>, id: NodeId) {
-        surface.event(id, EventKind::RequestClose, EventPayload::None);
+        let reason = EventPayload::Map(vec![("reason", PayloadValue::Str("cancel".into()))]);
+        surface.event(id, EventKind::RequestClose, reason);
         if let Some(m) = self.modals.get_mut(&id)
-            && m.config.dismissible
+            && m.config.close_on_escape
             && m.view.is_some()
         {
             m.closed = true;
@@ -1403,19 +914,16 @@ impl Nav {
     /// stack inside the newest modal pops, else the modal asks to close,
     /// else the innermost stack pops. Whether something took it.
     fn default_back(&mut self, surface: &Rc<Surface>) -> bool {
-        if let Some(&id) = self.order.last() {
-            let view = self.modals.get(&id).and_then(|m| m.view.clone());
-            match self.back_stack(view.as_ref()) {
-                Some(stack) => self.back(surface, stack),
-                None => self.request_close(surface, id),
-            }
-            return true;
+        let target = back_target(self.order.last().copied(), false, |modal| {
+            let view = modal.and_then(|id| self.modals.get(&id)?.view.clone());
+            self.back_stack(view.as_ref())
+        });
+        match target {
+            Some(Back::Stack(stack)) => self.back(surface, stack),
+            Some(Back::Modal(id)) => self.request_close(surface, id),
+            Some(Back::App) | None => return false,
         }
-        if let Some(stack) = self.back_stack(None) {
-            self.back(surface, stack);
-            return true;
-        }
-        false
+        true
     }
 
     /// Keeps the keyboard focus inside the newest modal: Tab never reaches
@@ -1440,145 +948,37 @@ impl Nav {
     }
 
     /// Keeps the presented modals (and those leaving) over the app's
-    /// views, each sheet right above its scrim.
+    /// views.
     fn raise_modals(&self, surface: &Surface) {
         let mut tail: Vec<gtk::Widget> = Vec::new();
         for m in self.order.iter().filter_map(|id| self.modals.get(id)) {
-            if let Some(scrim) = &m.scrim {
-                tail.push(scrim.clone().upcast());
-            }
             if let Some(view) = &m.view {
                 tail.push(view.clone().upcast());
             }
         }
-        for t in &self.transitions {
-            if let Motion::ModalOut { layer, scrim, .. } = &t.motion {
-                if let Some(scrim) = scrim {
-                    tail.push(scrim.clone().upcast());
-                }
+        for motion in self.transitions.iter() {
+            if let Motion::ModalOut { layer, .. } = motion {
                 tail.push(layer.clone().upcast());
             }
         }
         keep_last(&surface.root, &tail);
     }
 
-    /// Sizes modal `id` to the surface (a sheet to its card, over a scrim
-    /// covering the window) and reports it.
+    /// Sizes modal `id` to the surface and reports it (with the surface's
+    /// safe area).
     fn size_modal(&mut self, surface: &Surface, id: NodeId) {
         let Some(m) = self.modals.get_mut(&id) else {
             return;
         };
         let Some(view) = &m.view else { return };
         let f = surface.root.state().frame;
-        let sheet = sheet_frame(&m.config, f.width, f.height);
-        let insets = if sheet.is_some() {
-            // A card inside the window: no system UI over it.
-            EdgeInsets::default()
-        } else {
-            let safe = surface.environment.get().safe_area;
-            EdgeInsets {
-                top: safe.top,
-                right: safe.right,
-                bottom: safe.bottom,
-                left: safe.left,
-            }
-        };
-        let frame = sheet.unwrap_or(rect(0.0, 0.0, f.width, f.height));
+        let frame = rect(0.0, 0.0, f.size.width.0, f.size.height.0);
         if std::mem::replace(&mut view.state_mut().frame, frame) != frame {
             view.queue_allocate();
             view.moved();
         }
-        if let Some(b) = &m.backdrop {
-            view.set_native(b, rect(0.0, 0.0, frame.width, frame.height));
-        }
-        if let Some(scrim) = &m.scrim {
-            surface.root.set_native(scrim, f);
-        }
-        let size = Size::new(frame.width, frame.height);
-        report(surface, id, &mut m.reported, size, insets);
-    }
-
-    /// Gives presented modal `id` the scrim of a sheet, or takes it away.
-    fn sheet_scrim(&mut self, surface: &Rc<Surface>, id: NodeId) {
-        let Some(m) = self.modals.get_mut(&id) else {
-            return;
-        };
-        if m.view.is_none() {
-            return;
-        }
-        let sheet = is_sheet(&m.config);
-        if !sheet {
-            if let Some(scrim) = m.scrim.take() {
-                surface.root.remove_native(&scrim);
-            }
-            return;
-        }
-        if m.scrim.is_some() {
-            return;
-        }
-        let scrim = Layer::new();
-        // Picked as a hosted widget: what is behind gets no input.
-        scrim.set_can_target(true);
-        scrim.set_colors(Some(theme(dark(surface)).scrim), None);
-        let click = gtk::GestureClick::new();
-        let weak = Rc::downgrade(surface);
-        click.connect_released(move |gesture, _, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            if let Some(surface) = weak.upgrade()
-                && let Ok(mut nav) = surface.nav.try_borrow_mut()
-            {
-                nav.request_close(&surface, id);
-            }
-        });
-        scrim.add_controller(click);
-        let frame = surface.root.state().frame;
-        surface.root.set_native(&scrim, frame);
-        m.scrim = Some(scrim);
-        // Right under the sheet.
-        self.raise_modals(surface);
-    }
-
-    /// Gives modal `id` its opaque background, unless it is transparent: a
-    /// sheet's is its own (a rounded card with a shadow), a full-screen
-    /// modal's a layer under its content.
-    fn style_modal(&mut self, dark: bool, id: NodeId) {
-        let Some(m) = self.modals.get_mut(&id) else {
-            return;
-        };
-        let Some(view) = &m.view else { return };
-        let t = theme(dark);
-        let sheet = is_sheet(&m.config);
-        let style = sheet.then(|| sheet_style(&t));
-        let restyle = {
-            let current = &view.state().style;
-            match &style {
-                Some(style) => **current != *style,
-                // Back from a sheet: the modal itself has no style.
-                None => current.overflow_hidden && current.border_radius == SHEET_RADIUS,
-            }
-        };
-        if restyle {
-            *view.state_mut().style = style.unwrap_or_default();
-            view.moved();
-        }
-        if let Some(scrim) = &m.scrim {
-            scrim.set_colors(Some(t.scrim), None);
-        }
-        if m.config.transparent || sheet {
-            if let Some(b) = m.backdrop.take() {
-                view.remove_native(&b);
-            }
-            return;
-        }
-        let backdrop = m.backdrop.get_or_insert_with(|| {
-            let layer = Layer::new();
-            // First, under the app's content.
-            layer.insert_after(view, None::<&gtk::Widget>);
-            layer
-        });
-        backdrop.set_colors(Some(t.window), None);
-        let f = view.state().frame;
-        view.set_native(backdrop, rect(0.0, 0.0, f.width, f.height));
+        let size = frame.size;
+        report(surface, id, &mut m.reported, size, safe_area(surface));
     }
 
     /// Listens to the window's back keys and the mouse's back button.
@@ -1633,24 +1033,9 @@ pub(crate) fn default_back(surface: &Rc<Surface>) {
     });
 }
 
-/// The back button of `screen`'s header.
-fn go_back_from(surface: &Rc<Surface>, screen: NodeId) {
-    let Ok(mut nav) = surface.nav.try_borrow_mut() else {
-        return;
-    };
-    let stack = nav
-        .stacks
-        .values()
-        .find(|s| s.shown.last() == Some(&screen))
-        .map(|s| s.view.id());
-    if let Some(stack) = stack {
-        nav.back(surface, stack);
-    }
-}
-
 /// The window of `surface`, when a text field (a `gtk::TextView` or any
 /// `gtk::Editable`) or a web view's page has its keyboard focus.
-fn focused_field(surface: &Surface) -> Option<gtk::Root> {
+pub(crate) fn focused_field(surface: &Surface) -> Option<gtk::Root> {
     let root = surface.root.root()?;
     let focus = root.focus()?;
     (focus.is::<gtk::TextView>()
@@ -1696,8 +1081,7 @@ pub(crate) fn stack_changed(surface: &Rc<Surface>, stack: &NshView, added: Optio
     let id = stack.id();
     nav.stacks.entry(id).or_insert_with(|| StackNav {
         view: stack.clone(),
-        shown: Vec::new(),
-        popped: Vec::new(),
+        screens: Stack::default(),
         paintable: None,
     });
     if let Some(screen) = added.filter(|v| v.kind() == ViewKind::Screen) {
@@ -1715,7 +1099,7 @@ pub(crate) fn stack_resized(surface: &Rc<Surface>, stack: &NshView) {
     let Some(st) = nav.stacks.get(&stack.id()) else {
         return;
     };
-    for id in &st.shown {
+    for id in st.screens.shown() {
         if let Some(s) = nav.screens.get_mut(id) {
             s.report(surface, stack);
         }
@@ -1727,23 +1111,11 @@ pub(crate) fn screen_config(surface: &Rc<Surface>, view: &NshView, config: &Scre
     let dark = dark(surface);
     let mut nav = surface.nav.borrow_mut();
     let s = nav.screen(view);
-    let back_title_changed = s.config.back_title != config.back_title;
     s.config = config.clone();
-    s.style(surface, dark);
-    let Some(stack) = view.parent_view().filter(|p| p.kind() == ViewKind::Stack) else {
-        return;
-    };
-    s.report(surface, &stack);
-    // The screen's back title labels the next one's back button.
-    if back_title_changed {
-        let next = nav.stacks.get(&stack.id()).and_then(|st| {
-            let i = st.shown.iter().position(|&s| s == view.id())?;
-            st.shown.get(i + 1).copied()
-        });
-        if let Some(next) = next.and_then(|id| nav.screens.get_mut(&id)) {
-            next.back_title = config.back_title.clone();
-            next.style(surface, dark);
-        }
+    s.style(dark);
+    s.layout();
+    if let Some(stack) = view.parent_view().filter(|p| p.kind() == ViewKind::Stack) {
+        s.report(surface, &stack);
     }
 }
 
@@ -1752,10 +1124,6 @@ pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &Modal
     let mut nav = surface.nav.borrow_mut();
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
-    nav.style_modal(dark(surface), id);
-    // Its presentation decides its frame and whether a scrim dims the
-    // window.
-    nav.sheet_scrim(surface, id);
     nav.size_modal(surface, id);
 }
 
@@ -1781,15 +1149,13 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     m.view = Some(view.clone());
     m.paintable = Some(gtk::WidgetPaintable::new(Some(view)));
     m.closed = false;
-    m.reported = None;
+    m.reported = Reported::default();
     if view.parent().is_some() {
         view.unparent();
     }
     view.insert_before(&surface.root, None::<&gtk::Widget>);
     nav.order.push(id);
     nav.scope_focus(surface);
-    nav.style_modal(dark(surface), id);
-    nav.sheet_scrim(surface, id);
     nav.size_modal(surface, id);
     // Animated in at the end of the batch, with the options it brings.
     nav.presenting.push(id);
@@ -1825,11 +1191,9 @@ pub(crate) fn header_item(surface: &Rc<Surface>, parent: &NshView, child: &NshVi
     if !s.items.contains(child) {
         s.items.push(child.clone());
     }
-    // Placed (and shown) by the header's layout at the end of the batch.
+    // Shown by the screen's layout at the end of the batch when it is the
+    // `header` (the core places it).
     hide(child);
-    if let Some(h) = &mut s.header {
-        h.laid_out = None;
-    }
 }
 
 /// A header item was removed.
@@ -1839,9 +1203,6 @@ pub(crate) fn header_item_removed(surface: &Rc<Surface>, view: &NshView) {
         && let Some(s) = nav.screens.get_mut(&screen.id())
     {
         s.items.retain(|v| v != view);
-        if let Some(h) = &mut s.header {
-            h.laid_out = None;
-        }
     }
     if view.parent().is_some() {
         view.unparent();
@@ -1865,12 +1226,8 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
     nav.install_keys(surface);
     let dark = dark(surface);
     if nav.dark.replace(dark).is_some_and(|d| d != dark) {
-        for s in nav.screens.values_mut() {
-            s.style(surface, dark);
-        }
-        let ids: Vec<NodeId> = nav.modals.keys().copied().collect();
-        for id in ids {
-            nav.style_modal(dark, id);
+        for s in nav.screens.values() {
+            s.style(dark);
         }
     }
     for stack in std::mem::take(&mut nav.dirty) {
@@ -1879,89 +1236,12 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
     for id in std::mem::take(&mut nav.presenting) {
         nav.show_modal(surface, id);
     }
-    // Screen widths and item sizes change with the app's layout.
+    // Screen sizes change with the app's layout.
     for s in nav.screens.values_mut() {
         s.layout();
         s.raise_header();
     }
     if !nav.order.is_empty() || !nav.transitions.is_empty() {
         nav.raise_modals(surface);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn eases_out() {
-        assert_eq!(ease(0.0), 0.0);
-        assert_eq!(ease(1.0), 1.0);
-        assert_eq!(ease(2.0), 1.0);
-        assert!(ease(0.5) > 0.5);
-    }
-
-    #[test]
-    fn sheets_are_centered_cards() {
-        let config = |presentation, transparent| ModalConfig {
-            presentation,
-            transparent,
-            ..ModalConfig::default()
-        };
-        let page = config(ModalPresentation::PageSheet, false);
-        let form = config(ModalPresentation::FormSheet, false);
-        assert_eq!(
-            sheet_frame(&config(ModalPresentation::FullScreen, false), 1200.0, 900.0),
-            None
-        );
-        // Transparent modals cover the window, as on iOS.
-        assert_eq!(
-            sheet_frame(&config(ModalPresentation::PageSheet, true), 1200.0, 900.0),
-            None
-        );
-        // A wide window: the sheet's own width, centered, the full height
-        // but the margins.
-        assert_eq!(
-            sheet_frame(&page, 1200.0, 900.0),
-            Some(rect(240.0, 32.0, 720.0, 836.0))
-        );
-        assert_eq!(
-            sheet_frame(&form, 1200.0, 900.0),
-            Some(rect(330.0, 140.0, 540.0, 620.0))
-        );
-        // A small window: smaller margins.
-        assert_eq!(
-            sheet_frame(&page, 400.0, 300.0),
-            Some(rect(20.0, 15.0, 360.0, 270.0))
-        );
-    }
-
-    #[test]
-    fn headers_shown_above_the_content_are_measured() {
-        let config = |transparent: bool, large_title: bool, header_shown: bool| ScreenConfig {
-            header_transparent: transparent,
-            large_title,
-            header_shown,
-            ..ScreenConfig::default()
-        };
-        assert_eq!(measured_header(&config(false, false, true)), Some(BAR));
-        assert_eq!(measured_header(&config(true, false, true)), None);
-        assert_eq!(measured_header(&config(false, true, true)), None);
-        assert_eq!(measured_header(&config(false, false, false)), None);
-    }
-
-    #[test]
-    fn content_under_the_header_is_inset() {
-        let config = |transparent: bool, large_title: bool, header_shown: bool| ScreenConfig {
-            header_transparent: transparent,
-            large_title,
-            header_shown,
-            header_height: 47.0,
-            ..ScreenConfig::default()
-        };
-        assert_eq!(content_insets(&config(false, false, true)).top, 0.0);
-        assert_eq!(content_insets(&config(true, false, true)).top, 47.0);
-        assert_eq!(content_insets(&config(false, true, true)).top, 47.0);
-        assert_eq!(content_insets(&config(true, false, false)).top, 0.0);
     }
 }

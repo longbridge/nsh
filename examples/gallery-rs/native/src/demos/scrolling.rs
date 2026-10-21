@@ -4,14 +4,14 @@
 //! gallery's `demos/Scrolling.tsx`).
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     ui::{View, prelude::*},
 };
 
 use crate::ui::{
     Badge, Button, ButtonVariant, DemoPage, Figure, Finish, Finished, IconName, Meter, PressProps,
     Section, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, Tone,
-    caption, code, colors, hint, press_with, radius, toggle,
+    caption, code, colors, hint, lengths, press_with, radius, toggle,
 };
 
 /// The tones cards, tiles and posts cycle through.
@@ -133,7 +133,7 @@ fn backdrop(size: (f32, f32), tone: Tone, seed: f32) -> Painter {
     p.stroke_style(color(tone.color()))
         .line_width(1.5)
         .stroke()
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .stroke_style(color(colors::FAINT))
         .line_width(1.0)
         .begin_path()
@@ -166,7 +166,9 @@ fn Backdrop(props: BackdropProps) -> impl IntoElement {
         .right_0()
         .bottom_0()
         .child(canvas(move || backdrop(size.get(), tone, seed)).flex_1())
-        .on_layout(move |frame: &Rect| size.set((frame.width, frame.height)))
+        .on_layout(move |frame: &Bounds<Points>| {
+            size.set((frame.size.width.0, frame.size.height.0))
+        })
 }
 
 /// The pages: a title, a figure, its note and tone.
@@ -186,7 +188,7 @@ fn Pager() -> impl IntoElement {
     // The pages' width: the scroll view's. Until the layout tells, as wide
     // as the scroll view would be (the section's inset is 32 + 12 + 28
     // narrower than the window).
-    let width = signal(untracked(window).width - 72.0);
+    let width = signal(untracked(window).width.0 - 72.0);
     let page = signal(0_usize);
     // The scroll offset, fed natively, and the pages' width as an animated
     // value: the offset in pages (`at`) moves the parallax and the
@@ -195,10 +197,10 @@ fn Pager() -> impl IntoElement {
     let pages_wide = animated_value(width.get_untracked().max(1.0));
     effect(move || pages_wide.set(width.get().max(1.0)));
     let at = x.div(&pages_wide);
-    let settle = move |e: &ScrollOffset| {
+    let settle = move |e: &Point<Points>| {
         let width = width.get_untracked();
         if width > 0.0 {
-            page.set((e.x / width).round().max(0.0) as usize);
+            page.set((e.x.0 / width).round().max(0.0) as usize);
         }
     };
     let pages = PAGES
@@ -249,7 +251,7 @@ fn Pager() -> impl IntoElement {
                 .finish(Finish::Card)
                 .border_1()
                 .border_color(colors::LINE)
-                .on_layout(move |frame: &Rect| width.set(frame.width))
+                .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 .on_momentum_scroll_end(settle)
                 .on_scroll_end(settle)
                 .child(view().flex_row().children(pages)),
@@ -352,16 +354,16 @@ fn Cards() -> impl IntoElement {
             )
     })
     .horizontal()
-    .estimated_item_size(CARD + GAP)
-    .snap_interval(CARD + GAP)
+    .estimated_item_size(px(CARD + GAP))
+    .snap_interval(px(CARD + GAP))
     .snap_alignment(move || ALIGNS[align.get()].0)
     // `decelerationRate="fast"`.
     .deceleration(0.99)
     .disable_interval_momentum(one_step)
     .shows_indicator(false)
     .h(px(128.0))
-    .column_gap(GAP)
-    .content_padding_x(14.0);
+    .column_gap(px(GAP))
+    .content_padding_x(px(14.0));
     view()
         .gap_3()
         .child(view().mx(px(-14.0)).child(cards))
@@ -435,15 +437,17 @@ fn Events() -> impl IntoElement {
     // Which of [`THROTTLES`].
     let throttle = signal(1_usize);
     let note = move |name: &'static str, tone: Tone| {
-        move |e: &ScrollOffset| {
+        move |e: &Point<Points>| {
             log.update(|log| {
-                log.insert(0, (name, e.y.round(), tone));
+                log.insert(0, (name, e.y.0.round(), tone));
                 log.truncate(5);
             });
         }
     };
     let progress = move || match offset.get() {
-        Some(o) if o.content_height > o.height => o.y / (o.content_height - o.height),
+        Some(o) if o.content_size.height > o.size.height => {
+            o.offset.y / (o.content_size.height - o.size.height)
+        }
         _ => 0.0,
     };
     let rows = (1..=30).map(|i: u32| {
@@ -472,11 +476,11 @@ fn Events() -> impl IntoElement {
     let figure = Figure::new(move || {
         offset
             .get()
-            .map_or("0".to_owned(), |o| o.y.round().to_string())
+            .map_or("0".to_owned(), |o| o.offset.y.0.round().to_string())
     })
     .note(move || {
         offset.get().map_or("Scroll the box".to_owned(), |o| {
-            format!("/ {}", o.content_height.round())
+            format!("/ {}", o.content_size.height.0.round())
         })
     });
     view()
@@ -490,7 +494,7 @@ fn Events() -> impl IntoElement {
                     text(move || {
                         let viewport = offset
                             .get()
-                            .map_or("—".to_owned(), |o| o.height.round().to_string());
+                            .map_or("—".to_owned(), |o| o.size.height.0.round().to_string());
                         format!("viewport {viewport} pt")
                     })
                     .text_size(px(13.0))
@@ -513,8 +517,8 @@ fn Events() -> impl IntoElement {
                 .content_inset(move || {
                     if inset.get() {
                         EdgeInsets {
-                            top: 40.0,
-                            bottom: 40.0,
+                            top: px(40.0),
+                            bottom: px(40.0),
                             ..EdgeInsets::default()
                         }
                     } else {
@@ -592,7 +596,7 @@ fn Zoom() -> impl IntoElement {
                 } else {
                     1.0
                 };
-                scroll_ref.zoom_to(to, Some((x, y)), true);
+                scroll_ref.zoom_to(to, Some(point(px(x), px(y))), true);
             })
             .child(
                 view()
@@ -774,7 +778,7 @@ fn Feed() -> impl IntoElement {
                 },
             )
             .keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))
-            .estimated_item_size(48.0)
+            .estimated_item_size(px(48.0))
             .h(px(240.0))
             .rounded(px(radius::CONTROL))
             .bg(colors::SURFACE)

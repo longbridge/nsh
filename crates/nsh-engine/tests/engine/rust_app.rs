@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
+use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, Size,
     ui::{Root, prelude::*},
@@ -42,18 +43,21 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         app: App::Rust(Root::new::<Counter>(|| CounterProps {
             label: "Taps".into(),
         })),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         // Nothing registered: Rust renders its components by type.
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -108,17 +112,20 @@ fn a_rust_app_starts_in_its_appearance() {
     let config = EngineConfig {
         // `nsh.json` `"appearance": "dark"` of a Rust app (`nsh.json` "root").
         app: App::Rust(Root::of::<WithCard>().appearance(nsh_core::platform::Appearance::Dark)),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -137,12 +144,12 @@ fn a_rust_app_starts_in_its_appearance() {
 #[component]
 fn Navigation() -> impl IntoElement {
     let routes = signal(vec![0_u32, 1]);
-    stack().flex_1().child(Each::new(
+    nav_stack().flex_1().child(Each::new(
         move || routes.get(),
         |&route: &u32| route,
         move |route, _| {
             let route = route.get_untracked();
-            screen()
+            nav_page()
                 .title(format!("page {route}"))
                 .header_right(text("more"))
                 .on_dismiss(move |_: &()| routes.update(|r| r.retain(|r| *r < route)))
@@ -156,17 +163,20 @@ fn rust_components_navigate_with_native_stacks() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Navigation>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -220,13 +230,13 @@ fn rust_components_navigate_with_native_stacks() {
     assert!(deleted, "the popped screen goes");
 }
 
-/// Rust content in a Rust component of the mobile UI: a card's header
-/// and body.
+/// Rust content in a Rust component of a UI set: a card's header and
+/// body.
 #[component]
 fn WithCard() -> impl IntoElement {
     let taps = signal(0);
     view().flex_1().child(
-        nsh_ui_mobile::Card::element(nsh_ui_mobile::CardProps::default())
+        crate::test_ui::Card::element(crate::test_ui::CardProps::default())
             .fill("header", text("card header"))
             .child(
                 text(move || format!("card body {}", taps.get()))
@@ -240,17 +250,20 @@ fn rust_components_pass_content_to_rust_components() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<WithCard>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -332,17 +345,20 @@ fn rust_components_take_the_back_button() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<BackCounter>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -381,6 +397,77 @@ fn rust_components_take_the_back_button() {
     )));
 }
 
+/// Takes the back button while a switch is on: the listener is made in an
+/// effect, and goes with it when the switch turns off.
+#[component]
+fn BackSwitch() -> impl IntoElement {
+    let on = signal(false);
+    let caught = signal(0);
+    effect(move || {
+        if on.get() {
+            on_back_press(move || {
+                caught.update(|c| *c += 1);
+                true
+            });
+        }
+    });
+    view()
+        .flex_1()
+        .child(text("Switch").on_press(move |_: &()| on.update(|on| *on = !*on)))
+        .child(text(move || format!("caught {}", caught.get())))
+}
+
+#[test]
+fn a_rust_back_listener_goes_with_its_owner() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let engine = Engine::start(
+        EngineConfig::new(Root::of::<BackSwitch>()),
+        || ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .unwrap();
+    let mut switch = None;
+    // Whether the root listens to the back button after what came.
+    let listens = |rx: &Receiver<MountBatch>, switch: &mut Option<u32>| {
+        let mut listens = None;
+        while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Events {
+                        id: nsh_core::ROOT_ID,
+                        events,
+                    } => listens = Some(events.contains(EventKind::BackPress)),
+                    MountItem::Text { id, text, .. } if text.text == "Switch" => {
+                        *switch = Some(*id)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        listens
+    };
+    assert_eq!(listens(&rx, &mut switch), None, "no listener while off");
+    let switch = switch.expect("the switch");
+    let press = |id| {
+        engine
+            .control()
+            .dispatch_event(id, EventKind::Press, EventPayload::None)
+    };
+    press(switch);
+    assert_eq!(listens(&rx, &mut None), Some(true), "it listens while on");
+    engine
+        .control()
+        .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+    let caught = shown(&rx, Duration::from_secs(5), "caught 1").map(|s| s.0);
+    assert_eq!(caught.as_deref(), Some("caught 1"), "the listener took it");
+    press(switch);
+    assert_eq!(
+        listens(&rx, &mut None),
+        Some(false),
+        "the listener goes when switched off"
+    );
+}
+
 /// The core's events (a layout) and throttled scroll events reach a Rust
 /// component with no JS.
 #[component]
@@ -389,14 +476,14 @@ fn Measured() -> impl IntoElement {
     let scrolled = signal(0.0_f32);
     view()
         .flex_1()
-        .on_layout(move |frame: &nsh_core::Rect| width.set(frame.width))
+        .on_layout(move |frame: &nsh_core::Bounds<nsh_core::Points>| width.set(frame.size.width.0))
         .child(text(move || {
             format!("width {} scrolled {}", width.get(), scrolled.get())
         }))
         .child(
             scroll()
                 .flex_1()
-                .on_scroll(move |e: &ScrollEvent| scrolled.set(e.y))
+                .on_scroll(move |e: &ScrollEvent| scrolled.set(e.offset.y.0))
                 .child(view().h(px(2000.0))),
         )
 }
@@ -406,17 +493,20 @@ fn rust_components_hear_layouts_and_scrolls() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Measured>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     // Until `until` shows; the scroll view's id on the way.
@@ -443,7 +533,11 @@ fn rust_components_hear_layouts_and_scrolls() {
     let mut scroll = None;
     assert!(wait("width 390 scrolled 0", &mut scroll), "the layout came");
     let scroll = scroll.expect("a scroll view");
-    engine.control().scroll(scroll, 0.0, 120.0, 0);
+    engine.control().scroll(
+        scroll,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(120.0)),
+        0,
+    );
     assert!(wait("width 390 scrolled 120", &mut None), "the scroll came");
 }
 
@@ -457,11 +551,11 @@ fn ButtonRows() -> impl IntoElement {
         .child(text(move || format!("pressed {:?}", pressed.get())))
         .child(
             virtual_list(20, move |at| {
-                nsh_ui_mobile::Button::element(nsh_ui_mobile::ButtonProps {
+                crate::test_ui::Button::element(crate::test_ui::ButtonProps {
                     title: Prop::bind(move || format!("row {}", at.index()).into()),
                     ..Default::default()
                 })
-                .on_event(move |_: &nsh_ui_mobile::ButtonEvent| pressed.set(Some(at.index())))
+                .on_event(move |_: &crate::test_ui::ButtonEvent| pressed.set(Some(at.index())))
             })
             .flex_1(),
         )
@@ -472,17 +566,20 @@ fn nested_components_in_list_rows_reach_the_list_owner() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<ButtonRows>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let mut parents = std::collections::HashMap::new();
@@ -520,7 +617,7 @@ fn WithSheet() -> impl IntoElement {
         .flex_1()
         .child(text("open").on_press(move |_: &()| open.set(true)))
         .child(
-            nsh_ui_mobile::Sheet::element(nsh_ui_mobile::SheetProps {
+            crate::test_ui::Sheet::element(crate::test_ui::SheetProps {
                 open: open.into(),
                 ..Default::default()
             })
@@ -533,17 +630,20 @@ fn content_a_component_does_not_place_is_not_shown() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<WithSheet>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let mut parents: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();

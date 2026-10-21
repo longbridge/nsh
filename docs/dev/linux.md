@@ -46,7 +46,7 @@ works and its runner only needs GTK.
   frames are kept as `f32` points and the integer
   allocation only bounds picking. `snapshot` draws, in order: shadows and background (`decor.rs`), the content (text,
   image, canvas), the children (clipped to the rounded bounds with `overflow: hidden`), the border, then hosted GTK
-  widgets (`ViewState::natives`: text editors, headers, videos, web views).
+  widgets (`ViewState::natives`: text editors, videos, web views).
 - **One hop per commit.** The engine runs on its own thread (`nsh_engine::Engine`); its sink queues each commit and wakes
   the main loop once (`MainContext::invoke`), and the main thread applies every queued batch in order (`surface.rs`,
   `mount.rs`). `invoke` closures must be `Send`, so they find their surface by key in a thread-local map; no globals
@@ -56,34 +56,38 @@ works and its runner only needs GTK.
   description, glyph ids and positions; the main thread loads the same fonts by description from GTK's font map and
   draws `gsk::TextNode`s where the engine put them. Hinted metrics and rounded positions are off on both sides, so
   what was measured is what is drawn (`text.rs`).
-- **Animations run on the frame clock**: native animation values (`anim.rs`, the Android animator's design), JS frame
-  requests (the root's tick callback, `surface.rs`), `LayoutAnimation`, style transitions and keyframes
-  (`transition.rs`), scroll glides and navigation transitions; tick callbacks exist only while something animates.
+- **Animations run on the frame clock**: native animation values (`animation.rs` over `nsh_core::animation`, the
+  Android animator's design), JS frame requests (the root's tick callback, `surface.rs`), `LayoutAnimation`, style
+  transitions and keyframes (`transition.rs`; curves, interpolation and timing in `nsh_core::transition`, shared
+  with Windows, GPUI and macOS), scroll glides and navigation transitions; tick callbacks exist only while something
+  animates.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a widget; `run_app` opens one in a window. `set_ui_sets`
-  replaces the default `nsh/ui/mobile` set for apps with Rust components of their own.
+  serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
+  `nsh_base::registry()` and its sets).
 
 ## How each area maps to GTK
 
 | Area | Module | GTK |
 |---|---|---|
 | Text | `text.rs` | Pango layouts on the engine thread, `gsk::TextNode` glyph runs; colors and decorations read per cluster from the spans (a layout is reused for texts that only differ in them); cap / x height from the font's OS/2 table (HarfBuzz); `selectable` text's range selection, desktop style (below) |
+| Selection areas | `selection_area.rs` | One selection across the texts of a `selection_area` view's subtree (`nsh_core::selection`'s model; depth-first order, an area inside another is part of it), driven from `input.rs`'s pointer handlers, so simulated drags select too: a mouse press in an area presses the model (GTK's double-click time and distance count clicks, Shift+click extends), a drag past 3 pt (10 pt over a press target, which then does not fire) drags it, dragging past a scroll view's edge around the area scrolls it; texts draw their part with the `selectable` highlight and run no selection of their own; the area view takes the focus while it has a selection (Ctrl+A / Ctrl+C / Ctrl+Insert / Escape, the menu's Copy and Select All), any press elsewhere or losing the focus clears it (one selection per surface), a finished drag sets the primary selection |
 | Decoration | `decor.rs` | GSK nodes: shadows (React Native's take the box's shape with a fill, the content's without, as iOS), colors, gradients, inset shadows, borders (over the children, as UIKit), outlines, filters |
 | Images | `image.rs` | Loaded and decoded on worker threads (GDK's PNG / JPEG / TIFF loaders, the `image` crate for GIF and WebP), textures in an LRU cache per resolved location; animated GIF / WebP play on timers of their frame delays (paused while unmapped); blur and tint at draw time |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Cairo into a recording surface (`Snapshot::append_cairo`), sharp at any scale; shadows blurred into a mask; conic gradients as mesh patterns |
-| Scroll views | `scroll.rs` | Offsets of their own (`ScrollState`), reported as UIKit's `contentOffset`; wheel / touchpad / touchscreen scrolling with UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's, for pans, responders and text selection; pull to refresh needs a touchscreen); an indicator that fades (it shows while the mouse moves over the view, as overlay scroll bars do; horizontal views keep it with `showsIndicator={false}`, their only scroll bar for a mouse without a horizontal wheel) and that the mouse drags as a scroll bar (a mouse press within 12 pt of the edge on the indicator, faded or not, drags it as a scroll bar's thumb: the content moves the other way, so the thumb follows the pointer); the keyboard (arrows by 40 pt, Page Up / Page Down and Space / Shift+Space by a page, Home / End) scrolls the view around the focused widget or under the pointer while no field has focus; a widget that gets the focus (Tab, a click, `focus()`) is scrolled into view, animated |
-| Input | `input.rs` | Its own hit testing over the views (GTK's `pick` ignores `overflow: hidden`, `hidden` and `box-only`; hosted widgets are picked inside with GTK's; outside a view's bounds only in its `Overflow` area); touches for the responder system, with `panActivation` gates (the scroll views around wait for the pan to fail; `TouchEvent::activated`); native presses, long presses, hover and pressed states, `onHoverIn` / `onHoverOut`; pan / pinch / rotate animated values (Ctrl + wheel pinches); wheel, touchpad and touch scrolling routed to scroll views (only touches drag them): wheels go to views along their axis, and a scroll stays on its view until it ends (touchpad gesture; wheel notches within 200 ms) |
-| Text inputs | `text_input.rs` | `gtk::Text` / `gtk::TextView` in a `gtk::ScrolledWindow`, hosted at the content box; the view draws the decoration, a per-input style provider clears GTK's (an animated `color` goes to a second one-rule provider, so frames do not reload the sheet); edit counts drop stale JS values; a user edit reports `onChangeText` once the main loop is idle (or before a submit or blur), so a text view's paste over a selection, undo and redo (a deletion and an insertion) report their result once; offsets converted between UTF-16 and characters; return does what `submitBehavior` says (see "Keyboard") |
-| Navigation | `navigation.rs` | Screens are child views, only the top one (and the one below during a transition) child-visible; headers are plain GTK widgets, of a fixed height reported to the core (`set_screen_header`); departing screens leave as a `gtk::WidgetPaintable` image; Escape (unless a text field has the focus: Escape leaves the field), Alt+Left, the Back key and the mouse's back button pop natively (a stack inside the newest modal first, else that modal is asked to close; without a modal, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it) |
-| Modals | `navigation.rs` | Children of the root above the app's views, sliding up or fading in; page and form sheets are centered cards (720 / 540 points wide at most) over a scrim that dims the window, and clicking the scrim asks them to close; the views under the newest modal cannot take the focus (`can-focus` off), and the widget that had it when a modal opened gets it back when it closes |
-| Dialogs, toasts | `system.rs` | GTK widgets the root hosts over the app's views (not separate windows: they stay with an embedded surface and never block the main loop) |
+| Scroll views | `scroll.rs`, `nsh_core::scroll` | Offsets of their own (`ScrollState`, with the physics and gestures in `nsh_core::scroll`, shared with Windows and GPUI; `scroll.rs` draws the indicator and spinner and handles the window's keys), reported as UIKit's `contentOffset`; wheel / touchpad / touchscreen scrolling with UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's, for pans, responders and text selection; pull to refresh needs a touchscreen); an indicator that fades (it shows while the mouse moves over the view, as overlay scroll bars do; horizontal views keep it with `showsIndicator={false}`, their only scroll bar for a mouse without a horizontal wheel) and that the mouse drags as a scroll bar (a mouse press within 12 pt of the edge on the indicator, faded or not, drags it as a scroll bar's thumb: the content moves the other way, so the thumb follows the pointer); the keyboard (arrows by 40 pt, Page Up / Page Down and Space / Shift+Space by a page, Home / End) scrolls the view around the focused widget or under the pointer while no field has focus; a widget that gets the focus (Tab, a click, `focus()`) is scrolled into view, animated |
+| Input | `input.rs`, `nsh_core::input` | Its own hit testing over the views (GTK's `pick` ignores `overflow: hidden`, `hidden` and `box-only`; hosted widgets are picked inside with GTK's; outside a view's bounds only in its `Overflow` area); touches for the responder system, with `panActivation` gates (the scroll views around wait for the pan to fail; `TouchEvent::activated`); native presses, long presses, hover and pressed states, `onHoverIn` / `onHoverOut`; pan / pinch / rotate animated values (Ctrl + wheel pinches); wheel, touchpad and touch scrolling routed to scroll views (only touches drag them): wheels go to views along their axis, and a scroll stays on its view until it ends (touchpad gesture; wheel notches within 200 ms); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
+| Text inputs | `text_input.rs` | `gtk::Text` / `gtk::TextView` in a `gtk::ScrolledWindow`, hosted at the content box; the view draws the decoration, a per-input style provider clears GTK's (an animated `color` goes to a second one-rule provider, so frames do not reload the sheet); edit counts drop stale JS values; a user edit reports `onChange` once the main loop is idle (or before a submit or blur), so a text view's paste over a selection, undo and redo (a deletion and an insertion) report their result once; offsets converted between UTF-16 and characters; return does what `submitBehavior` says (see "Keyboard") |
+| Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) child-visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; departing pages leave as a `gtk::WidgetPaintable` image; Escape (unless a text field has the focus: Escape leaves the field), Alt+Left, the Back key and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it) |
+| Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored); the views under the newest dialog cannot take the focus (`can-focus` off), and the widget that had it when a dialog opened gets it back when it closes |
+| Alerts (`AlertDialog`), toasts | `system.rs` | GTK widgets the root hosts over the app's views (not separate windows: they stay with an embedded surface and never block the main loop) |
 | Video | `native.rs` | `gtk::MediaFile` (GStreamer) in a `gtk::Picture`, or `gtk::Video` with `controls` |
-| Web views | `native/web.rs` | `WebKitWebView` (WebKitGTK 6.0, feature `webview`) hosted in the node's view like a video (mapped only while the view has a size, and loading only once mapped: with WebKit's DMA-BUF renderer a page loaded before its view is mapped sometimes stays blank for good), so it stacks, clips, fades and transforms with NSH content (sheets, scrims, dialogs, toasts and later siblings draw over it; departing screens keep its last frame in their `WidgetPaintable`): no composition surfaces. iOS's bridge (`ReactNativeWebView.postMessage` through a script message handler), injected scripts as top-frame user scripts, `javaScriptEnabled` as `enable-javascript-markup`, `scrollEnabled: false` as a user style sheet hiding the top document's overflow, `allowsBackForwardNavigationGestures`, user agent; the `webview` capability decided in `decide-policy` (for frames too: WebKitGTK does not tell them apart); responses it cannot show are refused, not downloaded; website data per app id in a `NetworkSession` (`$XDG_DATA_HOME/<app id>/webkit`, cache in `$XDG_CACHE_HOME`); the page's `prefers-color-scheme` follows GTK's settings, which follow the app. Pointer events GTK would send to a clipped-off part of a page are kept from it (`input.rs`); Escape a focused page does not use leaves it, Alt+Left / Alt+Right / Back / Forward and the mouse's side buttons move in the page's history first |
+| Web views | `native/web.rs` | `WebKitWebView` (WebKitGTK 6.0, feature `webview`) hosted in the node's view like a video (mapped only while the view has a size, and loading only once mapped: with WebKit's DMA-BUF renderer a page loaded before its view is mapped sometimes stays blank for good), so it stacks, clips, fades and transforms with NSH content (dialogs, alerts, toasts and later siblings draw over it; departing pages keep its last frame in their `WidgetPaintable`): no composition surfaces. iOS's bridge (`ReactNativeWebView.postMessage` through a script message handler), injected scripts as top-frame user scripts, `javaScriptEnabled` as `enable-javascript-markup`, `scrollEnabled: false` as a user style sheet hiding the top document's overflow, `allowsBackForwardNavigationGestures`, user agent; the `webview` capability decided in `decide-policy` (for frames too: WebKitGTK does not tell them apart); responses it cannot show are refused, not downloaded; website data per app id in a `NetworkSession` (`$XDG_DATA_HOME/<app id>/webkit`, cache in `$XDG_CACHE_HOME`); the page's `prefers-color-scheme` follows GTK's settings, which follow the app. Pointer events GTK would send to a clipped-off part of a page are kept from it (`input.rs`); Escape a focused page does not use leaves it, Alt+Left / Alt+Right / Back / Forward and the mouse's side buttons move in the page's history first |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s widget fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
-| Accessibility | `access.rs` | `GtkAccessible` (AT-SPI): roles from `accessibilityRole` / text / press handlers / labelled images, labels, descriptions, values, states; `testID` as the widget name; live regions emulated with `gtk_accessible_announce` |
+| Accessibility | `access.rs` | `GtkAccessible` (AT-SPI): roles from `role` / text / press handlers / labelled images, labels, descriptions, values, states; `testID` as the widget name; live regions emulated with `gtk_accessible_announce` |
 | Environment | `system.rs` | Color scheme: the app's appearance (`nsh.json` `"appearance"`, `setColorScheme`) when it forces one, else the XDG settings portal's (`org.freedesktop.appearance color-scheme`, live); hosted GTK widgets, dialogs and the root's background follow it, and a packaged app's window opens in it (`nsh/app.json`). The locale (`Intl`) from `LC_ALL` / `LC_TIME` / `LC_NUMERIC` / `LC_MESSAGES` / `LANG`, else GLib's language names. Font scale from `gtk-xft-dpi`, reduce motion from `gtk-enable-animations`, the surface's (fractional) scale, GTK's text direction, AT-SPI's `ScreenReaderEnabled`; `Platform.OS` `"linux"`, idiom `desktop`, OS version the kernel's major.minor; safe area and keyboard height 0 |
 | Window chrome (`nsh/desktop`) | `chrome.rs` | Title from `Window.setTitle`; the hidden title bar hides the window's header (the owner's `titlebar` or GTK's own `default-decoration` header bar), so GTK's client-side decorations keep their shadows and resize edges without the window being mapped again; a window the window manager decorates (X11, Wayland compositors that prefer server-side decorations, such as Hyprland) gets an empty, hidden `set_titlebar` box instead, which GTK can only apply by mapping the window again (it warns that the window is realized), with `gtk::WindowControls` for both ends over the app in the `AppView`'s overlay (the desktop's `gtk-decoration-layout`), their measured widths and the header's height (46 pt at least) reported as the environment's `title_bar` (0 in full screen). A primary press on a `windowDrag` view moves the window (`gdk::Toplevel::begin_move`), a double press follows `gtk-titlebar-double-click`, a secondary press opens the window menu. The application menu is a `gio::Menu` (separators split sections; checkable items are stateful actions) with its actions in a group on the window (`nsh.item-N`), shown in a `gtk::PopoverMenuBar` above the app (`AppView::widget` is a box holding it and the overlay) unless the title bar is hidden or in full screen; its shortcuts are a capture-phase `gtk::ShortcutController` on the window, which GTK runs before the keymap's (each gives way to an `nsh/keymap` binding of the same keystroke that fires: `keymap::claims`; the editing roles' stay the text field's, and run as the focused field's `clipboard.*` / `selection.select-all` / `text.undo` / `text.redo` actions). Context menus are `gtk::PopoverMenu`s parented to the root, which presents its popovers on every allocation (else they keep the size of their first frame and scroll) |
 | Clipboard | `system.rs` | The display's `GdkClipboard`; reads are asynchronous (another app's text), `hasString` only looks at the formats on offer |
-| Networking | `net.rs` | ureq (rustls, webpki roots), one thread per request, streaming both ways; only connecting and the response head have deadlines |
+| Networking | `nsh_engine::net` | ureq (rustls, webpki roots), one thread per request, streaming both ways; only connecting and the response head have deadlines |
 | Dev | `dev.rs` | The dev server client on its own thread; status line and error overlay above the surface; Ctrl+R reloads the latest build |
 
 ## File drop destinations
@@ -116,7 +120,7 @@ bubble back up. What NSH adds:
 - **At the window**, keys nothing focused used: going back (`navigation::key_pressed`: Escape, which leaves a focused
   field instead; Alt+Left and the Back key, also from a field, which does not use them), scrolling (`scroll.rs`, not
   while a field has the focus) and the mouse's back button. A `selectable` text with a selection takes Ctrl+A / Ctrl+C
-  / Escape (`text.rs`); without one Escape goes on.
+  / Escape (`text.rs`), and so does a selection area with one (`selection_area.rs`, above); without one Escape goes on.
 - **The app's shortcuts** (`nsh/keymap`, `keymap.rs`): the mounted table becomes a global-scope, capture-phase
   `gtk::ShortcutController` on the root, which the window runs before the focus widget and its own capture
   controllers (in the bubble phase a field would take Ctrl+A or Ctrl+Return first); one `gtk::Shortcut` per binding
@@ -130,50 +134,55 @@ bubble back up. What NSH adds:
   Ctrl+R gets no shortcut (the dev host reloads). GDK does not mark auto-repeats: a binding without `repeat` fires
   once until the window's capture-phase key controller sees a release.
 - **Focus**: Tab / Shift+Tab is GTK's, in screen order (GTK sorts a container's children by position); hidden screens
-  are not child visible, and the views under the newest modal cannot take the focus. Dialogs (`system.rs`) move it
+  are not child visible, and the views under the newest dialog cannot take the focus. Alerts (`system.rs`) move it
   between their own buttons.
 
 `onKeyPress` reports what UIKit's does: the typed text (`"Enter"` for a line break), `"Backspace"` for a deletion (in
 an empty input too), and `"Escape"`, as on macOS. Pasted and undone text, and the deletion of a selection typed over,
 report nothing: the key being handled is kept until the main loop is idle, and `paste-clipboard` marks the paste.
 
-## Checking a change: `--script`
+## Checking a change: `nsh test --target linux`
 
-`nsh-linux-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or new
-lines (`script.rs`), so a change can be checked without touching the screen:
+The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
+implements `nsh_testing::agent::Native`, each call on the GTK main thread (`MainContext::invoke`), with the input
+`synth.rs` makes. GTK 4 cannot be handed a made-up event, so the input goes through the handlers real input reaches:
 
-| Step | Does |
-|---|---|
-| `wait <ms>` | Waits. |
-| `shot <file.png>` | Renders the window's content to a PNG, offscreen at scale 1, whatever covers the window. |
-| `tap <x> <y>` | Presses and releases a finger at a point (points, root coordinates). |
-| `drag <x0> <y0> <x1> <y1> [ms]` | Presses the mouse, moves in steps over `ms` (default 300), releases; `touch` the same with a finger (whose drags scroll). |
-| `wheel <x> <y> <dx> <dy>` | A wheel / touchpad scroll. |
-| `hover <x> <y>` | Moves the pointer. |
-| `type <text>` | Types into the focused field. |
-| `key <name>` | Presses a key (GDK names: `Return`, `BackSpace`, ...). |
-| `dark` / `light` | Switches the system's appearance (an app that forces one keeps it). |
-| `resize <w> <h>` | Resizes the window. |
-| `quit` | Closes the window. |
+- a press is the mouse's down and up at the view's middle through `input::simulate` (after a hover), and a release on
+  a hosted widget (a text field) focuses it, as a real click would;
+- typing inserts each character into the focused `GtkText` / `GtkTextView` at its caret (`insert_text`, so the
+  field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`, select
+  all selects the field's text;
+- a scroll is smooth wheel events of at most 20 points, a frame apart;
+- back is Escape (`navigation::key_pressed`), twice when a field has the focus (the first only leaves it);
+- a dialog's button is the `GtkButton` with that label, clicked; closing it without one is its dismissal (a click
+  outside the card);
+- a screenshot renders the window's content offscreen at its scale after the next frame is painted
+  (`GtkWidgetPaintable`), whatever covers the window; the appearance is the portal's, simulated; the size is the
+  window's default size.
+
+`dev.rs` hands the model to the surface on the server's test session (idle sources keep their order, so it comes
+before the first bundle). On a machine without a display, the tests run on a virtual one:
 
 ```sh
-nsh dev examples/gallery &       # or: nsh build examples/gallery and --bundle <path>/bundle.nshc
-./target/debug/nsh-linux-host --window-size 390x844 --script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png; quit"
+xvfb-run -a ./target/debug/nsh test examples/gallery --target linux
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' \
+  | xvfb-run -a ./target/debug/nsh test examples/gallery/App.tsx --target linux   # steps from stdin
 ```
 
-`key` emits the field's signals rather than a key event (GTK 4 cannot make one). For real key events (modifiers,
-input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a window manager
-such as openbox makes full screen work):
+The agent's keys are the field's signals rather than key events (GTK 4 cannot make one). For real key events
+(modifiers, input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a
+window manager such as openbox makes full screen work):
 
 ```sh
 Xvfb :77 & export DISPLAY=:77 GDK_BACKEND=x11
-./target/debug/nsh-linux-host --bundle out/bundle.qbc --script "wait 20000; quit" & sleep 2
+./target/debug/nsh-linux-host --bundle out/bundle.qbc & sleep 2
 W=$(xdotool search --pid $! | tail -1)
 xdotool mousemove --window $W 100 30 click 1; xdotool type --window $W "hi"; xdotool key --window $W shift+Return
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings; `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
+`--trace` logs per-commit timings; `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
+one); `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
 Windows and GPUI hosts) names the GTK application and the directory of its web view data (the app's storage follows the id
 the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
 `testID` as its name.
@@ -184,7 +193,7 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
   `iframe` of a host that is not granted stays empty), as WebKitGTK's `decide-policy` does not say which frame a
   navigation is for; iOS and macOS only check the main frame's. A new window (`target="_blank"`, `window.open`) opens
   nothing, as on iOS. Script dialogs (`alert`, `confirm`) are WebKitGTK's own, drawn inside the page (iOS and macOS show
-  none). Simulated taps (`--script`'s `tap`) focus a page but do not click into it (GTK never sees them). Without the
+  none). The test agent's presses focus a page but do not click into it (GTK never sees them). Without the
   feature a `WebView` shows a neutral placeholder and ignores its commands.
 - **Video**: GTK streams have no playback rate, so `rate` is ignored (warned once); a looping video never ends, so
   `onEnd` only comes for videos that do not loop. Which formats play depends on the installed GStreamer plugins.

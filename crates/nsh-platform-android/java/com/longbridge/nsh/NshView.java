@@ -87,6 +87,11 @@ public class NshView extends FrameLayout {
      * @param trace log per-commit timings
      */
     public NshView(Context context, boolean trace) {
+        this(context, trace, new File(context.getFilesDir(), "nsh"));
+    }
+
+    /** As {@link #NshView(Context, boolean)}, the apps keeping their data in {@code dataDir}. */
+    NshView(Context context, boolean trace, File dataDir) {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
@@ -106,8 +111,9 @@ public class NshView extends FrameLayout {
         // sets no soft input mode, this makes the system resize (and report
         // the keyboard as insets) instead of panning the window.
         setScrollContainer(true);
-        // Apps keep their data in nsh/<app id> in the files directory.
-        handle = Native.create(this, density, trace, new File(context.getFilesDir(), "nsh").getPath());
+        // Apps keep their data in <dataDir>/<app id>: nsh in the files
+        // directory unless the development host's test session says.
+        handle = Native.create(this, density, trace, dataDir.getPath());
     }
 
     /**
@@ -147,6 +153,11 @@ public class NshView extends FrameLayout {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
     }
 
+    /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
+    void useStandaloneLimits() {
+        Native.setStandaloneLimits(handle);
+    }
+
     /**
      * The directory the storage ({@code nsh/storage}) of the apps this view
      * loads from now on is kept in ({@code storage.json} in it). {@code null}
@@ -172,6 +183,31 @@ public class NshView extends FrameLayout {
         } catch (java.io.IOException none) {
             return null;
         }
+    }
+
+    /**
+     * The host app's locale, standing in for the user's: what {@code Intl}
+     * formats for by default and what {@code locale()} ({@code nsh/device})
+     * reads, at once and for every app loaded later.
+     *
+     * @param locale the locale, or null to follow the system's again
+     */
+    public void setLocale(java.util.Locale locale) {
+        hostLocale = locale;
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
+     * The host app's text size relative to the default (1), standing in for
+     * the system's font size: texts and inputs are laid out again at it and
+     * {@code fontScale()} reads it, at once and for every app loaded later;
+     * lengths stay as they are.
+     *
+     * @param scale the text size, or 0 to follow the system's again
+     */
+    public void setFontScale(float scale) {
+        hostFontScale = scale;
+        publishEnvironment(getRootWindowInsets());
     }
 
     /**
@@ -309,6 +345,9 @@ public class NshView extends FrameLayout {
     // --- Environment ---------------------------------------------------------
 
     private float keyboard;
+    /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
+    private java.util.Locale hostLocale;
+    private float hostFontScale;
 
     @Override
     public WindowInsets onApplyWindowInsets(WindowInsets insets) {
@@ -392,8 +431,10 @@ public class NshView extends FrameLayout {
         Configuration c = getResources().getConfiguration();
         boolean dark = (c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         safe = new float[] {top / density, right / density, bottom / density, left / density};
+        java.util.Locale locale = hostLocale != null ? hostLocale : java.util.Locale.getDefault();
+        float fontScale = hostFontScale > 0 && !Float.isInfinite(hostFontScale) ? hostFontScale : c.fontScale;
         Native.environment(handle, new float[] {
-            top / density, right / density, bottom / density, left / density, ime / density, 0.25f, c.fontScale,
+            top / density, right / density, bottom / density, left / density, ime / density, 0.25f, fontScale,
             android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()) == LAYOUT_DIRECTION_RTL ? 1 : 0,
             // "Remove animations" sets the animator scale to 0.
             android.provider.Settings.Global.getFloat(getContext().getContentResolver(),
@@ -403,7 +444,7 @@ public class NshView extends FrameLayout {
             Build.VERSION.SDK_INT,
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
-        }, dark, java.util.Locale.getDefault().toLanguageTag());
+        }, dark, locale.toLanguageTag());
     }
 
     private android.view.accessibility.AccessibilityManager accessibility() {
@@ -438,6 +479,11 @@ public class NshView extends FrameLayout {
     private Object backCallback;
     private boolean backRegistered;
     private boolean exiting;
+
+    /** The mounter, for the test agent ({@link TestAgent}). */
+    Mounter mounter() {
+        return mounter;
+    }
 
     /**
      * Handles the back button for the app: closes modals, pops screens, runs

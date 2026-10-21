@@ -7,9 +7,9 @@ group: start
 
 # Installation
 
-Everything NSH does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
+Everything NSH does goes through one command, `nsh`. It builds apps written in Rust or TSX, runs them on every platform, serves TSX to development hosts with hot updates, and packages installable apps. You can use it from a prebuilt distribution or build it from a checkout of the repository.
 
-On top of `nsh`, each platform needs its own tools:
+Apps written in Rust also need a Rust toolchain ([below](#for-apps-written-in-rust)); TSX apps need `nsh` alone. On top of that, each platform needs its own tools:
 
 | Platform | Develop and package on | Needs |
 |---|---|---|
@@ -18,9 +18,9 @@ On top of `nsh`, each platform needs its own tools:
 | macOS | macOS | Xcode's command line tools; apps run on macOS 14+ |
 | Windows | Windows | Windows 10 1809+; the WebView2 Runtime for web views |
 | Linux | Linux | GTK 4.14+ (and its development packages to build the runtime) |
-| [GPUI](./gpui.md) | macOS, Windows or Linux, for that OS | A GPU (Metal, DirectX or Vulkan); on Linux, Wayland or X11 |
+| [GPUI](./gpui.md) (embedding in GPUI apps) | macOS, Windows or Linux | A GPU (Metal, DirectX or Vulkan); on Linux, Wayland or X11 |
 
-Mac Catalyst, `nsh run`'s default on macOS, needs Xcode like iOS. Details are under [Platform tools](#platform-tools).
+The AppKit host is the default on macOS. Mac Catalyst (`--target catalyst`) needs Xcode like iOS. Details are under [Platform tools](#platform-tools).
 
 ## Installing a release
 
@@ -65,6 +65,18 @@ The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-
 > [!NOTE]
 > The binaries are not signed yet. macOS quarantines files downloaded by a browser; the install script, Homebrew and mise download with `curl` and are not affected, otherwise run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). There is no Intel Mac or arm64 Linux / Windows build: build those from a checkout.
 
+## For apps written in Rust
+
+Install Rust through [rustup](https://rustup.rs). `nsh` builds a Rust app's runner for each target with Cargo, from your crate and NSH's crates on crates.io at the CLI's version, so add the Rust targets of the platforms you run on:
+
+```sh
+rustup target add aarch64-apple-ios-sim aarch64-apple-ios aarch64-apple-ios-macabi   # iOS simulator, devices, Mac Catalyst
+rustup target add aarch64-linux-android x86_64-linux-android                         # Android (with the SDK's NDK)
+rustup target add wasm32-unknown-unknown                                             # the web
+```
+
+The desktops build for the machine you are on. `cargo run` in a Rust app's directory starts it on the desktop backend directly, which builds with the backend's development libraries ([Platform tools](#platform-tools)). Android builds also use an **NDK** from the SDK, as [building the Android runtime](#building-the-android-runtime) does.
+
 ## The prebuilt distribution
 
 The distribution is a directory, `dist/nsh`, with the CLI and the prebuilt native runtimes it packages apps with:
@@ -78,7 +90,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
-dist/nsh/runtime/gpui/{nsh-gpui-host,nsh-gpui-app}[.exe]     # the GPUI development host and release runner, for this OS
+dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                    # the GPUI development host, for this OS
 dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          # the web runtimes (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
@@ -91,7 +103,18 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) runtime, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
+The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) development host, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
+
+## Installing the latest source
+
+On macOS and Linux, install the latest `main` with Git, Rust and the platform build dependencies below:
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+The installer keeps the checkout in `~/.nsh/source`, builds the release CLI and links it into `~/.local/bin`. Re-run the command to update; local source changes must be saved first. The retained checkout lets NSH build native runtimes on demand. Cargo uses its existing configuration and target directory. `NSH_INSTALL_DIR` changes the installation prefix; `NSH_VERSION` selects prebuilt releases only. Both `-V` and `--version` show the version and seven-character source revision.
 
 ## Building from a checkout
 
@@ -125,7 +148,6 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
-cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-app    # nsh package --target gpui
 # nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
@@ -184,12 +206,12 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 
 | Command | macOS | Linux | Windows |
 |---|---|---|---|
-| `nsh init`, `nsh build`, `nsh trace`, `nsh dev`, `nsh check` | Yes | Yes | Yes |
-| `nsh run` (Mac Catalyst, the default on macOS) | Yes | No | No |
+| `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | Yes | Yes | Yes |
+| `nsh run --target catalyst` (Mac Catalyst) | Yes | No | No |
 | `nsh run --target macos`, `nsh package --target macos` | Yes | No | No |
 | `nsh run --target linux` (the default on Linux), `nsh package --target linux` | No | Yes | No |
 | `nsh run --target windows` (the default on Windows), `nsh package --target windows` | No | No | Yes |
-| `nsh run --target gpui`, `nsh package --target gpui` (a package for the OS it is made on) | Yes | Yes | Yes |
+| `nsh run --target gpui` (the backend GPUI apps embed) | Yes | Yes | Yes |
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | Yes, with Xcode | No | No |
 | `nsh run --target android`, `nsh package --target android` | Yes | Yes, from a checkout | Yes, with the Android runtime |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | Yes | Yes | Yes |
@@ -198,7 +220,9 @@ On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p
 
 ## Editor setup
 
-NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
+A Rust app is a Cargo project: rust-analyzer (VS Code, Zed, Neovim, RustRover) checks it and completes NSH's API, with its doc comments, as for any crate.
+
+For TSX, NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
 
 ## Next steps
 

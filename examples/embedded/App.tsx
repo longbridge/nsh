@@ -4,7 +4,7 @@
 
 import { mount, signal, Text, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
-import { SafeAreaView } from "nsh/ui/mobile";
+import { SafeAreaView } from "nsh/base";
 
 /** The host app's badge: a label it draws, sized to its text. */
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {

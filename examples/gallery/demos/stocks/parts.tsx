@@ -1,6 +1,5 @@
-import { effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
+import { type CanvasRenderingContext2D, effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, type AnimatedNode } from "nsh/animated";
-import type { CanvasRenderingContext2D } from "nsh/canvas";
 import { PanResponder } from "nsh/gesture";
 import { alpha, colors, isDark } from "../../ui";
 import type { Quote } from "./market";
@@ -102,33 +101,33 @@ export function scrub(at: (x: number | null) => void): TouchProps & { panActivat
 }
 
 /** Diagonal stripes over a rectangle (projections, zones). */
-export function hatch(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, gap = 6) {
+export function hatch(cx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, gap = 6) {
   if (w <= 0 || h <= 0) return;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
+  cx.save();
+  cx.beginPath();
+  cx.rect(x, y, w, h);
+  cx.clip();
+  cx.strokeStyle = color;
+  cx.lineWidth = 1;
+  cx.beginPath();
   for (let i = -h; i < w; i += gap) {
-    ctx.moveTo(x + i, y + h);
-    ctx.lineTo(x + i + h, y);
+    cx.moveTo(x + i, y + h);
+    cx.lineTo(x + i + h, y);
   }
-  ctx.stroke();
-  ctx.restore();
+  cx.stroke();
+  cx.restore();
 }
 
 /** A dashed horizontal line. */
-export function dashed(ctx: CanvasRenderingContext2D, x0: number, x1: number, y: number, color: string, dash = [3, 4]) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.setLineDash(dash);
-  ctx.beginPath();
-  ctx.moveTo(x0, y);
-  ctx.lineTo(x1, y);
-  ctx.stroke();
-  ctx.setLineDash([]);
+export function dashed(cx: CanvasRenderingContext2D, x0: number, x1: number, y: number, color: string, dash = [3, 4]) {
+  cx.strokeStyle = color;
+  cx.lineWidth = 1;
+  cx.setLineDash(dash);
+  cx.beginPath();
+  cx.moveTo(x0, y);
+  cx.lineTo(x1, y);
+  cx.stroke();
+  cx.setLineDash([]);
 }
 
 export { alpha };

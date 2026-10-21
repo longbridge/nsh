@@ -7,6 +7,7 @@ IPHONEOS_DEPLOYMENT_TARGET = "15.0"
 xtask = "run -q -p xtask --"
 
 # The web runtime (`nsh-platform-web`): QuickJS recursion and deep component
-# trees need more than the 1 MiB default stack of wasm32.
+# trees need more than the 1 MiB default stack of wasm32. Cryptographic
+# entropy uses the raw browser Web Crypto import provided by nsh-js.
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=-zstack-size=8388608"]
+rustflags = ["-C", "link-arg=-zstack-size=8388608", "--cfg", 'getrandom_backend="custom"']

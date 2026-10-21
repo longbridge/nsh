@@ -6,7 +6,7 @@
 use std::{f32::consts::TAU, rc::Rc};
 
 use nsh_core::{
-    PanActivation, Rect,
+    Bounds, PanActivation, Points,
     canvas::{CanvasGradient, CanvasTextAlign, CanvasTextBaseline, LineJoin},
     ui::{AnimatedNode, prelude::*},
 };
@@ -17,7 +17,8 @@ use super::{
     parts::{Calm, GRID, dashed, hatch, pulse, run_pulse},
 };
 use crate::ui::{
-    Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors, legend, radius,
+    Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors, legend, lengths, pt,
+    radius, rect,
 };
 
 /// What the chart shows.
@@ -328,11 +329,21 @@ impl Plot {
             last.c - last.o
         });
         if !intraday {
-            p = dashed(p, 0.0, f.plot_w, ly, color(tone.opacity(0.7)), &[3.0, 3.0]);
+            p = dashed(
+                p,
+                0.0,
+                f.plot_w,
+                ly,
+                color(tone.opacity(0.7)),
+                &lengths([3.0, 3.0]),
+            );
         }
         p.fill_color(color(tone))
             .begin_path()
-            .round_rect(f.plot_w + 2.0, ly - 9.0, PAD_RIGHT - 2.0, 18.0, 5.0)
+            .round_rect(
+                rect(f.plot_w + 2.0, ly - 9.0, PAD_RIGHT - 2.0, 18.0),
+                px(5.0),
+            )
             .fill()
             .fill_color(color(colors::INSET))
             .text_align(CanvasTextAlign::Right)
@@ -362,12 +373,12 @@ impl Plot {
             f.plot_w,
             f.y(prev_close),
             color(colors::FAINT),
-            &[3.0, 4.0],
+            &lengths([3.0, 4.0]),
         );
         // The price area and line.
-        let fill = CanvasGradient::linear(0.0, PAD_TOP, 0.0, bottom)
-            .add_color_stop(0.0, color(tone.opacity(0.26)))
-            .add_color_stop(1.0, color(tone.opacity(0.0)));
+        let fill = CanvasGradient::linear(pt(0.0, PAD_TOP), pt(0.0, bottom))
+            .add_color_stop(percentage(0.0), color(tone.opacity(0.26)))
+            .add_color_stop(percentage(1.0), color(tone.opacity(0.0)));
         p = p.begin_path().move_to(self.x(0), bottom);
         for (i, candle) in d.iter().enumerate() {
             p = p.line_to(self.x(i), f.y(candle.c));
@@ -466,12 +477,12 @@ impl Plot {
                 .fill_color(color(if up { colors::INSET } else { tint }))
                 .fill_rect(x - body / 2.0, top, body, h);
             if up {
-                p = p.stroke_rect(
+                p = p.stroke_rect(rect(
                     x - body / 2.0 + 0.5,
                     top + 0.5,
                     body - 1.0,
                     (h - 1.0).max(0.0),
-                );
+                ));
             }
             let vh = (candle.v / vmax) as f32 * VOL_H;
             p = p.fill_color(color(tint.opacity(0.5))).fill_rect(
@@ -745,14 +756,17 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                                 .map_or("", |p| p.2);
                             format!("{code} {name} chart")
                         })
-                        .on_layout(move |frame: &Rect| width.set(frame.width))
+                        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                         // The platform gives the chart the finger only once
                         // it has moved sideways, so vertical drags still
                         // scroll the page.
-                        .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(6.0, 8.0)))
+                        .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(
+                            px(6.0),
+                            px(8.0),
+                        )))
                         .keep_touches(true)
-                        .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location_x)))
-                        .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location_x)))
+                        .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location.x.0)))
+                        .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location.x.0)))
                         .on_responder_release(move |_: &ResponderEvent| pick(None))
                         .on_responder_terminate(move |_: &ResponderEvent| pick(None)),
                 )

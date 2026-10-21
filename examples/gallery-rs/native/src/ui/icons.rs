@@ -5,8 +5,11 @@ use std::f32::consts::{PI, TAU};
 
 use nsh_core::{
     canvas::{LineCap, LineJoin},
+    geometry::size,
     ui::{JsObject, PropEnum, prelude::*},
 };
+
+use super::{lengths, pt};
 
 /// A glyph of [`Icon`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -89,7 +92,9 @@ fn line(p: Painter, points: &[f32]) -> Painter {
 }
 
 fn rect(p: Painter, x: f32, y: f32, w: f32, h: f32, r: f32) -> Painter {
-    p.begin_path().round_rect(x, y, w, h, r).stroke()
+    p.begin_path()
+        .round_rect(super::rect(x, y, w, h), px(r))
+        .stroke()
 }
 
 fn circle(p: Painter, x: f32, y: f32, r: f32, fill: bool) -> Painter {
@@ -152,7 +157,7 @@ impl IconName {
                 let c = circle(c, 10.0, 6.0, 3.0, false);
                 let c = line(c, &[3.0, 16.0, 17.0, 16.0]);
                 let c = line(c, &[6.0, 12.0, 6.0, 12.1]);
-                let c = line(c.line_dash(&[1.5, 2.0]), &[10.0, 9.0, 10.0, 15.0]);
+                let c = line(c.line_dash(&lengths([1.5, 2.0])), &[10.0, 9.0, 10.0, 15.0]);
                 c.line_dash(&[])
             }
             IconName::Animation => {
@@ -236,13 +241,27 @@ impl IconName {
                 // The top, then the front edge of two disks under it.
                 let c = c
                     .begin_path()
-                    .ellipse(10.0, 5.0, (6.0, 2.2), 0.0, 0.0, TAU, false)
+                    .ellipse(
+                        pt(10.0, 5.0),
+                        size(px(6.0), px(2.2)),
+                        Radians(0.0),
+                        Radians(0.0),
+                        Radians(TAU),
+                        false,
+                    )
                     .stroke();
                 let c = line(c, &[4.0, 5.0, 4.0, 15.0]);
                 let c = line(c, &[16.0, 5.0, 16.0, 15.0]);
                 [10.0, 15.0].into_iter().fold(c, |c, y| {
                     c.begin_path()
-                        .ellipse(10.0, y, (6.0, 2.2), 0.0, 0.0, PI, false)
+                        .ellipse(
+                            pt(10.0, y),
+                            size(px(6.0), px(2.2)),
+                            Radians(0.0),
+                            Radians(0.0),
+                            Radians(PI),
+                            false,
+                        )
                         .stroke()
                 })
             }
@@ -313,9 +332,9 @@ impl IconName {
 #[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
 pub(crate) struct Tint {
     /// In light appearance.
-    pub(crate) light: Color,
+    pub(crate) light: Hsla,
     /// In dark appearance.
-    pub(crate) dark: Color,
+    pub(crate) dark: Hsla,
 }
 
 impl From<AdaptiveColor> for Tint {

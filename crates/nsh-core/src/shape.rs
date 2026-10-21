@@ -8,6 +8,8 @@
 //! iOS). Where the box is too small for the transitions they shrink, down to
 //! a circular corner, so `rounded-full` stays a pill.
 
+use crate::geometry::{Bounds, Corners, Point, Points, Size};
+
 /// Corner smoothing of continuous corners (0: circular, 1: maximal).
 pub const SMOOTHING: f64 = 0.6;
 
@@ -15,32 +17,42 @@ pub const SMOOTHING: f64 = 0.6;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Segment {
     /// Starts the outline at a point.
-    Move(f64, f64),
+    Move(Point<Points>),
     /// A straight line to a point.
-    Line(f64, f64),
+    Line(Point<Points>),
     /// A cubic Bézier curve: two control points, then the end point.
-    Cubic([f64; 6]),
+    Cubic([Point<Points>; 3]),
     /// Closes the outline.
     Close,
 }
 
-/// A corner's radii: along the horizontal and the vertical edge.
-pub type Corner = (f64, f64);
+/// A corner's radii: along the horizontal edge (`width`) and the vertical
+/// one (`height`).
+pub type Corner = Size<Points>;
 
-/// The outline of the rectangle `(x0, y0)`–`(x1, y1)` with `corners`
-/// (top left, top right, bottom right, bottom left; already fitted so
-/// adjacent radii do not overlap), clockwise on screen (y down) or, with
-/// `reverse`, counterclockwise (a hole under the non-zero rule). Starts on
-/// the top edge.
+/// The outline of `rect` with `corners` (already fitted so adjacent radii
+/// do not overlap), clockwise on screen (y down) or, with `reverse`,
+/// counterclockwise (a hole under the non-zero rule). Starts on the top
+/// edge.
 pub fn rounded_rect(
-    (x0, y0, x1, y1): (f64, f64, f64, f64),
-    corners: [Corner; 4],
+    rect: Bounds<Points>,
+    corners: Corners<Corner>,
     continuous: bool,
     reverse: bool,
     out: &mut impl FnMut(Segment),
 ) {
-    let (w, h) = (x1 - x0, y1 - y0);
-    let [tl, tr, br, bl] = corners;
+    // Computed in `f64`, as the platforms' path APIs take it.
+    let (x0, y0) = (f64::from(rect.origin.x.0), f64::from(rect.origin.y.0));
+    let (w, h) = (f64::from(rect.size.width.0), f64::from(rect.size.height.0));
+    let (x1, y1) = (x0 + w, y0 + h);
+    let radii = |c: Corner| (f64::from(c.width.0), f64::from(c.height.0));
+    let (tl, tr, br, bl) = (
+        radii(corners.top_left),
+        radii(corners.top_right),
+        radii(corners.bottom_right),
+        radii(corners.bottom_left),
+    );
+    let at = |(x, y): (f64, f64)| Point::new(Points(x as f32), Points(y as f32));
     // Each corner as (its point, the unit direction it is entered along,
     // the one it leaves along, its radius along each, the edge lengths
     // and the radii of the neighbors sharing those edges).
@@ -157,30 +169,27 @@ pub fn rounded_rect(
             )
         };
         if r <= 0.0 {
-            let (x, y) = s.at;
             out(if i == 0 {
-                Segment::Move(x, y)
+                Segment::Move(at(s.at))
             } else {
-                Segment::Line(x, y)
+                Segment::Line(at(s.at))
             });
             continue;
         }
         // How far the corner may spread, in the frame of radius `r`.
         let budget = (s.limit_u / su).min(s.limit_v / sv).max(r);
         let c = params(r, if continuous { SMOOTHING } else { 0.0 }, budget);
-        let (x, y) = pt(-c.p, 0.0);
+        let start = at(pt(-c.p, 0.0));
         out(if i == 0 {
-            Segment::Move(x, y)
+            Segment::Move(start)
         } else {
-            Segment::Line(x, y)
+            Segment::Line(start)
         });
         // Corner frame: the corner at (0, 0), entered along +a from
         // a = -p, left along +b to b = p. The arc's circle is centered at
         // (-r, r).
-        let cubic = |c1: (f64, f64), c2: (f64, f64), e: (f64, f64)| {
-            let (a, b, c, d, e, f) = (c1.0, c1.1, c2.0, c2.1, e.0, e.1);
-            Segment::Cubic([a, b, c, d, e, f])
-        };
+        let cubic =
+            |c1: (f64, f64), c2: (f64, f64), e: (f64, f64)| Segment::Cubic([at(c1), at(c2), at(e)]);
         let e1 = (-c.p + c.a + c.b + c.c, c.d);
         // Circular corners (and continuous ones without room) have none.
         let transitions = c.a + c.b + c.c > 1e-9 * r;
@@ -257,12 +266,19 @@ fn params(r: f64, smoothing: f64, budget: f64) -> Params {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::{bounds, point, px, size};
 
-    fn outline(corners: [Corner; 4], continuous: bool, reverse: bool) -> Vec<Segment> {
+    fn outline(corners: [f32; 4], continuous: bool, reverse: bool) -> Vec<Segment> {
+        let [tl, tr, br, bl] = corners.map(|r| size(px(r), px(r)));
         let mut v = Vec::new();
         rounded_rect(
-            (0.0, 0.0, 100.0, 60.0),
-            corners,
+            bounds(point(px(0.0), px(0.0)), size(px(100.0), px(60.0))),
+            Corners {
+                top_left: tl,
+                top_right: tr,
+                bottom_right: br,
+                bottom_left: bl,
+            },
             continuous,
             reverse,
             &mut |s| v.push(s),
@@ -270,55 +286,56 @@ mod tests {
         v
     }
 
-    fn end(s: &Segment) -> (f64, f64) {
-        match *s {
-            Segment::Move(x, y) | Segment::Line(x, y) => (x, y),
-            Segment::Cubic(c) => (c[4], c[5]),
+    fn end(s: &Segment) -> (f32, f32) {
+        let p = match *s {
+            Segment::Move(p) | Segment::Line(p) => p,
+            Segment::Cubic(c) => c[2],
             Segment::Close => unreachable!(),
-        }
+        };
+        (p.x.0, p.y.0)
     }
 
-    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
-        (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9
+    fn close(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4
     }
 
     #[test]
     fn circular_corners_are_quarter_circles() {
-        let v = outline([(10.0, 10.0); 4], false, false);
+        let v = outline([10.0; 4], false, false);
         // Move, then per corner a line and one arc, then close.
         assert_eq!(v.len(), 1 + 1 + 3 * 2 + 1);
         assert!(close(end(&v[0]), (90.0, 0.0)));
         assert!(close(end(&v[1]), (100.0, 10.0)));
         let Segment::Cubic(c) = v[1] else { panic!() };
         // The standard quarter circle handles (0.5523 r).
-        assert!((c[0] - (90.0 + 5.522_847_5)).abs() < 1e-4 && c[1].abs() < 1e-9);
+        assert!((c[0].x.0 - (90.0 + 5.522_847_5)).abs() < 1e-4 && c[0].y.0.abs() < 1e-6);
         assert!(close(end(&v[2]), (100.0, 50.0)));
     }
 
     #[test]
     fn continuous_corners_spread_along_the_edges() {
-        let v = outline([(10.0, 10.0); 4], true, false);
+        let v = outline([10.0; 4], true, false);
         // The curve starts 1.6 r before the corner and ends 1.6 r after it.
         assert!(close(end(&v[0]), (84.0, 0.0)));
         assert!(close(end(&v[3]), (100.0, 16.0)));
         // Tangent continuity: the first handle lies on the edge.
         let Segment::Cubic(c) = v[1] else { panic!() };
-        assert_eq!(c[1], 0.0);
+        assert_eq!(c[0].y.0, 0.0);
         let Segment::Cubic(last) = v[3] else { panic!() };
-        assert_eq!(last[2], 100.0);
-        assert_eq!(last[4], 100.0);
+        assert_eq!(last[1].x.0, 100.0);
+        assert_eq!(last[2].x.0, 100.0);
     }
 
     #[test]
     fn pills_stay_pills() {
         // Radius half the height: no room to spread, so circular ends.
-        let continuous = outline([(30.0, 30.0); 4], true, false);
-        let circular = outline([(30.0, 30.0); 4], false, false);
+        let continuous = outline([30.0; 4], true, false);
+        let circular = outline([30.0; 4], false, false);
         assert_eq!(continuous.len(), circular.len());
         for (a, b) in continuous.iter().zip(&circular) {
             if let (Segment::Cubic(a), Segment::Cubic(b)) = (a, b) {
                 for (x, y) in a.iter().zip(b) {
-                    assert!((x - y).abs() < 1e-6);
+                    assert!((x.x.0 - y.x.0).abs() < 1e-4 && (x.y.0 - y.y.0).abs() < 1e-4);
                 }
             }
         }
@@ -326,11 +343,7 @@ mod tests {
 
     #[test]
     fn reversed_outlines_visit_the_corners_the_other_way() {
-        let v = outline(
-            [(10.0, 10.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
-            false,
-            true,
-        );
+        let v = outline([10.0, 0.0, 0.0, 0.0], false, true);
         assert!(close(end(&v[0]), (10.0, 0.0)));
         assert!(close(end(&v[1]), (0.0, 10.0)));
         assert!(close(end(&v[2]), (0.0, 60.0)));

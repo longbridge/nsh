@@ -22,70 +22,14 @@
 use std::cell::{Ref, RefCell, RefMut};
 
 use gtk4::{self as gtk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+// The scroll position, extent and motion of a `ViewKind::Scroll` view.
+pub(crate) use nsh_core::scroll::ScrollState;
 use nsh_core::{
-    EventMask, MAX_TRANSFORMS, NodeId, PointerEvents, Rect, TransformKind, ViewKind, ViewProps,
+    Bounds, EventMask, NodeId, PointerEvents, Points, TransformKind, ViewKind, ViewProps,
     ViewStyle,
+    animation::AnimValues,
+    geometry::{AbsoluteLength, DefiniteLength, REM_SIZE},
 };
-
-/// Values native animations set on a view; they win over the style's.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub(crate) struct AnimValues {
-    /// Animated opacity.
-    pub(crate) opacity: Option<f32>,
-    /// Animated background color.
-    pub(crate) background: Option<nsh_core::Color>,
-    /// Animated entries of the transform list (by position).
-    pub(crate) transform: [Option<f32>; MAX_TRANSFORMS],
-    /// Animated border color (every side).
-    pub(crate) border_color: Option<nsh_core::Color>,
-    /// Animated text color (a text view's runs, an input's text).
-    pub(crate) color: Option<nsh_core::Color>,
-    /// Animated shadow color.
-    pub(crate) shadow_color: Option<nsh_core::Color>,
-    /// Animated shadow opacity.
-    pub(crate) shadow_opacity: Option<f32>,
-    /// Animated shadow blur radius.
-    pub(crate) shadow_radius: Option<f32>,
-}
-
-/// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct ScrollState {
-    /// Current offset (points; content coordinates of the viewport's top
-    /// left).
-    pub(crate) x: f32,
-    /// Vertical offset.
-    pub(crate) y: f32,
-    /// Size of the scrollable content.
-    pub(crate) content: (f32, f32),
-    /// Scrolls horizontally.
-    pub(crate) horizontal: bool,
-    /// Shows the scroll indicator.
-    pub(crate) indicator: bool,
-    /// How it scrolls (paging, snapping, insets...).
-    pub(crate) behavior: nsh_core::ScrollBehavior,
-    /// Scrolls the core asked for (`ScrollBy`, `scrollTo`) that were
-    /// applied: reported with each offset.
-    pub(crate) applied: u32,
-    /// The sticky cells: (cell, start, end).
-    pub(crate) sticky: Vec<nsh_core::StickyCell>,
-    /// A horizontal list laid out right to left: children are placed
-    /// mirrored (offsets stay left to right).
-    pub(crate) mirrored: bool,
-    /// Gestures, glides and the indicator ([`crate::scroll`]).
-    pub(crate) live: crate::scroll::Live,
-}
-
-impl ScrollState {
-    /// The largest offsets.
-    pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset;
-        (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
-        )
-    }
-}
 
 /// A native GTK widget a view hosts at `rect` (view coordinates).
 #[derive(Debug, Clone)]
@@ -93,7 +37,7 @@ pub(crate) struct Native {
     /// The widget (a child of the view).
     pub(crate) widget: gtk::Widget,
     /// Where it goes.
-    pub(crate) rect: Rect,
+    pub(crate) rect: Bounds<Points>,
 }
 
 /// Everything the mounter set on one view.
@@ -103,7 +47,7 @@ pub(crate) struct ViewState {
     /// What it is.
     pub(crate) kind: ViewKind,
     /// Frame in the parent (points).
-    pub(crate) frame: Rect,
+    pub(crate) frame: Bounds<Points>,
     /// Visual style.
     pub(crate) style: Box<ViewStyle>,
     /// Native animation values.
@@ -124,6 +68,9 @@ pub(crate) struct ViewState {
     pub(crate) scroll: Option<ScrollState>,
     /// Text content (text views).
     pub(crate) text: Option<crate::text::DrawnText>,
+    /// The part of its selection area's selection its text draws (UTF-16,
+    /// `start < end`; [`crate::selection_area`]).
+    pub(crate) area_selection: Option<(u32, u32)>,
     /// Image content (image views).
     pub(crate) image: Option<crate::image::ImageState>,
     /// Canvas content.
@@ -134,7 +81,7 @@ pub(crate) struct ViewState {
     pub(crate) natives: Vec<Native>,
     /// The area descendants cover outside the bounds (`MountItem::Overflow`):
     /// hit testing looks there too.
-    pub(crate) overflow: Option<Rect>,
+    pub(crate) overflow: Option<Bounds<Points>>,
     /// Running layout / style transitions and keyframes.
     pub(crate) live: Option<Box<crate::transition::Live>>,
     /// What accessibility last gave GTK.
@@ -146,7 +93,7 @@ impl ViewState {
         ViewState {
             id,
             kind,
-            frame: Rect::default(),
+            frame: Bounds::default(),
             style: Box::default(),
             anim: AnimValues::default(),
             events: EventMask::default(),
@@ -157,6 +104,7 @@ impl ViewState {
             fade: 1.0,
             scroll: matches!(kind, ViewKind::Scroll).then(ScrollState::default),
             text: None,
+            area_selection: None,
             image: None,
             canvas: None,
             input: None,
@@ -169,7 +117,7 @@ impl ViewState {
 
     /// The opacity it is drawn with.
     pub(crate) fn opacity(&self) -> f32 {
-        let live = self.live.as_ref().map_or(1.0, |l| l.opacity);
+        let live = self.live.as_ref().map_or(1.0, |l| l.opacity());
         self.anim.opacity.unwrap_or(self.style.opacity) * self.fade * live
     }
 
@@ -201,9 +149,11 @@ impl ViewState {
     /// clamped as CSS clamps them to the box.
     pub(crate) fn radii(&self) -> [f32; 4] {
         let s = &self.style;
-        let mut r: [f32; 4] =
-            std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
-        let (w, h) = (self.frame.width, self.frame.height);
+        let mut r: [f32; 4] = s
+            .corner_radius
+            .to_array()
+            .map(|r| r.unwrap_or(s.border_radius).0);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
         let lens = [w, h, w, h];
         let f = sums
@@ -234,8 +184,8 @@ impl ViewState {
             &graphene::Rect::new(
                 -m,
                 -m,
-                self.frame.width + 2.0 * m,
-                self.frame.height + 2.0 * m,
+                self.frame.size.width.0 + 2.0 * m,
+                self.frame.size.height.0 + 2.0 * m,
             ),
         );
     }
@@ -252,7 +202,7 @@ impl ViewState {
     /// The rounded rectangle of its bounds.
     pub(crate) fn rounded_bounds(&self) -> gsk::RoundedRect {
         rounded(
-            graphene::Rect::new(0.0, 0.0, self.frame.width, self.frame.height),
+            graphene::Rect::new(0.0, 0.0, self.frame.size.width.0, self.frame.size.height.0),
             self.radii(),
         )
     }
@@ -266,12 +216,16 @@ impl ViewState {
         if extra.is_none() && (t.ops().is_empty() || (!animated && t.is_identity())) {
             return None;
         }
-        let (w, h) = (self.frame.width, self.frame.height);
+        let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let o = self.style.transform_origin;
-        let (ox, oy) = (o.x.resolve(w), o.y.resolve(h));
+        let at = |l: DefiniteLength, side: f32| {
+            l.to_points(AbsoluteLength::Points(Points(side)), REM_SIZE)
+                .0
+        };
+        let (ox, oy, oz) = (at(o.x, w), at(o.y, h), o.z.0);
         let mut m = gsk::Transform::new().translate(&graphene::Point::new(ox, oy));
-        if o.z != 0.0 {
-            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, o.z));
+        if oz != 0.0 {
+            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, oz));
         }
         for (i, op) in t.ops().iter().enumerate() {
             let v = self.anim.transform[i].unwrap_or(op.value);
@@ -298,10 +252,10 @@ impl ViewState {
             };
         }
         if let Some(extra) = extra {
-            m = extra.apply(m, h);
+            m = crate::transition::apply_extra(extra, m, h);
         }
-        if o.z != 0.0 {
-            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, -o.z));
+        if oz != 0.0 {
+            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, -oz));
         }
         Some(m.translate(&graphene::Point::new(-ox, -oy)))
     }
@@ -427,8 +381,8 @@ mod imp {
             let state = self.state.borrow();
             let (sx, sy) = match &state.scroll {
                 Some(s) => {
-                    let inset = s.behavior.content_inset;
-                    (s.x - inset.left, s.y - inset.top)
+                    let inset = s.behavior.content_inset.map(|v| v.0);
+                    (s.x.0 - inset.left, s.y.0 - inset.top)
                 }
                 None => (0.0, 0.0),
             };
@@ -438,17 +392,17 @@ mod imp {
                 .scroll
                 .as_ref()
                 .is_some_and(|s| s.mirrored)
-                .then_some(state.frame.width);
+                .then_some(state.frame.size.width.0);
             let natives: Vec<Native> = state.natives.clone();
             drop(state);
             let mut child = self.obj().first_child();
             while let Some(widget) = child {
                 child = widget.next_sibling();
                 if let Some(rect) = natives.iter().find(|n| n.widget == widget).map(|n| n.rect) {
-                    let t = placement(rect.x, rect.y, None);
+                    let t = placement(rect.origin.x.0, rect.origin.y.0, None);
                     widget.allocate(
-                        rect.width.ceil().max(0.0) as i32,
-                        rect.height.ceil().max(0.0) as i32,
+                        rect.size.width.0.ceil().max(0.0) as i32,
+                        rect.size.height.0.ceil().max(0.0) as i32,
                         -1,
                         Some(t),
                     );
@@ -465,15 +419,15 @@ mod imp {
                 };
                 let s = view.state();
                 let f = s.frame;
-                let mut x = f.x - sx + s.shift.0;
+                let mut x = f.origin.x.0 - sx + s.shift.0;
                 if let Some(w) = mirror {
-                    x = w - x - f.width;
+                    x = w - x - f.size.width.0;
                 }
-                let t = placement(x, f.y - sy + s.shift.1, s.transform());
+                let t = placement(x, f.origin.y.0 - sy + s.shift.1, s.transform());
                 drop(s);
                 widget.allocate(
-                    f.width.ceil().max(0.0) as i32,
-                    f.height.ceil().max(0.0) as i32,
+                    f.size.width.0.ceil().max(0.0) as i32,
+                    f.size.height.0.ceil().max(0.0) as i32,
                     -1,
                     Some(t),
                 );
@@ -511,8 +465,8 @@ mod imp {
                 snapshot.push_clip(&graphene::Rect::new(
                     0.0,
                     0.0,
-                    state.frame.width,
-                    state.frame.height,
+                    state.frame.size.width.0,
+                    state.frame.size.height.0,
                 ));
             }
             crate::text::draw(snapshot, &state);
@@ -532,8 +486,8 @@ mod imp {
                 if let Some(view) = widget.downcast_ref::<super::NshView>()
                     && widget.width() == 0
                     && widget.height() == 0
-                    && view.state().frame.width >= 1.0
-                    && view.state().frame.height >= 1.0
+                    && view.state().frame.size.width.0 >= 1.0
+                    && view.state().frame.size.height.0 >= 1.0
                 {
                     continue;
                 }
@@ -558,11 +512,11 @@ mod imp {
             if s.style.hidden || matches!(s.props.pointer_events, PointerEvents::BoxNone) {
                 return false;
             }
-            let h = s.props.hit_slop;
+            let h = s.props.hit_slop.map(|v| v.0);
             x >= -(h.left as f64)
                 && y >= -(h.top as f64)
-                && x < (s.frame.width + h.right) as f64
-                && y < (s.frame.height + h.bottom) as f64
+                && x < (s.frame.size.width.0 + h.right) as f64
+                && y < (s.frame.size.height.0 + h.bottom) as f64
         }
     }
 }
@@ -639,7 +593,7 @@ impl NshView {
     }
 
     /// Hosts `widget` at `rect` (or moves it there).
-    pub(crate) fn set_native(&self, widget: &impl IsA<gtk::Widget>, rect: Rect) {
+    pub(crate) fn set_native(&self, widget: &impl IsA<gtk::Widget>, rect: Bounds<Points>) {
         let widget = widget.as_ref();
         {
             let mut s = self.state_mut();

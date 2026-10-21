@@ -1,19 +1,450 @@
 ---
-title: Testing with nsh trace
-description: Run an app headless with nsh trace, read the native view operations and timings it prints, simulate taps and scrolling, and use it in CI; testID for UI tests.
+title: Testing
+description: Test apps headless, in Rust with cargo test and nsh_testing or in TypeScript with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings --trace prints; testID for UI tests.
 order: 61
 group: tools
 ---
 
-# Testing with nsh trace
+# Testing
 
-`nsh trace` runs an app **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components,
-layout and list virtualization as on a device), but no simulator, no device and no window. Instead of drawing, it
-prints every operation the runtime would send to the native views, with timings. It runs anywhere the CLI runs,
-including Linux CI machines.
+NSH runs apps **headless**: the real engine (the same reactive graph, renderer, components, layout and list
+virtualization as on a device, and QuickJS for TSX), with display frames at 60 Hz, but no simulator, no device and no
+window. It runs anywhere Cargo or the CLI runs, including Linux CI machines, and does two jobs:
+
+- it runs tests: each opens the app, takes the steps a user would (press, type, scroll), and checks what is on screen.
+  A Rust app's tests are Rust, run by `cargo test` with the `nsh-testing` crate; tests written in TypeScript run with
+  `nsh test`, for TSX apps and Rust apps alike;
+- with `--trace`, it prints every operation the runtime sends to the native views, with timings: what the first
+  frame, a tap or a frame of scrolling costs.
+
+## Writing tests
+
+The same test, in Rust and in TypeScript: it opens the app with an empty todo list in its storage, types, presses and
+checks what the screen shows.
+
+```rust tabs
+// tests/app/main.rs
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, MemoryStorage};
+
+#[test]
+fn adds_a_todo() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.storage = Some(MemoryStorage::new([("todos".to_owned(), "[]".to_owned())]));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("id:new-todo", "Buy milk").unwrap();
+    app.press("text:Add").unwrap();
+    app.wait_for("text:Buy milk").unwrap();
+    assert!(app.screen().texts().contains(&"1 item left"));
+}
+```
+
+```tsx tabs
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
+## Tests in Rust with cargo test
+
+A Rust app's tests are integration tests of its crate, with `nsh-engine` and `nsh-testing` (its default features,
+without QuickJS) as dev-dependencies:
+
+```toml
+[dev-dependencies]
+nsh-engine = "0.1"
+nsh-testing = "0.1"
+```
 
 ```sh
-nsh trace App.tsx
+cargo test                    # every test of the crate
+cargo test adds_a_todo        # the tests whose name contains "adds_a_todo"
+```
+
+`EngineConfig::new(root)` is a phone-sized engine (390×844 points) with nothing else set; its fields set what `open`'s
+options set below: `storage` (`MemoryStorage::new(entries)`), `network` (`StubNetwork`, below), `viewport`,
+`environment` (the appearance, the locale, reduced motion), `clock` (`Clock::manual(time)`, below).
+`nsh_testing::Headless::start(config)` starts the app and keeps a model of the views it shows. Its steps are those of
+`nsh test` below, with the same selectors, in Rust: `press`, `long_press`, `clear`, `type_text`, `submit`,
+`scroll(selector, px(3000.0))`, `back`, `wait`, `wait_for`, `wait_for_gone`, `wait_until`, `run_for`, `fast_forward`,
+`set_system_time`, `set_viewport`, `set_clipboard` and `on_dialog`; `app.shows(text)` and `app.screen()` (`texts()`,
+`count(selector)`, `enabled(selector)`, `dialogs()`, `clipboard()`, `commands()`) read what is on screen. A step
+returns an error with the texts on screen when it cannot be taken.
+
+`nsh_testing::tsx(entry, sets)` (feature `bundle`) opens an app's TSX entry the same way, built against NSH's and the
+crate's UI sets ([Building with Rust](./rust.md#testing)). `examples/gallery-rs` tests its Rust root this way, one
+module per demo; `examples/rust-exports` tests its TSX entry from Rust.
+
+## Tests with nsh test
+
+A test file is a `*.test.tsx` or `*.test.ts` file next to your code. It imports `nsh/test`, as `App.test.tsx` above
+does:
+
+```sh
+nsh test                      # every test file of the app in the current directory
+nsh test App.test.tsx         # one file
+nsh test --filter "adds"      # the tests whose name contains "adds"
+```
+
+```text
+✓ App.test.tsx › adds a todo (84ms)
+✗ App.test.tsx › keeps todos after a restart (312ms)
+    expected ["Todos","0 items left"] to contain "1 item left"
+    at <anonymous> (App.test.tsx:21:22)
+    on screen: "Todos", "0 items left"
+error 2 tests: 1 passed, 1 failed (0.9s)
+```
+
+A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. Any failure
+makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with the app, and `nsh check` type
+checks test files with the rest (`.nsh/types` declares `nsh/test`).
+
+Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
+another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
+test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
+`test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
+(`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
+(`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
+
+### Grouping tests and setting them up
+
+`describe`, the hooks and the variants of `test` work as Jest's:
+
+```tsx
+import { beforeEach, describe, expect, open, test } from "nsh/test";
+import type { App } from "nsh/test";
+
+describe("the cart", () => {
+  let app: App;
+  beforeEach(async () => {
+    app = await open("./App.tsx", { storage: { cart: "[]" } });
+    await app.press("Cart");
+  });
+
+  test("starts empty", () => {
+    expect(app.texts()).toContain("No items");
+  });
+
+  test.todo("applies a coupon");
+});
+```
+
+| Function | Description |
+|---|---|
+| `describe(name, body)` | Groups the tests and blocks `body` declares (at once, as the file loads): their names start with `name` (`the cart › starts empty`), and the hooks it declares run around them only. Blocks nest. |
+| `beforeEach(fn, timeout?)`, `afterEach(fn, timeout?)` | Run `fn` before / after each test of the block they are declared in (the file, a `describe`): `beforeEach` of the outer blocks first, `afterEach` of the inner ones first. A `beforeEach` that fails fails the test; `afterEach` runs either way. |
+| `beforeAll(fn, timeout?)`, `afterAll(fn, timeout?)` | Run `fn` once before the first and after the last test of their block, when one of its tests runs. A `beforeAll` that fails fails the block's tests; an `afterAll` that fails is reported as a failed `<block> › afterAll`. An app a `beforeAll` opens stays open for the block's tests, and is closed after its `afterAll`. |
+| `test.skip(name, body, timeout?)`, `describe.skip(name, body)` | Declares a test, or a block whose tests, do not run: they are reported as skipped. |
+| `test.only(name, body, timeout?)`, `describe.only(name, body)` | While a test file has one, only those tests and blocks run; the file's others are reported as skipped. |
+| `test.todo(name)` | A test still to write, reported as one. |
+
+A hook may be `async`; its `timeout` is 30 seconds unless given. Tests and hooks are declared as the file loads: a
+test declared inside a test or a hook throws.
+
+### Opening the app
+
+`open(entry, options?)` builds the app at `entry` (relative to the test file; each entry is built once per run),
+starts it on a 390×844 viewport and resolves once it rendered and is quiet.
+
+| Option | Default | Description |
+|---|---|---|
+| `storage` | empty | What `nsh/storage` holds at the start: `{ todos: "[]" }`. |
+| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network. |
+| `width`, `height` | 390, 844 | The viewport in points. |
+| `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
+| `clipboard` | empty | The text on the clipboard at the start. |
+| `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
+| `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
+| `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
+| `platform` | `"ios"` | The platform the app runs as: `"ios"` or `"android"` (`Platform.OS`, `ios={{…}}` / `android={{…}}` props). |
+| `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
+
+### Stubbing the network
+
+`network` lists routes by `"<METHOD> <URL>"` (a bare URL is a `GET`; `*` matches any text). A request no route
+matches fails, so tests never reach the network unasked. A route is a response, or a function of the request that
+returns one (or a promise of one); in Rust, `StubNetwork::new(routes)` takes the same routes, each a `StubResponse` or
+a `StubRoute::Handler`:
+
+```rust tabs
+use std::sync::Arc;
+use nsh_engine::{EngineConfig, Root};
+use nsh_testing::{Headless, StubNetwork, StubResponse};
+
+#[test]
+fn adds_a_todo_on_the_server() {
+    let mut todos = StubResponse::default();
+    todos.status = 200;
+    todos.headers = vec![("content-type".to_owned(), "application/json".to_owned())];
+    todos.body = br#"[{ "id": 1, "title": "Walk" }]"#.to_vec();
+    let mut created = StubResponse::default();
+    created.status = 201;
+    let mut offline = StubResponse::default();
+    offline.error = Some("offline".to_owned());
+    let network = Arc::new(StubNetwork::new([
+        ("GET https://api.example.com/todos".to_owned(), todos),
+        ("POST https://api.example.com/todos".to_owned(), created),
+        ("GET https://api.example.com/sync".to_owned(), offline),
+    ]));
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    config.network = Some(network.clone());
+    let mut app = Headless::start(config).unwrap();
+    app.press("Add").unwrap();
+    let methods: Vec<String> = network.requests().iter().map(|r| r.method.clone()).collect();
+    assert_eq!(methods, ["GET", "POST"]);
+}
+```
+
+```tsx tabs
+const app = await open("./App.tsx", {
+  network: {
+    "GET https://api.example.com/todos": { body: [{ id: 1, title: "Walk" }] },
+    "POST https://api.example.com/todos": (request) => ({ status: 201, body: JSON.parse(request.body!) }),
+    "GET https://api.example.com/todos/*": { status: 404 },
+    "GET https://api.example.com/sync": { error: "offline" },
+    "GET https://api.example.com/slow": { body: "done", delay: 2000 },
+  },
+});
+await app.press("Add");
+expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
+```
+
+| Response member | Default | Description |
+|---|---|---|
+| `status` | 200 | The status code. |
+| `headers` | none | Header names and values. |
+| `body` | empty | A string, or a value sent as JSON (with `content-type: application/json` unless `headers` name one). |
+| `error` | none | The request fails with this message instead, as when the device is offline. |
+| `delay` | 0 | How long the response takes, in milliseconds; a step does not wait for it, `waitFor` does. On a manual clock, it comes once the clock passes it. |
+
+A route's function gets the request (`method`, `url`, `headers`, `body` as text) and runs in the test file, so it can
+count requests or answer from what the test set up. A function that throws fails the request and the step that made
+it. `app.requests()` lists the requests the app made, in order, the same way.
+
+### Controlling time
+
+On the system's clock, an app's timers and native animations take as long as on a device, and so do the tests that
+wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clock` in TypeScript), the app runs on a
+clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
+`page.clock`:
+
+```rust tabs
+use std::time::{Duration, SystemTime};
+use nsh_engine::{Clock, EngineConfig, Root};
+use nsh_testing::Headless;
+
+#[test]
+fn autosaves() {
+    let mut config = EngineConfig::new(Root::of::<my_app::App>());
+    // 2026-01-01T09:00:00Z
+    config.clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_secs(1_767_258_000));
+    let mut app = Headless::start(config).unwrap();
+    app.type_text("label:Note", "Milk").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap(); // the autosave, ten seconds later
+    assert!(app.shows("Saved at 09:00:10"));
+}
+```
+
+```tsx tabs
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock.runFor(10_000);            // the autosave, ten seconds later
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
+A `StubNetwork` whose responses have a `delay` follows a manual clock with `.with_clock(clock.clone())`. The steps below
+are `nsh test`'s; `Headless` has each of them (`run_for`, `fast_forward`, `set_system_time`).
+
+| Step | Description |
+|---|---|
+| `await app.clock.runFor(ms)` | Moves the clock by `ms` milliseconds, one display frame at a time. Timers, `requestAnimationFrame`, native animations and delayed responses run as they come due, in order, each at its time. Resolves once the app is quiet. |
+| `await app.clock.fastForward(ms)` | Moves the clock by `ms` milliseconds at once, as a device waking from sleep does: the timers due meanwhile run once each. |
+| `app.clock.setSystemTime(time)` | Sets the wall time (`Date.now()`, `new Date()`) to a `Date` or milliseconds, moving no timer. |
+
+`Date`, `performance.now()` and `Intl`'s default date follow the clock. Steps finish what is running without waiting
+for it: while the app asks for frames or a native animation runs, frames come one after another, each a frame's time
+(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. `app.wait(ms)`
+and a long press move the clock by their time. A timer that comes due later runs only when the test moves the clock
+there. `waitFor`'s timeout stays real time, as it also waits for what comes from outside (a route's function, the
+network). The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
+take 6 s instead of 28 s.
+
+### Steps
+
+Steps name views with **selectors**, written as Playwright's:
+
+| Selector | Matches |
+|---|---|
+| `id:<testID>` | The view with that `testID`. |
+| `label:<label>` | The view with that `accessibilityLabel`. |
+| `text:<text>` | A text that reads it (spaces around it aside), or an input holding it or, while empty, with that placeholder. |
+| `role:<role>`, `role:<role>[<name>]` | A view with that `role` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
+| `view:<id>` | The view with that id in `--trace` output. |
+| anything else | A `testID`, else a label, else a text, as written. |
+
+`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`. ` >> ` looks inside what the part before matched
+(`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0 (`text:Delete >> nth=1`). A
+selector finds the views a user would look at first: in the top modal, then on screen, and of a navigation stack only
+the top screen. A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
+one: a selector matching several fails the step, and the error says how to narrow it.
+
+| Step | Description |
+|---|---|
+| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`. Rejects when it is disabled. |
+| `await app.longPress(selector)` | Holds a finger on it for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. |
+| `await app.clear(selector)` | Empties the input, as selecting all and deleting does. |
+| `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) at the end of what it holds, key by key: it takes the focus, then each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
+| `await app.submit(selector)` | The return key in the input, as its `submitBehavior` says: `onSubmit` (and the focus leaves a single-line input), or a line break in a multiline one. |
+| `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content. Negative scrolls back. |
+| `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
+| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |
+| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
+| `app.shows(selector)` | Whether a view matches now. |
+| `app.count(selector)` | How many views match now. |
+| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
+| `app.texts()` | The texts on screen now, in order. |
+| `app.value(selector)` | The text of an input, `null` when none matches. |
+| `app.storage()` | What the app's storage holds now. |
+| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
+| `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
+| `app.dialogs()` | The dialogs the app showed, in order. |
+| `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
+| `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
+| `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
+| `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
+| `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
+
+A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
+render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on screen when the next
+line runs; use `waitFor` for what comes later (a
+response, a timer). A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
+screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
+
+### What headless runs play of the platform
+
+A headless run has the real runtime and no platform. It plays the platform's part NSH's protocol defines, and nothing
+that only a real platform can do:
+
+- **Native animations run** frame by frame, to their end: `start(callback)` callbacks run, and so does what waits for
+  them.
+- **Going back** pops screens and closes modals as a platform does (`app.back()`).
+- **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
+  be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
+- **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
+- **Modals show at once**: `onShow` comes when one is presented.
+- **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
+- **What only a real platform answers fails the step**: an image or files on the clipboard.
+
+### Expectations
+
+`expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
+does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`.
+
+| Check | Holds when |
+|---|---|
+| `toBe(expected)`, `toEqual(expected)` | The value equals `expected`, member by member. |
+| `toContain(item)` | An array holds `item`, or a string contains it. |
+| `toBeTruthy()`, `toBeFalsy()` | The value is truthy / falsy, as JS sees it. |
+| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`). |
+| `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
+| `toBeNull()` | The value is `null` (or `undefined`). |
+| `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
+| `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
+| `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
+
+### On a real platform
+
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
+each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
+own input at the views their selectors name, as Playwright does in a browser:
+
+- a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
+  `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
+  back button on Windows and in GPUI, the browser's back button on the web, the header's back button or a sheet
+  swiped down on iOS, the back button on Android);
+- a view off screen is scrolled into view first, a gesture at a time;
+- selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
+  they find the same views;
+- dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
+  when the test says nothing) presses its button;
+- `app.screenshot(path)` takes a picture of the window.
+
+```sh
+nsh test --target macos                       # the app's tests in macOS windows
+nsh test --target linux                       # in GTK windows (xvfb-run -a … on a machine without a display)
+nsh test --target windows                     # in Win32 windows
+nsh test --target ios                         # in an iOS simulator
+nsh test --target android                     # on the Android device or emulator adb lists first
+nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
+nsh test --target web                         # in a headless Chrome, Edge or Chromium
+nsh test tests/form.test.tsx --target macos   # one file
+```
+
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. Time is real: a `clock`
+moves as the system's does, so `app.clock.runFor(ms)` waits that long, and `fastForward` and `setSystemTime`, which
+real time cannot do, reject. What a real platform cannot be given yet makes `open` reject rather than being left
+out: stubbed `network` routes, `storage`, `clipboard`, `locale`, `reducedMotion` and `safeArea`; requests go to the
+network. `app.storage()` and `app.requests()` are headless only. An app with Rust crates of its own runs its tests
+headless for now.
+
+On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
+on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked
+when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
+the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
+
+On iOS, the apps run in the development host in an iOS simulator: the booted one, else the newest iPhone, which
+`nsh test` boots. The steps are a finger's touches and the software keyboard's typing, as UIKit gets them from the
+device. `setColorScheme` switches the simulator's appearance, which `nsh test` sets back after the app, and the screen
+has the simulated device's size.
+
+On Android, the apps run in the development host on the first device or emulator `adb devices` lists, with storage
+of their own. The steps are a finger's touches and a keyboard's keys, as the app's views get them from the device;
+`back` is the system's back. `setColorScheme` switches the device's dark theme, which `nsh test` sets back after the
+app.
+
+### Steps from standard input
+
+Given the app's entry instead of tests, `nsh test` opens the app on the real network, lets it run for 1.2 s, then takes
+the steps standard input gives, with `app` the app:
+
+```sh
+echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh test App.tsx
+```
+
+The 1.2 s let the engine's idle garbage collection run before the first step, so an app that lets go of what it still
+uses shows it: its handlers stop working.
+
+The examples have tests to start from: `examples/gallery-rs` for a Rust app (`cargo test`, one module per demo, and
+`App.test.tsx`), `examples/rust-exports` for an app with a Rust crate, `examples/counter` and `examples/gallery/tests`
+(storage, inputs, a long list, stubbed requests, dark mode, a manual clock) for TSX apps.
+
+## Tracing with --trace
+
+`--trace` prints every mount batch of the apps the tests open, under the step it came in, and the time of every
+commit. In Rust, a test prints the same: `observe` hands it each batch with its step, and `EngineConfig::trace` logs
+the `perf` lines through the `log` crate (target `nsh::perf`; install a logger such as `env_logger` in the test):
+
+```rust
+let mut config = EngineConfig::new(Root::of::<my_app::App>());
+config.trace = true;
+let mut app = Headless::start(config).unwrap();
+app.observe(|step, batch| nsh_testing::print_batch(&mut std::io::stdout(), step, batch));
+app.press("Add").unwrap();
+```
+
+`nsh test` takes `--trace` on a test file, or on the app's entry with the steps on standard input:
+
+```sh
+nsh test App.test.tsx --trace
+nsh test App.tsx --trace                                   # the first frame, then 1.2 s idle
+echo 'await app.press("Add")' | nsh test App.tsx --trace    # and a press
 ```
 
 Use it to:
@@ -23,66 +454,43 @@ Use it to:
 - measure the cost of the first frame, of a tap and of each scrolling frame;
 - catch regressions in CI.
 
-## What it does
+### Reading the output
 
-1. Bundles the entry (development settings, not minified) and compiles it to bytecode.
-2. Starts an engine with a 390×844 viewport and renders the first frame.
-3. Optionally scrolls the first scroll view or list.
-4. Waits while the app is idle (by default 1.2 s, so the engine's idle garbage collection runs first and retention bugs
-   show up), printing whatever the app renders meanwhile (timers, fetches, animations). An app that never stops
-   rendering (a clock, a looping animation) is waited for at most 10 s; `--wait` sets the time instead.
-5. Taps the views `--tap` names, or the first pressable view (the first view with `onPress`) a number of times, and
-   prints what each tap changes, then what the app renders after it.
-
-| Flag | Default | Description |
-|---|---|---|
-| `--tap <selector>` | none | A view to tap (repeatable, in order): `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>`, or a bare string matched as each of the first three. |
-| `--taps <n>` | 2 | Without `--tap`: taps to send to the first pressable view. |
-| `--idle-ms <ms>` | 1200 | Idle time before tapping. |
-| `--wait <ms>` | none | Run exactly this long before the first tap and after each one, instead of waiting until the app is idle. |
-| `--duration <ms>` | 0 | Keep running this long after the last tap. |
-| `--safe-area <insets>` | 0 | Safe area insets: `top,right,bottom,left` in points, e.g. `47,0,34,0`. |
-| `--scroll <points>` | none | Scroll the first scroll view or list by this many points, in 10 pt frames, printing each frame's batch. |
-| `--width <points>` | 390 | Viewport width. |
-| `--height <points>` | 844 | Viewport height. |
-
-## Reading the output
-
-Here is the counter example (`examples/counter/App.tsx`), shortened:
+Here is the counter example with one press (`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx
+--trace`), shortened:
 
 ```text
-✓ bundled App.tsx (3255 B in 14.3 ms)
-perf commit: 56 ops, 395µs (list js 6µs), 49 mount items, 21 nodes
-perf first frame: eval 271µs, total 1235µs
-── initial render: 49 items
+✓ bundled App.tsx (3255 B in 6.2 ms)
+perf commit: 56 ops, 271µs (list js 5µs), 49 mount items, 21 nodes
+perf first frame: eval 187µs, total 820µs
+── open(App.tsx): 49 items
    LayoutDirection { rtl: false }
    Create { id: 2, kind: View }
    Create { id: 4, kind: Text }
    Insert { parent: 2, child: 4, before: None }
    ...
-   Events { id: 20, events: EventMask(1) }
    Frame { id: 2, x: 0, y: 0, w: 390, h: 844 }
    Frame { id: 4, x: 24, y: 64, w: 342, h: 34 }
    ...
    Text { id: 4, text: "nsh counter", content: 342x34 @ 0,0 }
    Text { id: 14, text: "0", content: 36x77 @ 0,0 }
-perf event Press on view 20
-perf event js: 196µs
-perf commit: 10 ops, 248µs (list js 6µs), 8 mount items, 24 nodes
-── tap #1 on view 20: 8 items
+perf event Press on view 26
+perf event js: 413µs
+perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
+── press(+1): 7 items
    Create { id: 42, kind: Text }
    Insert { parent: 32, child: 42, before: None }
-   Frame { id: 14, x: 136, y: 49, w: 71, h: 77 }
    Frame { id: 32, x: 24, y: 366, w: 342, h: 43 }
    Frame { id: 42, x: 0, y: 23, w: 342, h: 20 }
-   Text { id: 14, text: "-1", content: 71x77 @ 0,0 }
-   Text { id: 42, text: "• -1", content: 342x20 @ 0,0 }
+   Text { id: 14, text: "1", content: 36x77 @ 0,0 }
+   Text { id: 42, text: "• 1", content: 342x20 @ 0,0 }
    Text { id: 34, text: "Recent values: 1", content: 342x17 @ 0,0 }
+✓ App.tsx › steps (1.4s)
 ```
 
-### Batches and mount items
+#### Batches and mount items
 
-Each `── title: N items` block is one **mount batch**: everything the platform applies to native views for one frame,
+Each `── step: N items` block is one **mount batch**, under the step it came in: everything the platform applies to native views for one frame,
 in one hop to the main thread. The lines in it are **mount items**:
 
 | Item | Meaning |
@@ -100,7 +508,7 @@ in one hop to the main thread. The lines in it are **mount items**:
 Only what changed is sent: a tap that changes one number sends one `Text` item; views get no default style and no empty
 event mask; unchanged frames are not sent. A frame of scrolling that reveals no new row produces **no batch at all**.
 
-### The `perf` lines
+#### The `perf` lines
 
 | Line | Meaning |
 |---|---|
@@ -117,98 +525,76 @@ event mask; unchanged frames are not sent. A frame of scrolling that reveals no 
 Single-run timings depend a lot on the CPU's clock state (a machine that just woke from idle is slow). Compare runs on
 the same machine, look at the minimum of several runs, and trust the op and item counts more than the microseconds.
 
-## Scrolling
+### Scrolling
 
-```sh
-nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
+```rust
+app.scroll("id:photos", px(3000.0)).unwrap();
 ```
 
-Scrolls the first `<Scroll>` or `List` 10 points per frame and prints each frame's batch:
+```sh
+echo 'await app.scroll("id:photos", 3000)' | nsh test examples/gallery/Bench.tsx --trace
+```
+
+`scroll` moves the list 10 points per frame, at 60 frames a second, and each frame's batch is printed:
 
 ```text
-perf commit: 26 ops, 297µs (list js 111µs), 22 mount items, 233 nodes
-── scroll to 20: 22 items
-   Create { id: 448, kind: View }
+perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
+── scroll(id:photos, 3000): 46 items
+   Create { id: 792, kind: View }
+   Insert { parent: 94, child: 792, before: None }
    ...
-   Text { id: 456, text: "Photo #25", content: 298x20 @ 0,0 }
 ```
 
 For a [list](./lists.md), this shows the virtualization at work: which frames bind new rows, how many operations a row
-costs, and that frames revealing no new row produce nothing. Use it with a release build of the CLI
-(`./target/release/nsh` in a checkout) for meaningful timings.
+costs, and that frames revealing no new row produce nothing. Use it with a release build (`cargo test --release`, or `./target/release/nsh` in a checkout) for meaningful
+timings.
 
-## Taps
+### In CI
 
-Name the views to tap with `--tap`, by `testID`, accessibility label or text, in the order to tap them. A match that is
-not pressable itself (a `Text` inside a button) taps its nearest pressable ancestor, and the views a tap brings in (a
-pushed screen, an opened menu) can be tapped next:
-
-```sh
-nsh trace --tap label:Plan --tap "text:Add stage" --tap id:save --wait 300
-```
-
-Without `--tap`, `nsh trace` taps the **first** view with `onPress` on screen. You can also write a small entry file
-that renders only the screen under test:
-
-```tsx
-// trace/AddItem.tsx: renders the screen and puts the button under test first
-import { mount } from "nsh";
-import { Cart } from "../src/Cart";
-
-mount(() => <Cart initialItems={[]} />);
-```
-
-```sh
-nsh trace trace/AddItem.tsx --taps 5
-```
-
-If a tap produces no update, `nsh trace` stops with `error tap #1 produced no update` and a non-zero exit code: that
-is how it catches handlers that stopped working, for example because the app's nodes were garbage-collected.
-
-## In CI
-
-`nsh trace` needs nothing but the CLI, so it runs on Linux runners. Errors in the app (a failed bundle evaluation, an
-uncaught exception) are printed as `error` lines; a build failure, an app that renders nothing, or a tap that changes
-nothing make it exit with a non-zero code. Check both:
-
-```sh
-#!/bin/sh
-set -e
-for entry in App.tsx trace/*.tsx; do
-  out=$(nsh trace "$entry" --idle-ms 300 2>&1) || { echo "$out"; exit 1; }
-  if echo "$out" | grep -E '^ *error' >/dev/null; then
-    echo "$out"
-    echo "errors in $entry"
-    exit 1
-  fi
-done
-```
+Headless tests need no device or display, so they run on Linux runners: `cargo test` for a Rust app's tests, and
+`nsh test`, which needs nothing but the CLI. Any failing test makes either exit with a non-zero code: a test that
+fails, an app that does not build or renders nothing, an exception the app throws during a step.
 
 ```yaml
-# .github/workflows/trace.yml
+# .github/workflows/test.yml
 jobs:
-  trace:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/trace.sh
+      - run: cargo test                            # a Rust app's tests
+      - run: nsh test --junit test-results.xml     # its TypeScript tests, or a TSX app's
 ```
 
 (Install the `nsh` CLI on the runner the way you install it locally; see [Installation](./installation.md).)
 
+`--junit <FILE>` also writes the results as a JUnit XML report, which CI services (GitHub Actions test reporters,
+GitLab, Jenkins, Azure Pipelines) show per test: a `testsuite` per test file, a `testcase` per test, with what failed,
+where, and the texts on screen.
+
 To guard performance, record the item counts of a few interactions (the `── … : N items` lines and the `ops` /
-`mount items` numbers) and fail when they grow. Counts are deterministic; timings on shared CI machines are not.
+`mount items` numbers of `--trace`) and fail when they grow. Counts are deterministic; timings on shared CI machines
+are not.
 
 > [!NOTE]
-> `nsh trace` runs with every capability: it does not apply the `capabilities` of `nsh.json`, and its `fetch` really
-> goes to the network. Test capability rules on a device or in a packaged build.
+> Tests run with every capability: `nsh.json`'s `capabilities` are not applied. Test capability rules on a device or in
+> a packaged build.
 
 ## `testID` for UI tests
 
-`nsh trace` checks what the runtime renders. To drive the real native UI with the platform's test tools (XCUITest,
-Espresso / UI Automator, Appium, Maestro), give views a `testID`:
+Headless tests check what the runtime renders, and their `id:` selectors find views by test id. To drive the real
+native UI with the platform's test tools (XCUITest, Espresso / UI Automator, Appium, Maestro), give views a test id:
+`.test_id(…)` in Rust, `testID` in TSX:
 
-```tsx
+```rust tabs
+view()
+    .test_id("add-to-cart")
+    .p_3()
+    .on_press(add)
+    .child(text(move || format!("{} items", count.get())).test_id("cart-count"))
+```
+
+```tsx tabs
 <View testID="add-to-cart" onPress={add} style={{ padding: 12 }}>
   <Text testID="cart-count">{`${count()} items`}</Text>
 </View>
@@ -219,8 +605,8 @@ Espresso / UI Automator, Appium, Maestro), give views a `testID`:
 | iOS | The view's `accessibilityIdentifier` (`app.otherElements["add-to-cart"]` in XCUITest). |
 | Android | The accessibility node's view id resource name (`By.res("add-to-cart")` in UI Automator). |
 
-`testID` is a prop of every element and of the components in `nsh/ui/mobile`. It does not change what screen readers
-say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `nsh trace` output it appears in
+The test id is a method of every element in Rust, and `testID` a prop of every element and of every Rust component (`SafeAreaView`, `KeyboardAvoidingView`, ...). It does not change what screen readers
+say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 
 ## See also

@@ -28,8 +28,8 @@ impl JsError {
         }
     }
 
-    pub(crate) fn from_engine(ctx: &Ctx<'_>, err: rquickjs::Error) -> Self {
-        Self::caught(CaughtError::from_error(ctx, err))
+    pub(crate) fn from_engine(cx: &Ctx<'_>, err: rquickjs::Error) -> Self {
+        Self::caught(CaughtError::from_error(cx, err))
     }
 }
 

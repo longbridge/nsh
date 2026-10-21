@@ -105,6 +105,7 @@ impl Mounter {
         crate::navigation::end_batch(surface);
         crate::system::end_batch(surface);
         crate::input::content_moved(surface);
+        crate::selection_area::end_batch(surface);
     }
 
     fn get(&self, id: NodeId) -> Option<&NshView> {
@@ -195,10 +196,10 @@ impl Mounter {
                 }
                 let mut frame = *frame;
                 if view.kind() == ViewKind::Modal {
-                    // Where a modal sits is the platform's (a sheet is a
-                    // card inside the window): the core only sizes it.
+                    // Where a modal sits is the platform's (it covers the
+                    // window): the core only sizes it.
                     let old = view.state().frame;
-                    (frame.x, frame.y) = (old.x, old.y);
+                    (frame.origin.x.0, frame.origin.y.0) = (old.origin.x.0, old.origin.y.0);
                 }
                 let frame = &frame;
                 // Compared with where a running layout animation is headed,
@@ -278,7 +279,7 @@ impl Mounter {
             }
             MountItem::ScrollBy { id, dx, dy } => {
                 if let Some(view) = self.get(*id) {
-                    crate::scroll::scroll_by(surface, view, *dx, *dy);
+                    crate::scroll::scroll_by(surface, view, dx.0, dy.0);
                 }
             }
             MountItem::LayoutDirection { rtl } => self.rtl = *rtl,

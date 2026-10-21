@@ -1,18 +1,53 @@
 ---
 title: Video
-description: "The Video component: native video playback with your own or the system's controls."
+description: "The Video element: native video playback with your own or the system's controls."
 order: 10
+group: primitives
 ---
 
 # Video
 
 A video view plays a video file or stream with the platform's player: AVPlayer on iOS and Mac Catalyst, MediaPlayer on
 Android. Playback is controlled with props (`paused`, `muted`, `rate`, …), so the player follows your state like any
-other view.
+other view. Rust makes one with `video(url)`, TSX with `<Video>` from `nsh`.
 
-```tsx
-import { signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+fn player() -> impl IntoElement {
+    let paused = signal(true);
+    let time = signal(String::new());
+    let player = element_ref();
+    view()
+        .gap_3()
+        .child(
+            video("https://example.com/clip.mp4")
+                .element_ref(&player)
+                .paused(paused)
+                .repeat(true)
+                .resize_mode(ResizeMode::Contain)
+                .h(px(220.0))
+                .bg(black())
+                .on_progress(move |p: &VideoProgress| {
+                    time.set(format!("{:.1} / {:.1} s", p.current_time, p.duration))
+                }),
+        )
+        .child(
+            view()
+                .flex_row()
+                .gap_4()
+                .child(
+                    text(move || if paused.get() { "Play" } else { "Pause" })
+                        .on_press(move || paused.update(|p| *p = !*p)),
+                )
+                .child(text("Restart").on_press(move || player.seek(0.0)))
+                .child(text(move || time.get())),
+        )
+}
+```
+
+```tsx tabs
+import { signal, Text, Video, View, type YNode } from "nsh";
 
 function Player() {
   const paused = signal(true);
@@ -39,54 +74,65 @@ function Player() {
 }
 ```
 
-`Video` comes from [`nsh/video`](../modules/nsh-video.md); `source` is required. See the
+In TSX `source` is required (see the [Video API](../modules/nsh-video.md)). See the
 [web view and video guide](../docs/web-view-and-video.md).
 
 ## Props
 
-`Video` takes the props of a [view](./view.md) (without `children`) plus:
+A video takes the props of a [view](./view.md) (it has no children) plus:
 
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `source` | `string \| { uri: string }` | | The video's URL. |
-| `paused` | `boolean` | `false` | Playback is paused. |
-| `muted` | `boolean` | `false` | No sound. |
-| `volume` | `number` | `1` | 0..1. |
-| `rate` | `number` | `1` | The playback speed. |
-| `repeat` | `boolean` | `false` | Plays again from the start at the end. |
-| `controls` | `boolean` | `false` | Shows the platform's playback controls. |
-| `resizeMode` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the video fits its box. |
-| `progressUpdateInterval` | `number` | `250` | Milliseconds between `onProgress` events. |
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `source` | `video(url)` | `string \| { uri: string }` | | The video's URL (in Rust, an asset's `uri` too: `video(CLIP.uri)`). |
+| `paused` | `.paused(..)` | `boolean` | `false` | Playback is paused. |
+| `muted` | `.muted(..)` | `boolean` | `false` | No sound. |
+| `volume` | `.volume(..)` | `number` | `1` | 0..1. |
+| `rate` | `.rate(..)` | `number` | `1` | The playback speed. |
+| `repeat` | `.repeat(..)` | `boolean` | `false` | Plays again from the start at the end. |
+| `controls` | `.controls(..)` | `boolean` | `false` | Shows the platform's playback controls. |
+| `resizeMode` | `.resize_mode(ResizeMode::Contain)` | `"cover" \| "contain" \| "stretch" \| "center"` | | How the video fits its box. |
+| `progressUpdateInterval` | `.progress_interval(ms)` | `number` | `250` | Milliseconds between `onProgress` events. |
 
-Give the video a size through its style; it does not size itself to the video. Use the `width` and `height` of `onLoad`
-to set an `aspectRatio` if you need the video's own proportions.
+Give the video a size through its styles; its size is the one its styles give it. Use the size `onLoad` reports to set
+an aspect ratio when you want the video's own proportions.
 
 ## Events
 
-| Event | Payload | When |
-|---|---|---|
-| `onLoadStart` | none | Loading began. |
-| `onLoad` | `{ duration, width, height }` | The video is ready: its duration in seconds and its size. |
-| `onProgress` | `{ currentTime, duration }` | Every `progressUpdateInterval` while playing (seconds). |
-| `onBuffer` | `{ isBuffering }` | Playback stalled for data / resumed. |
-| `onEnd` | none | Playback reached the end (with `repeat`, at the end of each loop). |
-| `onError` | `{ message }` | Loading or playback failed. |
+| Event | Rust | Payload | When |
+|---|---|---|---|
+| `onLoadStart` | `.on_load_start` | none | Loading began. |
+| `onLoad` | `.on_load` | `{ duration, width, height }` (`VideoInfo`: `duration`, `size`) | The video is ready: its duration in seconds and its size. |
+| `onProgress` | `.on_progress` | `{ currentTime, duration }` (`VideoProgress`: `current_time`, `duration`) | Every `progressUpdateInterval` while playing (seconds). |
+| `onBuffer` | `.on_buffer` | `{ isBuffering }` (`bool`) | Playback stalled for data / resumed. |
+| `onEnd` | `.on_end` | none | Playback reached the end (with `repeat`, at the end of each loop). |
+| `onError` | `.on_error` | `{ message }` (`&str`) | Loading or playback failed. |
 
-```tsx
+```rust tabs
+let ratio = signal(16.0_f32 / 9.0);
+
+video(url)
+    .w_full()
+    .aspect_ratio(ratio)
+    .on_load(move |info: &VideoInfo| {
+        ratio.set(info.size.width.0 as f32 / info.size.height.0 as f32)
+    })
+```
+
+```tsx tabs
 const ratio = signal(16 / 9);
 <Video source={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.width / e.height)} />;
 ```
 
 ## Ref methods
 
-| Method | Description |
-|---|---|
-| `seek(seconds)` | Jumps to a time. |
+| Method | Rust | Description |
+|---|---|---|
+| `seek(seconds)` | `seek(seconds)` | Jumps to a time. |
 
 ## Capabilities
 
-If the app declares [capabilities](../docs/sandbox-and-capabilities.md), video sources must be allowed by `network`;
-a refused source shows nothing.
+When the app declares [capabilities](../docs/sandbox-and-capabilities.md), video sources load from the hosts `network`
+allows; a source on another host shows an empty view.
 
 ## Platform notes
 

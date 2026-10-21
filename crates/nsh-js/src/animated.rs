@@ -15,8 +15,7 @@ use std::{
     ptr,
 };
 
-use nsh_animation::AnimationOp;
-use nsh_core::js::protocol::*;
+use nsh_core::{animation::AnimationOp, js::protocol::*};
 use rquickjs::{Ctx, Value, qjs};
 use rustc_hash::FxHashMap;
 
@@ -109,9 +108,9 @@ impl Animations {
     }
 }
 
-fn animations<'a>(ctx: *mut JsContext) -> &'a Animations {
+fn animations<'a>(cx: *mut JsContext) -> &'a Animations {
     // SAFETY: a projection of the state's field, by shared reference.
-    unsafe { &(*crate::state::state(ctx)).animations }
+    unsafe { &(*crate::state::state(cx)).animations }
 }
 
 /// A node's data: its id and the nodes it reads (kept alive with it).
@@ -203,15 +202,15 @@ unsafe extern "C" fn composite_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark:
 }
 
 /// Registers the classes and prototypes (once per context).
-fn classes(ctx: *mut JsContext) -> Classes {
-    let a = animations(ctx);
+fn classes(cx: *mut JsContext) -> Classes {
+    let a = animations(cx);
     if let Some(c) = a.classes.get() {
         return c;
     }
     // SAFETY: registering classes on the context's runtime; prototypes
     // take their methods.
     unsafe {
-        let rt = qjs::JS_GetRuntime(ctx);
+        let rt = qjs::JS_GetRuntime(cx);
         let class =
             |name: &'static CStr, finalizer: qjs::JSClassFinalizer, mark: qjs::JSClassGCMark| {
                 let mut id: qjs::JSClassID = 0;
@@ -236,11 +235,11 @@ fn classes(ctx: *mut JsContext) -> Classes {
         };
         let methods = |obj: JsValue, list: &[(&CStr, Native, c_int)]| {
             for &(name, f, length) in list {
-                let func = reactive::new_function(ctx, name, f, length);
-                qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func);
+                let func = reactive::new_function(cx, name, f, length);
+                qjs::JS_SetPropertyStr(cx, obj, name.as_ptr(), func);
             }
         };
-        let node_proto = qjs::JS_NewObject(ctx);
+        let node_proto = qjs::JS_NewObject(cx);
         methods(
             node_proto,
             &[
@@ -253,7 +252,7 @@ fn classes(ctx: *mut JsContext) -> Classes {
                 (c"mod", node_mod, 1),
             ],
         );
-        let value_proto = qjs::JS_NewObjectProto(ctx, node_proto);
+        let value_proto = qjs::JS_NewObjectProto(cx, node_proto);
         methods(
             value_proto,
             &[
@@ -268,7 +267,7 @@ fn classes(ctx: *mut JsContext) -> Classes {
                 (c"decay", value_decay, 1),
             ],
         );
-        let composite_proto = qjs::JS_NewObject(ctx);
+        let composite_proto = qjs::JS_NewObject(cx);
         methods(
             composite_proto,
             &[
@@ -277,11 +276,7 @@ fn classes(ctx: *mut JsContext) -> Classes {
                 (c"reset", composite_reset, 0),
             ],
         );
-        qjs::JS_SetClassProto(
-            ctx,
-            classes.composite,
-            qjs::JS_DupValue(ctx, composite_proto),
-        );
+        qjs::JS_SetClassProto(cx, classes.composite, qjs::JS_DupValue(cx, composite_proto));
         a.protos.set([node_proto, value_proto, composite_proto]);
         a.classes.set(Some(classes));
         classes
@@ -290,29 +285,29 @@ fn classes(ctx: *mut JsContext) -> Classes {
 
 /// Decodes an encoded animation operation (`ANIMATION_*`, the node, its
 /// values) and queues it. Takes `values`.
-fn send(ctx: *mut JsContext, values: Vec<JsValue>) -> Result<(), JsValue> {
-    let op = decode(ctx, values)?;
-    dom::push_op(ctx, nsh_core::Op::Animation(op))
+fn send(cx: *mut JsContext, values: Vec<JsValue>) -> Result<(), JsValue> {
+    let op = decode(cx, values)?;
+    dom::push_op(cx, nsh_core::Op::Animation(op))
 }
 
 /// Decodes an encoded animation operation. Takes `values`.
-fn decode(ctx: *mut JsContext, values: Vec<JsValue>) -> Result<AnimationOp, JsValue> {
+fn decode(cx: *mut JsContext, values: Vec<JsValue>) -> Result<AnimationOp, JsValue> {
     let mut values = values;
     // SAFETY: an array taking the values, read by the decoder through a
     // context reference.
-    let array = unsafe { qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr()) };
-    let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
-    let value = unsafe { Value::from_raw(cx.clone(), array) };
+    let array = unsafe { qjs::JS_NewArrayFrom(cx, values.len() as c_int, values.as_mut_ptr()) };
+    let js_cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(cx)) };
+    let value = unsafe { Value::from_raw(js_cx.clone(), array) };
     let Some(array) = value.as_array() else {
         return Err(qjs::JS_EXCEPTION);
     };
-    match crate::protocol::decode_animation_op(&cx, array) {
+    match crate::protocol::decode_animation_op(&js_cx, array) {
         Ok(op) => Ok(op),
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => {
             let message = CString::new(format!("nsh/animated: {e}")).unwrap_or_default();
             // SAFETY: throws on a live context.
-            Err(unsafe { qjs::JS_ThrowTypeError(ctx, c"%s".as_ptr(), message.as_ptr()) })
+            Err(unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), message.as_ptr()) })
         }
     }
 }
@@ -321,35 +316,35 @@ fn int(v: impl Into<f64>) -> JsValue {
     qjs::JS_NewFloat64(v.into())
 }
 
-fn string(ctx: *mut JsContext, s: &str) -> JsValue {
+fn string(cx: *mut JsContext, s: &str) -> JsValue {
     // SAFETY: a new string.
-    unsafe { qjs::JS_NewStringLen(ctx, s.as_ptr().cast(), s.len() as _) }
+    unsafe { qjs::JS_NewStringLen(cx, s.as_ptr().cast(), s.len() as _) }
 }
 
-fn dup(ctx: *mut JsContext, v: JsValue) -> JsValue {
+fn dup(cx: *mut JsContext, v: JsValue) -> JsValue {
     // SAFETY: a live value.
-    unsafe { qjs::JS_DupValue(ctx, v) }
+    unsafe { qjs::JS_DupValue(cx, v) }
 }
 
-fn free(ctx: *mut JsContext, v: JsValue) {
+fn free(cx: *mut JsContext, v: JsValue) {
     // SAFETY: an owned value.
-    unsafe { qjs::JS_FreeValue(ctx, v) };
+    unsafe { qjs::JS_FreeValue(cx, v) };
 }
 
-fn get(ctx: *mut JsContext, obj: JsValue, key: &CStr) -> JsValue {
+fn get(cx: *mut JsContext, obj: JsValue, key: &CStr) -> JsValue {
     // SAFETY: a property read of a live value.
     unsafe {
         if !qjs::JS_IsObject(obj) {
             return UNDEFINED;
         }
-        qjs::JS_GetPropertyStr(ctx, obj, key.as_ptr())
+        qjs::JS_GetPropertyStr(cx, obj, key.as_ptr())
     }
 }
 
 /// A new node object (`value`: a `AnimatedValue`) reading `inputs` (taken).
-fn new_node(ctx: *mut JsContext, value: bool, inputs: Vec<JsValue>) -> (JsValue, u32) {
-    let c = classes(ctx);
-    let a = animations(ctx);
+fn new_node(cx: *mut JsContext, value: bool, inputs: Vec<JsValue>) -> (JsValue, u32) {
+    let c = classes(cx);
+    let a = animations(cx);
     let id = a.next_node.get();
     a.next_node.set(id + 2);
     let proto = a.protos.get()[if value { 1 } else { 0 }];
@@ -361,43 +356,43 @@ fn new_node(ctx: *mut JsContext, value: bool, inputs: Vec<JsValue>) -> (JsValue,
     // SAFETY: an object of the node class owning its data; `__av` is what
     // the prop decoder reads.
     unsafe {
-        let obj = qjs::JS_NewObjectProtoClass(ctx, proto, c.node);
+        let obj = qjs::JS_NewObjectProtoClass(cx, proto, c.node);
         qjs::JS_SetOpaque(obj, data as *mut c_void);
-        qjs::JS_SetPropertyStr(ctx, obj, c"__av".as_ptr(), int(id));
+        qjs::JS_SetPropertyStr(cx, obj, c"__av".as_ptr(), int(id));
         (obj, id)
     }
 }
 
 /// The id of node object `v`, if it is one.
-fn node_id(ctx: *mut JsContext, v: JsValue) -> Option<u32> {
-    let c = classes(ctx);
+fn node_id(cx: *mut JsContext, v: JsValue) -> Option<u32> {
+    let c = classes(cx);
     // SAFETY: the opaque of a node object.
     let p = unsafe { qjs::JS_GetOpaque(v, c.node) } as *const NodeData;
     (!p.is_null()).then(|| unsafe { (*p).id })
 }
 
-fn this_node(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
-    node_id(ctx, this).ok_or_else(|| {
+fn this_node(cx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
+    node_id(cx, this).ok_or_else(|| {
         // SAFETY: throws on a live context.
-        unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated node".as_ptr()) }
+        unsafe { qjs::JS_ThrowTypeError(cx, c"not an animated node".as_ptr()) }
     })
 }
 
 /// A node reading `inputs` (taken) made by encoded operation `sub` with
 /// `args`: the live node made by the same operation if there is one.
-fn derived(ctx: *mut JsContext, inputs: Vec<JsValue>, sub: i32, args: Vec<JsValue>) -> JsValue {
+fn derived(cx: *mut JsContext, inputs: Vec<JsValue>, sub: i32, args: Vec<JsValue>) -> JsValue {
     let mut values = vec![int(sub), int(0)];
     values.extend(args);
-    let key = match decode(ctx, values) {
+    let key = match decode(cx, values) {
         Ok(op) => op,
         Err(e) => {
             for v in inputs {
-                free(ctx, v);
+                free(cx, v);
             }
             return e;
         }
     };
-    let a = animations(ctx);
+    let a = animations(cx);
     let hash = derived_hash(&key);
     let existing = a.derived.borrow().get(&hash).and_then(|list| {
         list.iter()
@@ -406,12 +401,12 @@ fn derived(ctx: *mut JsContext, inputs: Vec<JsValue>, sub: i32, args: Vec<JsValu
     });
     if let Some(obj) = existing {
         for v in inputs {
-            free(ctx, v);
+            free(cx, v);
         }
-        return dup(ctx, obj);
+        return dup(cx, obj);
     }
-    let (node, id) = new_node(ctx, false, inputs);
-    let c = classes(ctx);
+    let (node, id) = new_node(cx, false, inputs);
+    let c = classes(cx);
     // SAFETY: the node object's own data.
     unsafe { (*(qjs::JS_GetOpaque(node, c.node) as *mut NodeData)).derived = Some(hash) };
     a.derived
@@ -419,10 +414,10 @@ fn derived(ctx: *mut JsContext, inputs: Vec<JsValue>, sub: i32, args: Vec<JsValu
         .entry(hash)
         .or_default()
         .push((key.clone(), id, node));
-    match dom::push_op(ctx, nsh_core::Op::Animation(with_node(key, id))) {
+    match dom::push_op(cx, nsh_core::Op::Animation(with_node(key, id))) {
         Ok(()) => node,
         Err(e) => {
-            free(ctx, node);
+            free(cx, node);
             e
         }
     }
@@ -459,8 +454,10 @@ fn derived_hash(op: &AnimationOp) -> u64 {
                 f(x);
             }
             match output {
-                nsh_animation::Output::Numbers(v) => v.iter().for_each(|&x| f(x)),
-                nsh_animation::Output::Colors(v) => v.iter().for_each(|&c| f(f32::from_bits(c))),
+                nsh_core::animation::Output::Numbers(v) => v.iter().for_each(|&x| f(x)),
+                nsh_core::animation::Output::Colors(v) => {
+                    v.iter().for_each(|&c| f(f32::from_bits(c)))
+                }
             }
         }
         AnimationOp::CreateDiffClamp {
@@ -475,8 +472,8 @@ fn derived_hash(op: &AnimationOp) -> u64 {
             kind = 2;
             for (i, o) in [a, b].into_iter().enumerate() {
                 match *o {
-                    nsh_animation::Operand::Node(n) => ids[i] = n,
-                    nsh_animation::Operand::Const(c) => f(c),
+                    nsh_core::animation::Operand::Node(n) => ids[i] = n,
+                    nsh_core::animation::Operand::Const(c) => f(c),
                 }
             }
         }
@@ -488,94 +485,94 @@ fn derived_hash(op: &AnimationOp) -> u64 {
 }
 
 unsafe extern "C" fn node_interpolate(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let input = match this_node(ctx, this) {
+    let input = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
     let config = arg(argc, argv, 0);
-    let both = get(ctx, config, c"extrapolate");
+    let both = get(cx, config, c"extrapolate");
     let both = if unsafe { qjs::JS_IsUndefined(both) } {
-        string(ctx, "clamp")
+        string(cx, "clamp")
     } else {
         both
     };
     let side = |key: &CStr| {
-        let v = get(ctx, config, key);
+        let v = get(cx, config, key);
         if unsafe { qjs::JS_IsUndefined(v) } {
-            dup(ctx, both)
+            dup(cx, both)
         } else {
             v
         }
     };
-    let easing = get(ctx, config, c"easing");
+    let easing = get(cx, config, c"easing");
     let easing = if unsafe { qjs::JS_IsUndefined(easing) } {
-        string(ctx, "linear")
+        string(cx, "linear")
     } else {
         easing
     };
     let args = vec![
         int(input),
-        get(ctx, config, c"inputRange"),
-        get(ctx, config, c"outputRange"),
+        get(cx, config, c"inputRange"),
+        get(cx, config, c"outputRange"),
         side(c"extrapolateLeft"),
         side(c"extrapolateRight"),
         easing,
     ];
-    free(ctx, both);
-    derived(ctx, vec![dup(ctx, this)], ANIMATION_INTERPOLATE, args)
+    free(cx, both);
+    derived(cx, vec![dup(cx, this)], ANIMATION_INTERPOLATE, args)
 }
 
 unsafe extern "C" fn node_diff_clamp(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let input = match this_node(ctx, this) {
+    let input = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
     let args = vec![
         int(input),
-        dup(ctx, arg(argc, argv, 0)),
-        dup(ctx, arg(argc, argv, 1)),
+        dup(cx, arg(argc, argv, 0)),
+        dup(cx, arg(argc, argv, 1)),
     ];
-    derived(ctx, vec![dup(ctx, this)], ANIMATION_DIFF_CLAMP, args)
+    derived(cx, vec![dup(cx, this)], ANIMATION_DIFF_CLAMP, args)
 }
 
 /// `a op b`: a node of two operands (nodes or numbers).
-fn math(ctx: *mut JsContext, op: &str, a: JsValue, b: JsValue) -> JsValue {
-    let operand = |v: JsValue| match node_id(ctx, v) {
+fn math(cx: *mut JsContext, op: &str, a: JsValue, b: JsValue) -> JsValue {
+    let operand = |v: JsValue| match node_id(cx, v) {
         // The decoder reads a node as its object.
-        Some(_) => dup(ctx, v),
-        None => dup(ctx, v),
+        Some(_) => dup(cx, v),
+        None => dup(cx, v),
     };
     let inputs: Vec<JsValue> = [a, b]
         .into_iter()
-        .filter(|&v| node_id(ctx, v).is_some())
-        .map(|v| dup(ctx, v))
+        .filter(|&v| node_id(cx, v).is_some())
+        .map(|v| dup(cx, v))
         .collect();
-    let args = vec![string(ctx, op), operand(a), operand(b)];
-    derived(ctx, inputs, ANIMATION_MATH, args)
+    let args = vec![string(cx, op), operand(a), operand(b)];
+    derived(cx, inputs, ANIMATION_MATH, args)
 }
 
 macro_rules! math_method {
     ($name:ident, $op:literal) => {
         unsafe extern "C" fn $name(
-            ctx: *mut JsContext,
+            cx: *mut JsContext,
             this: JsValue,
             argc: c_int,
             argv: *mut JsValue,
         ) -> JsValue {
-            if let Err(e) = this_node(ctx, this) {
+            if let Err(e) = this_node(cx, this) {
                 return e;
             }
-            math(ctx, $op, this, arg(argc, argv, 0))
+            math(cx, $op, this, arg(argc, argv, 0))
         }
     };
 }
@@ -588,22 +585,22 @@ math_method!(node_mod, "mod");
 
 /// `new AnimatedValue(value)` / `createAnimatedValue(value)`.
 unsafe extern "C" fn animated_value(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let mut v = 0f64;
     // SAFETY: converting a live value.
-    unsafe { qjs::JS_ToFloat64(ctx, &mut v, arg(argc, argv, 0)) };
-    let (node, id) = new_node(ctx, true, Vec::new());
+    unsafe { qjs::JS_ToFloat64(cx, &mut v, arg(argc, argv, 0)) };
+    let (node, id) = new_node(cx, true, Vec::new());
     match send(
-        ctx,
+        cx,
         vec![int(ANIMATION_VALUE), int(id), qjs::JS_NewFloat64(v)],
     ) {
         Ok(()) => node,
         Err(e) => {
-            free(ctx, node);
+            free(cx, node);
             e
         }
     }
@@ -611,70 +608,70 @@ unsafe extern "C" fn animated_value(
 
 /// `new AnimatedNode()`: a node of its own (a pass-through input).
 unsafe extern "C" fn animated_node(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    new_node(ctx, false, Vec::new()).0
+    new_node(cx, false, Vec::new()).0
 }
 
 unsafe extern "C" fn value_set(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let id = match this_node(ctx, this) {
+    let id = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
-    let v = dup(ctx, arg(argc, argv, 0));
-    send(ctx, vec![int(ANIMATION_SET), int(id), v])
+    let v = dup(cx, arg(argc, argv, 0));
+    send(cx, vec![int(ANIMATION_SET), int(id), v])
         .err()
         .unwrap_or(UNDEFINED)
 }
 
 /// `stop()`: stops the animation; a promise of where the value stopped.
 unsafe extern "C" fn value_stop(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let id = match this_node(ctx, this) {
+    let id = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
-    if let Err(e) = send(ctx, vec![int(ANIMATION_STOP), int(id)]) {
+    if let Err(e) = send(cx, vec![int(ANIMATION_STOP), int(id)]) {
         return e;
     }
-    read(ctx, id)
+    read(cx, id)
 }
 
 /// `getValue()`: a promise of the node's current value, read on the UI
 /// thread (where it moves).
 unsafe extern "C" fn value_get(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    match this_node(ctx, this) {
-        Ok(id) => read(ctx, id),
+    match this_node(cx, this) {
+        Ok(id) => read(cx, id),
         Err(e) => e,
     }
 }
 
 /// A promise of node `node`'s value, answered by the graph
 /// (`AnimationOp::Read`, reported as a `Finished` with the value).
-fn read(ctx: *mut JsContext, node: u32) -> JsValue {
-    let request = next_animation(ctx);
-    if let Err(e) = send(ctx, vec![int(ANIMATION_READ), int(node), int(request)]) {
+fn read(cx: *mut JsContext, node: u32) -> JsValue {
+    let request = next_animation(cx);
+    if let Err(e) = send(cx, vec![int(ANIMATION_READ), int(node), int(request)]) {
         return e;
     }
-    let (p, resolve) = promise(ctx);
-    animations(ctx).ends.borrow_mut().insert(
+    let (p, resolve) = promise(cx);
+    animations(cx).ends.borrow_mut().insert(
         request,
         End {
             resolve,
@@ -687,76 +684,76 @@ fn read(ctx: *mut JsContext, node: u32) -> JsValue {
 }
 
 /// A value method sending `code` (and its first argument, with `arg`).
-fn value_op(ctx: *mut JsContext, this: JsValue, code: i32, arg: Option<JsValue>) -> JsValue {
-    let id = match this_node(ctx, this) {
+fn value_op(cx: *mut JsContext, this: JsValue, code: i32, arg: Option<JsValue>) -> JsValue {
+    let id = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => return e,
     };
     let mut values = vec![int(code), int(id)];
-    values.extend(arg.map(|v| dup(ctx, v)));
-    send(ctx, values).err().unwrap_or(UNDEFINED)
+    values.extend(arg.map(|v| dup(cx, v)));
+    send(cx, values).err().unwrap_or(UNDEFINED)
 }
 
 unsafe extern "C" fn value_set_offset(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    value_op(ctx, this, ANIMATION_SET_OFFSET, Some(arg(argc, argv, 0)))
+    value_op(cx, this, ANIMATION_SET_OFFSET, Some(arg(argc, argv, 0)))
 }
 
 unsafe extern "C" fn value_flatten_offset(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    value_op(ctx, this, ANIMATION_FLATTEN_OFFSET, None)
+    value_op(cx, this, ANIMATION_FLATTEN_OFFSET, None)
 }
 
 unsafe extern "C" fn value_extract_offset(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    value_op(ctx, this, ANIMATION_EXTRACT_OFFSET, None)
+    value_op(cx, this, ANIMATION_EXTRACT_OFFSET, None)
 }
 
 /// A new promise and its resolve function (owned).
-fn promise(ctx: *mut JsContext) -> (JsValue, JsValue) {
+fn promise(cx: *mut JsContext) -> (JsValue, JsValue) {
     let mut funcs = [UNDEFINED; 2];
     // SAFETY: a new promise; the reject function is not needed.
     unsafe {
-        let p = qjs::JS_NewPromiseCapability(ctx, funcs.as_mut_ptr());
-        qjs::JS_FreeValue(ctx, funcs[1]);
+        let p = qjs::JS_NewPromiseCapability(cx, funcs.as_mut_ptr());
+        qjs::JS_FreeValue(cx, funcs[1]);
         (p, funcs[0])
     }
 }
 
-fn next_animation(ctx: *mut JsContext) -> u32 {
-    let a = animations(ctx);
+fn next_animation(cx: *mut JsContext) -> u32 {
+    let a = animations(cx);
     let id = a.next_animation.get();
     a.next_animation.set(id + 2);
     id
 }
 
 /// Starts driver `config` (`{ type, to, ... }`, taken) on value `this`.
-fn start(ctx: *mut JsContext, this: JsValue, config: JsValue) -> JsValue {
-    let node = match this_node(ctx, this) {
+fn start(cx: *mut JsContext, this: JsValue, config: JsValue) -> JsValue {
+    let node = match this_node(cx, this) {
         Ok(id) => id,
         Err(e) => {
-            free(ctx, config);
+            free(cx, config);
             return e;
         }
     };
-    let id = next_animation(ctx);
-    if let Err(e) = send(ctx, vec![int(ANIMATION_START), int(node), int(id), config]) {
+    let id = next_animation(cx);
+    if let Err(e) = send(cx, vec![int(ANIMATION_START), int(node), int(id), config]) {
         return e;
     }
-    let (p, resolve) = promise(ctx);
-    animations(ctx).ends.borrow_mut().insert(
+    let (p, resolve) = promise(cx);
+    animations(cx).ends.borrow_mut().insert(
         id,
         End {
             resolve,
@@ -769,59 +766,57 @@ fn start(ctx: *mut JsContext, this: JsValue, config: JsValue) -> JsValue {
 }
 
 /// `{ type, to?, ...options }` (a copy of `options`).
-fn driver_config(
-    ctx: *mut JsContext,
-    kind: &str,
-    to: Option<JsValue>,
-    options: JsValue,
-) -> JsValue {
+fn driver_config(cx: *mut JsContext, kind: &str, to: Option<JsValue>, options: JsValue) -> JsValue {
     let mut args = [options];
     // SAFETY: `merge` copies the options' properties into a new object.
-    let config = crate::dom::merge_values(ctx, &mut args);
+    let config = crate::dom::merge_values(cx, &mut args);
     unsafe {
-        qjs::JS_SetPropertyStr(ctx, config, c"type".as_ptr(), string(ctx, kind));
+        qjs::JS_SetPropertyStr(cx, config, c"type".as_ptr(), string(cx, kind));
         if let Some(to) = to {
-            qjs::JS_SetPropertyStr(ctx, config, c"to".as_ptr(), dup(ctx, to));
+            qjs::JS_SetPropertyStr(cx, config, c"to".as_ptr(), dup(cx, to));
         }
     }
     config
 }
 
 unsafe extern "C" fn value_timing(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let config = driver_config(ctx, "timing", Some(arg(argc, argv, 0)), arg(argc, argv, 1));
-    start(ctx, this, config)
+    let config = driver_config(cx, "timing", Some(arg(argc, argv, 0)), arg(argc, argv, 1));
+    start(cx, this, config)
 }
 
 unsafe extern "C" fn value_spring(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let config = driver_config(ctx, "spring", Some(arg(argc, argv, 0)), arg(argc, argv, 1));
-    start(ctx, this, config)
+    let config = driver_config(cx, "spring", Some(arg(argc, argv, 0)), arg(argc, argv, 1));
+    start(cx, this, config)
 }
 
 unsafe extern "C" fn value_decay(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let config = driver_config(ctx, "decay", None, arg(argc, argv, 0));
-    start(ctx, this, config)
+    let config = driver_config(cx, "decay", None, arg(argc, argv, 0));
+    start(cx, this, config)
 }
 
 /// Settles the promise of animation (or value read) `f.animation`
 /// (`Host::animations_finished`); false when it is not one of these.
-pub(crate) fn finished(ctx: *mut JsContext, f: &nsh_animation::Finished) -> Result<bool, JsValue> {
+pub(crate) fn finished(
+    cx: *mut JsContext,
+    f: &nsh_core::animation::Finished,
+) -> Result<bool, JsValue> {
     let (id, done) = (f.animation, f.finished);
-    let a = animations(ctx);
+    let a = animations(cx);
     let Some(End {
         resolve,
         callback,
@@ -843,21 +838,21 @@ pub(crate) fn finished(ctx: *mut JsContext, f: &nsh_animation::Finished) -> Resu
     // SAFETY: calls of owned functions.
     unsafe {
         let mut result = Ok(true);
-        if qjs::JS_IsFunction(ctx, callback) {
-            let r = qjs::JS_NewObject(ctx);
+        if qjs::JS_IsFunction(cx, callback) {
+            let r = qjs::JS_NewObject(cx);
             qjs::JS_SetPropertyStr(
-                ctx,
+                cx,
                 r,
                 c"finished".as_ptr(),
                 if done { qjs::JS_TRUE } else { qjs::JS_FALSE },
             );
             let mut args = [r];
-            let v = qjs::JS_Call(ctx, callback, UNDEFINED, 1, args.as_mut_ptr());
-            qjs::JS_FreeValue(ctx, r);
+            let v = qjs::JS_Call(cx, callback, UNDEFINED, 1, args.as_mut_ptr());
+            qjs::JS_FreeValue(cx, r);
             if qjs::JS_IsException(v) {
                 result = Err(v);
             } else {
-                qjs::JS_FreeValue(ctx, v);
+                qjs::JS_FreeValue(cx, v);
             }
         }
         let mut args = [match (read, done) {
@@ -865,10 +860,10 @@ pub(crate) fn finished(ctx: *mut JsContext, f: &nsh_animation::Finished) -> Resu
             (false, true) => qjs::JS_TRUE,
             (false, false) => qjs::JS_FALSE,
         }];
-        let v = qjs::JS_Call(ctx, resolve, UNDEFINED, 1, args.as_mut_ptr());
-        qjs::JS_FreeValue(ctx, v);
+        let v = qjs::JS_Call(cx, resolve, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(cx, v);
         for x in [resolve, callback] {
-            qjs::JS_FreeValue(ctx, x);
+            qjs::JS_FreeValue(cx, x);
         }
         result
     }
@@ -877,9 +872,9 @@ pub(crate) fn finished(ctx: *mut JsContext, f: &nsh_animation::Finished) -> Resu
 // --- Composite animations --------------------------------------------------------
 
 /// A composite of `spec` (taken) animating `values` (taken).
-fn composite(ctx: *mut JsContext, spec: JsValue, values: Vec<JsValue>) -> JsValue {
-    let c = classes(ctx);
-    let a = animations(ctx);
+fn composite(cx: *mut JsContext, spec: JsValue, values: Vec<JsValue>) -> JsValue {
+    let c = classes(cx);
+    let a = animations(cx);
     let key = a.next_composite.get();
     a.next_composite.set(key + 2);
     let data = Box::into_raw(Box::new(CompositeData {
@@ -891,48 +886,48 @@ fn composite(ctx: *mut JsContext, spec: JsValue, values: Vec<JsValue>) -> JsValu
     a.composites.borrow_mut().insert(key, data);
     // SAFETY: an object of the composite class owning its data.
     unsafe {
-        let obj = qjs::JS_NewObjectClass(ctx, c.composite);
+        let obj = qjs::JS_NewObjectClass(cx, c.composite);
         qjs::JS_SetOpaque(obj, data as *mut c_void);
         obj
     }
 }
 
-fn composite_data(ctx: *mut JsContext, v: JsValue) -> *mut CompositeData {
-    let c = classes(ctx);
+fn composite_data(cx: *mut JsContext, v: JsValue) -> *mut CompositeData {
+    let c = classes(cx);
     // SAFETY: the opaque of a composite object.
     unsafe { qjs::JS_GetOpaque(v, c.composite) as *mut CompositeData }
 }
 
 unsafe extern "C" fn composite_stop(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let p = composite_data(ctx, this);
+    let p = composite_data(cx, this);
     // SAFETY: live composite data.
     if p.is_null() || unsafe { (*p).running } == 0 {
         return UNDEFINED;
     }
     let id = unsafe { (*p).running };
-    send(ctx, vec![int(ANIMATION_STOP_ANIMATION), int(id)])
+    send(cx, vec![int(ANIMATION_STOP_ANIMATION), int(id)])
         .err()
         .unwrap_or(UNDEFINED)
 }
 
 unsafe extern "C" fn composite_reset(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let p = composite_data(ctx, this);
+    let p = composite_data(cx, this);
     if p.is_null() {
         return UNDEFINED;
     }
     // SAFETY: live composite data.
     let key = unsafe { (*p).key };
-    send(ctx, vec![int(ANIMATION_RESET_COMPOSITE), int(key)])
+    send(cx, vec![int(ANIMATION_RESET_COMPOSITE), int(key)])
         .err()
         .unwrap_or(UNDEFINED)
 }
@@ -940,41 +935,41 @@ unsafe extern "C" fn composite_reset(
 /// `start(callback)`: runs the composite (stopping a run of it first); a
 /// promise of whether it finished.
 unsafe extern "C" fn composite_start(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let p = composite_data(ctx, this);
+    let p = composite_data(cx, this);
     if p.is_null() {
         return UNDEFINED;
     }
     // SAFETY: live composite data, reached briefly.
     if unsafe { (*p).running } != 0 {
-        let r = unsafe { composite_stop(ctx, this, 0, ptr::null_mut()) };
+        let r = unsafe { composite_stop(cx, this, 0, ptr::null_mut()) };
         if unsafe { qjs::JS_IsException(r) } {
             return r;
         }
     }
-    let id = next_animation(ctx);
+    let id = next_animation(cx);
     let (key, spec) = unsafe {
         (*p).running = id;
-        ((*p).key, qjs::JS_DupValue(ctx, (*p).spec))
+        ((*p).key, qjs::JS_DupValue(cx, (*p).spec))
     };
     if let Err(e) = send(
-        ctx,
+        cx,
         vec![int(ANIMATION_START_COMPOSITE), int(id), int(key), spec],
     ) {
         return e;
     }
-    let (promise, resolve) = promise(ctx);
+    let (promise, resolve) = promise(cx);
     // Not the composite itself: a run going on must not keep the values it
     // animates alive (an endless loop would run on after its component).
-    animations(ctx).ends.borrow_mut().insert(
+    animations(cx).ends.borrow_mut().insert(
         id,
         End {
             resolve,
-            callback: dup(ctx, arg(argc, argv, 0)),
+            callback: dup(cx, arg(argc, argv, 0)),
             composite: key,
             read: false,
         },
@@ -983,74 +978,74 @@ unsafe extern "C" fn composite_start(
 }
 
 /// The spec and values of composite `v` (dups), if it is one.
-fn parts(ctx: *mut JsContext, v: JsValue) -> Option<(JsValue, Vec<JsValue>)> {
-    let p = composite_data(ctx, v);
+fn parts(cx: *mut JsContext, v: JsValue) -> Option<(JsValue, Vec<JsValue>)> {
+    let p = composite_data(cx, v);
     // SAFETY: live composite data.
     (!p.is_null()).then(|| unsafe {
         (
-            qjs::JS_DupValue(ctx, (*p).spec),
+            qjs::JS_DupValue(cx, (*p).spec),
             (*p).values
                 .iter()
-                .map(|&x| qjs::JS_DupValue(ctx, x))
+                .map(|&x| qjs::JS_DupValue(cx, x))
                 .collect(),
         )
     })
 }
 
-fn object(ctx: *mut JsContext, fields: Vec<(&CStr, JsValue)>) -> JsValue {
+fn object(cx: *mut JsContext, fields: Vec<(&CStr, JsValue)>) -> JsValue {
     // SAFETY: a new object taking the values.
     unsafe {
-        let o = qjs::JS_NewObject(ctx);
+        let o = qjs::JS_NewObject(cx);
         for (k, v) in fields {
-            qjs::JS_SetPropertyStr(ctx, o, k.as_ptr(), v);
+            qjs::JS_SetPropertyStr(cx, o, k.as_ptr(), v);
         }
         o
     }
 }
 
 /// `numbers` as a JS array.
-fn number_array(ctx: *mut JsContext, numbers: &[f32]) -> JsValue {
+fn number_array(cx: *mut JsContext, numbers: &[f32]) -> JsValue {
     let mut values: Vec<JsValue> = numbers
         .iter()
         .map(|&x| qjs::JS_NewFloat64(x as f64))
         .collect();
     // SAFETY: the array takes the values.
-    unsafe { qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr()) }
+    unsafe { qjs::JS_NewArrayFrom(cx, values.len() as c_int, values.as_mut_ptr()) }
 }
 
 /// `Animated.sampleSpring / sampleDecay(config, fps)`: the values the
 /// driver moves through from `config.from` (0), one per frame at `fps`
 /// (60) until it ends: what the native driver runs, to draw it.
-fn sample(ctx: *mut JsContext, kind: &str, config: JsValue, fps: JsValue) -> JsValue {
-    let to = get(ctx, config, c"toValue");
+fn sample(cx: *mut JsContext, kind: &str, config: JsValue, fps: JsValue) -> JsValue {
+    let to = get(cx, config, c"toValue");
     let has_to = !unsafe { qjs::JS_IsUndefined(to) };
-    let spec = driver_config(ctx, kind, has_to.then_some(to), config);
-    free(ctx, to);
+    let spec = driver_config(cx, kind, has_to.then_some(to), config);
+    free(cx, to);
     let (mut from, mut rate) = (0f64, 60f64);
     // SAFETY: conversions of live values.
     unsafe {
-        let f = get(ctx, config, c"from");
+        let f = get(cx, config, c"from");
         if !qjs::JS_IsUndefined(f) {
-            qjs::JS_ToFloat64(ctx, &mut from, f);
+            qjs::JS_ToFloat64(cx, &mut from, f);
         }
-        free(ctx, f);
+        free(cx, f);
         if !qjs::JS_IsUndefined(fps) {
-            qjs::JS_ToFloat64(ctx, &mut rate, fps);
+            qjs::JS_ToFloat64(cx, &mut rate, fps);
         }
     }
     // SAFETY: a context reference for the decoder; the value takes `spec`.
-    let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
-    let spec = unsafe { Value::from_raw(cx.clone(), spec) };
-    match crate::protocol::driver(&cx, &spec) {
+    let js_cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(cx)) };
+    let spec = unsafe { Value::from_raw(js_cx.clone(), spec) };
+    match crate::protocol::driver(&js_cx, &spec) {
         Ok(driver) => {
             let step = 1.0 / rate.clamp(1.0, 1000.0);
             number_array(
-                ctx,
-                &nsh_animation::sample_driver(
+                cx,
+                &nsh_core::animation::sample_driver(
                     driver,
                     from as f32,
                     step,
-                    nsh_animation::MAX_SAMPLES,
+                    nsh_core::animation::MAX_SAMPLES,
                 ),
             )
         }
@@ -1059,26 +1054,26 @@ fn sample(ctx: *mut JsContext, kind: &str, config: JsValue, fps: JsValue) -> JsV
 }
 
 unsafe extern "C" fn animated_sample_spring(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    sample(ctx, "spring", arg(argc, argv, 0), arg(argc, argv, 1))
+    sample(cx, "spring", arg(argc, argv, 0), arg(argc, argv, 1))
 }
 
 unsafe extern "C" fn animated_sample_decay(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    sample(ctx, "decay", arg(argc, argv, 0), arg(argc, argv, 1))
+    sample(cx, "decay", arg(argc, argv, 0), arg(argc, argv, 1))
 }
 
 /// `Easing.sample(easing, count)`: the curve at `count` points of 0..1.
 unsafe extern "C" fn easing_sample(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -1086,50 +1081,50 @@ unsafe extern "C" fn easing_sample(
     let mut count = 0f64;
     // SAFETY: a conversion; a context reference for the decoder, which
     // takes a dup.
-    unsafe { qjs::JS_ToFloat64(ctx, &mut count, arg(argc, argv, 1)) };
-    let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
-    let e = unsafe { Value::from_raw(cx, qjs::JS_DupValue(ctx, arg(argc, argv, 0))) };
+    unsafe { qjs::JS_ToFloat64(cx, &mut count, arg(argc, argv, 1)) };
+    let js_cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(cx)) };
+    let e = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, arg(argc, argv, 0))) };
     let count = if count.is_finite() {
-        (count.max(0.0) as usize).min(nsh_animation::MAX_SAMPLES)
+        (count.max(0.0) as usize).min(nsh_core::animation::MAX_SAMPLES)
     } else {
         0
     };
     number_array(
-        ctx,
-        &nsh_animation::sample_easing(crate::protocol::easing(e), count),
+        cx,
+        &nsh_core::animation::sample_easing(crate::protocol::easing(e), count),
     )
 }
 
 /// `Animated.timing / spring / decay(value, config)`: one driver as a
 /// composite.
-fn run_driver(ctx: *mut JsContext, kind: &str, value: JsValue, config: JsValue) -> JsValue {
-    let Some(node) = node_id(ctx, value) else {
+fn run_driver(cx: *mut JsContext, kind: &str, value: JsValue, config: JsValue) -> JsValue {
+    let Some(node) = node_id(cx, value) else {
         // SAFETY: throws on a live context.
-        return unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated value".as_ptr()) };
+        return unsafe { qjs::JS_ThrowTypeError(cx, c"not an animated value".as_ptr()) };
     };
-    let to = get(ctx, config, c"toValue");
+    let to = get(cx, config, c"toValue");
     let has_to = !unsafe { qjs::JS_IsUndefined(to) };
-    let spec = driver_config(ctx, kind, has_to.then_some(to), config);
-    free(ctx, to);
+    let spec = driver_config(cx, kind, has_to.then_some(to), config);
+    free(cx, to);
     // SAFETY: the spec takes the fields.
     unsafe {
-        let atom = qjs::JS_NewAtom(ctx, c"toValue".as_ptr());
-        qjs::JS_DeleteProperty(ctx, spec, atom, 0);
-        qjs::JS_FreeAtom(ctx, atom);
-        qjs::JS_SetPropertyStr(ctx, spec, c"node".as_ptr(), int(node));
+        let atom = qjs::JS_NewAtom(cx, c"toValue".as_ptr());
+        qjs::JS_DeleteProperty(cx, spec, atom, 0);
+        qjs::JS_FreeAtom(cx, atom);
+        qjs::JS_SetPropertyStr(cx, spec, c"node".as_ptr(), int(node));
     }
-    composite(ctx, spec, vec![dup(ctx, value)])
+    composite(cx, spec, vec![dup(cx, value)])
 }
 
 macro_rules! driver_fn {
     ($name:ident, $kind:literal) => {
         unsafe extern "C" fn $name(
-            ctx: *mut JsContext,
+            cx: *mut JsContext,
             _this: JsValue,
             argc: c_int,
             argv: *mut JsValue,
         ) -> JsValue {
-            run_driver(ctx, $kind, arg(argc, argv, 0), arg(argc, argv, 1))
+            run_driver(cx, $kind, arg(argc, argv, 0), arg(argc, argv, 1))
         }
     };
 }
@@ -1140,52 +1135,52 @@ driver_fn!(animated_decay, "decay");
 
 /// A composite of `kind` over the composites of array `list`, with extra
 /// fields.
-fn group(ctx: *mut JsContext, kind: &str, list: JsValue, extra: Vec<(&CStr, JsValue)>) -> JsValue {
+fn group(cx: *mut JsContext, kind: &str, list: JsValue, extra: Vec<(&CStr, JsValue)>) -> JsValue {
     let mut specs = Vec::new();
     let mut values = Vec::new();
     let mut len: i64 = 0;
     // SAFETY: reads of a live array; values got are freed.
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(ctx, list, &mut len) == 0 {
+        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
             for i in 0..len.max(0) {
-                let c = qjs::JS_GetPropertyInt64(ctx, list, i);
-                if let Some((spec, v)) = parts(ctx, c) {
+                let c = qjs::JS_GetPropertyInt64(cx, list, i);
+                if let Some((spec, v)) = parts(cx, c) {
                     specs.push(spec);
                     values.extend(v);
                 }
-                qjs::JS_FreeValue(ctx, c);
+                qjs::JS_FreeValue(cx, c);
             }
         }
     }
-    let children = unsafe { qjs::JS_NewArrayFrom(ctx, specs.len() as c_int, specs.as_mut_ptr()) };
-    let mut fields = vec![(c"type", string(ctx, kind)), (c"children", children)];
+    let children = unsafe { qjs::JS_NewArrayFrom(cx, specs.len() as c_int, specs.as_mut_ptr()) };
+    let mut fields = vec![(c"type", string(cx, kind)), (c"children", children)];
     fields.extend(extra);
-    composite(ctx, object(ctx, fields), values)
+    composite(cx, object(cx, fields), values)
 }
 
 unsafe extern "C" fn animated_sequence(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    group(ctx, "sequence", arg(argc, argv, 0), Vec::new())
+    group(cx, "sequence", arg(argc, argv, 0), Vec::new())
 }
 
 unsafe extern "C" fn animated_parallel(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let together = get(ctx, arg(argc, argv, 1), c"stopTogether");
+    let together = get(cx, arg(argc, argv, 1), c"stopTogether");
     let together = if unsafe { qjs::JS_IsUndefined(together) } {
         qjs::JS_TRUE
     } else {
         together
     };
     group(
-        ctx,
+        cx,
         "parallel",
         arg(argc, argv, 0),
         vec![(c"stopTogether", together)],
@@ -1193,103 +1188,103 @@ unsafe extern "C" fn animated_parallel(
 }
 
 unsafe extern "C" fn animated_delay(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let spec = object(
-        ctx,
+        cx,
         vec![
-            (c"type", string(ctx, "delay")),
-            (c"ms", dup(ctx, arg(argc, argv, 0))),
+            (c"type", string(cx, "delay")),
+            (c"ms", dup(cx, arg(argc, argv, 0))),
         ],
     );
-    composite(ctx, spec, Vec::new())
+    composite(cx, spec, Vec::new())
 }
 
 /// `stagger(ms, list)`: the animations starting `ms` apart.
 unsafe extern "C" fn animated_stagger(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let mut ms = 0f64;
     // SAFETY: a conversion, reads of a live array; values are freed.
-    unsafe { qjs::JS_ToFloat64(ctx, &mut ms, arg(argc, argv, 0)) };
+    unsafe { qjs::JS_ToFloat64(cx, &mut ms, arg(argc, argv, 0)) };
     let list = arg(argc, argv, 1);
     let mut len: i64 = 0;
     let mut staged = Vec::new();
     unsafe {
-        if qjs::JS_IsArray(list) && qjs::JS_GetLength(ctx, list, &mut len) == 0 {
+        if qjs::JS_IsArray(list) && qjs::JS_GetLength(cx, list, &mut len) == 0 {
             for i in 0..len.max(0) {
-                let a = qjs::JS_GetPropertyInt64(ctx, list, i);
+                let a = qjs::JS_GetPropertyInt64(cx, list, i);
                 let mut delay_args = [qjs::JS_NewFloat64(ms * i as f64)];
-                let delay = animated_delay(ctx, UNDEFINED, 1, delay_args.as_mut_ptr());
+                let delay = animated_delay(cx, UNDEFINED, 1, delay_args.as_mut_ptr());
                 let mut pair = [delay, a];
-                let seq_list = qjs::JS_NewArrayFrom(ctx, 2, pair.as_mut_ptr());
-                staged.push(group(ctx, "sequence", seq_list, Vec::new()));
-                qjs::JS_FreeValue(ctx, seq_list);
+                let seq_list = qjs::JS_NewArrayFrom(cx, 2, pair.as_mut_ptr());
+                staged.push(group(cx, "sequence", seq_list, Vec::new()));
+                qjs::JS_FreeValue(cx, seq_list);
             }
         }
     }
-    let all = unsafe { qjs::JS_NewArrayFrom(ctx, staged.len() as c_int, staged.as_mut_ptr()) };
-    let r = group(ctx, "parallel", all, vec![(c"stopTogether", qjs::JS_TRUE)]);
-    free(ctx, all);
+    let all = unsafe { qjs::JS_NewArrayFrom(cx, staged.len() as c_int, staged.as_mut_ptr()) };
+    let r = group(cx, "parallel", all, vec![(c"stopTogether", qjs::JS_TRUE)]);
+    free(cx, all);
     r
 }
 
 /// `loop(animation, { iterations, resetBeforeIteration })`.
 unsafe extern "C" fn animated_loop(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let Some((spec, values)) = parts(ctx, arg(argc, argv, 0)) else {
+    let Some((spec, values)) = parts(cx, arg(argc, argv, 0)) else {
         // SAFETY: throws on a live context.
-        return unsafe { qjs::JS_ThrowTypeError(ctx, c"loop: an animation".as_ptr()) };
+        return unsafe { qjs::JS_ThrowTypeError(cx, c"loop: an animation".as_ptr()) };
     };
     let config = arg(argc, argv, 1);
-    let iterations = get(ctx, config, c"iterations");
+    let iterations = get(cx, config, c"iterations");
     let iterations = if unsafe { qjs::JS_IsUndefined(iterations) } {
         qjs::JS_NewFloat64(-1.0)
     } else {
         iterations
     };
-    let reset = get(ctx, config, c"resetBeforeIteration");
+    let reset = get(cx, config, c"resetBeforeIteration");
     let reset = if unsafe { qjs::JS_IsUndefined(reset) } {
         qjs::JS_TRUE
     } else {
         reset
     };
     let spec = object(
-        ctx,
+        cx,
         vec![
-            (c"type", string(ctx, "loop")),
+            (c"type", string(cx, "loop")),
             (c"child", spec),
             (c"iterations", iterations),
             (c"reset", reset),
         ],
     );
-    composite(ctx, spec, values)
+    composite(cx, spec, values)
 }
 
 macro_rules! math_fn {
     ($name:ident, $op:literal) => {
         unsafe extern "C" fn $name(
-            ctx: *mut JsContext,
+            cx: *mut JsContext,
             _this: JsValue,
             argc: c_int,
             argv: *mut JsValue,
         ) -> JsValue {
             let a = arg(argc, argv, 0);
-            if node_id(ctx, a).is_none() {
+            if node_id(cx, a).is_none() {
                 // SAFETY: throws on a live context.
-                return unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated node".as_ptr()) };
+                return unsafe { qjs::JS_ThrowTypeError(cx, c"not an animated node".as_ptr()) };
             }
-            math(ctx, $op, a, arg(argc, argv, 1))
+            math(cx, $op, a, arg(argc, argv, 1))
         }
     };
 }
@@ -1301,29 +1296,29 @@ math_fn!(animated_divide, "div");
 math_fn!(animated_modulo, "mod");
 
 unsafe extern "C" fn animated_diff_clamp(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let a = arg(argc, argv, 0);
     // SAFETY: the node method with `a` as `this`.
-    unsafe { node_diff_clamp(ctx, a, argc - 1, argv.add(1)) }
+    unsafe { node_diff_clamp(cx, a, argc - 1, argv.add(1)) }
 }
 
-fn functions(ctx: *mut JsContext, list: &[(&CStr, Native, c_int)]) -> JsValue {
+fn functions(cx: *mut JsContext, list: &[(&CStr, Native, c_int)]) -> JsValue {
     // SAFETY: a new object taking the functions.
-    let o = unsafe { qjs::JS_NewObject(ctx) };
+    let o = unsafe { qjs::JS_NewObject(cx) };
     for &(name, f, length) in list {
-        let func = reactive::new_function(ctx, name, f, length);
-        unsafe { qjs::JS_SetPropertyStr(ctx, o, name.as_ptr(), func) };
+        let func = reactive::new_function(cx, name, f, length);
+        unsafe { qjs::JS_SetPropertyStr(cx, o, name.as_ptr(), func) };
     }
     o
 }
 
-fn animated(ctx: *mut JsContext) -> JsValue {
+fn animated(cx: *mut JsContext) -> JsValue {
     functions(
-        ctx,
+        cx,
         &[
             (c"timing", animated_timing, 2),
             (c"spring", animated_spring, 2),
@@ -1346,21 +1341,21 @@ fn animated(ctx: *mut JsContext) -> JsValue {
 }
 
 /// A constructor-or-function `name` whose objects have `proto`.
-fn class_function(ctx: *mut JsContext, name: &CStr, f: Native, proto_index: usize) -> JsValue {
-    classes(ctx);
-    let proto = animations(ctx).protos.get()[proto_index];
+fn class_function(cx: *mut JsContext, name: &CStr, f: Native, proto_index: usize) -> JsValue {
+    classes(cx);
+    let proto = animations(cx).protos.get()[proto_index];
     // SAFETY: a C function callable with or without `new`; its `prototype`
     // is the objects' (so `instanceof` works).
     unsafe {
         let func = qjs::JS_NewCFunction2(
-            ctx,
+            cx,
             Some(f),
             name.as_ptr(),
             1,
             qjs::JSCFunctionEnum_JS_CFUNC_constructor_or_func,
             0,
         );
-        qjs::JS_SetConstructor(ctx, func, proto);
+        qjs::JS_SetConstructor(cx, func, proto);
         func
     }
 }
@@ -1368,14 +1363,14 @@ fn class_function(ctx: *mut JsContext, name: &CStr, f: Native, proto_index: usiz
 // --- Easing and LayoutAnimation ------------------------------------------------------
 
 /// The core's animation tables as JS (cached JSON, converted on use).
-fn table(ctx: *mut JsContext, key: &str) -> JsValue {
+fn table(cx: *mut JsContext, key: &str) -> JsValue {
     static TABLES: std::sync::OnceLock<nsh_core::JsonValue> = std::sync::OnceLock::new();
     let tables = TABLES.get_or_init(nsh_core::js::animation::tables);
-    crate::host::json_to_js(ctx, &tables[key])
+    crate::host::json_to_js(cx, &tables[key])
 }
 
 unsafe extern "C" fn easing_curve(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -1386,16 +1381,16 @@ unsafe extern "C" fn easing_curve(
     let (name, default) = unsafe { (*data, *data.add(1)) };
     let p = arg(argc, argv, 0);
     let param = if unsafe { qjs::JS_IsUndefined(p) } {
-        dup(ctx, default)
+        dup(cx, default)
     } else {
-        dup(ctx, p)
+        dup(cx, p)
     };
     object(
-        ctx,
+        cx,
         vec![
-            (c"curve", dup(ctx, name)),
+            (c"curve", dup(cx, name)),
             (c"param", param),
-            (c"mode", string(ctx, "in")),
+            (c"mode", string(cx, "in")),
         ],
     )
 }
@@ -1403,7 +1398,7 @@ unsafe extern "C" fn easing_curve(
 /// `Easing.in / out / inOut(e)`: a curve in that mode (`out` also turns a
 /// Bézier or the named in/out easings around).
 unsafe extern "C" fn easing_mode(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -1420,10 +1415,10 @@ unsafe extern "C" fn easing_mode(
     unsafe {
         if qjs::JS_IsArray(e) && magic == 1 {
             let n = |i| {
-                let v = qjs::JS_GetPropertyInt64(ctx, e, i);
+                let v = qjs::JS_GetPropertyInt64(cx, e, i);
                 let mut x = 0f64;
-                qjs::JS_ToFloat64(ctx, &mut x, v);
-                qjs::JS_FreeValue(ctx, v);
+                qjs::JS_ToFloat64(cx, &mut x, v);
+                qjs::JS_FreeValue(cx, v);
                 x
             };
             let mut values = [
@@ -1432,86 +1427,86 @@ unsafe extern "C" fn easing_mode(
                 qjs::JS_NewFloat64(1.0 - n(0)),
                 qjs::JS_NewFloat64(1.0 - n(1)),
             ];
-            return qjs::JS_NewArrayFrom(ctx, 4, values.as_mut_ptr());
+            return qjs::JS_NewArrayFrom(cx, 4, values.as_mut_ptr());
         }
         if qjs::JS_IsObject(e) && !qjs::JS_IsArray(e) {
             let mut args = [e];
-            let copy = crate::dom::merge_values(ctx, &mut args);
-            qjs::JS_SetPropertyStr(ctx, copy, c"mode".as_ptr(), string(ctx, mode));
+            let copy = crate::dom::merge_values(cx, &mut args);
+            qjs::JS_SetPropertyStr(cx, copy, c"mode".as_ptr(), string(cx, mode));
             return copy;
         }
         if magic == 1 {
-            match dom::string_arg(ctx, e).as_deref() {
-                Some("easeIn") => return string(ctx, "easeOut"),
-                Some("easeOut") => return string(ctx, "easeIn"),
+            match dom::string_arg(cx, e).as_deref() {
+                Some("easeIn") => return string(cx, "easeOut"),
+                Some("easeOut") => return string(cx, "easeIn"),
                 _ => {}
             }
         }
-        qjs::JS_DupValue(ctx, e)
+        qjs::JS_DupValue(cx, e)
     }
 }
 
 unsafe extern "C" fn easing_bezier(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let mut values: Vec<JsValue> = (0..4).map(|i| dup(ctx, arg(argc, argv, i))).collect();
+    let mut values: Vec<JsValue> = (0..4).map(|i| dup(cx, arg(argc, argv, i))).collect();
     // SAFETY: the array takes the values.
-    unsafe { qjs::JS_NewArrayFrom(ctx, 4, values.as_mut_ptr()) }
+    unsafe { qjs::JS_NewArrayFrom(cx, 4, values.as_mut_ptr()) }
 }
 
-fn easing(ctx: *mut JsContext) -> JsValue {
+fn easing(cx: *mut JsContext) -> JsValue {
     // SAFETY: a new object taking its fields.
-    let o = unsafe { qjs::JS_NewObject(ctx) };
-    let curves = table(ctx, "curves");
+    let o = unsafe { qjs::JS_NewObject(cx) };
+    let curves = table(cx, "curves");
     let mut len: i64 = 0;
     // SAFETY: reads of the table's arrays; values got are freed or moved.
     unsafe {
-        qjs::JS_GetLength(ctx, curves, &mut len);
+        qjs::JS_GetLength(cx, curves, &mut len);
         for i in 0..len.max(0) {
-            let c = qjs::JS_GetPropertyInt64(ctx, curves, i);
-            let name = qjs::JS_GetPropertyInt64(ctx, c, 0);
-            let param = qjs::JS_GetPropertyInt64(ctx, c, 1);
-            let default = qjs::JS_GetPropertyInt64(ctx, c, 2);
+            let c = qjs::JS_GetPropertyInt64(cx, curves, i);
+            let name = qjs::JS_GetPropertyInt64(cx, c, 0);
+            let param = qjs::JS_GetPropertyInt64(cx, c, 1);
+            let default = qjs::JS_GetPropertyInt64(cx, c, 2);
             let key =
-                CString::new(dom::string_arg(ctx, name).unwrap_or_default()).unwrap_or_default();
+                CString::new(dom::string_arg(cx, name).unwrap_or_default()).unwrap_or_default();
             let value = if qjs::JS_IsNull(param) {
                 object(
-                    ctx,
+                    cx,
                     vec![
-                        (c"curve", qjs::JS_DupValue(ctx, name)),
-                        (c"mode", string(ctx, "in")),
+                        (c"curve", qjs::JS_DupValue(cx, name)),
+                        (c"mode", string(cx, "in")),
                     ],
                 )
             } else {
                 let mut data = [name, default];
-                qjs::JS_NewCFunctionData(ctx, Some(easing_curve), 1, 0, 2, data.as_mut_ptr())
+                qjs::JS_NewCFunctionData(cx, Some(easing_curve), 1, 0, 2, data.as_mut_ptr())
             };
-            qjs::JS_SetPropertyStr(ctx, o, key.as_ptr(), value);
+            qjs::JS_SetPropertyStr(cx, o, key.as_ptr(), value);
             for v in [c, name, param, default] {
-                qjs::JS_FreeValue(ctx, v);
+                qjs::JS_FreeValue(cx, v);
             }
         }
-        qjs::JS_FreeValue(ctx, curves);
-        qjs::JS_SetPropertyStr(ctx, o, c"linear".as_ptr(), string(ctx, "linear"));
-        qjs::JS_SetPropertyStr(ctx, o, c"ease".as_ptr(), string(ctx, "ease"));
+        qjs::JS_FreeValue(cx, curves);
+        qjs::JS_SetPropertyStr(cx, o, c"linear".as_ptr(), string(cx, "linear"));
+        qjs::JS_SetPropertyStr(cx, o, c"ease".as_ptr(), string(cx, "ease"));
         qjs::JS_SetPropertyStr(
-            ctx,
+            cx,
             o,
             c"bezier".as_ptr(),
-            reactive::new_function(ctx, c"bezier", easing_bezier, 4),
+            reactive::new_function(cx, c"bezier", easing_bezier, 4),
         );
         qjs::JS_SetPropertyStr(
-            ctx,
+            cx,
             o,
             c"sample".as_ptr(),
-            reactive::new_function(ctx, c"sample", easing_sample, 2),
+            reactive::new_function(cx, c"sample", easing_sample, 2),
         );
         for (name, magic) in [(c"in", 0), (c"out", 1), (c"inOut", 2)] {
-            let f = qjs::JS_NewCFunctionData(ctx, Some(easing_mode), 1, magic, 0, ptr::null_mut());
-            qjs::JS_SetPropertyStr(ctx, o, name.as_ptr(), f);
+            let f = qjs::JS_NewCFunctionData(cx, Some(easing_mode), 1, magic, 0, ptr::null_mut());
+            qjs::JS_SetPropertyStr(cx, o, name.as_ptr(), f);
         }
     }
     o
@@ -1520,18 +1515,18 @@ fn easing(ctx: *mut JsContext) -> JsValue {
 /// `LayoutAnimation.configureNext(config, onEnd)`: the next commit's
 /// changes animate.
 unsafe extern "C" fn configure_next(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
     let config = arg(argc, argv, 0);
     // SAFETY: a context reference for the decoder, which takes a dup.
-    let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
-    let value = unsafe { Value::from_raw(cx, qjs::JS_DupValue(ctx, config)) };
+    let js_cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(cx)) };
+    let value = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, config)) };
     match crate::protocol::decode_command("layoutAnimation", value) {
         Ok(Some(command)) => {
-            if let Err(e) = dom::push_op(ctx, nsh_core::Op::Command { id: 1, command }) {
+            if let Err(e) = dom::push_op(cx, nsh_core::Op::Command { id: 1, command }) {
                 return e;
             }
         }
@@ -1541,13 +1536,13 @@ unsafe extern "C" fn configure_next(
     let on_end = arg(argc, argv, 1);
     // SAFETY: an inline check; `setTimeout(onEnd, duration)`.
     unsafe {
-        if qjs::JS_IsFunction(ctx, on_end) {
-            let global = qjs::JS_GetGlobalObject(ctx);
-            let set_timeout = qjs::JS_GetPropertyStr(ctx, global, c"setTimeout".as_ptr());
-            let mut args = [on_end, get(ctx, config, c"duration")];
-            let r = qjs::JS_Call(ctx, set_timeout, UNDEFINED, 2, args.as_mut_ptr());
+        if qjs::JS_IsFunction(cx, on_end) {
+            let global = qjs::JS_GetGlobalObject(cx);
+            let set_timeout = qjs::JS_GetPropertyStr(cx, global, c"setTimeout".as_ptr());
+            let mut args = [on_end, get(cx, config, c"duration")];
+            let r = qjs::JS_Call(cx, set_timeout, UNDEFINED, 2, args.as_mut_ptr());
             for v in [r, args[1], set_timeout, global] {
-                qjs::JS_FreeValue(ctx, v);
+                qjs::JS_FreeValue(cx, v);
             }
         }
     }
@@ -1556,7 +1551,7 @@ unsafe extern "C" fn configure_next(
 
 /// `LayoutAnimation.create(duration, type, property)`.
 unsafe extern "C" fn layout_create(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
@@ -1564,77 +1559,77 @@ unsafe extern "C" fn layout_create(
     let or = |i: usize, default: &str| {
         let v = arg(argc, argv, i);
         if unsafe { qjs::JS_IsUndefined(v) } {
-            string(ctx, default)
+            string(cx, default)
         } else {
-            dup(ctx, v)
+            dup(cx, v)
         }
     };
     let (kind, property) = (or(1, "easeInEaseOut"), or(2, "opacity"));
     let phase = |with_property: bool| {
-        let mut fields = vec![(c"type", dup(ctx, kind))];
+        let mut fields = vec![(c"type", dup(cx, kind))];
         if with_property {
-            fields.push((c"property", dup(ctx, property)));
+            fields.push((c"property", dup(cx, property)));
         }
-        object(ctx, fields)
+        object(cx, fields)
     };
     let o = object(
-        ctx,
+        cx,
         vec![
-            (c"duration", dup(ctx, arg(argc, argv, 0))),
+            (c"duration", dup(cx, arg(argc, argv, 0))),
             (c"create", phase(true)),
             (c"update", phase(false)),
             (c"delete", phase(true)),
         ],
     );
-    free(ctx, kind);
-    free(ctx, property);
+    free(cx, kind);
+    free(cx, property);
     o
 }
 
 /// `LayoutAnimation.easeInEaseOut / linear / spring(onEnd)`: a preset.
 unsafe extern "C" fn layout_preset(
-    ctx: *mut JsContext,
+    cx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
     magic: c_int,
     _data: *mut JsValue,
 ) -> JsValue {
-    let presets = table(ctx, "presets");
+    let presets = table(cx, "presets");
     let name = match magic {
         0 => c"easeInEaseOut",
         1 => c"linear",
         _ => c"spring",
     };
-    let preset = get(ctx, presets, name);
+    let preset = get(cx, presets, name);
     let mut args = [preset, arg(argc, argv, 0)];
     // SAFETY: borrowed arguments.
-    let r = unsafe { configure_next(ctx, UNDEFINED, 2, args.as_mut_ptr()) };
-    free(ctx, preset);
-    free(ctx, presets);
+    let r = unsafe { configure_next(cx, UNDEFINED, 2, args.as_mut_ptr()) };
+    free(cx, preset);
+    free(cx, presets);
     r
 }
 
 /// An object naming each of `names` as itself.
-fn names_object(ctx: *mut JsContext, names: JsValue) -> JsValue {
+fn names_object(cx: *mut JsContext, names: JsValue) -> JsValue {
     // SAFETY: a new object; reads of a live array, values freed or moved.
     unsafe {
-        let o = qjs::JS_NewObject(ctx);
+        let o = qjs::JS_NewObject(cx);
         let mut len: i64 = 0;
-        qjs::JS_GetLength(ctx, names, &mut len);
+        qjs::JS_GetLength(cx, names, &mut len);
         for i in 0..len.max(0) {
-            let n = qjs::JS_GetPropertyInt64(ctx, names, i);
-            let key = CString::new(dom::string_arg(ctx, n).unwrap_or_default()).unwrap_or_default();
-            qjs::JS_SetPropertyStr(ctx, o, key.as_ptr(), n);
+            let n = qjs::JS_GetPropertyInt64(cx, names, i);
+            let key = CString::new(dom::string_arg(cx, n).unwrap_or_default()).unwrap_or_default();
+            qjs::JS_SetPropertyStr(cx, o, key.as_ptr(), n);
         }
-        qjs::JS_FreeValue(ctx, names);
+        qjs::JS_FreeValue(cx, names);
         o
     }
 }
 
-fn layout_animation(ctx: *mut JsContext) -> JsValue {
+fn layout_animation(cx: *mut JsContext) -> JsValue {
     let o = functions(
-        ctx,
+        cx,
         &[
             (c"configureNext", configure_next, 2),
             (c"create", layout_create, 3),
@@ -1643,22 +1638,21 @@ fn layout_animation(ctx: *mut JsContext) -> JsValue {
     // SAFETY: the object takes its fields.
     unsafe {
         qjs::JS_SetPropertyStr(
-            ctx,
+            cx,
             o,
             c"Types".as_ptr(),
-            names_object(ctx, table(ctx, "types")),
+            names_object(cx, table(cx, "types")),
         );
         qjs::JS_SetPropertyStr(
-            ctx,
+            cx,
             o,
             c"Properties".as_ptr(),
-            names_object(ctx, table(ctx, "properties")),
+            names_object(cx, table(cx, "properties")),
         );
-        qjs::JS_SetPropertyStr(ctx, o, c"Presets".as_ptr(), table(ctx, "presets"));
+        qjs::JS_SetPropertyStr(cx, o, c"Presets".as_ptr(), table(cx, "presets"));
         for (name, magic) in [(c"easeInEaseOut", 0), (c"linear", 1), (c"spring", 2)] {
-            let f =
-                qjs::JS_NewCFunctionData(ctx, Some(layout_preset), 1, magic, 0, ptr::null_mut());
-            qjs::JS_SetPropertyStr(ctx, o, name.as_ptr(), f);
+            let f = qjs::JS_NewCFunctionData(cx, Some(layout_preset), 1, magic, 0, ptr::null_mut());
+            qjs::JS_SetPropertyStr(cx, o, name.as_ptr(), f);
         }
     }
     o
@@ -1668,7 +1662,7 @@ fn layout_animation(ctx: *mut JsContext) -> JsValue {
 pub(crate) const EXPORTS: &[Item] = &[
     (
         "AnimatedNode",
-        Export::Value(|ctx| class_function(ctx, c"AnimatedNode", animated_node, 0)),
+        Export::Value(|cx| class_function(cx, c"AnimatedNode", animated_node, 0)),
         Ts::class(
             "A node of the native animation graph: evaluated on the UI thread.",
             r#" {
@@ -1699,7 +1693,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     ),
     (
         "AnimatedValue",
-        Export::Value(|ctx| class_function(ctx, c"AnimatedValue", animated_value, 1)),
+        Export::Value(|cx| class_function(cx, c"AnimatedValue", animated_value, 1)),
         Ts::class(
             "A settable, animatable animated value.",
             r#" extends AnimatedNode {
@@ -1883,19 +1877,20 @@ mod tests {
         let starts: Vec<u32> = ops
             .iter()
             .filter_map(|o| match o {
-                Op::Animation(nsh_animation::AnimationOp::Start { animation, .. }) => {
+                Op::Animation(nsh_core::animation::AnimationOp::Start { animation, .. }) => {
                     Some(*animation)
                 }
-                Op::Animation(nsh_animation::AnimationOp::StartComposite { animation, .. }) => {
-                    Some(*animation)
-                }
+                Op::Animation(nsh_core::animation::AnimationOp::StartComposite {
+                    animation,
+                    ..
+                }) => Some(*animation),
                 _ => None,
             })
             .collect();
         assert_eq!(starts, [2, 4], "{ops:?}");
         host.animations_finished(&[
-            nsh_animation::Finished::new(2, true),
-            nsh_animation::Finished::new(4, false),
+            nsh_core::animation::Finished::new(2, true),
+            nsh_core::animation::Finished::new(4, false),
         ]);
         host.eval_script("report.js", "report()").unwrap();
         let mut ops = Vec::new();
@@ -1912,7 +1907,7 @@ mod tests {
         );
     }
 
-    fn animation_ops(host: &Host) -> Vec<nsh_animation::AnimationOp> {
+    fn animation_ops(host: &Host) -> Vec<nsh_core::animation::AnimationOp> {
         let mut ops = Vec::new();
         host.take_ops(&mut ops);
         ops.into_iter()
@@ -1935,7 +1930,7 @@ mod tests {
 
     #[test]
     fn values_are_read_back_and_offset() {
-        use nsh_animation::AnimationOp as A;
+        use nsh_core::animation::AnimationOp as A;
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
@@ -1979,12 +1974,12 @@ mod tests {
             ]
         );
         host.animations_finished(&[
-            nsh_animation::Finished {
+            nsh_core::animation::Finished {
                 animation: 2,
                 finished: true,
                 value: Some(6.0),
             },
-            nsh_animation::Finished {
+            nsh_core::animation::Finished {
                 animation: 4,
                 finished: true,
                 value: Some(6.5),
@@ -2026,8 +2021,8 @@ mod tests {
             .filter(|o| {
                 matches!(
                     o,
-                    nsh_animation::AnimationOp::CreateInterpolate { .. }
-                        | nsh_animation::AnimationOp::CreateMath { .. }
+                    nsh_core::animation::AnimationOp::CreateInterpolate { .. }
+                        | nsh_core::animation::AnimationOp::CreateMath { .. }
                 )
             })
             .count();
@@ -2042,13 +2037,13 @@ mod tests {
         host.collect_garbage();
         let released = animation_ops(&host);
         assert!(
-            released.contains(&nsh_animation::AnimationOp::Release { node: 8 }),
+            released.contains(&nsh_core::animation::AnimationOp::Release { node: 8 }),
             "{released:?}"
         );
         host.eval_script("again.js", "keep.push(again())").unwrap();
         let ops = animation_ops(&host);
         assert!(
-            matches!(ops[..], [nsh_animation::AnimationOp::CreateMath { node, .. }] if node > 8),
+            matches!(ops[..], [nsh_core::animation::AnimationOp::CreateMath { node, .. }] if node > 8),
             "{ops:?}"
         );
     }
@@ -2067,7 +2062,7 @@ mod tests {
         let ops = animation_ops(&host);
         assert!(
             ops.iter()
-                .any(|o| matches!(o, nsh_animation::AnimationOp::StartComposite { .. })),
+                .any(|o| matches!(o, nsh_core::animation::AnimationOp::StartComposite { .. })),
             "{ops:?}"
         );
         // Its component goes: nothing holds the value but the running loop.
@@ -2076,7 +2071,7 @@ mod tests {
         let ops = animation_ops(&host);
         // The graph stops a loop whose value is released.
         assert!(
-            ops.contains(&nsh_animation::AnimationOp::Release { node: 2 }),
+            ops.contains(&nsh_core::animation::AnimationOp::Release { node: 2 }),
             "{ops:?}"
         );
     }

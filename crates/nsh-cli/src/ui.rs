@@ -14,7 +14,7 @@
 //!   comes: log lines with their levels and targets (`logger.rs`), the
 //!   tools' and hosts' own output.
 //!
-//! Everything goes to stderr: stdout is the commands' results (`nsh trace`'s
+//! Everything goes to stderr: stdout is the commands' results (`nsh test --trace`'s
 //! mount items, the signing commands' lines).
 
 use std::{

@@ -20,19 +20,31 @@ bytecode-only = []
 serde_json.workspace = true
 log.workspace = true
 nsh-core.workspace = true
-nsh-animation.workspace = true
-rquickjs.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 percent-encoding.workspace = true
 url.workspace = true
+quickjs-jit-stdlib.workspace = true
 
-# Bindings are generated for the Apple and Android targets; WebAssembly uses
-# rquickjs' pregenerated ones (its bindgen run misses `JS_ToCStringLen2` there).
+# Native targets generate QuickJS bindings for Apple and Android targets.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rquickjs = { workspace = true, features = ["bindgen"] }
+quickjs-jit-stdlib = { workspace = true, features = ["url"] }
 # The heap's allocator: the system's `malloc` (as QuickJS's own).
 libc.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "sync", "io-util", "macros"] }
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+
+# The browser uses the same QuickJS and portable standard library.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rquickjs.workspace = true
+getrandom-stdlib.workspace = true
 
 [dev-dependencies]
-nsh-ui-mobile.workspace = true
+brotli.workspace = true
+flate2.workspace = true
+zstd.workspace = true
+# The typed API check reads the crate's public API.
+syn = { workspace = true, features = ["visit"] }
+nsh-base.workspace = true

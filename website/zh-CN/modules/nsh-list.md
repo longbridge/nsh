@@ -1,15 +1,15 @@
 ---
-title: nsh/list
+title: List
 description: List：基于原生滚动视图、虚拟化并复用单元格的列表，以及它的全部属性、事件和 ref 方法。
-order: 4
+order: 2.1
 ---
 
-# nsh/list
+# List
 
-`nsh/list` 导出 `List`：一个基于原生滚动视图的虚拟化列表。只有视口附近的行才真正存在，滚动时单元格会被复用。哪些行存在、它们的位置、多列布局、吸顶标题和可见性都在原生侧计算，因此滚动一个上万条目的列表时，除了单元格被复用时变化的行绑定之外，不会运行任何 JS。
+`nsh` 导出 `List`：一个基于原生滚动视图的虚拟化列表。只有视口附近的行才真正存在，滚动时单元格会被复用。哪些行存在、它们的位置、多列布局、吸顶标题和可见性都在原生侧计算，因此滚动一个上万条目的列表时，除了单元格被复用时变化的行绑定之外，不会运行任何 JS。
 
 ```ts
-import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh/list";
+import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh";
 ```
 
 教程见[列表](../docs/lists.md)，元素的属性见 [`<List>`](../elements/list.md)。
@@ -21,8 +21,7 @@ function List<T>(props: ListProps<T>): YNode;
 ```
 
 ```tsx
-import { mount, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { List, mount, Text, View } from "nsh";
 
 const contacts = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), name: `Contact ${i}` }));
 
@@ -50,7 +49,7 @@ mount(App);
 
 ## 属性
 
-`ListProps<T>` 由列表自己的属性和与 `<Scroll>` 共用的滚动属性组成。
+`ListProps<T>` 由列表自己的属性、与 `<Scroll>` 共用的滚动属性和所有元素通用的属性组成，通用属性传给列表的滚动视图。
 
 ### 数据与渲染
 
@@ -63,14 +62,16 @@ mount(App);
 | `horizontal` | `boolean` | `false` | 横向滚动。 |
 | `inverted` | `boolean` | `false` | 从末端开始布局，条目 0 在最后（聊天风格）；初始滚动到末端，内容变化时保持与末端的距离。 |
 | `stickyHeaderIndices` | `number[]` | | 滚动经过时吸附在顶部的条目（仅单列且非 inverted）。 |
-| `ListHeaderComponent` | `ListSlot` | | 渲染在所有条目之前。 |
-| `ListFooterComponent` | `ListSlot` | | 渲染在所有条目之后。 |
-| `ListEmptyComponent` | `ListSlot` | | `each` 为空时代替条目显示。 |
-| `ItemSeparatorComponent` | `ListSlot` | | 渲染在条目之间（单列）。 |
+| `header` | `ListSlot` | | 渲染在所有条目之前。 |
+| `footer` | `ListSlot` | | 渲染在所有条目之后。 |
+| `empty` | `ListSlot` | | `each` 为空时代替条目显示。 |
+| `separator` | `ListSlot` | | 渲染在条目之间（单列）。 |
 | `keyExtractor` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。 |
 | `initialScrollIndex` | `number` | | 在第一帧之前滚动到该条目。 |
-| `contentContainerStyle` | `ListContentStyle` | | 内容的内边距和间距：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`（数字）。 |
+| `contentStyle` | `ListContentStyle` | | 内容的内边距和间距：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`（数字）。 |
+| `contentClass` | `string` | | 以类名（`p-*`、`gap-*`）给出的内容内边距和间距；`contentStyle` 优先。 |
 | `style` | `StyleProp<ViewStyle>` | | 列表自身的样式（需要给它尺寸：`flex: 1` 或高度）。 |
+| `testID` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
 | `ref` | `YNode \| ((node: YNode) => void)` | | 见 [ref 方法](#ref-方法)。 |
 
 `ListSlot` 是一个组件（`Header`）或一个元素（`<Header />`）。
@@ -149,15 +150,14 @@ interface ViewabilityConfig {
 | `scrollTo({ x?, y?, animated? })` | 滚动到某个偏移。 |
 
 ```tsx
-import { Text, View, type YNode } from "nsh";
-import { List } from "nsh/list";
+import { List, Text, View, type YNode } from "nsh";
 
 let list!: YNode;
 
 <View style={{ flex: 1 }}>
   <Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>
   <List ref={list} each={items} numColumns={3} estimatedItemSize={90} style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 12, gap: 8 }}>
+        contentStyle={{ padding: 12, gap: 8 }}>
     {(item) => <View style={{ height: 90, backgroundColor: "#e0e7ff" }}><Text>{item().title}</Text></View>}
   </List>
 </View>
@@ -173,7 +173,7 @@ let list!: YNode;
   inverted
   estimatedItemSize={44}
   style={{ flex: 1 }}
-  contentContainerStyle={{ padding: 12, gap: 6 }}
+  contentStyle={{ padding: 12, gap: 6 }}
   keyboardDismissMode="interactive"
   onEndReached={loadOlder}
   onEndReachedThreshold={0.5}
@@ -208,7 +208,7 @@ type ListItemsProps<T> = Pick<ListProps<T>,
   "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex"
   | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh"
   | "onEndReached" | "onEndReachedThreshold"
-  | "ListHeaderComponent" | "ListFooterComponent" | "ListEmptyComponent">;
+  | "header" | "footer" | "empty">;
 ```
 
-`ListProps` 中关于数据和行的那一半：传给自行布局列表的组件（例如 `nsh/ui/mobile` 的 [`ListView`](../components/list-view.md)）的内容。
+`ListProps` 中关于数据和行的那一半：传给你自己的、自行布局列表的组件（例如一个用自己的内边距和分隔线包装 `List` 的设置列表）的内容。

@@ -30,9 +30,9 @@ fn main() {
 }
 
 fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
-    // The mobile UI as the toolchain takes it: data (`SetDescription`).
+    // `nsh/base` as the toolchain takes it: data (`SetDescription`).
     let ui_sets = vec![nsh_core::ui::description::SetDescription::from(
-        nsh_ui_mobile::registry(),
+        nsh_base::registry(),
     )];
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),

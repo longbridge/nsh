@@ -67,9 +67,9 @@ The values below are the dark theme's.
   palette colour each (note info, tip up green, important citrus, warning
   amber, caution danger): a soft tint over the page (`--callout-tint`, 11%
   dark, 7% light), a 25% border, the icon and label in the colour, the body
-  in the text colour. No purple anywhere.
-- **Code colours are tokens** (`--code-*`): Shiki emits the macos-classic
-  light theme's hex values (`src/light.theme.json`) and `global.css` maps
+  in the text colour. No purple anywhere but code keywords.
+- **Code colours are tokens** (`--code-*`): Shiki emits the allsum-light
+  theme's hex values (`src/light.theme.json`) and `global.css` maps
   them onto the tokens, so fenced blocks, demo sources and the home page's
   code share one palette. Never hand-colour a snippet.
 - Diagrams in `public/diagrams` come as a light and a dark file, each with
@@ -78,8 +78,9 @@ The values below are the dark theme's.
   top highlight, a soft outer shadow, no inner shadow): a header row naming
   the language (`pre::before`, from `data-language`) with the copy button,
   a hairline, the code on a faintly tinted surface. Syntax colours per
-  theme: keywords info, strings up green, numbers amber, functions citrus,
-  comments faint. Tables are clean cards (a faint header tint, 13px muted
+  theme are Allsum's code palette, the one TextView highlights with:
+  keywords violet, strings green, numbers amber, functions and types blue,
+  properties gold, built-ins teal, comments faint italic. Tables are clean cards (a faint header tint, 13px muted
   labels, row hairlines). Inline code is a light-touch chip.
 - **A touch of liquid glass**, on floating and layered surfaces only: the nav
   bar, the search panel, menus, segmented controls (a glassy track, the
@@ -159,7 +160,7 @@ logs it).
   colours from `demos/palette.ts` (`ui()`, over `colorScheme()`) inside JSX,
   so they switch live. The playground inlines that file into a demo that
   imports it; its Dark switch follows the page until changed.
-  `demos/nsh.json` gives `nsh/ui/mobile` both appearances
+  `demos/nsh.json` gives Rust components both appearances
   (`demos/graphite-theme.json`). Never custom Tailwind colour names: the
   playground compiles without `nsh.json`.
 - A demo is shown in a **frame** (`.phone`, `frameBar()` in

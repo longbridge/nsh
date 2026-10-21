@@ -77,7 +77,7 @@ impl<T: super::Ret + 'static> ToJs for T {
 
 /// The result of a call JS waits for: the value, or the message its
 /// promise rejects with.
-pub type JsResult = Result<Box<dyn ToJs>, String>;
+pub type JsResult = Result<Box<dyn ToJs>, super::Thrown>;
 
 /// A module function with a context, its arguments decoded: run by the
 /// core in order with the UI's ops.
@@ -156,6 +156,33 @@ pub enum JsEvent {
         /// Placed.
         wanted: bool,
     },
+    /// The Rust component hosted by `host` places the content of its
+    /// render prop `prop` (`Option<Renderer<T>>`) for `key` with `value`,
+    /// which JS did not render yet: JS calls the app's function with it
+    /// and inserts what it returns into the host in a holder view of its
+    /// own (`componentRender`: the prop, U+001F, the key), replacing the
+    /// one it made for the key before. The core places the holder.
+    Render {
+        /// The component's host node.
+        host: NodeId,
+        /// The prop holding the app's function.
+        prop: &'static str,
+        /// The key, unique among the component's renders of the prop.
+        key: super::SharedString,
+        /// The value to render.
+        value: std::rc::Rc<dyn super::RenderValue>,
+    },
+    /// No element of the component's render (`prop`, `key`) is placed any
+    /// more ([`Self::Render`]): JS removes its holder and disposes what it
+    /// rendered.
+    Unrender {
+        /// The component's host node.
+        host: NodeId,
+        /// The prop holding the app's function.
+        prop: &'static str,
+        /// The key.
+        key: super::SharedString,
+    },
     /// The result of call `call` (its promise settles).
     Reply {
         /// The call number.
@@ -171,6 +198,10 @@ impl fmt::Debug for JsEvent {
             JsEvent::Event(id, kind, payload) => write!(f, "Event({id}, {kind:?}, {payload:?})"),
             JsEvent::Component { host, event } => write!(f, "Component({host}, {})", event.name()),
             JsEvent::Children { host, wanted } => write!(f, "Children({host}, {wanted})"),
+            JsEvent::Render {
+                host, prop, key, ..
+            } => write!(f, "Render({host}, {prop}, {key})"),
+            JsEvent::Unrender { host, prop, key } => write!(f, "Unrender({host}, {prop}, {key})"),
             JsEvent::Reply { call, result } => write!(f, "Reply({call}, ok: {})", result.is_ok()),
         }
     }

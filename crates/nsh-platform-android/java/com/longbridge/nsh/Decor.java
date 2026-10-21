@@ -192,7 +192,50 @@ final class Decor extends Drawable {
         int size;
         float x = 0.5f, y = 0.5f;
         int[] colors;
+        /** Fractions of the gradient line, placed by {@link #resolve} when {@link #units} is set. */
         float[] positions;
+        /** Stops as written when some are in points (else null): 0 spread, 1 fraction, 2 pixels. */
+        int[] units;
+        float[] values;
+
+        /**
+         * Places the stops along a gradient line {@code line} px long, as `Gradient::resolve_stops`
+         * does: lengths as fractions of the line, missing positions spread evenly, each at least the
+         * one before it.
+         */
+        void resolve(float line) {
+            if (units == null) return;
+            int n = positions.length;
+            if (n == 0) return;
+            for (int k = 0; k < n; k++) {
+                switch (units[k]) {
+                    case 0: positions[k] = Float.NaN; break;
+                    case 1: positions[k] = values[k]; break;
+                    default: positions[k] = line > 0 ? values[k] / line : values[k] > 0 ? 1 : 0;
+                }
+            }
+            if (Float.isNaN(positions[0])) positions[0] = 0;
+            if (Float.isNaN(positions[n - 1])) positions[n - 1] = 1;
+            // From 0, as the core's Gradient::resolve_stops: negative stops resolve to 0.
+            float max = 0;
+            for (int k = 0; k < n; k++) {
+                if (Float.isNaN(positions[k])) continue;
+                max = Math.max(max, positions[k]);
+                positions[k] = max;
+            }
+            int i = 1;
+            while (i < n) {
+                if (!Float.isNaN(positions[i])) {
+                    i++;
+                    continue;
+                }
+                int start = i - 1, end = i;
+                while (Float.isNaN(positions[end])) end++;
+                float a = positions[start], b = positions[end];
+                for (int k = i; k < end; k++) positions[k] = a + (b - a) * (k - start) / (end - start);
+                i = end;
+            }
+        }
     }
 
     /** `backdrop-filter: blur()` (API 31+), drawn under the background. */
@@ -347,6 +390,8 @@ final class Decor extends Drawable {
                                 : (float) Math.hypot(dx / 1.4142135f, dy / 1.4142135f);
                         dx = dy = r;
                     }
+                    // Lengths are along the ray to the right.
+                    g.resolve(dx);
                     shader = new android.graphics.RadialGradient(cx, cy, Math.max(0.5f, dx), g.colors, g.positions,
                             android.graphics.Shader.TileMode.CLAMP);
                     // An ellipse: the circle scaled vertically.
@@ -373,6 +418,7 @@ final class Decor extends Drawable {
                     float len = Math.abs(w * sin) + Math.abs(h * cos);
                     float cx = b.left + w / 2, cy = b.top + h / 2;
                     float dx = sin * len / 2, dy = -cos * len / 2;
+                    g.resolve(len);
                     shader = new android.graphics.LinearGradient(cx - dx, cy - dy, cx + dx, cy + dy, g.colors,
                             g.positions, android.graphics.Shader.TileMode.CLAMP);
                 }

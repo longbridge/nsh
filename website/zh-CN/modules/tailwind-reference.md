@@ -8,9 +8,41 @@ order: 17
 
 每个元素都可以在 `class` 属性中写 Tailwind CSS 类（条件类写在 `classList` 中）。NSH 在 Rust 中按 Tailwind 4 的默认主题解析它们：JS 只传递字符串，每个不同的字符串只解析一次并缓存；当外观、窗口尺寸或按压状态变化时，`dark:`、`active:` 等变体在原生侧重新求值，不运行任何 JS。
 
-本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
+每个工具类设置的值都与 Tailwind CSS 4 为它生成的完全相同，含义与浏览器中一致。本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
 
-```tsx
+Rust 组件不使用 class 字符串：它们用 `Styled`（`nsh_core::ui::prelude`）的类型化方法为元素设置样式，这些方法以本页的工具类命名，解析到相同的值，包括 Tailwind 的默认刻度（`px-4` 即 `.px_4()`，`rounded-2xl` 即 `.rounded_2xl()`，`shadow-md` 即 `.shadow_md()`，`bg-linear-to-br` 即 `.bg_linear_to_br()`）。颜色是值：主题颜色，或 `nsh_core::ui::palette` 中的 Tailwind 调色板（`ZINC.shade(800)` 即 `zinc-800`）。变体是接受样式闭包的方法：`.active(|s| …)`、`.hover(…)`、`.focus(…)`、`.disabled_style(…)`、`.dark(…)`、`.group_active(…)`，其余用 `.style_when(condition, …)`。[样式参考](./style-reference.md) 给出了每个样式键对应的方法。
+
+```rust tabs
+use nsh_core::ui::{
+    palette::{RED, ZINC},
+    prelude::*,
+};
+
+view()
+    .flex_row()
+    .items_center()
+    .gap_3()
+    .rounded_2xl()
+    .bg(white())
+    .p_4()
+    .shadow_md()
+    .active(|s| s.scale(0.98))
+    .transition()
+    .dark(|s| s.bg(ZINC.shade(800)))
+    .child(
+        text("Inbox")
+            .text_base()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(ZINC.shade(900))
+            .dark(|s| s.text_color(white())),
+    )
+    .child(
+        text(move || unread.get().to_string())
+            .text_color(move || if unread.get() > 0 { RED.shade(500) } else { ZINC.shade(400) }),
+    )
+```
+
+```tsx tabs
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">
   <Text class="text-base font-semibold text-zinc-900 dark:text-white">Inbox</Text>
   <Text classList={{ "text-red-500": unread() > 0, "text-zinc-400": unread() === 0 }}>{unread()}</Text>
@@ -20,7 +52,7 @@ order: 17
 ## 类如何组合
 
 - **后写的生效。** 同一变体层级的工具类中，字符串里靠后的那个生效：`"p-4 p-2"` 等于 `p-2`。组件可以接收 `class` 属性并直接拼接到自己的类后面，不需要 `tailwind-merge`。
-- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：位置（`first:` 等）、`group-*:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
+- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：位置（`first:` 等）、`group-*:`、`checked:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
 - **`style` 优先于类。** 内联 `style` 叠加在解析后的类之上。重要标记的工具类（`!p-4` 或 `p-4!`）连内联样式也能覆盖。
 - **文字样式会继承。** 写在视图上的文字类（`text-white`、`font-bold`、`text-center` 等）会像 CSS 一样传给其中的 `<Text>` 和 `<Input>`。
 - **display 遵循 CSS。** `flex` 和 `inline-flex` 是横向排列，除非有方向类另行指定，且与其在字符串中的位置无关（`flex-col flex` 是纵向）。没有 `flex` 的视图保持 NSH 默认的纵向排列。
@@ -240,7 +272,8 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 
 | Class | 设置 |
 |---|---|
-| `placeholder:text-<color>` | `placeholderTextColor` |
+| `placeholder:text-<color>` | `placeholderColor` |
+| `selection:text-<color>` | `selectionColor`（输入框的光标和选区、可选文本的选区高亮） |
 | `caret-<color>` | 光标颜色 |
 
 ## 背景
@@ -257,7 +290,18 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `from-<p>%`、`via-<p>%`、`to-<p>%` | 色标位置：`via-40%`、`from-[15%]` |
 | `bg-none` | 去掉渐变 |
 
-```tsx
+```rust tabs
+view()
+    .h_32()
+    .rounded_2xl()
+    .bg_linear_to_br()
+    .gradient_from(INDIGO.shade(500))
+    .gradient_via(PURPLE.shade(500))
+    .gradient_via_position(percentage(0.4))
+    .gradient_to(PINK.shade(500))
+```
+
+```tsx tabs
 <View class="h-32 rounded-2xl bg-linear-to-br from-indigo-500 via-purple-500 via-40% to-pink-500" />
 ```
 
@@ -383,14 +427,14 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 
 ### 外观与环境
 
-| 变体 | 生效条件 |
-|---|---|
-| `dark:` | 外观为深色 |
-| `ios:` | 运行在 iOS 或 Mac Catalyst 上 |
-| `android:` | 运行在 Android 上 |
-| `portrait:`、`landscape:` | 窗口高大于宽 / 宽大于高 |
-| `ltr:`、`rtl:` | 布局方向 |
-| `motion-safe:`、`motion-reduce:` | 用户未开启 / 开启了减弱动态效果 |
+| 变体 | 生效条件 | Rust |
+|---|---|---|
+| `dark:` | 外观为深色 | `.dark(\|s\| …)` |
+| `ios:` | 运行在 iOS 或 Mac Catalyst 上 | `.when(os() == Os::Ios, …)` |
+| `android:` | 运行在 Android 上 | `.when(os() == Os::Android, …)` |
+| `portrait:`、`landscape:` | 窗口高大于宽 / 宽大于高 | `.style_when(move \|\| window().height > window().width, …)` |
+| `ltr:`、`rtl:` | 布局方向 | `.style_when(rtl, …)` |
+| `motion-safe:`、`motion-reduce:` | 用户未开启 / 开启了减弱动态效果 | `.style_when(reduce_motion, …)` |
 
 ### 断点
 
@@ -411,24 +455,42 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `min-[<length>]:` | `min-[600px]:grid-cols-3` | 宽度 ≥ 该长度 |
 | `max-[<length>]:` | `max-[400px]:text-sm` | 宽度 < 该长度 |
 
-竖屏手机（宽 390 点）不匹配任何默认断点；平板或横屏手机会匹配其中几个。
+竖屏手机（宽 390 点）不匹配任何默认断点；平板或横屏手机会匹配其中几个。在 Rust 中，断点是关于窗口的条件：`.style_when(move || window().width >= px(768.0), |s| s.p_8())` 即 `md:p-8`。
 
 ### 交互状态
 
 只有类中用到这些状态的元素才会由平台跟踪，状态变化在原生侧生效，不需要往返 JS。
 
-| 变体 | 生效条件 |
-|---|---|
-| `active:` | 元素被按下 |
-| `hover:` | 指针悬停其上（iPad 指针、Mac Catalyst、Android 鼠标） |
-| `focus:`、`focus-visible:` | 输入框获得焦点 |
-| `focus-within:` | 元素自身或其后代获得焦点 |
-| `disabled:` | 元素设置了 `disabled` 属性 |
-| `enabled:` | 元素没有设置 `disabled` 属性 |
+| 变体 | 生效条件 | Rust |
+|---|---|---|
+| `active:` | 元素被按下 | `.active(\|s\| …)` |
+| `hover:` | 指针悬停其上（iPad 指针、Mac Catalyst、Android 鼠标） | `.hover(\|s\| …)` |
+| `focus:`、`focus-visible:` | 输入框获得焦点 | `.focus(\|s\| …)` |
+| `focus-within:` | 元素自身或其后代获得焦点 |  |
+| `disabled:` | 元素设置了 `disabled` 属性 | `.disabled_style(\|s\| …)` |
+| `enabled:` | 元素没有设置 `disabled` 属性 |  |
+| `selected:` | 元素处于选中状态：`Button` 的 `selected`，或 `accessibilityState.selected` |  |
+| `checked:` | 元素处于勾选状态：`accessibilityState.checked` 为 `true`（`"mixed"` 不算） |  |
+
+这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` 和 `checkedStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
 
 `disabled` 适用于任何元素：它会让 `disabled:` 生效，并移除元素的按压处理器，因此也不会显示按压反馈。
 
-```tsx
+```rust tabs
+view()
+    .on_press(save)
+    .disabled(saving)
+    .rounded_lg()
+    .bg(BLUE.shade(600))
+    .px_4()
+    .py_2()
+    .transition()
+    .active(|s| s.scale(0.95).bg(BLUE.shade(700)))
+    .disabled_style(|s| s.opacity(0.4))
+    .child(text("Save").font_weight(FontWeight::MEDIUM).text_color(white()))
+```
+
+```tsx tabs
 <View
   onPress={save}
   disabled={saving()}
@@ -442,15 +504,40 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 
 给祖先元素加上 `group`，后代即可用 `group-<state>:` 按它的状态设置样式。分组嵌套时给它命名：`group/card` 与 `group-hover/card:`。
 
-| 变体 | 分组处于 |
-|---|---|
-| `group-active:` | 按下 |
-| `group-hover:` | 悬停 |
-| `group-focus:`、`group-focus-visible:` | 获得焦点 |
-| `group-focus-within:` | 自身或内部获得焦点 |
-| `group-disabled:` | 禁用 |
+| 变体 | 分组处于 | Rust |
+|---|---|---|
+| `group-active:` | 按下 | `.group_active(…)`、`.group_active_named(name, …)` |
+| `group-hover:` | 悬停 | `.group_hover(…)`、`.group_hover_named(name, …)` |
+| `group-focus:`、`group-focus-visible:` | 获得焦点 |  |
+| `group-focus-within:` | 自身或内部获得焦点 | `.group_focus_within(…)`、`.group_focus_within_named(name, …)` |
+| `group-disabled:` | 禁用 |  |
+| `group-selected:` | 选中 |  |
+| `group-checked:` | 勾选 |  |
 
-```tsx
+```rust tabs
+view()
+    .on_press(open)
+    .group_named("row")
+    .flex_row()
+    .items_center()
+    .gap_3()
+    .p_3()
+    .active(|s| s.bg(ZINC.shade(100)))
+    .child(
+        text("Settings")
+            .flex_1()
+            .text_color(ZINC.shade(900))
+            .group_active_named("row", |s| s.text_color(BLUE.shade(600))),
+    )
+    .child(
+        text("›")
+            .text_color(ZINC.shade(400))
+            .group_active_named("row", |s| s.translate_x(px(4.0)))
+            .transition_transform(),
+    )
+```
+
+```tsx tabs
 <View onPress={open} class="group/row flex-row items-center gap-3 p-3 active:bg-zinc-100">
   <Text class="flex-1 text-zinc-900 group-active/row:text-blue-600">Settings</Text>
   <Text class="text-zinc-400 group-active/row:translate-x-1 transition-transform">›</Text>
@@ -467,13 +554,23 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `odd:` | 第 1、3……个子元素 |
 | `even:` | 第 2、4……个子元素 |
 
-```tsx
+```rust tabs
+each(items, |item: &Item| item.id, move |item, index| {
+    text(move || item.with(|i| i.name.clone()))
+        .border_b(px(1.0))
+        .border_color(ZINC.shade(200))
+        .py_3()
+        .style_when(move || index.get() + 1 == items.with(Vec::len), |s| s.border_b(px(0.0)))
+})
+```
+
+```tsx tabs
 <Each of={items()}>{(item) => <Text class="border-b border-zinc-200 py-3 last:border-b-0">{item().name}</Text>}</Each>
 ```
 
-### 占位符
+### 占位符与选区
 
-`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`。
+`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 的选区（包括光标）或可选 `<Text>` 的选区，同样只接受文字颜色：`selection:text-violet-500`（样式键 `selectionColor`）。
 
 ### 重要标记
 
@@ -534,7 +631,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> Tailwind 主题只影响应用自己的类。`nsh/ui/mobile` 的组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见 [组件](../components/index.md)。
+> Tailwind 主题只影响应用自己的类。Rust 组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见[用 Rust 开发](../docs/rust.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
 
 ## 相关
 

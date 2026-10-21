@@ -34,7 +34,7 @@ pub(crate) mod layer;
 
 use std::{cell::RefCell, hash::Hasher};
 
-use nsh_core::{BorderStyle, Borders, Color, Outline, Rect};
+use nsh_core::{BorderStyle, Borders, Bounds, Color, Outline, Points};
 use rustc_hash::FxHasher;
 use windows::{
     Win32::Graphics::{
@@ -139,15 +139,17 @@ pub(crate) fn outset(state: &ViewState) -> f32 {
     let s = state.shadow();
     let mut o: f32 = 0.0;
     if s.is_visible() {
-        o = s.offset_x.abs().max(s.offset_y.abs()) + 3.0 * s.radius.max(0.0);
+        o = s.offset_x.0.abs().max(s.offset_y.0.abs()) + 3.0 * s.radius.0.max(0.0);
     }
     let outline = state.style.outline;
     if outline.is_visible() {
-        o = o.max(outline.offset + outline.width);
+        o = o.max((outline.offset + outline.width).0);
     }
     if let Some(e) = &state.style.effects {
         for b in e.box_shadows.iter().filter(|b| !b.inset && b.is_visible()) {
-            o = o.max(b.offset_x.abs().max(b.offset_y.abs()) + b.spread + 1.5 * b.blur.max(0.0));
+            o = o.max(
+                b.offset_x.0.abs().max(b.offset_y.0.abs()) + b.spread.0 + 1.5 * b.blur.0.max(0.0),
+            );
         }
         o += layer::filters_outset(&e.filters);
     }
@@ -191,9 +193,9 @@ pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
             image = layer::drop_shadow(
                 cx.dc,
                 &image,
-                shadow.offset_x,
-                shadow.offset_y,
-                shadow.radius * 2.0,
+                shadow.offset_x.0,
+                shadow.offset_y.0,
+                shadow.radius.0 * 2.0,
                 faded(shadow.color, shadow.opacity),
                 &lin,
             )?;
@@ -201,17 +203,17 @@ pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         if let Some(mode) = layer::blend_mode(state.style.blend_mode)
             && cx.backdrop
         {
-            let (w, h) = (state.frame.width, state.frame.height);
+            let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
             let area = state.overflow.unwrap_or(rect(0.0, 0.0, w, h));
             let mut o = layer::filters_outset(filters);
             if content_shadow {
-                o += shadow.offset_x.abs().max(shadow.offset_y.abs()) + 3.0 * shadow.radius;
+                o += shadow.offset_x.0.abs().max(shadow.offset_y.0.abs()) + 3.0 * shadow.radius.0;
             }
             let bounds = world.bounds(
-                area.x - o,
-                area.y - o,
-                area.width + 2.0 * o,
-                area.height + 2.0 * o,
+                area.origin.x.0 - o,
+                area.origin.y.0 - o,
+                area.size.width.0 + 2.0 * o,
+                area.size.height.0 + 2.0 * o,
             );
             if let Some((x, y, bw, bh)) = bounds
                 && let Some((back, bx, by)) = layer::backdrop(cx, x, y, bw, bh)
@@ -255,7 +257,7 @@ pub(crate) fn draw_backdrop(cx: &mut DrawCx<'_>, state: &ViewState) {
     if !layer::filters_visible(&e.backdrop_filters) {
         return;
     }
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -296,7 +298,7 @@ pub(crate) fn draw_backdrop(cx: &mut DrawCx<'_>, state: &ViewState) {
 /// Draws the view's shadows, background color, gradients and inset
 /// shadows, under its content.
 pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -306,10 +308,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     let s = state.shadow();
     if s.is_visible() && has_fill(state) {
         let spec = ShadowSpec {
-            dx: s.offset_x,
-            dy: s.offset_y,
+            dx: s.offset_x.0,
+            dy: s.offset_y.0,
             spread: 0.0,
-            blur: s.radius.max(0.0) * 2.0,
+            blur: s.radius.0.max(0.0) * 2.0,
             color: faded(s.color, s.opacity),
             cut: false,
         };
@@ -320,10 +322,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for b in e.box_shadows.iter().rev() {
             if !b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    blur: b.blur.max(0.0),
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    blur: b.blur.0.max(0.0),
                     color: b.color,
                     cut: true,
                 };
@@ -358,14 +360,14 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     }
 
     if let Some(e) = effects {
-        let widths = state.style.borders.widths;
+        let widths = state.style.borders.widths.to_array().map(|w| w.0);
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    blur: b.blur.max(0.0),
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    blur: b.blur.0.max(0.0),
                     color: b.color,
                     cut: true,
                 };
@@ -479,36 +481,36 @@ fn shadow_key(
 }
 
 /// `r` snapped outwards to whole pixels at `scale`.
-fn snapped(r: Rect, scale: f32) -> Rect {
-    let x0 = (r.x * scale).floor() / scale;
-    let y0 = (r.y * scale).floor() / scale;
-    let x1 = ((r.x + r.width) * scale).ceil() / scale;
-    let y1 = ((r.y + r.height) * scale).ceil() / scale;
+fn snapped(r: Bounds<Points>, scale: f32) -> Bounds<Points> {
+    let x0 = (r.origin.x.0 * scale).floor() / scale;
+    let y0 = (r.origin.y.0 * scale).floor() / scale;
+    let x1 = ((r.origin.x.0 + r.size.width.0) * scale).ceil() / scale;
+    let y1 = ((r.origin.y.0 + r.size.height.0) * scale).ceil() / scale;
     rect(x0, y0, x1 - x0, y1 - y0)
 }
 
 /// The scale a bitmap of `r` is drawn at: the window's, less when it would
 /// exceed [`MAX_BAKE`] pixels.
-fn bake_scale(r: Rect, scale: f32) -> f32 {
+fn bake_scale(r: Bounds<Points>, scale: f32) -> f32 {
     scale
-        .min(MAX_BAKE / r.width.max(1.0))
-        .min(MAX_BAKE / r.height.max(1.0))
+        .min(MAX_BAKE / r.size.width.0.max(1.0))
+        .min(MAX_BAKE / r.size.height.0.max(1.0))
 }
 
 /// Draws an outer shadow of the `w` x `h` box with `radii`.
 fn outer_shadow(cx: &DrawCx<'_>, w: f32, h: f32, radii: [f32; 4], spec: &ShadowSpec) {
     let s = spec.spread;
     let shape = rect(spec.dx - s, spec.dy - s, w + 2.0 * s, h + 2.0 * s);
-    if shape.width <= 0.0 || shape.height <= 0.0 {
+    if shape.size.width.0 <= 0.0 || shape.size.height.0 <= 0.0 {
         return;
     }
     let sigma = spec.blur / 2.0;
     let e = (3.0 * sigma).ceil();
     let region = rect(
-        shape.x - e,
-        shape.y - e,
-        shape.width + 2.0 * e,
-        shape.height + 2.0 * e,
+        shape.origin.x.0 - e,
+        shape.origin.y.0 - e,
+        shape.size.width.0 + 2.0 * e,
+        shape.size.height.0 + 2.0 * e,
     );
     let scale = bake_scale(region, cx.scale);
     let region = snapped(region, scale);
@@ -553,7 +555,7 @@ fn inset_shadow(
     spec: &ShadowSpec,
 ) {
     let (padding, corners) = padding_box(w, h, radii, widths);
-    if padding.width <= 0.0 || padding.height <= 0.0 {
+    if padding.size.width.0 <= 0.0 || padding.size.height.0 <= 0.0 {
         return;
     }
     let sigma = spec.blur / 2.0;
@@ -566,21 +568,21 @@ fn inset_shadow(
         // The shadow is everything outside the hole: the padding box moved
         // and shrunk by the spread.
         let hole = rect(
-            padding.x + spec.dx + s,
-            padding.y + spec.dy + s,
-            padding.width - 2.0 * s,
-            padding.height - 2.0 * s,
+            padding.origin.x.0 + spec.dx + s,
+            padding.origin.y.0 + spec.dy + s,
+            padding.size.width.0 - 2.0 * s,
+            padding.size.height.0 - 2.0 * s,
         );
         let hole_corners = corners.map(|(x, y)| ((x - s).max(0.0), (y - s).max(0.0)));
         let reach = 3.0 * sigma + spec.dx.abs() + spec.dy.abs() + s.abs() + 2.0;
         let outside = rect(
-            region.x - reach,
-            region.y - reach,
-            region.width + 2.0 * reach,
-            region.height + 2.0 * reach,
+            region.origin.x.0 - reach,
+            region.origin.y.0 - reach,
+            region.size.width.0 + 2.0 * reach,
+            region.size.height.0 + 2.0 * reach,
         );
         let mut figures = vec![(outside, [(0.0, 0.0); 4])];
-        if hole.width > 0.0 && hole.height > 0.0 {
+        if hole.size.width.0 > 0.0 && hole.size.height.0 > 0.0 {
             figures.push((hole, hole_corners));
         }
         let paint = path(gfx, &figures)?;
@@ -608,7 +610,7 @@ fn inset_shadow(
 #[allow(clippy::too_many_arguments)]
 fn bake(
     gfx: &Gfx,
-    region: Rect,
+    region: Bounds<Points>,
     scale: f32,
     shape: &ID2D1Geometry,
     color: Color,
@@ -617,8 +619,8 @@ fn bake(
     mode: D2D1_COMPOSITE_MODE,
 ) -> Option<Baked> {
     let px = (
-        (region.width * scale).round().max(1.0) as u32,
-        (region.height * scale).round().max(1.0) as u32,
+        (region.size.width.0 * scale).round().max(1.0) as u32,
+        (region.size.height.0 * scale).round().max(1.0) as u32,
     );
     layer::with_context(gfx, |dc| {
         let paint = record_fill(dc, scale, shape, color)?;
@@ -654,7 +656,10 @@ fn bake(
             dc.SetDpi(96.0 * scale, 96.0 * scale);
             dc.BeginDraw();
             dc.Clear(Some(&color_f(Color::TRANSPARENT)));
-            dc.SetTransform(&Matrix3x2::translation(-region.x, -region.y));
+            dc.SetTransform(&Matrix3x2::translation(
+                -region.origin.x.0,
+                -region.origin.y.0,
+            ));
             let image: Option<ID2D1Image> = if sigma > 0.0 {
                 layer::blur(dc, &paint.cast().ok()?, sigma, false).ok()
             } else {
@@ -678,10 +683,10 @@ fn bake(
             dc.SetTarget(None);
             Some(Baked {
                 bitmap,
-                x: region.x,
-                y: region.y,
-                width: region.width,
-                height: region.height,
+                x: region.origin.x.0,
+                y: region.origin.y.0,
+                width: region.size.width.0,
+                height: region.size.height.0,
             })
         }
     })
@@ -719,7 +724,7 @@ fn record_fill(
 /// layer borders, so content the core placed under a border never covers
 /// it).
 pub(crate) fn draw_border(cx: &mut DrawCx<'_>, state: &ViewState) {
-    let (w, h) = (state.frame.width, state.frame.height);
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     if w <= 0.0 || h <= 0.0 {
         return;
     }
@@ -741,9 +746,11 @@ pub(crate) fn draw_border(cx: &mut DrawCx<'_>, state: &ViewState) {
 
 /// The borders of a `w` x `h` box with `radii`.
 fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4]) {
+    let widths = b.widths.to_array().map(|w| w.0);
+    let uniform = b.uniform().map(|(bw, c)| (bw.0, c));
     let uniform_radii = radii.iter().all(|&r| r == radii[0]);
     if b.style == BorderStyle::Solid {
-        if let Some((bw, c)) = b.uniform() {
+        if let Some((bw, c)) = uniform {
             let half = bw / 2.0;
             let line = rect_f(half, half, (w - bw).max(0.0), (h - bw).max(0.0));
             // Stroking the middle line is exact while the inner corners
@@ -766,24 +773,24 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
             }
         }
         // The ring between the border box and the padding box.
-        let (inner, corners) = padding_box(w, h, radii, b.widths);
+        let (inner, corners) = padding_box(w, h, radii, widths);
         let mut figures = vec![(rect(0.0, 0.0, w, h), circular(radii))];
-        if inner.width > 0.0 && inner.height > 0.0 {
+        if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
             figures.push((inner, corners));
         }
         let Some(ring) = path(cx.gfx, &figures) else {
             return;
         };
-        let mut drawn = (0..4).filter(|&i| b.widths[i] > 0.0);
+        let mut drawn = (0..4).filter(|&i| widths[i] > 0.0);
         let first = drawn.next().map_or(Color::TRANSPARENT, |i| b.colors[i]);
         if drawn.all(|i| b.colors[i] == first) {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe { cx.dc.FillGeometry(&ring, cx.solid(first), None) };
             return;
         }
-        for (side, quad) in side_quads(w, h, b.widths).iter().enumerate() {
+        for (side, quad) in side_quads(w, h, widths).iter().enumerate() {
             let c = b.colors[side];
-            if b.widths[side] <= 0.0 || c.is_transparent() {
+            if widths[side] <= 0.0 || c.is_transparent() {
                 continue;
             }
             let Some(clip) = polygon(cx.gfx, quad) else {
@@ -807,7 +814,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
             radii.map(|r| (r - half).max(0.0)),
         )
     };
-    if let Some((bw, c)) = b.uniform() {
+    if let Some((bw, c)) = uniform {
         if let Some(g) = line(bw) {
             // SAFETY: as above.
             unsafe { cx.dc.DrawGeometry(&g, cx.solid(c), bw, &style) };
@@ -816,8 +823,8 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
     }
     // Sides that differ: the whole line stroked with each side's width and
     // color, clipped to that side's part of the box.
-    for (side, quad) in side_quads(w, h, b.widths).iter().enumerate() {
-        let (bw, c) = (b.widths[side], b.colors[side]);
+    for (side, quad) in side_quads(w, h, widths).iter().enumerate() {
+        let (bw, c) = (widths[side], b.colors[side]);
         if bw <= 0.0 || c.is_transparent() {
             continue;
         }
@@ -834,17 +841,17 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
 /// The outline: outside the border box by its offset; rounded corners
 /// follow the border radius outwards, square ones stay square.
 fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4]) {
-    let d = o.offset + o.width;
+    let (width, off) = (o.width.0, o.offset.0);
+    let d = off + width;
     let (ow, oh) = (w + 2.0 * d, h + 2.0 * d);
     if ow <= 0.0 || oh <= 0.0 {
         return;
     }
     if o.style == BorderStyle::Solid {
         let outer = (rect(-d, -d, ow, oh), circular(radii.map(|r| grown(r, d))));
-        let off = o.offset;
         let inner = rect(-off, -off, w + 2.0 * off, h + 2.0 * off);
         let mut figures = vec![outer];
-        if inner.width > 0.0 && inner.height > 0.0 {
+        if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
             figures.push((inner, circular(radii.map(|r| grown(r, off)))));
         }
         if let Some(ring) = path(cx.gfx, &figures) {
@@ -853,18 +860,15 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
         }
         return;
     }
-    let half = o.width / 2.0;
+    let half = width / 2.0;
     let line = crate::render::rounded_geometry(
         cx.gfx,
-        rect(-d + half, -d + half, ow - o.width, oh - o.width),
+        rect(-d + half, -d + half, ow - width, oh - width),
         radii.map(|r| grown(r, d - half)),
     );
     if let (Some(line), Some(style)) = (line, stroke_style(cx.gfx, o.style)) {
         // SAFETY: as above.
-        unsafe {
-            cx.dc
-                .DrawGeometry(&line, cx.solid(o.color), o.width, &style)
-        };
+        unsafe { cx.dc.DrawGeometry(&line, cx.solid(o.color), width, &style) };
     }
 }
 
@@ -887,7 +891,7 @@ fn circular(radii: [f32; 4]) -> Corners {
 /// of a `w` x `h` box; its corners are the outer ones less the borders'
 /// widths on each axis, elliptical where they differ, square where a
 /// border is wider than its corner.
-fn padding_box(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4]) -> (Rect, Corners) {
+fn padding_box(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4]) -> (Bounds<Points>, Corners) {
     let [top, right, bottom, left] = widths;
     let r = rect(
         left,
@@ -974,9 +978,9 @@ fn side_quads(w: f32, h: f32, widths: [f32; 4]) -> [[(f32, f32); 4]; 4] {
 /// # Safety
 ///
 /// `sink` must be open.
-unsafe fn add_rounded(sink: &ID2D1GeometrySink, r: Rect, c: Corners) {
-    let c = fit_corners(r.width, r.height, c);
-    let (x, y, w, h) = (r.x, r.y, r.width, r.height);
+unsafe fn add_rounded(sink: &ID2D1GeometrySink, r: Bounds<Points>, c: Corners) {
+    let c = fit_corners(r.size.width.0, r.size.height.0, c);
+    let (x, y, w, h) = (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0);
     let p = |px: f32, py: f32| Vector2 { X: px, Y: py };
     let arc = |to: Vector2, (rx, ry): (f32, f32)| D2D1_ARC_SEGMENT {
         point: to,
@@ -1016,7 +1020,7 @@ unsafe fn add_rounded(sink: &ID2D1GeometrySink, r: Rect, c: Corners) {
 
 /// A path of rounded rectangles, filled alternately (a rectangle inside
 /// another makes a ring).
-fn path(gfx: &Gfx, figures: &[(Rect, Corners)]) -> Option<ID2D1Geometry> {
+fn path(gfx: &Gfx, figures: &[(Bounds<Points>, Corners)]) -> Option<ID2D1Geometry> {
     // SAFETY: COM calls on live objects; the sink is closed before use.
     unsafe {
         let path = gfx.factory.CreatePathGeometry().ok()?;
@@ -1149,7 +1153,10 @@ mod tests {
     fn padding_box_corners() {
         // Uniform 2 pt borders inside 10 pt corners: 8 pt inner corners.
         let (r, c) = padding_box(100.0, 50.0, [10.0; 4], [2.0; 4]);
-        assert_eq!((r.x, r.y, r.width, r.height), (2.0, 2.0, 96.0, 46.0));
+        assert_eq!(
+            (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
+            (2.0, 2.0, 96.0, 46.0)
+        );
         assert_eq!(c[0], (8.0, 8.0));
         // Differing borders make elliptical corners, square past the radius.
         let (_, c) = padding_box(100.0, 50.0, [6.0, 0.0, 1.0, 0.0], [6.0, 2.0, 4.0, 1.0]);
@@ -1232,8 +1239,8 @@ mod tests {
     #[test]
     fn regions_snap_outwards() {
         let r = snapped(rect(0.3, -0.2, 10.0, 5.0), 2.0);
-        assert_eq!((r.x, r.y), (0.0, -0.5));
-        assert!(r.x + r.width >= 10.3 && r.y + r.height >= 4.8);
+        assert_eq!((r.origin.x.0, r.origin.y.0), (0.0, -0.5));
+        assert!(r.origin.x.0 + r.size.width.0 >= 10.3 && r.origin.y.0 + r.size.height.0 >= 4.8);
         assert!(close(bake_scale(rect(0.0, 0.0, 8192.0, 10.0), 2.0), 0.5));
     }
 

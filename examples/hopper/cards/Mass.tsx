@@ -1,5 +1,4 @@
-import { Text, View } from "nsh";
-import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D, Path2D, Text, View } from "nsh";
 import { cgHeight, load, vehicle, wetMass } from "../store";
 import { color, mono } from "../theme";
 import { Caption, Gauge, Inset, Line, Panel, track } from "../ui";
@@ -42,106 +41,106 @@ function Section() {
         undefined,
         (x, y) => drawn?.isPointInPath(TANK, x, y) ?? false,
       )}
-      accessibilityRole="adjustable"
+      role="adjustable"
       accessibilityLabel="Propellant load"
       accessibilityValue={{ text: `${Math.round(load() * 100)} percent` }}
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
       onAccessibilityAction={(e) => load.set(Math.min(1, Math.max(0, Math.round((load() + (e.actionName === "increment" ? 0.05 : -0.05)) * 100) / 100)))}
-      draw={(ctx, { width, height }) => {
-        drawn = ctx;
-        ctx.scale(width / DW, height / DH);
+      draw={(cx, { width, height }) => {
+        drawn = cx;
+        cx.scale(width / DW, height / DH);
         // A ruler, one tick per meter.
-        ctx.strokeStyle = color.lineStrong;
-        ctx.fillStyle = color.faint;
-        ctx.lineWidth = 1;
-        ctx.font = `9px ${mono}`;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
+        cx.strokeStyle = color.lineStrong;
+        cx.fillStyle = color.faint;
+        cx.lineWidth = 1;
+        cx.font = `9px ${mono}`;
+        cx.textAlign = "left";
+        cx.textBaseline = "middle";
         for (let m = 1; m <= 5; m++) {
-          ctx.beginPath();
-          ctx.moveTo(2, yAt(m));
-          ctx.lineTo(8, yAt(m));
-          ctx.stroke();
-          ctx.fillText(`${m}`, 10, yAt(m));
+          cx.beginPath();
+          cx.moveTo(2, yAt(m));
+          cx.lineTo(8, yAt(m));
+          cx.stroke();
+          cx.fillText(`${m}`, 10, yAt(m));
         }
         // Propellant, filling the tank from the bottom.
         const level = TANK_BOTTOM + (TANK_TOP - TANK_BOTTOM) * load();
-        const fill = ctx.createLinearGradient(0, yAt(level), 0, yAt(TANK_BOTTOM));
+        const fill = cx.createLinearGradient(0, yAt(level), 0, yAt(TANK_BOTTOM));
         fill.addColorStop(0, "rgba(61,214,198,0.55)");
         fill.addColorStop(1, "rgba(61,214,198,0.15)");
-        ctx.fillStyle = fill;
-        ctx.fillRect(BODY.left + 2, yAt(level), BODY.right - BODY.left - 4, yAt(TANK_BOTTOM) - yAt(level));
-        ctx.strokeStyle = color.accent;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(BODY.left + 2, yAt(level));
-        ctx.lineTo(BODY.right - 2, yAt(level));
-        ctx.stroke();
+        cx.fillStyle = fill;
+        cx.fillRect(BODY.left + 2, yAt(level), BODY.right - BODY.left - 4, yAt(TANK_BOTTOM) - yAt(level));
+        cx.strokeStyle = color.accent;
+        cx.lineWidth = 1.5;
+        cx.beginPath();
+        cx.moveTo(BODY.left + 2, yAt(level));
+        cx.lineTo(BODY.right - 2, yAt(level));
+        cx.stroke();
 
         // Hull, nose, tank bulkheads, engine bell and legs.
-        ctx.strokeStyle = "#c8d1da";
-        ctx.lineWidth = 1.6;
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(BODY.left, yAt(1.1));
-        ctx.lineTo(BODY.left, yAt(4.3));
-        ctx.quadraticCurveTo(BODY.left + 4, yAt(5.1), 64, yAt(vehicle.height));
-        ctx.quadraticCurveTo(BODY.right - 4, yAt(5.1), BODY.right, yAt(4.3));
-        ctx.lineTo(BODY.right, yAt(1.1));
-        ctx.closePath();
-        ctx.stroke();
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = color.faint;
+        cx.strokeStyle = "#c8d1da";
+        cx.lineWidth = 1.6;
+        cx.lineJoin = "round";
+        cx.beginPath();
+        cx.moveTo(BODY.left, yAt(1.1));
+        cx.lineTo(BODY.left, yAt(4.3));
+        cx.quadraticCurveTo(BODY.left + 4, yAt(5.1), 64, yAt(vehicle.height));
+        cx.quadraticCurveTo(BODY.right - 4, yAt(5.1), BODY.right, yAt(4.3));
+        cx.lineTo(BODY.right, yAt(1.1));
+        cx.closePath();
+        cx.stroke();
+        cx.setLineDash([3, 3]);
+        cx.strokeStyle = color.faint;
         for (const m of [TANK_BOTTOM, TANK_TOP]) {
-          ctx.beginPath();
-          ctx.moveTo(BODY.left, yAt(m));
-          ctx.lineTo(BODY.right, yAt(m));
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(BODY.left, yAt(m));
+          cx.lineTo(BODY.right, yAt(m));
+          cx.stroke();
         }
-        ctx.setLineDash([]);
-        ctx.strokeStyle = "#c8d1da";
-        ctx.beginPath();
-        ctx.moveTo(56, yAt(1.1));
-        ctx.lineTo(50, yAt(0.45));
-        ctx.lineTo(78, yAt(0.45));
-        ctx.lineTo(72, yAt(1.1));
-        ctx.stroke();
+        cx.setLineDash([]);
+        cx.strokeStyle = "#c8d1da";
+        cx.beginPath();
+        cx.moveTo(56, yAt(1.1));
+        cx.lineTo(50, yAt(0.45));
+        cx.lineTo(78, yAt(0.45));
+        cx.lineTo(72, yAt(1.1));
+        cx.stroke();
         for (const [top, foot] of [[BODY.left, 22], [BODY.right, 106]] as const) {
-          ctx.beginPath();
-          ctx.moveTo(top, yAt(1.6));
-          ctx.lineTo(foot, FEET);
-          ctx.moveTo(foot - 6, FEET);
-          ctx.lineTo(foot + 6, FEET);
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(top, yAt(1.6));
+          cx.lineTo(foot, FEET);
+          cx.moveTo(foot - 6, FEET);
+          cx.lineTo(foot + 6, FEET);
+          cx.stroke();
         }
-        ctx.strokeStyle = color.lineStrong;
-        ctx.beginPath();
-        ctx.moveTo(0, FEET + 1);
-        ctx.lineTo(DW, FEET + 1);
-        ctx.stroke();
+        cx.strokeStyle = color.lineStrong;
+        cx.beginPath();
+        cx.moveTo(0, FEET + 1);
+        cx.lineTo(DW, FEET + 1);
+        cx.stroke();
 
         // The CG: a quartered disc beside the hull.
         const y = yAt(cgHeight());
-        ctx.strokeStyle = color.caution;
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([2, 3]);
-        ctx.beginPath();
-        ctx.moveTo(BODY.left, y);
-        ctx.lineTo(102, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = color.ink;
-        ctx.beginPath();
-        ctx.arc(108, y, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = color.caution;
+        cx.strokeStyle = color.caution;
+        cx.lineWidth = 1.2;
+        cx.setLineDash([2, 3]);
+        cx.beginPath();
+        cx.moveTo(BODY.left, y);
+        cx.lineTo(102, y);
+        cx.stroke();
+        cx.setLineDash([]);
+        cx.fillStyle = color.ink;
+        cx.beginPath();
+        cx.arc(108, y, 6, 0, Math.PI * 2);
+        cx.fill();
+        cx.stroke();
+        cx.fillStyle = color.caution;
         for (const a of [0, Math.PI]) {
-          ctx.beginPath();
-          ctx.moveTo(108, y);
-          ctx.arc(108, y, 6, a - Math.PI / 2, a);
-          ctx.closePath();
-          ctx.fill();
+          cx.beginPath();
+          cx.moveTo(108, y);
+          cx.arc(108, y, 6, a - Math.PI / 2, a);
+          cx.closePath();
+          cx.fill();
         }
       }}
     />

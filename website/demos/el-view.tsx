@@ -10,7 +10,7 @@ function App() {
 
       <View
         onPress={() => presses.update((n) => n + 1)}
-        activeOpacity={0.5}
+        activeStyle={{ opacity: 0.5 }}
         style={{
           ...ui().accentFill,
           borderRadius: 12,
@@ -18,15 +18,15 @@ function App() {
           alignItems: "center",
         }}
       >
-        <Text style={{ color: ui().onAccent, fontSize: 16, fontWeight: "600" }}>activeOpacity · pressed {presses()}×</Text>
+        <Text style={{ color: ui().onAccent, fontSize: 16, fontWeight: "600" }}>activeStyle opacity · pressed {presses()}×</Text>
       </View>
 
       <View
         onPress={() => presses.update((n) => n + 1)}
-        underlayColor={ui().border}
+        activeStyle={{ backgroundColor: ui().border }}
         style={{ ...ui().card, backgroundImage: "none", borderRadius: 16, padding: 16 }}
       >
-        <Text style={{ color: ui().text, fontSize: 16 }}>underlayColor (tap and hold)</Text>
+        <Text style={{ color: ui().text, fontSize: 16 }}>activeStyle background (tap and hold)</Text>
       </View>
 
       <View class="flex-row gap-3">

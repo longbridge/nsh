@@ -75,11 +75,21 @@ pub(crate) fn event_data(event: &dyn super::EventToJs) -> Option<JsonValue> {
     host.read(data)
 }
 
+/// The value JS renders with (`None`: `undefined`).
+pub(crate) fn render_value(value: &dyn super::RenderValue) -> Option<JsonValue> {
+    let host = JsonHost::default();
+    let data = value.render_js(&host).expect("the value converts");
+    host.read(data)
+}
+
 /// The value a call's result settles its promise with (`None`:
 /// `undefined`), or the rejection's message.
 pub(crate) fn result(result: JsResult) -> Result<Option<JsonValue>, String> {
     let host = JsonHost::default();
-    let value = result?.to_js_value(&host).map_err(|e| e.0)?;
+    let value = result
+        .map_err(|e| e.to_string())?
+        .to_js_value(&host)
+        .map_err(|e| e.0)?;
     Ok(host.read(value))
 }
 
@@ -108,6 +118,15 @@ impl JsHost for JsonHost {
         self.json_of(v)?.as_str().map(str::to_owned)
     }
 
+    /// An array of byte values stands for a `Uint8Array` here.
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>> {
+        self.json_of(v)?
+            .as_array()?
+            .iter()
+            .map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok()))
+            .collect()
+    }
+
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError> {
         Ok(self.json_of(v).and_then(|j| j.as_array().map(Vec::len)))
     }
@@ -120,6 +139,18 @@ impl JsHost for JsonHost {
     fn field(&self, v: JsRaw, key: &str) -> Result<JsRaw, PropError> {
         let field = self.json_of(v).and_then(|j| j.get(key).cloned());
         Ok(self.put(field.map_or(Val::Undefined, Val::Json)))
+    }
+
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError> {
+        Ok(match self.json_of(v) {
+            Some(JsonValue::Object(map)) => map.keys().cloned().collect(),
+            _ => Vec::new(),
+        })
+    }
+
+    /// A `{ "$date": millis }` object stands for a `Date` here.
+    fn date(&self, v: JsRaw) -> Option<f64> {
+        self.json_of(v)?.get("$date")?.as_f64()
     }
 
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {
@@ -147,7 +178,16 @@ impl JsHost for JsonHost {
                             JsonValue::Null => V::Null,
                             _ => continue,
                         };
-                        let _ = patch.set(style, key, v);
+                        // Reported as the JS host reports them.
+                        match patch.set(style, key, v) {
+                            Ok(()) => {}
+                            Err(crate::StyleError::UnknownProperty) => {
+                                log::warn!("unsupported style property `{key}`")
+                            }
+                            Err(crate::StyleError::InvalidValue) => {
+                                log::warn!("invalid value for style `{key}`: {v:?}")
+                            }
+                        }
                     }
                 }
                 JsonValue::Array(items) => {
@@ -190,6 +230,14 @@ impl JsHost for JsonHost {
 
     fn null(&self) -> JsRaw {
         self.value(JsonValue::Null)
+    }
+
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
+        Ok(self.value(JsonValue::from(bytes.to_vec())))
+    }
+
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {
+        Ok(self.value(serde_json::json!({ "$date": millis })))
     }
 
     fn new_bool(&self, b: bool) -> JsRaw {

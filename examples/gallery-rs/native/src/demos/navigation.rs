@@ -3,18 +3,18 @@
 //! back button (as the TSX gallery's `demos/Navigation.tsx`). Each pushed
 //! screen shows where its safe area is.
 
+use nsh_base::{SafeAreaView, SafeAreaViewProps, dialog, nav_page};
 use nsh_core::{
     Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
     ui::{AnyElement, Os, Screen, prelude::*},
 };
-use nsh_ui_mobile::{SafeAreaView, SafeAreaViewProps};
 
 use crate::{
     nav,
     ui::{
         Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
-        Inset, MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, hint,
-        icon, motion, press_with, radius, tints, toggle,
+        Inset, MONO, PageHeader, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors,
+        header_style, hint, icon, motion, press_with, radius, tints, titled, toggle, with_header,
     },
 };
 
@@ -25,10 +25,10 @@ type Edge = fn(EdgeInsets) -> f32;
 #[component]
 fn Insets(cx: Scope<NoEvent>) -> impl IntoElement {
     let edges: [(&str, Edge); 4] = [
-        ("Top", |i| i.top),
-        ("Bottom", |i| i.bottom),
-        ("Left", |i| i.left),
-        ("Right", |i| i.right),
+        ("Top", |i| i.top.0),
+        ("Bottom", |i| i.bottom.0),
+        ("Left", |i| i.left.0),
+        ("Right", |i| i.right.0),
     ];
     view().flex_row().children(edges.map(|(edge, inset)| {
         Stat::new(edge, move || format!("{} pt", inset(cx.insets()).round())).width(0.25)
@@ -60,7 +60,7 @@ fn title_block(badge: impl Into<SharedString>, title: impl Into<SharedString>, s
             text(title.into())
                 .text_size(px(size))
                 .font_weight(FontWeight::BOLD)
-                .letter_spacing(-0.5)
+                .letter_spacing(px(-0.5))
                 .text_color(colors::TEXT),
         )
 }
@@ -80,7 +80,7 @@ fn page(intro: &str, content: impl IntoIterator<Item = AnyElement>) -> AnyElemen
                 .child(
                     appear(1).child(
                         Section::new("Safe area")
-                            .note("useSafeAreaInsets()")
+                            .note("safeAreaInsets()")
                             .child(insets()),
                     ),
                 )
@@ -94,7 +94,7 @@ fn page(intro: &str, content: impl IntoIterator<Item = AnyElement>) -> AnyElemen
 #[derive(Default, Clone)]
 struct Likes(u32);
 
-/// The draft of the unsaved-changes screen (its `prevent_back` depends on
+/// The draft of the unsaved-changes screen (its `pop_on_back` depends on
 /// it).
 #[derive(Default, Clone)]
 struct Draft(String);
@@ -122,7 +122,7 @@ fn large_title() -> Screen {
     });
     // A large title on iOS only (TS: `ios={{ headerLargeTitle: true }}`):
     // elsewhere the header is the usual one.
-    header(screen().title("Large title"))
+    titled("Large title")
         .header_large_title(os() == Os::Ios)
         .child(page(
             "iOS: the title shrinks into the bar as the content scrolls.",
@@ -134,139 +134,161 @@ fn large_title() -> Screen {
 }
 
 fn transparent() -> Screen {
-    screen()
-        .title("Transparent")
-        .header_transparent(true)
-        .header_tint_color(|| color(colors::TEXT))
-        .header_title_color(|| color(colors::TEXT))
-        .child(
-            view()
-                .flex_1()
-                .bg(AdaptiveColor::new(rgb(0xeef3e2), rgb(0x11170c)))
-                .overflow_hidden()
-                .p_4()
-                .pb(px(56.0))
-                .justify_end()
-                .gap_4()
-                .child(
-                    view()
-                        .absolute()
-                        .top(px(-90.0))
-                        .right(px(-70.0))
-                        .size(px(320.0))
-                        .rounded(px(160.0))
-                        .bg(tints::ACCENT),
-                )
-                .child(
-                    view()
-                        .absolute()
-                        .top(px(150.0))
-                        .left(px(-110.0))
-                        .size(px(260.0))
-                        .rounded(px(130.0))
-                        .bg(tints::INFO),
-                )
-                .child(
-                    appear(0).child(
-                        title_block("headerTransparent", "Content under the header", 30.0)
-                            .gap_3()
-                            .child(body(
-                                "The circles start at the top of the screen; the bar and its back \
+    with_header(
+        nav_page()
+            .title("Transparent")
+            .header_transparent(true)
+            .header_style(header_style(
+                AdaptiveColor::TRANSPARENT,
+                colors::TEXT,
+                colors::TEXT,
+            )),
+        || {
+            PageHeader::new("Transparent")
+                .colors(colors::TEXT, colors::TEXT)
+                .transparent()
+        },
+    )
+    .child(
+        view()
+            .flex_1()
+            .bg(AdaptiveColor::new(rgb(0xeef3e2), rgb(0x11170c)))
+            .overflow_hidden()
+            .p_4()
+            .pb(px(56.0))
+            .justify_end()
+            .gap_4()
+            .child(
+                view()
+                    .absolute()
+                    .top(px(-90.0))
+                    .right(px(-70.0))
+                    .size(px(320.0))
+                    .rounded(px(160.0))
+                    .bg(tints::ACCENT),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .top(px(150.0))
+                    .left(px(-110.0))
+                    .size(px(260.0))
+                    .rounded(px(130.0))
+                    .bg(tints::INFO),
+            )
+            .child(
+                appear(0).child(
+                    title_block("headerTransparent", "Content under the header", 30.0)
+                        .gap_3()
+                        .child(body(
+                            "The circles start at the top of the screen; the bar and its back \
                                  button float over them.",
-                            )),
-                    ),
-                )
-                .child(appear(1).child(Inset::new().child(insets()))),
-        )
+                        )),
+                ),
+            )
+            .child(appear(1).child(Inset::new().child(insets()))),
+    )
 }
 
 fn custom_header() -> Screen {
     let likes = global::<Likes>();
     let count = move || likes.with(|l| l.0);
-    let on_accent = || color(colors::ON_ACCENT);
-    screen()
-        .title("Custom")
-        .header_tint_color(on_accent)
-        .header_background_color(|| color(colors::ACCENT_FILL))
-        .header_title_color(on_accent)
-        .header_back_visible(false)
-        .header_left(
-            text("Close")
-                .text_color(colors::ON_ACCENT)
-                .text_size(px(17.0))
-                .font_weight(FontWeight::MEDIUM)
-                .hit_slop(EdgeInsets::all(10.0))
-                .on_press(|_: &()| nav::pop()),
-        )
-        .header_title(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(7.0))
-                .child(view().size(px(10.0)).rounded(px(5.0)).bg(colors::ON_ACCENT))
-                .child(
-                    text("Custom title")
-                        .text_color(colors::ON_ACCENT)
-                        .text_size(px(17.0))
-                        .font_weight(FontWeight::BOLD),
-                ),
-        )
-        .header_right(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(5.0))
-                .hit_slop(EdgeInsets::all(10.0))
-                .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
-                .child(icon(IconName::Star, 18.0, colors::ON_ACCENT))
-                .child(
-                    text(move || count().to_string())
-                        .text_color(colors::ON_ACCENT)
-                        .text_size(px(17.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .tabular_nums(),
-                ),
-        )
-        .child(page(
-            "The header's items are views: the star on the right counts presses and re-renders \
+    let close = || {
+        text("Close")
+            .text_color(colors::ON_ACCENT)
+            .text_size(px(17.0))
+            .font_weight(FontWeight::MEDIUM)
+            .hit_slop(EdgeInsets::all(px(10.0)))
+            .on_press(|_: &()| nav::pop())
+    };
+    let title = || {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(7.0))
+            .child(view().size(px(10.0)).rounded(px(5.0)).bg(colors::ON_ACCENT))
+            .child(
+                text("Custom title")
+                    .text_color(colors::ON_ACCENT)
+                    .text_size(px(17.0))
+                    .font_weight(FontWeight::BOLD),
+            )
+    };
+    let star = move || {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(5.0))
+            .hit_slop(EdgeInsets::all(px(10.0)))
+            .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
+            .child(icon(IconName::Star, 18.0, colors::ON_ACCENT))
+            .child(
+                text(move || count().to_string())
+                    .text_color(colors::ON_ACCENT)
+                    .text_size(px(17.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .tabular_nums(),
+            )
+    };
+    with_header(
+        nav_page()
+            .title("Custom")
+            .header_style(header_style(
+                colors::ACCENT_FILL,
+                colors::ON_ACCENT,
+                colors::ON_ACCENT,
+            ))
+            .header_back_visible(false)
+            .header_left(close())
+            .header_title(title())
+            .header_right(star()),
+        || {
+            PageHeader::new("Custom")
+                .back(false)
+                .background(colors::ACCENT_FILL)
+                .left(close())
+                .title_element(title())
+                .right(star())
+        },
+    )
+    .child(page(
+        "The header's items are views: the star on the right counts presses and re-renders \
              the header.",
-            [Section::new("Header")
-                .note("headerRight")
-                .child(
-                    Figure::new(move || count().to_string())
-                        .unit(move || if count() == 1 { "star" } else { "stars" }),
-                )
-                .into_element()],
-        ))
+        [Section::new("Header")
+            .note("headerRight")
+            .child(
+                Figure::new(move || count().to_string())
+                    .unit(move || if count() == 1 { "star" } else { "stars" }),
+            )
+            .into_element()],
+    ))
 }
 
 fn locked() -> Screen {
-    header(screen().title("No swipe back"))
-        .gesture_enabled(false)
-        .child(page(
-            hint(
-                "The back gesture is off on this screen: no swipe on iOS, no predictive animation \
+    titled("No swipe back").pop_on_swipe(false).child(page(
+        hint(
+            "The back gesture is off on this screen: no swipe on iOS, no predictive animation \
                  on Android. The back buttons still work.",
-                "The back gesture is off on this screen (touch screens only). The back button, \
+            "The back gesture is off on this screen (touch screens only). The back button, \
                  Escape and Alt+Left still work.",
-            ),
-            [Section::new("Leaving")
-                .note("gestureEnabled={false}")
-                .child(
-                    view()
-                        .flex_row()
-                        .child(
-                            Stat::new("Swipe / predictive", "Off")
-                                .tone(Tone::Danger)
-                                .width(0.5),
-                        )
-                        .child(Stat::new("Back buttons", "On").tone(Tone::Up).width(0.5)),
-                )
-                .into_element()],
-        ))
+        ),
+        [Section::new("Leaving")
+            .note("popOnSwipe={false}")
+            .child(
+                view()
+                    .flex_row()
+                    .child(
+                        Stat::new("Swipe / predictive", "Off")
+                            .tone(Tone::Danger)
+                            .width(0.5),
+                    )
+                    .child(Stat::new("Back buttons", "On").tone(Tone::Up).width(0.5)),
+            )
+            .into_element()],
+    ))
 }
 
-/// The draft's card (the screen's `prevent_back` follows the draft).
+/// The draft's card (the screen's `pop_on_back` follows the draft).
 #[component]
 fn DraftCard() -> impl IntoElement {
     let draft = global::<Draft>();
@@ -276,7 +298,7 @@ fn DraftCard() -> impl IntoElement {
     Card::new()
         .icon(IconName::Form)
         .title("Draft")
-        .subtitle("preventBack + onBackRequest")
+        .subtitle("popOnBack={false} + onBackPress")
         .right(
             Badge::new(move || if guarded.get() { "Guarded" } else { "Empty" }).tone(move || {
                 if guarded.get() {
@@ -309,7 +331,7 @@ fn DraftCard() -> impl IntoElement {
                 .finish(Finish::Inset)
                 .on_focus(move |_: &()| focused.set(true))
                 .on_blur(move |_: &()| focused.set(false))
-                .on_change_text(move |text: &str| {
+                .on_change(move |text: &str| {
                     let text = text.to_owned();
                     draft.update(|draft| draft.0 = text);
                 }),
@@ -329,10 +351,10 @@ fn DraftCard() -> impl IntoElement {
 
 fn unsaved() -> Screen {
     let draft = global::<Draft>();
-    header(screen().title("Unsaved changes"))
-        .prevent_back(move || draft.with(|d| !d.0.is_empty()))
-        .on_back_request(move |_: &()| {
-            let answer = dialog(Dialog {
+    titled("Unsaved changes")
+        .pop_on_back(move || draft.with(|d| d.0.is_empty()))
+        .on_back_press(move |_: &()| {
+            let answer = nsh_core::ui::prelude::dialog(Dialog {
                 id: 0,
                 title: Some("Discard your changes?".into()),
                 message: None,
@@ -369,13 +391,13 @@ fn unsaved() -> Screen {
 }
 
 fn faded() -> Screen {
-    header(screen().title("Fade"))
+    titled("Fade")
         .animation(ScreenAnimation::Fade)
         .child(page("This screen faded in, and fades out.", []))
 }
 
 fn instant() -> Screen {
-    header(screen().title("No animation"))
+    titled("No animation")
         .animation(ScreenAnimation::None)
         .child(page(
             "Shown without a transition, and removed without one.",
@@ -384,7 +406,7 @@ fn instant() -> Screen {
 }
 
 fn headerless() -> Screen {
-    screen().header_shown(false).child(
+    nav_page().header_shown(false).child(
         SafeAreaView::element(SafeAreaViewProps::default())
             .flex_1()
             .bg(colors::BACKGROUND)
@@ -450,8 +472,8 @@ fn deep(depth: usize) -> impl Fn() -> Screen {
                         }),
                 )
         });
-        header(screen().title(format!("Level {depth}"))).child(page(
-            "Every push is a native screen; popToTop() unwinds them all at once.",
+        titled(format!("Level {depth}")).child(page(
+            "Every push is a native screen; popToRoot() unwinds them all at once.",
             [Card::new()
                 .icon(IconName::Nav)
                 .title(format!("Level {depth}"))
@@ -573,7 +595,7 @@ fn modals() -> [(
         ),
         (
             Presented::Dismissible,
-            "dismissible",
+            "closeOn*",
             "Dismissible",
             hint("Swipe to close", "Escape or click outside"),
             IconName::ArrowDown,
@@ -638,7 +660,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
             "large-title",
             IconName::Text,
             "Large title",
-            "ios.headerLargeTitle",
+            "headerLargeTitle",
             large_title,
         ),
         (
@@ -680,14 +702,14 @@ pub(crate) fn Navigation() -> impl IntoElement {
             "locked",
             IconName::Gestures,
             "No swipe back",
-            "gestureEnabled={false}",
+            "popOnSwipe={false}",
             locked,
         ),
         (
             "unsaved",
             IconName::Form,
             "Unsaved changes",
-            "preventBack + onBackRequest",
+            "popOnBack={false} + onBackPress",
             unsaved,
         ),
     ];
@@ -706,7 +728,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
             link_row(
                 IconName::Lists,
                 "A deep stack",
-                "push / popToTop",
+                "push / popToRoot",
                 false,
                 |_: &()| nav::push(format!("deep-{}", nav::depth()), deep(1)),
             )
@@ -774,14 +796,14 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     .into_iter()
                     .find(|m| m.0 == presented)
                     .expect("a modal");
-                modal()
+                dialog()
                     .presentation(presentation)
                     .animation(if presented == Presented::Fade {
                         ModalAnimation::Fade
                     } else {
                         ModalAnimation::Slide
                     })
-                    .on_request_close(close)
+                    .on_cancel(close)
                     .child(modal_body(
                         title,
                         key,
@@ -798,14 +820,16 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     ))
                     .into_element()
             }
-            Presented::Dismissible => modal()
-                .dismissible(true)
+            Presented::Dismissible => dialog()
+                .close_on_escape(true)
+                .close_on_backdrop_press(true)
+                .close_on_swipe(true)
                 .presentation(ModalPresentation::PageSheet)
-                .on_request_close(close)
-                .on_dismiss(close)
+                .on_cancel(close)
+                .on_close(close)
                 .child(modal_body(
                     "Dismissible",
-                    "dismissible",
+                    "closeOn*",
                     hint(
                         "Swipe it down (iOS) or press back (Android): it closes natively, then \
                          tells the app.",
@@ -814,10 +838,9 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     close,
                 ))
                 .into_element(),
-            Presented::Dialog => modal()
-                .transparent(true)
+            Presented::Dialog => dialog()
                 .animation(ModalAnimation::Fade)
-                .on_request_close(close)
+                .on_cancel(close)
                 .child(
                     view()
                         .flex_1()
@@ -834,9 +857,9 @@ pub(crate) fn Navigation() -> impl IntoElement {
                                     Card::new()
                                         .icon(IconName::Bell)
                                         .title("A dialog")
-                                        .subtitle("transparent + fade")
+                                        .subtitle("No background + fade")
                                         .child(body(
-                                            "A transparent modal shows what is behind it; the \
+                                            "A dialog without a background shows what is behind it; the \
                                              dialog springs in natively.",
                                         ))
                                         .child(

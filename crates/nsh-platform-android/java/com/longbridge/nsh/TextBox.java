@@ -65,12 +65,18 @@ final class TextBox extends android.view.ViewGroup implements Node {
 
     /** `selectable`. */
     private boolean selectable;
+    /** `selectable={false}`: out of selection areas too. */
+    boolean excluded;
+    /** The selection area whose gesture this touch is ({@link SelectionArea}), if any. */
+    private SelectionArea areaGesture;
+    /** What a selection area has selected here (UTF-16 offsets), or -1. */
+    private int areaStart = -1, areaEnd = -1;
     /** `selectionColor`: the highlight and the handles' tint; null: the theme's. */
     private Integer selectionColor;
     /** The selection (UTF-16 offsets), or -1 when there is none. */
     private int selStart = -1, selEnd = -1;
     private android.view.ActionMode mode;
-    private Handle startHandle, endHandle;
+    private SelectionHandle startHandle, endHandle;
     private android.graphics.Paint highlightPaint;
     private final android.graphics.Path selectionPath = new android.graphics.Path();
     private float downX, downY;
@@ -84,34 +90,79 @@ final class TextBox extends android.view.ViewGroup implements Node {
         return true;
     };
 
-    void setSelectable(boolean selectable, Integer selectionColor) {
+    void setSelectable(boolean selectable, boolean excluded, Integer selectionColor) {
         if (!selectable) clearSelection();
         boolean recolor = !java.util.Objects.equals(this.selectionColor, selectionColor);
         this.selectable = selectable;
+        this.excluded = excluded;
         this.selectionColor = selectionColor;
         if (recolor) {
             highlightPaint = null;
             if (startHandle != null) startHandle.tint(selectionColor);
             if (endHandle != null) endHandle.tint(selectionColor);
-            if (selStart >= 0) invalidate();
+            if (selStart >= 0 || areaStart >= 0) invalidate();
+        }
+    }
+
+    Layout layout() {
+        return layout;
+    }
+
+    float contentX() {
+        return contentX;
+    }
+
+    float contentY() {
+        return contentY;
+    }
+
+    float contentWidth() {
+        return contentWidth;
+    }
+
+    float contentHeight() {
+        return contentHeight;
+    }
+
+    Integer selectionColor() {
+        return selectionColor;
+    }
+
+    /** What a selection area selected here: [{@code start}, {@code end}), or -1, -1. */
+    void setAreaSelection(int start, int end) {
+        if (start == areaStart && end == areaEnd) return;
+        areaStart = start;
+        areaEnd = end;
+        invalidate();
+    }
+
+    /** Hands the touch to the press listeners, or cancels their press once a selection took over. */
+    private void forwardPress(android.view.MotionEvent e, boolean selecting) {
+        if (press == null) return;
+        if (selecting) {
+            // The long press selected: the press is over.
+            android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
+            cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+            press.onTouchEvent(cancel);
+            cancel.recycle();
+        } else {
+            press.onTouchEvent(e);
         }
     }
 
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(android.view.MotionEvent e) {
-        if (!selectable) return press != null && press.onTouchEvent(e);
-        if (press != null) {
-            if (extending) {
-                // The long press selected: the press is over.
-                android.view.MotionEvent cancel = android.view.MotionEvent.obtain(e);
-                cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
-                press.onTouchEvent(cancel);
-                cancel.recycle();
-            } else {
-                press.onTouchEvent(e);
-            }
+        // In a selection area, the area selects (across its texts), not the text.
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+            areaGesture = excluded ? null : mounter.selectionAreaOf(this);
         }
+        if (areaGesture != null) {
+            forwardPress(e, areaGesture.selecting());
+            return areaGesture.onTextTouch(this, e);
+        }
+        if (!selectable) return press != null && press.onTouchEvent(e);
+        forwardPress(e, extending);
         switch (e.getActionMasked()) {
             case android.view.MotionEvent.ACTION_DOWN:
                 downX = e.getX();
@@ -193,10 +244,28 @@ final class TextBox extends android.view.ViewGroup implements Node {
         selEnd = end;
         if (!was) {
             if (startHandle == null) {
-                startHandle = new Handle(true);
-                endHandle = new Handle(false);
+                SelectionHandle.Owner owner = new SelectionHandle.Owner() {
+                    @Override
+                    public void handleDown() {
+                        if (mode != null) mode.hide(android.view.ViewConfiguration.getDefaultActionModeHideDuration());
+                    }
+
+                    @Override
+                    public void handleMoved(boolean start, float x, float y) {
+                        dragHandle(start, x, y);
+                    }
+
+                    @Override
+                    public void handleUp() {
+                        showToolbar();
+                    }
+                };
+                startHandle = new SelectionHandle(this, true, selectionColor, owner);
+                endHandle = new SelectionHandle(this, false, selectionColor, owner);
             }
             getViewTreeObserver().addOnPreDrawListener(follow);
+            // One selection per surface.
+            if (mounter.selectedArea != null) mounter.selectedArea.clear();
             mounter.selectedText = this;
         }
         placeHandles();
@@ -232,6 +301,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
     @Override
     protected void onDetachedFromWindow() {
         clearSelection();
+        if (mounter.selectedArea != null) mounter.selectedArea.textChanged(this);
         super.onDetachedFromWindow();
     }
 
@@ -254,10 +324,11 @@ final class TextBox extends android.view.ViewGroup implements Node {
                         .setAlphabeticShortcut('c');
                 menu.add(android.view.Menu.NONE, android.R.id.selectAll, 1, android.R.string.selectAll)
                         .setAlphabeticShortcut('a');
-                // The system's own "Share" label (TextView's), not in the public resources.
-                int share = android.content.res.Resources.getSystem().getIdentifier("share", "string", "android");
-                menu.add(android.view.Menu.NONE, android.R.id.shareText, 2,
-                        share != 0 ? android.content.res.Resources.getSystem().getString(share) : "Share");
+                // The system's own "Share" label (TextView's), not in the public resources;
+                // without it there is no item (labels are never NSH's own words).
+                android.content.res.Resources system = android.content.res.Resources.getSystem();
+                int share = system.getIdentifier("share", "string", "android");
+                if (share != 0) menu.add(android.view.Menu.NONE, android.R.id.shareText, 2, system.getString(share));
                 return true;
             }
 
@@ -361,110 +432,6 @@ final class TextBox extends android.view.ViewGroup implements Node {
         else setSelection(selStart, Math.max(offset, selStart + 1), false);
     }
 
-    /** Screen minus window coordinates (raw touch points are the screen's). */
-    private int[] windowOffset() {
-        int[] screen = new int[2], window = new int[2];
-        getLocationOnScreen(screen);
-        getLocationInWindow(window);
-        return new int[] {screen[0] - window[0], screen[1] - window[1]};
-    }
-
-    /**
-     * A selection handle: the theme's drawable in a popup window over the
-     * app, hanging from the line's bottom at the selection's end.
-     */
-    private final class Handle extends View {
-        final boolean start;
-        final android.graphics.drawable.Drawable drawable;
-        final android.widget.PopupWindow popup;
-        /** The hotspot's x in the drawable: where it points. */
-        final int hotspot;
-        private float touchDx, touchDy;
-        private int x, y;
-
-        Handle(boolean start) {
-            super(TextBox.this.getContext());
-            this.start = start;
-            android.content.res.TypedArray a = getContext().obtainStyledAttributes(new int[] {
-                start ? android.R.attr.textSelectHandleLeft : android.R.attr.textSelectHandleRight
-            });
-            android.graphics.drawable.Drawable d = a.getDrawable(0);
-            a.recycle();
-            if (d == null) d = new android.graphics.drawable.ColorDrawable(0xff3b82f6);
-            drawable = d.mutate();
-            int w = Math.max(1, drawable.getIntrinsicWidth()), h = Math.max(1, drawable.getIntrinsicHeight());
-            drawable.setBounds(0, 0, w, h);
-            hotspot = start ? w * 3 / 4 : w / 4;
-            tint(selectionColor);
-            popup = new android.widget.PopupWindow(this, w, h, false);
-            popup.setClippingEnabled(false);
-            popup.setSplitTouchEnabled(true);
-            popup.setBackgroundDrawable(null);
-            popup.setWindowLayoutType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_SUB_PANEL);
-        }
-
-        void tint(Integer color) {
-            if (color != null) drawable.setTint(color);
-            else drawable.setTintList(null);
-            invalidate();
-        }
-
-        /** Points the handle at the window point ({@code px}, {@code py}). */
-        void place(float px, float py) {
-            int nx = Math.round(px) - hotspot, ny = Math.round(py);
-            if (popup.isShowing()) {
-                if (nx != x || ny != y) popup.update(nx, ny, -1, -1);
-            } else {
-                popup.showAtLocation(TextBox.this, android.view.Gravity.NO_GRAVITY, nx, ny);
-            }
-            x = nx;
-            y = ny;
-        }
-
-        void dismiss() {
-            if (popup.isShowing()) popup.dismiss();
-        }
-
-        boolean contains(float rawX, float rawY) {
-            if (!popup.isShowing()) return false;
-            int[] at = new int[2];
-            getLocationOnScreen(at);
-            return rawX >= at[0] && rawX < at[0] + getWidth() && rawY >= at[1] && rawY < at[1] + getHeight();
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            drawable.draw(canvas);
-        }
-
-        @SuppressLint("ClickableViewAccessibility")
-        @Override
-        public boolean onTouchEvent(android.view.MotionEvent e) {
-            switch (e.getActionMasked()) {
-                case android.view.MotionEvent.ACTION_DOWN: {
-                    // The finger's distance from the point the handle marks
-                    // (window coordinates, as the popup's).
-                    int[] offset = windowOffset();
-                    touchDx = x + hotspot - (e.getRawX() - offset[0]);
-                    touchDy = y - (e.getRawY() - offset[1]);
-                    if (mode != null) mode.hide(android.view.ViewConfiguration.getDefaultActionModeHideDuration());
-                    return true;
-                }
-                case android.view.MotionEvent.ACTION_MOVE: {
-                    int[] offset = windowOffset();
-                    dragHandle(start, e.getRawX() - offset[0] + touchDx, e.getRawY() - offset[1] + touchDy);
-                    return true;
-                }
-                case android.view.MotionEvent.ACTION_UP:
-                case android.view.MotionEvent.ACTION_CANCEL:
-                    showToolbar();
-                    return true;
-                default:
-                    return true;
-            }
-        }
-    }
-
     @Override
     public boolean performClick() {
         super.performClick();
@@ -528,10 +495,10 @@ final class TextBox extends android.view.ViewGroup implements Node {
     }
 
     void setLayout(Layout layout, float x, float y, float width, float height) {
+        boolean changed = this.layout == null || !android.text.TextUtils.equals(this.layout.getText(), layout.getText());
         // New text: the selection's offsets mean nothing in it.
-        if (selStart >= 0 && (this.layout == null || !android.text.TextUtils.equals(this.layout.getText(), layout.getText()))) {
-            clearSelection();
-        }
+        if (selStart >= 0 && changed) clearSelection();
+        if (changed && mounter.selectedArea != null) mounter.selectedArea.textChanged(this);
         this.layout = layout;
         this.contentX = x;
         this.contentY = y;
@@ -547,23 +514,10 @@ final class TextBox extends android.view.ViewGroup implements Node {
         canvas.translate(contentX, contentY);
         // Lines past `numberOfLines` (clip mode) stay outside the box.
         canvas.clipRect(0, 0, Math.max(contentWidth, layout.getWidth()), contentHeight);
-        if (selStart >= 0) {
-            if (highlightPaint == null) {
-                highlightPaint = new android.graphics.Paint();
-                int color;
-                if (selectionColor != null) {
-                    color = (selectionColor & 0x00ffffff) | 0x55000000;
-                } else {
-                    android.content.res.TypedArray a =
-                            getContext().obtainStyledAttributes(new int[] {android.R.attr.textColorHighlight});
-                    color = a.getColor(0, 0x553b82f6);
-                    a.recycle();
-                }
-                highlightPaint.setColor(color);
-            }
-            layout.getSelectionPath(selStart, selEnd, selectionPath);
-            canvas.drawPath(selectionPath, highlightPaint);
-        }
+        drawBackgrounds(canvas);
+        if (selStart >= 0) highlight(canvas, selStart, selEnd);
+        else if (areaStart >= 0) highlight(canvas, Math.min(areaStart, layout.getText().length()),
+                Math.min(areaEnd, layout.getText().length()));
         if (colored) {
             // An animated `color`: the text drawn as is into a layer, then
             // painted over in the color where it drew (antialiasing kept).
@@ -577,6 +531,26 @@ final class TextBox extends android.view.ViewGroup implements Node {
             drawDecorations(canvas);
         }
         canvas.restore();
+    }
+
+    /** Draws the selection's highlight over [{@code start}, {@code end}). */
+    private void highlight(Canvas canvas, int start, int end) {
+        if (start >= end) return;
+        if (highlightPaint == null) {
+            highlightPaint = new android.graphics.Paint();
+            int color;
+            if (selectionColor != null) {
+                color = (selectionColor & 0x00ffffff) | 0x55000000;
+            } else {
+                android.content.res.TypedArray a =
+                        getContext().obtainStyledAttributes(new int[] {android.R.attr.textColorHighlight});
+                color = a.getColor(0, 0x553b82f6);
+                a.recycle();
+            }
+            highlightPaint.setColor(color);
+        }
+        layout.getSelectionPath(start, end, selectionPath);
+        canvas.drawPath(selectionPath, highlightPaint);
     }
 
     /** An animated `color` (ARGB) the whole text is drawn in. */
@@ -594,6 +568,38 @@ final class TextBox extends android.view.ViewGroup implements Node {
     private final android.graphics.Paint decorationPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
 
     private final android.graphics.Path decorationPath = new android.graphics.Path();
+
+    private final android.graphics.Paint backgroundPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+    private final android.graphics.RectF backgroundRect = new android.graphics.RectF();
+
+    /** Span backgrounds: a rounded box on each line a span reaches, its
+     * fonts' ascent to descent around the baseline. */
+    private void drawBackgrounds(Canvas canvas) {
+        CharSequence text = layout.getText();
+        if (!(text instanceof android.text.Spanned)) return;
+        android.text.Spanned spanned = (android.text.Spanned) text;
+        TextLayouts.Background[] backgrounds = spanned.getSpans(0, text.length(), TextLayouts.Background.class);
+        if (backgrounds.length == 0) return;
+        int lines = layout.getLineCount();
+        for (TextLayouts.Background bg : backgrounds) {
+            int start = spanned.getSpanStart(bg), end = spanned.getSpanEnd(bg);
+            backgroundPaint.setColor(bg.color);
+            for (int line = layout.getLineForOffset(start); line < lines; line++) {
+                int lineStart = layout.getLineStart(line), lineEnd = layout.getLineVisibleEnd(line);
+                if (lineStart >= end) break;
+                int a = Math.max(start, lineStart), b = Math.min(end, lineEnd);
+                if (a >= b) continue;
+                float x1 = layout.getPrimaryHorizontal(a);
+                float x2 = b < layout.getLineEnd(line) ? layout.getPrimaryHorizontal(b) : layout.getLineRight(line);
+                if (layout.getParagraphDirection(line) < 0 && b >= lineEnd) x2 = layout.getLineLeft(line);
+                float baseline = layout.getLineBaseline(line);
+                backgroundRect.set(Math.min(x1, x2), baseline - bg.ascentPx, Math.max(x1, x2), baseline + bg.descentPx);
+                float r = Math.min(bg.radiusPx, Math.min(backgroundRect.width(), backgroundRect.height()) / 2);
+                canvas.drawRoundRect(backgroundRect, r, r, backgroundPaint);
+            }
+        }
+    }
 
     /** Underlines and strikethroughs, across the lines each run covers. */
     private void drawDecorations(Canvas canvas) {

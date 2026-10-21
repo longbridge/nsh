@@ -6,6 +6,8 @@
 //! `m41..m43` hold the translation. A list `[A, B]` means "apply B, then
 //! A" like CSS, which in row-vector form is `B · A`.
 
+use crate::geometry::{Points, Radians, Size};
+
 /// Most entries a `transform` list can have.
 pub const MAX_TRANSFORMS: usize = 8;
 
@@ -137,22 +139,22 @@ impl Transform {
         })
     }
 
-    /// The list with size fractions turned into points for a `width` ×
-    /// `height` view.
-    pub fn resolve_fractions(&self, width: f32, height: f32) -> Transform {
+    /// The list with size fractions turned into points for a view of
+    /// `size`.
+    pub fn resolve_fractions(&self, size: Size<Points>) -> Transform {
         let mut t = *self;
         for op in &mut t.ops[..t.len as usize] {
             match op.kind {
                 TransformKind::TranslateXFraction => {
                     *op = TransformOp {
                         kind: TransformKind::TranslateX,
-                        value: op.value * width,
+                        value: op.value * size.width.0,
                     }
                 }
                 TransformKind::TranslateYFraction => {
                     *op = TransformOp {
                         kind: TransformKind::TranslateY,
-                        value: op.value * height,
+                        value: op.value * size.height.0,
                     }
                 }
                 _ => {}
@@ -282,15 +284,15 @@ impl Matrix {
             (c * c + d * d).sqrt()
         };
         Decomposed {
-            translate: [m[12], m[13], 0.0],
+            translate: [points(m[12]), points(m[13]), Points::ZERO],
             scale: [scale_x, scale_y, 1.0],
-            rotate: [0.0, 0.0, b.atan2(a).to_degrees()],
-            perspective: 0.0,
+            rotate: [Radians::ZERO, Radians::ZERO, angle(b.atan2(a))],
+            perspective: None,
         }
     }
 
     /// The CSS Transforms "decomposing a 3D matrix" algorithm, with the
-    /// rotation as Euler angles (degrees, X then Y then Z).
+    /// rotation as Euler angles (X then Y then Z).
     fn decompose_3d(&self) -> Option<Decomposed> {
         let mut m = [[0.0f64; 4]; 4];
         for (r, row) in m.iter_mut().enumerate() {
@@ -305,7 +307,7 @@ impl Matrix {
                 *v /= w;
             }
         }
-        let perspective = if m[0][3] != 0.0 || m[1][3] != 0.0 || m[2][3] != 0.0 {
+        let term: f64 = if m[0][3] != 0.0 || m[1][3] != 0.0 || m[2][3] != 0.0 {
             // Solve rhs = p · P for the perspective row p, where P is the
             // matrix without its perspective column; only the z term matters
             // for a camera distance.
@@ -320,7 +322,9 @@ impl Matrix {
         } else {
             0.0
         };
-        let translate = [m[3][0], m[3][1], m[3][2]];
+        // The term is `-1 / distance`.
+        let perspective = (term != 0.0).then(|| points(-1.0 / term));
+        let translate = [points(m[3][0]), points(m[3][1]), points(m[3][2])];
         let mut rows = [
             [m[0][0], m[0][1], m[0][2]],
             [m[1][0], m[1][1], m[1][2]],
@@ -372,10 +376,20 @@ impl Matrix {
         Some(Decomposed {
             translate,
             scale,
-            rotate: [rx.to_degrees(), ry.to_degrees(), rz.to_degrees()],
+            rotate: [angle(rx), angle(ry), angle(rz)],
             perspective,
         })
     }
+}
+
+/// A length the matrices computed in `f64`.
+fn points(v: f64) -> Points {
+    Points(v as f32)
+}
+
+/// An angle the matrices computed in `f64`.
+fn angle(v: f64) -> Radians {
+    Radians(v as f32)
 }
 
 /// The inverse of a 4×4 matrix (Gauss-Jordan); `None` if singular.
@@ -413,15 +427,14 @@ fn invert(m: &[[f64; 4]; 4]) -> Option<[[f64; 4]; 4]> {
 /// A matrix split into view properties.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Decomposed {
-    /// Translation (points).
-    pub translate: [f64; 3],
+    /// Translation along x, y and z.
+    pub translate: [Points; 3],
     /// Scale factors.
     pub scale: [f64; 3],
-    /// Rotation around x, y and z in degrees (z clockwise on screen).
-    pub rotate: [f64; 3],
-    /// The z term of the perspective (`-1 / distance`), 0 without
-    /// perspective.
-    pub perspective: f64,
+    /// Rotation around x, y and z (z clockwise on screen).
+    pub rotate: [Radians; 3],
+    /// The viewer's distance (`perspective`), `None` without perspective.
+    pub perspective: Option<Points>,
 }
 
 #[cfg(test)]
@@ -430,6 +443,11 @@ mod tests {
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6
+    }
+
+    /// Equal up to `f32`'s precision.
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-3
     }
 
     fn list(ops: &[(TransformKind, f32)]) -> Transform {
@@ -486,21 +504,22 @@ mod tests {
             (TransformKind::Scale, 2.0),
         ]);
         let d = t.matrix(|_| None).decompose().unwrap();
-        assert!(close(d.translate[0], 12.0));
+        assert!(near(d.translate[0].0, 12.0));
         assert!(close(d.scale[0], 2.0) && close(d.scale[1], 2.0));
-        assert!(close(d.rotate[2], 135.0), "{:?}", d.rotate);
+        assert!(near(d.rotate[2].to_degrees(), 135.0), "{:?}", d.rotate);
 
         let t = list(&[
             (TransformKind::Perspective, 800.0),
             (TransformKind::RotateY, 30.0),
         ]);
         let d = t.matrix(|_| None).decompose().unwrap();
-        assert!(close(d.rotate[1], 30.0), "{:?}", d.rotate);
-        assert!(close(d.perspective, -1.0 / 800.0), "{}", d.perspective);
+        assert!(near(d.rotate[1].to_degrees(), 30.0), "{:?}", d.rotate);
+        let distance = d.perspective.unwrap();
+        assert!(near(distance.0, 800.0), "{distance:?}");
 
         let t = list(&[(TransformKind::RotateX, -40.0)]);
         let d = t.matrix(|_| None).decompose().unwrap();
-        assert!(close(d.rotate[0], -40.0), "{:?}", d.rotate);
+        assert!(near(d.rotate[0].to_degrees(), -40.0), "{:?}", d.rotate);
         assert!(
             list(&[(TransformKind::Scale, 0.0)])
                 .matrix(|_| None)

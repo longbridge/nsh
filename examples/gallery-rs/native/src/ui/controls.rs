@@ -2,7 +2,7 @@
 //! [`Segmented`].
 
 use nsh_core::{
-    Rect,
+    Bounds, Points,
     ui::{JsObject, PropEnum, prelude::*},
 };
 
@@ -62,7 +62,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
             }),
             ..AccessibilityState::default()
         })
-        .hit_slop(EdgeInsets::all(8.0))
+        .hit_slop(EdgeInsets::all(px(8.0)))
         .on_press(move |_: &()| {
             let next = !props.value.get_untracked();
             on.spring(knob(next), motion::SETTLE);
@@ -95,17 +95,17 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                 .bg_linear_to_b()
                 .gradient_from(rgb_a(0xffffff, 0.3))
                 .gradient_to(rgb_a(0xffffff, 0.0))
-                .gradient_to_position(0.6)
+                .gradient_to_position(percentage(0.6))
                 .adaptive_shadow(
                     knob_light.iter().copied(),
                     [
                         inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.2)),
                         BoxShadow {
-                            offset_x: 0.0,
-                            offset_y: 1.0,
-                            blur: 3.0,
-                            spread: 0.0,
-                            color: rgb_a(0x000000, 0.4),
+                            offset_x: px(0.0),
+                            offset_y: px(1.0),
+                            blur: px(3.0),
+                            spread: px(0.0),
+                            color: rgb_a(0x000000, 0.4).to_packed(),
                             inset: false,
                         },
                     ],
@@ -270,7 +270,7 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
         .border_1()
         .border_color(colors::BORDER)
         .role(AccessibilityRole::Tablist)
-        .on_layout(move |frame: &Rect| width.set(frame.width))
+        .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
         .child(
             view()
                 .absolute()

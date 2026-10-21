@@ -472,7 +472,7 @@ impl TextView {
         let Some(text) = layout.downcast::<CoreTextLayout>() else {
             return Vec::new();
         };
-        let bottom = (content.y + content.height) as CGFloat;
+        let bottom = (content.origin.y.0 + content.size.height.0) as CGFloat;
         text.lines
             .iter()
             .map(|l| {
@@ -487,7 +487,7 @@ impl TextView {
                     line: l.line.clone(),
                     start,
                     end: start + l.range.length.max(0) as usize,
-                    x: content.x as CGFloat + l.origin.x,
+                    x: content.origin.x.0 as CGFloat + l.origin.x,
                     top: bottom - (l.origin.y + ascent),
                     bottom: bottom - (l.origin.y - descent),
                     width,
@@ -503,32 +503,31 @@ impl TextView {
         point: CGPoint,
         range: Option<&UITextRange>,
     ) -> Option<Retained<UITextPosition>> {
-        let lines = self.line_boxes();
-        let mut at = if lines.is_empty() {
-            0
-        } else {
-            let line = lines
-                .iter()
-                .min_by(|a, b| {
-                    let d = |l: &LineBox| {
-                        if point.y < l.top {
-                            l.top - point.y
-                        } else if point.y > l.bottom {
-                            point.y - l.bottom
-                        } else {
-                            0.0
-                        }
-                    };
-                    d(a).total_cmp(&d(b))
-                })
-                .expect("lines");
-            line.index_at(point.x)
-        };
+        let mut at = self.closest_offset(point);
         if let Some(range) = range {
             let (a, b) = bounds(range);
             at = at.clamp(a, b);
         }
         Some(Position::make(self.mtm(), at.min(self.text_length())))
+    }
+
+    /// The caret offset nearest to `point` (view coordinates): the line
+    /// nearest vertically, then the caret nearest on it.
+    pub(crate) fn closest_offset(&self, point: CGPoint) -> usize {
+        let lines = self.line_boxes();
+        let d = |l: &LineBox| {
+            if point.y < l.top {
+                l.top - point.y
+            } else if point.y > l.bottom {
+                point.y - l.bottom
+            } else {
+                0.0
+            }
+        };
+        lines
+            .iter()
+            .min_by(|a, b| d(a).total_cmp(&d(b)))
+            .map_or(0, |line| line.index_at(point.x))
     }
 
     /// The character under `point`.
@@ -543,9 +542,24 @@ impl TextView {
 
     /// The caret's rect before character `position`.
     pub(crate) fn sel_caret(&self, position: &UITextPosition) -> CGRect {
+        self.caret_rect_at(offset(position), false)
+    }
+
+    /// The caret's rect at offset `at` (view coordinates); `trailing`
+    /// puts an offset where a line wraps at the end of the line before
+    /// (where a selection that ends there ends) rather than at the start
+    /// of the next.
+    pub(crate) fn caret_rect_at(&self, at: usize, trailing: bool) -> CGRect {
         let lines = self.line_boxes();
-        let at = offset(position);
-        match line_of(&lines, at) {
+        let line = if trailing {
+            lines
+                .iter()
+                .position(|l| at > l.start && at <= l.end)
+                .or_else(|| line_of(&lines, at))
+        } else {
+            line_of(&lines, at)
+        };
+        match line {
             Some(i) => {
                 let l = &lines[i];
                 CGRect::new(
@@ -555,23 +569,32 @@ impl TextView {
             }
             None => {
                 let content = self
-                    .ivars()
-                    .layout
-                    .borrow()
-                    .as_ref()
-                    .map(|(_, c)| *c)
-                    .unwrap_or_default();
-                CGRect::new(
-                    CGPoint::new(content.x as CGFloat, content.y as CGFloat),
-                    CGSize::new(2.0, content.height as CGFloat),
-                )
+                    .content_box()
+                    .unwrap_or(CGRect::new(CGPoint::ZERO, CGSize::ZERO));
+                CGRect::new(content.origin, CGSize::new(2.0, content.size.height))
             }
         }
+    }
+
+    /// The box the text is laid out in (view coordinates).
+    pub(crate) fn content_box(&self) -> Option<CGRect> {
+        let layout = self.ivars().layout.borrow();
+        let (_, c) = layout.as_ref()?;
+        Some(CGRect::new(
+            CGPoint::new(c.origin.x.0 as CGFloat, c.origin.y.0 as CGFloat),
+            CGSize::new(c.size.width.0 as CGFloat, c.size.height.0 as CGFloat),
+        ))
     }
 
     /// The rects of `range` on each line it covers.
     fn rects(&self, range: &UITextRange) -> Vec<(CGRect, bool, bool)> {
         let (a, b) = bounds(range);
+        self.range_rects(a, b)
+    }
+
+    /// The rects of the UTF-16 range `a..b` on each line it covers (view
+    /// coordinates), with whether each holds its start and its end.
+    pub(crate) fn range_rects(&self, a: usize, b: usize) -> Vec<(CGRect, bool, bool)> {
         let lines = self.line_boxes();
         let mut out = Vec::new();
         if a >= b {

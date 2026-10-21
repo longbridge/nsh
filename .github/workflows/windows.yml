@@ -8,7 +8,22 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/**"
+      - "crates/nsh-bundler/**"
+      - "crates/nsh-cli/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-js/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-package/**"
+      - "crates/nsh-platform-windows/**"
+      - "crates/nsh-testing/**"
+      - "crates/nsh-base/**"
+      - "crates/nsh-windows-app/**"
+      - "crates/nsh-windows-host/**"
+      - "crates/xtask/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -16,7 +31,22 @@ on:
       - ".github/workflows/windows.yml"
   pull_request:
     paths:
-      - "crates/**"
+      - "crates/nsh-bundler/**"
+      - "crates/nsh-cli/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-js/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-package/**"
+      - "crates/nsh-platform-windows/**"
+      - "crates/nsh-testing/**"
+      - "crates/nsh-base/**"
+      - "crates/nsh-windows-app/**"
+      - "crates/nsh-windows-host/**"
+      - "crates/xtask/**"
+      - "examples/counter/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -30,6 +60,14 @@ permissions:
 concurrency:
   group: windows-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # CI builds each crate once: no incremental state and no debug info
+  # (faster builds, smaller caches; panics still name their file and line).
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # The toolchain file's iOS and Android targets are only the release's.
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   check:
@@ -48,16 +86,11 @@ jobs:
         with:
           components: clippy
 
+      # Dependencies only: main's runs save it, pull requests restore it.
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-windows-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-windows-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         run: >
@@ -69,3 +102,17 @@ jobs:
       # Tests need no display: they open no window.
       - name: Test
         run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask
+
+      # The examples' tests in Win32 windows, with the platform's input
+      # (`nsh test --target windows`): those a real platform runs (no
+      # stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in Win32 windows
+        shell: bash
+        run: |
+          cargo build -p nsh-cli
+          run() { ./target/debug/nsh test "$@" --target windows; }
+          run examples/counter
+          for file in form navigation photos; do
+            run "examples/gallery/tests/$file.test.tsx"
+          done
+          run examples/gallery/tests/environment.test.tsx --filter appearance

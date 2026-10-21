@@ -17,9 +17,9 @@ NSH's design differs (SolidJS instead of React, Tailwind classes resolved native
 platform-styled widgets). A change that only adds React Native compatibility, such as a wrapper or an alias, is not
 accepted.
 
-The runtime (`nsh`, `nsh/<module>`) provides primitives and capabilities; components belong to a UI set
-(`nsh/ui/mobile`) and are drawn with those primitives so they look the same on every platform. See "Where new things
-go" in [docs/dev/js-modules.md](docs/dev/js-modules.md).
+The runtime (`nsh`, `nsh/<module>`) provides primitives and capabilities, and `nsh/base` the unstyled foundation of
+an app's UI (navigation, safe areas, system dialogs, the keyboard, the status bar); the look of an app is the app's
+own, drawn from those primitives or with Rust components in the app's crate. See "Where new things go" in [docs/dev/js-modules.md](docs/dev/js-modules.md).
 
 ## AI-Assisted Contributions
 
@@ -33,7 +33,7 @@ Before opening a pull request, please make sure that:
 
 - The problem is real and the change is necessary.
 - The API and implementation follow the existing patterns of NSH, and the rules in [AGENTS.md](AGENTS.md).
-- The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh trace` for
+- The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh test --trace` for
   the JS runtime, engine and core, and a run on a simulator, emulator or device for platform code (screenshots or
   recordings are encouraged for UI changes).
 - A pull request focuses on one thing and keeps the diff as small as practical. When using AI, ask it to avoid
@@ -50,6 +50,11 @@ The reviewer should be able to judge the API from the description without readin
 Changes to existing public items go under `## Breaking Changes` with a `diff` block showing the old and the new
 usage, even when the old form still works. Additive changes are not breaking, but they are still listed.
 
+What apps use — JS exports, `nsh:rt`, globals, elements, props, events, style keys, Tailwind utilities, their
+declarations and behavior — is never broken: apps built for an earlier release keep running unchanged
+([docs/dev/compatibility.md](docs/dev/compatibility.md)). Such a change adds and deprecates instead of removing, and
+commits its record in `api/` (`cargo xtask api`); the tests hold it to the record as of the merge base with `main`.
+
 Well-prepared pull requests are easier for us to review and may be merged very quickly. If a contribution is already
 in good shape, maintainers may directly help polish small details and move it forward.
 
@@ -65,28 +70,28 @@ Commit subjects and pull request titles name the area first, then say what chang
 <area>: <What the change does>
 ```
 
-- The area is the part of NSH the change is about, in lower case: a crate without its `nsh-` prefix (`core`, `animation`,
-  `js`, `engine`, `package`, `bundler`, `dev`, `cli`, `xtask`, `ui-mobile` for the `nsh/ui/mobile` set), a platform (`ios`,
-  `android`, `macos`, `windows`, `linux`), a JS layer or module (`runtime`, `list`, `animated`), or `tailwind`, `text`,
-  `docs`, `examples`, `gallery`, `ci`. A change to all the desktop backends (macOS, Windows and Linux) is `desktop`, one
-  to both mobile platforms (iOS and Android) is `mobile`. Name one area only, never several separated by commas: when a
-  change spans several, look at it as a whole and name the part it is mostly about. A feature the core adds and the
-  platforms carry out is `core`, not `core, desktop`; a change everywhere names its subject (`signed packages: …`).
+- The area is the part of NSH the change is about, in lower case: a crate without its `nsh-` prefix (`core`,
+  `animation`, `js`, `engine`, `package`, `bundler`, `dev`, `cli`, `xtask`, `base`), a platform (`ios`, `android`, `macos`,
+  `windows`, `linux`), a JS layer or module (`runtime`, `list`, `animated`, `navigation`), or `tailwind`, `text`, `docs`, `examples`, `gallery`, `ci`. A change to all the desktop
+  backends (macOS, Windows and Linux) is `desktop`, one to both mobile platforms (iOS and Android) is `mobile`. Name
+  one area only, never several separated by commas: when a change spans several, look at it as a whole and name the
+  part it is mostly about. A feature the core adds and the platforms carry out is `core`, not `core, desktop`; a
+  change everywhere names its subject (`signed packages: …`).
 - The sentence starts with a capital letter, uses the imperative mood, has no trailing period and fits in about 72
   characters with its area. It says what the change does for a user of NSH, not which files moved: `list: Keep the
   visible rows in place when items are inserted above them`, not `list: Update list.rs`.
 - Do not use conventional prefixes (`fix:`, `feat:`, `chore:`). Pull requests are squash merged and GitHub appends
   their number: `tailwind: Make flex a row as in CSS (#12)`.
 - The body (optional for small changes) explains why, wrapped at 72 columns: the problem, the approach and what it
-  costs. A change to a hot path includes its before / after `nsh trace` numbers.
+  costs. A change to a hot path includes its before / after `nsh test --trace` numbers.
 
 Examples:
 
 ```
 tailwind: Make flex a row and block use block layout, as in CSS
 list: Keep the visible rows in place when items are inserted above them
-mobile: Answer the back gesture from preventBack without asking JS
-desktop: Keep the keyboard focus inside the newest modal
+mobile: Answer the back gesture from popOnBack without asking JS
+desktop: Keep the keyboard focus inside the newest dialog
 cli: Add `nsh package --target ios` for signed .ipa files
 docs: Describe the capability checks of fetch redirects
 ```
@@ -161,14 +166,14 @@ rendering are typical examples.
 ## Performance
 
 Performance is NSH's first priority (the rules are in [AGENTS.md](AGENTS.md)). A change to a hot path (the JS
-runtime, the op buffer, the core, layout, text, lists, mounting) comes with before / after `nsh trace` timings and
+runtime, the op buffer, the core, layout, text, lists, mounting) comes with before / after `nsh test --trace` timings and
 mount item counts, compared with the baselines in [docs/dev/performance.md](docs/dev/performance.md); update the
 baselines when they move.
 
 ```sh
-./target/debug/nsh trace examples/counter
+./target/debug/nsh test examples/counter/App.tsx --trace
 cargo build --release -p nsh-cli
-./target/release/nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
+echo 'await app.scroll("id:photos", 3000)' | ./target/release/nsh test examples/gallery/Bench.tsx --trace
 cargo test --release -p nsh-engine --test list_bench -- --ignored --nocapture
 ```
 

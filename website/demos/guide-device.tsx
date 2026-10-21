@@ -47,7 +47,7 @@ function App() {
 
       <View
         onPress={() => I18nManager.forceRTL(!I18nManager.isRTL)}
-        activeOpacity={0.6}
+        activeStyle={{ opacity: 0.6 }}
         class="flex-row items-center gap-3 rounded-2xl bg-white border border-[#e1e1db] dark:bg-[#18191c] dark:border-[#2c2e33] p-4"
       >
         <Text class="text-lg text-[#4a6a0a] dark:text-[#c8f26d]">⇄</Text>

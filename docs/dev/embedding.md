@@ -1,6 +1,6 @@
 # Packaging and embedding
 
-- `nsh package <entry> --target ios|ios-simulator|android|linux|macos|windows|gpui` builds an installable app from the prebuilt runtime: metadata from
+- `nsh package <entry> --target ios|ios-simulator|android|linux|macos|windows` builds an installable app from the prebuilt runtime: metadata from
   `nsh.json` next to the entry (`name`, `id`, `version`, `build`, `icon`; `appearance` also sets `UIUserInterfaceStyle`
   and a dark window theme, so the launch screen is in it) or flags. iOS: `.app`, `.ipa` with `--sign <identity>
   --profile <file.mobileprovision>` (entitlements come from the profile; icons are compiled by `actool` into `Assets.car`).
@@ -20,11 +20,8 @@
   `nsh\bundle.nshc`, `nsh\assets\` and `nsh\app.json` (the window title, the app id, which groups the app's windows in
   the taskbar, the version and the appearance, which the window opens in); plus the same as `<name>.zip`. No tools
   are needed; `--run` launches the executable.
-  GPUI: packaged as the native apps of the machine it runs on are (Linux's directory and `.tar.gz`, macOS' `.app`,
-  Windows' directory and `.zip`), with the GPUI release runner (`crates/gpui/nsh-gpui-app`) as the executable; it finds
-  `nsh/` next to itself, or `Contents/Resources/nsh` inside an app bundle (`nsh_gpui_app::resources`). The Linux
-  runner links WebKitGTK 4.1 (GTK 3) and GStreamer dynamically (features `webview`, `video`): they must be installed
-  where the package runs, as GTK 4 must for Linux packages.
+  GPUI is the backend for embedding in GPUI and GPUI Kit apps (below), which ship it in their own executable: `nsh
+  package` refuses `--target gpui` and names this OS's target, the one backend each desktop packages apps with.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform
@@ -77,6 +74,16 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
+  pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
+  / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
+  (C `nsh_app_set_locale` / `nsh_app_set_font_scale`), Java `NshView.setLocale` / `setFontScale`. Each platform writes
+  them over the system's values where it builds the environment (`Surface::set_environment` on the desktops, the root
+  view's `environment()` on iOS, `publishEnvironment` in Java), so they reach the engine as a system change would and
+  are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts,
+  toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
+  size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
+  in classes included, stay as they are. The layout direction stays the system's (`I18nManager` decides it in the app).
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -117,10 +124,12 @@ NSH draws (`src/layers.rs`).
 - **Overlays.** The surface draws only inside its bounds and takes the mouse only on its hitbox: GPUI Kit's dialogs,
   sheets, popovers and notifications (drawn by `Root` above the content) cover it and take the input, while its app
   keeps running.
-- **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
-  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the components of
-  the UI sets render with it instead of the app's own theme (`Core::set_host_theme`, which wins until cleared with
-  `None`), and the surface is drawn on its `background`. It applies at once and to every app loaded later, in their
+- **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_base::Theme`
+  (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the app
+  renders with its tokens instead of its own theme's (`Core::set_host_tokens`, which win until cleared with
+  `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
+  `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
+  keys it lacks keep the app's values. It applies at once and to every app loaded later, in their
   first frame (the surface starts engines with `Engine::start_with`, sending the theme before the start).
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's
@@ -143,11 +152,11 @@ NSH draws (`src/layers.rs`).
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
   Space or Enter while focused (NSH's fields do not see those keys). It returns a focus handle of its own
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
-  among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
-  the app's fatal errors (also logged).
+  among the app's text fields, and a click focuses that handle too.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
-  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+  in another app) unless set; the development host `nsh-gpui-host` runs apps on its own, with `Limits::standalone()`
+  (`sandbox.md`).
 - **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
   (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
   (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
@@ -160,3 +169,12 @@ NSH draws (`src/layers.rs`).
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
   the session. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
+- **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
+  re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
+  on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS
+  of that app runs again, where a host falls back to another build), the `message` and the `stack` apart (the stack
+  mapped to the sources when the bundle has a source map), and the signed `package` it came from (`PackageInfo`: id,
+  name, version, build, SHA-256; `Bundle::package`, set by `Bundle::from_package`). `AppView::on_error` is the same
+  handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
+  `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
+  `NshView.ErrorListener`) are unchanged.

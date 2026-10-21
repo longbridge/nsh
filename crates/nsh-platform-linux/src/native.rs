@@ -42,8 +42,8 @@ use std::{
 
 use gtk4::{self as gtk, gio, glib, prelude::*};
 use nsh_core::{
-    Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Rect,
-    ResizeMode, Size, VideoProps, ViewKind,
+    Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
+    ResizeMode, Size, VideoProps, ViewKind, geometry::Point,
 };
 use nsh_engine::EngineControl;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -122,7 +122,7 @@ impl ComponentContext {
     /// dimension open.
     pub fn set_size(&self, width: f32, height: f32) {
         self.control
-            .set_component_size(self.id, Size::new(width, height));
+            .set_component_size(self.id, Size::new(Points(width), Points(height)));
     }
 }
 
@@ -448,8 +448,8 @@ fn fill_sized(view: &NshView, widget: &gtk::Widget) {
 
 fn host(view: &NshView, widget: &gtk::Widget, sized: bool) {
     let frame = view.state().frame;
-    let has_size = |rect: Rect| rect.width >= 1.0 && rect.height >= 1.0;
-    let rect = bounds(frame.width, frame.height);
+    let has_size = |rect: Bounds<Points>| rect.size.width.0 >= 1.0 && rect.size.height.0 >= 1.0;
+    let rect = bounds(frame.size.width.0, frame.size.height.0);
     view.set_native(widget, rect);
     // After `set_native`: parenting makes a widget child visible.
     if sized {
@@ -462,7 +462,7 @@ fn host(view: &NshView, widget: &gtk::Widget, sized: bool) {
     view.on_resize(move |_, _| {
         if let Some(view) = weak.upgrade() {
             let mut s = view.state_mut();
-            let rect = bounds(s.frame.width, s.frame.height);
+            let rect = bounds(s.frame.size.width.0, s.frame.size.height.0);
             for native in &mut s.natives {
                 native.rect = rect;
             }
@@ -474,12 +474,16 @@ fn host(view: &NshView, widget: &gtk::Widget, sized: bool) {
     });
 }
 
-fn bounds(width: f32, height: f32) -> Rect {
-    Rect {
-        x: 0.0,
-        y: 0.0,
-        width,
-        height,
+fn bounds(width: f32, height: f32) -> Bounds<Points> {
+    Bounds {
+        origin: Point {
+            x: Points(0.0),
+            y: Points(0.0),
+        },
+        size: Size {
+            width: Points(width),
+            height: Points(height),
+        },
     }
 }
 

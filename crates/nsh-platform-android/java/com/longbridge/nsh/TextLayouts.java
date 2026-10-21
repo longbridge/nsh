@@ -135,13 +135,15 @@ final class TextLayouts {
     }
 
     // Span ints: start, end, weight, flags, color, decoration color, family,
-    // font variant bits, decoration style. Floats: size, line height, letter
-    // spacing, decoration thickness, underline offset.
-    private static final int SPAN_INTS = 9;
-    private static final int SPAN_FLOATS = 5;
+    // font variant bits, decoration style, background color, background
+    // node. Floats: size, line height, letter spacing, decoration thickness,
+    // underline offset, background radius.
+    private static final int SPAN_INTS = 11;
+    private static final int SPAN_FLOATS = 6;
     private static final int ITALIC = 1;
     private static final int UNDERLINE = 2;
     private static final int STRIKE = 4;
+    private static final int BACKGROUND = 16;
 
     static final class Prepared {
         final CharSequence text;
@@ -244,6 +246,11 @@ final class TextLayouts {
             paint.setShadowLayer(Math.max(0.01f, shadowRadius * density), shadowDx * density, shadowDy * density, shadowColor);
         }
         int spans = ints.length / SPAN_INTS;
+        // The span background being extended over neighboring runs.
+        Background background = null;
+        int backgroundStart = 0, backgroundEnd = 0;
+        android.graphics.Paint.FontMetrics metrics = new android.graphics.Paint.FontMetrics();
+        TextPaint measure = new TextPaint();
         for (int i = 0; i < spans; i++) {
             int o = i * SPAN_INTS;
             int start = ints[o], end = Math.min(ints[o + 1], text.length());
@@ -272,7 +279,23 @@ final class TextLayouts {
                 s.setSpan(new Decoration((flags & UNDERLINE) != 0, (flags & STRIKE) != 0, ints[o + 5], size,
                         ints[o + 8], thickness, offset), start, end, f);
             }
+            if ((flags & BACKGROUND) != 0) {
+                measure.setTypeface(typeface);
+                measure.setTextSize(size);
+                measure.getFontMetrics(metrics);
+                float radius = floats[i * SPAN_FLOATS + 5] * density;
+                if (background != null && background.same(ints[o + 9], ints[o + 10], radius) && backgroundEnd == start) {
+                    background.ascentPx = Math.max(background.ascentPx, -metrics.ascent);
+                    background.descentPx = Math.max(background.descentPx, metrics.descent);
+                } else {
+                    if (background != null) s.setSpan(background, backgroundStart, backgroundEnd, f);
+                    background = new Background(ints[o + 9], ints[o + 10], radius, -metrics.ascent, metrics.descent);
+                    backgroundStart = start;
+                }
+                backgroundEnd = end;
+            }
         }
+        if (background != null) s.setSpan(background, backgroundStart, backgroundEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         // Attachments (offset, width, height in dp): placeholders of their
         // size on the baseline.
         for (int i = 0; i + 2 < attachments.length; i += 3) {
@@ -485,6 +508,29 @@ final class TextLayouts {
             this.style = style;
             this.thicknessPx = thicknessPx;
             this.offsetPx = offsetPx;
+        }
+    }
+
+    /** A span background (`backgroundColor` on a nested text), drawn by
+     * {@code TextBox} behind each line's part of its characters, as tall as
+     * its fonts. One covers the neighboring runs of one span. */
+    static final class Background {
+        final int color;
+        /** The span that set it: neighbors that look the same stay apart. */
+        final int node;
+        final float radiusPx;
+        float ascentPx, descentPx;
+
+        Background(int color, int node, float radiusPx, float ascentPx, float descentPx) {
+            this.color = color;
+            this.node = node;
+            this.radiusPx = radiusPx;
+            this.ascentPx = ascentPx;
+            this.descentPx = descentPx;
+        }
+
+        boolean same(int color, int node, float radiusPx) {
+            return this.color == color && this.node == node && this.radiusPx == radiusPx;
         }
     }
 

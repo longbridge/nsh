@@ -51,10 +51,12 @@ use std::{
 
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
-    Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    Rect,
+    Bounds, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
+    Points, ROOT_ID,
+    geometry::{Point, Size, px},
+    platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Environment, Insets, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Locale};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -142,6 +144,10 @@ enum OverlayKind {
         sized: gtk::Widget,
         max: f32,
         gutter: f32,
+        /// What closing it without a button does: `None` when it cannot
+        /// be closed so.
+        #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+        dismiss: Option<Rc<DialogAnswer>>,
     },
 }
 
@@ -268,6 +274,13 @@ fn system_changed() {
     }
 }
 
+/// The embedding app set its locale or text size
+/// ([`crate::AppView::set_locale`]): the system's settings are read again,
+/// with the host's over them.
+pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface, appearance());
+}
+
 /// Writes `appearance` and the surface's own values into its environment.
 fn update(surface: &Surface, appearance: Appearance) {
     let mut env: Environment = surface.environment.get();
@@ -284,12 +297,12 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.screen_reader = appearance.screen_reader;
     env.pixel_ratio = pixel_ratio(&surface.root);
     env.os_version = OS_VERSION.with(|v| *v);
-    env.safe_area = Insets::default();
-    env.keyboard_height = 0.0;
+    env.safe_area = Edges::default();
+    env.keyboard_height = px(0.0);
     surface.set_environment(env);
 }
 
-/// The surface's environment changed (from the system or a script): GTK's
+/// The surface's environment changed (from the system or a test): GTK's
 /// theme and the root's background follow its scheme.
 pub(crate) fn environment_applied(surface: &Surface) {
     let dark = surface.environment.get().color_scheme == ColorScheme::Dark;
@@ -483,6 +496,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
+        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::ReadClipboardImage { id, has_only } => {
+            read_clipboard_image(surface, *id, *has_only)
+        }
+        Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -546,15 +564,21 @@ pub(crate) fn clear(surface: &Surface) {
 
 fn place(overlay: &Overlay, width: f32, height: f32) {
     match &overlay.kind {
-        OverlayKind::Dialog { sized, max, gutter } => {
+        OverlayKind::Dialog {
+            sized, max, gutter, ..
+        } => {
             sized.set_width_request((width - gutter).min(*max).max(0.0) as i32);
             overlay.root.set_native(
                 &overlay.widget,
-                Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width,
-                    height,
+                Bounds {
+                    origin: Point {
+                        x: Points(0.0),
+                        y: Points(0.0),
+                    },
+                    size: Size {
+                        width: Points(width),
+                        height: Points(height),
+                    },
                 },
             );
         }
@@ -565,11 +589,15 @@ fn place(overlay: &Overlay, width: f32, height: f32) {
             let (_, h, _, _) = label.measure(gtk::Orientation::Vertical, w);
             overlay.root.set_native(
                 &overlay.widget,
-                Rect {
-                    x: ((width - w as f32) / 2.0).round(),
-                    y: height - 64.0 - h as f32,
-                    width: w as f32,
-                    height: h as f32,
+                Bounds {
+                    origin: Point {
+                        x: Points(((width - w as f32) / 2.0).round()),
+                        y: Points(height - 64.0 - h as f32),
+                    },
+                    size: Size {
+                        width: Points(w as f32),
+                        height: Points(h as f32),
+                    },
                 },
             );
         }
@@ -585,7 +613,7 @@ fn add_overlay(surface: &Surface, widget: gtk::Widget, kind: OverlayKind) {
         kind,
     };
     let env = surface.environment.get();
-    place(&overlay, env.window.0, env.window.1);
+    place(&overlay, env.window.width.0, env.window.height.0);
     SYSTEM.with(|s| s.borrow_mut().overlays.push(overlay));
     widget.set_opacity(0.0);
     fade(
@@ -742,15 +770,9 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         answered: Cell::new(false),
         previous_focus,
     });
-    let ok = [nsh_core::DialogButton {
-        text: "OK".to_owned(),
-        style: DialogButtonStyle::Default,
-    }];
-    let buttons = if dialog.buttons.is_empty() {
-        &ok[..]
-    } else {
-        &dialog.buttons[..]
-    };
+    // `AlertDialog` always brings the app's actions (it rejects none): no
+    // label of NSH's own.
+    let buttons = &dialog.buttons[..];
     let cancel = buttons
         .iter()
         .position(|b| b.style == DialogButtonStyle::Cancel);
@@ -924,11 +946,66 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
     add_overlay(
         surface,
         backdrop.upcast(),
-        OverlayKind::Dialog { sized, max, gutter },
+        OverlayKind::Dialog {
+            sized,
+            max,
+            gutter,
+            dismiss: cancelable.then(|| answer.clone()),
+        },
     );
     if let Some(focus) = focus {
         focus.grab_focus();
     }
+}
+
+/// Answers the newest dialog on `surface` as a user does: presses its
+/// button titled `button`, or closes it without one (`None`; only a dialog
+/// that can be closed so).
+#[cfg(feature = "dev")]
+pub(crate) fn answer_dialog(surface: &Surface, button: Option<&str>) -> Result<(), String> {
+    let (widget, dismiss) = SYSTEM
+        .with(|s| {
+            s.borrow()
+                .overlays
+                .iter()
+                .rev()
+                .find_map(|o| match &o.kind {
+                    OverlayKind::Dialog { dismiss, .. }
+                        if o.root == surface.root && o.widget.can_target() =>
+                    {
+                        Some((o.widget.clone(), dismiss.clone()))
+                    }
+                    _ => None,
+                })
+        })
+        .ok_or("no dialog is shown")?;
+    let Some(text) = button else {
+        let dismiss = dismiss.ok_or("the dialog can only be answered with a button")?;
+        dismiss.answer(-1);
+        return Ok(());
+    };
+    let found = descendants(&widget).find_map(|w| {
+        let button = w.downcast::<gtk::Button>().ok()?;
+        (button.label().as_deref() == Some(text)).then_some(button)
+    });
+    let button = found.ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+    button.emit_clicked();
+    Ok(())
+}
+
+/// `widget` and every widget inside it, depth first.
+#[cfg(feature = "dev")]
+fn descendants(widget: &gtk::Widget) -> impl Iterator<Item = gtk::Widget> {
+    let mut stack = vec![widget.clone()];
+    std::iter::from_fn(move || {
+        let w = stack.pop()?;
+        let mut child = w.last_child();
+        while let Some(c) = child {
+            child = c.prev_sibling();
+            stack.push(c);
+        }
+        Some(w)
+    })
 }
 
 /// Shows `text` at the bottom of the surface for a while (one at a time:
@@ -1003,6 +1080,104 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
+/// `Clipboard.setImage`: the image of a `data:` URI as a GDK texture,
+/// which GDK offers in the formats it encodes (PNG, TIFF, ...).
+fn set_clipboard_image(uri: &str) {
+    let Some((_, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
+        Ok(texture) => {
+            if let Some(display) = gdk::Display::default() {
+                display.clipboard().set_texture(&texture);
+            }
+        }
+        Err(err) => log::warn!("Clipboard.setImage: {err}"),
+    }
+}
+
+/// `Clipboard.getImage` / `hasImage`: the clipboard's image as a GDK
+/// texture (whatever format the app offering it put), answered as PNG.
+fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
+    let answer = move |surface: &Surface, payload| {
+        surface.event(ROOT_ID, EventKind::Clipboard, payload);
+    };
+    let Some(display) = gdk::Display::default() else {
+        return answer(surface, clipboard::image_answer(id, false, None));
+    };
+    let board = display.clipboard();
+    let has = board
+        .formats()
+        .union_deserialize_types()
+        .contains_type(gdk::Texture::static_type());
+    if has_only || !has {
+        return answer(surface, clipboard::image_answer(id, has, None));
+    }
+    let surface = Rc::downgrade(surface);
+    glib::spawn_future_local(async move {
+        let png = match board.read_texture_future().await {
+            Ok(texture) => texture.map(|t| t.save_to_png_bytes()),
+            Err(err) => {
+                log::debug!("linux: clipboard image read failed: {err}");
+                None
+            }
+        };
+        let image = png.as_deref().and_then(clipboard::Image::sniff);
+        if let Some(surface) = surface.upgrade() {
+            answer(&surface, clipboard::image_answer(id, true, image));
+        }
+    });
+}
+
+/// `Clipboard.getFiles`: the `file:` URIs of a file list on the clipboard
+/// (files copied in a file manager).
+fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
+    let answer = move |surface: &Surface, files: &[String]| {
+        surface.event(
+            ROOT_ID,
+            EventKind::Clipboard,
+            clipboard::files_answer(id, files),
+        );
+    };
+    let Some(display) = gdk::Display::default() else {
+        return answer(surface, &[]);
+    };
+    let board = display.clipboard();
+    if !board
+        .formats()
+        .union_deserialize_types()
+        .contains_type(gdk::FileList::static_type())
+    {
+        return answer(surface, &[]);
+    }
+    let surface = Rc::downgrade(surface);
+    glib::spawn_future_local(async move {
+        let files = match board
+            .read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT)
+            .await
+        {
+            Ok(value) => value
+                .get::<gdk::FileList>()
+                .map(|list| {
+                    list.files()
+                        .into_iter()
+                        .filter(|file| file.path().is_some_and(|path| path.is_absolute()))
+                        .map(|file| file.uri().to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            Err(err) => {
+                log::debug!("linux: clipboard files read failed: {err}");
+                Vec::new()
+            }
+        };
+        if let Some(surface) = surface.upgrade() {
+            answer(&surface, &files);
+        }
+    });
+}
+
 /// `MountItem::Appearance`: the app forces light or dark (or follows the
 /// system again). The environment, GTK's theme (hosted widgets, dialogs)
 /// and the root's background follow.
@@ -1012,8 +1187,9 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
     }
 }
 
-/// Scripts: the system's color scheme is now dark (or light), as the
+/// Tests: the system's color scheme is now dark (or light), as the
 /// portal would say.
+#[cfg(feature = "dev")]
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SYSTEM.with(|s| s.borrow_mut().portal_dark = Some(dark));
     system_changed();

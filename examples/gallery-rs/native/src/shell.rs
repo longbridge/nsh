@@ -8,6 +8,7 @@
 
 use std::{cell::Cell, ptr};
 
+use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
     storage::Storage,
     ui::{AccessibilityRole, AccessibilityState, AnyElement, prelude::*},
@@ -90,7 +91,7 @@ pub(crate) fn restore() {
         // A window's first frame can come before its size (0 × 0, the
         // phone layout): which layout opens the demo, and what is open,
         // are known once it has one.
-        if window().width <= 0.0 {
+        if window().width.0 <= 0.0 {
             return;
         }
         if !restored.replace(true)
@@ -126,7 +127,7 @@ pub(crate) fn phone() -> AnyElement {
         let Selected(demo) = global::<Selected>().get_untracked();
         nav::reset(vec![demo.route()]);
     }
-    stack()
+    nav_stack()
         .flex_1()
         .child(demos::index())
         .child(pushed())
@@ -151,9 +152,14 @@ pub(crate) fn desktop_layout() -> AnyElement {
         .bg(colors::BACKGROUND)
         .child(sidebar())
         .child(
-            stack()
+            nav_stack()
                 .flex_1()
-                .child(screen().key("pane").header_shown(false).child(demo_pane()))
+                .child(
+                    nav_page()
+                        .key("pane")
+                        .header_shown(false)
+                        .child(demo_pane()),
+                )
                 .child(pushed()),
         )
         .into_element()
@@ -239,7 +245,7 @@ fn sidebar() -> AnyElement {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors::FAINT)
-                    .letter_spacing(0.6)
+                    .letter_spacing(px(0.6))
                     .px(px(10.0))
                     .pt_4()
                     .pb(px(6.0)),
@@ -292,7 +298,7 @@ fn sidebar() -> AnyElement {
                 .child(
                     text(move || {
                         let size = window();
-                        format!("{} × {} pt", size.width.round(), size.height.round())
+                        format!("{} × {} pt", size.width.0.round(), size.height.0.round())
                     })
                     .text_size(px(12.0))
                     .text_color(colors::MUTED)

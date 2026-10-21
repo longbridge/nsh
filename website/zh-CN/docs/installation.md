@@ -7,9 +7,9 @@ group: start
 
 # 安装
 
-NSH 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、运行开发服务器、启动开发宿主、打包可安装的应用。你可以使用无需 Rust 的预构建发行包，也可以从仓库源码构建。
+NSH 的所有操作都通过一个命令 `nsh` 完成：构建用 Rust 或 TSX 编写的应用、在每个平台上运行它们、以热更新的方式把 TSX 提供给开发宿主，以及打包可安装的应用。你可以使用预构建发行包，也可以从仓库源码构建。
 
-除了 `nsh` 本身，每个平台还需要自己的工具：
+用 Rust 编写的应用还需要 Rust 工具链（[见下文](#用-rust-编写的应用)）；TSX 应用只需要 `nsh`。除此之外，每个平台还需要自己的工具：
 
 | 平台 | 在哪里开发和打包 | 需要 |
 |---|---|---|
@@ -18,9 +18,9 @@ NSH 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、
 | macOS | macOS | Xcode 命令行工具；应用运行在 macOS 14+ |
 | Windows | Windows | Windows 10 1809+；网页视图需要 WebView2 Runtime |
 | Linux | Linux | GTK 4.14+（构建运行时还需要它的开发包） |
-| [GPUI](./gpui.md) | macOS、Windows 或 Linux，为该系统打包 | GPU（Metal、DirectX 或 Vulkan）；Linux 上需要 Wayland 或 X11 |
+| [GPUI](./gpui.md)（嵌入 GPUI 应用） | macOS、Windows 或 Linux | GPU（Metal、DirectX 或 Vulkan）；Linux 上需要 Wayland 或 X11 |
 
-macOS 上 `nsh run` 的默认目标 Mac Catalyst 和 iOS 一样需要 Xcode。详见[平台工具](#平台工具)。
+macOS 上的默认目标为 AppKit。Mac Catalyst（`--target catalyst`）和 iOS 一样需要 Xcode。详见[平台工具](#平台工具)。
 
 ## 安装发布版本
 
@@ -65,6 +65,18 @@ mise use -g github:longbridge/nsh
 > [!NOTE]
 > 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。目前没有 Intel Mac 和 arm64 Linux / Windows 的构建，请从源码构建。
 
+## 用 Rust 编写的应用
+
+通过 [rustup](https://rustup.rs) 安装 Rust。`nsh` 用 Cargo 为每个目标构建 Rust 应用的运行器，使用你的 crate 以及 crates.io 上与 CLI 同版本的 NSH crate，所以请添加你要运行的平台对应的 Rust 目标：
+
+```sh
+rustup target add aarch64-apple-ios-sim aarch64-apple-ios aarch64-apple-ios-macabi   # iOS 模拟器、真机、Mac Catalyst
+rustup target add aarch64-linux-android x86_64-linux-android                         # Android（配合 SDK 中的 NDK）
+rustup target add wasm32-unknown-unknown                                             # Web
+```
+
+桌面平台为你所在的机器构建。在 Rust 应用目录中运行 `cargo run` 会直接在桌面后端上启动它，构建时使用该后端的开发库（[平台工具](#平台工具)）。Android 构建还会使用 SDK 中的 **NDK**，与[构建 Android 运行时](#构建-android-运行时)相同。
+
 ## 预构建发行包
 
 发行包是一个目录 `dist/nsh`，包含 CLI 以及它打包应用时使用的预构建原生运行时：
@@ -78,7 +90,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
-dist/nsh/runtime/gpui/{nsh-gpui-host,nsh-gpui-app}[.exe]     # the GPUI development host and release runner, for this OS
+dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                    # the GPUI development host, for this OS
 dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          # the web runtimes (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
@@ -91,8 +103,19 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 运行时。它们都包含
+发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 开发宿主。它们都包含
 Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）。
+
+## 安装最新源码版
+
+在 macOS 和 Linux 上，准备好 Git、Rust 和下文的平台构建依赖后，可以安装最新 `main`：
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+安装器保留 `~/.nsh/source` 中的源码，构建 release CLI，并链接到 `~/.local/bin`。再次运行即可更新；更新前需要保存本地源码改动。NSH 使用保留的源码按需构建原生运行时。Cargo 使用已有配置和 target 目录。`NSH_INSTALL_DIR` 修改安装目录；`NSH_VERSION` 仅用于选择预构建发行版。`-V` 和 `--version` 都显示版本号和七位源码提交 SHA。
 
 ## 从源码构建
 
@@ -126,7 +149,6 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
-cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-app    # nsh package --target gpui
 # nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
@@ -185,12 +207,12 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 | 命令 | macOS | Linux | Windows |
 |---|---|---|---|
-| `nsh init`, `nsh build`, `nsh trace`, `nsh dev`, `nsh check` | 可以 | 可以 | 可以 |
-| `nsh run`（Mac Catalyst，macOS 上的默认目标） | 可以 | 不可以 | 不可以 |
+| `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | 可以 | 可以 | 可以 |
+| `nsh run --target catalyst`（Mac Catalyst） | 可以 | 不可以 | 不可以 |
 | `nsh run --target macos`, `nsh package --target macos` | 可以 | 不可以 | 不可以 |
 | `nsh run --target linux`（Linux 上的默认目标）, `nsh package --target linux` | 不可以 | 可以 | 不可以 |
 | `nsh run --target windows`（Windows 上的默认目标）, `nsh package --target windows` | 不可以 | 不可以 | 可以 |
-| `nsh run --target gpui`, `nsh package --target gpui`（为打包所在的系统打包） | 可以 | 可以 | 可以 |
+| `nsh run --target gpui`（GPUI 应用嵌入的后端） | 可以 | 可以 | 可以 |
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | 可以，需要 Xcode | 不可以 | 不可以 |
 | `nsh run --target android`, `nsh package --target android` | 可以 | 可以，需从源码构建 | 可以，需有 Android 运行时 |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | 可以 | 可以 | 可以 |
@@ -199,7 +221,9 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 ## 编辑器配置
 
-NSH 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 NSH 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
+Rust 应用是一个 Cargo 项目：rust-analyzer（VS Code、Zed、Neovim、RustRover）会像对待任何 crate 一样检查它，并补全 NSH 的 API 及其文档注释。
+
+对 TSX，NSH 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 NSH 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
 
 ## 下一步
 

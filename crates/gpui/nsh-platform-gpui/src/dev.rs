@@ -32,7 +32,9 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
+use nsh_engine::{
+    App, AppError, AppErrorKind, BYTECODE_VERSION, Bundle, HotUpdate, Limits, Policy,
+};
 
 use crate::{app::AppView, image::AssetBase, input::KeyEvent};
 
@@ -94,14 +96,17 @@ pub fn init_logging() {
 enum Msg {
     /// From the dev client.
     Event(DevEvent),
-    /// An uncaught error of the app.
-    RuntimeError(String),
+    /// An error of the app.
+    RuntimeError(AppError),
     /// The engine could not apply a hot update in place.
     HotUpdateFailed,
     /// The reload key.
     Reload,
     /// The status line shown as number `.0` is done.
     HideStatus(u64),
+    /// A test session's model of the app, for the surface to keep from the
+    /// first bundle on (it comes before it).
+    TestModel(Arc<nsh_testing::agent::Model>),
 }
 
 /// Numbers the sessions: a replaced session's task stops.
@@ -242,8 +247,8 @@ pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
     // Next to the embedding app's handler (`AppView::on_error`), which
     // hears the errors too.
     let errors = tx.clone();
-    surface.set_dev_error_handler(Box::new(move |message| {
-        let _ = errors.unbounded_send(Msg::RuntimeError(message.to_owned()));
+    surface.set_dev_error_handler(Box::new(move |error| {
+        let _ = errors.unbounded_send(Msg::RuntimeError(error.clone()));
     }));
     let failed = tx.clone();
     surface.set_hot_update_failed(move || {
@@ -258,9 +263,23 @@ pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
             .iter()
             .filter_map(|set| set.specifier().map(str::to_owned))
             .collect(),
+        tests: true,
     };
+    // A test session (`nsh test --target gpui`): the model goes to the
+    // surface through the session's messages, ahead of the bundle.
+    let models = tx.clone();
+    let key = surface.key();
+    let tester = nsh_testing::agent::Tester::new(move |model| {
+        let _ = models.unbounded_send(Msg::TestModel(model));
+        Box::new(crate::agent::GpuiNative::new(key))
+    });
+    let tests = tester.clone();
     let events = tx;
     let started = DevClient::start(url, host, move |event| {
+        // Taken here: a step waits for what it does on the main thread.
+        let Some(event) = tests.event(event) else {
+            return;
+        };
         match event {
             DevEvent::Connected => CONNECTED.store(true, Ordering::Relaxed),
             DevEvent::Disconnected => CONNECTED.store(false, Ordering::Relaxed),
@@ -271,6 +290,7 @@ pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
     match started {
         Ok(client) => {
             let client = Arc::new(client);
+            tester.set_client(&client);
             *CLIENT.lock().unwrap_or_else(|e| e.into_inner()) = Arc::downgrade(&client);
             session._client = Some(client);
         }
@@ -370,8 +390,8 @@ fn handle(view: &AppView, msg: Msg) {
     let Some(session) = dev.as_mut() else { return };
     let load = match msg {
         Msg::Event(event) => on_event(view, session, event),
-        Msg::RuntimeError(message) => {
-            session.show_error("Uncaught error", &message, false);
+        Msg::RuntimeError(error) => {
+            session.show_error(error_title(&error), &error.to_string(), false);
             None
         }
         Msg::HotUpdateFailed => reload(session),
@@ -382,10 +402,25 @@ fn handle(view: &AppView, msg: Msg) {
             }
             None
         }
+        Msg::TestModel(model) => {
+            view.surface().set_test_model(Some(model));
+            None
+        }
     };
     drop(dev);
     if let Some(bundle) = load {
         view.load(App::Js(bundle));
+    }
+}
+
+/// The overlay's title for an error of the app.
+fn error_title(error: &AppError) -> &'static str {
+    match error.kind {
+        AppErrorKind::Load => "The app failed to load",
+        AppErrorKind::Stopped => "The app was stopped",
+        AppErrorKind::HotUpdate => "Update failed",
+        AppErrorKind::Asset => "Cannot load a file",
+        _ => "Uncaught error",
     }
 }
 
@@ -394,6 +429,8 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
     match event {
         DevEvent::Connected => dev.hide_status(),
         DevEvent::Disconnected => dev.show_status(Status::Reconnecting),
+        // The client's thread hands them to the test agent.
+        DevEvent::Testing | DevEvent::Step { .. } => {}
         DevEvent::Building => dev.show_status(Status::Building),
         DevEvent::BuildFailed(message) => {
             dev.hide_status();
@@ -411,6 +448,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             // A bundle reached through a hot update keeps its "Updated".
             if dev.running != Some((session, version)) {
@@ -448,6 +486,13 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
                     return None;
                 }
             };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => {
+                    dev.show_error("Invalid limits", &err, true);
+                    return None;
+                }
+            };
             dev.latest = Some((session, version, bundle.clone()));
             let running = dev.running.replace((session, version));
             // Already there through a hot update.
@@ -455,6 +500,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
                 return None;
             }
             log::info!("loading build {version}");
+            view.set_limits(limits);
             dev.error = None;
             if running.is_some() {
                 dev.show_status(Status::Reloaded);

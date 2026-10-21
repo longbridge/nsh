@@ -6,10 +6,12 @@
 
 use std::fmt::Write as _;
 
-use nsh_animation::{Curve, EaseMode, Easing};
-
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
-use crate::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, ui::TsTypes};
+use crate::{
+    LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
+    animation::{Curve, EaseMode, Easing},
+    ui::TsTypes,
+};
 
 /// A curve of `Easing`: its name, its parameter (name and default) and
 /// documentation.

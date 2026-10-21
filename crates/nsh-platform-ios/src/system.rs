@@ -5,12 +5,13 @@ use std::{cell::Cell, rc::Rc};
 use block2::RcBlock;
 use nsh_core::{
     Dialog, DialogButtonStyle, EventKind, EventPayload, PayloadValue, StatusBarConfig,
-    StatusBarStyle, platform::Appearance,
+    StatusBarStyle,
+    platform::{Appearance, clipboard},
 };
 use nsh_engine::EngineControl;
 use objc2::{MainThreadOnly, rc::Retained};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSData, NSString};
 use objc2_ui_kit::{
     UIAlertAction, UIAlertActionStyle, UIAlertController, UIAlertControllerStyle, UIDevice,
     UIPopoverArrowDirection, UIStatusBarAnimation, UIStatusBarStyle, UIUserInterfaceIdiom,
@@ -191,11 +192,12 @@ pub(crate) fn show_dialog(dialog: &Dialog, view: &UIView, control: &EngineContro
             .any(|b| b.style == DialogButtonStyle::Cancel)
     {
         // A popover hides its cancel action and runs it on a tap outside:
-        // one that answers "dismissed".
+        // one that answers "dismissed". It is never shown, so it has no
+        // title (labels all come from the app).
         let answer = answer.clone();
         let handler = RcBlock::new(move |_| answer.answer(-1));
         let action = UIAlertAction::actionWithTitle_style_handler(
-            Some(&NSString::from_str("Cancel")),
+            None,
             UIAlertActionStyle::Cancel,
             Some(&handler),
             mtm,
@@ -214,6 +216,48 @@ pub(crate) fn show_dialog(dialog: &Dialog, view: &UIView, control: &EngineContro
         popover.setPermittedArrowDirections(UIPopoverArrowDirection::empty());
     }
     top.presentViewController_animated_completion(&alert, true, None);
+}
+
+/// Where a user taps to answer the alert shown over `window`: the middle
+/// of its button titled `button` (window points), or `None`'s: an action
+/// sheet's popover closes with a tap outside it.
+#[cfg(feature = "dev")]
+pub(crate) fn dialog_point(
+    window: &objc2_ui_kit::UIWindow,
+    button: Option<&str>,
+) -> Result<(f64, f64), String> {
+    let mut top = window.rootViewController().ok_or("no dialog is shown")?;
+    while let Some(next) = top.presentedViewController() {
+        top = next;
+    }
+    let alert = top
+        .downcast::<UIAlertController>()
+        .map_err(|_| "no dialog is shown")?;
+    let Some(text) = button else {
+        if alert.popoverPresentationController().is_some() {
+            return Ok((2.0, 2.0));
+        }
+        return Err("the dialog can only be answered with a button".into());
+    };
+    let view = alert.view().ok_or("the dialog shows nothing")?;
+    let label =
+        find_label(&view, text).ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+    let r = label.convertRect_toView(label.bounds(), Some(window));
+    Ok((
+        r.origin.x + r.size.width / 2.0,
+        r.origin.y + r.size.height / 2.0,
+    ))
+}
+
+/// The label showing `text` in `view`'s subtree.
+#[cfg(feature = "dev")]
+fn find_label(view: &UIView, text: &str) -> Option<Retained<objc2_ui_kit::UILabel>> {
+    if let Some(label) = view.downcast_ref::<objc2_ui_kit::UILabel>()
+        && label.text().is_some_and(|t| t.to_string() == text)
+    {
+        return Some(objc2::Message::retain(label));
+    }
+    view.subviews().iter().find_map(|v| find_label(&v, text))
 }
 
 /// `Clipboard.setString`: puts `text` on the general pasteboard.
@@ -236,6 +280,69 @@ pub(crate) fn read_clipboard(has_only: bool) -> (bool, Option<String>) {
     // SAFETY: a plain getter.
     let text = unsafe { board.string() }.map(|s| s.to_string());
     (text.is_some(), text)
+}
+
+/// Pasteboard types of images read as they are (others become PNG through
+/// `UIImage`), by MIME type.
+const IMAGE_TYPES: [(&str, &str); 3] = [
+    ("image/png", "public.png"),
+    ("image/jpeg", "public.jpeg"),
+    ("image/gif", "com.compuserve.gif"),
+];
+
+/// `Clipboard.setImage`: the image of a `data:` URI on the general
+/// pasteboard, under its own type.
+pub(crate) fn set_clipboard_image(uri: &str) {
+    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    let kind = match IMAGE_TYPES.iter().find(|(m, _)| *m == mime) {
+        Some((_, kind)) => *kind,
+        None if mime.starts_with("image/") => "public.image",
+        None => {
+            log::warn!("Clipboard.setImage: unsupported image type {mime}");
+            return;
+        }
+    };
+    let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
+    board.setData_forPasteboardType(&NSData::with_bytes(&bytes), &NSString::from_str(kind));
+}
+
+/// `Clipboard.getImage` / `hasImage`: the answer to read `id`. `hasImages`
+/// does not read the pasteboard, so it shows no paste notice.
+pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
+    let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
+    // SAFETY: a plain getter.
+    let has = unsafe { board.hasImages() };
+    if has_only || !has {
+        return clipboard::image_answer(id, has, None);
+    }
+    let data = IMAGE_TYPES
+        .iter()
+        .find_map(|(_, kind)| board.dataForPasteboardType(&NSString::from_str(kind)))
+        // SAFETY: a plain getter.
+        .or_else(|| unsafe { board.image() }.and_then(|image| image.png_representation()));
+    let bytes = data.map(|d| d.to_vec()).unwrap_or_default();
+    clipboard::image_answer(id, true, clipboard::Image::sniff(&bytes))
+}
+
+/// `Clipboard.getFiles`: the `file:` URLs on the general pasteboard
+/// (files copied in the Finder, on Mac Catalyst).
+pub(crate) fn read_clipboard_files(id: u32) -> EventPayload {
+    let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
+    // SAFETY: plain getters.
+    let urls = unsafe { board.hasURLs().then(|| board.URLs()).flatten() };
+    let files: Vec<String> = urls
+        .map(|urls| {
+            urls.iter()
+                .filter(|url| url.isFileURL())
+                .filter_map(|url| url.absoluteString())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    clipboard::files_answer(id, &files)
 }
 
 /// `AccessibilityInfo.announceForAccessibility`: VoiceOver reads `text`.

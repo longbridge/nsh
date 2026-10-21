@@ -1,13 +1,13 @@
-import { batch, computed, effect, Input, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { batch, cleanup, computed, effect, Input, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { Platform } from "nsh/device";
-import { List } from "nsh/list";
-import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
+import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets, SelectionArea } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
+import { localReply, type Provider } from "./chat/local";
 import { Glyph } from "./chat/glyphs";
-import { type Block, Markdown, parse } from "./chat/markdown";
+import { Markdown } from "./chat/markdown";
 import { ActionButton, Avatar, Caret, DateSeparator, ErrorRow, FileChip, Photo, Spinner, ToolCard } from "./chat/parts";
 import { type FileRef, freeform, history, type Model, type Msg, photo, retried, type Scenario, scenarios, type Status, type Tool } from "./chat/scripts";
 
@@ -19,6 +19,8 @@ const models = [
   { value: "Deep", label: "Deep" },
   { value: "Vision", label: "Vision" },
 ] as const;
+
+const providers = [{ value: "Claude", label: "Claude" }, { value: "Codex", label: "Codex" }] as const;
 
 const featured: { id: string; icon: IconName; note: string }[] = [
   { id: "guide", icon: "text", note: "Markdown, a table, code" },
@@ -33,9 +35,8 @@ class Stopped extends Error {}
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * A simulated AI assistant: replies stream token by token (batched per
- * frame), think first, call tools, fail and recover; every scenario comes
- * from local scripts and timers. The desktop layout adds a list of
+ * A chat assistant backed by local Claude / Codex on desktop, and scripted
+ * streaming scenarios on web and mobile. The desktop layout adds a list of
  * conversations on the left and keeps messages and the composer in a
  * readable column.
  */
@@ -43,12 +44,15 @@ export function Chat() {
   const wide = desktop();
   /** Desktop: messages and the composer in a centered column. */
   const column: ViewStyle = wide ? { width: "100%", maxWidth: 820, alignSelf: "center" } : {};
-  const insets = useSafeAreaInsets();
+  const insets = safeAreaInsets();
   let ids = 0;
   const nextId = () => `m${ids++}`;
 
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
+  const native = Platform.isDesktop && Platform.OS !== "web";
+  const provider = signal<Provider>("Codex");
+  let cancelLocal: (() => void) | undefined;
   const draft = signal("");
   const inputHeight = signal(20);
   const attachment = signal<{ image: string; file: FileRef } | null>(null);
@@ -63,7 +67,7 @@ export function Chat() {
   const liveReason = signal("");
   const liveThinking = signal<{ start: number; seconds: number | null } | null>(null);
   const liveTools = signal<Tool[]>([]);
-  const liveBlocks = signal<Block[]>([]);
+  const liveMd = signal("");
   const now = signal(0);
 
   /** Whether the user is at the bottom (the list then follows the stream
@@ -98,7 +102,7 @@ export function Chat() {
       if (pendingText) {
         r.md += pendingText;
         pendingText = "";
-        liveBlocks.set(parse(r.md, liveBlocks(), true));
+        liveMd.set(r.md);
       }
     });
   };
@@ -145,7 +149,6 @@ export function Chat() {
       reasoning: r.reason ? { text: r.reason, seconds, open: false } : undefined,
       tools: liveTools().map((t) => (t.state === "done" ? t : ({ ...t, state: "cancelled" } as Tool))),
       md: r.md,
-      blocks: parse(r.md),
       status,
       error,
     };
@@ -162,18 +165,37 @@ export function Chat() {
 
   /** Runs a scenario's reply; `at` replaces that message (retry, regenerate). */
   const reply = async (s: Scenario, at?: string) => {
-    const r: Run = { id: nextId(), model: s.model, script: s.id, cancelled: false, md: "", reason: "", thinkStart: performance.now(), thinkSeconds: null };
+    const r: Run = { id: nextId(), model: s.model, script: native ? `local:${provider()}` : s.id, cancelled: false, md: "", reason: "", thinkStart: performance.now(), thinkSeconds: null };
     run = r;
-    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: s.id, tools: [], md: "", blocks: [], status: "done" };
+    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: r.script, tools: [], md: "", status: "done" };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
       liveReason.set("");
       liveThinking.set(null);
       liveTools.set([]);
-      liveBlocks.set([]);
+      liveMd.set("");
       liveId.set(r.id);
       messages.set(at ? messages().map((m) => (m.id === at ? placeholder : m)) : [...messages(), placeholder]);
     });
+    if (native) {
+      const all = messages();
+      const conversation = all.slice(0, all.findIndex((m) => m.id === r.id)).filter((m) => m.kind === "user" || (m.kind === "assistant" && m.id !== r.id && m.id !== at));
+      const prompt = "You are a helpful chat assistant. Answer the final user message using the conversation below. Reply directly in Markdown. Do not use tools or modify files.\n\n" + conversation.map((m) => m.kind === "user" ? `User: ${m.text}` : m.kind === "assistant" ? `Assistant: ${m.md}` : "").join("\n\n");
+      try {
+        cancelLocal = localReply(provider(), prompt, (chunk) => {
+          if (run !== r || r.cancelled) return;
+          pendingText += chunk;
+          queue();
+        }, (error) => {
+          if (run !== r || r.cancelled) return;
+          cancelLocal = undefined;
+          freeze(r, error ? "error" : "done", error);
+        });
+      } catch (error) {
+        freeze(r, "error", `${provider()}: ${error instanceof Error ? error.message : String(error)}. Install and sign in to the CLI, then retry.`);
+      }
+      return;
+    }
     try {
       await wait(r, 450);
       for (const step of s.steps) {
@@ -213,8 +235,16 @@ export function Chat() {
   const stop = () => {
     if (!run) return;
     run.cancelled = true;
+    cancelLocal?.();
+    cancelLocal = undefined;
     freeze(run, "stopped");
   };
+
+  cleanup(() => {
+    if (run) run.cancelled = true;
+    cancelLocal?.();
+    stopTicker();
+  });
 
   const jumpToLatest = () => {
     toEnd();
@@ -225,7 +255,7 @@ export function Chat() {
     if (run) return;
     menu.set(false);
     following.set(true);
-    const offline = s.steps.find((step) => "offline" in step) as { offline: number } | undefined;
+    const offline = !native && s.steps.find((step) => "offline" in step) as { offline: number } | undefined;
     const user: User = { kind: "user", id: nextId(), text, image, file, waiting: !!offline };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
@@ -289,7 +319,8 @@ export function Chat() {
   const retry = (m: Assistant) => {
     if (run) return;
     following.set(true);
-    void reply(retried, m.id);
+    if (native) regenerate(m);
+    else void reply(retried, m.id);
   };
   const copy = (key: string, text: string) => {
     Clipboard.setString(text);
@@ -355,13 +386,13 @@ export function Chat() {
       return `Thought for ${m().reasoning?.seconds ?? 1} s`;
     };
     const tools = () => (live() ? liveTools() : m().tools);
-    const blocks = () => (live() ? liveBlocks() : m().blocks);
-    const waitingForWords = () => live() && !liveBlocks().length && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
+    const md = () => (live() ? liveMd() : m().md);
+    const waitingForWords = () => live() && !liveMd() && !liveTools().length && !(liveThinking() && liveThinking()!.seconds === null);
     return (
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 26 }}>
           <Avatar />
-          <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().model}</Text>
+          <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().script.startsWith("local:") ? m().script.slice(6) : m().model}</Text>
           <If when={!live() && m().status === "stopped"}>
             <Badge label="Stopped" tone="warn" />
           </If>
@@ -411,7 +442,7 @@ export function Chat() {
             <Caret />
           </View>
         </If>
-        <Markdown blocks={blocks()} id={m().id} caret={live() ? Caret : undefined} copied={copied()} onCopy={(key, text) => copy(key, text)} />
+        <Markdown md={md()} id={m().id} streaming={live()} caret={live() ? <Caret /> : undefined} />
         <If when={!live() && m().status === "error"}>
           <ErrorRow message={m().error ?? "Something went wrong."} onRetry={() => retry(m())} />
         </If>
@@ -451,7 +482,7 @@ export function Chat() {
             <IconTile name="spark" tint={colors.accent} size={56} />
             <Text style={{ fontSize: 22, fontWeight: "600", color: colors.text }}>How can I help?</Text>
             <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, textAlign: "center" }}>
-              A simulated assistant: every reply is scripted and streamed locally.
+              {native ? "Chat with your local Claude or Codex CLI. Sign in to the CLI in a terminal first." : "A simulated assistant: every reply is scripted and streamed locally."}
             </Text>
           </View>
         </Appear>
@@ -502,42 +533,45 @@ export function Chat() {
       <KeyboardAvoidingView style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
           <If when={messages().length} else={empty}>
-            <List
-              ref={list}
-              each={messages()}
-              keyExtractor={(m) => m.id}
-              estimatedItemSize={140}
-              initialScrollIndex={Math.max(0, messages().length - 1)}
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingTop: 8, paddingBottom: 16 }}
-              keyboardDismissMode="interactive"
-              maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
-              scrollEventThrottle={100}
-              onScrollBeginDrag={() => (dragging = true)}
-              onScroll={(e) => {
-                if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
-              }}
-              onMomentumScrollEnd={() => (dragging = false)}
-              onScrollEnd={() => (dragging = false)}
-            >
-              {(item) => {
-                const kind = computed(() => item().kind);
-                return (
-                  <View style={wide ? column : undefined}>
-                    {(() => {
-                      switch (kind()) {
-                        case "date":
-                          return <DateSeparator label={(item() as Extract<Msg, { kind: "date" }>).label} />;
-                        case "user":
-                          return userRow(item as () => User);
-                        case "assistant":
-                          return assistantRow(item as () => Assistant);
-                      }
-                    })()}
-                  </View>
-                );
-              }}
-            </List>
+            {/* One selection across messages: in the List, over the rows that are mounted. */}
+            <SelectionArea style={{ flex: 1 }}>
+              <List
+                ref={list}
+                each={messages()}
+                keyExtractor={(m) => m.id}
+                estimatedItemSize={140}
+                initialScrollIndex={Math.max(0, messages().length - 1)}
+                style={{ flex: 1 }}
+                contentStyle={{ paddingTop: 8, paddingBottom: 16 }}
+                keyboardDismissMode="interactive"
+                maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
+                scrollEventThrottle={100}
+                onScrollBeginDrag={() => (dragging = true)}
+                onScroll={(e) => {
+                  if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
+                }}
+                onMomentumScrollEnd={() => (dragging = false)}
+                onScrollEnd={() => (dragging = false)}
+              >
+                {(item) => {
+                  const kind = computed(() => item().kind);
+                  return (
+                    <View style={wide ? column : undefined}>
+                      {(() => {
+                        switch (kind()) {
+                          case "date":
+                            return <DateSeparator label={(item() as Extract<Msg, { kind: "date" }>).label} />;
+                          case "user":
+                            return userRow(item as () => User);
+                          case "assistant":
+                            return assistantRow(item as () => Assistant);
+                        }
+                      })()}
+                    </View>
+                  );
+                }}
+              </List>
+            </SelectionArea>
           </If>
 
           {/* Jump to the latest message: shown while scrolled up. */}
@@ -645,8 +679,8 @@ export function Chat() {
                         if (row().id === "attach") attachment.set({ image: photo, file: { name: "trip-notes.pdf", size: "2.4 MB" } });
                         else play(row().id);
                       }}
-                      underlayColor={alpha(colors.text, 0.06)}
-                      accessibilityRole="button"
+                      activeStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
+                      role="button"
                       accessibilityLabel={row().label}
                       style={{ flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16 }}
                     >
@@ -687,7 +721,7 @@ export function Chat() {
         </If>
 
         {/* The composer. */}
-        <View style={{ ...column, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboard().height > 0 ? 0 : insets().bottom), gap: 8 }}>
+        <View style={{ ...column, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + (keyboardFrame().height > 0 ? 0 : insets().bottom), gap: 8 }}>
           <If when={attachment()}>
             <Appear>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -712,20 +746,18 @@ export function Chat() {
           >
             <Input
               value={draft()}
-              onChangeText={(v) => draft.set(v)}
+              onChange={(v) => draft.set(v)}
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
               submitBehavior={Platform.isDesktop ? "submit" : "newline"}
-              onSubmitEditing={() => {
+              onSubmit={() => {
                 if (!streaming()) send();
               }}
-              placeholder={`Message ${model()}`}
-              placeholderTextColor={colors.faint}
-              selectionColor={colors.accent}
+              placeholder={`Message ${native ? provider() : model()}`}
               onFocus={() => menu.set(false)}
               onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
-              style={{ height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
+              style={{ placeholderColor: colors.faint, selectionColor: colors.accent, height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View
@@ -739,7 +771,9 @@ export function Chat() {
                 <RoundButton icon="plus" label="Add" variant="secondary" onPress={() => menu.set(!menu())} />
               </View>
               <View style={{ flex: 1 }}>
-                <Segmented size="small" options={models} value={model()} onChange={(v) => model.set(v)} />
+                <If when={native} else={<Segmented size="small" options={models} value={model()} onChange={(v) => model.set(v)} />}>
+                  <Segmented size="small" options={providers} value={provider()} onChange={(v) => { if (!run) provider.set(v); }} />
+                </If>
               </View>
               <If
                 when={streaming()}
@@ -810,7 +844,7 @@ export function Chat() {
           {(chip) => (
             <View
               onPress={() => openChat(chip().id)}
-              accessibilityRole="button"
+              role="button"
               accessibilityLabel={chip().label}
               accessibilityState={{ selected: current() === chip().id }}
               class={current() === chip().id ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-card dark:active:bg-graphite-raised"}

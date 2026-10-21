@@ -8,9 +8,41 @@ order: 17
 
 Every element takes Tailwind CSS classes in its `class` prop (and conditional ones in `classList`). NSH resolves them in Rust against Tailwind 4's default theme: JS passes only the string, each distinct string is parsed once and cached, and variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
 
-This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
+Each utility sets exactly what Tailwind CSS 4 generates for it, with the same meaning as in a browser. This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
 
-```tsx
+Rust components take no class strings: they style elements with the typed methods of `Styled` (`nsh_core::ui::prelude`), named after these utilities and resolving to the same values, Tailwind's default scales included (`px-4` is `.px_4()`, `rounded-2xl` `.rounded_2xl()`, `shadow-md` `.shadow_md()`, `bg-linear-to-br` `.bg_linear_to_br()`). Colors are values: theme colors, or Tailwind's palette as `nsh_core::ui::palette` (`ZINC.shade(800)` is `zinc-800`). Variants are methods taking a closure of styles: `.active(|s| …)`, `.hover(…)`, `.focus(…)`, `.disabled_style(…)`, `.dark(…)`, `.group_active(…)`, and `.style_when(condition, …)` for the rest. The [Style reference](./style-reference.md) names the method of each style key.
+
+```rust tabs
+use nsh_core::ui::{
+    palette::{RED, ZINC},
+    prelude::*,
+};
+
+view()
+    .flex_row()
+    .items_center()
+    .gap_3()
+    .rounded_2xl()
+    .bg(white())
+    .p_4()
+    .shadow_md()
+    .active(|s| s.scale(0.98))
+    .transition()
+    .dark(|s| s.bg(ZINC.shade(800)))
+    .child(
+        text("Inbox")
+            .text_base()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(ZINC.shade(900))
+            .dark(|s| s.text_color(white())),
+    )
+    .child(
+        text(move || unread.get().to_string())
+            .text_color(move || if unread.get() > 0 { RED.shade(500) } else { ZINC.shade(400) }),
+    )
+```
+
+```tsx tabs
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">
   <Text class="text-base font-semibold text-zinc-900 dark:text-white">Inbox</Text>
   <Text classList={{ "text-red-500": unread() > 0, "text-zinc-400": unread() === 0 }}>{unread()}</Text>
@@ -20,7 +52,7 @@ This page lists what is supported. For an introduction see [Tailwind](../docs/ta
 ## How classes combine
 
 - **Later wins.** Among utilities of the same variant level, the one later in the string wins: `"p-4 p-2"` is `p-2`. A component can take a `class` prop and append it to its own classes without `tailwind-merge`.
-- **Variants apply after plain utilities**, in Tailwind's variant order: position (`first:` ...), `group-*:`, `focus-within:`, `hover:`, `focus:`, `active:`, `enabled:`, `disabled:`, motion, `max-*:` breakpoints, then breakpoints ascending, orientation, direction, `dark:`, then platform. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
+- **Variants apply after plain utilities**, in Tailwind's variant order: position (`first:` ...), `group-*:`, `checked:`, `selected:`, `focus-within:`, `hover:`, `focus:`, `active:`, `enabled:`, `disabled:`, motion, `max-*:` breakpoints, then breakpoints ascending, orientation, direction, `dark:`, then platform. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
 - **`style` wins over classes.** The inline `style` is applied on top of the resolved classes. An important utility (`!p-4` or `p-4!`) wins over the inline style too.
 - **Text styles inherit.** Text utilities on a view (`text-white`, `font-bold`, `text-center`, ...) pass to the `<Text>` and `<Input>` elements inside it, as in CSS.
 - **Display is CSS's.** `flex` and `inline-flex` make a row unless a direction utility says otherwise, wherever it is in the string (`flex-col flex` is a column). Views without `flex` keep NSH's column default.
@@ -240,7 +272,8 @@ Tailwind's text shadows have several layers; natively one shadow is drawn, the w
 
 | Class | Sets |
 |---|---|
-| `placeholder:text-<color>` | `placeholderTextColor` |
+| `placeholder:text-<color>` | `placeholderColor` |
+| `selection:text-<color>` | `selectionColor` (an input's caret and selection, a selectable text's highlight) |
 | `caret-<color>` | the cursor color |
 
 ## Backgrounds
@@ -257,7 +290,18 @@ Tailwind's text shadows have several layers; natively one shadow is drawn, the w
 | `from-<p>%`, `via-<p>%`, `to-<p>%` | stop positions: `via-40%`, `from-[15%]` |
 | `bg-none` | removes the gradient |
 
-```tsx
+```rust tabs
+view()
+    .h_32()
+    .rounded_2xl()
+    .bg_linear_to_br()
+    .gradient_from(INDIGO.shade(500))
+    .gradient_via(PURPLE.shade(500))
+    .gradient_via_position(percentage(0.4))
+    .gradient_to(PINK.shade(500))
+```
+
+```tsx tabs
 <View class="h-32 rounded-2xl bg-linear-to-br from-indigo-500 via-purple-500 via-40% to-pink-500" />
 ```
 
@@ -383,14 +427,14 @@ Variants make a utility conditional: `dark:bg-zinc-900`, `md:flex-row`, `active:
 
 ### Appearance and environment
 
-| Variant | Applies when |
-|---|---|
-| `dark:` | the appearance is dark |
-| `ios:` | running on iOS or Mac Catalyst |
-| `android:` | running on Android |
-| `portrait:`, `landscape:` | the window is taller than wide / wider than tall |
-| `ltr:`, `rtl:` | the layout direction |
-| `motion-safe:`, `motion-reduce:` | the user has not / has asked for reduced motion |
+| Variant | Applies when | Rust |
+|---|---|---|
+| `dark:` | the appearance is dark | `.dark(\|s\| …)` |
+| `ios:` | running on iOS or Mac Catalyst | `.when(os() == Os::Ios, …)` |
+| `android:` | running on Android | `.when(os() == Os::Android, …)` |
+| `portrait:`, `landscape:` | the window is taller than wide / wider than tall | `.style_when(move \|\| window().height > window().width, …)` |
+| `ltr:`, `rtl:` | the layout direction | `.style_when(rtl, …)` |
+| `motion-safe:`, `motion-reduce:` | the user has not / has asked for reduced motion | `.style_when(reduce_motion, …)` |
 
 ### Breakpoints
 
@@ -411,24 +455,42 @@ Breakpoints compare the window width in points.
 | `min-[<length>]:` | `min-[600px]:grid-cols-3` | width ≥ the length |
 | `max-[<length>]:` | `max-[400px]:text-sm` | width < the length |
 
-A phone in portrait (390 points wide) matches none of the default breakpoints; a tablet or a phone in landscape matches several.
+A phone in portrait (390 points wide) matches none of the default breakpoints; a tablet or a phone in landscape matches several. In Rust, a breakpoint is a condition on the window: `.style_when(move || window().width >= px(768.0), |s| s.p_8())` is `md:p-8`.
 
 ### Interaction states
 
 States are tracked by the platform only for elements whose classes use them, and changes apply natively, with no JS round trip.
 
-| Variant | Applies when |
-|---|---|
-| `active:` | the element is pressed |
-| `hover:` | a pointer is over it (iPad pointer, Mac Catalyst, Android mouse) |
-| `focus:`, `focus-visible:` | the input has focus |
-| `focus-within:` | the element or a descendant has focus |
-| `disabled:` | the element has the `disabled` prop |
-| `enabled:` | the element does not have the `disabled` prop |
+| Variant | Applies when | Rust |
+|---|---|---|
+| `active:` | the element is pressed | `.active(\|s\| …)` |
+| `hover:` | a pointer is over it (iPad pointer, Mac Catalyst, Android mouse) | `.hover(\|s\| …)` |
+| `focus:`, `focus-visible:` | the input has focus | `.focus(\|s\| …)` |
+| `focus-within:` | the element or a descendant has focus |  |
+| `disabled:` | the element has the `disabled` prop | `.disabled_style(\|s\| …)` |
+| `enabled:` | the element does not have the `disabled` prop |  |
+| `selected:` | the element is selected: a `Button`'s `selected`, or `accessibilityState.selected` |  |
+| `checked:` | the element is checked: `accessibilityState.checked` is `true` (`"mixed"` is not checked) |  |
+
+The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` and `checkedStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
 
 `disabled` works on any element: it applies `disabled:` and removes the element's press handlers, so it shows no press feedback either.
 
-```tsx
+```rust tabs
+view()
+    .on_press(save)
+    .disabled(saving)
+    .rounded_lg()
+    .bg(BLUE.shade(600))
+    .px_4()
+    .py_2()
+    .transition()
+    .active(|s| s.scale(0.95).bg(BLUE.shade(700)))
+    .disabled_style(|s| s.opacity(0.4))
+    .child(text("Save").font_weight(FontWeight::MEDIUM).text_color(white()))
+```
+
+```tsx tabs
 <View
   onPress={save}
   disabled={saving()}
@@ -442,15 +504,40 @@ States are tracked by the platform only for elements whose classes use them, and
 
 Mark an ancestor with `group` and style descendants by its state with `group-<state>:`. Name groups to nest them: `group/card` and `group-hover/card:`.
 
-| Variant | Applies when the group is |
-|---|---|
-| `group-active:` | pressed |
-| `group-hover:` | hovered |
-| `group-focus:`, `group-focus-visible:` | focused |
-| `group-focus-within:` | focused or containing focus |
-| `group-disabled:` | disabled |
+| Variant | Applies when the group is | Rust |
+|---|---|---|
+| `group-active:` | pressed | `.group_active(…)`, `.group_active_named(name, …)` |
+| `group-hover:` | hovered | `.group_hover(…)`, `.group_hover_named(name, …)` |
+| `group-focus:`, `group-focus-visible:` | focused |  |
+| `group-focus-within:` | focused or containing focus | `.group_focus_within(…)`, `.group_focus_within_named(name, …)` |
+| `group-disabled:` | disabled |  |
+| `group-selected:` | selected |  |
+| `group-checked:` | checked |  |
 
-```tsx
+```rust tabs
+view()
+    .on_press(open)
+    .group_named("row")
+    .flex_row()
+    .items_center()
+    .gap_3()
+    .p_3()
+    .active(|s| s.bg(ZINC.shade(100)))
+    .child(
+        text("Settings")
+            .flex_1()
+            .text_color(ZINC.shade(900))
+            .group_active_named("row", |s| s.text_color(BLUE.shade(600))),
+    )
+    .child(
+        text("›")
+            .text_color(ZINC.shade(400))
+            .group_active_named("row", |s| s.translate_x(px(4.0)))
+            .transition_transform(),
+    )
+```
+
+```tsx tabs
 <View onPress={open} class="group/row flex-row items-center gap-3 p-3 active:bg-zinc-100">
   <Text class="flex-1 text-zinc-900 group-active/row:text-blue-600">Settings</Text>
   <Text class="text-zinc-400 group-active/row:translate-x-1 transition-transform">›</Text>
@@ -467,13 +554,23 @@ Mark an ancestor with `group` and style descendants by its state with `group-<st
 | `odd:` | the 1st, 3rd, ... child |
 | `even:` | the 2nd, 4th, ... child |
 
-```tsx
+```rust tabs
+each(items, |item: &Item| item.id, move |item, index| {
+    text(move || item.with(|i| i.name.clone()))
+        .border_b(px(1.0))
+        .border_color(ZINC.shade(200))
+        .py_3()
+        .style_when(move || index.get() + 1 == items.with(Vec::len), |s| s.border_b(px(0.0)))
+})
+```
+
+```tsx tabs
 <Each of={items()}>{(item) => <Text class="border-b border-zinc-200 py-3 last:border-b-0">{item().name}</Text>}</Each>
 ```
 
-### Placeholder
+### Placeholder and selection
 
-`placeholder:` applies to an `<Input>`'s placeholder and only takes a text color: `placeholder:text-zinc-400`.
+`placeholder:` applies to an `<Input>`'s placeholder and only takes a text color: `placeholder:text-zinc-400` (the style key `placeholderColor`). `selection:` applies to the selection of an `<Input>` (its caret too) or a selectable `<Text>`, and also only takes a text color: `selection:text-violet-500` (the style key `selectionColor`).
 
 ### Important
 
@@ -534,7 +631,7 @@ With this theme, `bg-brand-500`, `bg-brand` (the `DEFAULT` shade), `text-accent`
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> The Tailwind theme shapes only your app's classes. The components of `nsh/ui/mobile` take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Components](../components/index.md).
+> The Tailwind theme shapes only your app's classes. Rust components take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Rust](../docs/rust.md). Classes can name that theme's colors and numbers too (`bg-primary`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
 
 ## Related
 

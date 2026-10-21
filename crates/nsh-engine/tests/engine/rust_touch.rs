@@ -9,6 +9,7 @@ use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, ROOT_ID, Size,
     TouchEvent, TouchPhase, TouchPoint,
     canvas::{CanvasOp, Num, PathOp},
+    geometry::px,
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
@@ -44,12 +45,12 @@ fn Sketch() -> impl IntoElement {
             .claim_touches(TouchClaim::on_start())
             .keep_touches(true)
             .on_responder_grant(move |e: &ResponderEvent| {
-                strokes.update(|s| s.push(vec![(e.location_x, e.location_y)]));
+                strokes.update(|s| s.push(vec![(e.location.x.0, e.location.y.0)]));
             })
             .on_responder_move(move |e: &ResponderEvent| {
                 strokes.update(|s| {
                     if let Some(stroke) = s.last_mut() {
-                        stroke.push((e.location_x, e.location_y));
+                        stroke.push((e.location.x.0, e.location.y.0));
                     }
                 });
             })
@@ -71,10 +72,8 @@ fn touch(phase: TouchPhase, path: &[u32], x: f32, y: f32, t: f64) -> EventPayloa
             } else {
                 Vec::new()
             },
-            page_x: x,
-            page_y: y + 100.0,
-            location_x: x,
-            location_y: y,
+            page: nsh_core::geometry::point(px(x), px(y + 100.0)),
+            location: nsh_core::geometry::point(px(x), px(y)),
             changed: true,
         }],
     }))
@@ -120,17 +119,20 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<Sketch>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();

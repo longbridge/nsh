@@ -1,6 +1,5 @@
-import { mount, signal, Text, View } from "nsh";
+import { Canvas, mount, Path2D, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
-import { Canvas, Path2D } from "nsh/canvas";
 import { tint, ui } from "./palette";
 
 const TAU = Math.PI * 2;
@@ -10,7 +9,7 @@ function Chip(props: { label: string; onPress: () => void }) {
   return (
     <Text
       onPress={props.onPress}
-      activeOpacity={0.6}
+      activeStyle={{ opacity: 0.6 }}
       style={{
         paddingHorizontal: 14,
         paddingVertical: 8,
@@ -41,63 +40,63 @@ function App() {
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>Canvas</Text>
       <Canvas
         style={{ height: 170, borderRadius: 12, ...ui().inset }}
-        draw={(ctx, { width, height }) => {
+        draw={(cx, { width, height }) => {
           const values = data();
           const pad = 16;
           const w = width - pad * 2, h = height - pad * 2;
           const x = (i: number) => pad + (i / (values.length - 1)) * w;
           const y = (v: number) => pad + h - (v / 100) * h;
-          const area = ctx.createLinearGradient(0, pad, 0, pad + h);
+          const area = cx.createLinearGradient(0, pad, 0, pad + h);
           area.addColorStop(0, tint(ui().accent, 0.28));
           area.addColorStop(1, tint(ui().accent, 0));
-          ctx.beginPath();
-          ctx.moveTo(x(0), pad + h);
-          values.forEach((v, i) => ctx.lineTo(x(i), y(v)));
-          ctx.lineTo(x(values.length - 1), pad + h);
-          ctx.closePath();
-          ctx.fillStyle = area;
-          ctx.fill();
-          ctx.beginPath();
-          values.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-          ctx.strokeStyle = ui().accent;
-          ctx.lineWidth = 2.5;
-          ctx.lineJoin = "round";
-          ctx.stroke();
+          cx.beginPath();
+          cx.moveTo(x(0), pad + h);
+          values.forEach((v, i) => cx.lineTo(x(i), y(v)));
+          cx.lineTo(x(values.length - 1), pad + h);
+          cx.closePath();
+          cx.fillStyle = area;
+          cx.fill();
+          cx.beginPath();
+          values.forEach((v, i) => (i ? cx.lineTo(x(i), y(v)) : cx.moveTo(x(i), y(v))));
+          cx.strokeStyle = ui().accent;
+          cx.lineWidth = 2.5;
+          cx.lineJoin = "round";
+          cx.stroke();
         }}
       />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
         <Canvas
           style={{ width: 110, height: 110 }}
-          draw={(ctx, { width, height }) => {
-            const cx = width / 2, cy = height / 2, r = width / 2 - 10;
-            ctx.lineWidth = 12;
-            ctx.lineCap = "round";
-            ctx.strokeStyle = ui().inset.backgroundColor;
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, TAU);
-            ctx.stroke();
-            const g = ctx.createConicGradient(-Math.PI / 2, cx, cy);
+          draw={(cx, { width, height }) => {
+            const centerX = width / 2, cy = height / 2, r = width / 2 - 10;
+            cx.lineWidth = 12;
+            cx.lineCap = "round";
+            cx.strokeStyle = ui().inset.backgroundColor;
+            cx.beginPath();
+            cx.arc(centerX, cy, r, 0, TAU);
+            cx.stroke();
+            const g = cx.createConicGradient(-Math.PI / 2, centerX, cy);
             g.addColorStop(0, ui().info);
             g.addColorStop(1, ui().accent);
-            ctx.strokeStyle = g;
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, -Math.PI / 2, progress.mul(TAU).sub(Math.PI / 2));
-            ctx.stroke();
-            ctx.fillStyle = ui().text;
-            ctx.font = "600 18px system-ui";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(`${Math.round(target() * 100)}%`, cx, cy);
+            cx.strokeStyle = g;
+            cx.beginPath();
+            cx.arc(centerX, cy, r, -Math.PI / 2, progress.mul(TAU).sub(Math.PI / 2));
+            cx.stroke();
+            cx.fillStyle = ui().text;
+            cx.font = "600 18px system-ui";
+            cx.textAlign = "center";
+            cx.textBaseline = "middle";
+            cx.fillText(`${Math.round(target() * 100)}%`, centerX, cy);
           }}
         />
         <Canvas
           style={{ width: 96, height: 96 }}
-          draw={(ctx) => {
-            ctx.save();
-            ctx.scale(4, 4);
-            ctx.fillStyle = ui().down;
-            ctx.fill(heart);
-            ctx.restore();
+          draw={(cx) => {
+            cx.save();
+            cx.scale(4, 4);
+            cx.fillStyle = ui().down;
+            cx.fill(heart);
+            cx.restore();
           }}
         />
       </View>

@@ -5,13 +5,15 @@
 
 use std::sync::Arc;
 
-use super::{Core, Key, Kind, NO_KEY, dirty, pressable};
+use super::{Core, Key, Kind, NO_KEY, dirty, disabling_changes};
 use crate::{
     mount::MountItem,
     ops::NodeId,
     platform::{Appearance, ColorScheme},
-    style::{Color, Style, ViewStyle},
-    tailwind::{ClassEnvironment, ClassList, ClassProps, Context, Theme, deps, position, state},
+    style::{Style, StylePatch, ViewStyle},
+    tailwind::{
+        ClassEnvironment, ClassList, ClassProps, Context, Rule, Theme, deps, position, rank, state,
+    },
     text::TextEngine,
 };
 
@@ -24,6 +26,68 @@ pub(super) struct ClassNames {
     class: Box<str>,
     list: Vec<Box<str>>,
 }
+
+/// A styled part of a node, besides the node itself: a state style
+/// (`activeStyle`, ...) or a part of a page or list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Part {
+    /// `activeStyle`.
+    Active,
+    /// `hoverStyle`.
+    Hover,
+    /// `focusStyle`.
+    Focus,
+    /// `disabledStyle`.
+    Disabled,
+    /// `selectedStyle`.
+    Selected,
+    /// `checkedStyle`.
+    Checked,
+    /// A page's `headerStyle` / `headerClass`.
+    Header,
+    /// A list's `contentClass`.
+    Content,
+}
+
+impl Part {
+    /// The state bits and rank of a state style.
+    fn state(self) -> Option<(u8, u16)> {
+        Some(match self {
+            Part::Active => (state::PRESSED, rank::ACTIVE),
+            Part::Hover => (state::HOVERED, rank::HOVER),
+            Part::Focus => (state::FOCUSED, rank::FOCUS),
+            Part::Disabled => (state::DISABLED, rank::DISABLED),
+            Part::Selected => (state::SELECTED, rank::SELECTED),
+            Part::Checked => (state::CHECKED, rank::CHECKED),
+            _ => return None,
+        })
+    }
+}
+
+/// What only some nodes have ([`super::Node`]'s `parts`).
+#[derive(Debug, Default)]
+pub(super) struct NodeParts {
+    /// The classes as set, before the state styles are merged in.
+    base: Option<Arc<ClassList>>,
+    /// The state styles, by [`Part`] (the first six).
+    states: [Option<Arc<StylePatch>>; 6],
+    /// The state styles as rules (none without any).
+    state_rules: Option<Arc<ClassList>>,
+    /// The inline styles of the other parts.
+    styles: Vec<(Part, Arc<StylePatch>)>,
+    /// The classes of the other parts.
+    classes: Vec<(Part, Arc<ClassList>)>,
+}
+
+/// The state style parts, by their index in [`NodeParts::states`].
+const STATE_PARTS: [Part; 6] = [
+    Part::Active,
+    Part::Hover,
+    Part::Focus,
+    Part::Disabled,
+    Part::Selected,
+    Part::Checked,
+];
 
 impl<M: TextEngine> Core<M> {
     /// Sets the environment class variants depend on (`dark:`, `ios:`,
@@ -75,6 +139,7 @@ impl<M: TextEngine> Core<M> {
             | (if env.platform != self.class_env.platform { u16::MAX } else { 0 });
         self.class_env = env;
         self.restyle_where(changed);
+        self.parts_restyled();
     }
 
     /// The platform reports interaction states of view `id` (`active:`,
@@ -126,9 +191,11 @@ impl<M: TextEngine> Core<M> {
             node.states &= !state::DISABLED;
         }
         if node.states != before {
-            if pressable(node.events) {
+            if disabling_changes(node.events) {
                 self.mark(key, dirty::EVENTS);
             }
+            // Its accessibility state says it.
+            self.mark(key, dirty::VIEW_PROPS);
             self.states_changed(key);
         }
     }
@@ -136,9 +203,6 @@ impl<M: TextEngine> Core<M> {
     /// Restyles `key` if its classes read its states, and the nodes inside
     /// it that read its group states.
     fn states_changed(&mut self, key: Key) {
-        if self.nodes[key as usize].underlay.is_some() {
-            self.mark_underlay(key);
-        }
         let Some(classes) = self.nodes[key as usize].classes.clone() else {
             return;
         };
@@ -150,46 +214,200 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `underlayColor` / `underlayOpacity` of `key` changed.
-    pub(super) fn underlay_changed(&mut self, key: Key) {
-        self.update_tracking(key);
-        self.mark_underlay(key);
-    }
-
-    /// Restyles `key` and its children, which an underlay changes.
-    fn mark_underlay(&mut self, key: Key) {
-        self.mark(key, dirty::VIEW);
-        for i in 0..self.nodes[key as usize].children.len() {
-            let child = self.nodes[key as usize].children[i];
-            self.mark(child, dirty::VIEW);
+    /// `selected` of `key`'s accessibility state: the `selected:` variant.
+    pub(super) fn set_selected(&mut self, key: Key, selected: bool) {
+        let node = &mut self.nodes[key as usize];
+        let before = node.states;
+        if selected {
+            node.states |= state::SELECTED;
+        } else {
+            node.states &= !state::SELECTED;
+        }
+        if node.states != before {
+            self.states_changed(key);
         }
     }
 
-    /// The underlay of `key` while it shows: pressed and not disabled.
-    fn showing_underlay(&self, key: Key) -> Option<(Color, f32)> {
-        let node = &self.nodes[key as usize];
-        let u = node.underlay.as_deref()?;
-        (node.states & (state::PRESSED | state::DISABLED) == state::PRESSED).then_some(*u)
+    /// `checked` of `key`'s accessibility state (true, not mixed): the
+    /// `checked:` variant.
+    pub(super) fn set_checked(&mut self, key: Key, checked: bool) {
+        let node = &mut self.nodes[key as usize];
+        let before = node.states;
+        if checked {
+            node.states |= state::CHECKED;
+        } else {
+            node.states &= !state::CHECKED;
+        }
+        if node.states != before {
+            self.states_changed(key);
+        }
     }
 
     /// The view style of `key` as platforms take it: fractional
-    /// translations resolved, an underlay shown while pressed (in place of
-    /// the background color and gradients).
+    /// translations resolved.
     pub(super) fn mounted_view_style(&self, key: Key) -> Box<ViewStyle> {
+        self.nodes[key as usize].mounted_view_style()
+    }
+
+    /// Sets the inline style of `key`'s `part` (`None`: removes it).
+    pub(super) fn set_part_style(&mut self, key: Key, part: Part, patch: Option<Arc<StylePatch>>) {
+        let node = &mut self.nodes[key as usize];
+        let base = node.classes.clone();
+        let parts = node.parts.get_or_insert_with(|| {
+            Box::new(NodeParts {
+                base,
+                ..NodeParts::default()
+            })
+        });
+        let patch = patch.filter(|p| !p.is_empty());
+        match part.state() {
+            Some(_) => {
+                let slot = &mut parts.states[part as usize];
+                if *slot == patch {
+                    return;
+                }
+                *slot = patch;
+                let rules: Vec<Rule> = parts
+                    .states
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        let p = p.as_ref()?;
+                        let (states, rank) = STATE_PARTS[i].state()?;
+                        Some(Rule::state_style(states, rank, p.decls().to_vec()))
+                    })
+                    .collect();
+                parts.state_rules =
+                    (!rules.is_empty()).then(|| Arc::new(ClassList::from_rules(rules, Vec::new())));
+                let base = parts.base.clone();
+                self.set_class_list(key, base);
+            }
+            None => {
+                let at = parts.styles.iter().position(|(p, _)| *p == part);
+                match (at, patch) {
+                    (Some(i), Some(p)) => parts.styles[i].1 = p,
+                    (Some(i), None) => {
+                        parts.styles.remove(i);
+                    }
+                    (None, Some(p)) => parts.styles.push((part, p)),
+                    (None, None) => return,
+                }
+                self.part_changed(key, part);
+            }
+        }
+    }
+
+    /// Sets the classes of `key`'s `part` (a page's header, a list's
+    /// content).
+    pub(super) fn set_part_class(&mut self, key: Key, part: Part, names: &str) {
+        let classes = (!names.trim().is_empty()).then(|| self.tailwind.classes(names));
+        let node = &mut self.nodes[key as usize];
+        let base = node.classes.clone();
+        let parts = node.parts.get_or_insert_with(|| {
+            Box::new(NodeParts {
+                base,
+                ..NodeParts::default()
+            })
+        });
+        let at = parts.classes.iter().position(|(p, _)| *p == part);
+        match (at, classes) {
+            (Some(i), Some(c)) => parts.classes[i].1 = c,
+            (Some(i), None) => {
+                parts.classes.remove(i);
+            }
+            (None, Some(c)) => parts.classes.push((part, c)),
+            (None, None) => return,
+        }
+        self.part_changed(key, part);
+    }
+
+    /// `part` of `key` changed: what shows it is sent again.
+    fn part_changed(&mut self, key: Key, part: Part) {
+        match part {
+            Part::Header => {
+                if self.nodes[key as usize].kind == Kind::Screen {
+                    self.mark(key, dirty::SCREEN);
+                }
+            }
+            Part::Content => {
+                let content = self.list_content(key);
+                if let Some(list) = self.nodes[key as usize].list.as_mut() {
+                    list.set_class_content(content);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The padding and gaps a list's `contentClass` sets.
+    fn list_content(&self, key: Key) -> crate::ListContentStyle {
+        let Some(style) = self.part_resolved(key, Part::Content) else {
+            return crate::ListContentStyle::default();
+        };
+        let px = |l: taffy::LengthPercentage| match l.expand() {
+            taffy::style::ExpandedLengthPercentage::Length(v) => crate::geometry::Points(v),
+            _ => crate::geometry::Points::ZERO,
+        };
+        let p = &style.layout.padding;
+        crate::ListContentStyle {
+            padding: crate::EdgeInsets {
+                top: px(p.top),
+                right: px(p.right),
+                bottom: px(p.bottom),
+                left: px(p.left),
+            },
+            row_gap: px(style.layout.gap.height),
+            column_gap: px(style.layout.gap.width),
+        }
+    }
+
+    /// The style of `key`'s `part`: its classes, then its inline style, as
+    /// they resolve now; `None` when the part has neither.
+    pub(super) fn part_resolved(&self, key: Key, part: Part) -> Option<Style> {
         let node = &self.nodes[key as usize];
-        let mut style = node.mounted_view_style();
-        if let Some((color, _)) = self.showing_underlay(key) {
-            // The underlay replaces the whole background, gradients too:
-            // drawn over the color, they would hide the feedback.
-            style.background_color = color;
-            style.clear_background_images();
+        let parts = node.parts.as_deref()?;
+        let classes = parts.classes.iter().find(|(p, _)| *p == part).map(|c| &c.1);
+        let inline = parts.styles.iter().find(|(p, _)| *p == part).map(|s| &s.1);
+        if classes.is_none() && inline.is_none() {
+            return None;
         }
-        if node.parent != NO_KEY
-            && let Some((_, opacity)) = self.showing_underlay(node.parent)
-        {
-            style.opacity *= opacity;
+        let mut style = Style::default();
+        let apply = |s: &mut Style| {
+            if let Some(i) = inline {
+                i.apply(s);
+            }
+        };
+        match classes {
+            Some(classes) => {
+                let group = |_: &str| 0;
+                let cx = Context {
+                    env: self.class_env,
+                    window: self.viewport,
+                    rtl: node.rtl,
+                    states: 0,
+                    position: 0,
+                    group: &group,
+                };
+                let mut props = ClassProps::default();
+                classes.apply(&cx, self.tailwind.theme(), &mut style, &mut props, apply);
+            }
+            None => apply(&mut style),
         }
-        style
+        Some(style)
+    }
+
+    /// The parts whose classes resolve again when the environment changes
+    /// (a header's `dark:` colors).
+    fn parts_restyled(&mut self) {
+        let keys: Vec<(Key, Part)> = self
+            .nodes
+            .iter()
+            .filter_map(|(k, n)| Some((k as Key, n.parts.as_deref()?)))
+            .flat_map(|(k, p)| p.classes.iter().map(move |(part, _)| (k, *part)))
+            .collect();
+        for (key, part) in keys {
+            self.part_changed(key, part);
+        }
     }
 
     /// Sets `class` (`list == false`) or `classList` of `key`.
@@ -237,6 +455,18 @@ impl<M: TextEngine> Core<M> {
     /// straight here).
     pub(super) fn set_class_list(&mut self, key: Key, classes: Option<Arc<ClassList>>) {
         let node = &mut self.nodes[key as usize];
+        // The state styles go over the classes.
+        let classes = match node.parts.as_deref_mut() {
+            Some(parts) => {
+                parts.base = classes.clone();
+                match (classes, &parts.state_rules) {
+                    (Some(c), Some(s)) => Some(Arc::new(c.merged(s))),
+                    (None, Some(s)) => Some(s.clone()),
+                    (c, None) => c,
+                }
+            }
+            None => classes,
+        };
         let had_groups = node
             .classes
             .as_ref()
@@ -274,15 +504,61 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The design tokens changed: classes naming them
+    /// (`bg-primary`) are resolved again, on nodes and on Rust components.
+    pub(super) fn class_tokens_changed(&mut self) {
+        let tokens = self.components.tokens.clone();
+        let Some(changed) = self.tailwind.set_tokens(&tokens) else {
+            return;
+        };
+        let reads =
+            |c: &Option<Arc<ClassList>>| c.as_ref().is_some_and(|c| c.deps() & changed != 0);
+        let keys: Vec<Key> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.class_names.is_some() && (changed == u16::MAX || reads(&n.classes)))
+            .map(|(k, _)| k as Key)
+            .collect();
+        for key in keys {
+            self.set_classes(key, None, None);
+        }
+        let hosts: Vec<NodeId> = self
+            .components
+            .instances
+            .iter()
+            .filter(|(_, inst)| {
+                (!inst.class.is_empty() || !inst.class_list.is_empty())
+                    && (changed == u16::MAX || reads(&inst.user))
+            })
+            .map(|(host, _)| *host)
+            .collect();
+        for host in hosts {
+            self.update_user_class(host);
+        }
+        // The app's classes on the views' elements (`app_class`).
+        let nodes: Vec<_> = self
+            .components
+            .app_classes
+            .iter()
+            .map(|(&id, entry)| (id, entry.clone()))
+            .collect();
+        for (id, (own, class, outer)) in nodes {
+            let app = self.app_class_list(&class);
+            let user = self.merge_user(Some(app), outer);
+            let list = match (own, user) {
+                (Some(a), Some(b)) => Some(Arc::new(a.merged(&b))),
+                (a, b) => a.or(b),
+            };
+            if let Ok(key) = self.key(id) {
+                self.set_class_list(key, list);
+            }
+        }
+    }
+
     /// Tells the platform which states of `key` to report.
     pub(super) fn update_tracking(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];
-        let tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states())
-            | if node.underlay.is_some() {
-                state::PRESSED
-            } else {
-                0
-            };
+        let tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states());
         if tracked != node.tracked {
             node.tracked = tracked;
             // The platform stops reporting the states it no longer tracks,
@@ -343,6 +619,37 @@ impl<M: TextEngine> Core<M> {
                 self.restyle(k);
             }
         }
+    }
+
+    /// `key` joined `parent`, or left it (`parent` is where it was): the
+    /// `group-*:` classes in it were resolved with the groups it had, which
+    /// only matters while one of them, or of the new ones, is in a state (a
+    /// disabled row, a pressed card). A leaf that reads no group skips the
+    /// walk.
+    pub(super) fn groups_changed(&mut self, key: Key, parent: Key) {
+        let node = &self.nodes[key as usize];
+        let reads = node
+            .classes
+            .as_ref()
+            .is_some_and(|c| c.deps() & deps::GROUP != 0);
+        if !reads && node.children.is_empty() {
+            return;
+        }
+        let mut k = parent;
+        loop {
+            if k == NO_KEY {
+                return;
+            }
+            let n = &self.nodes[k as usize];
+            if n.states != 0 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty()) {
+                break;
+            }
+            k = n.parent;
+        }
+        if reads {
+            self.restyle(key);
+        }
+        self.restyle_subtree(key, deps::GROUP);
     }
 
     /// Restyles the children of `parent` that depend on their position.
@@ -428,7 +735,7 @@ impl<M: TextEngine> Core<M> {
                 0
             };
             let positional = pos != 0 && node.parent != NO_KEY;
-            let window = (self.viewport.width, self.viewport.height);
+            let window = self.viewport;
             let cx = Context {
                 env: self.class_env,
                 window,
@@ -468,7 +775,9 @@ impl<M: TextEngine> Core<M> {
         let view_props = old.pointer_events != props.pointer_events;
         let image = old.resize_mode != props.resize_mode;
         let input = old.placeholder_color != props.placeholder_color
-            || old.caret_color != props.caret_color;
+            || old.caret_color != props.caret_color
+            || old.selection_color != props.selection_color;
+        let selection = old.selection_color != props.selection_color;
         node.class_props = (props != ClassProps::default()).then(|| Box::new(props));
         let kind = node.kind;
         if paragraph && kind == Kind::Text {
@@ -479,6 +788,9 @@ impl<M: TextEngine> Core<M> {
         }
         if image {
             self.mark(key, dirty::IMAGE);
+        }
+        if selection && kind == Kind::Text {
+            self.mark_text_block(key);
         }
         if input && kind == Kind::Input {
             self.mark(key, dirty::INPUT);

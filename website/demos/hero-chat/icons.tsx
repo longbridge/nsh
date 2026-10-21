@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D } from "nsh";
 
 /** Line glyphs drawn in a 20 × 20 box with the tint as stroke. */
 export type IconName =
@@ -33,24 +33,24 @@ export type IconName =
   | "bell"
   | "spark";
 
-type Draw = (ctx: CanvasRenderingContext2D) => void;
+type Draw = (cx: CanvasRenderingContext2D) => void;
 
-const line = (ctx: CanvasRenderingContext2D, points: number[]) => {
-  ctx.beginPath();
-  ctx.moveTo(points[0], points[1]);
-  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
-  ctx.stroke();
+const line = (cx: CanvasRenderingContext2D, points: number[]) => {
+  cx.beginPath();
+  cx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) cx.lineTo(points[i], points[i + 1]);
+  cx.stroke();
 };
-const rect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-  ctx.stroke();
+const rect = (cx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+  cx.beginPath();
+  cx.roundRect(x, y, w, h, r);
+  cx.stroke();
 };
-const circle = (ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill = false) => {
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  if (fill) ctx.fill();
-  else ctx.stroke();
+const circle = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, fill = false) => {
+  cx.beginPath();
+  cx.arc(x, y, r, 0, Math.PI * 2);
+  if (fill) cx.fill();
+  else cx.stroke();
 };
 
 const glyphs: Record<IconName, Draw> = {
@@ -213,14 +213,14 @@ export function Icon(props: { name: IconName; size?: number; tint: string }) {
     <Canvas
       pointerEvents="none"
       style={{ width: size, height: size }}
-      draw={(ctx, { width }) => {
-        ctx.scale(width / 20, width / 20);
-        ctx.strokeStyle = props.tint;
-        ctx.fillStyle = props.tint;
-        ctx.lineWidth = 1.6;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        glyphs[props.name](ctx);
+      draw={(cx, { width }) => {
+        cx.scale(width / 20, width / 20);
+        cx.strokeStyle = props.tint;
+        cx.fillStyle = props.tint;
+        cx.lineWidth = 1.6;
+        cx.lineCap = "round";
+        cx.lineJoin = "round";
+        glyphs[props.name](cx);
       }}
     />
   );

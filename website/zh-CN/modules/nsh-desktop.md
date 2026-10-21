@@ -6,9 +6,19 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否在桌面上。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码用 `nsh_core::ui::desktop`（`set_title_bar`、`title_bar`、`close_window`）绘制自己的标题栏、关闭窗口，并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`，其中还有窗口的其他函数和菜单。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否在桌面上。
 
-```ts
+```rust tabs
+use nsh_core::{
+    desktop::TitleBarStyle,
+    ui::{
+        desktop::{close_window, set_title_bar, title_bar},
+        prelude::*,
+    },
+};
+```
+
+```tsx tabs
 import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 ```
 
@@ -18,17 +28,17 @@ import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 const isAvailable: boolean;
 ```
 
-在 macOS、Windows 和 Linux 上为 `true`，其他平台为 `false`。
+在 macOS、Windows 和 Linux 上为 `true`，其他平台为 `false`。Rust：`os().is_desktop()`。
 
 ## Window
 
 ```ts
 const Window: {
-  setTitle(title: string): Promise<void>;
-  setTitleBar(style: "default" | "hidden", height?: number): Promise<void>;
-  minimize(): Promise<void>;
-  toggleMaximize(): Promise<void>;
-  toggleFullScreen(): Promise<void>;
+  setTitle(title: string): void;
+  setTitleBar(style: "default" | "hidden", height?: number): void;
+  minimize(): void;
+  toggleMaximize(): void;
+  toggleFullScreen(): void;
   setFrame(frame: {
     x?: number;
     y?: number;
@@ -36,24 +46,26 @@ const Window: {
     height?: number;
     animated?: boolean;
     anchorTop?: boolean;
-  }): Promise<void>;
-  setLevel(level: "normal" | "floating" | "desktopIcon"): Promise<void>;
-  orderFront(): Promise<void>;
-  close(): Promise<void>;
+  }): void;
+  setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  orderFront(): void;
+  close(): void;
 };
 ```
 
-| 成员 | 说明 |
-|---|---|
-| `setTitle(title)` | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
-| `setTitleBar(style, height?)` | `"hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`"default"` 恢复系统标题栏。 |
-| `minimize()` | 最小化窗口。 |
-| `toggleMaximize()` | 最大化窗口，已最大化时还原。 |
-| `toggleFullScreen()` | 进入或退出全屏。 |
-| `setFrame(frame)` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `width`、`height` 包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`x`、`y` 在 macOS 屏幕坐标中表示窗口左下角，在 Windows 上表示左上角。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。`anchorTop: true` 在只改 `height` 而不给 `y` 时保持顶边不动：窗口从底边伸缩。 |
-| `setLevel(level)` | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
-| `orderFront()` | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
-| `close()` | 关闭窗口，应用随之结束。 |
+Rust 列给出 `nsh_core::ui::desktop` 中的函数。
+
+| 成员 | Rust | 说明 |
+|---|---|---|
+| `setTitle(title)` | | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
+| `setTitleBar(style, height?)` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `"hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`"default"` 恢复系统标题栏（Rust：`set_title_bar(TitleBarStyle::Default, None)`）。 |
+| `minimize()` | | 最小化窗口。 |
+| `toggleMaximize()` | | 最大化窗口，已最大化时还原。 |
+| `toggleFullScreen()` | | 进入或退出全屏。 |
+| `setFrame(frame)` | | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `width`、`height` 包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`x`、`y` 在 macOS 屏幕坐标中表示窗口左下角，在 Windows 上表示左上角。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。`anchorTop: true` 在只改 `height` 而不给 `y` 时保持顶边不动：窗口从底边伸缩。 |
+| `setLevel(level)` | | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
+| `orderFront()` | | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
+| `close()` | `close_window()` | 关闭窗口，应用随之结束。 |
 
 窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。GPUI 窗口的尺寸、位置和层级由宿主在创建窗口时配置。
 
@@ -61,9 +73,37 @@ const Window: {
 
 ## 自定义标题栏
 
-隐藏标题栏后，应用绘制自己的标题栏，并用 `desktop={{ windowDrag: true }}` 指定哪些部分可以拖动窗口：
+隐藏标题栏后，应用绘制自己的标题栏，并指定哪些部分可以拖动窗口：Rust 用 `.window_drag(true)`，TSX 用 `desktop={{ windowDrag: true }}`：
 
-```tsx
+```rust tabs
+use nsh_core::{
+    desktop::TitleBarStyle,
+    ui::{
+        desktop::{set_title_bar, title_bar},
+        prelude::*,
+    },
+};
+
+#[component]
+fn TitleBar() -> impl IntoElement {
+    set_title_bar(TitleBarStyle::Hidden, Some(px(40.0))); // 40 点高的标题栏
+    view()
+        .window_drag(true)
+        .h(move || match title_bar().top {
+            top if top > px(0.0) => top,
+            _ => px(40.0),
+        })
+        .pl(move || title_bar().left + px(8.0)) // macOS 的红绿灯
+        .pr(move || title_bar().right + px(8.0)) // Windows 的标题栏按钮、GTK 的窗口按钮
+        .flex_row()
+        .items_center()
+        .child(text("My App"))
+        .child(view().flex_1())
+        .child(input().placeholder("搜索").w(px(180.0)))
+}
+```
+
+```tsx tabs
 import { Input, Text, View } from "nsh";
 import { titleBar, Window } from "nsh/desktop";
 
@@ -91,7 +131,7 @@ function TitleBar() {
 
 按住带 `windowDrag` 的视图会像按住系统标题栏一样拖动窗口：双击最大化（或执行用户的设置：macOS 的“连按窗口标题栏以”），在 Windows 和 Linux 上右键打开窗口菜单。
 
-- 由最近的设置了 `windowDrag` 的视图决定：`desktop={{ windowDrag: false }}` 让可拖动视图中的一部分保持可点击。
+- 由最近的设置了 `windowDrag` 的视图决定：`.window_drag(false)`（`desktop={{ windowDrag: false }}`）让可拖动视图中的一部分保持可点击。
 - 可拖动视图中的文本框，以及带按压或触摸处理（`onPress`、`onTouch*`、responder）的视图，不用设置也保持可点击：上例中的搜索框和其中的按钮照常工作。
 - `windowDrag` 在系统标题栏下也能用：侧边栏或工具栏同样可以拖动窗口。
 
@@ -101,7 +141,7 @@ function TitleBar() {
 const titleBar: Accessor<{ height: number; left: number; right: number }>;
 ```
 
-隐藏的标题栏的区域，单位为点（响应式）：它的 `height`，以及系统窗口按钮在左端（`left`）和右端（`right`）占用的宽度。用它来布局标题栏，避免内容被窗口按钮遮住。系统显示标题栏时（以及全屏时、非桌面平台上）三者都为 0。
+隐藏的标题栏的区域，单位为点（响应式）：它的 `height`，以及系统窗口按钮在左端（`left`）和右端（`right`）占用的宽度。用它来布局标题栏，避免内容被窗口按钮遮住。系统显示标题栏时（以及全屏时、非桌面平台上）三者都为 0。Rust：`title_bar() -> Edges<Points>`，其中 `top` 是高度，`left` 和 `right` 是窗口按钮的宽度；读取它会订阅变化。
 
 | | `height` | `left` | `right` |
 |---|---|---|---|

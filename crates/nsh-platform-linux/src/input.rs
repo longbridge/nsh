@@ -23,8 +23,9 @@
 //!
 //! Presses follow React Native and the other backends: the innermost view
 //! listening to press events gets them (or the pressable text span under
-//! the pointer); `activeOpacity` fades the view natively; inside scroll
-//! views a touch reports `onPressIn` only after ~130 ms, as it may start a
+//! the pointer; how it looks while pressed is the app's `activeStyle`,
+//! applied by the core from the reported states); inside scroll
+//! views a touch reports `onPressDown` only after ~130 ms, as it may start a
 //! scroll. A move beyond 6 pt starts the innermost pan or scroll view that
 //! takes that direction (only touches drag scroll views: the mouse scrolls
 //! with the wheel, the touchpad, the keyboard and the indicator, and its
@@ -32,9 +33,9 @@
 //! press is over.
 //!
 //! A view with a `panActivation` around the first pointer gates it
-//! ([`PanActivation::decide`] on every move): the scroll views around the
-//! view wait until its pan fails, and never take the drag once it
-//! activates; the activation goes to JS with the move's touches
+//! ([`Gate`], `PanActivation::decide` on every move): the scroll views
+//! around the view wait until its pan fails, and never take the drag once
+//! it activates; the activation goes to JS with the move's touches
 //! (`TouchEvent::activated`), where the view becomes the responder.
 //!
 //! A scroll stays on the scroll view it began in (a touchpad gesture until
@@ -44,6 +45,10 @@
 //!
 //! Real and simulated input ([`simulate`]) share the same handlers, which
 //! take root coordinates and millisecond timestamps.
+//!
+//! The decisions over plain data (what a pointer going down may start, a
+//! press's events, hover changes, hit areas, pinches, wheel latching) are
+//! [`nsh_core::input`]'s, shared by the desktop backends.
 
 use std::{
     cell::{Cell, RefCell},
@@ -53,38 +58,38 @@ use std::{
 
 use gtk4::{self as gtk, gdk, glib, glib::translate::ToGlibPtr, graphene, prelude::*};
 use nsh_core::{
-    Command, Cursor, EventKind, EventMask, EventPayload, GestureValues, NodeId, PanActivation,
-    PayloadValue, PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    Command, Cursor, EventKind, EventPayload, GestureValues, NodeId, PayloadValue, PointerEvents,
+    ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    geometry::{Points, point},
+    input::{
+        self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
+        SCROLL_PRESS_DELAY, VelocityTracker, ZOOM_IDLE, has_press, laid_out, latch_holds,
+        transforms,
+    },
     tailwind::state::{HOVERED, PRESSED},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{surface::Surface, view::NshView};
 
-/// Distance a pointer moves before a pan or scroll drag starts.
-const PAN_SLOP: f32 = 6.0;
-/// Distance a pointer moves before its press is cancelled.
-const PRESS_SLOP: f32 = 10.0;
-/// How far outside the pressed view (and its hit slop) a release still
-/// counts as a press.
-const PRESS_RETENTION: f32 = 8.0;
-/// Mouse wheel notches this close together (ms) are one scroll: they stay
-/// on the scroll view the first one moved.
-const WHEEL_LATCH: f64 = 200.0;
-/// Scale one Ctrl + wheel notch pinches by.
-const ZOOM_STEP: f32 = 1.1;
-/// A Ctrl + wheel pinch ends once the notches stop for this long (ms).
-const ZOOM_IDLE: u64 = 300;
-/// Delay before `onPressIn` for touches inside scroll views.
-const SCROLL_PRESS_DELAY: u64 = 130;
-/// Default `delayLongPress`.
-const LONG_PRESS: f32 = 500.0;
-/// Velocities are measured over this many milliseconds.
-const VELOCITY_WINDOW: f64 = 100.0;
-/// Duration of the `activeOpacity` fade when pressed.
-const FADE_IN_MS: f64 = 100.0;
-/// Duration of the fade back.
-const FADE_OUT_MS: f64 = 250.0;
+type Press = input::Press<NshView>;
+
+/// A pinch / rotation in progress.
+#[derive(Clone)]
+struct Transform {
+    view: NshView,
+    pinch: bool,
+    rotation: bool,
+    scale: f32,
+    degrees: f32,
+}
+
+/// Two touchscreen fingers transforming a view.
+struct TwoFinger {
+    keys: [Key; 2],
+    pinch: Pinch,
+    transform: Transform,
+}
 
 /// Which device a pointer is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,8 +98,6 @@ enum Key {
     Mouse,
     /// A touchscreen finger, by its event sequence.
     Touch(usize),
-    /// A scripted finger ([`simulate`]).
-    Simulated,
 }
 
 /// Pointer state of one surface.
@@ -120,8 +123,6 @@ pub(crate) struct Input {
     hovered: RefCell<Vec<NshView>>,
     /// Native gesture values by view.
     gestures: RefCell<FxHashMap<NodeId, (glib::WeakRef<NshView>, GestureValues)>>,
-    /// Running `activeOpacity` fades.
-    fades: RefCell<FxHashMap<NodeId, Fade>>,
     /// The JS responder blocks native scrolling and pans.
     js_block: Cell<bool>,
     /// Where the pointer last was (root coordinates), for events GTK
@@ -129,30 +130,8 @@ pub(crate) struct Input {
     last: Cell<Option<(f32, f32)>>,
     /// Next touch identifier.
     next_id: Cell<u32>,
-    /// Next press / fade generation (invalidates callbacks of earlier ones).
+    /// Next press generation (invalidates callbacks of earlier ones).
     next_gen: Cell<u64>,
-}
-
-/// What a drag on a view may start.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Candidate {
-    /// A pan with these values (both when it only has listeners).
-    Pan { x: bool, y: bool },
-    /// A scroll view.
-    Scroll { horizontal: bool },
-}
-
-impl Candidate {
-    /// Whether a drag by `(dx, dy)` starts it: single-axis pans and scroll
-    /// views take mostly-along-their-axis movements, so a horizontal pan
-    /// coexists with a vertical scroll view around it.
-    fn accepts(self, dx: f32, dy: f32) -> bool {
-        let horizontal = dx.abs() > dy.abs();
-        match self {
-            Candidate::Pan { x, y } => (x && y) || (x && horizontal) || (y && !horizontal),
-            Candidate::Scroll { horizontal: h } => h == horizontal,
-        }
-    }
 }
 
 /// What a pointer is doing.
@@ -171,25 +150,6 @@ enum Mode {
     Thumb(NshView, (f32, f32)),
     /// One of two fingers pinching / rotating.
     TwoFinger,
-}
-
-/// A press in progress.
-struct Press {
-    /// The view whose bounds the press must end in (the text view for a
-    /// span).
-    view: NshView,
-    /// The node that gets the events.
-    node: NodeId,
-    events: EventMask,
-    /// `activeOpacity` (none for spans).
-    feedback: Option<f32>,
-    /// Milliseconds before a long press.
-    long_delay: f32,
-    /// `onPressIn` was reported.
-    pressed: bool,
-    /// `onLongPress` was reported: the release is no press.
-    long: bool,
-    generation: u64,
 }
 
 /// A pointer that is down.
@@ -224,55 +184,6 @@ struct Pointer {
     moved: bool,
 }
 
-/// A view's `panActivation` deciding on a pointer's drag.
-struct Gate {
-    /// The gated view.
-    id: NodeId,
-    activation: PanActivation,
-    /// Candidates from this index on are around the gated view: they wait
-    /// for the pan to fail.
-    outer: usize,
-}
-
-impl Gate {
-    /// Decides on a drag by `(dx, dy)` from where the pointer went down:
-    /// the gated view when its pan activates (the candidates around it are
-    /// dropped), and whether the gate is still undecided.
-    fn decide(
-        &self,
-        candidates: &mut Vec<(NshView, Candidate)>,
-        dx: f32,
-        dy: f32,
-    ) -> (Option<NodeId>, bool) {
-        match self.activation.decide(dx, dy) {
-            Some(true) => {
-                candidates.truncate(self.outer);
-                (Some(self.id), false)
-            }
-            Some(false) => (None, false),
-            None => (None, true),
-        }
-    }
-}
-
-/// A pinch / rotation in progress.
-#[derive(Clone)]
-struct Transform {
-    view: NshView,
-    pinch: bool,
-    rotation: bool,
-    scale: f32,
-    degrees: f32,
-}
-
-/// Two touchscreen fingers transforming a view.
-struct TwoFinger {
-    keys: [Key; 2],
-    distance: f32,
-    angle: f32,
-    transform: Transform,
-}
-
 /// A touchpad scroll gesture.
 struct Wheel {
     view: NshView,
@@ -281,57 +192,6 @@ struct Wheel {
     velocity: VelocityTracker,
     /// Began with a hold (fingers resting) and has not scrolled yet.
     held: bool,
-}
-
-/// An `activeOpacity` fade.
-struct Fade {
-    /// The view's fade before the press.
-    base: f32,
-    tick: Option<gtk::TickCallbackId>,
-    generation: u64,
-}
-
-/// Estimates a pointer's velocity from its recent positions.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct VelocityTracker {
-    samples: [(f64, f32, f32); VelocityTracker::LEN],
-    count: usize,
-    head: usize,
-}
-
-impl VelocityTracker {
-    const LEN: usize = 16;
-
-    /// The pointer is at `(x, y)` at `time` (ms).
-    pub(crate) fn add(&mut self, time: f64, x: f32, y: f32) {
-        self.samples[self.head] = (time, x, y);
-        self.head = (self.head + 1) % Self::LEN;
-        self.count = (self.count + 1).min(Self::LEN);
-    }
-
-    /// Points per second over the last [`VELOCITY_WINDOW`] ms (zero after
-    /// a pause).
-    pub(crate) fn velocity(&self) -> (f32, f32) {
-        if self.count < 2 {
-            return (0.0, 0.0);
-        }
-        let at = |i: usize| self.samples[(self.head + Self::LEN - 1 - i) % Self::LEN];
-        let newest = at(0);
-        let mut oldest = newest;
-        for i in 1..self.count {
-            let s = at(i);
-            if newest.0 - s.0 > VELOCITY_WINDOW {
-                break;
-            }
-            oldest = s;
-        }
-        let dt = newest.0 - oldest.0;
-        if dt < 1.0 {
-            return (0.0, 0.0);
-        }
-        let k = (1000.0 / dt) as f32;
-        ((newest.1 - oldest.1) * k, (newest.2 - oldest.2) * k)
-    }
 }
 
 // --- Installation and the views' hooks ----------------------------------------------
@@ -372,11 +232,6 @@ pub(crate) fn reset(surface: &Surface) {
     input.hover_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
     input.gestures.borrow_mut().clear();
-    for (_, fade) in input.fades.borrow_mut().drain() {
-        if let Some(tick) = fade.tick {
-            tick.remove();
-        }
-    }
     input.js_block.set(false);
 }
 
@@ -395,12 +250,10 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
 }
 
 /// Whether hovering `view` matters: for its `hover:` styles (the
-/// `HOVERED` state) or its `onHoverIn` / `onHoverOut`.
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
 fn hoverable(view: &NshView) -> bool {
     let s = view.state();
-    s.tracked & HOVERED != 0
-        || s.events.contains(EventKind::HoverIn)
-        || s.events.contains(EventKind::HoverOut)
+    input::hoverable(s.tracked, s.events)
 }
 
 fn update_hover_tracking(surface: &Surface, view: &NshView) {
@@ -421,13 +274,9 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
 pub(crate) fn set_state(surface: &Surface, view: &NshView, bit: u8, on: bool) {
     let (id, next) = {
         let mut s = view.state_mut();
-        if s.tracked & bit == 0 {
+        let Some(next) = input::next_states(s.tracked, s.states, bit, on) else {
             return;
-        }
-        let next = if on { s.states | bit } else { s.states & !bit };
-        if next == s.states {
-            return;
-        }
+        };
         s.states = next;
         (s.id, next)
     };
@@ -454,8 +303,7 @@ pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
 
 /// The view's props changed.
 pub(crate) fn props_changed(_surface: &Rc<Surface>, _view: &NshView) {
-    // `pointerEvents`, `hitSlop`, `activeOpacity` and `delayLongPress` are
-    // read from the state when a pointer goes down.
+    // `pointerEvents`, `hitSlop` and `delayLongPress` are read from the state when a pointer goes down.
 }
 
 /// The view's style changed (cursor).
@@ -517,23 +365,16 @@ fn cursor_name(cursor: Cursor, pressable: bool) -> Option<&'static str> {
     })
 }
 
-fn has_press(events: EventMask) -> bool {
-    [
-        EventKind::Press,
-        EventKind::LongPress,
-        EventKind::PressIn,
-        EventKind::PressOut,
-    ]
-    .into_iter()
-    .any(|k| events.contains(k))
-}
-
 fn update_cursor(view: &NshView) {
     let name = {
         let s = view.state();
-        // Selectable text shows the I-beam (a press target its pointer).
-        cursor_name(s.style.cursor, has_press(s.events))
-            .or_else(|| crate::text::selectable(&s).then_some("text"))
+        // Selectable text and the texts of selection areas show the
+        // I-beam (a press target its pointer).
+        cursor_name(s.style.cursor, has_press(s.events)).or_else(|| {
+            let selects = crate::text::selectable(&s)
+                || (s.text.is_some() && crate::selection_area::takes_part(view));
+            selects.then_some("text")
+        })
     };
     let current = view.cursor().and_then(|c| c.name());
     if current.as_deref() != name {
@@ -639,13 +480,35 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
-            down(surface, Key::Mouse, x, y, time)
+            down(surface, Key::Mouse, x, y, time, event.modifier_state())
+        }
+        T::ButtonPress
+            if button() == Some(gdk::BUTTON_SECONDARY)
+                && context_menu(surface, x, y, event.modifier_state()) =>
+        {
+            return glib::Propagation::Stop;
         }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
             up(surface, Key::Mouse, x, y, time, false)
         }
-        T::MotionNotify => motion(surface, Key::Mouse, x, y, time),
-        T::TouchBegin => down(surface, touch_key(event), x, y, time),
+        T::MotionNotify => {
+            motion(surface, Key::Mouse, x, y, time);
+            let state = event.modifier_state();
+            let buttons = gdk::ModifierType::BUTTON1_MASK
+                | gdk::ModifierType::BUTTON2_MASK
+                | gdk::ModifierType::BUTTON3_MASK;
+            if !state.intersects(buttons) {
+                hover_moved(surface, x, y, state);
+            }
+        }
+        T::TouchBegin => down(
+            surface,
+            touch_key(event),
+            x,
+            y,
+            time,
+            event.modifier_state(),
+        ),
         T::TouchUpdate => motion(surface, touch_key(event), x, y, time),
         T::TouchEnd => up(surface, touch_key(event), x, y, time, false),
         T::TouchCancel => up(surface, touch_key(event), x, y, time, true),
@@ -669,6 +532,45 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         _ => {}
     }
     glib::Propagation::Proceed
+}
+
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it (true:
+/// the click is taken). Text fields are GTK's widgets, which show their
+/// own menu.
+fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> bool {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return false;
+    };
+    for v in chain(&hit.view) {
+        let (id, listens, input) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+            )
+        };
+        if listens {
+            let (location_x, location_y) = local(surface, &v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location: point(Points(location_x), Points(location_y)),
+                page: point(Points(x), Points(y)),
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                    alt: state.contains(gdk::ModifierType::ALT_MASK),
+                    shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                    cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if input {
+            return false;
+        }
+    }
+    false
 }
 
 /// The event's position in the root's coordinates (`None` for events of
@@ -751,15 +653,15 @@ fn scroll_event(
 
 // --- Simulation ---------------------------------------------------------------------
 
-/// A simulated pointer action ([`crate::script`]), in root coordinates.
+/// A simulated pointer action of the mouse ([`crate::synth`]), in root
+/// coordinates.
+#[cfg(feature = "dev")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Simulated {
-    /// Press at `(x, y)`, with the mouse when `true`, else a finger.
-    Down(f32, f32, bool),
-    /// Move to `(x, y)` while pressed.
-    Move(f32, f32, bool),
-    /// Release at `(x, y)`.
-    Up(f32, f32, bool),
+    /// A press at `(x, y)`.
+    Down(f32, f32),
+    /// A release at `(x, y)`.
+    Up(f32, f32),
     /// A wheel / touchpad scroll at `(x, y)` by `(dx, dy)` points.
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
@@ -767,15 +669,15 @@ pub(crate) enum Simulated {
 }
 
 /// Feeds a simulated pointer action through the same path as real input.
-/// A simulated finger's drags scroll, the mouse's do not.
+#[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
-    let key = |mouse| if mouse { Key::Mouse } else { Key::Simulated };
     match action {
-        Simulated::Down(x, y, mouse) => down(surface, key(mouse), x, y, time),
-        Simulated::Move(x, y, mouse) => motion(surface, key(mouse), x, y, time),
-        Simulated::Up(x, y, mouse) => {
-            up(surface, key(mouse), x, y, time, false);
+        Simulated::Down(x, y) => {
+            down(surface, Key::Mouse, x, y, time, gdk::ModifierType::empty())
+        }
+        Simulated::Up(x, y) => {
+            up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
             if let Some(native) = pick(&surface.root, x, y).and_then(|hit| hit.native) {
@@ -786,11 +688,15 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             let step = WheelInput::Step { notches: false };
             wheel_input(surface, x, y, dx, dy, time, step);
         }
-        Simulated::Hover(x, y) => hover(surface, x, y),
+        Simulated::Hover(x, y) => {
+            hover(surface, x, y);
+            hover_moved(surface, x, y, gdk::ModifierType::empty());
+        }
     }
 }
 
 /// Focuses `widget` or the first focusable widget inside it.
+#[cfg(feature = "dev")]
 fn focus_native(widget: &gtk::Widget) {
     if widget.grab_focus() {
         return;
@@ -861,24 +767,16 @@ fn pick_in(view: &NshView, p: graphene::Point) -> Option<Hit> {
                 s.kind,
                 ViewKind::Scroll | ViewKind::Image | ViewKind::Stack | ViewKind::Input
             );
-        let (w, h) = (s.frame.width, s.frame.height);
-        let (x, y) = (p.x(), p.y());
-        let inside = x >= 0.0 && y >= 0.0 && x < w && y < h;
-        let slop = s.props.hit_slop;
-        let in_slop =
-            x >= -slop.left && y >= -slop.top && x < w + slop.right && y < h + slop.bottom;
-        let children = if clip {
-            inside
-        } else if laid_out(s.kind, s.id) {
-            in_slop
-                || s.overflow.is_some_and(|e| {
-                    x >= e.x && y >= e.y && x < e.x + e.width && y < e.y + e.height
-                })
-        } else {
-            // The platform places these views' children (screens, header
-            // items) and the core knows no area for them.
-            true
-        };
+        let HitArea {
+            in_slop, children, ..
+        } = input::hit_area(
+            point(Points(p.x()), Points(p.y())),
+            s.frame.size,
+            s.props.hit_slop,
+            s.overflow,
+            clip,
+            laid_out(s.kind, s.id),
+        );
         (s.props.pointer_events, in_slop, children)
     };
     let own = || (pe != PointerEvents::BoxNone && in_slop).then(|| hit(view, None));
@@ -913,12 +811,6 @@ fn pick_in(view: &NshView, p: graphene::Point) -> Option<Hit> {
         }
     }
     own()
-}
-
-/// Whether the core lays out the children of a view of `kind`, so that
-/// they are outside its bounds only in its overflow area.
-fn laid_out(kind: ViewKind, id: NodeId) -> bool {
-    id != ROOT_ID && matches!(kind, ViewKind::View | ViewKind::Text)
 }
 
 fn hit(view: &NshView, native: Option<gtk::Widget>) -> Hit {
@@ -958,18 +850,6 @@ fn gesture_values(surface: &Surface, view: &NshView, id: NodeId) -> GestureValue
         .unwrap_or_default()
 }
 
-/// Whether a view pinches / rotates natively or listens to it.
-fn transforms(values: &GestureValues, events: EventMask) -> (bool, bool) {
-    (
-        values.pinch.is_some()
-            || events.contains(EventKind::PinchStart)
-            || events.contains(EventKind::PinchEnd),
-        values.rotation.is_some()
-            || events.contains(EventKind::RotationStart)
-            || events.contains(EventKind::RotationEnd),
-    )
-}
-
 // --- Pointers -----------------------------------------------------------------------
 
 fn take(surface: &Surface, key: Key) -> Option<Pointer> {
@@ -982,7 +862,7 @@ fn put(surface: &Surface, p: Pointer) {
     surface.input.pointers.borrow_mut().push(p);
 }
 
-fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
+fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: gdk::ModifierType) {
     // A release we never saw (the window lost the grab).
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
@@ -996,9 +876,6 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     }
     let touch = key != Key::Mouse;
     let native = hit.native.is_some();
-    // Mouse drags over selectable text select it (`text.rs`) rather than
-    // pan.
-    let selects = !touch && !native && crate::text::selectable(&hit.view.state());
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
     // pointer, where a drag on the content moves the content with it.
@@ -1033,74 +910,56 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
             mode: Mode::Thumb(view.clone(), (x, y)),
             moved: false,
         };
-        p.velocity.add(time, x, y);
+        p.velocity.add(time, point(Points(x), Points(y)));
         crate::scroll::thumb_begin(surface, view);
         put(surface, p);
         return;
     }
-    let mut path = Vec::new();
-    let mut candidates = Vec::new();
-    let mut pinch = None;
-    let mut pressed = Vec::new();
-    let mut in_scroll = false;
-    let mut gate = None;
+    // A press clears a selection anywhere else; the mouse selects in the
+    // selection area it presses in (`selection_area.rs`).
+    let area = crate::selection_area::pressed(surface, &hit.view, !touch, native);
+    // Mouse drags over selectable text or in a selection area select it
+    // (`text.rs`) rather than pan.
+    let selects =
+        area.is_some() || (!touch && !native && crate::text::selectable(&hit.view.state()));
     // The gate follows the first pointer only, as on the other platforms.
     let first = input.pointers.borrow().is_empty();
+    let options = GrabOptions::new(touch, native, selects, first);
+    let mut grab = Grab::default();
     for v in &views {
         let s = v.state();
-        if s.events.contains(EventKind::Touch) {
-            path.push(s.id);
-        }
-        if s.tracked & PRESSED != 0 {
-            pressed.push(v.clone());
-        }
-        let values = gesture_values(surface, v, s.id);
-        if !native
-            && !selects
-            && (values.pan_x.is_some()
-                || values.pan_y.is_some()
-                || s.events.contains(EventKind::PanStart)
-                || s.events.contains(EventKind::PanEnd))
-        {
-            let (x, y) = match (values.pan_x.is_some(), values.pan_y.is_some()) {
-                (false, false) => (true, true),
-                axes => axes,
-            };
-            candidates.push((v.clone(), Candidate::Pan { x, y }));
-        }
-        if let Some(scroll) = &s.scroll {
-            in_scroll = true;
-            // Dragging the content is a touchscreen's way to scroll; on the
-            // desktop the mouse's drags are the app's.
-            if touch && !native && !selects {
-                candidates.push((
-                    v.clone(),
-                    Candidate::Scroll {
-                        horizontal: scroll.horizontal,
-                    },
-                ));
-            }
-        }
-        if pinch.is_none() && transforms(&values, s.events) != (false, false) {
-            pinch = Some(v.clone());
-        }
-        if gate.is_none()
-            && first
-            && !native
-            && let Some(activation) = s.props.pan_activation
-        {
-            gate = Some(Gate {
-                id: s.id,
-                activation,
-                outer: candidates.len(),
-            });
-        }
+        let link = Link::new(
+            s.id,
+            s.events,
+            s.tracked,
+            gesture_values(surface, v, s.id),
+            s.scroll.as_ref().map(|scroll| scroll.horizontal),
+            s.props.pan_activation,
+        );
+        grab.add(v, &link, options);
     }
+    let Grab {
+        path,
+        candidates,
+        pinch,
+        pressed,
+        in_scroll,
+        gate,
+        ..
+    } = grab;
     let press = if native {
         None
     } else {
         find_press(surface, &hit.view, &views, x, y)
     };
+    if let Some(area) = &area {
+        // Over a press target in the area a drag selects only once the
+        // press is over.
+        let over_press = press
+            .as_ref()
+            .is_some_and(|p| p.view == *area || p.view.is_ancestor(area));
+        crate::selection_area::begin(surface, area, (x, y), time, modifiers, over_press);
+    }
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
     let mut p = Pointer {
@@ -1123,7 +982,7 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
         mode: Mode::Idle,
         moved: false,
     };
-    p.velocity.add(time, x, y);
+    p.velocity.add(time, point(Points(x), Points(y)));
     if p.reporting {
         report(surface, TouchPhase::Start, &p, None);
     }
@@ -1178,24 +1037,18 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     p.x = x;
     p.y = y;
     p.time = time;
-    p.velocity.add(time, x, y);
+    p.velocity.add(time, point(Points(x), Points(y)));
     let moved = std::mem::replace(&mut p.moved, true);
+    if key == Key::Mouse && crate::selection_area::dragged(surface, x, y) {
+        cancel_press(surface, &mut p);
+        release_pressed(surface, &mut p);
+    }
     let (tx, ty) = (x - p.start.0, y - p.start.1);
-    let mut activated = None;
-    if let Some(gate) = p.gate.take() {
-        let (id, undecided) = gate.decide(&mut p.candidates, tx, ty);
-        if let Some(id) = id {
-            log::debug!(target: "nsh::input", "panActivation of {id} activated");
-        }
-        activated = id;
-        if undecided {
-            p.gate = Some(gate);
-        }
-        // The view's JS responder takes the drag over: nothing native
-        // starts meanwhile.
-        if activated.is_some() && p.mode == Mode::Idle {
-            p.mode = Mode::Free;
-        }
+    let activated = Gate::step(&mut p.gate, &mut p.candidates, Points(tx), Points(ty));
+    // The view's JS responder takes the drag over: nothing native starts
+    // meanwhile.
+    if activated.is_some() && p.mode == Mode::Idle {
+        p.mode = Mode::Free;
     }
     if p.reporting {
         report(surface, TouchPhase::Move, &p, activated);
@@ -1209,21 +1062,16 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     // JS hears of the first move only now: give its responder a chance to
     // take the gesture (and block native drags) before one starts.
     let js_pending = p.reporting && !moved;
-    if p.mode == Mode::Idle && distance > PAN_SLOP && !js_pending {
+    if p.mode == Mode::Idle && distance > PAN_SLOP.0 && !js_pending {
         // While the gate decides, the candidates around it wait (the
         // pointer stays idle and they are asked again on the next move).
-        let waiting = p.gate.as_ref().map(|g| g.outer);
-        if waiting.is_none() {
+        if p.gate.is_none() {
             p.mode = Mode::Free;
         }
         let started = if surface.input.js_block.get() {
             None
         } else {
-            let open = waiting.unwrap_or(p.candidates.len());
-            p.candidates[..open]
-                .iter()
-                .find(|(_, c)| c.accepts(tx, ty))
-                .cloned()
+            input::startable(&p.candidates, p.gate.as_ref(), Points(tx), Points(ty)).cloned()
         };
         match started {
             Some((view, Candidate::Pan { .. })) => {
@@ -1244,7 +1092,7 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
             None => {}
         }
     }
-    if matches!(p.mode, Mode::Pan(_) | Mode::Scroll(..)) || distance > PRESS_SLOP {
+    if matches!(p.mode, Mode::Pan(_) | Mode::Scroll(..)) || distance > PRESS_SLOP.0 {
         cancel_press(surface, &mut p);
         release_pressed(surface, &mut p);
     }
@@ -1271,7 +1119,7 @@ fn up(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, cancelled: boo
     p.x = x;
     p.y = y;
     p.time = time;
-    p.velocity.add(time, x, y);
+    p.velocity.add(time, point(Points(x), Points(y)));
     finish(surface, p, cancelled);
 }
 
@@ -1286,6 +1134,9 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         report(surface, phase, &p, None);
     }
     release_pressed(surface, &mut p);
+    if p.key == Key::Mouse {
+        crate::selection_area::released(surface);
+    }
     let mode = std::mem::replace(&mut p.mode, Mode::Free);
     match mode {
         Mode::TwoFinger => end_two_finger(surface),
@@ -1344,10 +1195,8 @@ fn report(surface: &Surface, phase: TouchPhase, changed: &Pointer, activated: Op
                     } else {
                         Vec::new()
                     },
-                    page_x: p.x,
-                    page_y: p.y,
-                    location_x: lx,
-                    location_y: ly,
+                    page: point(Points(p.x), Points(p.y)),
+                    location: point(Points(lx), Points(ly)),
                     changed: is_changed,
                 }
             })
@@ -1422,62 +1271,41 @@ fn find_press(
             if let Some(link) = link
                 && has_press(link.events)
             {
-                return Some(Press {
-                    view: target.clone(),
-                    node: link.node,
-                    events: link.events,
-                    feedback: None,
-                    long_delay: s.props.long_press_delay.unwrap_or(LONG_PRESS),
-                    pressed: false,
-                    long: false,
+                return Some(Press::new(
+                    target.clone(),
+                    link.node,
+                    link.events,
+                    s.props.long_press_delay,
                     generation,
-                });
+                ));
             }
         }
     }
     views.iter().find_map(|v| {
         let s = v.state();
-        (has_press(s.events) && !s.props.accessibility.state.disabled).then(|| Press {
-            view: v.clone(),
-            node: s.id,
-            events: s.events,
-            feedback: s.props.active_opacity.filter(|o| *o < 1.0),
-            long_delay: s.props.long_press_delay.unwrap_or(LONG_PRESS),
-            pressed: false,
-            long: false,
-            generation,
+        (has_press(s.events) && !s.props.accessibility.state.disabled).then(|| {
+            Press::new(
+                v.clone(),
+                s.id,
+                s.events,
+                s.props.long_press_delay,
+                generation,
+            )
         })
     })
 }
 
 fn press_in(surface: &Rc<Surface>, press: &mut Press) {
-    if press.pressed {
-        return;
-    }
-    press.pressed = true;
-    if let Some(opacity) = press.feedback {
-        fade(surface, &press.view, Some(opacity));
-    }
-    if press.events.contains(EventKind::PressIn) {
-        press_event(surface, press.node, EventKind::PressIn);
+    if let Some(kind) = press.press_in() {
+        press_event(surface, press.node, kind);
     }
 }
 
-/// Ends a press: `onPressOut`, then `onPress` if `fire` (released inside)
+/// Ends a press: `onPressUp`, then `onPress` if `fire` (released inside)
 /// and it was no long press.
 fn press_out(surface: &Rc<Surface>, press: &mut Press, fire: bool) {
-    if !press.pressed {
-        return;
-    }
-    press.pressed = false;
-    if press.feedback.is_some() {
-        fade(surface, &press.view, None);
-    }
-    if press.events.contains(EventKind::PressOut) {
-        press_event(surface, press.node, EventKind::PressOut);
-    }
-    if fire && !press.long && press.events.contains(EventKind::Press) {
-        press_event(surface, press.node, EventKind::Press);
+    for kind in press.press_out(fire) {
+        press_event(surface, press.node, kind);
     }
 }
 
@@ -1497,65 +1325,11 @@ fn cancel_press(surface: &Rc<Surface>, p: &mut Pointer) {
 fn released_inside(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
     let (lx, ly) = local(surface, view, x, y);
     let s = view.state();
-    let slop = s.props.hit_slop;
-    let r = PRESS_RETENTION;
-    lx >= -slop.left - r
-        && ly >= -slop.top - r
-        && lx <= s.frame.width + slop.right + r
-        && ly <= s.frame.height + slop.bottom + r
-}
-
-/// Fades `view` to `opacity` times its fade before the press, or back
-/// (`None`), over a few frames.
-fn fade(surface: &Rc<Surface>, view: &NshView, opacity: Option<f32>) {
-    let (id, from) = {
-        let s = view.state();
-        (s.id, s.fade)
-    };
-    let generation = surface.input.next_gen.get();
-    surface.input.next_gen.set(generation + 1);
-    let mut fades = surface.input.fades.borrow_mut();
-    let entry = fades.entry(id).or_insert(Fade {
-        base: from,
-        tick: None,
-        generation,
-    });
-    entry.generation = generation;
-    if let Some(tick) = entry.tick.take() {
-        tick.remove();
-    }
-    let to = opacity.map_or(entry.base, |o| entry.base * o);
-    let duration = if opacity.is_some() {
-        FADE_IN_MS
-    } else {
-        FADE_OUT_MS
-    };
-    let releasing = opacity.is_none();
-    let weak = Rc::downgrade(surface);
-    let start = Cell::new(None::<f64>);
-    entry.tick = Some(view.add_tick_callback(move |view, clock| {
-        let now = clock.frame_time() as f64 / 1000.0;
-        let t0 = start.get().unwrap_or(now);
-        start.set(Some(t0));
-        let k = ((now - t0) / duration).min(1.0) as f32;
-        let eased = 1.0 - (1.0 - k) * (1.0 - k);
-        view.state_mut().fade = from + (to - from) * eased;
-        view.changed();
-        if k < 1.0 {
-            return glib::ControlFlow::Continue;
-        }
-        if let Some(surface) = weak.upgrade() {
-            let mut fades = surface.input.fades.borrow_mut();
-            if fades.get(&id).is_some_and(|f| f.generation == generation) {
-                if releasing {
-                    fades.remove(&id);
-                } else if let Some(f) = fades.get_mut(&id) {
-                    f.tick = None;
-                }
-            }
-        }
-        glib::ControlFlow::Break
-    }));
+    input::released_inside(
+        point(Points(lx), Points(ly)),
+        s.frame.size,
+        s.props.hit_slop,
+    )
 }
 
 // --- Pans ---------------------------------------------------------------------------
@@ -1563,12 +1337,11 @@ fn fade(surface: &Rc<Surface>, view: &NshView, opacity: Option<f32>) {
 fn pan_payload(surface: &Surface, id: NodeId, t: (f32, f32), v: (f32, f32)) -> EventPayload {
     let (value_x, value_y) = surface.anim.borrow().pan_values(id);
     EventPayload::Pan {
-        translation_x: t.0,
-        translation_y: t.1,
+        translation: point(Points(t.0), Points(t.1)),
         velocity_x: v.0,
         velocity_y: v.1,
-        value_x,
-        value_y,
+        value_x: value_x.map(Points),
+        value_y: value_y.map(Points),
     }
 }
 
@@ -1716,8 +1489,10 @@ fn start_two_finger(surface: &Rc<Surface>, p: &mut Pointer) -> bool {
     transform_begin(surface, &transform);
     *surface.input.two.borrow_mut() = Some(TwoFinger {
         keys: [o.key, p.key],
-        distance: (p.x - o.x).hypot(p.y - o.y).max(1.0),
-        angle: (p.y - o.y).atan2(p.x - o.x),
+        pinch: Pinch::new(
+            point(Points(o.x), Points(o.y)),
+            point(Points(p.x), Points(p.y)),
+        ),
         transform,
     });
     put(surface, o);
@@ -1730,12 +1505,16 @@ fn two_finger_moved(surface: &Rc<Surface>) {
         let Some(t) = two.as_mut() else { return };
         let positions = {
             let pointers = surface.input.pointers.borrow();
-            let at = |key: Key| pointers.iter().find(|p| p.key == key).map(|p| (p.x, p.y));
+            let at = |key: Key| {
+                let p = pointers.iter().find(|p| p.key == key)?;
+                Some(point(Points(p.x), Points(p.y)))
+            };
             at(t.keys[0]).zip(at(t.keys[1]))
         };
         let Some((a, b)) = positions else { return };
-        t.transform.scale = (b.0 - a.0).hypot(b.1 - a.1) / t.distance;
-        t.transform.degrees = ((b.1 - a.1).atan2(b.0 - a.0) - t.angle).to_degrees();
+        let (scale, rotation) = t.pinch.at(a, b);
+        t.transform.scale = scale;
+        t.transform.degrees = rotation.0.to_degrees();
         t.transform.clone()
     };
     transform_move(surface, &transform);
@@ -1819,7 +1598,7 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
             t
         }
     };
-    t.scale *= ZOOM_STEP.powf(-dy);
+    t.scale *= input::zoom_factor(dy);
     transform_move(surface, &t);
     *input.zoom.borrow_mut() = Some((t, generation));
     let weak = Rc::downgrade(surface);
@@ -1850,9 +1629,10 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
     let views = pick(&surface.root, x, y)
         .map(|hit| chain(&hit.view))
         .unwrap_or_default();
-    // The scroll views under the mouse show their indicators.
+    // Reveal only the scroll thumb under the pointer, including in nested scroll views.
     for v in views.iter().filter(|v| v.kind() == ViewKind::Scroll) {
-        crate::scroll::hovered(surface, v);
+        let (lx, ly) = local(surface, v, x, y);
+        crate::scroll::hovered(surface, v, lx, ly);
     }
     if input.hover_tracked.borrow().is_empty() && input.hovered.borrow().is_empty() {
         return;
@@ -1866,13 +1646,41 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
 /// in, as with the DOM's `pointerleave` / `pointerenter`.
 fn set_hovered(surface: &Surface, views: Vec<NshView>) {
     let old = std::mem::replace(&mut *surface.input.hovered.borrow_mut(), views.clone());
-    for v in old.iter().filter(|v| !views.contains(v)) {
+    let (left, entered) = input::hover_changes(&old, &views);
+    for v in left {
         set_state(surface, v, HOVERED, false);
         hover_event(surface, v, EventKind::HoverOut);
     }
-    for v in views.iter().rev().filter(|v| !old.contains(v)) {
+    for v in entered {
         set_state(surface, v, HOVERED, true);
         hover_event(surface, v, EventKind::HoverIn);
+    }
+}
+
+/// `onHoverMove` of the hovered views that listen, with the mouse at
+/// `(x, y)` (root coordinates) in each.
+fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
+    let hovered = surface.input.hovered.borrow().clone();
+    for v in hovered {
+        let id = {
+            let s = v.state();
+            if !s.events.contains(EventKind::HoverMove) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(surface, &v, x, y);
+        let event = nsh_core::HoverEvent {
+            location: point(Points(location_x), Points(location_y)),
+            page: point(Points(x), Points(y)),
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                alt: state.contains(gdk::ModifierType::ALT_MASK),
+                shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+            },
+        };
+        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 }
 
@@ -1922,20 +1730,13 @@ fn scroll_target(surface: &Surface, x: f32, y: f32, dx: f32, dy: f32) -> Option<
     if hit.native.as_ref().is_some_and(scrolls_itself) {
         return None;
     }
-    let views = chain(&hit.view);
-    let horizontal = dx.abs() > dy.abs();
-    let along = |v: &NshView| {
-        v.state()
-            .scroll
-            .as_ref()
-            .is_some_and(|s| s.horizontal == horizontal)
-    };
-    let any_along = views.iter().any(along);
-    views.into_iter().find(|v| {
-        v.kind() == ViewKind::Scroll
-            && (!any_along || along(v))
-            && crate::scroll::can_scroll(v, dx, dy)
-    })
+    input::scroll_target(
+        chain(&hit.view),
+        Points(dx),
+        Points(dy),
+        |v| v.state().scroll.as_ref().map(|s| s.horizontal),
+        |v| v.kind() == ViewKind::Scroll && crate::scroll::can_scroll(v, dx, dy),
+    )
 }
 
 /// Points one wheel notch scrolls a view `extent` points long, as
@@ -1966,7 +1767,7 @@ fn wheel_input(
             let horizontal = dx.abs() > dy.abs();
             let latched = match &*input.latch.borrow() {
                 Some((view, h, last))
-                    if *h == horizontal && time - last < WHEEL_LATCH && view.is_mapped() =>
+                    if latch_holds(*h, *last, horizontal, time) && view.is_mapped() =>
                 {
                     Some(view.clone())
                 }
@@ -1979,7 +1780,10 @@ fn wheel_input(
             *input.latch.borrow_mut() = Some((view.clone(), horizontal, time));
             let (dx, dy) = if notches {
                 let s = view.state();
-                (dx * notch(s.frame.width), dy * notch(s.frame.height))
+                (
+                    dx * notch(s.frame.size.width.0),
+                    dy * notch(s.frame.size.height.0),
+                )
             } else {
                 (dx, dy)
             };
@@ -2021,7 +1825,8 @@ fn wheel_input(
                 };
                 w.total.0 += dx;
                 w.total.1 += dy;
-                w.velocity.add(time, w.total.0, w.total.1);
+                w.velocity
+                    .add(time, point(Points(w.total.0), Points(w.total.1)));
                 w.view.clone()
             };
             crate::scroll::wheel(surface, &view, dx, dy);
@@ -2031,7 +1836,8 @@ fn wheel_input(
             let Some(mut w) = input.wheel.borrow_mut().take() else {
                 return false;
             };
-            w.velocity.add(time, w.total.0, w.total.1);
+            w.velocity
+                .add(time, point(Points(w.total.0), Points(w.total.1)));
             let (vx, vy) = w.velocity.velocity();
             crate::scroll::wheel_end(surface, &w.view, vx, vy);
             true
@@ -2041,7 +1847,7 @@ fn wheel_input(
 
 fn new_wheel(view: NshView, time: f64) -> Wheel {
     let mut velocity = VelocityTracker::default();
-    velocity.add(time, 0.0, 0.0);
+    velocity.add(time, point(Points(0.0), Points(0.0)));
     Wheel {
         view,
         total: (0.0, 0.0),
@@ -2102,56 +1908,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn velocity_over_recent_samples() {
-        let mut v = VelocityTracker::default();
-        for i in 0..10 {
-            v.add(i as f64 * 10.0, i as f32 * 5.0, 0.0);
-        }
-        let (vx, vy) = v.velocity();
-        assert!((vx - 500.0).abs() < 1.0, "{vx}");
-        assert_eq!(vy, 0.0);
-    }
-
-    #[test]
-    fn velocity_is_zero_after_a_pause() {
-        let mut v = VelocityTracker::default();
-        v.add(0.0, 0.0, 0.0);
-        v.add(10.0, 10.0, 10.0);
-        v.add(300.0, 10.0, 10.0);
-        assert_eq!(v.velocity(), (0.0, 0.0));
-    }
-
-    #[test]
-    fn velocity_needs_two_samples() {
-        let mut v = VelocityTracker::default();
-        assert_eq!(v.velocity(), (0.0, 0.0));
-        v.add(5.0, 3.0, 3.0);
-        assert_eq!(v.velocity(), (0.0, 0.0));
-    }
-
-    #[test]
-    fn velocity_wraps_around() {
-        let mut v = VelocityTracker::default();
-        for i in 0..100 {
-            v.add(i as f64 * 8.0, 0.0, -(i as f32) * 4.0);
-        }
-        let (_, vy) = v.velocity();
-        assert!((vy + 500.0).abs() < 1.0, "{vy}");
-    }
-
-    #[test]
-    fn candidates_take_their_axis() {
-        let horizontal = Candidate::Pan { x: true, y: false };
-        assert!(horizontal.accepts(8.0, 2.0));
-        assert!(!horizontal.accepts(2.0, 8.0));
-        let both = Candidate::Pan { x: true, y: true };
-        assert!(both.accepts(2.0, 8.0) && both.accepts(8.0, 2.0));
-        let vertical = Candidate::Scroll { horizontal: false };
-        assert!(vertical.accepts(1.0, -7.0));
-        assert!(!vertical.accepts(-7.0, 1.0));
-    }
-
-    #[test]
     fn cursors() {
         assert_eq!(cursor_name(Cursor::Auto, false), None);
         assert_eq!(cursor_name(Cursor::Auto, true), Some("pointer"));
@@ -2163,37 +1919,5 @@ mod tests {
     fn wheel_notches_scale_with_the_view() {
         assert!((notch(1000.0) - 100.0).abs() < 0.01);
         assert_eq!(notch(0.0), 1.0);
-    }
-
-    #[test]
-    fn gates_decide_on_their_offsets() {
-        let gate = Gate {
-            id: 7,
-            activation: PanActivation::horizontal(6.0, 8.0),
-            outer: 0,
-        };
-        let mut candidates = Vec::new();
-        assert_eq!(gate.decide(&mut candidates, 3.0, 3.0), (None, true));
-        assert_eq!(gate.decide(&mut candidates, 7.0, 1.0), (Some(7), false));
-        assert_eq!(gate.decide(&mut candidates, 2.0, -9.0), (None, false));
-        // A fail offset passed by the same move wins.
-        assert_eq!(gate.decide(&mut candidates, 9.0, 9.0), (None, false));
-    }
-
-    #[test]
-    fn only_laid_out_views_bound_their_children() {
-        assert!(laid_out(ViewKind::View, 8));
-        assert!(laid_out(ViewKind::Text, 8));
-        assert!(!laid_out(ViewKind::View, ROOT_ID));
-        assert!(!laid_out(ViewKind::Screen, 8));
-        assert!(!laid_out(ViewKind::Modal, 8));
-    }
-
-    #[test]
-    fn press_events() {
-        let mut events = EventMask::default();
-        assert!(!has_press(events));
-        events.set(EventKind::LongPress, true);
-        assert!(has_press(events));
     }
 }

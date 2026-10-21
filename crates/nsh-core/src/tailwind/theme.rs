@@ -1,6 +1,12 @@
 //! The design tokens classes resolve against: Tailwind CSS v4.1's default
 //! theme (`theme.css`) in points (1rem = 16pt), extended by the app's
-//! `nsh.json` (`"tailwind": { ... }`).
+//! `nsh.json` (`"tailwind": { ... }`), and the app's design tokens
+//! ([`ClassTokens`]).
+
+use std::{
+    fmt::Write,
+    sync::{Arc, LazyLock},
+};
 
 use rustc_hash::FxHashMap;
 
@@ -8,6 +14,7 @@ use crate::{
     css,
     effects::BoxShadow,
     style::{Color, TextShadow},
+    ui::AdaptiveColor,
 };
 
 /// Tailwind's design tokens.
@@ -53,6 +60,129 @@ pub struct Theme {
     pub(crate) ease: FxHashMap<Box<str>, [f32; 4]>,
     /// Default transition duration (ms) and curve.
     pub(crate) transition: (f32, [f32; 4]),
+    /// The design tokens classes name (`None`: none).
+    tokens: Option<Arc<ClassTokens>>,
+}
+
+/// The design tokens (`crate::ui::Tokens`) by the names classes give them: a key's dots are dashes (`muted.foreground`
+/// is `muted-foreground`) and `.background` may be left out (`primary` is
+/// `primary.background`). Colors are names of the color utilities
+/// (`bg-primary`, `text-muted-foreground/70`) when the Tailwind theme has no
+/// color of that name, and variables like numbers (`bg-(--primary)`,
+/// `rounded-(--radius-lg)`, `text-(length:--font-size)`).
+///
+/// Classes naming them are parsed with each appearance's values (one rule
+/// per appearance when they differ), so applying them costs what a palette
+/// color does; when the tokens change, only they are parsed again
+/// ([`super::deps::THEME`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ClassTokens {
+    colors: FxHashMap<Box<str>, AdaptiveColor>,
+    numbers: FxHashMap<Box<str>, f32>,
+}
+
+static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
+    LazyLock::new(|| Arc::new(ClassTokens::new(&crate::ui::Tokens::default())));
+
+impl ClassTokens {
+    /// The names classes give `theme`'s tokens.
+    pub(crate) fn new(theme: &crate::ui::Tokens) -> Self {
+        let mut tokens = ClassTokens::default();
+        // Exact names win over the short ones: set after them.
+        let mut exact = Vec::new();
+        for (key, c) in theme.colors() {
+            let name = key.replace('.', "-");
+            if let Some(short) = name.strip_suffix("-background") {
+                tokens.colors.insert(short.into(), c);
+            }
+            exact.push((name, c));
+        }
+        for (name, c) in exact {
+            tokens.colors.insert(name.into(), c);
+        }
+        for (key, n) in theme.numbers() {
+            tokens.numbers.insert(key.replace('.', "-").into(), n);
+        }
+        tokens
+    }
+
+    /// The names of the colors and the numbers.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.colors.keys().chain(self.numbers.keys()).map(|n| &**n)
+    }
+
+    /// Whether `self` and `other` have the same names (only their values
+    /// may differ).
+    pub(crate) fn same_names(&self, other: &ClassTokens) -> bool {
+        self.colors.len() == other.colors.len()
+            && self.numbers.len() == other.numbers.len()
+            && self.colors.keys().all(|k| other.colors.contains_key(k))
+            && self.numbers.keys().all(|k| other.numbers.contains_key(k))
+    }
+
+    /// `utility` with its tokens replaced by their values in the light or
+    /// dark appearance, as arbitrary values: `bg-primary/50` is
+    /// `bg-[color:#171717ff]/50`, `rounded-(--radius)` is `rounded-[12px]`.
+    /// `None` when it names none, or one there is not.
+    pub(crate) fn substitute(&self, utility: &str, dark: bool) -> Option<String> {
+        let hex = |out: &mut String, c: &AdaptiveColor| {
+            let c = if dark { c.dark } else { c.light };
+            let _ = write!(out, "#{:08x}", Color::from(c).0);
+        };
+        if utility.contains('(') {
+            // `(--name)` and `(hint:--name)`, Tailwind 4's shorthand of
+            // `[var(--name)]`.
+            let mut out = String::with_capacity(utility.len() + 8);
+            let mut rest = utility;
+            while let Some(open) = rest.find('(') {
+                out.push_str(&rest[..open]);
+                let close = open + rest[open..].find(')')?;
+                let inner = &rest[open + 1..close];
+                let (hint, var) = match inner.split_once(':') {
+                    Some((h, v)) => (Some(h), v),
+                    None => (None, inner),
+                };
+                let name = var.strip_prefix("--")?;
+                out.push('[');
+                if let Some(h) = hint {
+                    out.push_str(h);
+                    out.push(':');
+                }
+                let color = self
+                    .colors
+                    .get(name)
+                    .filter(|_| hint.is_none_or(|h| h == "color"));
+                match (color, self.numbers.get(name)) {
+                    (Some(c), _) => hex(&mut out, c),
+                    (None, Some(n)) if hint == Some("number") => {
+                        let _ = write!(out, "{n}");
+                    }
+                    (None, Some(n)) => {
+                        let _ = write!(out, "{n}px");
+                    }
+                    (None, None) => return None,
+                }
+                out.push(']');
+                rest = &rest[close + 1..];
+            }
+            out.push_str(rest);
+            return Some(out);
+        }
+        // A color name after a utility's prefix (`border-t-` `muted`), with
+        // an optional opacity modifier.
+        let (start, name) = utility.match_indices('-').find_map(|(i, _)| {
+            let rest = &utility[i + 1..];
+            let name = rest.split_once('/').map_or(rest, |(n, _)| n);
+            (i > 0 && self.colors.contains_key(name)).then_some((i, name))
+        })?;
+        let mut out = String::with_capacity(utility.len() + 16);
+        out.push_str(&utility[..=start]);
+        out.push_str("[color:");
+        hex(&mut out, &self.colors[name]);
+        out.push(']');
+        out.push_str(&utility[start + 1 + name.len()..]);
+        Some(out)
+    }
 }
 
 fn map<V>(entries: &[(&str, V)]) -> FxHashMap<Box<str>, V>
@@ -268,6 +398,7 @@ impl Default for Theme {
                 ("in-out", [0.4, 0.0, 0.2, 1.0]),
             ]),
             transition: (150.0, [0.4, 0.0, 0.2, 1.0]),
+            tokens: None,
         }
     }
 }
@@ -479,8 +610,70 @@ impl Theme {
     }
 
     /// A color by name (`red-500`, `brand`).
-    pub(crate) fn color(&self, name: &str) -> Option<Color> {
+    pub fn color(&self, name: &str) -> Option<Color> {
         self.colors.get(name).copied()
+    }
+
+    /// The names of every scale's entries (`red-500`, `lg`, `video`,
+    /// `snappy`, ...), sorted and without repeats: what utilities and
+    /// breakpoint variants take by name. Tools enumerate the classes a
+    /// theme offers with them (the engine's record of Tailwind classes).
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, _)| &**n).collect();
+        let keys = [
+            self.colors.keys().collect::<Vec<_>>(),
+            self.containers.keys().collect(),
+            self.text.keys().collect(),
+            self.weights.keys().collect(),
+            self.fonts.keys().collect(),
+            self.tracking.keys().collect(),
+            self.leading.keys().collect(),
+            self.radius.keys().collect(),
+            self.shadows.keys().collect(),
+            self.inset_shadows.keys().collect(),
+            self.drop_shadows.keys().collect(),
+            self.text_shadows.keys().collect(),
+            self.blur.keys().collect(),
+            self.perspective.keys().collect(),
+            self.aspect.keys().collect(),
+            self.ease.keys().collect(),
+        ];
+        names.extend(keys.into_iter().flatten().map(|n| &**n));
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// The names of the component theme's tokens (`primary`,
+    /// `muted-foreground`, `radius`), sorted: what `bg-primary` and
+    /// `rounded-(--radius)` name.
+    pub fn token_names(&self) -> Vec<&str> {
+        let tokens = self.tokens();
+        let mut names: Vec<&str> = tokens.names().collect();
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// The design tokens classes name.
+    pub(crate) fn tokens(&self) -> &ClassTokens {
+        self.tokens.as_deref().unwrap_or(&DEFAULT_TOKENS)
+    }
+
+    /// Takes design tokens `theme`, which classes such as `bg-primary`
+    /// name. Without them classes name none.
+    pub fn set_tokens(&mut self, theme: &crate::ui::Tokens) {
+        self.tokens = Some(Arc::new(ClassTokens::new(theme)));
+    }
+
+    /// The tokens of another theme.
+    pub(crate) fn share_tokens(&mut self, from: &Theme) {
+        self.tokens = from.tokens.clone();
+    }
+
+    /// Replaces the tokens.
+    pub(crate) fn replace_tokens(&mut self, tokens: Arc<ClassTokens>) {
+        self.tokens = Some(tokens);
     }
 }
 

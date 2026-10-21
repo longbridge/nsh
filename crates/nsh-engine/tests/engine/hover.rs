@@ -1,12 +1,14 @@
-//! `onHoverIn` / `onHoverOut` in a TSX app: the views' event masks tell
-//! the platform which views listen (the desktops raise the events from
-//! their hover tracking), and the payload-less events reach the handlers.
+//! `onHoverIn` / `onHoverOut` / `onHoverMove` in a TSX app: the views'
+//! event masks tell the platform which views listen (it raises the events
+//! from its hover tracking), the payload-less events reach the handlers,
+//! and moves come merged, before the events after them.
 
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
-    ApproxTextEngine, EventKind, EventMask, EventPayload, MountBatch, MountItem, NodeId, Size,
+    ApproxTextEngine, EventKind, EventMask, EventPayload, HoverEvent, MountBatch, MountItem,
+    NodeId, Size, geometry::px, keymap::Modifiers,
 };
 use nsh_engine::{Bundle, Engine, EngineConfig};
 
@@ -20,7 +22,12 @@ function App() {
   return (
     <View>
       <View testID="outer" onHoverIn={() => note("in outer")} onHoverOut={() => note("out outer")}>
-        <View testID="inner" style={{ height: 40 }} onHoverIn={() => note("in inner")} />
+        <View
+          testID="inner"
+          style={{ height: 40 }}
+          onHoverIn={() => note("in inner")}
+          onHoverMove={(e) => note(`move ${e.locationX},${e.locationY} ${e.pageX},${e.pageY}${e.shiftKey ? " shift" : ""}`)}
+        />
       </View>
       <Text>{"log " + log().join("|")}</Text>
     </View>
@@ -38,7 +45,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: dir.join("App.tsx"),
         minify: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into()],
+        ui_sets: vec![nsh_base::registry().into()],
         split: false,
     })
     .unwrap();
@@ -47,17 +54,20 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }),
-        viewport: Size::new(390.0, 844.0),
+        viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -67,6 +77,11 @@ fn start() -> (Engine, Receiver<MountBatch>) {
 
 /// Waits until the log text is `want`, within a few seconds.
 fn until_log(rx: &Receiver<MountBatch>, want: &str) {
+    until(rx, want, |log| log == want);
+}
+
+/// Waits until the log text satisfies `done`; returns it.
+fn until(rx: &Receiver<MountBatch>, what: &str, done: impl Fn(&str) -> bool) -> String {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut last = String::new();
     while let Ok(batch) = rx.recv_deadline(deadline) {
@@ -76,11 +91,11 @@ fn until_log(rx: &Receiver<MountBatch>, want: &str) {
         }) {
             last = text.clone();
         }
-        if last == want {
-            return;
+        if done(&last) {
+            return last;
         }
     }
-    panic!("the log never became {want:?}: {last:?}");
+    panic!("the log never became {what}: {last:?}");
 }
 
 #[test]
@@ -123,13 +138,36 @@ fn hover_handlers_are_in_the_event_masks_and_hear_their_events() {
         events(outer),
         mask(&[EventKind::HoverIn, EventKind::HoverOut])
     );
-    assert_eq!(events(inner), mask(&[EventKind::HoverIn]));
+    assert_eq!(
+        events(inner),
+        mask(&[EventKind::HoverIn, EventKind::HoverMove])
+    );
 
     // As a desktop raises them: out from the inside, in from the outside.
     let control = engine.control();
     control.dispatch_event(outer, EventKind::HoverIn, EventPayload::None);
     control.dispatch_event(inner, EventKind::HoverIn, EventPayload::None);
     until_log(&rx, "log in outer|in inner");
+    let at = |x: f32, shift: bool| {
+        EventPayload::Hover(HoverEvent {
+            location: nsh_core::geometry::point(px(x), px(2.0)),
+            page: nsh_core::geometry::point(px(x + 10.0), px(12.0)),
+            modifiers: Modifiers {
+                shift,
+                ..Default::default()
+            },
+        })
+    };
+    // Moves sent faster than frames are merged (how many depends on the
+    // engine thread's timing): the last one always arrives, and before
+    // the event after it.
+    for x in 1..=20 {
+        control.dispatch_event(inner, EventKind::HoverMove, at(x as f32, x == 20));
+    }
     control.dispatch_event(outer, EventKind::HoverOut, EventPayload::None);
-    until_log(&rx, "log in outer|in inner|out outer");
+    let log = until(&rx, "ending with the out", |l| l.ends_with("out outer"));
+    let moves: Vec<&str> = log.split('|').filter(|e| e.starts_with("move ")).collect();
+    assert!(moves.len() < 20, "moves are merged: {log}");
+    assert_eq!(moves.last(), Some(&"move 20,2 30,12 shift"), "{log}");
+    assert!(log.starts_with("log in outer|in inner|move "), "{log}");
 }

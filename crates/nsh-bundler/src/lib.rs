@@ -17,6 +17,7 @@ mod jsx;
 mod minify;
 #[cfg(feature = "bundle")]
 mod plugin;
+mod props;
 #[cfg(feature = "bundle")]
 mod split;
 #[cfg(feature = "bundle")]
@@ -43,9 +44,13 @@ pub fn compile_module(
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;
     let modules = compile::NativeModules::new(ui_sets);
-    compile::compile_native(path, source_type, source, None, None, &modules)
-        .map(|(code, _)| code)
-        .map_err(|e| compile::strip_ansi(&e))
+    let compiled =
+        compile::compile_native(path, source_type, source, None, None, Some(name), &modules)
+            .map_err(|e| compile::strip_ansi(&e))?;
+    for d in &compiled.destructured {
+        log::warn!(target: "nsh::build", "{name}:{}:{}: {}", d.line, d.column, d.message());
+    }
+    Ok(compiled.code)
 }
 
 #[cfg(test)]
@@ -55,15 +60,15 @@ mod tests {
         let code = super::compile_module(
             "App.tsx",
             "import { mount, signal, View } from \"nsh\";\n\
-             import { Button } from \"nsh/ui/mobile\";\n\
+             import { SafeAreaView } from \"nsh/base\";\n\
              const n: number = 1;\n\
-             function App() { const c = signal(n); return <View><Button title=\"x\" onPress={() => c.set(2)} /></View>; }\n\
+             function App() { const c = signal(n); return <SafeAreaView><View onPress={() => c.set(2)} /></SafeAreaView>; }\n\
              mount(App);\n",
-            &[nsh_ui_mobile::registry().into()],
+            &[nsh_base::registry().into()],
         )
         .unwrap();
         assert!(code.contains("from \"nsh:rt\""), "{code}");
-        assert!(code.contains("from \"nsh/ui/mobile\""), "{code}");
+        assert!(code.contains("from \"nsh/base\""), "{code}");
         assert!(!code.contains(": number"), "types are removed: {code}");
         assert!(!code.contains("<View"), "JSX is compiled: {code}");
     }
@@ -75,3 +80,6 @@ mod tests {
         assert!(!err.contains('\u{1b}'), "{err}");
     }
 }
+
+#[cfg(all(test, feature = "bundle"))]
+mod standard_tests;

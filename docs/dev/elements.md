@@ -1,37 +1,37 @@
 # Elements and interaction
 
-Every tag is a component in scope, imported from its one home (`native-pipeline.md`): `View`, `Text`, `Scroll`,
-`Input` from `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from
-`nsh/webview`, `Video` from `nsh/video`, `Modal` (and `Stack` / `Screen`) from `nsh/ui/mobile`, `InputAccessoryView` from
-`nsh/ios`; only `If` and `Each` are globals.
+Every tag is a component in scope (`native-pipeline.md`): the primitives `View`, `Text`, `Scroll`, `Input`, `Image`,
+`List`, `Canvas`, `WebView` and `Video` from `nsh`, `Dialog` (and `NavStack` / `NavPage`) from `nsh/base`,
+`InputAccessoryView` from `nsh/ios`; only `If` and `Each` are globals. (`nsh/image`, `nsh/list`, `nsh/canvas`,
+`nsh/webview` and `nsh/video`, where some primitives were first, still export them, deprecated.)
 
 | JSX | Native (Apple) | Notes |
 |---|---|---|
-| `<View>` | `NshView` (UIView) | `onPress` / `onLongPress` / `onPressIn` / `onPressOut`, `activeOpacity`, `pan={{x, y}}` + `onPanStart` / `onPanEnd`, `pinch` / `rotation`; `desktop={{ windowDrag }}` (any element: pressing it drags the window; the platforms decide on the main thread from `ViewProps::window_drag`, the nearest view that sets it decides, inputs and views with press / touch handlers nearer than it stay clickable; `nsh/desktop`) |
-| `<Text>` | `TextView` (CTFrame) | nested `<Text>` is a span, other elements are inline attachments ([text.md](text.md)); `numberOfLines`, `ellipsizeMode`, `allowFontScaling`, `maxFontSizeMultiplier`, `adjustsFontSizeToFit` + `minimumFontScale`, `selectable` (range selection) + `selectionColor`, `onTextLayout` |
+| `<View>` | `NshView` (UIView) | `onPress` / `onLongPress` / `onPressDown` / `onPressUp`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle`, `pan={{x, y}}` + `onPanStart` / `onPanEnd`, `pinch` / `rotation`; `desktop={{ windowDrag }}` (any element: pressing it drags the window; the platforms decide on the main thread from `ViewProps::window_drag`, the nearest view that sets it decides, inputs and views with press / touch handlers nearer than it stay clickable; `nsh/desktop`) |
+| `<Text>` | `TextView` (CTFrame) | nested `<Text>` is a span, other elements are inline attachments ([text.md](text.md)); `numberOfLines`, `ellipsizeMode`, `allowFontScaling`, `maxFontSizeMultiplier`, `adjustsFontSizeToFit` + `minimumFontScale`, `selectable` (range selection) + the `selectionColor` style key (`selection:text-*`), `onTextLayout` |
 | `<Image src>` | UIView + image CALayer | `src` is a URL or `import img from "./a.png"` (an asset descriptor with its size); `resizeMode`; `defaultSource` (placeholder), `blurRadius`, `fadeDuration`; `onLoadStart` / `onProgress` (`loaded` / `total` bytes) / `onLoad` (the source's pixel size) / `onError` / `onLoadEnd`; `tintColor`; animated GIF / WebP / APNG; `Image.getSize(uri)` / `Image.prefetch(uri)` |
-| `<Scroll>` | UIScrollView | `horizontal`, `contentContainerStyle` / `contentContainerClass`, `refreshing` + `onRefresh`, `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
+| `<Scroll>` | UIScrollView | `horizontal`, `contentStyle` / `contentClass`, `refreshing` + `onRefresh`, `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
 | `<Canvas draw>` | `CanvasView` (drawRect replay) | see [canvas.md](canvas.md) |
 | `<List each>` | UIScrollView + recycled cells | see [scrolling-and-lists.md](scrolling-and-lists.md) |
-| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChangeText` / `onSubmitEditing` / `onFocus` / `onBlur`, `placeholder`, `secureTextEntry`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `editable`, `autoFocus`, `selectionColor`, `blurOnSubmit`, `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `blurOnSubmit` and `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selection` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caretHidden`, `onContentSizeChange` (the text's size, for growing inputs); ref `setSelection(start, end)` |
-| `<Stack>` / `<Screen>` | UINavigationController | `createNavigator(route)`: `push` / `pop` / `popToTop` / `replace` / `reset`; screens keep their state while stacked; native header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, colors; `ios={{ headerLargeTitle, headerBackTitle }}`), swipe back (`gestureEnabled`: the interactive gesture only); `preventBack` + `onBackRequest` keep the user on a screen (no swipe; the header / Android back buttons send the event instead of popping) |
-| `<Modal>` | presented UIViewController | `visible`, `animationType`, `transparent`, `onRequestClose` (controlled), `onShow`, `onDismiss`; `dismissible` (iOS sheets swipe away, Android back closes natively, then `onRequestClose` + `onDismiss`; the renderer keeps a removed modal's `onDismiss` until the platform reports it, `dom.rs` `dismissed`); `ios={{ presentationStyle, supportedOrientations }}` (`pageSheet` / `formSheet`), `desktop={{ presentationStyle }}` (a card centered in the window: Linux, macOS, desktop browsers), `web={{ presentationStyle }}` (also in phone browsers: a card from just below the top, as on iPhones; `docs/dev/web.md`), `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
+| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `onCompositionChange` (`composing`, `text`: an input method's composition as it starts, changes and ends, its end after the `onChange` of the committed text; each platform tracks the composition natively and holds a `value` the app sets during one until it ends, since setting the text would end it and commit the text being composed), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caretHidden`, `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
+| `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerShown`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
+| `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange(open, reason)` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange(false, reason)` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
 | `<WebView>` | WKWebView (WebKit loaded on first use) | `source` (`uri` / `html` + `baseUrl`), `injectedJavaScript(BeforeContentLoaded)`, `onMessage` (pages call `window.ReactNativeWebView.postMessage`), `onLoad*`, `onNavigationStateChange`; ref: `reload()`, `goBack()`, `goForward()`, `postMessage(data)`, `injectJavaScript(js)` |
 | `nativeComponent` (`nsh/native`) | a `NshView` box filled by the registered component's view | see [embedding.md](embedding.md) |
 | `<Video>` | AVPlayerLayer / AVPlayerViewController (AVFoundation loaded on first use) | `source`, `paused`, `muted`, `volume`, `rate`, `repeat`, `resizeMode`, `controls`, `onLoad` / `onProgress` / `onEnd` / `onBuffer` / `onError`; ref: `seek(seconds)` |
 
 On Android the same elements map to `Box` (ViewGroup), `TextBox`, `ImageBox`, `ScrollBox` (ScrollView), `InputBox` (EditText),
-`StackBox` (screens with a Toolbar, predictive back), `ModalHost` (a Dialog), `WebBox` (android.webkit.WebView) and `VideoBox`
-(MediaPlayer on a TextureView, MediaController); both are `WidgetBox`es. Every host element and runtime component is typed in
-`.nsh/types/nsh/types.d.ts` and the declarations of the runtime's modules (made from the Rust tables: `tooling.md`).
+`StackBox` (pages with a Toolbar, predictive back), `ModalHost` (a Dialog), `WebBox` (android.webkit.WebView) and `VideoBox`
+(MediaPlayer on a TextureView, MediaController); both are `WidgetBox`es. Every host element and `nsh/base` component is typed in
+`.nsh/types/nsh/types.d.ts` and the declarations of the runtime's modules and `nsh/base` (made from the Rust tables: `tooling.md`).
 
 **Host props are one definition.** A host prop is a variant of `nsh_core::Prop` (or of the enum it nests: `ScrollProp`,
 `NativeProp`, `AccessibilityProp`, ...) with `#[prop(js = "name", ...)]`: `#[derive(HostProps)]` (`nsh_core::js::host`)
 derives from it how `nsh-js` decodes the JS value (straight from QuickJS values, no JSON), the default clearing the
 prop sets (`HostProps::reset`, also used when a Rust component's render stops setting it) and its declaration: one
 interface per element group and platform (`InputHostProps`, `IOSInputHostProps`, ...) that the element types of
-`types.d.ts` and the runtime's components extend. The payload's type decodes itself (`HostValue`;
+`types.d.ts` and `nsh/base`'s components extend. The payload's type decodes itself (`HostValue`;
 `#[derive(PropEnum)]` for string unions); `default`, `min` / `max`, `on` (the element groups), `ios` / `android`
 (names inside `ios={{…}}` / `android={{…}}`), `with` (a decoder of the whole variant, `js/host_values.rs`), `once`
 (not reset) and `internal` (set by the runtime, untyped) cover the rest. **Events** are a table next to it
@@ -42,15 +42,17 @@ in one of them.
 
 ## Primitives only
 
-NSH's runtime provides the basic capabilities. Components are the UI sets' (Rust, `crates/nsh-ui-mobile`,
-`docs/dev/components.md`), drawn with views, classes, canvases and native animations so they look the same on every platform. Do not
-add platform-styled widgets (UISwitch / SeekBar wrappers and the like), and do not add compositions of existing
-primitives to the runtime (section lists, touchables, drawers, ...): they belong to a UI set. React Native is a
-reference for which capabilities exist, not an API to be compatible with. Components that need core or native support
-are primitives of their own (`List`, `Canvas`, `WebView`, `Video`; in the mobile set `Stack`, `Modal`, `SafeAreaView`,
-`KeyboardAvoidingView`; `InputAccessoryView` in `nsh/ios`). Tags are PascalCase names of what is in scope: a host
-element's primitive is imported from its home (`import { View } from "nsh"`) and compiled in place, a component is
-imported (`import { Button } from "nsh/ui/mobile"`) or local; lowercase tags are errors (`native-pipeline.md`).
+NSH's runtime provides the primitives and the capabilities; the look of an app is the app's. Styled components are
+the app's own: drawn in TSX with views, classes, canvases and native animations, or Rust components in the app's crate
+(its UI set, `docs/dev/components.md`), so they look the same on every platform. Do not add platform-styled widgets
+(UISwitch / SeekBar wrappers and the like), and do not add styled widgets or compositions of existing primitives to
+the runtime (buttons, section lists, touchables, drawers, ...). React Native is a reference for which capabilities
+exist, not an API to be compatible with. Components that need core or native support are primitives of their own
+(`List`, `Canvas`, `WebView`, `Video`; in `nsh/base` `NavStack`, `Dialog`, `SafeAreaView`,
+`KeyboardAvoidingView`; `InputAccessoryView` in `nsh/ios`). Tags are PascalCase names
+of what is in scope: a host element's primitive is imported from its home (`import { View } from "nsh"`) and compiled
+in place, a component is imported (`import { Chart } from "app/native"`) or local; lowercase tags are errors
+(`native-pipeline.md`).
 
 ## The main thread never waits for JS
 
@@ -58,12 +60,12 @@ Some callbacks are questions the system wants answered on the spot (may this
 text change, may the back button pop, may the sheet close, may this gesture begin, may the web view navigate): they are
 answered natively from props mounted beforehand, never by asking JS (blocking the main thread drops frames, can deadlock
 and reorders fast input). Events tell JS afterwards. Existing answers: input `maxLength` (`shouldChangeCharactersIn`,
-`InputFilter`), `submitBehavior` (`textFieldShouldReturn`, `textView:shouldChangeTextInRange:`, Android's `OnEditorActionListener` and input connection, AppKit's `doCommandBySelector:`), `gestureEnabled` / `preventBack` (`gestureRecognizerShouldBegin`,
-`navigationBar:shouldPopItem:`, Android `wantsBack()` / `OnBackInvokedCallback` registration), `dismissible`
+`InputFilter`), `submitBehavior` (`textFieldShouldReturn`, `textView:shouldChangeTextInRange:`, Android's `OnEditorActionListener` and input connection, AppKit's `doCommandBySelector:`), `popOnSwipe` / `popOnBack` (`gestureRecognizerShouldBegin`,
+`navigationBar:shouldPopItem:`, Android `wantsBack()` / `OnBackInvokedCallback` registration), `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe`
 (`presentationControllerShouldDismiss`, the dialog's back), `pan` / `pinch` / `hitSlop` / `pointerEvents` /
 `keyboardShouldPersistTaps` / `panActivation` (recognizers), capabilities (`decidePolicyForNavigationAction`, `shouldOverrideUrlLoading`),
-`cancelable`. A new capability with such a callback gets a prop (a menu's items, a rule, a flag); what a prop cannot
-express is let through and corrected in the event afterwards (a controlled `value` in `onChangeText`). `BackHandler` is
+`AlertDialog`'s `closeOnEscape` / `closeOnBackdropPress`. A new capability with such a callback gets a prop (a menu's items, a rule, a flag); what a prop cannot
+express is let through and corrected in the event afterwards (a controlled `value` in `onChange`). `BackHandler` is
 of that kind: with a listener the press is taken, and JS exits the app when no listener handles it.
 
 One exception, bounded: on macOS a window resize waits up to 16 ms for the engine's layout at the new size, so the
@@ -72,29 +74,48 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 
 ## Interaction and the environment
 
-- **Press feedback primitives** (native, no JS round trip): `activeOpacity`; `underlayColor` + `underlayOpacity` (default 0.85)
-  on any view — the core shows the underlay as the background (in place of the background color and any gradient,
-  which would cover it) and fades the children while the platform reports the view pressed; `active:` classes.
-  Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`, Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin,
-  `position` → an inner view moved up; `keyboardVerticalOffset`).
+- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`,
+  `checkedStyle` (and a `Button`'s `selectedStyle`) on any view (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` /
+  `disabled:` / `selected:` / `checked:` classes: the core restyles the view while the platform reports it pressed,
+  hovered or focused, and while its accessibility state is selected or checked; later
+  states win, `disabled` over all (`docs/dev/styles.md`). Press feedback is the app's: the platforms add no fade or
+  underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
+  Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).
 - **Platform modules**: `Platform` (`OS`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
-  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh trace` is iOS); `isDesktop`,
+  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `isDesktop`,
   `Version`, `isPad`, `isTV`, `isMacCatalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); `isDesktop`, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `PixelRatio`, `AccessibilityInfo` (`isScreenReaderEnabled`,
   `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
   `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
-- **`disabled`** on any element applies `disabled:` classes and removes its press listeners from what is mounted (no press,
-  no feedback).
-- **`onHoverIn` / `onHoverOut`** (any element; macOS, Linux and GPUI) tell JS, after the fact, that the mouse came over a view
-  or left it. They follow the same hover tracking as `hover:` classes: the views along the chain under the mouse
-  (innermost first) whose classes read `HOVERED` or that listen to either event are the hovered ones, so ancestors
-  hear `onHoverIn` too, as with CSS `:hover` and the DOM's `pointerenter`; a handler alone makes its view take part
-  (`input.rs` `hoverable`, the view's mounted event mask), and a view that does not listen gets no event. When the set
-  changes, the views left hear `onHoverOut` from the inside out, then the views entered `onHoverIn` from the outside
-  in. The mouse leaving the window (while no button is down on macOS) unhovers everything; on macOS and GPUI hover is
-  picked again after every batch (on macOS also after every scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one
-  that arrives there `onHoverIn`; on Linux that waits for the next mouse move. Touches never hover. Other platforms do
-  not raise them yet (iOS, Android, Windows and the web track `hover:` styles only).
+- **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
+  is mounted (no press, no feedback; a secondary click goes on to the nearest enabled listener around it).
+- **`onHoverIn` / `onHoverOut` / `onHoverMove`** (any element) tell JS, after the fact, that the mouse came over a view,
+  left it, or moved over it with no button down. On the desktops they follow the same hover tracking as `hover:`
+  classes: the views along the chain under the mouse (innermost first) whose classes read `HOVERED` or that listen to
+  any of the three are the hovered ones, so ancestors hear `onHoverIn` too, as with CSS `:hover` and the DOM's
+  `pointerenter`; a handler alone makes its view take part (`input.rs` `hoverable`, the view's mounted event mask), and
+  a view that does not listen gets no event. When the set changes, the views left hear `onHoverOut` from the inside
+  out, then the views entered `onHoverIn` from the outside in; then each hovered view with `onHoverMove` hears where
+  the mouse is (`EventPayload::Hover`: `locationX` / `locationY` in the view, its transforms undone, `pageX` / `pageY`
+  in the root view as touches have them, the modifier keys). The mouse leaving the window (while no button is down on
+  macOS) unhovers everything; on macOS and GPUI hover is picked again after every batch (on macOS also after every
+  scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one that arrives there
+  `onHoverIn`; on Linux and Windows that waits for the next mouse move. Moves with a button down are touches
+  (`onTouchMove`, the responder), not hovers, and touches never hover. The web uses the browser's `pointerenter` /
+  `pointerleave` / `pointermove` of mice (`nsh.js` `installHover`); iOS a `UIHoverGestureRecognizer` per view (iPad
+  pointers, Mac Catalyst's mouse), Android the view's hover listener (mice, styluses): there each view is tracked by
+  the system, not along a chain. The engine merges moves (`State::hover_moves`): the latest per view, delivered at most
+  once per `HOVER_MOVE_INTERVAL` (8 ms) and always before the next other event, so a view hears where the mouse went
+  before it hears it leave; mice report up to 1000 moves a second, and a crosshair needs one per frame.
+- **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
+  macOS, in GPUI on macOS too; the browser's `contextmenu`, which its keyboard menu key raises too). The platform
+  decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
+  view that listens hears it (`EventPayload::ContextMenu`: `locationX` / `locationY` in it, `pageX` / `pageY` in its
+  root view, which is where `Menu.popup` takes its point, and the modifier keys); a text field nearer, or selectable
+  text with an edit menu of its own (Windows, GPUI, the web), shows that menu instead and the app hears nothing.
+  JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
+  mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
+  Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
 - **Keyboard focus**: on macOS and the web, views that take presses are stops of Tab (the keyboard focus) and Return /
   Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
   `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,
@@ -119,7 +140,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   right-to-left horizontal lists (scaleX −1). The answer settles the promise from the core's events
   (`JsEvent::Reply`), like a module call's (`nsh-js` `components.rs`). There is no `measureInWindow`: the root view is the window for a full-screen surface, and
   an embedding app knows where it put the surface.
-- **Touch** (React Native semantics): `pointerEvents`, `hitSlop`, `activeOpacity`, `delayLongPress`, `android={{ ripple }}`
+- **Touch** (React Native semantics): `pointerEvents`, `hitSlop`, `delayLongPress`, `android={{ ripple }}`
   (`{ color, borderless, radius, foreground }`, Android only); press-in waits ~130ms inside scroll views; only the innermost
   pressable view responds. Children placed outside their parent (`position: "absolute"`, `overflow` visible: a
   dropdown under its field) can be touched where they are drawn: UIKit and Android only look for a touch's target
@@ -162,7 +183,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   becomes the responder (its termination request is honored as for any claim). Its own `…ShouldSetResponder`
   handlers (and a Rust element's other claims) are never asked: the view is a responder exactly when its pan is
   active, so `PanResponder`'s `panHandlers` work unchanged next to the prop.
-- **Accessibility**: `accessible`, `accessibilityLabel` / `Hint` / `Role` (`role`) / `State` / `Value` / `Actions` +
+- **Accessibility**: `accessible`, `role`, `accessibilityLabel` / `Hint` / `State` / `Value` / `Actions` +
   `onAccessibilityAction`, `accessibilityElementsHidden`, `importantForAccessibility`, `accessibilityLiveRegion`, `testID`
   (Android: resource id). Views without a label read their texts. The props go as one `MountItem::ViewProps`, except
   a label changing alone on mounted props (one that follows app state: a count, a price), which goes as
@@ -176,9 +197,16 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
   Linux pages' "Keyboard"). Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
   their handlers (`docs/dev/components.md`).
-- **System UI**: `StatusBar` (component and static functions; the last mounted wins, prop by prop, over what the
-  functions set: the core layers them, `docs/dev/components.md`), `Alert.alert` and `ActionSheet.show` (promises of
-  the index chosen, -1 when dismissed; a list dialog on Android), `Toast` (`nsh/android`). Answers come back as the
+- **System UI**: the status bar follows UIKit, where the topmost view controller's `preferredStatusBarStyle` decides
+  and Info.plist holds the default: a page's or dialog's `statusBar` (`{ foreground, hidden, animated }`, a host prop
+  of screens and modals, `ScreenProp::StatusBar`, decoded to a `StatusBarSetting`; `Screen::status_bar` /
+  `Modal::status_bar` in Rust) is one entry of the surface's layers while the node is in the tree, over the app's
+  default (`nsh.json` `"statusBar"`: the bundler checks it and the entry's `setup` sends `Command::SetStatusBar`; a
+  Rust app's `Root::status_bar`). The core layers them (`docs/dev/components.md`); iOS and Android apply the merged
+  `Command::StatusBar`, the desktops and the web ignore it. `AlertDialog.show({ title, description, actions, presentation })`
+  (`nsh/base`: a promise of the chosen action's `id`, its `label` without one, `null` when closed without an action;
+  `presentation: "actionSheet"` is a list dialog on Android; every label is the app's: NSH adds no strings of its
+  own, and an iPad / Mac action sheet gets an untitled cancel action), `Toast` (`nsh/android`). Answers come back as the
   root's `Dialog` event, which the core resolves. Embedding apps forward their controller's status bar to `nsh_status_bar_style()` / `_hidden()` / `_animation()`.
 - **Right to left**: `I18nManager` (`isRTL`, reactive; `allowRTL`, `forceRTL`, applied at once) sets the root's direction;
   `direction` (`inherit` / `ltr` / `rtl`) overrides it per view. The core resolves each node's direction (inherited, also for
@@ -192,12 +220,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   negative offsets), starting at the right end and keeping their distance from it; horizontal lists are flipped natively
   (`ScrollConfig::mirrored`: the scroll view and each cell get scaleX −1, composed with their transforms), so the list's
   offset logic stays left to right.
-- **Environment** (reactive accessors; `nsh/device`, and `nsh/ui/mobile` for the mobile ones): `windowSize()`, `safeArea()`, `keyboard()` (`{ height, duration }`: how
+- **Environment** (reactive accessors; `nsh/device` and `nsh/base` (`safeArea()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
-  `colorScheme()`, `fontScale()`. `KeyboardAvoidingView` pads its bottom by `keyboard().height`, animated with the keyboard,
+  `colorScheme()`, `fontScale()`. `KeyboardAvoidingView` pads its bottom by `keyboardFrame().height`, animated with the keyboard,
   for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved.
 - **Controlled inputs**: each native edit carries an edit count; a `value` from JS is applied only if it is based on the latest
   edit, so a slow JS round trip can never overwrite newer typing (React Native's eventCount).
+  While an input method composes, a `value` is held natively and applied when the composition ends, if no edit came
+  after it: setting a field's text ends its composition on every platform, so an app that uppercases or filters its
+  value would otherwise commit the pinyin as typed (#170).
 
 Text, styles, scrolling and lists, animation, canvases and images have their own pages.

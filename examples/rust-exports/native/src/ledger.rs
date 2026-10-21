@@ -26,8 +26,11 @@ impl Ledger {
     /// # Rust
     ///
     /// Taking `cx` makes it an op, run in order with the UI changes TS made
-    /// before the call (the platform's services are on `cx`): a Promise.
-    /// What follows a heading stays in Rust's docs, out of TS's.
+    /// before the call (the platform's services are on `cx`). Returning a
+    /// value makes it a Promise of the value; returning `()` it would be a
+    /// plain call (`void`), and returning `Result<(), E>` a
+    /// `Promise<void>`. What follows a heading stays in Rust's docs, out of
+    /// TS's.
     pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
         let count = text.chars().count() as u32;
         cx.set_clipboard(text);

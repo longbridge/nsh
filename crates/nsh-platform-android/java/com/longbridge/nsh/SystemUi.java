@@ -28,14 +28,20 @@ final class SystemUi {
      * the appearance: {@code night}, the app's or the system's), 1 light
      * content, 2 dark content.
      */
-    @SuppressWarnings("deprecation")
-    static void statusBar(Context context, int style, boolean hidden, Integer background, boolean night) {
+    static void statusBar(Context context, int style, boolean hidden, boolean night) {
         Activity activity = activity(context);
         if (activity == null) return;
-        Window window = activity.getWindow();
+        statusBar(activity.getWindow(), style, hidden, night);
+    }
+
+    /**
+     * The status bar while {@code window} is on top: the activity's, or an
+     * open dialog's own window (which the bar follows while it is up).
+     */
+    @SuppressWarnings("deprecation")
+    static void statusBar(Window window, int style, boolean hidden, boolean night) {
+        if (window == null) return;
         boolean darkIcons = style == 2 || (style == 0 && !night);
-        // Before edge-to-edge (API 35) the bar has a color of its own.
-        if (background != null && Build.VERSION.SDK_INT < 35) window.setStatusBarColor(background);
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController c = window.getInsetsController();
             if (c == null) return;
@@ -118,12 +124,13 @@ final class SystemUi {
             }
         }
         b.setOnDismissListener(d -> {
+            if (TestAgent.shownDialog == d) TestAgent.shownDialog = null;
             if (!answered[0]) {
                 answered[0] = true;
                 answer(mounter, dialogId, -1);
             }
         });
-        b.show();
+        TestAgent.shownDialog = b.show();
     }
 
     private static void answer(Mounter mounter, int dialogId, int index) {

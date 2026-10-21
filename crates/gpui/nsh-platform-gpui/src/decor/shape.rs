@@ -8,7 +8,7 @@
 //! views) is filled as paths of these polygons, in the view's coordinates
 //! and mapped point by point.
 
-use nsh_core::Rect;
+use nsh_core::Points;
 
 use crate::geom::rect;
 
@@ -37,7 +37,12 @@ pub(crate) fn grown(r: f32, d: f32) -> f32 {
 /// of a `w` x `h` box; its corners are the outer ones less the borders'
 /// widths on each axis, elliptical where they differ, square where a
 /// border is wider than its corner.
-pub(crate) fn padding_box(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4]) -> (Rect, Corners) {
+pub(crate) fn padding_box(
+    w: f32,
+    h: f32,
+    radii: [f32; 4],
+    widths: [f32; 4],
+) -> (nsh_core::Bounds<Points>, Corners) {
     let [top, right, bottom, left] = widths;
     let r = rect(
         left,
@@ -133,9 +138,14 @@ pub(crate) fn arc_segments(r_px: f32) -> usize {
 /// Appends the outline of the rectangle `r` with corners `c`, clockwise
 /// on screen from the right end of the top side, flattened for `px` pixels
 /// per unit.
-pub(crate) fn rounded_polygon(r: Rect, c: Corners, px: f32, out: &mut Vec<Pt>) {
-    let c = fit_corners(r.width, r.height, c);
-    let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.width, r.y + r.height);
+pub(crate) fn rounded_polygon(r: nsh_core::Bounds<Points>, c: Corners, px: f32, out: &mut Vec<Pt>) {
+    let c = fit_corners(r.size.width.0, r.size.height.0, c);
+    let (x0, y0, x1, y1) = (
+        r.origin.x.0,
+        r.origin.y.0,
+        r.origin.x.0 + r.size.width.0,
+        r.origin.y.0 + r.size.height.0,
+    );
     // Each corner: its center and the angle its arc starts at (y down, so
     // angles turn clockwise on screen).
     let centers = [
@@ -163,7 +173,7 @@ pub(crate) fn rounded_polygon(r: Rect, c: Corners, px: f32, out: &mut Vec<Pt>) {
 
 /// The outline of the rectangle `r` with corners `c`, as
 /// [`rounded_polygon`] appends it.
-pub(crate) fn rounded(r: Rect, c: Corners, px: f32) -> Vec<Pt> {
+pub(crate) fn rounded(r: nsh_core::Bounds<Points>, c: Corners, px: f32) -> Vec<Pt> {
     let mut out = Vec::new();
     rounded_polygon(r, c, px, &mut out);
     out
@@ -351,7 +361,7 @@ pub(crate) fn circle(c: Pt, r: f32, px: f32) -> Vec<Pt> {
 pub(crate) fn ring(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4], px: f32) -> Vec<Vec<Pt>> {
     let mut out = vec![rounded(rect(0.0, 0.0, w, h), circular(radii), px)];
     let (inner, corners) = padding_box(w, h, radii, widths);
-    if inner.width > 0.0 && inner.height > 0.0 {
+    if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
         out.push(rounded(inner, corners, px));
     }
     out
@@ -399,7 +409,10 @@ mod tests {
     fn padding_box_corners() {
         // Uniform 2 pt borders inside 10 pt corners: 8 pt inner corners.
         let (r, c) = padding_box(100.0, 50.0, [10.0; 4], [2.0; 4]);
-        assert_eq!((r.x, r.y, r.width, r.height), (2.0, 2.0, 96.0, 46.0));
+        assert_eq!(
+            (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0),
+            (2.0, 2.0, 96.0, 46.0)
+        );
         assert_eq!(c[0], (8.0, 8.0));
         // Differing borders make elliptical corners, square past the radius.
         let (_, c) = padding_box(100.0, 50.0, [6.0, 0.0, 1.0, 0.0], [6.0, 2.0, 4.0, 1.0]);

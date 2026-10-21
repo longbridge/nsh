@@ -1,7 +1,8 @@
 # Performance
 
 Performance is the project's first priority; the rules are in `AGENTS.md`. Changes to hot paths come with before /
-after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
+after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
+(Apple Silicon):
 
 - counter, headless (debug): first frame ~0.5–0.65ms (58 ops / 49 mount items), one tap ~0.15ms (12 ops / 8 items).
 - counter, Catalyst (release): first frame ~1.05–1.15ms (of which ~0.7ms is cold CoreText layout of 10 texts), one tap ~0.12ms.
@@ -13,22 +14,29 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   no batch. `list_bench` runs at ~9µs per frame back to back (JS ~4µs; ~30µs / JS ~20µs before reactivity went native) and
   ~50µs with caches flushed between frames, but ~60–150µs after the thread sleeps 10ms. The difference is the CPU clocking down while the thread sleeps (Apple CLPC), not the code path; neither QoS (the engine
   thread is USER_INTERACTIVE) nor the Mach time-constraint policy changes it. Judge optimizations by the back-to-back and flushed-cache numbers:
-  single-frame `nsh trace` timings are dominated by the clock state.
+  single-frame `nsh test --trace` timings are dominated by the clock state.
 - On Catalyst (release), rebinding one row while scrolling slowly takes ~0.4ms (clocked down) and rebinding a whole screen of ~32 rows on a
   fast fling 0.9–1.6ms.
 - Host startup (`Host::new`, release): ~75–155µs (clock state). The web APIs add nothing until first used, then ~90µs to
-  make their classes (`bench_first_web_global`; as JS they cost ~0.8ms as source, ~0.33ms as bytecode).
+  make their classes (`bench_first_web_global`; as JS they cost ~0.8ms as source, ~0.33ms as bytecode). The standard
+  modules add `Buffer` (~30µs warm, ~70µs in a process's first VM; made at startup: it must exist before hardening
+  freezes `%TypedArray%.prototype`) and the async runtime over the plain one (~12µs). The first `new WebSocket`
+  starts the VM's tokio I/O runtime (~12µs and a worker thread); `process` and `crypto` are made on first use
+  (`standard::LAZY`), and `WebSocket` is one of the lazy web classes (`web/websocket.rs`, ~4µs of their making; as
+  a JS facade it cost ~190µs on first use). Installing `Buffer` keeps NSH's lazy web globals unmade. On a Linux x86 desktop (shared, noisy) `Host::new` is ~105µs warm and ~460µs
+  cold in a trace's first VM, close to main's; the counter's hardened release first frame (`nsh trace
+  examples/counter`, minimum of 81 interleaved runs) is ~650µs against main's ~540µs, of which `Buffer`'s cold
+  setup is ~70µs.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
-- Rust components vs the same component in TSX (`component_bench`, `examples/bench`, release, minimum of the runs;
-  `TsButton.tsx` is the TSX Button `nsh/ui/mobile` had before components moved into Rust, restyled to draw exactly
-  like the Rust one), with the Rust Button running once (its props bound) and, in brackets, as it rendered again
-  and was diffed before:
+- Rust components vs the same component in TSX (`component_bench`, which writes its screens as `examples/bench` has them; release, minimum of the runs;
+  a button written as a Rust component and the same button in TSX, `TsButton.tsx`, styled to draw exactly alike),
+  with the Rust button running once (its props bound) and, in brackets, as it rendered again and was diffed before:
 
-  | | Rust Button: JS / core | TSX Button: JS / core |
+  | | Rust button: JS / core | TSX button: JS / core |
   |---|---|---|
-  | first frame, 200 Buttons (ops) | 0.42ms / 1.04ms [0.75ms] (1015) | 0.85ms / 0.64ms (2415) |
+  | first frame, 200 buttons (ops) | 0.42ms / 1.04ms [0.75ms] (1015) | 0.85ms / 0.64ms (2415) |
   | one update of all 200 titles (ops) | 0.15ms / 0.44ms [0.48ms] (200) | 0.13ms / 0.34ms (400) |
   | first frame, 1000-row list | 0.17ms / 0.23ms [0.19ms] | 0.23ms / 0.18ms |
   | scrolling the list, per rebinding frame | 1.5µs / 6.1µs [6.3µs] | 1.5µs / 5.3µs |
@@ -40,7 +48,7 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   its text's and label's bindings, and a large view with one changing value costs what that value costs
   (`bench_view_tick`, below). The components' JS face must stay one effect per instance reading the props directly:
   the first version (Solid's `splitProps` / `mergeProps` / `spread` in the former JS runtime) cost 4.0ms of JS for
-  the same first frame, more than the TSX Button.
+  the same first frame, more than the TSX button.
 - Rust components run once (`cargo test --release -p nsh-core bench_view_tick -- --ignored --nocapture`, a view of
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
@@ -145,7 +153,7 @@ per frame). Other platforms need only call `record_work` / `vsync` / `record_lat
 draw a panel.
 
 - macOS (release, Apple silicon, 1200×800 window, 120 Hz ProMotion screen; `nsh-macos-host --fps --trace` with
-  `--script`, two alternating runs of each; main-thread ms per shown frame as p50 / p95). The display link delivers
+  scripted input (the then `--script` steps), two alternating runs of each; main-thread ms per shown frame as p50 / p95). The display link delivers
   120 Hz in every case (refresh gaps p50 8.33 ms). Before = the backend without the two drawing fixes below:
 
   | Scenario | Before: main p50 / p95, CPU | After: main p50 / p95, CPU |
@@ -202,4 +210,4 @@ draw a panel.
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
-The dev profile builds `rquickjs-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.
+The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.

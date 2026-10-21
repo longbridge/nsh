@@ -16,7 +16,9 @@
 
 use std::cell::{Cell, RefCell};
 
-use nsh_core::{NodeId, PanActivation, TouchEvent, TouchPhase, TouchPoint};
+use nsh_core::{
+    NodeId, PanActivation, Points, TouchEvent, TouchPhase, TouchPoint, geometry::point,
+};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
 };
@@ -221,10 +223,8 @@ impl TouchTracker {
                     } else {
                         Vec::new()
                     },
-                    page_x: page.x as f32,
-                    page_y: page.y as f32,
-                    location_x: local.x as f32,
-                    location_y: local.y as f32,
+                    page: point(Points(page.x as f32), Points(page.y as f32)),
+                    location: point(Points(local.x as f32), Points(local.y as f32)),
                     changed: is_changed,
                 }
             })
@@ -285,7 +285,7 @@ define_class!(
             };
             let at = touch.locationInView(None);
             let (dx, dy) = ((at.x - start.x) as f32, (at.y - start.y) as f32);
-            match self.ivars().activation.get().decide(dx, dy) {
+            match self.ivars().activation.get().decide(Points(dx), Points(dy)) {
                 Some(true) => {
                     self.set_state(UIGestureRecognizerState::Began);
                     self.report_activation(touch.timestamp());

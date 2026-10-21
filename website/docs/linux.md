@@ -1,6 +1,6 @@
 ---
 title: Linux
-description: Run NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
+description: Run Rust and TSX NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
 order: 15
 group: platforms
 ---
@@ -8,13 +8,15 @@ group: platforms
 # Linux
 
 NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets and lays out text with Pango; the core,
-the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the same as on iOS and Android,
-so one bundle runs everywhere. On Linux, `Platform.OS` is `"linux"` and the `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
-[`nsh/desktop`](../modules/nsh-desktop.md).
+the reactive graph, the renderer, Taffy layout and the native modules are the same as on iOS and Android,
+so one app runs everywhere. On Linux, `os()` is `Os::Linux` (`Platform.OS` is `"linux"` in TSX) and TSX's
+`desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come
+from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
+[`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
 
 ## Requirements
 
-- **GTK 4.14** or later. To build NSH's Linux runtime (from a checkout, or `cargo xtask
+- **GTK 4.14** or later. To build a Rust app's runner or NSH's Linux runtime (from a checkout, or `cargo xtask
   dist` on Linux) you need their development packages and clang: `libgtk-4-dev clang` on Debian and Ubuntu (24.04 or
   later), `gtk4 clang` on Arch, `gtk4-devel clang` on Fedora.
 - **WebKitGTK 6.0** (2.40 or later) for web views: `libwebkitgtk-6.0-dev` on Debian and Ubuntu, `webkitgtk-6.0` on
@@ -26,11 +28,22 @@ so one bundle runs everywhere. On Linux, `Platform.OS` is `"linux"` and the `des
 
 ## Running an app
 
-On Linux, `nsh run` opens the app in a GTK window (390×844 by default), with hot reload, logs in the terminal and the
+On Linux, `nsh run` opens the app in a GTK window. A Rust app runs from its directory:
+
+```sh
+nsh run                        # --target linux is the default on Linux
+```
+
+`nsh` builds a debug runner with your crate and opens the app, with its logs (`log::info!` and the rest) in the
+terminal; a change to the crate's Rust code builds the runner again and restarts the app. `cargo run` starts the same
+root from the crate's `src/main.rs`, which `nsh init --template rust` writes: [`run_app`](#embedding-in-a-gtk-app)
+with `AppSource::Rust`.
+
+A TSX app names its entry, and opens in a 390×844 window by default, with hot reload, logs in the terminal and the
 error overlay as on the other targets:
 
 ```sh
-nsh run my-app                 # --target linux is the default on Linux
+nsh run App.tsx
 ```
 
 In a checkout, `nsh run` builds the development host (`nsh-linux-host`) first; the distribution made on Linux ships
@@ -42,25 +55,26 @@ nsh build my-app --release -o build
 dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # in a checkout: target/debug/nsh-linux-host
 ```
 
-`--window-size` is the window's default size; tiling window managers may give the window another one.
+`--window-size` is the window's default size (TSX apps); tiling window managers may give the window another one.
 
 ## Packaging
 
 ```sh
-nsh package my-app --target linux [--run]
+nsh package --target linux [--run]           # a Rust app, from its directory
+nsh package App.tsx --target linux [--run]   # a TSX app
 ```
 
 Writes a directory and the same as an archive:
 
 ```text
-out/<Name>/
-  <Name>                 the executable (nsh's release runner)
-  nsh/bundle.nshc        your app, compiled
-  nsh/assets/…           the assets it imports
+.nsh/out/<Name>/
+  <Name>                 the executable: a Rust app's own runner, built with its crate; nsh's release runner for TSX
+  nsh/bundle.nshc        a TSX app, compiled
+  nsh/assets/…           the assets it imports (a Rust crate's `assets!()` too)
   nsh/app.json           the window title and the application id
   <id>.desktop           a desktop entry (StartupWMClass is the id)
   <id>.png               the icon, when nsh.json names one
-out/<Name>.tar.gz
+.nsh/out/<Name>.tar.gz
 ```
 
 The executable finds `nsh/` next to itself (a symbolic link to it, in `~/.local/bin` say, works too). GTK 4, Pango and
@@ -71,24 +85,22 @@ the app after packaging it.
 ## Embedding in a GTK app
 
 The `nsh-platform-linux` crate (from the NSH repository) gives a Rust GTK app `AppView`: one NSH engine as a GTK widget.
-Each `AppView` is independent; several can run at once.
+Each `AppView` is independent; several can run at once. It runs a Rust root, the root component of your crate:
 
 ```rust
 use std::rc::Rc;
-use nsh_platform_linux::{gtk4 as gtk, AppOptions, AppView, AssetBase, Bundle};
+use nsh_platform_linux::{gtk4 as gtk, set_ui_sets, AppOptions, AppView, Root};
 use gtk::prelude::*;
 
 fn main() -> gtk::glib::ExitCode {
+    // Once, before the first view: the UI sets the apps import (NSH's and your crate's).
+    set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
     let app = gtk::Application::builder().application_id("com.example.host").build();
     app.connect_activate(|app| {
         let window = gtk::ApplicationWindow::builder().application(app).default_width(390).default_height(844).build();
-        let view = AppView::new(AppOptions {
-            asset_base: Some(AssetBase::Directory("app/assets".into())),
-            ..AppOptions::default()
-        });
+        let view = AppView::new(AppOptions::default());
         // register native components here, before loading
-        let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-        view.load(Bundle::source(code).into());
+        view.load(Root::of::<my_app::App>().into());
         window.set_child(Some(&view.widget()));
         // The window keeps the view; closing it stops the app.
         let keep = std::cell::RefCell::new(Some(Rc::clone(&view)));
@@ -99,29 +111,51 @@ fn main() -> gtk::glib::ExitCode {
 }
 ```
 
+`Root::tokens` gives the root its [theme](./rust.md#theme) and `Root::app_id` the id its data is kept under. A TSX
+bundle that `nsh build` wrote loads into the same view, with `asset_base` set to its `assets` directory:
+
+```rust
+use nsh_platform_linux::{AppOptions, AppView, AssetBase, Bundle};
+
+let view = AppView::new(AppOptions {
+    asset_base: Some(AssetBase::Directory("app/assets".into())),
+    ..AppOptions::default()
+});
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(Bundle::source(code).into());
+```
+
 `AppView::load` replaces whatever ran; `stop` ends the app. `asset_base` tells it where `asset:/` URIs resolve
 (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`) load with `unsafe { Bundle::bytecode(bytes) }`:
-QuickJS bytecode is trusted input, so only load it from your own app's files.
+QuickJS bytecode is trusted input, so only load it from your own app's files. A standalone window is
+`nsh_platform_linux::run_app(source, options)`, with `AppSource::Rust(root)` or `AppSource::Bundle(bundle)`.
+
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
+`set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
+(`my_app::registry()`, which `#[native_module]` makes), so the TSX a view loads imports your Rust components and
+modules too.
 
 ## What differs on Linux
 
-The environment is a desktop's: the safe area and the keyboard height are 0, `Platform.constants.interfaceIdiom` is
-`"desktop"`, `Platform.Version` is the kernel's major and minor version, and dark mode follows the desktop's setting
+The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
+(`Platform.constants.interfaceIdiom` is `"desktop"`), `os_version()` (`Platform.Version`) is the kernel's major and minor version, and dark mode follows the desktop's setting
 (through the XDG settings portal) live. See [Device and environment](./device-and-environment.md).
 
 ### Keyboard
 
 | Keys | Do |
 |---|---|
-| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmitEditing`), submit and leave the field, or a new line (multiline inputs) |
+| Return | In an `Input`, what `submitBehavior` says: submit (`onSubmit`), submit and leave the field, or a new line (multiline inputs) |
 | Shift+Return, Alt+Return | A new line in a multiline input whose return submits (Ctrl+Return submits) |
-| Tab, Shift+Tab | The next / previous field in screen order, within the newest modal |
-| Escape | Leaves the focused field; else clears a text selection, then goes back or asks the newest modal to close |
+| Tab, Shift+Tab | The next / previous field in screen order, within the newest dialog |
+| Escape | Leaves the focused field; else clears a text selection, then closes the newest dialog or goes back |
 | Alt+Left, Back key, mouse back button | Go back (also from a field) |
 | Ctrl+arrows, Home / End, with Shift; Ctrl+Backspace / Delete | Move, select and delete by word and line in a field, as in every GTK app |
-| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a secure field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
+| Ctrl+Z, Ctrl+Shift+Z, Ctrl+X / C / V / A | Undo, redo, cut, copy, paste, select all (a `masked` field refuses cut and copy); Ctrl+A / Ctrl+C select and copy `selectable` text |
 | Arrows; Page Up / Down, Space, Shift+Space; Home / End | Scroll the scroll view around the focused view or under the mouse by a line, a page, to the start / end (not while a field has the focus) |
 | Ctrl+W, F11, Ctrl+Q | Close the window, full screen, quit (`nsh package` and `nsh run` apps) |
 | Ctrl+R | Reloads the latest build (`nsh run`) |
