@@ -74,7 +74,7 @@ function App() {
                     <Text style={{ fontSize: 15, fontWeight: "500", color: ui().text }}>{item().label}</Text>
                     <Text style={{ fontSize: 12, color: ui().muted }}>{item().detail}</Text>
                   </View>
-                  <Text style={{ fontSize: 14, fontWeight: "600", color: ui().text }}>{item().price}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: "600", fontVariant: ["tabular-nums"], color: ui().text }}>{item().price}</Text>
                 </Radio>
               </>
             )}
