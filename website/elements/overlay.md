@@ -29,7 +29,7 @@ fn more_button() -> impl IntoElement {
                 .py_2()
                 .child(text("More")),
         )
-        .child(If::new(move || open.get(), move || {
+        .child(when(move || open.get(), move || {
             overlay()
                 .anchor(&anchor)
                 .placement(Placement::Bottom)
@@ -78,7 +78,7 @@ function MoreButton() {
 ```
 
 `Overlay` comes from `nsh` in TSX and `overlay()` from `nsh_core::ui::prelude` in Rust. It is shown while it is in the
-view: put it in an `If` (Rust: `If::new`) to open and close it. Overlays shown later are on top of earlier ones, and
+view: put it in an `If` (Rust: `when(..)`) to open and close it. Overlays shown later are on top of earlier ones, and
 an overlay inside another is on top of it.
 
 ## Placement

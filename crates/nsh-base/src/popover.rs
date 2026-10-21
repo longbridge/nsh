@@ -91,11 +91,11 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
                     change(!open.get_untracked(), OpenChangeReason::TriggerPress);
                 })
         }))
-        .child(If::new(
+        .child(when(
             move || open.get(),
             move || {
                 // Touch screens: the press outside is the popover's.
-                let backdrop = If::new(
+                let backdrop = when(
                     move || !desktop && props.close_on_press_outside.get(),
                     move || {
                         overlay()

@@ -67,7 +67,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
             cx.emit(SheetEvent::OpenChange(next, reason));
         }
     };
-    If::new(
+    when(
         move || open.get(),
         move || {
             let backdrop = overlay()

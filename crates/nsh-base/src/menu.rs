@@ -113,7 +113,7 @@ fn surface(
             }
         }
     };
-    If::new(
+    when(
         move || open.get(),
         move || {
             // Each opening starts at the top.
@@ -420,7 +420,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let content = match sheet.clone() {
         // Only the items of the level shown are there (for screen readers
         // and tests too).
-        Some(m) => If::new(move || m.shown(), move || props.children).into_element(),
+        Some(m) => when(move || m.shown(), move || props.children).into_element(),
         None => props.children.into_element(),
     };
     view()
@@ -516,7 +516,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             });
         };
         return view()
-            .child(If::new(
+            .child(when(
                 move || shown.shown(),
                 move || {
                     props
@@ -524,13 +524,13 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                         .place(move |t| t.role(AccessibilityRole::Menuitem).on_press(into))
                 },
             ))
-            .child(If::new(
+            .child(when(
                 // While it is on the path: a submenu inside it shows its
                 // own items in place of these, which hide themselves.
                 move || path.with(|p| p.contains(&id)),
                 move || {
                     vec![
-                        If::new(
+                        when(
                             move || path.with(|p| p.last() == Some(&id)),
                             move || props.back.place(move |b| b.on_press(back)),
                         )
@@ -558,7 +558,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                 .on_hover_in(open)
                 .on_press(open)
         }))
-        .child(If::new(
+        .child(when(
             move || open_sub.get() == Some(id),
             move || {
                 overlay()

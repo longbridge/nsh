@@ -120,7 +120,7 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
             }
         })
         .child(props.children)
-        .child(If::new(
+        .child(when(
             move || open.get() && !props.disabled.get(),
             move || {
                 overlay()
