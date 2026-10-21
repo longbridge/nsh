@@ -1,0 +1,108 @@
+//! What a host gives one engine: typed values its UI sets' Rust code reads
+//! while that engine runs it ([`engine_context`]).
+//!
+//! Several engines run in one process (one per surface), and a module
+//! function is a free function: what it reaches of its host would be
+//! process-wide without this. The engine makes its context its thread's
+//! ([`EngineContext::enter`]) for its whole run, so module functions read
+//! it in the JS call, as ops and as `async` tasks (polled on that thread),
+//! and so do components. Work sent to other threads (`background`) does
+//! not see it: read it first and move the value there.
+
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    fmt,
+    sync::Arc,
+};
+
+use rustc_hash::FxHashMap;
+
+type Values = FxHashMap<TypeId, Arc<dyn Any + Send + Sync>>;
+
+/// Typed values a host gives one engine (`EngineConfig::context`), at most
+/// one per type, which its Rust code reads with [`engine_context`].
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub struct EngineContext {
+    values: Arc<Values>,
+}
+
+impl EngineContext {
+    /// This context with `value` as its `T`, replacing one it had.
+    pub fn with<T: Send + Sync + 'static>(mut self, value: T) -> Self {
+        Arc::make_mut(&mut self.values).insert(TypeId::of::<T>(), Arc::new(value));
+        self
+    }
+
+    /// Its `T`, if it has one.
+    pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
+        self.values
+            .get(&TypeId::of::<T>())
+            .cloned()
+            .and_then(|value| value.downcast::<T>().ok())
+    }
+
+    /// Makes it the current thread's until the guard drops: what
+    /// [`engine_context`] reads there (the engine does this on its thread).
+    pub fn enter(&self) -> EngineContextGuard {
+        let previous = CURRENT.with(|current| current.replace(Some(self.clone())));
+        EngineContextGuard { previous }
+    }
+}
+
+impl fmt::Debug for EngineContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EngineContext")
+            .field("values", &self.values.len())
+            .finish()
+    }
+}
+
+thread_local! {
+    /// The context of the engine on this thread.
+    static CURRENT: RefCell<Option<EngineContext>> = const { RefCell::new(None) };
+}
+
+/// Puts the thread's previous context back ([`EngineContext::enter`]).
+#[must_use = "the context is the thread's while the guard lives"]
+pub struct EngineContextGuard {
+    previous: Option<EngineContext>,
+}
+
+impl Drop for EngineContextGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        CURRENT.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// The `T` the host gave the engine running this code
+/// ([`EngineContext::with`]); `None` without one, or off the engine's
+/// thread.
+pub fn engine_context<T: Send + Sync + 'static>() -> Option<Arc<T>> {
+    CURRENT.with(|current| current.borrow().as_ref()?.get::<T>())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_thread_reads_the_context_it_entered_until_the_guard_drops() {
+        let outer = EngineContext::default().with(1_u32).with("outer");
+        let inner = EngineContext::default().with(2_u32);
+        assert_eq!(engine_context::<u32>(), None);
+        {
+            let _outer = outer.enter();
+            assert_eq!(engine_context::<u32>().as_deref(), Some(&1));
+            {
+                let _inner = inner.enter();
+                assert_eq!(engine_context::<u32>().as_deref(), Some(&2));
+                assert_eq!(engine_context::<&str>(), None);
+            }
+            assert_eq!(engine_context::<&str>().as_deref(), Some(&"outer"));
+        }
+        assert_eq!(engine_context::<u32>(), None);
+    }
+}

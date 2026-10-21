@@ -74,6 +74,14 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **Each engine's own part of the host** (`nsh_core::ui::EngineContext`): a host serving several engines (windows,
+  panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
+  `EngineContext::default().with(MyLink { .. })`, at most one value per type, `Send + Sync`. The set's Rust code
+  reads the context of the engine running it with `engine_context::<MyLink>()` (`Option<Arc<MyLink>>`): plain
+  functions in the call, `cx` functions as ops, `async` ones in their task, after awaits too, and components. The
+  engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
+  threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
+  backend's window tests run two engines reading their own.
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`

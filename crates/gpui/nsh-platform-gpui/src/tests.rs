@@ -155,6 +155,7 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -202,4 +203,98 @@ fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppCont
     ime(&view, cx, |s| crate::text_input::char_input(s, "好"));
     assert_eq!(field_text(&view, cx).as_deref(), Some("held好"));
     wait_for(&view, cx, "compose ni|end|compose hao|change held好|end");
+}
+/// The part of the embedding app a view reaches: its engine's context.
+struct Desk(&'static str);
+
+/// Which desk the engine running the call was given.
+#[nsh_core::ui::module]
+struct Whose;
+
+#[nsh_core::ui::module]
+impl Whose {
+    /// In the JS call.
+    pub(crate) fn now() -> String {
+        desk()
+    }
+
+    /// As a task, after it waited.
+    pub(crate) async fn later() -> String {
+        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        desk()
+    }
+}
+
+fn desk() -> String {
+    nsh_core::ui::engine_context::<Desk>()
+        .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
+}
+
+/// A field showing which desk `Whose` names, in the call and in a task.
+const WHOSE: &str = r#"
+import { Input, mount, signal, View } from "nsh";
+import { nativeModule } from "nsh/native";
+
+interface WhoseApi {
+  now(): string;
+  later(): Promise<string>;
+}
+const { Whose } = nativeModule<{ Whose: WhoseApi }>("test/context");
+
+function App() {
+  const text = signal("waiting");
+  setTimeout(async () => text.set(`${Whose.now()} ${await Whose.later()}`), 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+/// Two surfaces side by side in one window.
+struct Pair {
+    a: Entity<AppView>,
+    b: Entity<AppView>,
+}
+
+impl gpui::Render for Pair {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::ParentElement as _;
+        div()
+            .size_full()
+            .flex()
+            .child(div().flex_1().child(self.a.clone()))
+            .child(div().flex_1().child(self.b.clone()))
+    }
+}
+
+fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
+    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    context.module::<Whose>();
+    crate::set_ui_sets(vec![nsh_base::registry(), context]);
+    let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (pair, cx) = cx.add_window_view(|window, cx| {
+        let view = |desk: &'static str, window: &mut Window, cx: &mut gpui::Context<Pair>| {
+            let options = AppOptions {
+                context: nsh_engine::EngineContext::default().with(Desk(desk)),
+                ..AppOptions::default()
+            };
+            cx.new(|cx| AppView::new(options, window, cx))
+        };
+        Pair {
+            a: view("A", window, cx),
+            b: view("B", window, cx),
+        }
+    });
+    let (a, b) = pair.read_with(cx, |pair, _| (pair.a.clone(), pair.b.clone()));
+    for view in [&a, &b] {
+        view.update(cx, |view, _| {
+            view.load(App::Js(Bundle::source(code.clone())))
+        });
+    }
+    wait_for(&a, cx, "A A");
+    wait_for(&b, cx, "B B");
 }

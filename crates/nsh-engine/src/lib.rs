@@ -52,7 +52,7 @@ pub use nsh_core::{
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
-    ui::{Root, Tokens},
+    ui::{EngineContext, Root, Tokens},
 };
 #[cfg(feature = "js")]
 pub use nsh_js::BYTECODE_VERSION;
@@ -669,6 +669,11 @@ pub struct EngineConfig {
     /// moves (`nsh_core::time::Clock::manual`), which its timers, frames
     /// and `Date` follow.
     pub clock: Clock,
+    /// What the host gives this engine's Rust code, which its UI sets'
+    /// functions and components read while it runs them
+    /// (`nsh_core::ui::engine_context`): a host serving several engines
+    /// tells them apart by it.
+    pub context: EngineContext,
     /// Values of the environment kept whatever the platform reports (a
     /// test's locale, reduced motion and safe area: `nsh test --target`).
     pub pinned: EnvironmentPins,
@@ -762,6 +767,7 @@ impl EngineConfig {
             data_dir: None,
             storage: None,
             clock: Clock::system(),
+            context: EngineContext::default(),
             pinned: EnvironmentPins::default(),
             clipboard: None,
         }
@@ -814,6 +820,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("limits", &self.limits)
             .field("ui_sets", &self.ui_sets)
             .field("clock", &self.clock)
+            .field("context", &self.context)
             .field("pinned", &self.pinned)
             .field("clipboard", &self.clipboard.is_some())
             .finish()
@@ -1094,6 +1101,7 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     raise_thread_priority();
     // The thread's time is the engine's from its first line of JS on.
     let _clock = config.clock.enter();
+    let _context = config.context.enter();
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
@@ -1152,6 +1160,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
         let _clock = config.clock.enter();
+        let _context = config.context.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
         Some(LocalEngine {
             driver,
@@ -1197,6 +1206,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     /// latest (sooner if input arrives); `None`: only for input.
     pub fn pump(&mut self) -> Option<Instant> {
         let _clock = self.driver.clock.enter();
+        let _context = self.driver.context.enter();
         self.pumping
             .store(true, std::sync::atomic::Ordering::SeqCst);
         // Bounded: messages sent while handling (a task waking another)
@@ -1241,6 +1251,8 @@ struct Driver<M: TextEngine + 'static> {
     posts: nsh_core::ui::Posts,
     /// The engine's clock, its thread's ([`Clock::enter`]).
     clock: Clock,
+    /// The host's context, its thread's ([`EngineContext::enter`]).
+    context: EngineContext,
     /// When the last display frame ran, on a clock that moves with the
     /// display's frames: the next one comes a frame after it.
     last_frame: Option<Instant>,
@@ -1380,6 +1392,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             last_gc: Instant::now(),
             posts: posts.clone(),
             clock: config.clock.clone(),
+            context: config.context.clone(),
             last_frame: None,
         };
         let eval_us = match &config.app {

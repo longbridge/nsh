@@ -145,6 +145,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// What the embedding app gives the engines of the views made with
+    /// these options ([`nsh_engine::EngineConfig::context`]): its UI sets'
+    /// functions read it with `nsh_core::ui::engine_context`, so each view
+    /// reaches its own part of the embedding app.
+    pub context: nsh_engine::EngineContext,
 }
 
 impl Default for AppOptions {
@@ -161,6 +166,7 @@ impl Default for AppOptions {
             limits: Limits::default(),
             data_dir: None,
             storage: None,
+            context: Default::default(),
         }
     }
 }
@@ -298,6 +304,7 @@ impl AppView {
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
             clock: Default::default(),
+            context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
         };
