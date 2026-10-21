@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="14 12 100 100">
   <style>
-    .top { stop-color: #2c6c14; }
-    .bottom { stop-color: #20580c; }
+    .top { stop-color: #5f9e26; }
+    .bottom { stop-color: #2a6812; }
     .dot { fill: #15161a; }
     @media (prefers-color-scheme: dark) {
       .top { stop-color: #e2fb9f; }
