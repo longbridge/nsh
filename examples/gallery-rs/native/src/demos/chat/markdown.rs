@@ -7,9 +7,7 @@
 //! the caret ends its last block. Every block is selectable: a long press
 //! highlights it and offers Copy.
 
-use nsh_base::{
-    MarkdownOptions, TextView, TextViewCodeAction, TextViewPart, TextViewParts, TextViewProps,
-};
+use nsh_base::{MarkdownOptions, TextViewCodeAction, TextViewPart, TextViewParts, text_view};
 use nsh_core::ui::{StyleRefinement, prelude::*};
 
 use super::parts::caret;
@@ -40,20 +38,20 @@ pub(crate) fn markdown(
 ) -> impl IntoElement {
     provide_context(parts());
     let streaming = computed(streaming);
-    TextView::element(TextViewProps {
-        markdown: Prop::bind(move || Some(SharedString::from(md()))),
-        options: Prop::bind(move || MarkdownOptions {
+    text_view()
+        .markdown(move || Some(SharedString::from(md())))
+        .options(move || MarkdownOptions {
             streaming: streaming.get(),
             ..MarkdownOptions::default()
-        }),
-        selectable: true.into(),
-        code_block_scroll_indicator: false.into(),
-        code_block_actions: vec![TextViewCodeAction::new("copy").with_label("Copy code")].into(),
-        ..TextViewProps::default()
-    })
-    .fill("caret", If::new(streaming, caret))
-    .gap_3()
-    .text_size(px(15.0))
-    .line_height(px(22.0))
-    .text_color(colors::TEXT)
+        })
+        .selectable(true)
+        .code_block_scroll_indicator(false)
+        .code_block_actions(vec![
+            TextViewCodeAction::new("copy").with_label("Copy code"),
+        ])
+        .caret(when(streaming, caret))
+        .gap_3()
+        .text_size(px(15.0))
+        .line_height(px(22.0))
+        .text_color(colors::TEXT)
 }

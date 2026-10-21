@@ -54,7 +54,6 @@
 //! keyboard and have no meaning on the desktop: they are never shown.
 
 mod layout;
-mod model;
 
 use std::{
     cell::{Cell, RefCell},
@@ -66,14 +65,13 @@ use std::{
 use gpui::{Font, FontFeatures, FontStyle, FontWeight, SharedString, TextSystem, px};
 use nsh_core::{
     AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points,
-    ReturnKeyType, SubmitBehavior, TextAlign, tailwind::state,
+    ReturnKeyType, SubmitBehavior, TextAlign,
+    tailwind::state,
+    text_edit::{self as model, Composition, Model, Unit, key_of, pasted, utf16_to_byte},
 };
 use rustc_hash::FxHashMap;
 
-use self::{
-    layout::{Layout, Style},
-    model::{Composition, Model, Unit, key_of, pasted, utf16_to_byte},
-};
+use self::layout::{Layout, Style};
 use crate::{
     input::{KeyEvent, Modifiers, PointerKind},
     keys::{
@@ -1027,11 +1025,7 @@ fn composition(text: &str, selected: Option<Range<usize>>) -> Option<Composition
         }
         None => (text.len(), None),
     };
-    Some(Composition {
-        text: text.to_owned(),
-        cursor,
-        target,
-    })
+    Some(Composition::new(text.to_owned(), cursor, target))
 }
 
 /// What a field's config asks of input methods and on-screen keyboards.

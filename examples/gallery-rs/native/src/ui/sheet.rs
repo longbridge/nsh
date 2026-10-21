@@ -76,7 +76,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
         }
     });
     let children = props.children;
-    view().child(If::new(props.open, move || {
+    view().child(when(props.open, move || {
         let height = untracked(window).height;
         dialog()
             .animation(ModalAnimation::None)
@@ -85,7 +85,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
             .close_on_escape(false)
             .close_on_backdrop_press(false)
             .close_on_swipe(false)
-            .on_cancel(move |_: &()| close())
+            .on_cancel(close)
             .child(
                 // The backdrop fades with the panel's position.
                 view()
@@ -97,7 +97,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
                     // For the pointer: Escape and the back button close it
                     // from the keyboard, which goes straight to the panel.
                     .focusable(false)
-                    .on_press(move |_: &()| close()),
+                    .on_press(close),
             )
             .child(
                 view()

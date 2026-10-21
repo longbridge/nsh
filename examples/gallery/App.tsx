@@ -1,8 +1,7 @@
-import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, Image, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 import { Platform, windowSize } from "nsh/device";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
-import { Image } from "nsh/image";
 import { NavPage, NavStack } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";

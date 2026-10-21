@@ -8,7 +8,7 @@ use std::{collections::HashSet, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     MountBatch, MountItem,
-    ui::{Each, Registry, Rendered, Renderer, dynamic, prelude::*},
+    ui::{Registry, Rendered, Renderer, dynamic, prelude::*},
 };
 
 /// Renders each item (`key:label`) with the app's function, keyed by its
@@ -35,7 +35,7 @@ impl Component for Shelf {
     type Event = NoEvent;
 
     fn view(props: ShelfProps, _: Scope<NoEvent>) -> impl IntoElement {
-        view().child(Each::new(
+        view().child(each(
             props.items,
             |item: &String| split(item).0,
             move |item, _| {

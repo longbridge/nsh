@@ -851,7 +851,7 @@ impl Animated for AnimatedValue {
 ///     Animation::timing(&y, -36.0, Timing::new(220.0, Easing::EaseOut)),
 ///     Animation::spring(&y, 0.0, Spring::default()),
 /// ]);
-/// view().on_press(move |_: &()| {
+/// view().on_press(move || {
 ///     let end = jump.start();
 /// })
 /// ```

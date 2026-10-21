@@ -13,9 +13,9 @@ use std::{
 };
 
 use super::{
-    Accessible, AnyElement, If, Interactive, IntoReactive, Position, Reactive,
+    Accessible, AnyElement, Interactive, IntoReactive, Position, Reactive,
     element::{BoundListConfig, ElKind, ElNode, Element, IntoElement, IntoListener, ListConfig},
-    events,
+    events, when,
 };
 use crate::{
     CellSlot, EventKind, EventPayload, ListContentStyle, PayloadValue, Prop, Tag, Viewability,
@@ -267,7 +267,7 @@ impl VirtualList {
             // While the bound count is 0.
             Reactive::Bound(count) => {
                 let cell = extra_cell(CellSlot::Empty, "\0empty", empty);
-                let shown = If::new(move || count() == 0, move || AnyElement(cell.clone()));
+                let shown = when(move || count() == 0, move || AnyElement(cell.clone()));
                 self.0.children.push(shown.into_element().0);
                 self
             }

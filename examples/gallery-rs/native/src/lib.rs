@@ -31,5 +31,5 @@ pub fn Gallery() -> impl IntoElement {
         .bg(colors::BACKGROUND)
         // Made again when the window crosses the threshold, as TS remounts
         // its shell: what is open carries over.
-        .child(If::new(desktop, shell::desktop_layout).otherwise(shell::phone))
+        .child(when(desktop, shell::desktop_layout).otherwise(shell::phone))
 }

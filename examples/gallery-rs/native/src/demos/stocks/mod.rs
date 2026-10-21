@@ -35,17 +35,17 @@ use nsh_core::{
 };
 
 use self::{
-    detail::{StockView, StockViewProps},
+    detail::stock_view,
     market::{
         INDEX_BASE, ISSUES, Market, Quote, SECTORS, TICK_MS, grouped, price, signed, time, tone_of,
     },
-    parts::{Calm, MarketButton, SpringBar, SpringBarProps, spring_bar},
+    parts::{Calm, market_button, spring_bar},
 };
 use crate::{
     nav,
     ui::{
-        IconName, PageHeader, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize,
-        colors, desktop, header, icon, lengths, motion, pane_width, pt, with_header,
+        IconName, PageHeader, Segment, SegmentedSize, colors, desktop, header, icon, lengths,
+        motion, pane_width, pt, segmented, with_header,
     },
 };
 
@@ -167,13 +167,10 @@ fn open(live: &Live, index: usize) {
         // The screen is outside the watchlist: it gets the market here.
         provide_context(live.clone());
         with_header(
-            header(nav_page().title(code)).header_right(MarketButton::element(())),
-            || PageHeader::new(code).right(MarketButton::element(())),
+            header(nav_page().title(code)).header_right(market_button()),
+            || PageHeader::new(code).right(market_button()),
         )
-        .child(StockView::element(StockViewProps {
-            stock: index as u32,
-            ..StockViewProps::default()
-        }))
+        .child(stock_view().stock(index as u32))
     });
 }
 
@@ -254,25 +251,24 @@ pub(crate) fn Stocks() -> impl IntoElement {
     let shown = signal(0_usize);
     let stocks = {
         let live = live.clone();
-        Each::new(
+        each(
             move || rows.get(),
             |i: &usize| *i,
             move |i, at| {
                 let index = i.get_untracked();
                 let live = live.clone();
-                StockRow::element(StockRowProps {
-                    index: index as u32,
-                    first: Prop::bind(move || at.get() == 0),
-                    wide,
-                    active: Prop::bind(move || wide && shown.get() == index),
-                })
-                .on_event(move |_: &StockRowEvent| {
-                    if wide {
-                        shown.set(index);
-                    } else {
-                        open(&live, index);
-                    }
-                })
+                stock_row()
+                    .index(index as u32)
+                    .first(move || at.get() == 0)
+                    .wide(wide)
+                    .active(move || wide && shown.get() == index)
+                    .on_press(move || {
+                        if wide {
+                            shown.set(index);
+                        } else {
+                            open(&live, index);
+                        }
+                    })
             },
         )
     };
@@ -288,24 +284,22 @@ pub(crate) fn Stocks() -> impl IntoElement {
     let watchlist = view()
         .flex_1()
         .bg(colors::BACKGROUND)
-        .child(MarketStrip::element(()))
+        .child(market_strip())
         .child(
             view().px_4().pb(px(6.0)).child(
-                Segmented::element(SegmentedProps {
-                    options,
-                    selected: Prop::bind(move || filter.get() as u32),
-                    size: SegmentedSize::Small,
-                })
-                .on_event(move |e: &SegmentedEvent| {
-                    let SegmentedEvent::Change(i) = e;
-                    filter.set(*i as usize);
-                }),
+                segmented()
+                    .options(options)
+                    .selected(move || filter.get() as u32)
+                    .size(SegmentedSize::Small)
+                    .on_change(move |i: &u32| {
+                        filter.set(*i as usize);
+                    }),
             ),
         )
         .child(
             scroll()
                 .flex_1()
-                .child(view().child(stocks).child(If::new(
+                .child(view().child(stocks).child(when(
                     move || rows.with(Vec::is_empty),
                     || {
                         text("Nothing here right now")
@@ -345,13 +339,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
         // A new stock view when another stock is shown.
         .child(view().flex_1().child(dynamic(move || {
             let stock = shown.get() as u32;
-            untracked(|| {
-                StockView::element(StockViewProps {
-                    stock,
-                    wide: true,
-                    split: split.into(),
-                })
-            })
+            untracked(|| stock_view().stock(stock).wide(true).split(split))
         })))
         .into_element()
 }
@@ -420,7 +408,12 @@ fn MarketStrip() -> impl IntoElement {
                         .child(
                             view()
                                 .bind_rotate(&turn.interpolate(&[0.0, 1.0], &[90.0, -90.0]))
-                                .child(icon(IconName::Chevron, 12.0, colors::FAINT)),
+                                .child(
+                                    icon()
+                                        .name(IconName::Chevron)
+                                        .size(12.0)
+                                        .tint(colors::FAINT),
+                                ),
                         ),
                 )
                 .child(
@@ -429,9 +422,9 @@ fn MarketStrip() -> impl IntoElement {
                         .text_color(colors::FAINT)
                         .tabular_nums(),
                 )
-                .child(MarketButton::element(())),
+                .child(market_button()),
         )
-        .child(If::new(opened, move || breadth(&live)))
+        .child(when(opened, move || breadth(&live)))
 }
 
 /// Advancers vs decliners across the composite and the sectors' moves:
@@ -536,22 +529,36 @@ fn sector_bar(label: &'static str, change: Memo<f64>, scale: Memo<f64>) -> View 
                 .flex_1()
                 .flex_row()
                 .items_center()
-                .child(view().flex_1().child(SpringBar::element(SpringBarProps {
-                    from_right: true,
-                    radius: Some(2.0),
-                    ..spring_bar(
-                        move || if change.get() < 0.0 { share() } else { 0.0 },
-                        colors::DOWN,
-                    )
-                })))
+                .child(
+                    view().flex_1().child(
+                        spring_bar()
+                            .share(move || {
+                                if change.get() < 0.0 {
+                                    share() as f32
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .color(colors::DOWN)
+                            .from_right(true)
+                            .radius(2.0),
+                    ),
+                )
                 .child(view().w(px(1.0)).h(px(14.0)).bg(colors::BORDER))
-                .child(view().flex_1().child(SpringBar::element(SpringBarProps {
-                    radius: Some(2.0),
-                    ..spring_bar(
-                        move || if change.get() > 0.0 { share() } else { 0.0 },
-                        colors::UP,
-                    )
-                }))),
+                .child(
+                    view().flex_1().child(
+                        spring_bar()
+                            .share(move || {
+                                if change.get() > 0.0 {
+                                    share() as f32
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .color(colors::UP)
+                            .radius(2.0),
+                    ),
+                ),
         )
         .child(
             text(move || format!("{}%", signed(change.get(), 2)))
@@ -763,7 +770,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .items_center()
         .gap_3()
         .px_4()
-        .on_press(move |_: &()| cx.emit(StockRowEvent::Press))
+        .on_press(move || cx.emit(StockRowEvent::Press))
         // Pressed, the row shows the surface under its content.
         .active(|s| s.bg(colors::SURFACE))
         .role(AccessibilityRole::Button)
@@ -777,7 +784,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
                 .style_when(active, |s| s.bg(fill))
                 .hover(|s| s.bg(move || if active.get() { fill } else { colors::SURFACE }))
         })
-        .child(If::new(active, || {
+        .child(when(active, || {
             view()
                 .absolute()
                 .top(px(14.0))

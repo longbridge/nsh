@@ -9,9 +9,8 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
-    Segment, SegmentedEvent, ToggleEvent, caption, colors, hint, inset_shadow, press_with, radius,
-    rgb_a, segmented, tints, toggle,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, Segment,
+    caption, colors, hint, inset_shadow, press, radius, rgb_a, segmented, tints, toggle,
 };
 
 /// The stage every specimen stands on: the card's light, without its
@@ -224,52 +223,48 @@ fn FlipCard() -> impl IntoElement {
     };
     let tone = |light: u32, dark: u32| AdaptiveColor::new(rgb(light), rgb(dark));
     view().flex_1().child(
-        press_with(
-            PressProps {
-                scale: 0.98.into(),
-                label: Some("Flip the card".into()).into(),
-                ..PressProps::default()
-            },
-            flip,
-        )
-        .child(
-            view()
-                .h(px(132.0))
-                // The bound rotations follow the static perspective.
-                .child(
-                    face(
-                        [
-                            tone(0xeef2fc, 0x1a2134),
-                            tone(0xf5f8fe, 0x212a42),
-                            tone(0xe6ecfa, 0x171d2d),
-                            tone(0xcdd8f3, 0x2b3a5c),
-                        ],
-                        Badge::new("front").tone(crate::ui::Tone::Info),
-                        "0°",
-                        hint("Tap to flip", "Click to flip"),
-                        "A spring turns it on the UI thread",
+        press()
+            .scale(0.98)
+            .label("Flip the card")
+            .on_press(flip)
+            .child(
+                view()
+                    .h(px(132.0))
+                    // The bound rotations follow the static perspective.
+                    .child(
+                        face(
+                            [
+                                tone(0xeef2fc, 0x1a2134),
+                                tone(0xf5f8fe, 0x212a42),
+                                tone(0xe6ecfa, 0x171d2d),
+                                tone(0xcdd8f3, 0x2b3a5c),
+                            ],
+                            Badge::new("front").tone(crate::ui::Tone::Info),
+                            "0°",
+                            hint("Tap to flip", "Click to flip"),
+                            "A spring turns it on the UI thread",
+                        )
+                        .bind_transform(TransformKind::RotateY, &angle),
                     )
-                    .bind_transform(TransformKind::RotateY, &angle),
-                )
-                .child(
-                    face(
-                        [
-                            tone(0xf1f7e2, 0x202814),
-                            tone(0xf7fbec, 0x283219),
-                            tone(0xe9f2d2, 0x1b2211),
-                            tone(0xd3e3a8, 0x3b4a22),
-                        ],
-                        Badge::new("back").tone(crate::ui::Tone::Accent),
-                        "180°",
-                        "backfaceVisibility",
-                        "hidden: each face hides while turned away",
-                    )
-                    .bind_transform(
-                        TransformKind::RotateY,
-                        &angle.interpolate(&[0.0, 180.0], &[180.0, 360.0]),
+                    .child(
+                        face(
+                            [
+                                tone(0xf1f7e2, 0x202814),
+                                tone(0xf7fbec, 0x283219),
+                                tone(0xe9f2d2, 0x1b2211),
+                                tone(0xd3e3a8, 0x3b4a22),
+                            ],
+                            Badge::new("back").tone(crate::ui::Tone::Accent),
+                            "180°",
+                            "backfaceVisibility",
+                            "hidden: each face hides while turned away",
+                        )
+                        .bind_transform(
+                            TransformKind::RotateY,
+                            &angle.interpolate(&[0.0, 180.0], &[180.0, 360.0]),
+                        ),
                     ),
-                ),
-        ),
+            ),
     )
 }
 
@@ -557,10 +552,14 @@ fn layers() -> Card {
         .icon(IconName::Lists)
         .title("Clipping and layers")
         .subtitle("overflow · zIndex · opacity")
-        .right(toggle(clip, "Clip").on_event(move |event: &ToggleEvent| {
-            let ToggleEvent::Change(on) = *event;
-            clip.set(on);
-        }))
+        .right(
+            toggle()
+                .value(clip)
+                .label("Clip")
+                .on_change(move |&on: &bool| {
+                    clip.set(on);
+                }),
+        )
         .child(
             grid()
                 .child(tile(
@@ -637,17 +636,17 @@ fn layers() -> Card {
                         .gap_2()
                         .child(caption("Opacity", Some("Animated natively")))
                         .child(
-                            segmented(LEVELS.map(|(l, _)| Segment::new(l)), level).on_event(
-                                move |event: &SegmentedEvent| {
-                                    let SegmentedEvent::Change(to) = *event;
+                            segmented()
+                                .options(LEVELS.map(|(l, _)| Segment::new(l)))
+                                .selected(level)
+                                .on_change(move |&to: &u32| {
                                     level.set(to);
                                     opacity.timing(
                                         LEVELS[to as usize].1,
                                         260.0,
                                         Easing::Curve(Curve::Cubic, EaseMode::Out),
                                     );
-                                },
-                            ),
+                                }),
                         ),
                 ),
         )
@@ -670,7 +669,7 @@ fn transforms() -> Card {
         .icon(IconName::Physics)
         .title("3D transforms")
         .subtitle("perspective · rotateX/Y · skew · origin")
-        .child(FlipCard::element(()))
+        .child(flip_card())
         .child(
             grid()
                 .child(tile(

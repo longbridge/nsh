@@ -10,7 +10,7 @@ use nsh_core::{
 };
 
 use super::live;
-use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with, rect};
+use crate::ui::{Finish, Finished, IconName, Tint, colors, icon, press, rect};
 
 /// Grid lines of charts: the hairline color, a step darker on the light
 /// page.
@@ -48,7 +48,7 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
     let placed = stored(false);
     let from_right = props.from_right;
     let place = move |share: f32| {
-        let width = width.with(|w| *w);
+        let width = width.get();
         if width <= 0.0 {
             return;
         }
@@ -90,21 +90,6 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
                 .bg(color)
                 .bind_translate_x(&x),
         )
-}
-
-/// A [`SpringBar`] of `color` filled to `share` (a binding: the bar
-/// springs when it changes).
-pub(crate) fn spring_bar(
-    share: impl Fn() -> f64 + 'static,
-    color: AdaptiveColor,
-) -> SpringBarProps {
-    SpringBarProps {
-        share: Prop::bind(move || share() as f32),
-        color: color.into(),
-        from_right: false,
-        height: 8.0,
-        radius: None,
-    }
 }
 
 /// The props of [`LiveDot`].
@@ -171,14 +156,6 @@ pub(crate) fn LiveDot(props: LiveDotProps) -> impl IntoElement {
         }))
 }
 
-/// [`LiveDot`] of `size`, pulsing while the market runs.
-pub(crate) fn live_dot(running: Signal<bool>, size: f32) -> ComponentElement<LiveDot> {
-    LiveDot::element(LiveDotProps {
-        running: running.into(),
-        size,
-    })
-}
-
 /// Pauses or resumes the market: a pill while it runs, citrus while it
 /// is paused.
 #[component]
@@ -186,49 +163,46 @@ pub(crate) fn MarketButton() -> impl IntoElement {
     let running = live().running;
     // In a view: the press takes the styles a parent gives the button.
     view().child(
-        press_with(
-            PressProps {
-                hit_slop: Some(6.0),
-                label: Prop::bind(move || {
-                    Some(
-                        if running.get() {
-                            "Pause the market"
-                        } else {
-                            "Resume the market"
-                        }
-                        .into(),
-                    )
-                }),
-                ..PressProps::default()
-            },
-            move |_: &()| running.update(|r| *r = !*r),
-        )
-        .child(
-            view()
-                .size(px(32.0))
-                .rounded(px(16.0))
-                .items_center()
-                .justify_center()
-                .style_when(running, |v| v.finish(Finish::Pill).border_1())
-                .style_when(move || !running.get(), |v| v.finish(Finish::Accent))
-                .child(icon(
-                    Prop::bind(move || {
-                        if running.get() {
-                            IconName::Pause
-                        } else {
-                            IconName::Play
-                        }
-                    }),
-                    13.0,
-                    move || {
-                        if running.get() {
-                            colors::MUTED
-                        } else {
-                            colors::ON_ACCENT
-                        }
-                    },
-                )),
-        ),
+        press()
+            .hit_slop(6.0)
+            .label(move || {
+                Some(
+                    if running.get() {
+                        "Pause the market"
+                    } else {
+                        "Resume the market"
+                    }
+                    .into(),
+                )
+            })
+            .on_press(move || running.update(|r| *r = !*r))
+            .child(
+                view()
+                    .size(px(32.0))
+                    .rounded(px(16.0))
+                    .items_center()
+                    .justify_center()
+                    .style_when(running, |v| v.finish(Finish::Pill).border_1())
+                    .style_when(move || !running.get(), |v| v.finish(Finish::Accent))
+                    .child(
+                        icon()
+                            .name(move || {
+                                if running.get() {
+                                    IconName::Pause
+                                } else {
+                                    IconName::Play
+                                }
+                            })
+                            .size(13.0)
+                            .tint(move || {
+                                if running.get() {
+                                    colors::MUTED
+                                } else {
+                                    colors::ON_ACCENT
+                                }
+                            }),
+                    ),
+            ),
     )
 }
 

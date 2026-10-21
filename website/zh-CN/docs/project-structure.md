@@ -142,8 +142,6 @@ error building App.tsx failed
 nsh.json: tailwind: unknown theme key `colours`
 ```
 
-> [!WARNING]
-> `nsh package` 和 `nsh publish` 会严格读取 `nsh.json`，目前会拒绝它们不认识的键，包括 `theme`。如果你设置了主题，在此问题修复之前，请用去掉该键的应用副本进行打包。
 
 ### capabilities
 

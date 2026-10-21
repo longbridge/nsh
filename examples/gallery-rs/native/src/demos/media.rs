@@ -6,9 +6,8 @@
 use nsh_core::ui::prelude::*;
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, PressProps,
-    RoundButton, Segment, SegmentedEvent, Tone, caption, colors, icon, press_with, radius,
-    segmented,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, RoundButton,
+    Segment, Tone, caption, colors, icon, press, radius, segmented,
 };
 
 /// The web site of the second web view.
@@ -262,19 +261,17 @@ fn Player() -> impl IntoElement {
                     });
                 }),
         ))
-        .child(If::new(move || !system_controls.get(), controls))
+        .child(when(move || !system_controls.get(), controls))
         .child(
-            segmented(
-                [
+            segmented()
+                .options([
                     Segment::new("Own controls"),
                     Segment::new("System controls"),
-                ],
-                Prop::bind(move || u32::from(system_controls.get())),
-            )
-            .on_event(move |e: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = *e;
-                system_controls.set(i == 1);
-            }),
+                ])
+                .selected(move || u32::from(system_controls.get()))
+                .on_change(move |&i: &u32| {
+                    system_controls.set(i == 1);
+                }),
         )
 }
 
@@ -286,28 +283,25 @@ fn nav_button(
     enabled: impl Fn() -> bool + 'static,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            disabled: Prop::bind(move || !enabled()),
-            label: Some(label.into()).into(),
-            hit_slop: Some(4.0),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
-        view()
-            .size(px(44.0))
-            .rounded(px(22.0))
-            .bg(colors::RAISED)
-            .finish(Finish::Raised)
-            .border_1()
-            .border_color(colors::BORDER)
-            .items_center()
-            .justify_center()
-            .when(flip, |v| v.rotate(deg(180.0)))
-            .child(icon(IconName::Chevron, 18.0, colors::TEXT)),
-    )
+    let on_press: Listener<()> = on_press.into();
+    press()
+        .disabled(move || !enabled())
+        .label(label)
+        .hit_slop(4.0)
+        .on_press(on_press)
+        .child(
+            view()
+                .size(px(44.0))
+                .rounded(px(22.0))
+                .bg(colors::RAISED)
+                .finish(Finish::Raised)
+                .border_1()
+                .border_color(colors::BORDER)
+                .items_center()
+                .justify_center()
+                .when(flip, |v| v.rotate(deg(180.0)))
+                .child(icon().name(IconName::Chevron).size(18.0).tint(colors::TEXT)),
+        )
 }
 
 /// The inline page and the messages between it and the app. The page's
@@ -363,8 +357,5 @@ fn messaging() -> impl IntoElement {
 /// tell the app.
 #[component]
 pub(crate) fn Media() -> impl IntoElement {
-    DemoPage::new()
-        .card(messaging)
-        .card(|| Site::element(()))
-        .card(|| Player::element(()))
+    DemoPage::new().card(messaging).card(site).card(player)
 }

@@ -30,8 +30,8 @@ use std::{
 };
 
 use nsh_core::{
-    Bounds, EventMask, MAX_TRANSFORMS, Matrix, NodeId, PointerEvents, Points, ROOT_ID, ViewKind,
-    ViewProps, ViewStyle,
+    Bounds, EventMask, Matrix, NodeId, PointerEvents, Points, ROOT_ID, ViewKind, ViewProps,
+    ViewStyle, animation::AnimValues,
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -49,27 +49,6 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D};
 
 use crate::surface::{Surface, quiet};
-
-/// Values native animations set on a view; they win over the style's.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub(crate) struct AnimValues {
-    /// Animated opacity.
-    pub(crate) opacity: Option<f32>,
-    /// Animated background color.
-    pub(crate) background: Option<nsh_core::Color>,
-    /// Animated entries of the transform list (by position).
-    pub(crate) transform: [Option<f32>; MAX_TRANSFORMS],
-    /// Animated border color (every side).
-    pub(crate) border_color: Option<nsh_core::Color>,
-    /// Animated text color (a text view's runs, an input's text).
-    pub(crate) color: Option<nsh_core::Color>,
-    /// Animated shadow color.
-    pub(crate) shadow_color: Option<nsh_core::Color>,
-    /// Animated shadow opacity.
-    pub(crate) shadow_opacity: Option<f32>,
-    /// Animated shadow blur radius.
-    pub(crate) shadow_radius: Option<f32>,
-}
 
 /// Scroll position and extent of a [`ViewKind::Scroll`] view.
 #[derive(Debug, Default, Clone)]
@@ -195,7 +174,7 @@ impl ViewState {
 
     /// The opacity it is drawn with.
     pub(crate) fn opacity(&self) -> f32 {
-        let live = self.live.as_ref().map_or(1.0, |l| l.opacity);
+        let live = self.live.as_ref().map_or(1.0, |l| l.opacity());
         // `filter: opacity()` scales it like the property.
         let filters = self.style.effects.as_ref().map_or(1.0, |e| {
             e.filters
@@ -215,7 +194,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.map(Points).unwrap_or(s.radius);
+        s.radius = a.shadow_radius.unwrap_or(s.radius);
         s
     }
 
@@ -260,7 +239,7 @@ impl ViewState {
         let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let mut m = t.matrix(|i| self.anim.transform.get(i).copied().flatten());
         if let Some(extra) = extra {
-            m = extra.apply(m, h);
+            m = crate::transition::apply_extra(extra, m, h);
         }
         let o = self.style.transform_origin;
         let at = |len: nsh_core::geometry::DefiniteLength, side: f32| {

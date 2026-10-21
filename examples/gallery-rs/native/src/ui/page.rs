@@ -116,7 +116,7 @@ impl Default for DemoPage {
 /// ones before it, or as it is.
 fn place(make: &MakeCard, index: usize, appears: bool) -> AnyElement {
     if appears {
-        appear(index as u32).child(make()).into_element()
+        appear().index(index as u32).child(make()).into_element()
     } else {
         make()
     }

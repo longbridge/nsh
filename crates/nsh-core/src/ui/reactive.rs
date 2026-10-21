@@ -4,8 +4,8 @@
 //!
 //! Handles ([`Signal`], [`Memo`], [`ReadSignal`]) are `Copy` indices into
 //! the graph, so closures and async blocks capture them as they are. What is
-//! made under an owner (a component, an effect, a branch of `If`, a row of
-//! `Each`) is disposed with it; a handle of a disposed node reads as gone
+//! made under an owner (a component, an effect, a branch of `when`, a row of
+//! `each`) is disposed with it; a handle of a disposed node reads as gone
 //! ([`Signal::try_get`]) and panics when read as live. The UI's other
 //! handles (animated values, element refs) are kept the same way
 //! (`Kept`), but find their value gone rather than panic.
@@ -470,6 +470,15 @@ impl<T: 'static> Stored<T> {
     #[track_caller]
     pub fn replace(&self, value: T) -> T {
         self.with(|v| std::mem::replace(v, value))
+    }
+}
+
+impl<T: Clone + 'static> Stored<T> {
+    /// A copy of the value (reading it subscribes nothing, unlike
+    /// [`Signal::get`]).
+    #[track_caller]
+    pub fn get(&self) -> T {
+        self.with(|v| v.clone())
     }
 }
 
@@ -1084,12 +1093,26 @@ static_reactive!(f64: f64);
 static_reactive!(u32: u32);
 static_reactive!(i32: i32);
 static_reactive!(usize: usize);
+static_reactive!(u8: u8);
+static_reactive!(u64: u64);
+static_reactive!(u128: u128);
+static_reactive!(i8: i8);
+static_reactive!(i64: i64);
+static_reactive!(i128: i128);
+static_reactive!(isize: isize);
 static_reactive!((u32, u32): (u32, u32));
 static_reactive!(String: String);
 
 impl IntoReactive<String> for &str {
     fn into_reactive(self) -> Reactive<String> {
         Reactive::Static(self.to_owned())
+    }
+}
+
+/// As `&str`: what setters that took a `&str` were given (`&url`).
+impl IntoReactive<String> for &String {
+    fn into_reactive(self) -> Reactive<String> {
+        Reactive::Static(self.clone())
     }
 }
 static_reactive!(super::SharedString: super::SharedString, String, &'static str);

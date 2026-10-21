@@ -23,6 +23,10 @@ const CATALYST_WINDOW: CGSize = CGSize {
 
 /// What a standalone app runs.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one source per app; keep the public constructor API without allocation"
+)]
 pub enum AppSource {
     /// A Rust app: its root component.
     Rust(Root),

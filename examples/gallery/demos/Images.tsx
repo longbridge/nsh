@@ -1,5 +1,4 @@
-import { type JSX, signal, Text, View } from "nsh";
-import { Image } from "nsh/image";
+import { Image, type JSX, signal, Text, View } from "nsh";
 import bounce from "../bounce.gif";
 import logo from "../logo@2x.png";
 import spinner from "../spinner.webp";

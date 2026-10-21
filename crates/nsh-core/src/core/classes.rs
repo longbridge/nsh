@@ -301,6 +301,17 @@ impl<M: TextEngine> Core<M> {
     /// content).
     pub(super) fn set_part_class(&mut self, key: Key, part: Part, names: &str) {
         let classes = (!names.trim().is_empty()).then(|| self.tailwind.classes(names));
+        self.set_part_class_list(key, part, classes);
+    }
+
+    /// Sets `part`'s classes of `key` to `classes`, already parsed (typed
+    /// styles lowered); none clears them.
+    pub(super) fn set_part_class_list(
+        &mut self,
+        key: Key,
+        part: Part,
+        classes: Option<Arc<ClassList>>,
+    ) {
         let node = &mut self.nodes[key as usize];
         let base = node.classes.clone();
         let parts = node.parts.get_or_insert_with(|| {

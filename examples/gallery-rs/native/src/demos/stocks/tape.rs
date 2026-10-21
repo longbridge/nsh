@@ -15,7 +15,7 @@ use super::{
     detail::StockProps,
     figure, live,
     market::{self, BLOCK, BUCKETS, TAPE, TAPE_HELD, Trade, compact, price, time},
-    parts::{Block, Col, GRID, SpringBar, SpringBarProps, head, spring_bar},
+    parts::{Block, Col, GRID, head, spring_bar},
 };
 use crate::ui::{colors, legend, rect, tints};
 
@@ -139,7 +139,7 @@ pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
 
 /// The tape's section of stock `index`: its totals (every tick), the
 /// columns and the [`Tape`] (four times a second).
-pub(crate) fn tape(live: &Live, index: usize) -> Block {
+pub(crate) fn tape_block(live: &Live, index: usize) -> Block {
     let quote = live.quotes[index];
     let market = live.market.clone();
     // Bought at the ask, sold at the bid, and the blocks, over the trades
@@ -193,9 +193,7 @@ pub(crate) fn tape(live: &Live, index: usize) -> Block {
                 .child(head("PRICE", Col::Flex, false))
                 .child(head("SIZE", Col::Auto, true)),
         )
-        .child(Tape::element(StockProps {
-            stock: index as u32,
-        }))
+        .child(tape().stock(index as u32))
 }
 
 /// One bucket of `flow` (of its `max`): sold to the left of the middle,
@@ -236,12 +234,16 @@ fn flow_row(
             view()
                 .flex_row()
                 .items_center()
-                .child(view().flex_1().child(SpringBar::element(SpringBarProps {
-                    from_right: true,
-                    height: 10.0,
-                    radius: Some(3.0),
-                    ..spring_bar(move || sell() / max.get(), colors::DOWN)
-                })))
+                .child(
+                    view().flex_1().child(
+                        spring_bar()
+                            .share(move || (sell() / max.get()) as f32)
+                            .color(colors::DOWN)
+                            .from_right(true)
+                            .height(10.0)
+                            .radius(3.0),
+                    ),
+                )
                 .child(
                     view()
                         .w(px(2.0))
@@ -250,11 +252,15 @@ fn flow_row(
                         .rounded(px(1.0))
                         .bg(colors::BORDER),
                 )
-                .child(view().flex_1().child(SpringBar::element(SpringBarProps {
-                    height: 10.0,
-                    radius: Some(3.0),
-                    ..spring_bar(move || buy() / max.get(), colors::UP)
-                }))),
+                .child(
+                    view().flex_1().child(
+                        spring_bar()
+                            .share(move || (buy() / max.get()) as f32)
+                            .color(colors::UP)
+                            .height(10.0)
+                            .radius(3.0),
+                    ),
+                ),
         )
 }
 

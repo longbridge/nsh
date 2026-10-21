@@ -7,14 +7,13 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
+use nsh_base::keyboard_avoiding_view;
 use nsh_core::ui::{LayoutAnimation, SubmitBehavior, prelude::*};
 
 use crate::ui::{
-    Appear, AppearProps, Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO,
-    Meter, PressProps, PressRole, RoundButton, Section, Segment, SegmentedEvent, Tone,
-    bind_refresh, colors, columns_for, desktop, hint, icon, pane_width, press_with, radius,
-    segmented,
+    Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO, Meter, PressRole,
+    RoundButton, Section, Segment, Tone, appear, bind_refresh, colors, columns_for, desktop, hint,
+    icon, pane_width, press, radius, segmented,
 };
 
 /// The tones rows cycle through (the last, neutral, only in the grid).
@@ -46,15 +45,8 @@ fn action(
     icon_name: Option<IconName>,
     on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
-    press_with(
-        PressProps {
-            label: Some(label.into()).into(),
-            hit_slop: Some(4.0),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
+    let on_press: Listener<()> = on_press.into();
+    press().label(label).hit_slop(4.0).on_press(on_press).child(
         view()
             .h(px(36.0))
             .px(px(14.0))
@@ -66,7 +58,7 @@ fn action(
             .border_1()
             .border_color(colors::BORDER)
             .finish(Finish::Raised)
-            .children(icon_name.map(|name| icon(name, 14.0, colors::TEXT)))
+            .children(icon_name.map(|name| icon().name(name).size(14.0).tint(colors::TEXT)))
             .child(
                 text(label)
                     .text_size(px(13.0))
@@ -364,7 +356,7 @@ fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
     let person = move || row.get().person();
     view()
         // A tap lights the row up and does nothing else.
-        .on_press(|_: &()| {})
+        .on_press(|| {})
         .active(|s| s.bg(colors::RAISED))
         .flex_row()
         .items_center()
@@ -434,7 +426,7 @@ fn Contacts() -> impl IntoElement {
             let rows = rows.clone();
             let row = computed(move || rows[at.index()]);
             let header = computed(move || matches!(row.get(), ContactRow::Header { .. }));
-            If::new(header, move || contact_header(row)).otherwise(move || contact_person(row))
+            when(header, move || contact_header(row)).otherwise(move || contact_person(row))
         })
         .sticky_header_indices(headers)
         .estimated_item_size(px(60.0))
@@ -636,7 +628,7 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             move |_: &()| send(),
         ));
     view().flex_1().child(
-        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+        keyboard_avoiding_view()
             .flex_1()
             .child(room)
             .child(list)
@@ -741,45 +733,41 @@ fn refresh_section(
 fn ranges(range: Signal<&'static str>) -> Section {
     let chips = RANGES.map(|label| {
         let selected = computed(move || range.get() == label);
-        press_with(
-            PressProps {
-                hit_slop: Some(4.0),
-                role: PressRole::Tab.into(),
-                selected: selected.into(),
-                label: Some(label.into()).into(),
-                ..PressProps::default()
-            },
-            move |_: &()| range.set(label),
-        )
-        .child(
-            view()
-                .h(px(36.0))
-                .px(px(14.0))
-                .rounded(px(18.0))
-                .justify_center()
-                .style_when(selected, |v| v.bg(colors::LIGHT).finish(Finish::Light))
-                .style_when(
-                    move || !selected.get(),
-                    |v| {
-                        v.bg(colors::RAISED)
-                            .finish(Finish::Raised)
-                            .border_1()
-                            .border_color(colors::BORDER)
-                    },
-                )
-                .child(
-                    text(label)
-                        .text_size(px(13.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(move || {
-                            if selected.get() {
-                                colors::ON_LIGHT
-                            } else {
-                                colors::MUTED
-                            }
-                        }),
-                ),
-        )
+        press()
+            .hit_slop(4.0)
+            .role(PressRole::Tab)
+            .selected(selected)
+            .label(label)
+            .on_press(move || range.set(label))
+            .child(
+                view()
+                    .h(px(36.0))
+                    .px(px(14.0))
+                    .rounded(px(18.0))
+                    .justify_center()
+                    .style_when(selected, |v| v.bg(colors::LIGHT).finish(Finish::Light))
+                    .style_when(
+                        move || !selected.get(),
+                        |v| {
+                            v.bg(colors::RAISED)
+                                .finish(Finish::Raised)
+                                .border_1()
+                                .border_color(colors::BORDER)
+                        },
+                    )
+                    .child(
+                        text(label)
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(move || {
+                                if selected.get() {
+                                    colors::ON_LIGHT
+                                } else {
+                                    colors::MUTED
+                                }
+                            }),
+                    ),
+            )
     });
     Section::new("Horizontal scroll view")
         .note(move || range.get())
@@ -1027,30 +1015,24 @@ pub(crate) fn Lists() -> impl IntoElement {
                     }
                 })
                 .child(
-                    segmented(
-                        TABS.map(|t| Segment::new(t.1)),
-                        Prop::bind(move || {
+                    segmented()
+                        .options(TABS.map(|t| Segment::new(t.1)))
+                        .selected(move || {
                             TABS.iter().position(|t| t.0 == tab.get()).unwrap_or(0) as u32
+                        })
+                        .on_change(move |&i: &u32| {
+                            tab.set(TABS[i as usize].0);
                         }),
-                    )
-                    .on_event(move |e: &SegmentedEvent| {
-                        let SegmentedEvent::Change(i) = *e;
-                        tab.set(TABS[i as usize].0);
-                    }),
                 ),
         )
         // A tab's list is made when it is chosen, and comes in.
         .child(dynamic(move || {
             let content = match tab.get() {
-                Tab::Grid => Grid::element(()).into_element(),
-                Tab::Sections => Contacts::element(()).into_element(),
-                Tab::Chat => Chat::element(()).into_element(),
-                Tab::More => More::element(()).into_element(),
+                Tab::Grid => grid().into_element(),
+                Tab::Sections => contacts().into_element(),
+                Tab::Chat => chat().into_element(),
+                Tab::More => more().into_element(),
             };
-            Appear::element(AppearProps {
-                flex: true,
-                ..AppearProps::default()
-            })
-            .child(content)
+            appear().flex(true).child(content)
         }))
 }

@@ -205,17 +205,3 @@ pub(crate) fn Glyph(props: GlyphProps) -> impl IntoElement {
             .size_full(),
         )
 }
-
-/// [`Glyph`] `name` at `size`, in `tint` (each a value, or bound: a signal
-/// or a closure).
-pub(crate) fn glyph(
-    name: impl Into<Prop<GlyphName>>,
-    size: f32,
-    tint: impl IntoReactive<AdaptiveColor>,
-) -> ComponentElement<Glyph> {
-    Glyph::element(GlyphProps {
-        name: name.into(),
-        size,
-        tint: tint.into_reactive().map(Tint::from).into(),
-    })
-}

@@ -1246,6 +1246,13 @@ pub struct StatusBarSetting {
     pub animated: Option<bool>,
 }
 
+/// The setting of the content's color alone (`.status_bar(StatusBarStyle::Light)`).
+impl From<StatusBarStyle> for StatusBarSetting {
+    fn from(style: StatusBarStyle) -> Self {
+        Self::default().foreground(style)
+    }
+}
+
 impl StatusBarSetting {
     /// Sets the content's color.
     pub const fn foreground(mut self, style: StatusBarStyle) -> Self {
@@ -1570,6 +1577,10 @@ pub enum Prop {
     /// `headerClass` of a page: the header's colors as classes (`bg-*`,
     /// `text-*`, `tint-*`); `headerStyle` wins over them.
     HeaderClass(Box<str>),
+    /// A page header's colors as typed styles lowered as classes are (Rust:
+    /// `Screen::header_style_with`), in place of `headerClass`;
+    /// `headerStyle` wins over them. Set by components, never by JS.
+    HeaderClassList(Option<Arc<crate::tailwind::ClassList>>),
     /// The surface lays out right to left (on the root, from
     /// `I18nManager`).
     #[prop(js = "layoutDirectionRtl", internal)]

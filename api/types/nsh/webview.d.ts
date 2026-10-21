@@ -14,6 +14,8 @@ export interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desk
  * A web page (WKWebView / android.webkit.WebView); its `ref` has
  * `reload()`, `goBack()`, `goForward()`, `stopLoading()`,
  * `injectJavaScript(script)` and `postMessage(data)`.
+ *
+ * @deprecated Import from "nsh".
  */
 export declare const WebView: (props: WebViewProps) => YNode;
 

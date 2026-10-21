@@ -48,8 +48,9 @@ test("reload loads the images again and show shows the large one", async () => {
 });
 
 test("the size and prefetch buttons ask the platform", async () => {
-  // Only a real platform answers them.
-  await expect(() => app.press("Size")).rejects.toThrow("only a real platform answers");
-  await expect(() => app.press("Prefetch")).rejects.toThrow("only a real platform answers");
-  expect(app.texts()).toContain("loading…");
+  // A headless run has no images: the platform answers with an error.
+  await app.press("Size");
+  await app.waitFor("headless runs load no images");
+  await app.press("Prefetch");
+  await app.waitFor("failed");
 });

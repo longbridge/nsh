@@ -26,8 +26,7 @@ impl MountSink for ChannelSink {
 }
 
 const APP: &str = r#"
-import { mount, signal, Text, View } from "nsh";
-import { Image } from "nsh/image";
+import { Image, mount, signal, Text, View } from "nsh";
 import { Counter } from "./Counter";
 import dot from "./dot.png";
 

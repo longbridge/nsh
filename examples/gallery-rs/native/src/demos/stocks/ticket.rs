@@ -10,8 +10,8 @@ use nsh_core::{
 
 use super::market::{grouped, price};
 use crate::ui::{
-    Button, ButtonVariant, Finish, Finished, IconName, PressProps, Segment, Segmented,
-    SegmentedEvent, SegmentedProps, colors, icon, press_with, radius, tints,
+    Button, ButtonVariant, Finish, Finished, IconName, Segment, colors, icon, press, radius,
+    segmented, tints,
 };
 
 /// Buying or selling.
@@ -74,14 +74,8 @@ pub(crate) enum TicketEvent {
 
 /// A square 44 pt stepper button.
 fn step(plus: bool, label: &'static str, on_press: impl Into<Listener<()>>) -> impl IntoElement {
-    press_with(
-        PressProps {
-            label: Some(label.into()).into(),
-            ..PressProps::default()
-        },
-        on_press,
-    )
-    .child(
+    let on_press: Listener<()> = on_press.into();
+    press().label(label).on_press(on_press).child(
         view()
             .size(px(44.0))
             .rounded(px(radius::CONTROL))
@@ -91,7 +85,7 @@ fn step(plus: bool, label: &'static str, on_press: impl Into<Listener<()>>) -> i
             .border_1()
             .map(|v| {
                 if plus {
-                    v.child(icon(IconName::Plus, 18.0, colors::TEXT))
+                    v.child(icon().name(IconName::Plus).size(18.0).tint(colors::TEXT))
                 } else {
                     v.child(
                         view()
@@ -165,53 +159,49 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
     let chips = QUANTITIES.map(|q| {
         let selected = computed(move || quantity.get() == q);
         view().flex_1().child(
-            press_with(
-                PressProps {
-                    label: Some(format!("{q} shares").into()).into(),
-                    selected: selected.into(),
-                    ..PressProps::default()
-                },
-                move |_: &()| quantity.set(q),
-            )
-            .child(
-                view()
-                    .h(px(44.0))
-                    .rounded(px(radius::CONTROL))
-                    .items_center()
-                    .justify_center()
-                    .bg(move || {
-                        if selected.get() {
-                            tints::ACCENT
-                        } else {
-                            colors::RAISED
-                        }
-                    })
-                    .border_1()
-                    .border_color(move || {
-                        if selected.get() {
-                            colors::ACCENT
-                        } else {
-                            colors::BORDER
-                        }
-                    })
-                    .child(
-                        text(if q >= 1000.0 {
-                            format!("{}K", q / 1000.0)
-                        } else {
-                            format!("{q}")
+            press()
+                .label(format!("{q} shares"))
+                .selected(selected)
+                .on_press(move || quantity.set(q))
+                .child(
+                    view()
+                        .h(px(44.0))
+                        .rounded(px(radius::CONTROL))
+                        .items_center()
+                        .justify_center()
+                        .bg(move || {
+                            if selected.get() {
+                                tints::ACCENT
+                            } else {
+                                colors::RAISED
+                            }
                         })
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .tabular_nums()
-                        .text_color(move || {
+                        .border_1()
+                        .border_color(move || {
                             if selected.get() {
                                 colors::ACCENT
                             } else {
-                                colors::TEXT
+                                colors::BORDER
                             }
-                        }),
-                    ),
-            ),
+                        })
+                        .child(
+                            text(if q >= 1000.0 {
+                                format!("{}K", q / 1000.0)
+                            } else {
+                                format!("{q}")
+                            })
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .tabular_nums()
+                            .text_color(move || {
+                                if selected.get() {
+                                    colors::ACCENT
+                                } else {
+                                    colors::TEXT
+                                }
+                            }),
+                        ),
+                ),
         )
     });
     let place = {
@@ -322,19 +312,16 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 ),
         )
         .child(
-            Segmented::element(SegmentedProps {
-                options: vec![Segment::new("Buy"), Segment::new("Sell")].into(),
-                selected: Prop::bind(move || u32::from(!buy.get())),
-                ..SegmentedProps::default()
-            })
-            .on_event(move |e: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = e;
-                cx.emit(TicketEvent::Side(if *i == 0 {
-                    Side::Buy
-                } else {
-                    Side::Sell
-                }));
-            }),
+            segmented()
+                .options(vec![Segment::new("Buy"), Segment::new("Sell")])
+                .selected(move || u32::from(!buy.get()))
+                .on_change(move |i: &u32| {
+                    cx.emit(TicketEvent::Side(if *i == 0 {
+                        Side::Buy
+                    } else {
+                        Side::Sell
+                    }));
+                }),
         )
         .child(
             view()
@@ -342,7 +329,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 .child(
                     caption("Limit price").child(
                         text(move || format!("use last {}", p(props.last.get())))
-                            .on_press(move |_: &()| limit.set(props.last.get_untracked()))
+                            .on_press(move || limit.set(props.last.get_untracked()))
                             .role(AccessibilityRole::Button)
                             .hit_slop(EdgeInsets::all(px(10.0)))
                             .text_size(px(13.0))
@@ -440,7 +427,7 @@ pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoEle
                 ),
         )
         // Reviewing expands the ticket (its layout springs).
-        .child(If::new(review, reviewing).otherwise(move || {
+        .child(when(review, reviewing).otherwise(move || {
             Button::new(
                 move || format!("Review {}", verb().to_lowercase()),
                 move |_: &()| expand(true),

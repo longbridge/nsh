@@ -47,7 +47,7 @@ nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" -
 
 现有的 iOS 应用可以在自己的界面中显示 NSH 应用。带 Rust 代码的 iOS 应用链接你的 crate 和 `nsh-platform-ios` crate，在
 `AppView` 中显示你的根组件（[嵌入 Rust 应用](#嵌入-rust-应用)）。Swift 应用链接 `NativeShell.xcframework`，这是一个带 Swift
-模块的静态 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个 TSX 应用或签名包即可。
+模块的 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个 TSX 应用或签名包即可。
 你的原生页面、导航和 NSH 应用共处同一个 UIKit 视图层级。
 
 每个视图都是一个独立的引擎；没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
@@ -99,13 +99,22 @@ dist/nsh/embed/ios/NativeShellDev.xcframework   also connects to a `nsh dev` ser
 cargo xtask ios-embed    # writes dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework
 ```
 
-每个 XCFramework 包含三个 arm64 切片：iOS 真机、iOS 模拟器（Apple 芯片）和 Mac Catalyst。最低部署目标为 iOS 15.0。Swift
+默认构建生成静态 framework。要构建动态 framework，运行：
+
+```sh
+cargo xtask ios-embed --dynamic
+```
+
+动态 framework 让运行时拥有独立的库映像和展开表，适合已经链接其他 Rust 运行时的宿主应用。请根据构建类型选择下文的 Xcode 嵌入设置。
+
+默认情况下，每个 XCFramework 包含三个 arm64 切片：iOS 真机、iOS 模拟器（Apple 芯片）和 Mac Catalyst。最低部署目标为 iOS 15.0。Swift
 模块启用了 library evolution 编译，因此用其他版本 Swift 编译器构建的应用也能导入它；framework 已链接了它需要的一切，你无需再添加其他东西。
 
 ## 加入 Xcode 项目
 
 1. 把 `NativeShell.xcframework`（开发构建则用 `NativeShellDev.xcframework`）拖到应用 target 的
-   **Frameworks, Libraries, and Embedded Content** 中。它是静态 framework，所以选择 **Do Not Embed**。
+   **Frameworks, Libraries, and Embedded Content** 中。默认的静态 framework 选择 **Do Not Embed**；
+   使用 `--dynamic` 构建的动态 framework 选择 **Embed & Sign**。
 2. 在 Swift 中 `import NativeShell`。
 
 > [!TIP]

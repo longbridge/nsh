@@ -17,6 +17,7 @@ mod runtime;
 mod rust_app;
 mod sign;
 mod test;
+mod test_android;
 mod test_host;
 mod test_ios;
 mod test_web;
@@ -147,8 +148,9 @@ enum Command {
         junit: Option<PathBuf>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
-        /// (macos, linux, windows, gpui, web and ios for now; web runs them in
-        /// a headless Chrome, Edge or Chromium, ios in a simulator).
+        /// (macos, linux, windows, gpui, web, ios and android; web runs them
+        /// in a headless Chrome, Edge or Chromium, ios in a simulator,
+        /// android on the first device adb lists).
         #[arg(long, value_enum)]
         target: Option<run::Target>,
         /// The Chrome, Edge or Chromium executable `--target web` runs the

@@ -96,7 +96,7 @@ fn card(
                         .border_color(colors::BORDER)
                         .bg(colors::RAISED)
                         .finish(Finish::Raised)
-                        .child(icon(name, 20.0, colors::TEXT)),
+                        .child(icon().name(name).size(20.0).tint(colors::TEXT)),
                 )
                 .child(
                     view()
@@ -393,7 +393,7 @@ fn buttons() -> AnyElement {
         .transition()
         .duration(150.0)
         .active(|s| s.scale(0.97).opacity(0.9))
-        .on_press(move |_: &()| count.update(|n| *n += 1))
+        .on_press(move || count.update(|n| *n += 1))
         .child(
             text(move || format!("Pressed {}×", count.get()))
                 .text_size(px(15.0))
@@ -412,7 +412,7 @@ fn buttons() -> AnyElement {
         .finish(Finish::Raised)
         .transition()
         .active(|s| s.scale(0.95).opacity(0.8))
-        .on_press(move |_: &()| count.set(0))
+        .on_press(move || count.set(0))
         .child(
             text("Reset")
                 .text_size(px(15.0))
@@ -432,7 +432,7 @@ fn buttons() -> AnyElement {
         .hover(|s| s.opacity(0.9))
         .disabled(busy)
         .disabled_style(|s| s.opacity(0.4))
-        .on_press(move |_: &()| busy.update(|b| *b = !*b))
+        .on_press(move || busy.update(|b| *b = !*b))
         .child(
             text(move || if busy.get() { "Disabled" } else { "Disable me" })
                 .text_size(px(15.0))
@@ -446,7 +446,7 @@ fn buttons() -> AnyElement {
         .rounded_lg()
         .px_1()
         .active(|s| s.bg(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.05))))
-        .on_press(move |_: &()| busy.set(false))
+        .on_press(move || busy.set(false))
         .child(
             text("Enable again")
                 .text_sm()

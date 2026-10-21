@@ -12,6 +12,8 @@ mod access;
 mod app_directory;
 mod error;
 mod local_storage;
+#[cfg(feature = "net")]
+pub mod net;
 pub mod perf;
 mod script;
 #[cfg(not(target_arch = "wasm32"))]

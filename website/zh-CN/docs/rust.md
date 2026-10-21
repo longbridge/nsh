@@ -309,7 +309,7 @@ Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简�
 
 ### 渲染函数与应用的类
 
-组件用渲染函数为它拥有的值（它的一行数据、文档中的一个代码块）绘制应用的内容：一个 `Option<Renderer<T>>` 属性，在 TypeScript 中是 `(value: T) => JSX.Element`。组件在内容所在的位置调用 `render(key, value)`，得到一个视图，像其他视图一样设定样式并放置（在 `text(..)` 中是一个行内视图）。只要值不变，内容按 key 保留；值改变时重新渲染。Rust 父组件传入 `Renderer::new(|value: &T| ..)`。
+组件用渲染函数为它拥有的值（它的一行数据、文档中的一个代码块）绘制应用的内容：一个 `Option<Renderer<T>>` 属性，在 TypeScript 中是 `(value: T) => JSX.Element`。组件在内容所在的位置调用 `render(key, value)`，得到一个视图，像其他视图一样设定样式并放置（在 `text(..)` 中是一个行内视图）。只要值不变，内容按 key 保留；值改变时重新渲染。Rust 父组件把闭包传给该属性的设置方法（`quote().render_badge(|symbol| ..)`），由它生成 `Renderer`。
 
 组件中的样式是类型化的；应用的 Tailwind 类通过一个类名属性和该部件元素上的 `.app_class(..)` 作用于组件的某个部件。它们在元素自身的样式之后应用，并使用应用的主题、`dark:` 和各种状态，就像元素上的 `class` 一样。
 

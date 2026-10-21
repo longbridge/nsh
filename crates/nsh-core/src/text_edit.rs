@@ -1,4 +1,5 @@
-//! The editing model of a text input, without a window: the text, the
+//! The editing model of a text input, without a window (the Windows and
+//! GPUI backends draw it with their own text engines): the text, the
 //! selection, caret stops and word boundaries, undo and redo, and the IME
 //! composition shown at the caret. Offsets are bytes of the UTF-8 text,
 //! always on character boundaries; JS sees UTF-16 units (converted by the
@@ -6,7 +7,7 @@
 
 /// How far a caret movement or a deletion goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Unit {
+pub enum Unit {
     /// One user-perceived character (a base character with its marks).
     Char,
     /// To the next word boundary.
@@ -33,14 +34,27 @@ struct Snapshot {
 /// Text an input method is composing, shown at the caret until it is
 /// committed or cancelled.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Composition {
+#[non_exhaustive]
+pub struct Composition {
     /// The text being composed.
-    pub(crate) text: String,
+    pub text: String,
     /// The caret inside it (bytes).
-    pub(crate) cursor: usize,
+    pub cursor: usize,
     /// The clause being converted (bytes of `text`), drawn with a thicker
     /// underline.
-    pub(crate) target: Option<(usize, usize)>,
+    pub target: Option<(usize, usize)>,
+}
+
+impl Composition {
+    /// `text` composed with the caret at `cursor` and the clause `target`
+    /// being converted (bytes of `text`).
+    pub fn new(text: String, cursor: usize, target: Option<(usize, usize)>) -> Self {
+        Composition {
+            text,
+            cursor,
+            target,
+        }
+    }
 }
 
 /// The most undo steps kept.
@@ -48,7 +62,8 @@ const MAX_UNDO: usize = 200;
 
 /// A text input's text, selection and history.
 #[derive(Debug, Default)]
-pub(crate) struct Model {
+#[non_exhaustive]
+pub struct Model {
     text: String,
     /// Where the selection started (the end that stays when extending).
     anchor: usize,
@@ -59,45 +74,45 @@ pub(crate) struct Model {
     /// The last edit, for merging; `None` after the caret moved.
     last: Option<EditKind>,
     /// The IME's text, if it composes.
-    pub(crate) composition: Option<Composition>,
+    pub composition: Option<Composition>,
 }
 
 impl Model {
     /// The text.
-    pub(crate) fn text(&self) -> &str {
+    pub fn text(&self) -> &str {
         &self.text
     }
 
     /// The caret.
-    pub(crate) fn caret(&self) -> usize {
+    pub fn caret(&self) -> usize {
         self.caret
     }
 
     /// The selection's fixed end.
     #[cfg(test)]
-    pub(crate) fn anchor(&self) -> usize {
+    pub fn anchor(&self) -> usize {
         self.anchor
     }
 
     /// The selection, `start <= end`.
-    pub(crate) fn selection(&self) -> (usize, usize) {
+    pub fn selection(&self) -> (usize, usize) {
         (self.anchor.min(self.caret), self.anchor.max(self.caret))
     }
 
     /// True when some text is selected.
-    pub(crate) fn has_selection(&self) -> bool {
+    pub fn has_selection(&self) -> bool {
         self.anchor != self.caret
     }
 
     /// The selected text.
-    pub(crate) fn selected(&self) -> &str {
+    pub fn selected(&self) -> &str {
         let (s, e) = self.selection();
         &self.text[s..e]
     }
 
     /// Replaces the text without history (a value from JS), keeping the
     /// caret where it was, or at the end if it was there.
-    pub(crate) fn set_text(&mut self, text: &str) {
+    pub fn set_text(&mut self, text: &str) {
         let at_end = self.caret >= self.text.len();
         let caret = if at_end {
             text.len()
@@ -117,7 +132,7 @@ impl Model {
 
     /// Selects from `anchor` to `caret` (clamped to the text, moved onto
     /// character boundaries).
-    pub(crate) fn select(&mut self, anchor: usize, caret: usize) {
+    pub fn select(&mut self, anchor: usize, caret: usize) {
         let anchor = floor(&self.text, anchor.min(self.text.len()));
         let caret = floor(&self.text, caret.min(self.text.len()));
         if (anchor, caret) != (self.anchor, self.caret) {
@@ -128,14 +143,14 @@ impl Model {
     }
 
     /// Moves the caret to `to`, extending the selection or not.
-    pub(crate) fn move_to(&mut self, to: usize, extend: bool) {
+    pub fn move_to(&mut self, to: usize, extend: bool) {
         let anchor = if extend { self.anchor } else { to };
         self.select(anchor, to);
     }
 
     /// Moves the caret by `unit` (`forward` or back). Without `extend`, a
     /// selection collapses to its end in that direction instead.
-    pub(crate) fn step(&mut self, unit: Unit, forward: bool, extend: bool) {
+    pub fn step(&mut self, unit: Unit, forward: bool, extend: bool) {
         if !extend && self.has_selection() && unit == Unit::Char {
             let (s, e) = self.selection();
             let to = if forward { e } else { s };
@@ -146,7 +161,7 @@ impl Model {
     }
 
     /// The position `unit` away from `at`.
-    pub(crate) fn boundary(&self, at: usize, unit: Unit, forward: bool) -> usize {
+    pub fn boundary(&self, at: usize, unit: Unit, forward: bool) -> usize {
         match (unit, forward) {
             (Unit::Char, true) => next_cluster(&self.text, at),
             (Unit::Char, false) => prev_cluster(&self.text, at),
@@ -156,7 +171,7 @@ impl Model {
     }
 
     /// Selects everything.
-    pub(crate) fn select_all(&mut self) {
+    pub fn select_all(&mut self) {
         self.select(0, self.text.len());
     }
 
@@ -184,7 +199,7 @@ impl Model {
     /// Replaces the selection with `text`, clipped to what `max_len`
     /// (UTF-16 units of the whole text) leaves room for. Returns what was
     /// inserted; `None` when nothing changed.
-    pub(crate) fn insert(&mut self, text: &str, max_len: Option<u32>) -> Option<String> {
+    pub fn insert(&mut self, text: &str, max_len: Option<u32>) -> Option<String> {
         let (s, e) = self.selection();
         let fit = match max_len {
             Some(max) => {
@@ -212,7 +227,7 @@ impl Model {
 
     /// Deletes the selection, or `unit` before (`forward == false`) or
     /// after the caret. True when something was deleted.
-    pub(crate) fn delete(&mut self, unit: Unit, forward: bool) -> bool {
+    pub fn delete(&mut self, unit: Unit, forward: bool) -> bool {
         let (s, e) = if self.has_selection() {
             self.selection()
         } else if forward {
@@ -241,12 +256,12 @@ impl Model {
     }
 
     /// There is an edit to undo.
-    pub(crate) fn can_undo(&self) -> bool {
+    pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
     /// Undoes the last edit; true when there was one.
-    pub(crate) fn undo(&mut self) -> bool {
+    pub fn undo(&mut self) -> bool {
         let Some(snap) = self.undo.pop() else {
             return false;
         };
@@ -256,7 +271,7 @@ impl Model {
     }
 
     /// Redoes the last undone edit; true when there was one.
-    pub(crate) fn redo(&mut self) -> bool {
+    pub fn redo(&mut self) -> bool {
         let Some(snap) = self.redo.pop() else {
             return false;
         };
@@ -274,12 +289,12 @@ impl Model {
 
     /// The word (or run of spaces, or punctuation) at `at`, for double
     /// clicks.
-    pub(crate) fn word_at(&self, at: usize) -> (usize, usize) {
+    pub fn word_at(&self, at: usize) -> (usize, usize) {
         word_at(&self.text, at)
     }
 
     /// The line (between line breaks) at `at`, for triple clicks.
-    pub(crate) fn line_at(&self, at: usize) -> (usize, usize) {
+    pub fn line_at(&self, at: usize) -> (usize, usize) {
         let at = at.min(self.text.len());
         let start = self.text[..at].rfind('\n').map_or(0, |i| i + 1);
         let end = self.text[at..]
@@ -289,7 +304,7 @@ impl Model {
     }
 
     /// The text shown: the text with the composition at the caret.
-    pub(crate) fn display(&self) -> std::borrow::Cow<'_, str> {
+    pub fn display(&self) -> std::borrow::Cow<'_, str> {
         match &self.composition {
             Some(c) if !c.text.is_empty() => {
                 let mut s = String::with_capacity(self.text.len() + c.text.len());
@@ -304,7 +319,7 @@ impl Model {
 
     /// The UTF-16 offset in the shown text (`secure`: one bullet per
     /// character) of text offset `at`.
-    pub(crate) fn to_display(&self, at: usize, secure: bool) -> u32 {
+    pub fn to_display(&self, at: usize, secure: bool) -> u32 {
         let units = |s: &str| {
             if secure {
                 s.chars().count()
@@ -323,7 +338,7 @@ impl Model {
 
     /// The text offset of UTF-16 offset `u` in the shown text; offsets in
     /// the composition go to the caret.
-    pub(crate) fn text_at(&self, u: u32, secure: bool) -> usize {
+    pub fn text_at(&self, u: u32, secure: bool) -> usize {
         let comp = match &self.composition {
             Some(c) if !c.text.is_empty() => Some((self.to_display(self.caret, secure), &c.text)),
             _ => None,
@@ -353,7 +368,7 @@ impl Model {
 
     /// Where the caret shows in the shown text (inside the composition
     /// while there is one).
-    pub(crate) fn display_caret(&self, secure: bool) -> u32 {
+    pub fn display_caret(&self, secure: bool) -> u32 {
         let base = self.to_display(self.caret, secure);
         match &self.composition {
             Some(c) => base + utf16_len(&c.text[..c.cursor.min(c.text.len())]) as u32,
@@ -363,7 +378,7 @@ impl Model {
 }
 
 /// The largest character boundary of `s` at or before `at`.
-pub(crate) fn floor(s: &str, mut at: usize) -> usize {
+pub fn floor(s: &str, mut at: usize) -> usize {
     at = at.min(s.len());
     while !s.is_char_boundary(at) {
         at -= 1;
@@ -404,7 +419,7 @@ fn regional(c: char) -> bool {
 }
 
 /// The end of the cluster starting at `at`.
-pub(crate) fn next_cluster(s: &str, at: usize) -> usize {
+pub fn next_cluster(s: &str, at: usize) -> usize {
     let mut chars = s[at..].char_indices().peekable();
     let Some((_, first)) = chars.next() else {
         return s.len();
@@ -427,7 +442,7 @@ pub(crate) fn next_cluster(s: &str, at: usize) -> usize {
 }
 
 /// The start of the cluster ending at `at`.
-pub(crate) fn prev_cluster(s: &str, at: usize) -> usize {
+pub fn prev_cluster(s: &str, at: usize) -> usize {
     // Clusters are found forward from the line's start: flags pair up from
     // there.
     let start = s[..at].rfind('\n').map_or(0, |i| i + 1);
@@ -474,7 +489,7 @@ fn is_ideograph(c: char) -> bool {
 }
 
 /// Ctrl+Right: past the word at `at` and the spaces after it.
-pub(crate) fn word_right(s: &str, at: usize) -> usize {
+pub fn word_right(s: &str, at: usize) -> usize {
     let mut chars = s[at..].char_indices().peekable();
     let Some(&(_, first)) = chars.peek() else {
         return s.len();
@@ -501,7 +516,7 @@ pub(crate) fn word_right(s: &str, at: usize) -> usize {
 }
 
 /// Ctrl+Left: back over spaces, then to the start of the word before.
-pub(crate) fn word_left(s: &str, at: usize) -> usize {
+pub fn word_left(s: &str, at: usize) -> usize {
     let mut chars = s[..at].char_indices().rev().peekable();
     while let Some(&(_, c)) = chars.peek() {
         if class(c) != Class::Space {
@@ -523,7 +538,7 @@ pub(crate) fn word_left(s: &str, at: usize) -> usize {
 }
 
 /// The run of one class of characters around `at` (a double click).
-pub(crate) fn word_at(s: &str, at: usize) -> (usize, usize) {
+pub fn word_at(s: &str, at: usize) -> (usize, usize) {
     let at = floor(s, at);
     // The character after the point, or the one before it at the end.
     let probe = if at < s.len() { at } else { prev_char(s, at) };
@@ -552,18 +567,18 @@ pub(crate) fn word_at(s: &str, at: usize) -> (usize, usize) {
 }
 
 /// Length of `s` in UTF-16 units.
-pub(crate) fn utf16_len(s: &str) -> usize {
+pub fn utf16_len(s: &str) -> usize {
     s.chars().map(char::len_utf16).sum()
 }
 
 /// The UTF-16 offset of byte offset `at` of `s`.
-pub(crate) fn byte_to_utf16(s: &str, at: usize) -> u32 {
+pub fn byte_to_utf16(s: &str, at: usize) -> u32 {
     utf16_len(&s[..floor(s, at)]) as u32
 }
 
 /// The byte offset of UTF-16 offset `units` of `s`: an offset inside a
 /// surrogate pair moves past the pair; one past the end clamps.
-pub(crate) fn utf16_to_byte(s: &str, units: u32) -> usize {
+pub fn utf16_to_byte(s: &str, units: u32) -> usize {
     let mut at = 0;
     for (i, c) in s.char_indices() {
         if at >= units as usize {
@@ -576,7 +591,7 @@ pub(crate) fn utf16_to_byte(s: &str, units: u32) -> usize {
 
 /// The longest prefix of `s` that fits in `max` UTF-16 units, cut between
 /// characters.
-pub(crate) fn clip_utf16(s: &str, max: usize) -> &str {
+pub fn clip_utf16(s: &str, max: usize) -> &str {
     let mut units = 0;
     for (i, c) in s.char_indices() {
         units += c.len_utf16();
@@ -588,13 +603,13 @@ pub(crate) fn clip_utf16(s: &str, max: usize) -> &str {
 }
 
 /// The key an insertion reports (`onKeyPress`).
-pub(crate) fn key_of(text: &str) -> &str {
+pub fn key_of(text: &str) -> &str {
     if text == "\n" { "Enter" } else { text }
 }
 
 /// Pasted text for a field: Windows line breaks become `\n`, and a
 /// single-line field gets spaces instead.
-pub(crate) fn pasted(text: &str, multiline: bool) -> String {
+pub fn pasted(text: &str, multiline: bool) -> String {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     if multiline {
         text

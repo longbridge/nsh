@@ -13,8 +13,8 @@ demo: ui-navigation
 
 ```rust tabs
 use nsh_base::{
-    AvoidBehavior, Edge, alert_dialog, button, dialog, keyboard_avoiding_view, nav_page, nav_stack, safe_area_view,
-    theme,
+    AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, dialog, keyboard_avoiding_view,
+    nav_page, nav_stack, safe_area_view, selection_area, text_view, theme,
 };
 ```
 
@@ -42,6 +42,8 @@ import type {
 | [`KeyboardAvoidingView`](../elements/keyboard-avoiding-view.md) | `keyboard_avoiding_view()` | 让内容保持在软键盘上方的视图。 |
 | [`Keyboard.dismiss()`、`keyboardFrame()`](../elements/keyboard-avoiding-view.md#hiding-the-keyboard) | `dismiss_keyboard()`、`keyboard_height()` | 隐藏键盘；键盘在界面上的高度。 |
 | [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | 平台的警告框或操作表。 |
+| [`TextView`](../elements/text-view.md) | `text_view()` | 用文字和视图绘制的 Markdown、HTML 或文档块组成的文档，适用于流式输出的 AI 回复。 |
+| [`SelectionArea`](../elements/selection-area.md) | `selection_area()` | 让其中的文字共用一个选区。 |
 | 页面和对话框的 `statusBar` | `.status_bar(..)` | 页面或对话框显示期间的状态栏。见[状态栏](#status-bar)。 |
 
 在 Rust 中，`theme()` 以设计 token 的形式读取应用的主题（`theme().primary()`、`theme().radius()`），与 TSX 的[主题类](../docs/tailwind.md#主题-token)使用同样的 token。
@@ -60,20 +62,11 @@ import type {
 
 ## 文档
 
+<a id="textview"></a>
+
 ### TextView
 
-`TextView` 用 [`Text`](../elements/text.md) 元素和视图显示 Markdown、HTML 或应用自己构建的文档块：标题、列表、代码、表格、图片、公式、脚注以及应用自己的语法。它为流式输出的 AI 聊天回复而设计（`options={{ streaming: true }}` 加上 `caret`），自带一套采用主题颜色的阅读排版，应用可按部件重新设定样式（`classes`、`styles`）。点击链接会通知应用（`onLinkPress`），渲染函数则把应用自己的内容放进文档：代码块及其操作、表格的操作、公式、图片和自定义节点。
-
-```tsx
-<TextView
-  markdown={reply()}
-  options={{ streaming: true }}
-  classes={{ heading: "font-semibold", code: "rounded bg-neutral-100 px-1", link: "text-blue-600" }}
-  onLinkPress={(url) => openLink(url)}
-/>
-```
-
-部件、流式输出、渲染函数、Markdown 扩展、文档模型以及在 Rust 中的用法见 [TextView](../elements/text-view.md)。
+`TextView` 用 [`Text`](../elements/text.md) 元素和视图显示 Markdown、HTML 或应用自己构建的文档块：标题、列表、代码、表格、图片、公式、脚注以及应用自己的语法。它为流式输出的 AI 聊天回复而设计，自带一套采用主题颜色的阅读排版，应用可按部件重新设定样式，渲染函数则把应用自己的内容放进文档。见 [TextView](../elements/text-view.md)。
 
 <a id="selection"></a>
 
@@ -83,39 +76,7 @@ import type {
 
 ### SelectionArea
 
-`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，跨越视图、[`Text`](../elements/text.md) 元素和 [`TextView`](../elements/text-view.md)，按阅读顺序排列。把聊天记录包在它里面，选区就能从一条消息开始、在下一条消息结束；复制会把选中的文字放进剪贴板，并排的文字之间用制表符连接，其他文字之间用换行连接。
-
-```tsx
-import { Text, View } from "nsh";
-import { SelectionArea, TextView } from "nsh/base";
-
-<SelectionArea class="gap-3 p-4">
-  <Text class="font-semibold">Release notes</Text>
-  <TextView markdown={notes} />
-  <View class="flex-row gap-2">
-    <Text selectable={false} class="text-neutral-500">Updated</Text>
-    <Text>October 21</Text>
-  </View>
-</SelectionArea>
-```
-
-| 平台 | 如何选择 |
-|---|---|
-| macOS、Windows、Linux、GPUI | 在文字上拖动；双击选中一个词，三击选中一个段落，之后的拖动按词或段落继续。Shift+点击扩展选区。Ctrl / Cmd+A 选中区域内的全部文字，Ctrl / Cmd+C 复制，Esc 或在区域外按下会清除选区。 |
-| iOS、Android | 长按选中一个词；用平台的选择手柄扩展选区，平台的编辑菜单提供“拷贝”和“全选”。 |
-| Web | 浏览器自己的选择，使用浏览器的手势、菜单和快捷键。 |
-
-| 属性 | 类型 | |
-|---|---|---|
-| `children` | `JSX.Element` | 内容：任意视图，文字可以在任意层级。 |
-| `class`、`style` | | 它的布局和外观，与 [View](../elements/view.md) 相同。 |
-
-- **不参与选择的文字**：设置了 `selectable={false}` 的文字（标签、按钮上的文字）会被选区及其手势跳过。
-- **嵌套的区域**：一个区域在另一个区域里面时属于外层区域，一个选区覆盖两者。
-- **TextView**：设置了 `selectable` 的 `TextView` 本身就是一个选择区域：它的段落、列表项、单元格和代码块一起选择。放在 `SelectionArea` 里时，它加入外层的选区。
-- **区域之外**：不在任何区域里的 `selectable` 文字单独选择，见 [Text](../elements/text.md#属性)。
-- **外观**是平台的高亮，使用每段文字的 `selectionColor`（`selection:text-*`）；区域本身不绘制任何东西。
-- **列表**：在虚拟化的 [List](../elements/list.md) 中，选区覆盖已挂载的行；滚出视野被回收的行会离开选区。
+`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区按阅读顺序跨越视图、`Text` 元素和 `TextView`。见 [SelectionArea](../elements/selection-area.md)。
 
 <a id="navigation"></a>
 
@@ -272,6 +233,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。

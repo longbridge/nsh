@@ -29,7 +29,12 @@ crates/
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it); the native animation graph (`animation/`: value / interpolate /
-                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame);
+                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame; `Animator`: its
+                       bindings to views, gestures and scroll views); what the desktop backends share, free of any toolkit:
+                       pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching),
+                       navigation decisions (`navigation.rs`: stacks' screens, transitions' timing and motion, what going back
+                       acts on), one view's transitions, layout animations and keyframes (`transition.rs`: curves,
+                       interpolation, timing), scroll views' state and physics (`scroll.rs`);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
@@ -212,6 +217,7 @@ echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh t
 ./target/debug/nsh test examples/gallery --target web                      # in a headless Chrome / Edge / Chromium (found, or --browser <PATH>): trusted input over CDP
 xvfb-run -a ./target/debug/nsh test examples/gallery --target linux        # in GTK windows (a virtual display here); also windows, gpui
 ./target/debug/nsh test examples/gallery --target ios                      # in an iOS simulator: a finger's touches and the keyboard's typing, as UIKit gets them
+./target/debug/nsh test examples/gallery --target android                  # on the first device adb lists: MotionEvents and KeyEvents at the window's views
 echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' | ./target/debug/nsh test examples/gallery/App.tsx --target macos   # check a platform change: steps from stdin in its window
 ./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
 ./target/debug/nsh run examples/counter --trace                            # dev server + Catalyst host (390×844), hot reload on save
@@ -239,7 +245,7 @@ cargo test --release -p nsh-core bench_ -- --ignored --nocapture                
 cargo +nightly fmt --all                                                        # .rustfmt.toml uses nightly options
 cargo clippy --workspace --all-targets
 cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
-cargo xtask ios-embed                                                           # NativeShell(Dev).xcframework into dist/nsh/embed/ios
+cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask api                                                                 # record the API apps use in api/ (after an additive change)
 cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture, when it differs from the app's newest
@@ -278,7 +284,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `CARGO_TARGET_DIR` behavior; do not add Cargo configuration or change that environment variable just to organize
   NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
-  `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`).
+  `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`);
+  TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
   button, safe areas, system alerts and the keyboard today, with the status bar a prop of pages and dialogs; controls
@@ -359,10 +366,12 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   in public API that the crate's `unitless.txt` (unitless quantities, with reasons) or its shrinking `untyped.txt`
   (legacy, to migrate) does not list (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
-  `<Each>` are globals that need no import. The primitives have one home each: `View`, `Text`, `Scroll`, `Input` from
-  `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from `nsh/webview`,
-  `Video` from `nsh/video`, `Dialog` from `nsh/base`, `InputAccessoryView` from `nsh/ios`; the compiler makes
-  their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
+  `<Each>` are globals that need no import. Imports mirror the Rust crates' layers: every primitive comes from `nsh`
+  (`View`, `Text`, `Scroll`, `Input`, `Image`, `List`, `Canvas` and its classes, `WebView`, `Video`), as
+  `nsh_core::ui::prelude` holds them, every base component from `nsh/base` (`Dialog`, `Button`, `NavStack`, ...), and
+  `InputAccessoryView` from `nsh/ios`; the compiler makes their tags in place (`jsx::PRIMITIVES`). `nsh/image`,
+  `nsh/list`, `nsh/canvas`, `nsh/webview` and `nsh/video`, where primitives were first, still export them (the same
+  values, deprecated): new code imports them from `nsh`. Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
   They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.

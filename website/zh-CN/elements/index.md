@@ -89,13 +89,13 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | 组件 | Rust | 作用 | 页面 |
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
-| `<TextView>` | `nsh_base::TextView::element(props)` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
-| `<SelectionArea>` | `nsh_base::SelectionArea::element(props)` | 让其中的文字一起选择 | [nsh/base](../modules/nsh-base.md#selectionarea) |
 | `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
 | `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
 | `<SafeAreaView>` | `nsh_base::safe_area_view()` | 让内容避开刘海、系统栏和主屏幕指示条 | [SafeAreaView](./safe-area-view.md) |
 | `<KeyboardAvoidingView>` | `nsh_base::keyboard_avoiding_view()` | 让内容保持在软键盘之上 | [KeyboardAvoidingView](./keyboard-avoiding-view.md) |
 | `AlertDialog` | `nsh_base::alert_dialog()` | 系统的提示框和操作表 | [AlertDialog](./alert-dialog.md) |
+| `<TextView>` | `nsh_base::text_view()` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
+| `<SelectionArea>` | `nsh_base::selection_area()` | 让其中的文字一起选择 | [SelectionArea](./selection-area.md) |
 
 > [!NOTE]
 > 字符串只有放在 `Text` 里才会被绘制。`View` 的字符串子节点不会创建原生视图，也不参与布局。

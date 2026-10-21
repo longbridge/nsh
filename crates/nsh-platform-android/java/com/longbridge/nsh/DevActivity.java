@@ -22,7 +22,17 @@ public final class DevActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         edgeToEdge(this);
-        view = new NshView(this, getIntent().getBooleanExtra("trace", false));
+        boolean trace = getIntent().getBooleanExtra("trace", false);
+        // A test session's app (`nsh test --target android`) keeps its data
+        // in a directory of its own, empty when it starts.
+        String data = getIntent().getStringExtra("dataDir");
+        if (data != null) {
+            java.io.File dir = new java.io.File(new java.io.File(getCacheDir(), "nsh-test"), data);
+            deleteTree(dir);
+            view = new NshView(this, trace, dir);
+        } else {
+            view = new NshView(this, trace);
+        }
         // An app on its own, not a module embedded in another app: no limits.
         view.useStandaloneLimits();
         setContentView(view);
@@ -42,6 +52,12 @@ public final class DevActivity extends Activity {
         }
         String url = getIntent().getStringExtra("url");
         view.connectDevServer(url != null ? url : "ws://127.0.0.1:8790/ws");
+    }
+
+    private static void deleteTree(java.io.File file) {
+        java.io.File[] children = file.listFiles();
+        if (children != null) for (java.io.File c : children) deleteTree(c);
+        file.delete();
     }
 
     /** Android 12 and older: the app gets the back button first. */

@@ -63,7 +63,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
             ..AccessibilityState::default()
         })
         .hit_slop(EdgeInsets::all(px(8.0)))
-        .on_press(move |_: &()| {
+        .on_press(move || {
             let next = !props.value.get_untracked();
             on.spring(knob(next), motion::SETTLE);
             cx.emit(ToggleEvent::Change(next));
@@ -112,18 +112,6 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                 )
                 .bind_translate_x(&on.interpolate(&[0.0, 1.0], &[0.0, 20.0])),
         )
-}
-
-/// A [`Toggle`] at `value` with accessibility label `label`; its owner
-/// handles [`ToggleEvent::Change`] with `.on_event(..)`.
-pub(crate) fn toggle(
-    value: impl Into<Prop<bool>>,
-    label: impl Into<SharedString>,
-) -> ComponentElement<Toggle> {
-    Toggle::element(ToggleProps {
-        value: value.into(),
-        label: Some(label.into()).into(),
-    })
 }
 
 /// A segment of [`Segmented`].
@@ -228,7 +216,7 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
                         selected: selected.get(),
                         ..AccessibilityState::default()
                     })
-                    .on_press(move |_: &()| cx.emit(SegmentedEvent::Change(i)))
+                    .on_press(move || cx.emit(SegmentedEvent::Change(i)))
                     .child(
                         text(option.label)
                             .number_of_lines(1)
@@ -285,17 +273,4 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
                 .bind_translate_x(&x),
         )
         .child(segments)
-}
-
-/// A [`Segmented`] of `options` with `selected` selected; its owner
-/// handles [`SegmentedEvent::Change`] with `.on_event(..)`.
-pub(crate) fn segmented(
-    options: impl IntoIterator<Item = Segment>,
-    selected: impl Into<Prop<u32>>,
-) -> ComponentElement<Segmented> {
-    Segmented::element(SegmentedProps {
-        options: options.into_iter().collect::<Vec<_>>().into(),
-        selected: selected.into(),
-        size: SegmentedSize::Regular,
-    })
 }

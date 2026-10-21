@@ -276,11 +276,11 @@ fn info() -> AnyElement {
         }
     };
     let toggle = move |_: &()| show.update(|s| *s = !*s);
-    let shown = If::new(show, move || {
-        appear(0).child(
+    let shown = when(show, move || {
+        appear().index(0).child(
             frame(image(big()))
                 .h(px(170.0))
-                .on_load_start(move |_: &()| status.set("loading"))
+                .on_load_start(move || status.set("loading"))
                 .on_progress(move |e: &ImageProgress| {
                     progress.set(e.loaded / e.total.max(1.0));
                 })
