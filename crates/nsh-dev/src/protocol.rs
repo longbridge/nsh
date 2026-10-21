@@ -277,6 +277,11 @@ pub enum TestStep {
         /// Points downwards.
         y: f32,
     },
+    /// Moves the mouse over the view (`app.hover`).
+    Hover {
+        /// The view.
+        selector: String,
+    },
     /// Presses a key with its modifiers, as `nsh/keymap` names it
     /// (`app.keyboard.press`).
     PressKey {

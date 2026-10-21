@@ -1055,6 +1055,14 @@ impl App {
         step(&this, move |app| app.drag(&selector, by)).await
     }
 
+    /// Moves the mouse over the middle of what `selector` names: the views
+    /// under it hear `onHoverIn` (and the ones it left `onHoverOut`), take
+    /// their `hover:` styles and hear `onHoverMove`. Desktops and the web
+    /// only: a phone has no mouse.
+    pub async fn hover(this: Instance<Self>, selector: String) -> Result<(), String> {
+        step(&this, move |app| app.hover(&selector)).await
+    }
+
     /// Lets the app run for `ms` milliseconds (timers and animations): on a
     /// manual clock, moves it by `ms` (`clock.runFor`).
     pub async fn wait(this: Instance<Self>, ms: f64) -> Result<(), String> {

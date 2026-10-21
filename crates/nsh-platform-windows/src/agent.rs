@@ -175,6 +175,16 @@ impl Native for WindowsNative {
         self.on_main(move |s| synth::press(s, vk, modifiers));
     }
 
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        self.on_main(move |s| synth::pointer(s, PointerKind::Move, x, y, 0))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         let stroke = nsh_core::keymap::Keystroke::parse(keys, nsh_core::platform::Os::Windows)
             .map_err(|e| e.to_string())?;

@@ -508,6 +508,18 @@ pub trait Native: Send + Sync {
     /// [`drag_path`] a display frame at a time and lifting at `to` at once,
     /// still moving, as a quick drag does.
     fn drag(&self, from: Point<Points>, to: Point<Points>);
+    /// The platform has a mouse ([`Native::hover`]): the desktops and the
+    /// web; not the phones.
+    fn mouse(&self) -> bool {
+        false
+    }
+    /// Moves the mouse to `at`, without a button: what is under it is
+    /// hovered. Only asked when the platform has a mouse
+    /// ([`Native::mouse`]).
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let _ = at;
+        Err("this platform has no mouse".into())
+    }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
     /// `mod` the platform's command key), on a hardware keyboard: the app's
     /// shortcuts hear it, else what has the keyboard focus. Platforms
@@ -738,6 +750,7 @@ impl Agent {
             TestStep::Clear { selector } => done(self.clear(&selector)),
             TestStep::Scroll { selector, distance } => done(self.scroll(&selector, distance)),
             TestStep::Drag { selector, x, y } => done(self.drag(&selector, x, y)),
+            TestStep::Hover { selector } => done(self.hover(&selector)),
             TestStep::PressKey { keys } => {
                 done(self.native.press_keys(&keys).and_then(|()| self.settled()))
             }
@@ -1035,6 +1048,19 @@ impl Agent {
             Point::new(Points(0.0), Points(distance))
         };
         self.native.scroll(at, delta);
+        self.settled()
+    }
+
+    fn hover(&self, selector: &str) -> Result<(), String> {
+        if !self.native.mouse() {
+            return Err(
+                "this platform has no mouse to hover with: run the test headless as a \
+                        desktop (`platform`), or on a desktop or the web"
+                    .into(),
+            );
+        }
+        let (_, at) = self.find(selector, "view", PickTarget::View)?;
+        self.native.hover(at)?;
         self.settled()
     }
 

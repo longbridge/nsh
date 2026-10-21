@@ -196,6 +196,30 @@ impl Native for MacNative {
         self.on_main(move |_, window| synth::key(window, name));
     }
 
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+        // Straight to the surface's input: AppKit hands a posted mouse
+        // move to the first responder only, not to the view under it.
+        self.on_main(move |surface, window| {
+            let event = synth::mouse_event(
+                window,
+                NSEventType::MouseMoved,
+                x,
+                y,
+                0,
+                objc2_app_kit::NSEventModifierFlags::empty(),
+            );
+            if let Some(event) = event {
+                crate::input::event(surface, &event);
+            }
+        })
+        .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         use nsh_core::keymap::{Key, Keystroke};
         let stroke =

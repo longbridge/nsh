@@ -147,6 +147,16 @@ impl Native for LinuxNative {
         });
     }
 
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        let (x, y) = (at.x.0, at.y.0);
+        self.on_main(move |s| crate::input::simulate(s, Simulated::Hover(x, y)))
+            .ok_or_else(|| "the window is gone".to_owned())
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         use nsh_core::keymap::{Key as K, Keystroke};
         let stroke =

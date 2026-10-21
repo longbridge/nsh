@@ -227,6 +227,15 @@ impl Native for GpuiNative {
         self.with_surface(move |surface| synth::press(surface, vk, modifiers));
     }
 
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        self.mouse(PointerKind::Move, at, 0);
+        Ok(())
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         use nsh_core::platform::Os;
         let os = if cfg!(target_os = "macos") {

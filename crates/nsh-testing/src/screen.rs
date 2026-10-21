@@ -92,6 +92,9 @@ pub struct Screen {
     js_grants: Vec<bool>,
     /// The app's keyboard shortcuts (`nsh/keymap`, the root's `Keymap`).
     keymap: Option<Arc<nsh_core::keymap::Keymap>>,
+    /// The views under the mouse that care (`input::hoverable`), innermost
+    /// first.
+    hovered: Vec<NodeId>,
 }
 
 #[derive(Debug, Default)]
@@ -121,6 +124,8 @@ struct View {
     selection_area: bool,
     /// The interaction states it tracks (`TrackStates`: pressed, hovered).
     tracked: u8,
+    /// The interaction states it is in (of those it tracks).
+    states: u8,
     /// The values its drags, pinches and rotations drive natively.
     gestures: GestureValues,
     /// When a drag on it activates its JS responder (`panActivation`).
@@ -920,6 +925,37 @@ impl Screen {
             at = p.parent;
         }
         Some(Bounds::new(origin, view.frame.size))
+    }
+
+    /// The views of `chain` (innermost first) that hovering matters to:
+    /// their `hover:` styles or hover events (`input::hoverable`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn hoverable(&self, chain: &[NodeId]) -> Vec<NodeId> {
+        chain
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.nodes
+                    .get(id)
+                    .is_some_and(|v| nsh_core::input::hoverable(v.tracked, v.events))
+            })
+            .collect()
+    }
+
+    /// The views under the mouse are now `views`: the ones it was over.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_hovered(&mut self, views: Vec<NodeId>) -> Vec<NodeId> {
+        std::mem::replace(&mut self.hovered, views)
+    }
+
+    /// View `id`'s interaction states with `bit` set (or cleared), when it
+    /// tracks it and they change.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_state(&mut self, id: NodeId, bit: u8, on: bool) -> Option<u8> {
+        let view = self.nodes.get_mut(&id)?;
+        let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
+        view.states = next;
+        Some(next)
     }
 
     /// The app's keyboard shortcuts (`nsh/keymap`).

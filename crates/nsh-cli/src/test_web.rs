@@ -336,6 +336,15 @@ impl Native for WebNative {
         self.mouse("mouseReleased", last, 0);
     }
 
+    fn mouse(&self) -> bool {
+        true
+    }
+
+    fn hover(&self, at: Point<Points>) -> Result<(), String> {
+        self.mouse("mouseMoved", at, 0);
+        Ok(())
+    }
+
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         // `mod` is the browser's platform's command key.
         let stroke = nsh_core::keymap::Keystroke::parse_with(keys, cfg!(target_os = "macos"))
