@@ -167,6 +167,10 @@ pub struct QuantityStepperProps {
     /// The largest quantity (99 when left out).
     #[prop(default = 99)]
     pub max: Prop<u32>,
+    /// What screen readers say for the button that takes one away.
+    pub decrement_label: Prop<SharedString>,
+    /// What screen readers say for the button that adds one.
+    pub increment_label: Prop<SharedString>,
 }
 
 /// What a [`QuantityStepper`] reports.
@@ -192,20 +196,30 @@ pub fn QuantityStepper(props: QuantityStepperProps, cx: Scope<QuantityStepperEve
         .flex_row()
         .items_center()
         .gap_3()
-        .child(step_button("−", "Fewer", move || props.value.get() <= props.min.get(), move || step(-1)))
+        .child(step_button(
+            "−",
+            move || props.decrement_label.get(),
+            move || props.value.get() <= props.min.get(),
+            move || step(-1),
+        ))
         .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground()))
-        .child(step_button("+", "More", move || props.value.get() >= props.max.get(), move || step(1)))
+        .child(step_button(
+            "+",
+            move || props.increment_label.get(),
+            move || props.value.get() >= props.max.get(),
+            move || step(1),
+        ))
 }
 
 fn step_button(
     symbol: &'static str,
-    label: &'static str,
+    label: impl Fn() -> SharedString + 'static,
     disabled: impl Fn() -> bool + 'static,
     on_press: impl Fn() + 'static,
 ) -> impl IntoElement {
     button()
         .disabled(disabled)
-        .accessibility_label(label)
+        .accessibility_label(move || Some(label()))
         .on_press(on_press)
         .w(px(32.0))
         .h(px(32.0))
@@ -224,6 +238,8 @@ quantity_stepper()
     .value(quantity)
     .min(1)
     .max(10)
+    .decrement_label("Fewer")
+    .increment_label("More")
     .on_change(move |next: &u32| quantity.set(*next))
 ```
 
@@ -233,7 +249,16 @@ import { QuantityStepper } from "my-app";   // Rust 组件：src/lib.rs 中有 #
 
 function CartRow() {
   const quantity = signal(1);
-  return <QuantityStepper value={quantity()} min={1} max={10} onChange={(next) => quantity.set(next)} />;
+  return (
+    <QuantityStepper
+      value={quantity()}
+      min={1}
+      max={10}
+      decrementLabel="Fewer"
+      incrementLabel="More"
+      onChange={(next) => quantity.set(next)}
+    />
+  );
 }
 ```
 
@@ -250,6 +275,10 @@ export interface QuantityStepperProps {
   min?: number;
   /** The largest quantity (99 when left out). */
   max?: number;
+  /** What screen readers say for the button that takes one away. */
+  decrementLabel: string;
+  /** What screen readers say for the button that adds one. */
+  incrementLabel: string;
   /** The user asked for another quantity; the owner sets `value`. */
   onChange?: (next: number) => void;
 }
@@ -264,11 +293,11 @@ export function QuantityStepper(props: QuantityStepperProps) {
   const buttonClass = "size-8 items-center justify-center rounded-(--radius) bg-muted active:opacity-60 disabled:opacity-40";
   return (
     <View class="flex-row items-center gap-3">
-      <Button disabled={props.value <= min()} accessibilityLabel="Fewer" onPress={() => step(-1)} class={buttonClass}>
+      <Button disabled={props.value <= min()} accessibilityLabel={props.decrementLabel} onPress={() => step(-1)} class={buttonClass}>
         <Text class="text-foreground">−</Text>
       </Button>
       <Text class="text-foreground">{props.value}</Text>
-      <Button disabled={props.value >= max()} accessibilityLabel="More" onPress={() => step(1)} class={buttonClass}>
+      <Button disabled={props.value >= max()} accessibilityLabel={props.incrementLabel} onPress={() => step(1)} class={buttonClass}>
         <Text class="text-foreground">+</Text>
       </Button>
     </View>
