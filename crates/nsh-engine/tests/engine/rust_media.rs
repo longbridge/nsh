@@ -24,6 +24,7 @@ const LOGO: ImageAsset = ImageAsset {
         width: Points(64.0),
         height: Points(64.0),
     },
+    scales: &[],
 };
 
 /// An image, an inline page and a video logging what they report, and
