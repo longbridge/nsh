@@ -14,6 +14,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
+use nsh_base::dialog;
 use nsh_core::{
     ApproxTextEngine, AttributedText, Command, EventKind, EventPayload, MountBatch, MountItem,
     Points, ROOT_ID, Size, StatusBarSetting, StatusBarStyle, TextEngine, TextLayout,
@@ -344,7 +345,7 @@ fn Services() -> impl IntoElement {
         .child(text("The note").element_ref(&note))
         .child(dynamic(move || {
             open.get().then(|| {
-                modal()
+                dialog()
                     .status_bar(|| {
                         StatusBarSetting::default()
                             .foreground(StatusBarStyle::Light)
