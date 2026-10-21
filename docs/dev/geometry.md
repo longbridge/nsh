@@ -45,7 +45,7 @@ The rest of the Rust UI API (`nsh_core::ui`) follows GPUI's element APIs:
   `ResponderEvent::location` / `page`, `PanGesture`'s `position`, `origin` and `delta`, `ElementRef::scroll_to`,
   `zoom_to`'s center, `Scrollable::content_offset`); **sizes** are `Size<Points>` (`ScrollEvent`'s `size` and
   `content_size`, `ImageAsset::size`); single lengths are `Points` (`ListLayout`'s paddings, gaps and estimates,
-  `Scrollable::snap_interval` / `snap_offsets`, `Theme`'s `radius`, `radius_lg` and `font_size`, `keyboard_height()`,
+  `Scrollable::snap_interval` / `snap_offsets`, `Theme::radius`, `keyboard_height()`,
   `measure_text`, `round_to_nearest_pixel`, `set_title_bar`'s height).
 - **Styles** (`nsh_core::style`, what a node's style resolves to and the platforms draw): lengths are `Points`
   (`ViewStyle`'s `border_radius` and `elevation`, `Shadow` and `TextShadow` offsets and radii, `TextStyle`'s font size,

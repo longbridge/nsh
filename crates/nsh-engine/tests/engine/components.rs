@@ -1330,6 +1330,35 @@ fn the_apps_appearance_overrides_the_systems() {
     assert_eq!(background(&later), Some(nsh_core::Color(0xffff_ffff)));
 }
 
+const TOKENS: &str = r#"import { mount, Text, token } from "nsh";
+
+mount(() => (
+  <Text>{`up ${token("up")} radius ${token("radius")} font ${token("font-sans")} primary ${token("primary") !== undefined}`}</Text>
+));
+"#;
+
+#[test]
+fn token_reads_the_apps_theme_in_the_appearance_shown() {
+    let shown = |appearance: &str| {
+        let config = format!(
+            r##"{{ "appearance": "{appearance}", "theme": {{ "cssVars": {{
+                "theme": {{ "font-sans": "Inter, sans-serif", "radius": "0.5rem" }},
+                "light": {{ "up": "#00ff00" }}, "dark": {{ "up": "#004400" }} }} }} }}"##
+        );
+        let (_engine, rx) = start_with(TOKENS, Environment::default(), None, Some(&config));
+        let up = if appearance == "dark" {
+            "#004400ff"
+        } else {
+            "#00ff00ff"
+        };
+        let wanted = format!("up {up} radius 8 font Inter primary true");
+        let batches = until(&rx, |b| shows(b, &wanted));
+        assert!(batches.iter().any(|b| shows(b, &wanted)), "{batches:?}");
+    };
+    shown("light");
+    shown("dark");
+}
+
 const MENU: &str = r#"import { mount, signal, Text } from "nsh";
 import { Menu } from "nsh/desktop";
 

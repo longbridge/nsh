@@ -162,7 +162,7 @@ function Secondary(props: { label: string; onPress: () => void }) {
 The state variants are applied natively: a press darkens the button on the main thread with no JS or Rust running.
 In Rust the state methods are the same variants: `.active(..)`, `.hover(..)`, `.focus(..)`, `.selected_style(..)` and
 `.disabled_style(..)` follow the button's own states. Your theme's colors work the same way: `bg-primary` in TSX,
-`theme().primary()` in Rust (see [Theme tokens](../docs/tailwind.md#theme-tokens)).
+`theme().primary` in Rust (see [Theme tokens](../docs/tailwind.md#theme-tokens)).
 
 ## Disabled
 

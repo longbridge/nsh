@@ -1,7 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Radio, RadioGroup } from "nsh/base";
-import { platform } from "nsh/device";
-import { ui } from "./palette";
+import { desktop, Log, size, Split, ui } from "./palette";
 
 const plans = [
   { id: "starter", label: "Starter", detail: "1 project · 5 GB", price: "Free" },
@@ -19,12 +18,12 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>radio</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Click an option, or Tab to one and press Space" : "Tap an option: its label checks it too"}
+        {desktop ? "Click an option, or Tab to one and press Space" : "Tap an option: its label checks it too"}
       </Text>
 
-      <View style={{ maxWidth: 390, gap: 14 }}>
+      <Split gap={14} inspector={<Log title={`onChange(checked) · ${plan()}, ${cycle()}`} lines={events()} minHeight={76} />}>
         {/* A segmented choice: each radio is a segment, `checkedStyle` raises the checked one. */}
-        <RadioGroup style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset }}>
+        <RadioGroup style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset, ...(desktop ? { alignSelf: "flex-start" } : {}) }}>
           <Each of={cycles}>
             {(c) => (
               <Radio
@@ -33,7 +32,11 @@ function App() {
                   cycle.set(c());
                   log(`${c()} → ${next}`);
                 }}
-                style={{ flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }}
+                style={
+                  desktop
+                    ? { height: 26, paddingHorizontal: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                    : { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" }
+                }
                 checkedStyle={ui().raised}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: cycle() === c() ? ui().text : ui().muted }}>{c()}</Text>
@@ -47,7 +50,7 @@ function App() {
           <Each of={plans}>
             {(item, i) => (
               <>
-                {i() > 0 ? <View style={{ height: 1, marginLeft: 48, backgroundColor: ui().line }} /> : null}
+                {i() > 0 ? <View style={{ height: 1, marginLeft: desktop ? 40 : 48, backgroundColor: ui().line }} /> : null}
                 <Radio
                   checked={plan() === item().id}
                   disabled={item().locked}
@@ -55,24 +58,27 @@ function App() {
                     plan.set(item().id);
                     log(`${item().label} → ${next}`);
                   }}
-                  class="group flex-row items-center gap-3 px-4 py-3 active:opacity-70 disabled:opacity-40"
+                  class={`group flex-row items-center gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`}
                 >
                   <View
                     style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 10,
+                      width: desktop ? 16 : 20,
+                      height: desktop ? 16 : 20,
+                      borderRadius: desktop ? 8 : 10,
                       borderWidth: 2,
                       borderColor: plan() === item().id ? ui().accent : ui().faint,
                       alignItems: "center",
                       justifyContent: "center",
                     }}
                   >
-                    <View class="opacity-0 group-checked:opacity-100" style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: ui().accent }} />
+                    <View
+                      class="opacity-0 group-checked:opacity-100"
+                      style={{ width: desktop ? 8 : 10, height: desktop ? 8 : 10, borderRadius: desktop ? 4 : 5, backgroundColor: ui().accent }}
+                    />
                   </View>
                   <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={{ fontSize: 15, fontWeight: "500", color: ui().text }}>{item().label}</Text>
-                    <Text style={{ fontSize: 12, color: ui().muted }}>{item().detail}</Text>
+                    <Text style={{ fontSize: size.label, fontWeight: "500", color: ui().text }}>{item().label}</Text>
+                    <Text style={{ fontSize: size.detail, color: ui().muted }}>{item().detail}</Text>
                   </View>
                   <Text style={{ fontSize: 14, fontWeight: "600", fontVariant: ["tabular-nums"], color: ui().text }}>{item().price}</Text>
                 </Radio>
@@ -80,16 +86,7 @@ function App() {
             )}
           </Each>
         </RadioGroup>
-
-        <View style={{ ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: 76 }}>
-          <Text style={{ fontSize: 12, color: ui().muted }}>
-            onChange(checked) · {plan()}, {cycle()}
-          </Text>
-          <Each of={events()}>
-            {(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}
-          </Each>
-        </View>
-      </View>
+      </Split>
     </View>
   );
 }

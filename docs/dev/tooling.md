@@ -11,10 +11,12 @@
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
   frames, the web APIs and the control flow components `If` / `Each`), and from the bundler `nsh/assets.d.ts` (what
-  image and font imports give). Each file declares its own names; the `import type` lines between them are worked out
+  image and font imports give) and `nsh/tokens.d.ts` (`nsh_bundler::tokens_declaration`: `interface Tokens` of `nsh`,
+  every design token of the app's theme, `nsh.json` `"theme"` over the default, by name with its type, which types
+  `token()`; a theme that does not parse gives the default's names, and the build reports it). Each file declares its own names; the `import type` lines between them are worked out
   from the names each uses. Next to them nsh writes `.nsh/tsconfig.json` (`nsh_bundler::TSCONFIG_BASE`): the
   compiler options mapping `nsh` and `nsh/*` there (`jsxImportSource: "nsh"`, no DOM library, `ESNext.Disposable`)
-  and the globals and assets files; the `tsconfig.json` `nsh init` writes (`nsh_bundler::TSCONFIG`) only extends it
+  and the globals, assets and tokens files; the `tsconfig.json` `nsh init` writes (`nsh_bundler::TSCONFIG`) only extends it
   and includes the app's sources, so editors type-check apps without `node_modules` and a change of nsh's settings
   (a new `lib`, a path) reaches existing apps with the next build, without an edit of theirs. An app's
   `tsconfig.json` that an earlier `nsh init` wrote and the app never changed (`templates/tsconfig/*.json`, compared

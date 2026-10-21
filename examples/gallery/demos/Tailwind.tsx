@@ -5,9 +5,10 @@ import { colors, DemoPage } from "../ui";
 
 /**
  * The gallery's design built from class strings alone: the surfaces and the
- * citrus accent are `nsh.json` theme colors (`paper-*` in light appearance,
- * `dark:` `graphite-*`, `citrus`), the light and depth (`finish` in ui.tsx)
- * are gradients and arbitrary shadows, everything else is stock Tailwind.
+ * citrus accent are the tokens of `theme.json` (`bg-card`, `border-line`,
+ * `text-brand`, ...: each switches with the appearance by itself), the light
+ * and depth (`finish` in ui.tsx) are gradients and arbitrary shadows with
+ * `dark:` variants, everything else is stock Tailwind.
  */
 const photo = "https://picsum.photos/seed/nsh-tailwind/600/400";
 
@@ -31,9 +32,9 @@ const finish = {
 /** A card: an icon tile, a title and the classes it shows, over a darker inset. */
 function Card(props: { icon: IconName; title: string; subtitle: string; children: JSX.Element }) {
   return (
-    <View class={`rounded-2xl border border-paper-border bg-paper-card p-[5px] dark:border-graphite-border dark:bg-graphite-card ${finish.card}`}>
+    <View class={`rounded-2xl border border-border bg-card p-[5px] ${finish.card}`}>
       <View class="flex-row items-center gap-3 px-[11px] pb-3 pt-[11px]">
-        <View class={`size-10 items-center justify-center rounded-xl border border-paper-border bg-paper-raised dark:border-graphite-border dark:bg-graphite-raised ${finish.raised}`}>
+        <View class={`size-10 items-center justify-center rounded-xl border border-border bg-raised ${finish.raised}`}>
           <Icon name={props.icon} size={20} tint={colors.text} />
         </View>
         <View class="flex-1 gap-0.5">
@@ -43,7 +44,7 @@ function Card(props: { icon: IconName; title: string; subtitle: string; children
           </Text>
         </View>
       </View>
-      <View class={`gap-3 rounded-xl border border-paper-line bg-paper-inset p-3.5 dark:border-graphite-line dark:bg-graphite-inset ${finish.inset}`}>{props.children}</View>
+      <View class={`gap-3 rounded-xl border border-line bg-inset p-3.5 ${finish.inset}`}>{props.children}</View>
     </View>
   );
 }
@@ -56,14 +57,14 @@ function Label(props: { children: string }) {
 function Hero() {
   return (
     <View
-      class="overflow-hidden rounded-2xl border border-paper-border bg-linear-to-br from-white via-[#fafaf8] to-paper-inset p-5 inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(20,20,10,0.08)] dark:border-graphite-border dark:from-[#26282d] dark:via-graphite-card dark:to-graphite-inset dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)]"
+      class="overflow-hidden rounded-2xl border border-border bg-linear-to-br from-white via-[#fafaf8] to-inset p-5 inset-shadow-[0_1px_0_#ffffff] shadow-[0_6px_20px_rgba(20,20,10,0.08)] dark:from-[#26282d] dark:via-card dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)]"
     >
-      <View class="absolute -right-20 -top-24 size-72 rounded-full bg-radial from-citrus/20 to-transparent to-70%" />
+      <View class="absolute -right-20 -top-24 size-72 rounded-full bg-radial from-brand-fill/20 to-transparent to-70%" />
       <View class="flex-row flex-wrap items-center gap-2">
         <View class="h-[26px] flex-row items-center gap-1.5 rounded-full bg-black/5 px-2.5 ring-1 ring-inset ring-black/10 dark:bg-white/10 dark:ring-white/10">
           <View class="size-2 items-center justify-center">
-            <View class="absolute size-2 rounded-full bg-citrus animate-ping" />
-            <View class="size-1.5 rounded-full bg-citrus" />
+            <View class="absolute size-2 rounded-full bg-brand-fill animate-ping" />
+            <View class="size-1.5 rounded-full bg-brand-fill" />
           </View>
           <Text class="text-xs font-medium text-zinc-900 dark:text-zinc-100">Resolved natively</Text>
         </View>
@@ -84,7 +85,7 @@ function Hero() {
 /** A grid of figures, each with a tinted note. */
 function Stats() {
   const stats = [
-    { label: "Swatches", value: String(palette.length * shades.length), note: `${palette.length} hues × ${shades.length} shades`, tone: "text-citrus-deep dark:text-citrus" },
+    { label: "Swatches", value: String(palette.length * shades.length), note: `${palette.length} hues × ${shades.length} shades`, tone: "text-brand" },
     { label: "Gradients", value: "4", note: "Linear, radial, conic", tone: "text-emerald-600 dark:text-emerald-400" },
     { label: "Animations", value: "4", note: "Spin, ping, pulse, bounce", tone: "text-sky-600 dark:text-sky-400" },
     { label: "Unknown classes", value: "0", note: "Checked at build", tone: "text-amber-600 dark:text-amber-400" },
@@ -94,7 +95,7 @@ function Stats() {
       <View class="grid grid-cols-2 gap-2">
         <Each of={stats}>
           {(s) => (
-            <View class="gap-1 rounded-[10px] border border-paper-line bg-linear-to-b from-white to-[#fafaf8] p-3 inset-shadow-[0_1px_0_#ffffff] dark:border-graphite-line dark:from-[#1d1e22] dark:to-[#17181b] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.05)]">
+            <View class="gap-1 rounded-[10px] border border-line bg-linear-to-b from-white to-[#fafaf8] p-3 inset-shadow-[0_1px_0_#ffffff] dark:from-[#1d1e22] dark:to-[#17181b] dark:inset-shadow-[0_1px_0_rgba(255,255,255,0.05)]">
               <Text class="text-xs text-zinc-500">{s().label}</Text>
               <Text class="text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">{s().value}</Text>
               <Text numberOfLines={1} class={`text-xs tabular-nums ${s().tone}`}>
@@ -105,7 +106,7 @@ function Stats() {
         </Each>
       </View>
       <View class="flex-row flex-wrap gap-x-4 gap-y-2">
-        <Each of={["bg-citrus", "bg-emerald-400", "bg-sky-400", "bg-amber-400"]}>
+        <Each of={["bg-brand-fill", "bg-emerald-400", "bg-sky-400", "bg-amber-400"]}>
           {(c, i) => (
             <View class="flex-row items-center gap-1.5">
               <View class={`size-2.5 rounded-[3px] ${c()}`} />
@@ -133,20 +134,20 @@ function Buttons() {
       <View class="flex-row gap-2">
         <View
           onPress={() => count.set(0)}
-          class={`h-11 flex-1 items-center justify-center rounded-[10px] border border-paper-border bg-paper-raised dark:border-graphite-border dark:bg-graphite-raised ${finish.raised} transition active:scale-95 active:opacity-80`}
+          class={`h-11 flex-1 items-center justify-center rounded-[10px] border border-border bg-raised ${finish.raised} transition active:scale-95 active:opacity-80`}
         >
           <Text class="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Reset</Text>
         </View>
         <View
           onPress={() => busy.set(!busy())}
           disabled={busy()}
-          class={`h-11 flex-1 items-center justify-center rounded-[10px] bg-citrus ${finish.accent} transition active:scale-95 hover:opacity-90 disabled:opacity-40`}
+          class={`h-11 flex-1 items-center justify-center rounded-[10px] bg-brand-fill ${finish.accent} transition active:scale-95 hover:opacity-90 disabled:opacity-40`}
         >
-          <Text class="text-[15px] font-semibold text-citrus-ink">{busy() ? "Disabled" : "Disable me"}</Text>
+          <Text class="text-[15px] font-semibold text-on-brand">{busy() ? "Disabled" : "Disable me"}</Text>
         </View>
       </View>
       <View onPress={() => busy.set(false)} class="min-h-11 justify-center self-start rounded-lg px-1 active:bg-black/5 dark:active:bg-white/5">
-        <Text class="text-sm text-citrus-deep underline dark:text-citrus decoration-dotted underline-offset-4">Enable again</Text>
+        <Text class="text-sm text-brand underline decoration-dotted underline-offset-4">Enable again</Text>
       </View>
     </Card>
   );
@@ -166,7 +167,7 @@ function Cards() {
         <Image src={logo} class="size-12 rounded-[10px]" />
         <View class="flex-1 gap-0.5">
           <Text class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Group press</Text>
-          <Text class="text-[13px] text-zinc-500 dark:text-zinc-500 dark:text-zinc-400 group-active:text-citrus-deep dark:group-active:text-citrus">Press the card: this line changes color</Text>
+          <Text class="text-[13px] text-zinc-500 dark:text-zinc-500 dark:text-zinc-400 group-active:text-brand">Press the card: this line changes color</Text>
         </View>
         <Text class="text-2xl text-zinc-400 dark:text-zinc-600 transition-transform group-active:translate-x-1">›</Text>
       </View>
@@ -241,7 +242,7 @@ function Shadows() {
         <Each of={sizes}>
           {(s) => (
             <View class="items-center gap-2">
-              <View class={`size-12 rounded-xl bg-paper-raised shadow-black dark:bg-graphite-raised ${s()}`} />
+              <View class={`size-12 rounded-xl bg-raised shadow-black ${s()}`} />
               <Label>{s().slice(7)}</Label>
             </View>
           )}
@@ -249,15 +250,15 @@ function Shadows() {
       </View>
       <View class="flex-row justify-between px-1 pb-1">
         <View class="items-center gap-2">
-          <View class="size-12 rounded-xl bg-paper-inset inset-shadow-sm inset-shadow-black/10 ring-1 ring-inset ring-black/5 dark:bg-black dark:inset-shadow-white/10 dark:ring-white/10" />
+          <View class="size-12 rounded-xl bg-inset inset-shadow-sm inset-shadow-black/10 ring-1 ring-inset ring-black/5 dark:bg-black dark:inset-shadow-white/10 dark:ring-white/10" />
           <Label>Inset</Label>
         </View>
         <View class="items-center gap-2">
-          <View class="size-12 rounded-xl bg-paper-raised ring-2 ring-sky-400 ring-offset-2 ring-offset-paper-inset dark:bg-graphite-raised dark:ring-offset-graphite-inset" />
+          <View class="size-12 rounded-xl bg-raised ring-2 ring-sky-400 ring-offset-2 ring-offset-inset" />
           <Label>Ring</Label>
         </View>
         <View class="items-center gap-2">
-          <View class="size-12 rounded-full bg-paper-raised dark:bg-graphite-raised outline-2 outline-offset-2 outline-dashed outline-pink-400" />
+          <View class="size-12 rounded-full bg-raised outline-2 outline-offset-2 outline-dashed outline-pink-400" />
           <Label>Outline</Label>
         </View>
         <View class="items-center gap-2">
@@ -304,7 +305,7 @@ function Typography() {
         <Text class="underline decoration-double decoration-sky-400">double</Text>
         <Text class="underline decoration-dashed decoration-2">dashed</Text>
         <Text class="line-through decoration-zinc-500">struck</Text>
-        <Text class="text-xs font-semibold uppercase tracking-widest text-citrus-deep dark:text-citrus">caps</Text>
+        <Text class="text-xs font-semibold uppercase tracking-widest text-brand">caps</Text>
       </View>
       <Text class="truncate text-[13px] text-zinc-500">truncate: a single line that is far too long to fit in the card cut with an ellipsis</Text>
       <Text class="line-clamp-2 text-[13px] leading-relaxed text-zinc-500">
@@ -356,7 +357,7 @@ function Motion() {
           <Label>Ping</Label>
         </View>
         <View class="items-center gap-2.5">
-          <View class="h-8 w-14 rounded-lg bg-paper-border dark:bg-graphite-raised animate-pulse" />
+          <View class="h-8 w-14 rounded-lg bg-accent animate-pulse" />
           <Label>Pulse</Label>
         </View>
         <View class="items-center gap-2.5">
@@ -376,10 +377,10 @@ function Lists() {
   const items = ["Inbox", "Drafts", "Sent", "Archive", "Trash"];
   return (
     <Card icon="lists" title="Structural variants" subtitle="first: even: last: active:">
-      <View class="overflow-hidden rounded-xl border border-paper-line dark:border-graphite-line">
+      <View class="overflow-hidden rounded-xl border border-line">
         <Each of={items}>
           {(item) => (
-            <View class="min-h-12 flex-row items-center justify-between border-t border-paper-line px-3.5 text-zinc-800 first:border-t-0 even:bg-black/3 last:bg-rose-500/10 last:text-rose-600 active:bg-citrus/10 dark:border-graphite-line dark:text-zinc-200 dark:even:bg-white/5 dark:last:text-rose-300 dark:active:bg-citrus/10">
+            <View class="min-h-12 flex-row items-center justify-between border-t border-line px-3.5 text-zinc-800 first:border-t-0 even:bg-black/3 last:bg-rose-500/10 last:text-rose-600 active:bg-brand-fill/10 dark:text-zinc-200 dark:even:bg-white/5 dark:last:text-rose-300">
               {/* `last:` is the row's: the label inherits its color. */}
               <Text class="text-[15px]">{item()}</Text>
               <Text class="text-base text-zinc-400 dark:text-zinc-600">›</Text>
@@ -396,7 +397,7 @@ function Inputs() {
     <Card icon="form" title="Inputs" subtitle="focus: placeholder: caret-*">
       <Input
         placeholder="Focus me"
-        class="h-11 rounded-[10px] border border-paper-border bg-paper-card px-3.5 inset-shadow-[0_1px_2px_rgba(20,20,10,0.07)] text-[15px] text-zinc-900 placeholder:text-zinc-400 caret-citrus-deep focus:border-citrus-deep focus:ring-2 focus:ring-citrus/40 dark:border-graphite-border dark:bg-graphite-card dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)] dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:caret-citrus dark:focus:border-citrus dark:focus:ring-citrus/25"
+        class="h-11 rounded-[10px] border border-border bg-card px-3.5 inset-shadow-[0_1px_2px_rgba(20,20,10,0.07)] text-[15px] text-zinc-900 placeholder:text-zinc-400 caret-brand focus:border-brand focus:ring-2 focus:ring-brand-fill/40 dark:inset-shadow-[0_1px_3px_rgba(0,0,0,0.55)] dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:ring-brand-fill/25"
       />
       <Label>Focus adds a border and a ring; the placeholder and caret colors are classes too.</Label>
     </Card>

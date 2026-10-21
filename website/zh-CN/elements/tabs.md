@@ -21,12 +21,12 @@ fn sections() -> impl IntoElement {
         tab()
             .selected(selected)
             .on_press(move |_: &()| section.set(value))
-            .rounded(move || theme().radius())
+            .rounded(move || theme().radius)
             .px_3()
             .py_2()
-            .selected_style(|s| s.bg(move || theme().background()))
+            .selected_style(|s| s.bg(move || theme().background))
             .child(text(label).text_sm().text_color(move || {
-                if selected() { theme().foreground() } else { theme().muted_foreground() }
+                if selected() { theme().foreground } else { theme().muted_foreground }
             }))
     };
     view()
@@ -37,8 +37,8 @@ fn sections() -> impl IntoElement {
                 .self_start()
                 .gap_1()
                 .p_1()
-                .rounded(move || theme().radius_lg())
-                .bg(move || theme().muted())
+                .rounded(move || theme().radius)
+                .bg(move || theme().muted)
                 .child(item("overview", "Overview"))
                 .child(item("activity", "Activity")),
         )
@@ -48,7 +48,7 @@ fn sections() -> impl IntoElement {
             } else {
                 "Deploys, invoices and new members, newest first."
             }
-        }).text_color(move || theme().foreground()))
+        }).text_color(move || theme().foreground))
 }
 ```
 

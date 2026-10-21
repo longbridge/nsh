@@ -80,11 +80,11 @@ pub fn App() -> impl IntoElement {
             button()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || theme().radius())
-                .bg(move || theme().primary())
-                .active(|s| s.bg(move || theme().primary_active()))
+                .rounded(move || theme().radius)
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary.opacity(0.9)))
                 .on_press(move || count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground())),
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -202,7 +202,7 @@ pub enum ChartEvent {
 pub fn Chart(props: ChartProps, cx: Scope<ChartEvent>) -> impl IntoElement {
     view()
         .h(px(160.0))
-        .bg(move || theme().muted())
+        .bg(move || theme().muted)
         .on_press(move || cx.emit(ChartEvent::Select(101.5)))
         .child(text(move || format!("{} · {}", props.symbol.get(), props.range.get())))
 }
@@ -454,14 +454,14 @@ batches to a test that keeps its own model of the screen. `examples/rust-exports
 ## Theme
 
 The look of an app is the app's own: NSH provides the primitives and the unstyled base components of `nsh_base`, and
-your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radii and base font size from a theme, `theme()` from
+your crate is the styled layer on top, the app's own component library ([Three layers](./architecture.md#three-layers)). Rust components take their colors, corner radius and fonts from a theme, `theme()` from
 `nsh_base`, so one file restyles every component of the app. Each color has a light and a dark value;
-when the system switches appearance, a binding such as `.bg(move || theme().primary())` changes color natively, with no
+when the system switches appearance, a binding such as `.bg(move || theme().primary)` changes color natively, with no
 render.
 
-The default theme is gpui-kit's default theme, a neutral black-and-white palette, with mobile corner radii. To use
-your own, set `"theme"` in `nsh.json` to the path of a theme file, relative to `nsh.json`, or to the theme's content
-inline:
+The theme has the design tokens of [shadcn/ui](https://ui.shadcn.com/docs/theming), and its default is shadcn's
+`neutral` theme, a black-and-white palette with a 10 pt corner radius. To use your own, set `"theme"` in `nsh.json`
+to the path of a theme file, relative to `nsh.json`, or to the theme's content inline:
 
 ```json
 {
@@ -471,65 +471,66 @@ inline:
 }
 ```
 
-The format is gpui-kit's theme file format. Each entry in `themes` sets the values for one appearance (`mode`:
-`"light"` or `"dark"`; an entry without `mode` is light):
+A theme file is shadcn's `cssVars`, the format of shadcn's themes and registry items, so a theme exported from
+[shadcn's themes](https://ui.shadcn.com/themes) or [tweakcn](https://tweakcn.com) works as it is. `light` sets the
+values of the light appearance, `dark` those of the dark one, and `theme` those of both:
 
 ```json
 {
-  "themes": [
-    {
-      "mode": "light",
-      "radius": 8,
-      "radius.lg": 14,
-      "font.size": 16,
-      "colors": {
-        "primary.background": "#7c3aed",
-        "primary.foreground": "white",
-        "border": "neutral-200"
-      }
+  "cssVars": {
+    "theme": {
+      "radius": "0.5rem",
+      "font-sans": "Inter, sans-serif"
     },
-    {
-      "mode": "dark",
-      "colors": {
-        "primary.background": "#a78bfa",
-        "primary.foreground": "neutral-950"
-      }
+    "light": {
+      "primary": "oklch(0.541 0.281 293.009)",
+      "primary-foreground": "oklch(0.969 0.016 293.756)",
+      "ring": "var(--primary)",
+      "up": "#16a34a"
+    },
+    "dark": {
+      "primary": "oklch(0.702 0.183 293.541)",
+      "primary-foreground": "oklch(0.283 0.141 291.089)",
+      "up": "#4ade80"
     }
-  ]
+  }
 }
 ```
 
-- Your theme is applied over the default theme, so you list only what you change.
-- Colors are CSS colors (`#7c3aed`, `rgb(…)`, `white`) or names from Tailwind's default palette (`neutral-900`,
-  `red-500`). The colors of `nsh.json`'s `tailwind` key belong to `class` strings.
-- `radius` (`theme().radius()`) is the corner radius of controls, `radius.lg` (`theme().radius_lg()`) that of large
-  surfaces such as cards and sheets, and `font.size` (`theme().font_size()`) the base font size. All are in points.
-- A pressed color you leave out (`primary.active.background`, `secondary.active.background`,
-  `danger.active.background`, ...) is derived from its base color: 12% darker in light mode, 12% lighter in dark
-  mode.
-- Keys for gpui-kit's desktop components (sidebars, title bars, ...) are accepted and left aside, so a gpui-kit theme
-  file works as it is.
-- The bundler checks the theme when it builds: a missing file, invalid JSON, an unknown `mode` or a value that is not
-  a color fails the build with an `nsh.json: theme: …` error.
+- Your theme is applied over the default theme, so you list only what you change. A value `light` sets and `dark`
+  leaves out is used in both appearances.
+- Values are written as in CSS. Colors are any CSS color (`#7c3aed`, `rgb(…)`, `hsl(…)`, `oklch(…)`, `white`),
+  `color-mix(in oklab, var(--primary) 80%, white)`, or another token of the same appearance, `var(--primary)` (with a
+  fallback: `var(--brand, #7c3aed)`). Lengths are `rem` (16 points) or `px` (points). Fonts are font family lists:
+  the first family that is not a generic one is used, and a generic first family (`system-ui`, `sans-serif`) is the
+  system font.
+- **Your own tokens.** Any other name is a token of the app, as a variable in Tailwind's `@theme` is: `"up"` above is
+  `theme().color("up")` in Rust, `bg-up` / `text-up/70` in classes and `token("up")` in TSX
+  ([Theme tokens](./tailwind.md#theme-tokens)). A number such as `"radius-card": "14px"` is `theme().number("radius-card")`
+  and `rounded-(--radius-card)`.
+- The bundler checks the theme when it builds: a missing file, invalid JSON or a theme other than `cssVars` fails the
+  build with an `nsh.json: theme: …` error.
 
-The theme's keys, with their default light and dark values:
+The tokens, with their default light and dark values (shadcn's `neutral`):
 
-| Key | Light | Dark | Role |
-|---|---|---|---|
-| `background` | `white` | `neutral-950` | The background of pages, lists and inputs |
-| `foreground` | `neutral-950` | `neutral-50` | Text on `background` |
-| `border` | `neutral-200` | `neutral-800` | Dividers and borders |
-| `primary.background` / `.active.background` / `.foreground` | `neutral-900` / `neutral-950` / `neutral-50` | `neutral-50` / `neutral-200` / `neutral-900` | The main action (a primary button), pressed, and the text on it; selections and check marks |
-| `secondary.background` / `.active.background` / `.foreground` | `neutral-200` / `neutral-300` / `neutral-900` | `neutral-800` / `#212121` / `neutral-50` | Secondary actions, pressed, and the text on them |
-| `danger.background` / `.active.background` / `.foreground` | `red-500` / `red-600` / `neutral-50` | `red-400` / `red-500` / `red-600` | Destructive actions, pressed, and the text on them |
-| `accent.background` | `neutral-100` | `neutral-800` | A highlighted item, such as a plain button while pressed |
-| `muted.background` | `neutral-100` | `neutral-800` | Quiet surfaces: an inset list's page, a grabber, a clear button |
-| `muted.foreground` | `neutral-500` | `neutral-400` | Secondary text: captions, labels, placeholders |
-| `group_box.background` / `.foreground` | `#f5f5f5` / `#171717` | `neutral-950` / `neutral-50` | Grouped surfaces such as cards, and the text on them |
-| `input.border` | `neutral-200` | `#2f2f2f` | The border of inputs |
-| `ring` | `neutral-400` | `neutral-500` | The border of a focused input |
-| `list.active.background` | `#bfdbfe33` | `#1e40af33` | A list row while pressed |
-| `overlay` | `#0000000d` | `#00000033` | The backdrop behind sheets and dialogs |
+| Token | `theme()` | Light | Dark | Role |
+|---|---|---|---|---|
+| `background` / `foreground` | `background` / `foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | The app's background, and the text on it |
+| `card` / `card-foreground` | `card` / `card_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Cards and grouped surfaces, and the text on them |
+| `popover` / `popover-foreground` | `popover` / `popover_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | Popovers, menus and tooltips, and the text on them |
+| `primary` / `primary-foreground` | `primary` / `primary_foreground` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | The main action (a primary button), and the text on it |
+| `secondary` / `secondary-foreground` | `secondary` / `secondary_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | Secondary actions, and the text on them |
+| `muted` / `muted-foreground` | `muted` / `muted_foreground` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | Quiet surfaces; secondary text: captions, labels, placeholders |
+| `accent` / `accent-foreground` | `accent` / `accent_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | A hovered or highlighted item, such as a menu item or list row, and its text |
+| `destructive` | `destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | Destructive actions and errors |
+| `border` | `border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | Dividers and borders |
+| `input` | `input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | The border of inputs |
+| `ring` | `ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | Focus rings |
+| `chart-1` … `chart-5` | `chart_1` … `chart_5` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | the same | The series of a chart |
+| `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-border`, `sidebar-ring` | `sidebar`, `sidebar_foreground`, ... | `sidebar` `oklch(0.985 0 0)`, `sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`, `sidebar-primary` `oklch(0.488 0.243 264.376)` | A sidebar's surface, its main action, its highlighted item, borders and focus ring |
+| `radius` | `radius` | `0.625rem` (10 pt) | | The corner radius |
+| `font-sans` | `font_sans` | the system font | | The app's font: every text that sets no family of its own |
+| `font-mono` | `font_mono` | the system monospace font | | The monospaced font: `font-mono`, code in `TextView` |
 
 ## Several crates
 

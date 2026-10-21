@@ -156,7 +156,7 @@ function Secondary(props: { label: string; onPress: () => void }) {
 }
 ```
 
-状态变体在原生侧应用：按下时按钮在主线程上变暗，不需要运行任何 JS 或 Rust。在 Rust 中，状态方法就是这些变体：`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)` 和 `.disabled_style(..)` 跟随按钮自身的状态。主题颜色的用法相同：TSX 中写 `bg-primary`，Rust 中写 `theme().primary()`（见[主题 token](../docs/tailwind.md#主题-token)）。
+状态变体在原生侧应用：按下时按钮在主线程上变暗，不需要运行任何 JS 或 Rust。在 Rust 中，状态方法就是这些变体：`.active(..)`、`.hover(..)`、`.focus(..)`、`.selected_style(..)` 和 `.disabled_style(..)` 跟随按钮自身的状态。主题颜色的用法相同：TSX 中写 `bg-primary`，Rust 中写 `theme().primary`（见[主题 token](../docs/tailwind.md#主题-token)）。
 
 <a id="disabled"></a>
 

@@ -1,14 +1,13 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { mount, signal, Text, View } from "nsh";
 import { Switch } from "nsh/base";
-import { platform } from "nsh/device";
-import { ui } from "./palette";
+import { desktop, Log, Panel, size, Split, ui } from "./palette";
 
 // The parts: geometry and motion in classes (`checked:` moves the thumb,
 // `disabled:` dims the row, both following the switch), colors from the
-// palette by the value the app owns.
-const row = "flex-row-reverse items-center justify-between gap-3 px-4 py-3 active:opacity-70 disabled:opacity-40";
-const track = "w-12 rounded-full p-0.5 transition-colors";
-const thumb = "size-5.5 rounded-full transition-transform checked:translate-x-5";
+// palette by the value the app owns. A pointer gets the compact size.
+const row = `flex-row-reverse items-center justify-between gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`;
+const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;
+const thumb = desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5";
 
 function Setting(props: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -23,19 +22,10 @@ function Setting(props: { label: string; detail: string; checked: boolean; disab
       thumbStyle={props.checked ? { backgroundColor: ui().onAccent } : ui().raised}
     >
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ fontSize: 15, fontWeight: "500", color: ui().text }}>{props.label}</Text>
-        <Text style={{ fontSize: 12, color: ui().muted }}>{props.detail}</Text>
+        <Text style={{ fontSize: size.label, fontWeight: "500", color: ui().text }}>{props.label}</Text>
+        <Text style={{ fontSize: size.detail, color: ui().muted }}>{props.detail}</Text>
       </View>
     </Switch>
-  );
-}
-
-function Panel(props: { title: string; children: JSX.Element; minHeight?: number }) {
-  return (
-    <View style={{ ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight }}>
-      <Text style={{ fontSize: 12, color: ui().muted }}>{props.title}</Text>
-      {props.children}
-    </View>
   );
 }
 
@@ -48,15 +38,28 @@ function App() {
     value.set(next);
     events.set([`${name} → ${next}`, ...events()].slice(0, 3));
   };
-  const line = () => <View style={{ height: 1, marginLeft: 16, backgroundColor: ui().line }} />;
+  const line = () => <View style={{ height: 1, marginLeft: desktop ? 12 : 16, backgroundColor: ui().line }} />;
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>switch</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Click a row, or Tab to a switch and press Space" : "Tap a row: the label toggles it too"}
+        {desktop ? "Click a row, or Tab to a switch and press Space" : "Tap a row: the label toggles it too"}
       </Text>
 
-      <View style={{ maxWidth: 390, gap: 14 }}>
+      <Split
+        gap={14}
+        inspector={
+          <>
+            <Panel title="checked · disabled">
+              <Text style={{ fontSize: 13, color: ui().text }}>
+                Wi-Fi {wifi() ? "on" : "off"} · ask {ask() ? "on" : "off"}
+                {wifi() ? "" : " (disabled)"} · Bluetooth {bluetooth() ? "on" : "off"}
+              </Text>
+            </Panel>
+            <Log title="onChange(checked)" lines={events()} minHeight={92} />
+          </>
+        }
+      >
         <View style={{ ...ui().card, borderRadius: 16, overflow: "hidden" }}>
           <Setting label="Wi-Fi" detail={wifi() ? "Connected to Studio" : "Off"} checked={wifi()} onChange={change("Wi-Fi", wifi)} />
           {line()}
@@ -70,17 +73,7 @@ function App() {
           {line()}
           <Setting label="Bluetooth" detail={bluetooth() ? "Discoverable as “Desk”" : "Off"} checked={bluetooth()} onChange={change("Bluetooth", bluetooth)} />
         </View>
-
-        <Panel title="checked · disabled">
-          <Text style={{ fontSize: 13, color: ui().text }}>
-            Wi-Fi {wifi() ? "on" : "off"} · ask {ask() ? "on" : "off"}
-            {wifi() ? "" : " (disabled)"} · Bluetooth {bluetooth() ? "on" : "off"}
-          </Text>
-        </Panel>
-        <Panel title="onChange(checked)" minHeight={92}>
-          <Each of={events()}>{(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}</Each>
-        </Panel>
-      </View>
+      </Split>
     </View>
   );
 }

@@ -69,7 +69,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Sheet`](../elements/sheet.md) | `sheet()` | A panel at an edge of the screen over a backdrop. |
 | `statusBar` on pages and dialogs | `.status_bar(..)` | The status bar while a page or dialog is up. See [Status bar](#status-bar). |
 
-In Rust, `theme()` reads the app's theme as design tokens (`theme().primary()`, `theme().radius()`), the same tokens
+In Rust, `theme()` reads the app's theme as design tokens (`theme().primary`, `theme().radius`), the same tokens
 TSX's [theme classes](../docs/tailwind.md#theme-tokens) use.
 
 ## Controls

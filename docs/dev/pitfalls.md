@@ -88,6 +88,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## iOS, UIKit and Mac Catalyst
 
+- **Pressed-style observers must leave ancestor clicks working**: a view with only `activeStyle` / `active:`
+  has a `PressRecognizer` to report its pressed state, but yields the click to the nearest ancestor with press
+  handlers. `handled_deeper` counts handlers and pressable text spans; a style-only recognizer ends as failed
+  after reporting its state, so it does not compete with the ancestor's recognizer.
+
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
 - **Catalyst's Mac idiom does not support `UIRefreshControl`** (attaching one throws `_UICatalystUnsupportedMacIdiomBehavior`): in the Mac
@@ -182,6 +187,14 @@ Things that were found the hard way. Read the section of the area you change bef
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
   input mode resize instead of panning: the system picks the mode at the first layout, before the app's content is mounted,
   and a mode set from code afterwards is overridden. Windows that ask for `adjustPan` are left to the system.
+- **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
+  consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
+  clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation
+  takes over, so a styled child leaves its parent's overlay or menu trigger clickable. The walk up from the touched
+  view stops at the first press handler, or at a text only when the finger is on one of its pressable spans (as
+  iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
+  While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
+  the view that took the down, and the release is what ends the feedback.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.

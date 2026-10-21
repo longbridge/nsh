@@ -236,6 +236,9 @@ function Tex(props: { tex: string; display: boolean }) {
   );
 }
 
+/** Links in the gallery's accent (a `TextView` draws them in the theme's `primary`). */
+const links = { link: "text-brand decoration-brand/40" };
+
 function Markdown() {
   const pressed = signal("nothing yet");
   const viewing = signal<TextViewImage | null>(null);
@@ -244,6 +247,7 @@ function Markdown() {
       <TextView
         markdown={MARKDOWN}
         selectable
+        classes={links}
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={({ url }) => pressed.set(url)}
@@ -259,7 +263,7 @@ function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
     <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
-      <TextView html={HTML} selectable onImagePress={(image) => viewing.set(image)} />
+      <TextView html={HTML} selectable classes={links} onImagePress={(image) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );
@@ -275,11 +279,11 @@ function Chart(props: { source: string }) {
       .map(([label, value]) => ({ label, value: Number(value) || 0 }));
   const max = () => Math.max(1, ...bars().map((b) => b.value));
   return (
-    <View class="h-28 flex-row items-end gap-2 rounded-xl border border-paper-border bg-paper-inset p-3 dark:border-graphite-border dark:bg-graphite-inset">
+    <View class="h-28 flex-row items-end gap-2 rounded-xl border border-border bg-inset p-3">
       <Each of={bars()}>
         {(bar) => (
           <View class="flex-1 items-center gap-1">
-            <View class="w-full rounded-md bg-citrus-deep dark:bg-citrus" style={{ height: (bar().value / max()) * 64 }} />
+            <View class="w-full rounded-md bg-brand" style={{ height: (bar().value / max()) * 64 }} />
             <Text class="text-[11px] text-zinc-500">{bar().label}</Text>
           </View>
         )}
@@ -326,7 +330,7 @@ function Extensions() {
 }
 
 function Caret() {
-  return <View class="ml-0.5 h-4 w-2 animate-pulse rounded-sm bg-citrus-deep dark:bg-citrus" />;
+  return <View class="ml-0.5 h-4 w-2 animate-pulse rounded-sm bg-brand" />;
 }
 
 function Streaming() {

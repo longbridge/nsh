@@ -386,10 +386,9 @@ impl AppView {
         crate::rt::flush(cx);
     }
 
-    /// [`AppView::set_theme`] with a theme in gpui-kit's JSON format
-    /// (`{ "themes": [{ "mode": "light", "colors": { … } }, …] }`: a
-    /// gpui-kit theme file, or `ThemeConfig`s serialized; null colors are
-    /// left as they are), over `nsh/base`'s default theme.
+    /// [`AppView::set_theme`] with a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them), over `nsh/base`'s default theme.
     pub fn set_theme_json(&self, json: &str, cx: &mut GpuiApp) -> Result<(), ThemeError> {
         let theme = Theme::from_json(json)?;
         self.set_theme(Some(theme), cx);

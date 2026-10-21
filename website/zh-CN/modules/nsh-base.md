@@ -56,7 +56,7 @@ import type {
 | [`Sheet`](../elements/sheet.md) | `sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板。 |
 | 页面和对话框的 `statusBar` | `.status_bar(..)` | 页面或对话框显示期间的状态栏。见[状态栏](#status-bar)。 |
 
-在 Rust 中，`theme()` 以设计 token 的形式读取应用的主题（`theme().primary()`、`theme().radius()`），与 TSX 的[主题类](../docs/tailwind.md#主题-token)使用同样的 token。
+在 Rust 中，`theme()` 以设计 token 的形式读取应用的主题（`theme().primary`、`theme().radius`），与 TSX 的[主题类](../docs/tailwind.md#主题-token)使用同样的 token。
 
 <a id="controls"></a>
 

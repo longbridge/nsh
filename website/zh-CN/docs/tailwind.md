@@ -202,63 +202,83 @@ view()
 
 未知的键和无效的值会导致构建错误（`nsh.json: tailwind: unknown theme key 'colours'`）。主题会编译进 bundle，并在第一帧之前生效。
 
-Tailwind 主题影响你的类名。类型化方法保持 Tailwind 的默认刻度，因此 Rust 组件在任何应用中看起来都一样，它们从组件主题，即 `nsh.json` 中的 `"theme"` 获取应用的外观（[用 Rust 开发](./rust.md#主题)）。
+Tailwind 主题影响你的类名。类型化方法保持 Tailwind 的默认刻度，因此 Rust 组件在任何应用中看起来都一样，它们从应用主题的设计令牌，即 `nsh.json` 中的 `"theme"` 获取应用的外观（[用 Rust 开发](./rust.md#主题)）。
 
 ## 主题 token
 
-Rust 组件使用组件主题中的颜色和数值绘制（`nsh_base` 的 `theme()`）；类名也可以引用它们，让 TSX 页面跟它的 Rust 组件使用同一套主题：
+应用的主题（`nsh.json` 中的 `"theme"`）保存它的设计令牌：shadcn/ui 的颜色（`background`、`foreground`、`primary`、`muted-foreground`、`border`、`ring`、`chart-1`、`sidebar` 等）、`radius`、字体 `font-sans` 和 `font-mono`，以及应用自己添加的令牌。类名像 Tailwind 引用 CSS `@theme` 变量那样引用它们，Rust 组件用 `nsh_base` 的 `theme()` 读取，TSX 用 `nsh` 的 `token()` 读取，所以 TSX 页面和 Rust 组件使用同一套主题：
 
 ```rust tabs
 use nsh_base::theme;
 
 view()
-    .rounded(move || theme().radius_lg())
+    .rounded(move || theme().radius)
     .border_1()
-    .border_color(move || theme().border())
-    .bg(move || theme().background())
+    .border_color(move || theme().border)
+    .bg(move || theme().card)
     .p_4()
-    .child(text("Balance").text_color(move || theme().foreground()))
-    .child(text("Updated just now").text_color(move || theme().muted_foreground()))
+    .child(text("Balance").text_color(move || theme().card_foreground))
+    .child(text("Updated just now").text_color(move || theme().muted_foreground))
     .child(
         view()
-            .rounded(move || theme().radius())
-            .bg(move || theme().primary())
+            .rounded(move || theme().radius)
+            .bg(move || theme().primary)
             .px_4()
             .py_2()
-            .active(|s| s.bg(move || theme().primary_active()))
-            .child(
-                text("Continue")
-                    .text_color(move || theme().primary_foreground())
-                    .text_size(move || theme().font_size()),
-            ),
+            .active(|s| s.bg(move || theme().primary.opacity(0.9)))
+            .child(text("Continue").text_color(move || theme().primary_foreground)),
     )
 ```
 
 ```tsx tabs
-<View class="rounded-(--radius-lg) border border-border bg-background p-4">
-  <Text class="text-foreground">Balance</Text>
+<View class="rounded-(--radius) border border-border bg-card p-4">
+  <Text class="text-card-foreground">Balance</Text>
   <Text class="text-muted-foreground">Updated just now</Text>
-  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
-    <Text class="text-primary-foreground text-(length:--font-size)">Continue</Text>
+  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary/90">
+    <Text class="text-primary-foreground">Continue</Text>
   </View>
 </View>
 ```
 
-token 就是主题文件里的键，把其中的点写成连字符：`muted.foreground` 写作 `muted-foreground`，`radius.lg` 写作 `--radius-lg`。以 `.background` 结尾的键可以省略这一段：`bg-primary` 即 `primary.background`，`bg-primary-background` 同样可用。在 Rust 中，组件用到的键是 `theme()` 的方法（`primary()`、`muted_foreground()`、`radius_lg()`），其他键用 `theme().color("chart.up")` 或 `theme().number("radius.card")` 读取。
+token 的名称就是主题文件中 CSS 变量去掉 `--` 后的名称：`muted-foreground`、`radius`、`chart-1`。在 Rust 中，shadcn 的令牌是 `theme()` 的方法（`primary()`、`muted_foreground()`、`radius()`、`font_mono()`），所有令牌也都可以用 `theme().color("up")`、`theme().number("radius-card")` 或 `theme().font("font-display")` 读取。
 
 | 写法 | 取值 | 示例 |
 |---|---|---|
-| 任意颜色类里的颜色名 | 主题颜色 | `bg-primary`、`text-muted-foreground/70`、`border-t-border`、`ring-ring`、`from-accent`、`placeholder:text-muted-foreground` |
+| 任意颜色类里的颜色名 | 主题颜色，也可带不透明度 | `bg-primary`、`text-muted-foreground/70`、`bg-up/30`、`border-t-border`、`ring-ring`、`from-accent`、`placeholder:text-muted-foreground` |
 | `(--name)`，Tailwind 4 的变量简写 | 主题颜色或数值 | `bg-(--primary)`、`rounded-(--radius)`、`p-(--gap-card)` |
-| `(color:--name)`、`(length:--name)`、`(number:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--link)`、`text-(length:--font-size)` |
+| `(color:--name)`、`(length:--name)`、`(number:--name)`、`(family-name:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--up)`、`text-(length:--text-title)`、`font-(family-name:--font-mono)` |
+| `font-sans`、`font-mono` | 主题设置的字体 | `font-mono` |
 
-- **每个键都是 token。** 包括组件用到的键（`primary.background`、`border`、`radius`、`font.size` 等，列表见[用 Rust 开发](./rust.md#主题)），以及主题文件里的其他任何键：`"sidebar.background"` 生成 `bg-sidebar`，`"chart.up": "#16a34a"` 生成 `text-chart-up`，数值 `"radius.card": 10` 生成 `rounded-(--radius-card)`。数值的单位是点；`(number:--name)` 传入不带单位的数值。
-- **两种外观。** token 带有主题的浅色值和深色值：`bg-primary` 和 `theme().primary()` 都会随外观自动切换，不需要 `dark:` 类。只在一种模式里设置的颜色在两种模式下都使用该值。
-- **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以只有 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 才是主题 token。
-- **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类和读取 `theme()` 的 Rust 绑定会在原生侧重新应用样式，不运行 JavaScript。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。
+- **应用自己的令牌。** 主题文件中的每个名称都是 token，就像 CSS `@theme` 中的每个变量：`"up": "#16a34a"` 生成 `bg-up`、`text-up` 和 `bg-up/30`；`"radius-card": "14px"` 生成 `rounded-(--radius-card)`；`"font-display": "Pacifico"` 生成 `font-(family-name:--font-display)`。长度的单位是点；`(number:--name)` 传入不带单位的数值。
+- **字体。** `font-sans` 是应用的字体：没有设置自己字体族的文字都用它绘制，就像网页使用 Tailwind 的 `--font-sans`。`font-mono` 是 `font-mono` 类和 `TextView` 中代码的字体。未设置时两者都是系统字体。
+- **两种外观。** token 带有主题的浅色值和深色值：`bg-primary`、`theme().primary` 和 `token("primary")` 都会随外观自动切换，不需要 `dark:` 类。只在一种外观里设置的颜色在两种外观下都使用该值。
+- **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 是主题 token。
+- **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类、读取 `theme()` 的 Rust 绑定和读取 `token()` 的 TSX 代码都会更新，其中类和绑定在原生侧更新。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。
 - **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
 
 引用 token 的类和其他类一样，每套主题只解析一次：绘制时的开销与调色板颜色相同。
+
+### TSX 中的 `token()`
+
+`nsh` 的 `token(name)` 是令牌在当前外观下的值：颜色是 `#rrggbbaa`，长度是以点为单位的数值，字体是字体族名称。它是响应式的，在组件、memo 或 effect 中读取它的代码会在主题或外观变化时重新运行，适合类名用不到的地方，例如画布或图表：
+
+```tsx
+import { Canvas, token } from "nsh";
+
+<Canvas
+  style={{ height: 160 }}
+  draw={(cx, { width, height }) => {
+    cx.beginPath();
+    cx.moveTo(0, height);
+    cx.lineTo(width, 0);
+    cx.strokeStyle = token("chart-1");
+    cx.lineWidth = 2;
+    cx.stroke();
+  }}
+/>
+```
+
+名称带有类型：NSH 根据主题把应用的令牌写入 `.nsh/types/nsh/tokens.d.ts`，所以主题中有 `"up"` 后 `token("up")` 的类型是 `string`，主题中没有的名称是类型错误。
 
 ## 类名检查
 

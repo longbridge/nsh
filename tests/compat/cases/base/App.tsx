@@ -18,6 +18,7 @@ import BaseSelectionArea from "./base-selection-area";
 import BaseSwitch from "./base-switch";
 import BaseTabs from "./base-tabs";
 import BaseTextView from "./base-text-view";
+import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
@@ -35,6 +36,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-checkbox": BaseCheckbox,
   "base-radio": BaseRadio,
   "base-tabs": BaseTabs,
+  "base-token": BaseToken,
 };
 const shown = signal("");
 
