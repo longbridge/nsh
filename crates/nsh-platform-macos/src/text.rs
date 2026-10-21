@@ -1296,6 +1296,19 @@ pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
         .map_or(0, |l| l.caret_at(x).max(0) as u32)
 }
 
+/// The rectangles (view coordinates) the characters `start..end` of the
+/// text view with `state` cover, one per line (the test agent's spans).
+#[cfg(feature = "dev")]
+pub(crate) fn range_rects(state: &crate::view::ViewState, start: u32, end: u32) -> Vec<CGRect> {
+    let Some(drawn) = state.text.as_ref() else {
+        return Vec::new();
+    };
+    let Some(layout) = drawn.layout.downcast::<CoreTextLayout>() else {
+        return Vec::new();
+    };
+    selection_rects(layout, drawn.content, (start, end))
+}
+
 /// The rectangles (view coordinates) the selected `range` covers, one per
 /// line.
 fn selection_rects(

@@ -622,13 +622,7 @@ impl ModuleTable {
 
     /// The value of export `export` of nsh's module `module` that another
     /// module serves too (owned), made once per VM.
-    fn shared(
-        &self,
-        cx: *mut JsContext,
-        module: &'static str,
-        export: &str,
-        e: Export,
-    ) -> JsValue {
+    fn shared(&self, cx: *mut JsContext, module: &'static str, export: &str, e: Export) -> JsValue {
         let key = (module, export.to_owned());
         if let Some(value) = self.shared.borrow().get(&key) {
             // SAFETY: a live value the table holds.

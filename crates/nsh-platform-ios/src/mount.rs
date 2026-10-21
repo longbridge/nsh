@@ -478,6 +478,15 @@ impl Mounter {
         Some(self.slot(id)?.native.view().retain())
     }
 
+    /// Text view `id` (`None`: it is no text view).
+    #[cfg(feature = "dev")]
+    pub(crate) fn text_view(&self, id: NodeId) -> Option<Retained<TextView>> {
+        match &self.slot(id)?.native {
+            Native::Text(text) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
     /// The text input `id` holds (`None`: it is no input).
     #[cfg(feature = "dev")]
     pub(crate) fn input_text(&self, id: NodeId) -> Option<String> {

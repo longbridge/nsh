@@ -60,6 +60,33 @@ final class TestAgent {
         });
     }
 
+    /**
+     * Where the characters {@code start}..{@code end} (UTF-16 units) of
+     * text view {@code id} are on their first line, in the window: x, y,
+     * width, height; null when it does not show.
+     */
+    static float[] textBounds(NshView host, int id, int start, int end) {
+        return onMain(() -> {
+            View v = host.mounter().views.get(id);
+            if (!(v instanceof TextBox) || !v.isShown()) return null;
+            TextBox text = (TextBox) v;
+            android.text.Layout layout = text.layout();
+            if (layout == null || start >= end || start >= layout.getText().length()) return null;
+            int line = layout.getLineForOffset(start);
+            float x1 = layout.getPrimaryHorizontal(start);
+            // Through the line's end when the characters go on past it.
+            float x2 = end < layout.getLineEnd(line) ? layout.getPrimaryHorizontal(end) : layout.getLineRight(line);
+            int[] at = new int[2];
+            v.getLocationInWindow(at);
+            return new float[] {
+                at[0] + text.contentX() + Math.min(x1, x2),
+                at[1] + text.contentY() + layout.getLineTop(line),
+                Math.abs(x2 - x1),
+                layout.getLineBottom(line) - layout.getLineTop(line),
+            };
+        });
+    }
+
     /** The window's content size: width, height. */
     static float[] viewport(NshView host) {
         return onMain(() -> {

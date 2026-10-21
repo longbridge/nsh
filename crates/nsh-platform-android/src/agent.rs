@@ -166,6 +166,36 @@ impl Native for AndroidNative {
         ))
     }
 
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        let b = self.call(|env, class, view| {
+            let array = env
+                .call_static_method(
+                    class,
+                    "textBounds",
+                    "(Lcom/longbridge/nsh/NshView;III)[F",
+                    &[
+                        JValue::Object(view),
+                        JValue::Int(text as i32),
+                        JValue::Int(start as i32),
+                        JValue::Int(end as i32),
+                    ],
+                )?
+                .l()?;
+            if array.is_null() {
+                return Ok(None);
+            }
+            let array = JFloatArray::from(array);
+            let mut out = [0.0; 4];
+            env.get_float_array_region(&array, 0, &mut out)?;
+            Ok(Some(out))
+        })?;
+        let d = self.density;
+        Some(Bounds::new(
+            point(Points(b[0] / d), Points(b[1] / d)),
+            Size::new(Points(b[2] / d), Points(b[3] / d)),
+        ))
+    }
+
     fn viewport(&self) -> Size<Points> {
         let v = self
             .floats("viewport", "(Lcom/longbridge/nsh/NshView;)[F", None)

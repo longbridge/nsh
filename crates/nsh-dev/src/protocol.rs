@@ -472,6 +472,14 @@ pub enum SceneQuery {
     },
     /// The viewport's size in points.
     Viewport,
+    /// The text view showing span `id` (a nested text that takes presses)
+    /// and where in its text it is: `[view, start, end]` (UTF-16 units),
+    /// or `null` for a view.
+    Span {
+        /// The span.
+        id: u32,
+    },
+
     /// The text input `id` holds.
     InputText {
         /// The view.

@@ -286,6 +286,9 @@ pub trait Scene: Send + Sync {
     /// The window's content is `size` ([`Native::viewport`]): what lies
     /// outside it, and no scroll view brings in, is not on screen.
     fn set_viewport(&self, size: Size<Points>) -> Result<(), String>;
+    /// The text view showing span `id` (a nested text that takes presses)
+    /// and where in its text the span is (UTF-16 units); `None` for a view.
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String>;
 }
 
 impl Scene for Model {
@@ -373,6 +376,9 @@ impl Scene for Model {
     fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
         self.lock().screen.set_viewport(size);
         Ok(())
+    }
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
+        Ok(self.lock().screen.span(id))
     }
 }
 
@@ -514,6 +520,7 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::SetViewport { width, height } => model
                 .set_viewport(Size::new(Points(*width), Points(*height)))
                 .map(|()| Value::Null),
+            SceneQuery::Span { id } => model.span(*id).and_then(|s| json(to_value(s))),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
             | SceneQuery::InputText { .. }
@@ -637,6 +644,9 @@ impl Scene for RemoteScene {
         })
         .map(drop)
     }
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
+        self.query(SceneQuery::Span { id })
+    }
 }
 
 /// A key the agent presses.
@@ -657,6 +667,15 @@ pub trait Native: Send + Sync {
     /// The view `id`'s bounds in the window's content, in points from its
     /// top-left (`None`: it has no native view on screen).
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
+    /// Where the characters `start..end` (UTF-16 units) of text view
+    /// `text` are on screen: the part on their first line, in the
+    /// window's content as [`Native::bounds`] (`None`: not on screen, or
+    /// the platform cannot say). A press there goes to the span they are
+    /// (a nested text that takes presses), as the platform finds it.
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        let _ = (text, start, end);
+        None
+    }
     /// The size of the window's content, in points.
     fn viewport(&self) -> Size<Points>;
     /// A press (a click, a tap) at `at`.
@@ -1053,6 +1072,7 @@ impl Agent {
             SceneQuery::SetViewport { width, height } => scene
                 .set_viewport(Size::new(Points(width), Points(height)))
                 .map(|()| Value::Null),
+            SceneQuery::Span { id } => scene.span(id).and_then(|s| json(to_value(s))),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
                     [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
@@ -1119,7 +1139,24 @@ impl Agent {
         self.settled()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
-        Ok((id, self.scroll_into_view(id, selector)?))
+        let Some((text, start, end)) = self.scene.span(id)? else {
+            return Ok((id, self.scroll_into_view(id, selector)?));
+        };
+        // A span of a text: its text view comes into view, then the finger
+        // goes on its characters.
+        self.scroll_into_view(text, selector)?;
+        let at = self
+            .native
+            .text_bounds(text, start, end)
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "`{selector}` is a span of a text, and this platform does not say where its \
+                     characters are; {}",
+                    self.on_screen()
+                )
+            })?;
+        Ok((id, at.center()))
     }
 
     /// The middle of view `id` on screen, scrolled into view first when it

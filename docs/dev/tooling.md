@@ -226,7 +226,10 @@ clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`Scrol
 (`Screen::set_viewport`: the headless viewport; on a host the platform's, which `Agent::sync_viewport` tells the model
 before each step). A scroll view the user can scroll shows all of its content (scrolling brings it in), a modal shows
 over the window wherever it is in the tree, header items and input accessories wherever the platform puts them;
-`opacity` and transforms aside. Steps acting on a view are strict, as Playwright's: the matches
+`opacity` and transforms aside. The spans of a text that take presses (`AttributedText::links`: a nested
+`<Text onPress>`, a `TextView`'s links) are views of the model too (`Screen::set_spans`), inside their text view (or
+the span around them), found by their characters (`text:`, a bare string) and pressed as the platform presses them:
+the events go to the span's node; they are not texts of their own (`texts()` lists the text view's). Steps acting on a view are strict, as Playwright's: the matches
 are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
 and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
 (the accessibility state) fails too. Each step sends what a platform would, to the views that report it:
@@ -392,7 +395,9 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
 view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
-one per gesture), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
+one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
+platform's own hit testing gives the press to the span) and acts there with synthesized input
 (`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
 the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
 (`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the

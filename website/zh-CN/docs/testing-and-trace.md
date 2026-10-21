@@ -271,7 +271,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 |---|---|
 | `id:<testID>` | 设置了该 `testID` 的视图。 |
 | `label:<label>` | 设置了该 `accessibilityLabel` 的视图。 |
-| `text:<text>` | 内容为该文字的文本（忽略首尾空格），或者内容为该文字、空着时占位文字为该文字的输入框。 |
+| `text:<text>` | 内容为该文字的文本（忽略首尾空格）、文本中可以按的片段（嵌套的 `<Text onPress>`、`TextView` 的链接），或者内容为该文字、空着时占位文字为该文字的输入框。 |
 | `role:<role>`、`role:<role>[<name>]` | 设置了该 `role` 的视图（`role:button`），并且名称为 `<name>`：它的标签，没有标签时取它内部的文字（`role:button[Save]`）。 |
 | `view:<id>` | `--trace` 输出中该 id 的视图。 |
 | 其他写法 | 依次按 `testID`、标签、文字匹配。 |
@@ -285,7 +285,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 | 步骤 | 说明 |
 |---|---|
-| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressDown`、`onPressUp`、`onPress`，期间手指按下再抬起，外层监听触摸的视图都能收到（例如 Overlay 的 `onPressOutside`）。视图被禁用时 reject。 |
+| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressDown`、`onPressUp`、`onPress`，期间手指按下再抬起，外层监听触摸的视图都能收到（例如 Overlay 的 `onPressOutside`）。文本中的片段按在它的文字上（`await app.press("Privacy policy")`），headless 以及 iOS、Android 和桌面平台都支持。视图被禁用时 reject。 |
 | `await app.longPress(selector)` | 按住它（或它外层最近的可按压或监听触摸的视图），持续它的 `delayLongPress`（500 ms）：依次触发 `onPressDown`、`onLongPress`、`onPressUp`，之后不再触发 `onPress`。触摸处理函数能收到这根手指（`ContextMenu`、`Tooltip` 会打开）。 |
 | `await app.clear(selector)` | 清空输入框，相当于全选后删除。 |
 | `await app.type(selector, text)` | 在输入框（或该视图内的第一个输入框；`text:` 也匹配输入框的内容或占位文字）已有内容的末尾逐键输入：输入框先获得焦点，然后每个字符触发一次 `onKeyPress` 和一次 `onChange`，不超过 `maxLength`。单行输入框中的 `\n` 相当于回车键。 |

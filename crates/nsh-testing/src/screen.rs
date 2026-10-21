@@ -26,9 +26,22 @@ const ROOT: NodeId = 1;
 /// (what it holds, or while empty its placeholder).
 fn shows_text(v: &View, want: &TextMatch) -> bool {
     v.text.as_deref().is_some_and(|t| want.matches(t))
+        || v.span.as_ref().is_some_and(|s| want.matches(&s.text))
         || v.input.as_ref().is_some_and(|i| {
             want.matches(&i.text) || (i.text.is_empty() && want.matches(&i.config.placeholder))
         })
+}
+
+/// The characters of `text` from UTF-16 offset `start` to `end`.
+fn utf16_slice(text: &str, start: u32, end: u32) -> String {
+    let mut at = 0;
+    text.chars()
+        .filter(|c| {
+            let here = at;
+            at += c.len_utf16() as u32;
+            here >= start && at <= end
+        })
+        .collect()
 }
 
 /// Why a [`Pick::Disabled`] match takes no step on `what` (the kind of
@@ -150,6 +163,24 @@ struct View {
     hidden: bool,
     /// It clips what it holds to its bounds (`overflow: hidden`).
     clips: bool,
+    /// A span of a text that takes presses (a nested `<Text onPress>`):
+    /// not a view of its own, its parent is the text view showing it, or
+    /// the span around it.
+    span: Option<Span>,
+    /// The spans of a text view's text that take presses.
+    spans: Vec<NodeId>,
+}
+
+/// A span of a text view's text that takes presses ([`nsh_core::TextLink`]).
+#[derive(Debug, Clone)]
+struct Span {
+    /// The text view showing it.
+    view: NodeId,
+    /// Its characters.
+    text: String,
+    /// Where they are in the view's text (UTF-16 units).
+    start: u32,
+    end: u32,
 }
 
 /// Where the views around a view let it show, in the root's points.
@@ -257,6 +288,7 @@ impl Screen {
                 self.closed.remove(id);
             }
             MountItem::Delete { id } => {
+                self.drop_spans(*id);
                 self.detach(*id);
                 self.nodes.remove(id);
                 self.children.remove(id);
@@ -306,6 +338,7 @@ impl Screen {
             }
             MountItem::Text { id, text, .. } => {
                 self.nodes.entry(*id).or_default().text = Some(text.text.clone());
+                self.set_spans(*id, text);
             }
             MountItem::Input { id, config } => {
                 if let Some(input) = self.input_mut(*id) {
@@ -408,6 +441,69 @@ impl Screen {
         }
     }
 
+    /// The spans of text view `id` that take presses become those of
+    /// `text`: each a view in the model, inside the text view (or the span
+    /// around it), as a platform finds the one under a finger.
+    fn set_spans(&mut self, id: NodeId, text: &nsh_core::AttributedText) {
+        self.drop_spans(id);
+        let mut links = text.links.clone();
+        // Outer spans first, so each finds the one around it made.
+        links.sort_by_key(|l| (l.start, std::cmp::Reverse(l.end)));
+        let mut spans = Vec::with_capacity(links.len());
+        for (i, link) in links.iter().enumerate() {
+            let parent = links[..i]
+                .iter()
+                .rev()
+                .find(|l| l.start <= link.start && link.end <= l.end)
+                .map_or(id, |l| l.node);
+            self.nodes.insert(
+                link.node,
+                View {
+                    parent: Some(parent),
+                    events: link.events,
+                    span: Some(Span {
+                        view: id,
+                        text: utf16_slice(&text.text, link.start, link.end),
+                        start: link.start,
+                        end: link.end,
+                    }),
+                    ..View::default()
+                },
+            );
+            self.children.entry(parent).or_default().push(link.node);
+            spans.push(link.node);
+        }
+        if let Some(view) = self.nodes.get_mut(&id) {
+            view.spans = spans;
+        }
+    }
+
+    /// Text view `id`'s spans are gone.
+    fn drop_spans(&mut self, id: NodeId) {
+        let Some(spans) = self
+            .nodes
+            .get_mut(&id)
+            .map(|v| std::mem::take(&mut v.spans))
+        else {
+            return;
+        };
+        for span in spans {
+            self.nodes.remove(&span);
+            self.children.remove(&span);
+        }
+        let nodes = &self.nodes;
+        if let Some(children) = self.children.get_mut(&id) {
+            children.retain(|c| nodes.contains_key(c));
+        }
+    }
+
+    /// The text view showing span `id`, and where in its text the span is
+    /// (UTF-16 units); `None` for a view.
+    pub(crate) fn span(&self, id: NodeId) -> Option<(NodeId, u32, u32)> {
+        let span = self.nodes.get(&id)?.span.as_ref()?;
+        Some((span.view, span.start, span.end))
+    }
+
     fn detach(&mut self, id: NodeId) {
         if let Some(parent) = self.nodes.get_mut(&id).and_then(|v| v.parent.take())
             && let Some(siblings) = self.children.get_mut(&parent)
@@ -452,9 +548,10 @@ impl Screen {
             Clip::Within(Bounds::new(Point::default(), size))
         });
         // A view, the origin of its parent's content and its clip in the
-        // root's points, and whether a view around it is hidden.
-        let mut stack = vec![(ROOT, Point::default(), window, false)];
-        while let Some((id, origin, clip, hidden)) = stack.pop() {
+        // root's points, whether a view around it is hidden, and whether its
+        // parent shows.
+        let mut stack = vec![(ROOT, Point::default(), window, false, true)];
+        while let Some((id, origin, clip, hidden, parent_shown)) = stack.pop() {
             if self.closed.contains(&id) {
                 continue;
             }
@@ -483,7 +580,13 @@ impl Screen {
                         | ViewKind::InputAccessory
                 )
             );
-            if id != ROOT && !hidden && (placed || (!bounds.is_empty() && clip.shows(&bounds))) {
+            let shows = if view.span.is_some() {
+                // Where its text view is.
+                parent_shown
+            } else {
+                !hidden && (placed || (!bounds.is_empty() && clip.shows(&bounds)))
+            };
+            if id != ROOT && shows {
                 out.push(id);
             }
             let mut inner = if matches!(
@@ -516,7 +619,7 @@ impl Screen {
                 children
                     .into_iter()
                     .rev()
-                    .map(|child| (child, content, inner, hidden)),
+                    .map(|child| (child, content, inner, hidden, shows || id == ROOT)),
             );
         }
         out
@@ -1086,6 +1189,9 @@ impl Screen {
     /// it (transforms aside).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
+        if let Some((text, ..)) = self.span(id) {
+            return self.bounds_in_root(text);
+        }
         let view = self.nodes.get(&id)?;
         let mut origin = view.frame.origin;
         let mut at = view.parent;
@@ -1379,5 +1485,47 @@ mod tests {
         );
         screen.apply(&batch(vec![style(2, |s| s.hidden = true)]));
         assert_eq!(shown(&screen), "");
+    }
+
+    #[test]
+    fn spans_that_take_presses_are_found_by_their_characters() {
+        let mut screen = Screen::default();
+        let mut events = EventMask::default();
+        events.set(EventKind::Press, true);
+        let link = |start, end, node| nsh_core::TextLink {
+            start,
+            end,
+            node,
+            events,
+        };
+        let linked = |links: Vec<nsh_core::TextLink>| MountItem::Text {
+            id: 4,
+            text: Arc::new(nsh_core::AttributedText {
+                text: "Agree to the Terms 🙂 and Privacy".into(),
+                links,
+                ..Default::default()
+            }),
+            layout: nsh_core::TextLayout(Arc::new(())),
+            content: Bounds::default(),
+        };
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Text),
+            frame(2, 0.0, 0.0, 400.0, 800.0),
+            frame(4, 0.0, 0.0, 300.0, 40.0),
+            insert(1, 2),
+            insert(2, 4),
+            // "Terms 🙂" (the emoji is two UTF-16 units), and "Privacy".
+            linked(vec![link(13, 21, 100), link(26, 33, 102)]),
+        ]));
+        let pick = |screen: &Screen, s: &str| screen.pressable(&Selector::parse(s).unwrap());
+        assert_eq!(pick(&screen, "Privacy"), Pick::One(102));
+        assert_eq!(pick(&screen, "text:Terms 🙂"), Pick::One(100));
+        assert_eq!(screen.span(102), Some((4, 26, 33)));
+        // They are not texts of their own.
+        assert_eq!(screen.texts(), ["Agree to the Terms 🙂 and Privacy"]);
+        screen.apply(&batch(vec![linked(Vec::new())]));
+        assert_eq!(pick(&screen, "Privacy"), Pick::None);
+        assert_eq!(screen.span(102), None);
     }
 }

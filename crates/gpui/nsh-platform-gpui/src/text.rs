@@ -2415,6 +2415,21 @@ pub(crate) fn draw_silhouette(
     paint_glyphs(cx, glyphs);
 }
 
+/// The first rectangle (view coordinates: x, y, width, height) the
+/// characters `start..end` of the text view with `state` cover (the test
+/// agent's spans).
+#[cfg(feature = "dev")]
+pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32, f32, f32, f32)> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<GpuiLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut first = None;
+    layout.selection_rects((start, end), |x, y, w, h| {
+        first.get_or_insert((cx + x, cy + y, w, h));
+    });
+    first
+}
+
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
 /// any (presses on nested text links).
 pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {

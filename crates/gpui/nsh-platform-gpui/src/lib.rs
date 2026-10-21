@@ -74,10 +74,10 @@ pub use nsh_engine::{App, AppError, AppErrorKind, Bundle, Limits, PackageInfo, R
 #[cfg(feature = "js")]
 pub use nsh_engine::{LoadedPackage, accept_package, load_package, package, verify_package};
 
+#[cfg(feature = "dev")]
+pub use crate::app::set_root;
 pub use crate::{
     app::{AppOptions, AppSource, AppView, open_app_window, run_app, set_ui_sets},
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };
-#[cfg(feature = "dev")]
-pub use crate::app::set_root;

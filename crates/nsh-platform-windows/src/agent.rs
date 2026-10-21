@@ -74,26 +74,20 @@ impl Native for WindowsNative {
             let view = surface.mounter.borrow().views.get(id)?;
             let to_root = view.to_root()?;
             let size = view.state().frame.size;
-            let corners = [
-                (0.0, 0.0),
-                (size.width.0, 0.0),
-                (0.0, size.height.0),
-                (size.width.0, size.height.0),
-            ];
-            let mapped: Vec<(f32, f32)> = corners
-                .iter()
-                .map(|&(x, y)| to_root.map(x, y))
-                .collect::<Option<_>>()?;
-            let (x0, y0) = mapped
-                .iter()
-                .fold((f32::MAX, f32::MAX), |(a, b), &(x, y)| (a.min(x), b.min(y)));
-            let (x1, y1) = mapped
-                .iter()
-                .fold((f32::MIN, f32::MIN), |(a, b), &(x, y)| (a.max(x), b.max(y)));
-            Some(Bounds::new(
-                point(Points(x0), Points(y0)),
-                Size::new(Points(x1 - x0), Points(y1 - y0)),
-            ))
+            mapped_bounds(
+                |x, y| to_root.map(x, y),
+                (0.0, 0.0, size.width.0, size.height.0),
+            )
+        })
+        .flatten()
+    }
+
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        self.on_main(move |surface| {
+            let view = surface.mounter.borrow().views.get(text)?;
+            let rect = crate::text::range_rect(&view.state(), start, end)?;
+            let to_root = view.to_root()?;
+            mapped_bounds(|x, y| to_root.map(x, y), rect)
         })
         .flatten()
     }
@@ -274,4 +268,33 @@ impl Native for WindowsNative {
             let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(s.hwnd()) };
         });
     }
+}
+
+/// The box `(x, y, width, height)` of a view (in its coordinates) in the
+/// root's, through `map`, the view's transform to the root: the box
+/// around its mapped corners.
+fn mapped_bounds(
+    map: impl Fn(f32, f32) -> Option<(f32, f32)>,
+    (x, y, width, height): (f32, f32, f32, f32),
+) -> Option<Bounds<Points>> {
+    let corners = [
+        (x, y),
+        (x + width, y),
+        (x, y + height),
+        (x + width, y + height),
+    ];
+    let mapped: Vec<(f32, f32)> = corners
+        .iter()
+        .map(|&(x, y)| map(x, y))
+        .collect::<Option<_>>()?;
+    let (x0, y0) = mapped
+        .iter()
+        .fold((f32::MAX, f32::MAX), |(a, b), &(x, y)| (a.min(x), b.min(y)));
+    let (x1, y1) = mapped
+        .iter()
+        .fold((f32::MIN, f32::MIN), |(a, b), &(x, y)| (a.max(x), b.max(y)));
+    Some(Bounds::new(
+        point(Points(x0), Points(y0)),
+        Size::new(Points(x1 - x0), Points(y1 - y0)),
+    ))
 }
