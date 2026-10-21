@@ -3,7 +3,7 @@ import { computed, effect, Image, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 import logoDark from "./logo-dark.svg";
@@ -781,22 +781,45 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
   );
 }
 
-/** An on / off switch: the knob springs across, the track changes color natively. */
+/**
+ * An on / off switch (`nsh/base`'s `Switch`, in the gallery's look): the
+ * knob springs across, the track changes color natively.
+ */
 export function Toggle(props: { value: boolean; onChange: (value: boolean) => void; label?: string }) {
-  const t = createAnimatedValue(props.value ? 1 : 0);
-  let last = props.value;
+  const look = switchLook(() => props.value);
   return (
-    <View
-      onPress={() => {
-        last = !props.value;
-        t.spring(last ? 1 : 0, motion.settle);
-        props.onChange(last);
-      }}
-      role="switch"
+    <Switch
+      checked={props.value}
+      onChange={props.onChange}
       accessibilityLabel={props.label}
-      accessibilityState={{ checked: props.value }}
-      hitSlop={8}
-      style={{
+      // 8 pt more to press on every side (the hit slop of a 30 pt track),
+      // without taking more room.
+      style={{ margin: -8, padding: 8 }}
+      trackStyle={look.trackStyle}
+      thumbStyle={look.thumbStyle}
+    />
+  );
+}
+
+/**
+ * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
+ * track that turns citrus and a knob that springs across, both natively.
+ * `on` is the value the app owns: the knob follows it, from a press or from
+ * elsewhere. Read the styles in JSX, so the appearance is followed.
+ */
+export function switchLook(on: () => boolean): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
+  const t = createAnimatedValue(on() ? 1 : 0);
+  const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] });
+  let shown = on();
+  effect(() => {
+    const next = on();
+    if (next === shown) return;
+    shown = next;
+    t.spring(next ? 1 : 0, motion.settle);
+  });
+  return {
+    get trackStyle(): ViewStyle {
+      return {
         width: 50,
         height: 30,
         borderRadius: 15,
@@ -805,22 +828,21 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
         borderWidth: 1,
         borderColor: colors.border,
         ...finish.track,
-      }}
-    >
-      <View
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 11,
-          backgroundColor: props.value ? colors.onAccent : colors.knob,
-          // A drop of glass: a specular top over the knob's color.
-          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
-          boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
-          transform: [{ translateX: t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }) }],
-        }}
-      />
-    </View>
-  );
+      };
+    },
+    get thumbStyle(): ViewStyle {
+      return {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: on() ? colors.onAccent : colors.knob,
+        // A drop of glass: a specular top over the knob's color.
+        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
+        boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
+        transform: [{ translateX: x }],
+      };
+    },
+  };
 }
 
 /**
