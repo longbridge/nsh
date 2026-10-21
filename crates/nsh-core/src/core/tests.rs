@@ -10803,6 +10803,62 @@ mod views {
         assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
     }
 
+    #[test]
+    fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
+        use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
+        let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.bindings().iter().map(|b| b.id).collect()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let listening = |c: &Core<FakeEngine>| {
+            c.nodes[c.root as usize]
+                .events
+                .contains(EventKind::KeyCommand)
+        };
+        let mut c = core();
+        let js = KeyBinding::new(
+            1,
+            Keystroke::parse_with("escape", true).unwrap(),
+            When::Always,
+            false,
+        );
+        apply(
+            &mut c,
+            vec![
+                Op::SetProp {
+                    id: ROOT_ID,
+                    prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![js]))),
+                },
+                Op::Listen {
+                    id: ROOT_ID,
+                    event: EventKind::KeyCommand,
+                    enabled: true,
+                },
+            ],
+        );
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let table = tables(&batch);
+        let [js, ours] = table.last().expect("a table").as_slice() else {
+            panic!("{table:?}");
+        };
+        assert_eq!(*js, 1);
+        assert!(*ours >= crate::ui::keys::FIRST_ID);
+        assert!(listening(&c));
+        // The view's binding goes; JS's stays, still listened to.
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+        assert!(listening(&c));
+    }
+
     /// A pressable box with the pointing hand.
     #[component]
     fn Pointing() -> impl IntoElement {

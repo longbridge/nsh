@@ -1047,7 +1047,8 @@ impl<M: TextEngine> Core<M> {
         let _entered = self.components.runtime.enter();
         // Ops on a component's host go to its component, calls of a UI
         // set's modules to the module; the components learn whether JS
-        // listens to the back button.
+        // listens to the back button and JS's shortcuts even before one
+        // mounts, so a component's own join them rather than replace them.
         if self.components.instances.is_empty()
             && !matches!(
                 op,
@@ -1056,8 +1057,11 @@ impl<M: TextEngine> Core<M> {
                     ..
                 } | Op::Listen {
                     id: ROOT_ID,
-                    event: EventKind::BackPress,
+                    event: EventKind::BackPress | EventKind::KeyCommand,
                     ..
+                } | Op::SetProp {
+                    id: ROOT_ID,
+                    prop: Prop::Keymap(_),
                 }
             )
         {
