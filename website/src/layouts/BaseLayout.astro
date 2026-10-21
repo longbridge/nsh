@@ -29,11 +29,8 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#101113" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#f4f4f2" media="(prefers-color-scheme: light)" />
-    <!-- The icon follows the site's theme (the script below picks its variant); favicon.svg follows the system
-         until it runs, or without scripts. -->
-    <link id="favicon" rel="icon" type="image/svg+xml" href={`${BASE}favicon.svg`} data-light={`${BASE}favicon-light.svg`} data-dark={`${BASE}favicon-dark.svg`} />
     <!-- Before first paint: `theme` in localStorage is "light" or "dark";
-         absent follows the system. <html> gets `dark` or `light`, the icon its variant. -->
+         absent follows the system. <html> gets `dark` or `light`. -->
     <script is:inline>
       (function () {
         var stored = null;
@@ -46,8 +43,6 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
           var dark = p === 'dark' || (p === 'system' && media.matches);
           root.classList.toggle('dark', dark);
           root.classList.toggle('light', !dark);
-          var icon = document.getElementById('favicon');
-          if (icon) icon.href = dark ? icon.dataset.dark : icon.dataset.light;
         };
         root.dataset.themePref = pref;
         apply();
@@ -55,6 +50,7 @@ const abs = (route: string) => new URL(`${BASE.replace(/\/$/, '')}${route}`, SIT
         window.__applyTheme = apply;
       })();
     </script>
+    <link rel="icon" type="image/svg+xml" href={`${BASE}favicon.svg`} />
     <link rel="apple-touch-icon" href={`${BASE}apple-touch-icon.png`} />
     <link rel="canonical" href={canonical} />
     {alternates?.en && <link rel="alternate" hreflang="en" href={abs(alternates.en)} />}
