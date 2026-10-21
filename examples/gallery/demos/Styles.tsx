@@ -337,13 +337,13 @@ function FlipCard() {
             ...(isDark()
               ? {
                   backgroundColor: "#1a2134",
-                  backgroundImage: "linear-gradient(180deg, #212a42 0%, #171d2d 100%)",
+                  backgroundImage: "linear-gradient(180deg, #1e263b 0%, #1a2134 100%)",
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 24px rgba(0,0,0,0.4)",
                   borderColor: "#2b3a5c",
                 }
               : {
                   backgroundColor: "#eef2fc",
-                  backgroundImage: "linear-gradient(180deg, #f5f8fe 0%, #e6ecfa 100%)",
+                  backgroundImage: "linear-gradient(180deg, #f0f4fd 0%, #ebf0fb 100%)",
                   boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
                   borderColor: "#cdd8f3",
                 }),
@@ -365,13 +365,13 @@ function FlipCard() {
             ...(isDark()
               ? {
                   backgroundColor: "#202814",
-                  backgroundImage: "linear-gradient(180deg, #283219 0%, #1b2211 100%)",
+                  backgroundImage: "linear-gradient(180deg, #242d16 0%, #1f2714 100%)",
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 24px rgba(0,0,0,0.4)",
                   borderColor: "#3b4a22",
                 }
               : {
                   backgroundColor: "#f1f7e2",
-                  backgroundImage: "linear-gradient(180deg, #f7fbec 0%, #e9f2d2 100%)",
+                  backgroundImage: "linear-gradient(180deg, #f2f8e4 0%, #eef5da 100%)",
                   boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
                   borderColor: "#d3e3a8",
                 }),

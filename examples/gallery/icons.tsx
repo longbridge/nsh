@@ -34,7 +34,9 @@ export type IconName =
   | "star"
   | "bell"
   | "spark"
-  | "sidebar";
+  | "sidebar"
+  | "sun"
+  | "moon";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -223,6 +225,23 @@ const glyphs: Record<IconName, Draw> = {
   sidebar: (c) => {
     rect(c, 3, 4, 14, 12, 3);
     line(c, [8, 4, 8, 16]);
+  },
+  sun: (c) => {
+    c.beginPath();
+    c.arc(10, 10, 3.4, 0, Math.PI * 2);
+    c.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4;
+      line(c, [10 + Math.cos(a) * 6, 10 + Math.sin(a) * 6, 10 + Math.cos(a) * 7.8, 10 + Math.sin(a) * 7.8]);
+    }
+  },
+  moon: (c) => {
+    // A disc less the one up and to its right: the arcs meet where the circles cross.
+    c.beginPath();
+    c.arc(10, 10, 6.5, 0.134, Math.PI * 2 - 1.704);
+    c.arc(13.2, 6.8, 5.2, Math.PI * 2 - 2.468, 0.898, true);
+    c.closePath();
+    c.stroke();
   },
 };
 

@@ -73,7 +73,7 @@ export const colors: Palette = themed<Palette>(
     inset: "#0c0d0f",
     raised: "#24262a",
     border: "#2c2e33",
-    line: "#1f2124",
+    line: "#24262a",
     text: "#eceef1",
     muted: "#8d9198",
     faint: "#5a5e65",
@@ -96,8 +96,8 @@ export const colors: Palette = themed<Palette>(
     surface: "#ffffff",
     inset: "#f0f0ec",
     raised: "#fbfbf9",
-    border: "#e2e2dd",
-    line: "#ecece8",
+    border: "#d8d8d1",
+    line: "#e2e2dc",
     text: "#16171a",
     muted: "#5f636a",
     faint: "#9a9ea4",
@@ -159,23 +159,23 @@ export interface Finish {
 export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "accent" | "track" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>>(
   {
     card: {
-      backgroundImage: "linear-gradient(180deg, #1d1e22 0%, #17181b 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.38)",
+      backgroundImage: "linear-gradient(180deg, #1b1c20 0%, #191a1d 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 36px -20px rgba(0,0,0,0.75)",
     },
     inset: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.55)" },
     raised: {
-      backgroundImage: "linear-gradient(180deg, #2d2f34 0%, #222428 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.45)",
+      backgroundImage: "linear-gradient(180deg, #2b2d32 0%, #24262a 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 1px 1px rgba(0,0,0,0.4), 0 6px 14px -7px rgba(0,0,0,0.7)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #fbfbfc 0%, #d4d6d9 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 3px 10px rgba(0,0,0,0.4)",
+      backgroundImage: "linear-gradient(180deg, #fbfbfc 0%, #e3e5e8 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(0,0,0,0.4), 0 8px 18px -8px rgba(0,0,0,0.75)",
     },
     accent: {
-      backgroundImage: "linear-gradient(180deg, #dbf893 0%, #b3dd4e 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 3px 12px rgba(200,242,109,0.22)",
+      backgroundImage: "linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 1px rgba(0,0,0,0.4), 0 8px 20px -9px rgba(200,242,109,0.4)",
     },
-    track: { boxShadow: "inset 0 1px 3px rgba(0,0,0,0.6)" },
+    track: { boxShadow: "inset 0 1px 2px rgba(0,0,0,0.5)" },
     /** A knob or handle over a track. */
     knob: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 6px rgba(0,0,0,0.45)" },
     /**
@@ -183,17 +183,17 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
      * small round button), a specular top, a faint inner edge, a lower rim.
      */
     pill: {
-      backgroundColor: "#2a2c31",
-      backgroundImage: "linear-gradient(180deg, #383a40 0%, #2a2c31 52%, #24262a 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 -1px 0 rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.35)",
-      borderColor: "rgba(255,255,255,0.07)",
+      backgroundColor: "#2b2d32",
+      backgroundImage: "linear-gradient(180deg, #2f3136 0%, #2a2c30 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 1px rgba(0,0,0,0.4), 0 6px 14px -7px rgba(0,0,0,0.7)",
+      borderColor: "rgba(255,255,255,0.08)",
     },
     /** A tinted capsule's rim and highlight (badges). */
     chip: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(0,0,0,0.18)" },
     /** A bar floating over content: translucent, blurred, rimmed. */
     glass: {
       backgroundColor: "rgba(22,23,26,0.62)",
-      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%)",
+      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.019) 60%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.09), 0 -8px 24px rgba(0,0,0,0.28)",
       borderColor: "rgba(255,255,255,0.07)",
       backdropFilter: "blur(20px)",
@@ -201,7 +201,7 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
     /** A floating panel (menus, the composer): glass, denser for reading. */
     menu: {
       backgroundColor: "rgba(30,32,36,0.82)",
-      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 40%, rgba(255,255,255,0) 100%)",
+      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.043) 0%, rgba(255,255,255,0.024) 40%, rgba(255,255,255,0.018) 100%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.11), inset 0 -1px 0 rgba(0,0,0,0.25), 0 12px 32px rgba(0,0,0,0.42)",
       borderColor: "rgba(255,255,255,0.08)",
       backdropFilter: "blur(24px)",
@@ -209,41 +209,41 @@ export const finish = themed<Record<"card" | "inset" | "raised" | "light" | "acc
   },
   {
     card: {
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fafaf8 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, 0 6px 20px rgba(20,20,10,0.08)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.04), 0 14px 32px -18px rgba(20,20,10,0.2)",
     },
     inset: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.07)" },
     raised: {
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f2f2ee 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 2px rgba(20,20,10,0.12)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f6f6f2 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.06), 0 5px 12px -6px rgba(20,20,10,0.18)",
     },
     light: {
-      backgroundImage: "linear-gradient(180deg, #2c2e33 0%, #16171a 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), 0 3px 10px rgba(20,20,10,0.22)",
+      backgroundImage: "linear-gradient(180deg, #2e3035 0%, #1b1c20 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 1px 1px rgba(20,20,10,0.2), 0 7px 14px -7px rgba(20,20,10,0.5)",
     },
     accent: {
-      backgroundImage: "linear-gradient(180deg, #d8f88f 0%, #bde65a 100%)",
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 3px 10px rgba(110,150,20,0.25)",
+      backgroundImage: "linear-gradient(180deg, #d6f78a 0%, #c1ea5c 100%)",
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 1px rgba(80,110,10,0.2), 0 7px 14px -7px rgba(110,150,20,0.55)",
     },
-    track: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.10)" },
+    track: { boxShadow: "inset 0 1px 2px rgba(20,20,10,0.08)" },
     knob: { boxShadow: "inset 0 1px 0 #ffffff, 0 1px 4px rgba(20,20,10,0.28)" },
     pill: {
       backgroundColor: "#ffffff",
-      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #fcfcfa 52%, #f3f3ef 100%)",
-      boxShadow: "inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255,255,255,0.7), inset 0 -1px 0 rgba(20,20,10,0.06), 0 1px 3px rgba(20,20,10,0.12), 0 4px 10px rgba(20,20,10,0.05)",
-      borderColor: "rgba(20,20,10,0.08)",
+      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #f6f6f2 100%)",
+      boxShadow: "inset 0 1px 0 #ffffff, 0 1px 1px rgba(20,20,10,0.06), 0 5px 12px -6px rgba(20,20,10,0.18)",
+      borderColor: "rgba(20,20,10,0.14)",
     },
     chip: { boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -1px 0 rgba(20,20,10,0.04)" },
     glass: {
       backgroundColor: "rgba(250,250,248,0.66)",
-      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0) 60%)",
+      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.472) 0%, rgba(255,255,255,0.227) 60%)",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 -6px 20px rgba(20,20,10,0.06)",
       borderColor: "rgba(20,20,10,0.07)",
       backdropFilter: "blur(20px)",
     },
     menu: {
       backgroundColor: "rgba(255,255,255,0.84)",
-      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.2) 40%, rgba(255,255,255,0) 100%)",
+      backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.497) 0%, rgba(255,255,255,0.287) 40%, rgba(255,255,255,0.217) 100%)",
       boxShadow: "inset 0 1px 0 #ffffff, inset 0 -1px 0 rgba(20,20,10,0.05), 0 12px 32px rgba(20,20,10,0.12)",
       borderColor: "rgba(20,20,10,0.08)",
       backdropFilter: "blur(24px)",
@@ -669,7 +669,7 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
           borderRadius: 11,
           backgroundColor: props.value ? colors.onAccent : colors.knob,
           // A drop of glass: a specular top over the knob's color.
-          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 60%)",
+          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
           boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
           transform: [{ translateX: t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }) }],
         }}
@@ -712,8 +712,7 @@ export function Segmented<T extends string>(props: {
         padding: 3,
         borderRadius: height / 2,
         backgroundColor: colors.inset,
-        // The track's glass: the sunk shadow plus a lit lower rim.
-        boxShadow: `${finish.track.boxShadow}, inset 0 -1px 0 ${isDark() ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.85)"}`,
+        boxShadow: finish.track.boxShadow,
         borderWidth: 1,
         borderColor: colors.border,
       }}
