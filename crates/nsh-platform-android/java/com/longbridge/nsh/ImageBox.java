@@ -67,7 +67,7 @@ final class ImageBox extends View implements Node {
         return true;
     }
 
-    /** `defaultSource`, `blurRadius` (px), `fadeDuration` (ms, -1: the default). */
+    /** `placeholder`, `blurRadius` (px), `fadeDuration` (ms, -1: the default). */
     String placeholderUri;
     int blurPx;
     int fadeMs = -1;

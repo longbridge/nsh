@@ -375,7 +375,7 @@ pub struct ListConfig {
     pub(crate) columns: Option<u32>,
     pub(crate) horizontal: Option<bool>,
     pub(crate) inverted: Option<bool>,
-    pub(crate) shows_indicator: Option<bool>,
+    pub(crate) scrollbar_visible: Option<bool>,
     pub(crate) content: Option<ListContentStyle>,
     pub(crate) follow_end: Option<f32>,
 }
@@ -397,8 +397,8 @@ impl ListConfig {
         if self.inverted != old.inverted {
             out.push(Prop::Inverted(self.inverted.unwrap_or(false)));
         }
-        if self.shows_indicator != old.shows_indicator {
-            out.push(Prop::ShowsIndicator(self.shows_indicator.unwrap_or(true)));
+        if self.scrollbar_visible != old.scrollbar_visible {
+            out.push(Prop::Scrollbar(self.scrollbar_visible.unwrap_or(true)));
         }
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
@@ -1781,7 +1781,7 @@ impl Image {
     /// [`super::ImageAsset`]).
     pub fn placeholder(mut self, src: impl IntoReactive<super::ImageSrc>) -> Self {
         super::host::bind_prop(&mut self.0, src, |src: super::ImageSrc| {
-            Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
+            Prop::Image(crate::ImageProp::Placeholder(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,

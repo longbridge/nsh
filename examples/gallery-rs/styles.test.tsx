@@ -32,7 +32,7 @@ test("the Styles demo shows its cards", async () => {
     "1,111.11",
     "Small Caps",
     "Right to left",
-    "isRTL: false",
+    "direction: ltr",
     "12",
   ]) {
     expect(app.texts()).toContain(text);
@@ -51,13 +51,13 @@ test("the layer tiles take taps", async () => {
   await app.waitFor("Front: 2 of 3 · tap");
 });
 
-test("flip lays the surface out right to left and back", async () => {
+test("flip lays the card out right to left and back", async () => {
   const app = await open(".", { clock: {} });
   await app.press("label:Styles");
   await app.press("Flip");
-  await app.waitFor("isRTL: true");
+  await app.waitFor("direction: rtl");
   await app.press("Flip");
-  await app.waitFor("isRTL: false");
+  await app.waitFor("direction: ltr");
 });
 
 test("the Typed styles demo shows every card", async () => {

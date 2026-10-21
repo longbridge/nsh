@@ -176,7 +176,7 @@ const DRAW: &str = r##"(cx, size) => {
   cx.scale(2, 3);
   cx.rotate(0.1);
   cx.drawImage("https://example.com/a.png", 1, 2);
-  cx.drawImage({ uri: "asset:/b.png", width: 20, height: 10 }, 1, 2);
+  cx.drawImage({ url: "asset:/b.png", size: { width: 20, height: 10 } }, 1, 2);
   cx.drawImage("https://example.com/a.png", 1, 2, 3, 4);
   cx.drawImage("https://example.com/a.png", 1, 2, 3, 4, 5, 6, 7, 8);
   const p = new Path2D();

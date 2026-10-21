@@ -1,15 +1,14 @@
-import { effect, Image, mount, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { NavPage, NavStack } from "nsh/base";
 import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
-import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, header, IconTile, lazy, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen } from "./ui";
+import { Appear, Badge, colors, desktop, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
 
 /** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
@@ -92,7 +91,7 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 
 function Home() {
   return (
-    <NavPage title="Gallery" {...header} header={<PageHeader title="Gallery" root />}>
+    <NavPage title="Gallery" {...header} headerRight={<ThemeToggle />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={{ padding: 16, paddingBottom: 40, gap: 20 }}>
           <Each of={groups}>
@@ -242,11 +241,12 @@ function Sidebar() {
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
-          <Image src={logo} style={{ width: 32, height: 32, borderRadius: 8 }} />
+          <Logo size={32} />
           <View style={{ flex: 1, gap: 1 }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-            <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {Platform.OS}</Text>
+            <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
           </View>
+          <ThemeToggle />
         </View>
         <Scroll style={{ flex: 1 }}>
           <View style={{ paddingHorizontal: 12, paddingBottom: 16 }}>
@@ -320,7 +320,7 @@ function Desktop() {
         {(route) => {
           if (route.name !== "page") {
             return (
-              <NavPage headerShown={false}>
+              <NavPage headerVisible={false}>
                 <DemoPane />
               </NavPage>
             );

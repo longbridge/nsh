@@ -1,5 +1,5 @@
 import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { ui } from "./palette";
 
 // The page: a button that posts to the app, and a line that shows what the
@@ -21,7 +21,7 @@ const page = (c: ReturnType<typeof ui>) => `<!doctype html>
 <script>
   let taps = 0;
   document.getElementById("post").onclick = () =>
-    window.ReactNativeWebView.postMessage("tap " + ++taps + " from the page");
+    window.nsh.postMessage("tap " + ++taps + " from the page");
   window.addEventListener("message", (e) => { document.getElementById("got").textContent = "App says: " + e.data; });
 </script>`;
 
@@ -53,16 +53,16 @@ function App() {
       <View style={{ flex: 1, flexDirection: wide() ? "row" : "column", gap: 16 }}>
         <WebView
           ref={web}
-          source={{ html: page(ui()) }}
+          html={page(ui())}
           // Runs after each load: the page reports its title.
-          injectedJavaScript={`window.ReactNativeWebView.postMessage("loaded: " + document.title)`}
+          injectedJavaScript={`window.nsh.postMessage("loaded: " + document.title)`}
           onLoad={(e) => nav.set(e)}
           onMessage={(e) => messages.set([e.data, ...messages()].slice(0, 4))}
           style={{ flex: 1, minHeight: 240, borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: ui().border }}
         />
         <View style={{ gap: 12, width: wide() ? 320 : undefined }}>
           <Text style={{ color: ui().muted }}>
-            {Platform.isDesktop ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
+            {platform.idiom === "desktop" ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Button

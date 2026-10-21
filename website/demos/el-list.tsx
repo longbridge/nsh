@@ -1,5 +1,5 @@
 import { List, mount, signal, Text, View, type YNode } from "nsh";
-import { Platform, windowSize } from "nsh/device";
+import { platform, windowSize } from "nsh/device";
 import { tint, ui } from "./palette";
 
 type Trade = { id: string; symbol: string; shares: number; change: number };
@@ -40,7 +40,7 @@ function App() {
       <View style={{ paddingHorizontal: 16, gap: 6, paddingBottom: 8 }}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>list</Text>
         <Text style={{ color: ui().muted }}>
-          {trades().length} rows · onEndReached {loads()}× · visible {visible()}
+          {trades().length} rows · onLoadMore {loads()}× · visible {visible()}
         </Text>
       </View>
       <List
@@ -52,8 +52,8 @@ function App() {
         estimatedItemSize={64}
         style={{ flex: 1 }}
         contentStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16, gap: 8 }}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
+        onLoadMore={loadMore}
+        loadMoreThreshold={0.5}
         refreshing={refreshing()}
         onRefresh={() => {
           refreshing.set(true);
@@ -65,13 +65,13 @@ function App() {
           }, 800);
         }}
         viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-        onViewableItemsChanged={({ viewableItems }) =>
+        onViewableItemsChange={({ viewableItems }) =>
           visible.set(viewableItems.length ? `${viewableItems[0].index}–${viewableItems[viewableItems.length - 1].index}` : "")
         }
         header={
           <View style={{ ...ui().card, borderRadius: 14, padding: 14, gap: 10, marginBottom: 4 }}>
             <Text style={{ color: ui().muted }}>
-              {Platform.isDesktop ? "Scroll with the wheel or trackpad" : "Swipe up; pull down to refresh"}: more rows load near the end, up to {LIMIT}.
+              {platform.idiom === "desktop" ? "Scroll with the wheel or trackpad" : "Swipe up; pull down to refresh"}: more rows load near the end, up to {LIMIT}.
             </Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
               <Chip label="scrollToIndex 100" onPress={() => list.scrollToIndex({ index: Math.min(100, trades().length - 1), viewPosition: 0.5 })} />

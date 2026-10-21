@@ -368,7 +368,7 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             let on_hold = opener.clone();
             trigger
                 .on_context_menu(move |e: &ContextMenuEvent| {
-                    point.set(e.page);
+                    point.set(e.page_position);
                     on_menu(true, OpenChangeReason::ContextMenu);
                 })
                 // Observed, never claimed: the trigger's presses and the

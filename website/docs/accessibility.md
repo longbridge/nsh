@@ -209,7 +209,7 @@ Hide what adds nothing: decorative images, dividers, an icon next to a text that
 
 `accessibilityElementsHidden` (iOS's name) and `importantForAccessibility="no-hide-descendants"` (Android's) both hide the subtree on both platforms; setting both is harmless.
 
-## AccessibilityInfo
+## The screen reader and the user's settings
 
 In Rust, the prelude reports the user's settings and talks to the screen reader: `screen_reader()` and `reduce_motion()` are reactive, `announce_for_accessibility(message)` has the screen reader read a message, and an element's `element_ref()` moves the screen reader's focus to it with `set_accessibility_focus()`. In TSX, `nsh/accessibility` reports the user's settings and lets you talk to the screen reader.
 
@@ -217,13 +217,10 @@ In Rust, the prelude reports the user's settings and talks to the screen reader:
 |---|---|
 | `screenReaderEnabled()` | Whether VoiceOver or TalkBack runs (reactive). |
 | `reduceMotion()` | Whether the user asked for less motion (reactive). |
-| `AccessibilityInfo.isScreenReaderEnabled()` | The same, as a promise. |
-| `AccessibilityInfo.isReduceMotionEnabled()` | The same, as a promise. |
-| `AccessibilityInfo.addEventListener(event, listener)` | `"screenReaderChanged"` or `"reduceMotionChanged"`; returns `{ remove() }`. |
-| `AccessibilityInfo.announceForAccessibility(message)` | The screen reader reads `message`. |
-| `AccessibilityInfo.setAccessibilityFocus(ref)` | Moves the screen reader's focus to a view. |
+| `announce(message)` | The screen reader reads `message`. |
+| `setAccessibilityFocus(ref)` | Moves the screen reader's focus to a view. |
 
-Prefer the reactive accessors in components: they update what reads them, and need no cleanup.
+The settings are accessors: read them in a binding or an effect, and what reads them updates when the user changes the setting, with no cleanup.
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -249,15 +246,15 @@ fn upload() -> impl IntoElement {
 
 ```tsx tabs
 import { signal, Text, View, type YNode } from "nsh";
-import { AccessibilityInfo, screenReaderEnabled } from "nsh/accessibility";
+import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 
 function Upload() {
   const done = signal(false);
   let result!: YNode;
   const finish = () => {
     done.set(true);
-    AccessibilityInfo.announceForAccessibility("Upload complete");
-    AccessibilityInfo.setAccessibilityFocus(result);
+    announce("Upload complete");
+    setAccessibilityFocus(result);
   };
   return (
     <View style={{ gap: 12 }}>

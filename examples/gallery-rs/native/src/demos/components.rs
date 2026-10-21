@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-/// One device pixel, in points (TS: `1 / PixelRatio.get()`; reading it in
+/// One device pixel, in points (TS: `1 / pixelRatio()`; reading it in
 /// a binding follows the screen).
 fn hairline() -> f32 {
     1.0 / pixel_ratio()
@@ -609,26 +609,27 @@ fn PlatformInfo() -> impl IntoElement {
         Os::Android => "android branch",
         _ => "",
     };
+    let idiom_name = match idiom {
+        Idiom::Phone => "phone",
+        Idiom::Pad => "pad",
+        Idiom::Mac => "mac",
+        Idiom::Tv => "tv",
+        Idiom::Desktop => "desktop",
+    };
     let rows: [(&str, Reactive<SharedString>); 8] = [
-        ("Platform.OS", os.name().into_reactive()),
-        ("Platform.Version", version.into_reactive()),
+        ("platform.os", os.name().into_reactive()),
+        ("platform.version", version.into_reactive()),
         (
-            "isPad / isTV / isMacCatalyst",
-            format!(
-                "{} / {} / {}",
-                idiom == Idiom::Pad,
-                idiom == Idiom::Tv,
-                idiom == Idiom::Mac
-            )
-            .into_reactive(),
+            "platform.idiom / catalyst",
+            format!("{idiom_name} / {}", idiom == Idiom::Mac).into_reactive(),
         ),
-        ("Platform.select", branch.into_reactive()),
+        ("platform.select", branch.into_reactive()),
         (
-            "PixelRatio.get()",
+            "pixelRatio()",
             (|| pixel_ratio().to_string()).into_reactive(),
         ),
         (
-            "roundToNearestPixel(10.3)",
+            "10.3 on whole pixels",
             (|| round_to_nearest_pixel(px(10.3)).0.to_string()).into_reactive(),
         ),
         (
@@ -661,7 +662,7 @@ fn PlatformInfo() -> impl IntoElement {
     ui::Card::new()
         .icon(IconName::Spark)
         .title("Platform")
-        .subtitle("Platform, PixelRatio, AccessibilityInfo")
+        .subtitle("platform, pixelRatio, announce")
         .right(Badge::new(os.name()).tone(Tone::Accent))
         .child(view().children(rows))
         .child(view().h(move || px(hairline())).bg(colors::ACCENT))

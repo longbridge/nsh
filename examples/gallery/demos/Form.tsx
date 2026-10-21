@@ -44,10 +44,10 @@ function Field(
           borderRadius: radius.control,
           borderCurve: "continuous",
           borderWidth: 1,
-          borderColor: own.error ? colors.danger : props.readonly ? colors.line : colors.border,
-          backgroundColor: colors.inset,
+          borderColor: own.error ? colors.danger : props.readonly ? colors.line : colors.fieldBorder,
+          backgroundColor: colors.field,
           // Recessed while editable; a read-only field lies flat.
-          ...(props.readonly ? {} : finish.inset),
+          ...(props.readonly ? {} : finish.field),
         }}
       >
         <If when={own.prefix}>
@@ -75,9 +75,10 @@ function Field(
             left: -1,
             right: -1,
             bottom: -1,
-            borderRadius: radius.control,
+            // Around the field's border: its radius plus the 1pt it reaches out.
+            borderRadius: radius.control + 1,
             borderCurve: "continuous",
-            borderWidth: 1.5,
+            borderWidth: 2,
             borderColor: own.error ? colors.danger : colors.accent,
             opacity: focus,
           }}
@@ -352,7 +353,7 @@ export function Form() {
               <Meter value={notes().length / 280} tone={notes().length > 250 ? "warn" : "accent"} />
             </View>
             <AutoGrow />
-            <Field label="No caret" api="caretHidden" caretHidden defaultValue="No caret here" />
+            <Field label="No caret" api="caret" caret={false} defaultValue="No caret here" />
           </Section>
         ),
         () => (
@@ -393,7 +394,7 @@ export function Form() {
         ),
       ]}
     >
-      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)}>
+      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)} style={{ flex: 1 }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
             <View style={{ padding: 16, paddingBottom: 40, gap: 16 }}>

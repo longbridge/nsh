@@ -128,7 +128,7 @@ runtime does not know: they are not granted there.
 
 ### `network`
 
-Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `defaultSource`, canvas images,
+Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `placeholder`, canvas images,
 `Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
@@ -164,7 +164,7 @@ paths.
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
-`about:blank` and inline HTML (`source={{ html }}`) need only web views to be granted at all: `"webview": { "hosts": [] }`
+`about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
 allows them without allowing any remote page.
 
 ### `statusBar`
@@ -187,7 +187,7 @@ Every app may keep its own data on the device with [`nsh/storage`](../modules/ns
 | `fetch` | The promise rejects; the request never reaches the network. |
 | Remote image | The image fails with `onError`. |
 | Video source, web view source, status bar change | Nothing is shown or changed. |
-| Clipboard | `setString` does nothing; `getString` resolves `""` and `hasString` `false`. |
+| Clipboard | `writeText` and `writeImage` do nothing; `readText` resolves `""`, `readImage` `null`, `readFiles` `[]`, and `hasText` and `hasImage` `false`. |
 
 Each refusal is logged once, saying which key to add:
 

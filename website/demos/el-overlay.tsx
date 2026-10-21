@@ -1,5 +1,5 @@
 import { mount, Overlay, signal, Text, View, type YNode } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 type Placement = "top" | "bottom" | "left" | "right";
@@ -45,7 +45,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>overlay</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Click the button, then click outside or press Escape" : "Tap the button, then tap outside"}
+        {platform.idiom === "desktop" ? "Click the button, then click outside or press Escape" : "Tap the button, then tap outside"}
       </Text>
 
       <View style={{ flexDirection: "row", gap: 12 }}>
@@ -88,11 +88,11 @@ function App() {
               margin={12}
               onPosition={(e) =>
                 position.set(
-                  `${e.placement} at ${Math.round(e.x)}, ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)} · room ${Math.round(e.availableWidth)}×${Math.round(e.availableHeight)}`,
+                  `${e.placement} at ${Math.round(e.bounds.origin.x)}, ${Math.round(e.bounds.origin.y)} · ${Math.round(e.bounds.size.width)}×${Math.round(e.bounds.size.height)} · room ${Math.round(e.available.width)}×${Math.round(e.available.height)}`,
                 )
               }
               onPressOutside={(e) => {
-                closed.set(`onPressOutside at ${Math.round(e.pageX)}, ${Math.round(e.pageY)}`);
+                closed.set(`onPressOutside at ${Math.round(e.pagePosition.x)}, ${Math.round(e.pagePosition.y)}`);
                 open.set(false);
               }}
               onCancel={() => {

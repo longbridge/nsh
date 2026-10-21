@@ -15,7 +15,7 @@ const page = () => `<!doctype html><html><head><meta name="viewport" content="wi
 <body>
 <h3>An inline page</h3>
 <p>HTML from a string. It sends messages to the app and receives them.</p>
-<button onclick="window.ReactNativeWebView.postMessage('hello from the page')">Post to the app</button>
+<button onclick="window.nsh.postMessage('hello from the page')">Post to the app</button>
 <div id="got">No message from the app yet.</div>
 <script>window.addEventListener('message', (e) => { document.getElementById('got').textContent = 'From the app: ' + e.data; });</script>
 </body></html>`;
@@ -28,7 +28,7 @@ function Messaging() {
   let web!: YNode;
   return (
     <Card icon="media" title="Web view" subtitle="Inline HTML, with messages both ways">
-      <WebView ref={web} source={{ html: page() }} style={{ height: 210, backgroundColor: colors.inset, ...frame() }} onMessage={(e) => message.set(e.data)} />
+      <WebView ref={web} html={page()} style={{ height: 210, backgroundColor: colors.inset, ...frame() }} onMessage={(e) => message.set(e.data)} />
       <Caption label="From the page" note={message() || "—"} />
       <Caption label="To the page" note={sent() ? `hi #${sent()}` : "—"} />
       <Button
@@ -101,7 +101,7 @@ function Site() {
       </View>
       <WebView
         ref={site}
-        source={{ uri: "https://nsh.dev" }}
+        src="https://nsh.dev"
         style={{ height: 340, backgroundColor: colors.inset, ...frame() }}
         onNavigationStateChange={(v) => state.set(v)}
       />
@@ -139,7 +139,7 @@ function Player() {
     >
       <Video
         ref={video}
-        source="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
         paused={paused()}
         muted
         repeat

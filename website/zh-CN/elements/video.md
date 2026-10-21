@@ -56,7 +56,7 @@ function Player() {
     <View style={{ gap: 12 }}>
       <Video
         ref={video}
-        source="https://example.com/clip.mp4"
+        src="https://example.com/clip.mp4"
         paused={paused()}
         repeat
         resizeMode="contain"
@@ -73,7 +73,7 @@ function Player() {
 }
 ```
 
-在 TSX 中 `source` 必填（参见 [Video API](../modules/nsh-video.md)）。另见 [Web view 与视频指南](../docs/web-view-and-video.md)。
+在 TSX 中 `src` 必填（参见 [Video API](../modules/nsh-video.md)）。另见 [Web view 与视频指南](../docs/web-view-and-video.md)。
 
 ## 属性
 
@@ -81,7 +81,7 @@ function Player() {
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
-| `source` | `video(url)` | `string \| { uri: string }` | | 视频的 URL（在 Rust 中也可以是资源的 `uri`：`video(CLIP.uri)`）。 |
+| `src` | `video(url)` | `string` | | 视频的 URL（在 Rust 中也可以是资源的 `uri`：`video(CLIP.uri)`）。 |
 | `paused` | `.paused(..)` | `boolean` | `false` | 暂停播放。 |
 | `muted` | `.muted(..)` | `boolean` | `false` | 静音。 |
 | `volume` | `.volume(..)` | `number` | `1` | 0..1。 |
@@ -98,7 +98,7 @@ function Player() {
 | 事件 | Rust | 载荷 | 时机 |
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | 无 | 开始加载。 |
-| `onLoad` | `.on_load` | `{ duration, width, height }`（`VideoInfo`：`duration`、`size`） | 视频已就绪：时长（秒）和尺寸。 |
+| `onLoad` | `.on_load` | `{ duration, size }`（`VideoInfo`：`duration`、`size`） | 视频已就绪：时长（秒）和尺寸。 |
 | `onProgress` | `.on_progress` | `{ currentTime, duration }`（`VideoProgress`：`current_time`、`duration`） | 播放期间每隔 `progressUpdateInterval` 触发（秒）。 |
 | `onBuffer` | `.on_buffer` | `{ isBuffering }`（`bool`） | 因等待数据而卡顿 / 恢复播放。 |
 | `onEnd` | `.on_end` | 无 | 播放到结尾（设置了 `repeat` 时，每轮结束都会触发）。 |
@@ -117,7 +117,7 @@ video(url)
 
 ```tsx tabs
 const ratio = signal(16 / 9);
-<Video source={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.width / e.height)} />;
+<Video src={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.size.width / e.size.height)} />;
 ```
 
 ## ref 方法

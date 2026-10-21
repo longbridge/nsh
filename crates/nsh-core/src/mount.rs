@@ -59,6 +59,11 @@ pub enum ViewKind {
 pub struct WebProps {
     /// What it shows.
     pub source: WebSource,
+    /// The `src` prop, which [`Self::source`] loads unless `html` is set.
+    pub src: Option<Arc<str>>,
+    /// The `baseUrl` prop, which [`Self::source`] holds while `html` is
+    /// set.
+    pub base_url: Option<Arc<str>>,
     /// Script run after each page loads.
     pub injected_js: Option<Arc<str>>,
     /// Script run before each page's own scripts.
@@ -66,7 +71,7 @@ pub struct WebProps {
     /// User agent; the platform's when `None`.
     pub user_agent: Option<Arc<str>>,
     /// The page scrolls.
-    pub scroll_enabled: bool,
+    pub scrollable: bool,
     /// The page may run JavaScript.
     pub javascript_enabled: bool,
     /// Swipes go back and forward (iOS).
@@ -77,10 +82,12 @@ impl Default for WebProps {
     fn default() -> Self {
         Self {
             source: WebSource::None,
+            src: None,
+            base_url: None,
             injected_js: None,
             injected_js_before: None,
             user_agent: None,
-            scroll_enabled: true,
+            scrollable: true,
             javascript_enabled: true,
             back_forward_gestures: false,
         }
@@ -165,7 +172,7 @@ pub struct ScrollBehavior {
     pub max_zoom: f32,
     /// `bouncesZoom`: pinching may go past the limits and springs back.
     pub bounces_zoom: bool,
-    /// `pinchGestureEnabled`: the user can pinch to zoom.
+    /// `zoomable`: the user can pinch to zoom.
     pub pinch: bool,
     /// `centerContent`: content smaller than the viewport is centered.
     pub center_content: bool,
@@ -313,7 +320,7 @@ pub struct ScreenConfig {
     /// Title in the header.
     pub title: Option<Arc<str>>,
     /// Show the native header.
-    pub header_shown: bool,
+    pub header_visible: bool,
     /// Large title (iOS; the content scrolls under the header).
     pub large_title: bool,
     /// The content extends under the header.
@@ -360,7 +367,7 @@ impl Default for ScreenConfig {
     fn default() -> Self {
         Self {
             title: None,
-            header_shown: true,
+            header_visible: true,
             large_title: false,
             header_transparent: false,
             tint_color: None,
@@ -477,7 +484,7 @@ pub struct InputConfig {
     pub auto_fill: crate::ops::AutoFill,
     /// The text runs right to left.
     pub rtl: bool,
-    /// `caretHidden`.
+    /// No caret is drawn (`caret={false}`).
     pub caret_hidden: bool,
     /// `inputAccessoryViewID` as set.
     pub accessory_id: Option<Box<str>>,
@@ -533,7 +540,7 @@ impl Default for InputConfig {
 /// How an image is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ImageOptions {
-    /// `defaultSource`: shown until the image loads (and if it fails).
+    /// `placeholder`: shown until the image loads (and if it fails).
     pub placeholder: Option<ImageSource>,
     /// `blurRadius` in points (0: sharp).
     pub blur_radius: Points,
@@ -651,7 +658,7 @@ pub enum MountItem {
         /// Scrolls horizontally.
         horizontal: bool,
         /// Shows the scroll indicator.
-        shows_indicator: bool,
+        scrollbar_visible: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,
         /// When dragging dismisses the keyboard.

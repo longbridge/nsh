@@ -15,10 +15,10 @@ function Pager() {
       <Scroll
         horizontal
         pagingEnabled
-        showsIndicator={false}
+        scrollbar={false}
         style={{ height: 110, borderRadius: 12 }}
-        onLayout={(e) => width.set(e.width)}
-        onMomentumScrollEnd={(e) => page.set(Math.round(e.x / width()))}
+        onLayout={(e) => width.set(e.size.width)}
+        onMomentumEnd={(e) => page.set(Math.round(e.x / width()))}
         onScrollEnd={(e) => page.set(Math.round(e.x / width()))}
       >
         <View style={{ flexDirection: "row" }}>
@@ -43,7 +43,7 @@ function Pager() {
 /** Cards that snap: one stop every card plus gap. */
 function Cards() {
   return (
-    <Scroll horizontal showsIndicator={false} snapToInterval={152} decelerationRate="fast" style={{ height: 90 }}>
+    <Scroll horizontal scrollbar={false} snapToInterval={152} decelerationRate="fast" style={{ height: 90 }}>
       <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 4 }}>
         <Each of={Array.from({ length: 12 }, (_, i) => i)}>
           {(i) => (
@@ -111,7 +111,7 @@ function App() {
         style={{ flex: 1 }}
         scrollValue={offset}
         scrollEventThrottle={100}
-        onScroll={(e) => y.set(Math.round(e.y))}
+        onScroll={(e) => y.set(Math.round(e.offset.y))}
         refreshing={refreshing()}
         onRefresh={refresh}
         keyboardDismissMode="on-drag"

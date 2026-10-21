@@ -87,6 +87,22 @@ impl Native for LinuxNative {
         .flatten()
     }
 
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        self.on_main(move |surface| {
+            let view = surface.mounter.borrow().views.get(&text)?.clone();
+            if !view.is_drawable() {
+                return None;
+            }
+            let (x, y, width, height) = crate::text::range_rect(&view.state(), start, end)?;
+            let r = view.compute_bounds(&surface.root)?;
+            Some(Bounds::new(
+                point(Points(r.x() + x), Points(r.y() + y)),
+                Size::new(Points(width), Points(height)),
+            ))
+        })
+        .flatten()
+    }
+
     fn viewport(&self) -> Size<Points> {
         let (width, height) = self
             .on_main(|s| (s.root.width() as f32, s.root.height() as f32))

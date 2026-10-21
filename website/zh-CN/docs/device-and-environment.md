@@ -21,7 +21,6 @@ demo: guide-device
 | `cx.insets()` | `safeAreaInsets()`（`nsh/base`） | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboard_height()`、`keyboard_duration()` | `keyboardFrame()`（`nsh/base`） | 软键盘的高度和动画时长。 |
 | `locale()` | `locale()`（`nsh/device`） | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
-| `rtl()` | `I18nManager.isRTL`（`nsh/device`） | 应用是否从右到左布局。 |
 | `reduce_motion()`、`screen_reader()` | `reduceMotion()`、`screenReaderEnabled()`（`nsh/accessibility`） | 见[无障碍](./accessibility.md)。 |
 
 ```rust tabs
@@ -307,27 +306,24 @@ function BottomBar() {
 
 ## 平台
 
-Rust 中的 `os()`、`os_version()`、`idiom()` 和 `is_desktop()`，以及 TSX 中 `nsh/device` 的 `Platform`，描述应用运行的平台。它们不是响应式的：这些信息在运行期间不会改变。
+Rust 中的 `os()`、`os_version()`、`idiom()` 和 `is_desktop()`，以及 TSX 中 `nsh/device` 的常量 `platform`，描述应用运行的平台。它们在应用运行期间保持不变。
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `os()` | `Platform.OS` | `Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`（`os().name()` 即 TSX 的字符串）。Mac Catalyst 为 iOS。 |
-| `os_version()` | `Platform.Version` | 主版本号和次版本号；Android 上为 API 级别和 0。 |
-| `idiom()` | `Platform.isPad`、`isTV`、`isMacCatalyst`、`constants.interfaceIdiom` | `Idiom::Phone`、`Pad`、`Mac`、`Tv` 或 `Desktop`。 |
-| `is_desktop()` | `Platform.isDesktop` | macOS、Windows 或 Linux，或桌面浏览器。 |
+| `os()` | `platform.os` | `Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`（`os().name()` 即 TSX 的字符串）。Mac Catalyst 为 iOS。 |
+| `os_version()` | `platform.version` | 主版本号和次版本号；Android 上为 API 级别和 0。 |
+| `idiom()` | `platform.idiom`、`platform.catalyst` | `Idiom::Phone`、`Pad`、`Mac`、`Tv` 或 `Desktop`。 |
+| `is_desktop()` | `platform.idiom === "desktop"` | macOS、Windows 或 Linux，或桌面浏览器。 |
 
-TSX 的 `Platform` 完整成员：
+TSX 的 `platform` 完整成员：
 
 | 成员 | 说明 |
 |---|---|
-| `Platform.OS` | `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
-| `Platform.Version` | iOS 和桌面平台：版本字符串（`"17.5"`）；Android：API 级别（数字）。 |
-| `Platform.isPad` | iPad（或 iPad 界面风格）。 |
-| `Platform.isTV` | 电视。 |
-| `Platform.isMacCatalyst` | Mac 界面风格的 Mac Catalyst。 |
-| `Platform.isDesktop` | macOS、Windows 或 Linux，或桌面浏览器（Web 上界面风格为 `"desktop"`）。 |
-| `Platform.constants` | `{ osVersion, interfaceIdiom }`，界面风格为 `"phone"`、`"pad"`、`"mac"`、`"tv"` 或 `"desktop"`。 |
-| `Platform.select(spec)` | 当前平台对应的值；见[平台特定代码](./platform-specific.md#platformselect)。 |
+| `platform.os` | `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
+| `platform.version` | 字符串：iOS 和桌面平台为系统版本（`"17.5"`）；Android 为 API 级别（`"35"`）；Web 为 `"0.0"`。 |
+| `platform.idiom` | `"phone"`、`"pad"`、`"mac"`、`"tv"` 或 `"desktop"`。`"desktop"` 表示桌面行为：macOS、Windows、Linux 和桌面浏览器。 |
+| `platform.catalyst` | Mac 界面风格的 Mac Catalyst。 |
+| `platform.select(spec)` | 当前平台对应的值；见[平台特定代码](./platform-specific.md#platformselect)。 |
 
 ```rust tabs
 use nsh_core::ui::{Os, prelude::*};
@@ -336,40 +332,38 @@ let haptics_supported = os() == Os::Ios || (os() == Os::Android && os_version().
 ```
 
 ```tsx tabs
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 
-const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
+const hapticsSupported = platform.os === "ios" || (platform.os === "android" && Number(platform.version) >= 30);
 ```
 
 `nsh test` 以 iOS 身份无界面运行。
 
-在 [Linux](./linux.md) 上，`Platform.OS` 为 `"linux"`，界面风格为 `"desktop"`，`Platform.Version` 为内核的主、次版本号（`"6.12"`）：
+在 [Linux](./linux.md) 上，`platform.os` 为 `"linux"`，界面风格为 `"desktop"`，`platform.version` 为内核的主、次版本号（`"6.12"`）：
 各发行版给版本编号的方式无法相互比较。在那里，安全区域和键盘高度为 0，`colorScheme()` 实时跟随桌面的设置（XDG 设置门户），
-`fontScale()` 跟随桌面的文字缩放，`PixelRatio.get()` 跟随显示器的缩放比例（包括小数缩放）。
+`fontScale()` 跟随桌面的文字缩放，`pixelRatio()` 跟随显示器的缩放比例（包括小数缩放）。
 
-在 [macOS](./macos.md)（AppKit 后端）上，`Platform.OS` 为 `"macos"`，界面风格为 `"desktop"`，
-`Platform.Version` 为 macOS 的版本号。安全区域和键盘高度为 0，`colorScheme()` 实时跟随系统外观，`fontScale()` 为 1，
-`PixelRatio.get()` 为显示器的缩放比例（backing scale）。
+在 [macOS](./macos.md)（AppKit 后端）上，`platform.os` 为 `"macos"`，界面风格为 `"desktop"`，
+`platform.version` 为 macOS 的版本号。安全区域和键盘高度为 0，`colorScheme()` 实时跟随系统外观，`fontScale()` 为 1，
+`pixelRatio()` 为显示器的缩放比例（backing scale）。
 
-在 [Windows](./windows.md) 上，`Platform.OS` 为 `"windows"`，界面风格为 `"desktop"`，`Platform.Version` 为 `"10.0"`，Windows 11
+在 [Windows](./windows.md) 上，`platform.os` 为 `"windows"`，界面风格为 `"desktop"`，`platform.version` 为 `"10.0"`，Windows 11
 上也是如此（Windows 沿用了这个版本号）。安全区域和键盘高度为 0，`colorScheme()` 实时跟随“设置 > 个性化 > 颜色”，`fontScale()`
-跟随“文本大小”设置（1 到 2.25），`reduceMotion()` 跟随“动画效果”设置，`PixelRatio.get()` 为显示器的缩放比例，`Intl`
+跟随“文本大小”设置（1 到 2.25），`reduceMotion()` 跟随“动画效果”设置，`pixelRatio()` 为显示器的缩放比例，`Intl`
 按用户的区域格式进行格式化。
 
-在浏览器中（[Web 运行时](./web.md)），`Platform.OS` 为 `"web"`，`Platform.Version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
-`"desktop"`（此时 `Platform.isDesktop` 为 `true`），平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`reduceMotion()`、
-`fontScale()`（浏览器的文字大小）、`PixelRatio.get()`、安全区域和键盘高度都来自浏览器，并实时跟随。
+在浏览器中（[Web 运行时](./web.md)），`platform.os` 为 `"web"`，`platform.version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
+`"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`reduceMotion()`、
+`fontScale()`（浏览器的文字大小）、`pixelRatio()`、安全区域和键盘高度都来自浏览器，并实时跟随。
 
 ## 像素密度
 
-Rust 中的 `pixel_ratio()` 和 `round_to_nearest_pixel(points)`，以及 TSX 中 `nsh/device` 的 `PixelRatio`，在点与设备像素之间换算。
+Rust 中的 `pixel_ratio()` 和 `round_to_nearest_pixel(points)`，以及 TSX 中 `nsh/device` 的 `pixelRatio()`，在点与设备像素之间换算。
 
-| 方法 | 说明 |
-|---|---|
-| `PixelRatio.get()` | 每个点对应的设备像素数（大多数手机为 2 或 3）。 |
-| `PixelRatio.getFontScale()` | 与 `fontScale()` 相同，但不是响应式的。 |
-| `PixelRatio.getPixelSizeForLayoutSize(points)` | 把点换算为整数设备像素。 |
-| `PixelRatio.roundToNearestPixel(points)` | 把点数取整到最近的设备像素。 |
+| Rust | TSX | 说明 |
+|---|---|---|
+| `pixel_ratio()` | `pixelRatio()` | 每个点对应的设备像素数（大多数手机为 2 或 3），响应式。 |
+| `round_to_nearest_pixel(points)` | `Math.round(x * pixelRatio()) / pixelRatio()` | 把点数取整到最近的设备像素。 |
 
 一条一个设备像素高的细线：
 
@@ -381,26 +375,18 @@ view()
 
 ```tsx tabs
 import { View } from "nsh";
-import { PixelRatio } from "nsh/device";
+import { pixelRatio } from "nsh/device";
 
-const hairline = 1 / PixelRatio.get();
-<View style={{ height: hairline, backgroundColor: "#d0d7de" }} />
+<View style={{ height: 1 / pixelRatio(), backgroundColor: "#d0d7de" }} />
 ```
 
-在 Rust 中 `pixel_ratio()` 是响应式的，窗口被移到另一块密度不同的屏幕上时，细线会随之调整。TSX 的 `PixelRatio` 不是响应式的：在同时读取 `windowSize()` 的组件中读取它，这种情况下 `windowSize()` 会变化。
+`pixel_ratio()` 和 `pixelRatio()` 都是响应式的，窗口被移到另一块密度不同的屏幕上时，细线会随之调整。
 
 ## 从右到左
 
-当设备语言是从右到左书写的（阿拉伯语、希伯来语、波斯语等），NSH 会从右到左布局应用：横排从右侧开始，`left` 和 `right` 样式属性互换，文字右对齐，原生控件镜像显示。Rust 中的 `rtl()`、`allow_rtl(allow)` 和 `force_rtl(force)`，以及 TSX 中 `nsh/device` 的 `I18nManager`，控制这一行为：
+当设备语言是从右到左书写的（阿拉伯语、希伯来语、波斯语等），NSH 会从右到左布局应用：横排从右侧开始，`left` 和 `right` 样式属性互换，文字右对齐，原生控件镜像显示。布局方向自动跟随用户的语言。视图的 `direction` 样式（`"ltr"`、`"rtl"` 或 `"inherit"`；Rust 中为 `.direction(LayoutDirection::..)`）设置其子树的方向；设在根视图上即设置整个应用的方向。
 
-| 成员 | 说明 |
-|---|---|
-| `I18nManager.isRTL` | 应用是否从右到左布局（响应式）。 |
-| `I18nManager.allowRTL(allow)` | 跟随从右到左的语言（默认 `true`）。 |
-| `I18nManager.forceRTL(force)` | 无论语言如何都从右到左布局。 |
-| `I18nManager.getConstants()` | `{ isRTL, doLeftAndRightSwapInRTL }`。 |
-
-修改会立即生效，无需重启应用；本页的演示就在切换 `forceRTL`。
+修改会立即生效，无需重启应用；本页的演示就在切换 `direction` 样式。
 
 用逻辑属性编写两个方向都适用的布局：Rust 中的 `ms` / `me` 和 `ps` / `pe`（与 Tailwind 同名），TSX 中的 `marginStart` / `marginEnd`、`paddingStart` / `paddingEnd`、`start` / `end`、`borderTopStartRadius` 等，它们在从左到右布局中表示左和右，从右到左时则相反。`left` 和 `right` 本身也会互换。`direction` 样式（`"inherit"`、`"ltr"`、`"rtl"`）可以为子树覆盖方向，例如让电话号码或播放器控件保持从左到右。Tailwind 的 `rtl:` 和 `ltr:` 变体按方向生效。
 
@@ -409,7 +395,7 @@ const hairline = 1 / PixelRatio.get();
 ## 相关内容
 
 - [`nsh/device`](../modules/nsh-device.md)：参考。
-- [平台特定代码](./platform-specific.md)：`Platform.select`、平台属性与模块。
+- [平台特定代码](./platform-specific.md)：`platform.select`、平台属性与模块。
 - [无障碍](./accessibility.md)：屏幕阅读器与减少动态效果。
 - [`SafeAreaView`](../modules/nsh-base.md#safeareaview) 与[状态栏](../modules/nsh-base.md#status-bar)。
 - [Tailwind](./tailwind.md)：`dark:`、断点与方向变体。

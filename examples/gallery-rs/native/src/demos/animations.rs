@@ -440,7 +440,7 @@ fn EasingPlot() -> impl IntoElement {
         .child(
             scroll()
                 .horizontal()
-                .shows_indicator(false)
+                .scrollbar(false)
                 .child(view().flex_row().gap_2().children(chips)),
         )
         .child(Button::new("Play", move |_: &()| play()).icon(IconName::Play))

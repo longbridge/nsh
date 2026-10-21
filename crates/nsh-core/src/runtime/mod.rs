@@ -40,7 +40,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<android::Toast>()
             .module::<android::BackHandler>();
         let mut accessibility = Registry::runtime("nsh/accessibility");
-        accessibility.module::<accessibility::AccessibilityInfo>();
+        accessibility.module::<accessibility::Accessibility>();
         let mut image = Registry::runtime("nsh/image");
         image.module::<image::Image>();
         let mut clipboard = Registry::runtime("nsh/clipboard");

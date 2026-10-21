@@ -22,7 +22,7 @@ const Storage: {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
-  getAllKeys(): Promise<string[]>;
+  keys(): Promise<string[]>;
   clear(): Promise<void>;
 };
 ```
@@ -32,7 +32,7 @@ const Storage: {
 | `await Storage.getItem(key)` | `Storage::get_item(key) -> Option<String>` |
 | `await Storage.setItem(key, value)` | `Storage::set_item(key, value) -> Result<(), StorageFull>` |
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
-| `await Storage.getAllKeys()` | `Storage::get_all_keys() -> Vec<String>` |
+| `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
 
 The Rust functions are synchronous, as the entries are in memory: call them where components run (their bodies, handlers and tasks).
@@ -95,10 +95,10 @@ removeItem(key: string): Promise<void>;
 
 Removes `key` and its value. Removing a key that has no value does nothing. Rust: `Storage::remove_item(key)`.
 
-## Storage.getAllKeys
+## Storage.keys
 
 ```ts
-getAllKeys(): Promise<string[]>;
+keys(): Promise<string[]>;
 ```
 
 Resolves with every key, in order. Rust: `Storage::get_all_keys()`.

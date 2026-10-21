@@ -40,10 +40,8 @@ const Window: {
   toggleMaximize(): void;
   toggleFullScreen(): void;
   setFrame(frame: {
-    x?: number;
-    y?: number;
-    width?: number;
-    height?: number;
+    origin?: Partial<Point>;
+    size?: Partial<Size>;
     animated?: boolean;
     anchorTop?: boolean;
   }): void;
@@ -62,7 +60,7 @@ The Rust column names the functions of `nsh_core::ui::desktop`.
 | `minimize()` | | Minimizes the window. |
 | `toggleMaximize()` | | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | | Enters or leaves full screen. |
-| `setFrame(frame)` | | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `width` and `height` include window decorations; on Linux they set GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
+| `setFrame(frame)` | | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
 | `setLevel(level)` | | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
 | `orderFront()` | | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | `close_window()` | Closes the window; the app ends with it. |
@@ -156,16 +154,16 @@ On Windows the caption buttons are drawn by NSH in Windows 11's style and follow
 ```ts
 const Menu: {
   setApplicationMenu(items: MenuItem[] | null): void;
-  popup(items: MenuItem[], at?: { x: number; y: number }): Promise<void>;
+  popup(items: MenuItem[], at?: Point): Promise<void>;
 };
 ```
 
 | Member | Description |
 |---|---|
 | `setApplicationMenu(items)` | Sets the application menu: one submenu per top-level item (`File`, `Edit`, ...). On macOS it is the menu bar, whose first menu is the app menu (AppKit titles it with the app's name). On Windows and Linux it is the window's menu bar, which is not shown while the title bar is hidden; its shortcuts still work, and a title bar of the app's own can open its menus with `Menu.popup`. `null` restores the platform's default menu. |
-| `popup(items, at?)` | Shows a context menu with its top left corner at `at` (the window's coordinates, in points), or at the pointer. The promise resolves once the menu closes, whether an item was chosen or not: a button that opened it can stay pressed until then. |
+| `popup(items, at?)` | Shows a context menu with its top left corner at `at` (the window's coordinates, in points: an `onContextMenu`'s `e.pagePosition`), or at the pointer. The promise resolves once the menu closes, whether an item was chosen or not: a button that opened it can stay pressed until then. |
 
-Call `setApplicationMenu` again to change the menu. Inside an `effect` it follows the signals it reads: a check mark or an enabled state that depends on app state stays current.
+Call `setApplicationMenu` again to change the menu. Inside an `effect` it follows the signals it reads: a check mark or a disabled state that depends on app state stays current.
 
 ### Menu items
 
@@ -176,7 +174,7 @@ type MenuItem =
       label?: string;
       role?: MenuRole;
       shortcut?: string;
-      enabled?: boolean;
+      disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
       submenu?: MenuItem[];
@@ -188,7 +186,7 @@ type MenuItem =
 | `label` | What the item shows. A role's item has a label of its own without it. |
 | `onSelect` | Called when the item is chosen, by a click or its shortcut. |
 | `shortcut` | Its keyboard shortcut: modifiers and one key joined by `+`, such as `"mod+n"`, `"mod+shift+z"`, `"alt+f4"` or `"f11"`. The modifiers are in the table below. Keys are letters, digits and punctuation, written as the character the key types on a US keyboard without Shift (`,`, `/`; `"shift+/"` for `?`), or a name: `plus` (the `=` / `+` key, also `=`), `minus` (also `-`), `space`, `enter` (`return`), `escape` (`esc`), `tab`, `backspace`, `delete` (`del`), `insert`, the arrows `up`, `down`, `left`, `right` (`arrowup`, …), `home`, `end`, `pageup`, `pagedown`, `f1`–`f24`. Case does not matter (`"Mod+Shift+N"` is `"mod+shift+n"`; a capital letter is the same key, not Shift), and lowercase is the recommended style. An invalid shortcut (`"mod-n"`, `"mod++"`, `"mod+?"`) throws an error that gives the right spelling. `nsh/keymap` takes the same keystrokes. Menus show it in the platform's own style (`⇧⌘N` on macOS, `Ctrl+Shift+N` on Windows). |
-| `enabled` | `false` grays the item out (default `true`). |
+| `disabled` | `true` grays the item out (default `false`). |
 | `checked` | Set (to `true` or `false`) for an item with a check mark. |
 | `submenu` | Makes the item a submenu (it needs a `label`). |
 | `role` | A standard item the platform carries out (below). |
@@ -222,10 +220,10 @@ Menu shortcuts come first, as in native apps: a key an item takes never reaches 
 
 ```tsx
 import { effect, signal } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Menu } from "nsh/desktop";
 
-const mac = Platform.OS === "macos";
+const mac = platform.os === "macos";
 const wrap = signal(true);
 
 effect(() => {

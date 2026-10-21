@@ -331,7 +331,7 @@ fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
     surface.event(id, kind, EventPayload::Scroll(point(Points(x), Points(y))));
 }
 
-/// Ends momentum or a snap a new input interrupts (`onMomentumScrollEnd`,
+/// Ends momentum or a snap a new input interrupts (`onMomentumEnd`,
 /// as UIKit sends when a drag catches a glide).
 fn interrupt(surface: &Rc<Surface>, view: &NshView) {
     settle(surface, view);
@@ -341,7 +341,7 @@ fn interrupt(surface: &Rc<Surface>, view: &NshView) {
     );
     set_phase(view, Phase::Idle);
     if momentum {
-        emit(surface, view, EventKind::MomentumScrollEnd);
+        emit(surface, view, EventKind::MomentumEnd);
     }
 }
 
@@ -485,7 +485,7 @@ fn animate_to(
         set_phase(view, Phase::Idle);
         moved_to(surface, view, to);
         if momentum {
-            emit(surface, view, EventKind::MomentumScrollEnd);
+            emit(surface, view, EventKind::MomentumEnd);
         }
         if end {
             emit(surface, view, EventKind::ScrollEnd);
@@ -552,7 +552,7 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
     } else if let Some(target) = target {
         let duration = snap_duration(Points(target - pos), v);
         if duration > 0.0 {
-            emit(surface, view, EventKind::MomentumScrollBegin);
+            emit(surface, view, EventKind::MomentumStart);
         }
         animate_to(surface, view, target, duration, duration > 0.0, true);
     } else {
@@ -632,7 +632,7 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
             if t >= 1.0 {
                 set_phase(view, Phase::Idle);
                 if momentum {
-                    emit(surface, view, EventKind::MomentumScrollEnd);
+                    emit(surface, view, EventKind::MomentumEnd);
                 }
                 if end {
                     emit(surface, view, EventKind::ScrollEnd);
@@ -1341,7 +1341,7 @@ pub(crate) fn thumb_begin(surface: &Rc<Surface>, view: &NshView) {
         s.live.dark = surface.environment.get().color_scheme == nsh_engine::ColorScheme::Dark;
     }
     update_overlays(view);
-    emit(surface, view, EventKind::ScrollBeginDrag);
+    emit(surface, view, EventKind::ScrollDragStart);
 }
 
 /// The grabbed indicator was dragged by `(dx, dy)` points since it was
@@ -1382,7 +1382,7 @@ pub(crate) fn thumb_end(surface: &Rc<Surface>, view: &NshView) {
         s.live.shown = now();
     }
     ensure_ticking(surface, view);
-    emit(surface, view, EventKind::ScrollEndDrag);
+    emit(surface, view, EventKind::ScrollDragEnd);
     release(surface, view, 0.0, 0.0);
 }
 
@@ -1418,7 +1418,7 @@ pub(crate) fn wheel_begin(surface: &Rc<Surface>, view: &NshView) {
             raw,
         },
     );
-    emit(surface, view, EventKind::ScrollBeginDrag);
+    emit(surface, view, EventKind::ScrollDragStart);
 }
 
 /// A wheel or trackpad scroll by `(dx, dy)` points (positive: the content
@@ -1501,7 +1501,7 @@ pub(crate) fn wheel_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32)
     };
     set_phase(view, Phase::Idle);
     if gesture {
-        emit(surface, view, EventKind::ScrollEndDrag);
+        emit(surface, view, EventKind::ScrollDragEnd);
         pulled_to_refresh(surface, view);
     }
     // After the refresh check: refreshing lowers the top limit.
@@ -1531,7 +1531,7 @@ pub(crate) fn momentum_begin(surface: &Rc<Surface>, view: &NshView) -> bool {
         return false;
     }
     set_phase(view, Phase::Momentum);
-    emit(surface, view, EventKind::MomentumScrollBegin);
+    emit(surface, view, EventKind::MomentumStart);
     true
 }
 
@@ -1559,7 +1559,7 @@ pub(crate) fn momentum_end(surface: &Rc<Surface>, view: &NshView) {
         return;
     }
     set_phase(view, Phase::Idle);
-    emit(surface, view, EventKind::MomentumScrollEnd);
+    emit(surface, view, EventKind::MomentumEnd);
     emit(surface, view, EventKind::ScrollEnd);
 }
 

@@ -292,7 +292,8 @@ pub struct Prepared {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
-    /// Attachments: placeholder offset (UTF-16) and height.
+    /// Attachments: placeholder offset (UTF-16) and how far its top is
+    /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
 }
 
@@ -335,7 +336,43 @@ const WHOLE: CFRange = CFRange {
 };
 
 impl CoreTextEngine {
-    fn attributed_string(&self, text: &AttributedText) -> CFRetained<CFMutableAttributedString> {
+    /// Where attachment `a` of `text` sits: how far its top is above the
+    /// baseline, and its run delegate's ascent and descent
+    /// (`TextAttachment::ascent` and `extent` in its placeholder's font).
+    fn attachment_metrics(
+        &self,
+        text: &AttributedText,
+        a: &nsh_core::TextAttachment,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> (CGFloat, CGFloat, CGFloat) {
+        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+            nsh_core::FontExtent::default()
+        } else {
+            let style = text
+                .span_at(a.index)
+                .map_or_else(Default::default, |s| s.style);
+            let f = self.fonts.get(&style);
+            // SAFETY: a valid font.
+            let (ascent, descent, x) = unsafe { (f.ascent(), f.descent(), f.x_height()) };
+            nsh_core::FontExtent::new(
+                Points(ascent as f32),
+                Points(descent as f32),
+                Points(x as f32),
+            )
+        };
+        let (up, down) = a.extent(font, alignments.get(a.index));
+        (
+            a.ascent(font, alignments.get(a.index)).0 as CGFloat,
+            up.0 as CGFloat,
+            down.0 as CGFloat,
+        )
+    }
+
+    fn attributed_string(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> CFRetained<CFMutableAttributedString> {
         let string =
             CFMutableAttributedString::new(None, 0).expect("CFAttributedStringCreateMutable");
         let s = Some(&*string);
@@ -435,15 +472,17 @@ impl CoreTextEngine {
                 set(range, background_key(), node.as_ref());
             }
         }
-        // Attachments: their placeholders take the attachment's size (on the
-        // baseline) and draw nothing.
+        // Attachments: their placeholders take the attachment's width and
+        // its extent around the baseline (`verticalAlign`), and draw
+        // nothing.
         let clear = cg_color(Color::TRANSPARENT);
         for a in &text.attachments {
             let range = CFRange {
                 location: a.index as CFIndex,
                 length: 1,
             };
-            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, a.height.0 as CGFloat) {
+            let (_, ascent, descent) = self.attachment_metrics(text, a, alignments);
+            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, ascent, descent) {
                 set(
                     range,
                     unsafe { kCTRunDelegateAttributeName },
@@ -461,9 +500,14 @@ impl CoreTextEngine {
     }
 }
 
-/// A run delegate reserving `width` x `height` above the baseline.
-fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDelegate>> {
-    type Size = [CGFloat; 2];
+/// A run delegate reserving `width`, `ascent` above the baseline and
+/// `descent` below it.
+fn run_delegate(
+    width: CGFloat,
+    ascent: CGFloat,
+    descent: CGFloat,
+) -> Option<CFRetained<CTRunDelegate>> {
+    type Size = [CGFloat; 3];
     unsafe extern "C-unwind" fn dealloc(refcon: NonNull<c_void>) {
         // SAFETY: the box created below, freed once by CoreText.
         drop(unsafe { Box::from_raw(refcon.as_ptr().cast::<Size>()) });
@@ -472,8 +516,9 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
         // SAFETY: the live box created below.
         unsafe { (*refcon.as_ptr().cast::<Size>())[1] }
     }
-    unsafe extern "C-unwind" fn get_descent(_: NonNull<c_void>) -> CGFloat {
-        0.0
+    unsafe extern "C-unwind" fn get_descent(refcon: NonNull<c_void>) -> CGFloat {
+        // SAFETY: as above.
+        unsafe { (*refcon.as_ptr().cast::<Size>())[2] }
     }
     unsafe extern "C-unwind" fn get_width(refcon: NonNull<c_void>) -> CGFloat {
         // SAFETY: as above.
@@ -486,7 +531,7 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
         getDescent: Some(get_descent),
         getWidth: Some(get_width),
     };
-    let refcon = Box::into_raw(Box::new([width, height]));
+    let refcon = Box::into_raw(Box::new([width, ascent, descent]));
     // SAFETY: static callbacks; the delegate owns `refcon` (freed by
     // `dealloc`).
     let delegate = unsafe { CTRunDelegate::new(NonNull::from(&CALLBACKS), refcon.cast()) };
@@ -497,8 +542,9 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
     delegate
 }
 
-/// Where the lines put the placeholders at `attachments` (offset, height):
-/// the top left of each (y down in a box `height` tall), if shown.
+/// Where the lines put the placeholders at `attachments` (offset, top
+/// above the baseline): the top left of each (y down in a box `height`
+/// tall), if shown.
 fn attachment_points(
     lines: &[LaidLine],
     attachments: &[(CFIndex, CGFloat)],
@@ -690,7 +736,15 @@ impl TextEngine for CoreTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
-        let string = self.attributed_string(text);
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
+        let string = self.attributed_string(text, alignments);
         let attributed: &CFAttributedString = &string;
         // SAFETY: a valid attributed string.
         let framesetter = unsafe { CTFramesetter::with_attributed_string(attributed) };
@@ -704,7 +758,12 @@ impl TextEngine for CoreTextEngine {
             attachments: text
                 .attachments
                 .iter()
-                .map(|a| (a.index as CFIndex, a.height.0 as CGFloat))
+                .map(|a| {
+                    (
+                        a.index as CFIndex,
+                        self.attachment_metrics(text, a, alignments).0,
+                    )
+                })
                 .collect(),
         }
     }

@@ -151,7 +151,7 @@ const toggle = (id: number) =>
 
 ## 属性
 
-列表接受滚动视图中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollEnabled`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollBeginDrag`、`onScrollEndDrag`、`onMomentumScrollBegin`、`onMomentumScrollEnd`、`onScrollEnd`、`scrollValue`；在 Rust 中是与滚动视图相同的方法），说明见[滚动](./scrolling.md)。列表保持 1 倍缩放。它自己的属性：
+列表接受滚动视图中对列表有意义的所有滚动属性（`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`decelerationRate`、`disableIntervalMomentum`、`bounces`、`scrollable`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`keyboardDismissMode`、`scrollEventThrottle`、`onScroll`、`onScrollDragStart`、`onScrollDragEnd`、`onMomentumStart`、`onMomentumEnd`、`onScrollEnd`、`scrollValue`；在 Rust 中是与滚动视图相同的方法），说明见[滚动](./scrolling.md)。列表保持 1 倍缩放。它自己的属性：
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
@@ -171,13 +171,13 @@ const toggle = (id: number) =>
 | `empty` | `.empty(..)` | 组件或元素 | | 没有条目时代替条目显示。 |
 | `separator` | `.separator(\|\| ..)` | 组件或元素 | | 条目之间（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前滚动到该条目。 |
-| `onEndReached` | `.on_end_reached(..)` | `() => void` | | 接近末尾（见下文）。 |
-| `onEndReachedThreshold` | `.end_reached_threshold(..)` | `number` | `1` | 距离末尾多少个视口时触发 `onEndReached`。 |
-| `onViewableItemsChanged` | `.on_viewable_items_changed(..)` | `(info) => void` | | 有条目变为可见或不再可见。 |
+| `onLoadMore` | `.on_load_more(..)` | `() => void` | | 接近末尾（见下文）。 |
+| `loadMoreThreshold` | `.load_more_threshold(..)` | `number` | `1` | 距离末尾多少个视口时触发 `onLoadMore`。 |
+| `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info) => void` | | 有条目变为可见或不再可见。 |
 | `viewabilityConfig` | `.viewability(..)`、`.minimum_view_time(..)` | `ViewabilityConfig` | | 什么情况下条目算作可见。 |
 | `keyExtractor` | `.keys(..)` | `(item, index) => string` | | 可见性回调中的键；在 Rust 中是各行的标识。 |
 | `refreshing` / `onRefresh` | `.refreshing(..)` / `.on_refresh(..)` | `boolean` / `() => void` | | 下拉刷新。 |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `ref` | `.element_ref(&list)` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
 头部、尾部和空状态插槽接受元素（在 TSX 中也可以是组件：`header={Header}`）。它们是独立的单元格，从不被复用，并且和其他元素一样是响应式的。
@@ -279,7 +279,7 @@ for (const [letter, names] of groups) {
 
 ## 聊天：倒置列表
 
-`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面；添加消息时插到前面，用 `onEndReached` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。
+`inverted` 让列表从末尾开始排版：第 0 项在底部，列表初始滚动到末尾，并在条目变化时保持与末尾的距离。把最新的消息放在最前面；添加消息时插到前面，用 `onLoadMore` 加载更早的消息时追加到后面（倒置列表的"末尾"是顶部）。
 
 ```rust tabs
 use nsh_base::keyboard_avoiding_view;
@@ -344,8 +344,8 @@ pub fn chat() -> impl IntoElement {
     .content_padding(px(12.0))
     .row_gap(px(6.0))
     .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-    .on_end_reached(load_older)
-    .end_reached_threshold(0.5)
+    .on_load_more(load_older)
+    .load_more_threshold(0.5)
     .flex_1();
     keyboard_avoiding_view()
         .flex_1()
@@ -398,8 +398,8 @@ function Chat() {
         style={{ flex: 1 }}
         contentStyle={{ padding: 12, gap: 6 }}
         keyboardDismissMode="interactive"
-        onEndReached={loadOlder}
-        onEndReachedThreshold={0.5}
+        onLoadMore={loadOlder}
+        loadMoreThreshold={0.5}
       >
         {(m) => (
           <View
@@ -472,7 +472,7 @@ virtual_list(count, move |at| {
 .estimated_item_size(px(232.0))
 .snap_interval(px(232.0))
 .deceleration(0.99)
-.shows_indicator(false)
+.scrollbar(false)
 .content_padding_x(px(16.0))
 .column_gap(px(12.0))
 .h(px(140.0))
@@ -485,7 +485,7 @@ virtual_list(count, move |at| {
   estimatedItemSize={232}
   snapToInterval={232}
   decelerationRate="fast"
-  showsIndicator={false}
+  scrollbar={false}
   style={{ height: 140 }}
   contentStyle={{ paddingHorizontal: 16, gap: 12 }}
 >
@@ -495,9 +495,9 @@ virtual_list(count, move |at| {
 
 在从右到左布局中，横向列表从右侧开始向左排列。
 
-## 加载更多：onEndReached
+## 加载更多：onLoadMore
 
-当视口距离末尾不到 `onEndReachedThreshold` 个视口时（默认 1：提前一屏），触发 `onEndReached`（`.on_end_reached(..)`）。追加下一页数据；新的末尾临近时会再次触发。
+当视口距离末尾不到 `loadMoreThreshold` 个视口时（默认 1：提前一屏），触发 `onLoadMore`（`.on_load_more(..)`）。追加下一页数据；新的末尾临近时会再次触发。
 
 ```rust tabs
 let posts = signal(Vec::<Post>::new());
@@ -524,8 +524,8 @@ load_more();
 
 virtual_list(move || posts.with(Vec::len), move |at| post_row(posts, at))
     .estimated_item_size(px(72.0))
-    .on_end_reached(load_more)
-    .end_reached_threshold(0.5)
+    .on_load_more(load_more)
+    .load_more_threshold(0.5)
     .footer(text("Loading…").p_4().text_center().text_color(rgb(0x8c959f)))
     .flex_1()
 ```
@@ -551,8 +551,8 @@ loadMore();
   each={posts()}
   estimatedItemSize={72}
   style={{ flex: 1 }}
-  onEndReached={loadMore}
-  onEndReachedThreshold={0.5}
+  onLoadMore={loadMore}
+  loadMoreThreshold={0.5}
   footer={<Text style={{ padding: 16, textAlign: "center", color: "#8c959f" }}>Loading…</Text>}
 >
   {(post) => <PostRow post={post()} />}
@@ -563,7 +563,7 @@ loadMore();
 
 ## 可见性
 
-`onViewableItemsChanged`（`.on_viewable_items_changed(..)`）报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。在 TSX 中它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组；在 Rust 中它收到 `ViewableItems`，包含第一个和最后一个可见行（`viewable`）以及状态发生变化的行（`changed()`）。可见性由原生计算，你的代码只在变化时收到通知。
+`onViewableItemsChange`（`.on_viewable_items_change(..)`）报告哪些条目在屏幕上，可用于统计曝光、自动播放可见的视频或把消息标记为已读。在 TSX 中它收到 `{ viewableItems, changed }`，两者都是由 `{ item, key, index, isViewable }` 组成的数组；在 Rust 中它收到 `ViewableItems`，包含第一个和最后一个可见行（`viewable`）以及状态发生变化的行（`changed()`）。可见性由原生计算，你的代码只在变化时收到通知。
 
 | `viewabilityConfig` | Rust | 说明 |
 |---|---|---|
@@ -583,7 +583,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
         ..Viewability::default()
     })
     .minimum_view_time(Duration::from_millis(250))
-    .on_viewable_items_changed(move |rows: &ViewableItems| {
+    .on_viewable_items_change(move |rows: &ViewableItems| {
         playing.set(rows.viewable.map(|(first, _)| first))
     })
     .flex_1()
@@ -596,7 +596,7 @@ virtual_list(count, move |at| video_card(videos.clone(), at))
   style={{ flex: 1 }}
   keyExtractor={(v) => v.slug}
   viewabilityConfig={{ itemVisiblePercentThreshold: 60, minimumViewTime: 250 }}
-  onViewableItemsChanged={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
+  onViewableItemsChange={({ viewableItems }) => playing.set(viewableItems[0]?.key ?? null)}
 >
   {(v) => <VideoCard video={v()} />}
 </List>

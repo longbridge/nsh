@@ -1102,14 +1102,14 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ScrollConfig {
             id,
             horizontal,
-            shows_indicator,
+            scrollbar_visible,
             mirrored,
             ..
         } => {
             out.item("sc")
                 .num(*id)
                 .bool(*horizontal)
-                .bool(*shows_indicator)
+                .bool(*scrollbar_visible)
                 .bool(*mirrored)
                 .end();
         }
@@ -1232,7 +1232,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     .opt_str(base)
                     .opt_str(w.injected_js_before.as_deref())
                     .opt_str(w.injected_js.as_deref())
-                    .bool(w.scroll_enabled)
+                    .bool(w.scrollable)
                     .bool(w.javascript_enabled)
                     .end();
             }

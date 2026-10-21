@@ -349,4 +349,4 @@ TSX 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 - [全局 API](../modules/globals.md)：所有全局对象及其成员。
 - [沙箱与能力声明](./sandbox-and-capabilities.md)：能力、限制以及嵌入应用如何授予它们。
 - [图片与资源](./images-and-assets.md)：远程图片。
-- [列表](./lists.md#加载更多onendreached)：分页加载 API 数据。
+- [列表](./lists.md#加载更多onloadmore)：分页加载 API 数据。

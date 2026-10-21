@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Popover } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 type Placement = "top" | "bottom" | "left" | "right";
@@ -43,7 +43,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>popover</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop
+        {platform.idiom === "desktop"
           ? "Open it, then click “Count” below: one click closes it and presses the button"
           : "Open it, then tap “Count” below: the tap only closes it"}
       </Text>

@@ -19,7 +19,7 @@ use crate::ChannelSink;
 
 /// A 2× logo of 64 × 64 points, as `asset!` describes one.
 const LOGO: ImageAsset = ImageAsset {
-    uri: "asset:/@app/logo@2x.png",
+    url: "asset:/@app/logo@2x.png",
     size: nsh_core::geometry::Size {
         width: Points(64.0),
         height: Points(64.0),
@@ -178,7 +178,7 @@ fn an_asset_image_lays_out_at_its_natural_size() {
     let (logo, _, natural) = seen
         .images
         .iter()
-        .find(|i| i.1 == LOGO.uri)
+        .find(|i| i.1 == LOGO.url)
         .expect("the logo's source")
         .clone();
     assert_eq!(natural, Some(size(px(64.0), px(64.0))));

@@ -83,7 +83,7 @@
   are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts,
   toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
   size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
-  in classes included, stay as they are. The layout direction stays the system's (`I18nManager` decides it in the app).
+  in classes included, stay as they are. The layout direction stays the system's language's.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

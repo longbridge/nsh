@@ -133,6 +133,7 @@ function StatusBarCard() {
         animation="fade"
         statusBar={{ foreground: foreground(), hidden: barHidden(), animated: true }}
         onOpenChange={(o) => open.set(o)}
+        style={{ flex: 1 }}
       >
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16, backgroundColor: backdrop() }}>
           <Text style={{ fontSize: 13, color: foreground() === "light" ? "#ffffff" : "#111214", fontFamily: mono }}>
@@ -372,7 +373,7 @@ function ContextMenu() {
   const menu = () =>
     Menu.popup([
       { label: "Copy", onSelect: () => chosen.set("Copy") },
-      { label: "Paste", enabled: false },
+      { label: "Paste", disabled: true },
       { label: "Share", submenu: [{ label: "Mail", onSelect: () => chosen.set("Share > Mail") }] },
     ]);
   return (

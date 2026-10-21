@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Button, Dialog, SafeAreaView } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { tint, ui } from "./palette";
 
 function App() {
@@ -50,7 +50,7 @@ function App() {
           <Text style={{ color: ui().accent, fontSize: 15, fontWeight: "600" }}>{log()}</Text>
         </View>
         <Text style={{ color: ui().faint, fontSize: 13 }}>
-          {Platform.isDesktop
+          {platform.idiom === "desktop"
             ? "Close with Escape or a click on the backdrop."
             : "Close with a tap on the backdrop, a swipe down or the back button. On iOS the sheet is a system pageSheet."}
         </Text>

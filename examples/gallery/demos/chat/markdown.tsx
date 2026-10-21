@@ -30,8 +30,8 @@ export function Markdown(props: {
         markdown={props.md}
         options={{ streaming: !!props.streaming }}
         selectable
-        codeBlockScrollIndicator={false}
-        caret={props.caret}
+        codeBlockScrollbar={false}
+        streamingCaret={props.caret}
         styles={{
           // A chat's scale: tighter than a document's.
           root: { gap: 12, fontSize: 15, lineHeight: 22, color: colors.text },

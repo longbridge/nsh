@@ -58,7 +58,7 @@ function Player() {
     <View style={{ gap: 12 }}>
       <Video
         ref={video}
-        source="https://example.com/clip.mp4"
+        src="https://example.com/clip.mp4"
         paused={paused()}
         repeat
         resizeMode="contain"
@@ -75,7 +75,7 @@ function Player() {
 }
 ```
 
-In TSX `source` is required (see the [Video API](../modules/nsh-video.md)). See the
+In TSX `src` is required (see the [Video API](../modules/nsh-video.md)). See the
 [web view and video guide](../docs/web-view-and-video.md).
 
 ## Props
@@ -84,7 +84,7 @@ A video takes the props of a [view](./view.md) (it has no children) plus:
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `source` | `video(url)` | `string \| { uri: string }` | | The video's URL (in Rust, an asset's `uri` too: `video(CLIP.uri)`). |
+| `src` | `video(url)` | `string` | | The video's URL (in Rust, an asset's `uri` too: `video(CLIP.uri)`). |
 | `paused` | `.paused(..)` | `boolean` | `false` | Playback is paused. |
 | `muted` | `.muted(..)` | `boolean` | `false` | No sound. |
 | `volume` | `.volume(..)` | `number` | `1` | 0..1. |
@@ -102,7 +102,7 @@ an aspect ratio when you want the video's own proportions.
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | none | Loading began. |
-| `onLoad` | `.on_load` | `{ duration, width, height }` (`VideoInfo`: `duration`, `size`) | The video is ready: its duration in seconds and its size. |
+| `onLoad` | `.on_load` | `{ duration, size }` (`VideoInfo`: `duration`, `size`) | The video is ready: its duration in seconds and its size. |
 | `onProgress` | `.on_progress` | `{ currentTime, duration }` (`VideoProgress`: `current_time`, `duration`) | Every `progressUpdateInterval` while playing (seconds). |
 | `onBuffer` | `.on_buffer` | `{ isBuffering }` (`bool`) | Playback stalled for data / resumed. |
 | `onEnd` | `.on_end` | none | Playback reached the end (with `repeat`, at the end of each loop). |
@@ -121,7 +121,7 @@ video(url)
 
 ```tsx tabs
 const ratio = signal(16 / 9);
-<Video source={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.width / e.height)} />;
+<Video src={url} style={{ width: "100%", aspectRatio: ratio() }} onLoad={(e) => ratio.set(e.size.width / e.size.height)} />;
 ```
 
 ## Ref methods

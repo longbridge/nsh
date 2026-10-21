@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Sheet } from "nsh/base";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 type Side = "bottom" | "top" | "left" | "right";
@@ -32,7 +32,7 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>sheet</Text>
       <Text style={{ color: ui().muted }}>
-        {Platform.isDesktop ? "Open a side; click the backdrop or press Escape to close it" : "Open a side; tap the backdrop or Android's back to close it"}
+        {platform.idiom === "desktop" ? "Open a side; click the backdrop or press Escape to close it" : "Open a side; tap the backdrop or Android's back to close it"}
       </Text>
 
       <View style={{ flex: 1, minHeight: 200, alignItems: "center", justifyContent: "center" }}>
@@ -75,7 +75,7 @@ function App() {
       >
         <Text style={{ fontSize: 17, fontWeight: "700", color: ui().text }}>Filters</Text>
         <Text style={{ fontSize: 14, color: ui().muted }}>
-          A panel at the {side()} edge. {Platform.isDesktop ? "The backdrop and Escape close it." : "The backdrop and Android's back close it."}
+          A panel at the {side()} edge. {platform.idiom === "desktop" ? "The backdrop and Escape close it." : "The backdrop and Android's back close it."}
         </Text>
         <View
           onPress={() => {

@@ -181,7 +181,7 @@ let composing = false;
 | `readonly` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
 | `autoFocus` | `boolean` | `false` | 出现时自动获得焦点。 |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | 单行 `"blurAndSubmit"`，多行 `"newline"` | 回车键做什么：提交并保持焦点、提交后失去焦点，或插入换行（仅多行）。 |
-| `caretHidden` | `boolean` | `false` | 不绘制光标。 |
+| `caret` | `boolean` | `true` | 绘制光标；`false` 隐藏光标。 |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | 键盘的外观（iOS）。 |
 | `selectedRange` | `{ start: number; end?: number }` | | 受控的选区，单位为 UTF-16 码元。 |
 | `allowFontScaling` | `boolean` | `true` | 跟随系统文字大小。 |
@@ -660,7 +660,7 @@ function Note() {
 }
 ```
 
-工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图（`nsh/ios` 的 `isAvailable` 为 `false`），所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `Platform.OS === "android"`）。
+工具栏与窗口等宽，高度由内容决定。输入附件视图是 iOS 的功能：在 Android 上它是一个空的隐藏视图（`nsh/ios` 的 `isAvailable` 为 `false`），所以在那里要为这些控件另找位置，例如放在输入框上方（Rust 中判断 `os() == Os::Android`，TSX 中判断 `platform.os === "android"`）。
 
 ## 相关内容
 

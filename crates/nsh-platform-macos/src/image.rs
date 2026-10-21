@@ -24,7 +24,7 @@
 //! points (CSS pixels of the SVG). Canvases draw bitmaps only.
 //!
 //! Animated GIF / PNG / WebP images play through a keyframe animation of the
-//! layer's `contents`. `defaultSource` shows until the image arrives (and
+//! layer's `contents`. The `placeholder` shows until the image arrives (and
 //! stays on error); an image that had to load fades in over `fadeDuration`
 //! (default 0, as iOS).
 

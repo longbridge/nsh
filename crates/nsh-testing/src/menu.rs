@@ -13,8 +13,8 @@ use nsh_core::desktop::{MenuAction, MenuItem};
 pub struct Entry {
     /// Its label; a submenu's actions after the submenu's (`"Share > Mail"`).
     pub label: String,
-    /// It can be chosen.
-    pub enabled: bool,
+    /// It cannot be chosen (it, or a submenu around it, is disabled).
+    pub disabled: bool,
     /// Its check mark, when it is a checkable item.
     pub checked: Option<bool>,
 }
@@ -32,7 +32,7 @@ fn collect(items: &[MenuItem], prefix: &str, enabled: bool, out: &mut Vec<Entry>
             MenuItem::Separator => {}
             MenuItem::Action(action) => out.push(Entry {
                 label: format!("{prefix}{}", action.label),
-                enabled: enabled && action.enabled,
+                disabled: !(enabled && action.enabled),
                 checked: action.checked,
             }),
             MenuItem::Submenu {

@@ -397,7 +397,7 @@ fn instant() -> Screen {
 }
 
 fn headerless() -> Screen {
-    nav_page().header_shown(false).child(
+    nav_page().header_visible(false).child(
         safe_area_view().flex_1().bg(colors::BACKGROUND).child(
             view()
                 .flex_1()
@@ -405,7 +405,7 @@ fn headerless() -> Screen {
                 .gap_4()
                 .child(
                     appear().index(0).child(
-                        title_block("headerShown={false}", "No header", 30.0)
+                        title_block("headerVisible={false}", "No header", 30.0)
                             .px_1()
                             .pt_3()
                             .child(body(
@@ -664,7 +664,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
             "headerless",
             IconName::Mobile,
             "No header",
-            "headerShown={false}",
+            "headerVisible={false}",
             headerless,
         ),
         (

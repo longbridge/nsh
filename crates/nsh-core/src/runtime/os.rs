@@ -15,12 +15,16 @@ impl Os {
     /// The native platform's line ending.
     pub(crate) const EOL: &'static str = if cfg!(windows) { "\r\n" } else { "\n" };
 
-    /// The native operating system name.
+    /// The native operating system's name, as Rust's `std::env::consts::OS`
+    /// and gpui-shell's say it: `"macos"`, `"windows"`, `"linux"`, `"ios"`,
+    /// `"android"` (not Node's `"darwin"` / `"win32"`).
     pub(crate) fn platform() -> String {
         std::env::consts::OS.to_owned()
     }
 
-    /// The native CPU architecture name.
+    /// The native CPU architecture's name, as Rust's
+    /// `std::env::consts::ARCH` and gpui-shell's say it: `"aarch64"`,
+    /// `"x86_64"` (not Node's `"arm64"` / `"x64"`).
     pub(crate) fn arch() -> String {
         std::env::consts::ARCH.to_owned()
     }

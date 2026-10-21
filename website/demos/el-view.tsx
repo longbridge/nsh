@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { ui } from "./palette";
 
 function App() {
@@ -28,7 +28,7 @@ function App() {
           activeStyle={{ backgroundColor: ui().border }}
           style={{ ...ui().card, backgroundImage: "none", borderRadius: 16, padding: 16 }}
         >
-          <Text style={{ color: ui().text, fontSize: 16 }}>activeStyle background ({Platform.isDesktop ? "click" : "tap"} and hold)</Text>
+          <Text style={{ color: ui().text, fontSize: 16 }}>activeStyle background ({platform.idiom === "desktop" ? "click" : "tap"} and hold)</Text>
         </View>
 
         <View class="flex-row gap-3">
@@ -47,7 +47,7 @@ function App() {
         </View>
 
         <View
-          onLayout={(e) => size.set(`${Math.round(e.width)} × ${Math.round(e.height)} pt`)}
+          onLayout={(e) => size.set(`${Math.round(e.size.width)} × ${Math.round(e.size.height)} pt`)}
           style={{ flex: 1, borderRadius: 12, borderWidth: 2, borderStyle: "dashed", borderColor: ui().faint, alignItems: "center", justifyContent: "center" }}
         >
           <Text style={{ color: ui().muted }}>onLayout: {size()}</Text>

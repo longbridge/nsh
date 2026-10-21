@@ -291,7 +291,8 @@ pub struct Prepared {
     max_lines: u32,
     ellipsize: EllipsizeMode,
     align: TextAlign,
-    /// Attachments: placeholder offset (UTF-16) and height.
+    /// Attachments: placeholder offset (UTF-16) and how far its top is
+    /// above the baseline (`TextAttachment::ascent`).
     attachments: Vec<(CFIndex, CGFloat)>,
 }
 
@@ -334,7 +335,43 @@ const WHOLE: CFRange = CFRange {
 };
 
 impl CoreTextEngine {
-    fn attributed_string(&self, text: &AttributedText) -> CFRetained<CFMutableAttributedString> {
+    /// Where attachment `a` of `text` sits: how far its top is above the
+    /// baseline, and its run delegate's ascent and descent
+    /// (`TextAttachment::ascent` and `extent` in its placeholder's font).
+    fn attachment_metrics(
+        &self,
+        text: &AttributedText,
+        a: &nsh_core::TextAttachment,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> (CGFloat, CGFloat, CGFloat) {
+        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+            nsh_core::FontExtent::default()
+        } else {
+            let style = text
+                .span_at(a.index)
+                .map_or_else(Default::default, |s| s.style);
+            let f = self.fonts.get(&style);
+            // SAFETY: a valid font.
+            let (ascent, descent, x) = unsafe { (f.ascent(), f.descent(), f.x_height()) };
+            nsh_core::FontExtent::new(
+                Points(ascent as f32),
+                Points(descent as f32),
+                Points(x as f32),
+            )
+        };
+        let (up, down) = a.extent(font, alignments.get(a.index));
+        (
+            a.ascent(font, alignments.get(a.index)).0 as CGFloat,
+            up.0 as CGFloat,
+            down.0 as CGFloat,
+        )
+    }
+
+    fn attributed_string(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> CFRetained<CFMutableAttributedString> {
         let string =
             CFMutableAttributedString::new(None, 0).expect("CFAttributedStringCreateMutable");
         let s = Some(&*string);
@@ -434,15 +471,17 @@ impl CoreTextEngine {
                 set(range, background_key(), node.as_ref());
             }
         }
-        // Attachments: their placeholders take the attachment's size (on the
-        // baseline) and draw nothing.
+        // Attachments: their placeholders take the attachment's width and
+        // its extent around the baseline (`verticalAlign`), and draw
+        // nothing.
         let clear = cg_color(Color::TRANSPARENT);
         for a in &text.attachments {
             let range = CFRange {
                 location: a.index as CFIndex,
                 length: 1,
             };
-            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, a.height.0 as CGFloat) {
+            let (_, ascent, descent) = self.attachment_metrics(text, a, alignments);
+            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, ascent, descent) {
                 set(
                     range,
                     unsafe { kCTRunDelegateAttributeName },
@@ -460,9 +499,14 @@ impl CoreTextEngine {
     }
 }
 
-/// A run delegate reserving `width` x `height` above the baseline.
-fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDelegate>> {
-    type Size = [CGFloat; 2];
+/// A run delegate reserving `width`, `ascent` above the baseline and
+/// `descent` below it.
+fn run_delegate(
+    width: CGFloat,
+    ascent: CGFloat,
+    descent: CGFloat,
+) -> Option<CFRetained<CTRunDelegate>> {
+    type Size = [CGFloat; 3];
     unsafe extern "C-unwind" fn dealloc(refcon: NonNull<c_void>) {
         // SAFETY: the box created below, freed once by CoreText.
         drop(unsafe { Box::from_raw(refcon.as_ptr().cast::<Size>()) });
@@ -471,8 +515,9 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
         // SAFETY: the live box created below.
         unsafe { (*refcon.as_ptr().cast::<Size>())[1] }
     }
-    unsafe extern "C-unwind" fn get_descent(_: NonNull<c_void>) -> CGFloat {
-        0.0
+    unsafe extern "C-unwind" fn get_descent(refcon: NonNull<c_void>) -> CGFloat {
+        // SAFETY: as above.
+        unsafe { (*refcon.as_ptr().cast::<Size>())[2] }
     }
     unsafe extern "C-unwind" fn get_width(refcon: NonNull<c_void>) -> CGFloat {
         // SAFETY: as above.
@@ -485,7 +530,7 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
         getDescent: Some(get_descent),
         getWidth: Some(get_width),
     };
-    let refcon = Box::into_raw(Box::new([width, height]));
+    let refcon = Box::into_raw(Box::new([width, ascent, descent]));
     // SAFETY: static callbacks; the delegate owns `refcon` (freed by
     // `dealloc`).
     let delegate = unsafe { CTRunDelegate::new(NonNull::from(&CALLBACKS), refcon.cast()) };
@@ -496,8 +541,9 @@ fn run_delegate(width: CGFloat, height: CGFloat) -> Option<CFRetained<CTRunDeleg
     delegate
 }
 
-/// Where the lines put the placeholders at `attachments` (offset, height):
-/// the top left of each (y down in a box `height` tall), if shown.
+/// Where the lines put the placeholders at `attachments` (offset, top
+/// above the baseline): the top left of each (y down in a box `height`
+/// tall), if shown.
 fn attachment_points(
     lines: &[LaidLine],
     attachments: &[(CFIndex, CGFloat)],
@@ -689,7 +735,15 @@ impl TextEngine for CoreTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, text: &AttributedText) -> Prepared {
-        let string = self.attributed_string(text);
+        self.prepare_aligned(text, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
+        let string = self.attributed_string(text, alignments);
         let attributed: &CFAttributedString = &string;
         // SAFETY: a valid attributed string.
         let framesetter = unsafe { CTFramesetter::with_attributed_string(attributed) };
@@ -703,7 +757,12 @@ impl TextEngine for CoreTextEngine {
             attachments: text
                 .attachments
                 .iter()
-                .map(|a| (a.index as CFIndex, a.height.0 as CGFloat))
+                .map(|a| {
+                    (
+                        a.index as CFIndex,
+                        self.attachment_metrics(text, a, alignments).0,
+                    )
+                })
                 .collect(),
         }
     }
@@ -1296,6 +1355,19 @@ pub(crate) fn caret_at(state: &crate::view::ViewState, x: f32, y: f32) -> u32 {
         .map_or(0, |l| l.caret_at(x).max(0) as u32)
 }
 
+/// The rectangles (view coordinates) the characters `start..end` of the
+/// text view with `state` cover, one per line (the test agent's spans).
+#[cfg(feature = "dev")]
+pub(crate) fn range_rects(state: &crate::view::ViewState, start: u32, end: u32) -> Vec<CGRect> {
+    let Some(drawn) = state.text.as_ref() else {
+        return Vec::new();
+    };
+    let Some(layout) = drawn.layout.downcast::<CoreTextLayout>() else {
+        return Vec::new();
+    };
+    selection_rects(layout, drawn.content, (start, end))
+}
+
 /// The rectangles (view coordinates) the selected `range` covers, one per
 /// line.
 fn selection_rects(
@@ -1841,4 +1913,64 @@ fn stroke_decoration(
     }
     CGContext::stroke_path(c);
     CGContext::restore_g_state(c);
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{AttributedText, Points, ResolvedTextStyle, Size, TextEngine, VerticalAlign};
+
+    use super::CoreTextEngine;
+
+    /// The baseline of the first line, the attachment's top and the line's
+    /// extent above and below the baseline.
+    fn place(align: VerticalAlign) -> (f32, f32, f32, f32) {
+        let engine = CoreTextEngine::default();
+        let style = ResolvedTextStyle {
+            font_size: Points(14.0),
+            ..ResolvedTextStyle::default()
+        };
+        let mut t = AttributedText::default();
+        t.push("Ax", style);
+        let mut alignments = nsh_core::AttachmentAlignments::default();
+        alignments.push(&mut t, Size::new(Points(10.0), Points(30.0)), align, style);
+        let prepared = engine.prepare_aligned(&t, &alignments);
+        let size = engine.measure(&prepared, None);
+        let layout = engine.layout(&prepared, size);
+        let line = engine.lines(&layout).remove(0);
+        let top = engine.attachments(&layout)[0].expect("shown").y.0;
+        let baseline = line.y.0 + line.ascender.0;
+        (baseline, top, line.ascender.0, line.descender.0)
+    }
+
+    #[test]
+    fn attachments_sit_by_vertical_align() {
+        let font = CoreTextEngine::default().fonts.get(&ResolvedTextStyle {
+            font_size: Points(14.0),
+            ..ResolvedTextStyle::default()
+        });
+        // SAFETY: a valid font.
+        let (ascent, descent, x) = unsafe { (font.ascent(), font.descent(), font.x_height()) };
+        let (ascent, descent, x) = (ascent as f32, descent as f32, x as f32);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+
+        let (baseline, top, up, down) = place(VerticalAlign::Baseline);
+        assert!(near(top, baseline - 30.0), "{top} {baseline}");
+        assert!(near(up, 30.0) && near(down, descent), "{up} {down}");
+
+        // Its top at the font's: the line grows below the baseline.
+        let (baseline, top, up, down) = place(VerticalAlign::TextTop);
+        assert!(near(top, baseline - ascent), "{top} {baseline}");
+        assert!(near(up, ascent) && near(down, 30.0 - ascent), "{up} {down}");
+
+        // Its bottom at the font's (Android's `ImageSpan` default).
+        let (baseline, top, up, down) = place(VerticalAlign::TextBottom);
+        assert!(near(top + 30.0, baseline + descent), "{top} {baseline}");
+        assert!(
+            near(up, 30.0 - descent) && near(down, descent),
+            "{up} {down}"
+        );
+
+        let (baseline, top, _, _) = place(VerticalAlign::Middle);
+        assert!(near(top + 15.0, baseline - x / 2.0), "{top} {baseline}");
+    }
 }

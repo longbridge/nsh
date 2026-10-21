@@ -77,13 +77,13 @@ A [NavPage](./nav-stack.md) with a visible, opaque header already places its con
 inset there is 0. SafeAreaView is for:
 
 - the root of an app without a navigation stack,
-- a page with `headerShown={false}` or `headerTransparent`,
+- a page with `headerVisible={false}` or `headerTransparent`,
 - the content of a full-screen [Dialog](./dialog.md).
 
 ## safeArea and safeAreaInsets
 
 When you need the numbers, for example to pad a bottom bar yourself, read them directly. Both TSX accessors return an
-`Insets` object (`{ top, right, bottom, left }` in points) and are reactive: code that reads them runs again when they
+`Edges` object (`{ top, right, bottom, left }` in points) and are reactive: code that reads them runs again when they
 change, for example on rotation.
 
 | TSX | Rust | Returns |

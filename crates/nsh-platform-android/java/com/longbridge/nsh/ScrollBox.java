@@ -131,9 +131,9 @@ final class ScrollBox extends FrameLayout implements Node {
                 // The scroll view takes the touches from JS responders.
                 mounter.cancelTouches();
                 // Caught while gliding: the glide ended.
-                if (momentum) emit(Native.MOMENTUM_SCROLL_END);
+                if (momentum) emit(Native.MOMENTUM_END);
                 momentum = false;
-                emit(Native.SCROLL_BEGIN_DRAG);
+                emit(Native.SCROLL_DRAG_START);
             } else if (swallowing) {
                 dragging = true;
             }
@@ -316,7 +316,7 @@ final class ScrollBox extends FrameLayout implements Node {
         return target != null ? target : velocity > 0 ? max : 0;
     }
 
-    /** The platform scroll views, with `scrollEnabled` and snapping. */
+    /** The platform scroll views, with `scrollable` and snapping. */
     private final class VScroll extends ScrollView {
         VScroll(Context context) {
             super(context);
@@ -384,10 +384,10 @@ final class ScrollBox extends FrameLayout implements Node {
             snap(0);
             flung = true;
         }
-        emit(Native.SCROLL_END_DRAG);
+        emit(Native.SCROLL_DRAG_END);
         if (flung) {
             momentum = true;
-            emit(Native.MOMENTUM_SCROLL_BEGIN);
+            emit(Native.MOMENTUM_START);
         }
     }
 
@@ -461,7 +461,7 @@ final class ScrollBox extends FrameLayout implements Node {
         }
         if (momentum) {
             momentum = false;
-            emit(Native.MOMENTUM_SCROLL_END);
+            emit(Native.MOMENTUM_END);
         }
         float d = mounter.density;
         mounter.event(id, Native.SCROLL_END, null, 0, scroller.getScrollX() / d, scroller.getScrollY() / d);

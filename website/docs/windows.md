@@ -9,7 +9,7 @@ group: platforms
 
 NSH apps also run on Windows. The Windows backend draws them in Win32 windows with Direct2D and lays out text with
 DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the native modules are the same
-as on iOS and Android, so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`Platform.OS` is `"windows"`
+as on iOS and Android, so one app runs everywhere. On Windows, `os()` is `Os::Windows` (`platform.os` is `"windows"`
 in TSX) and TSX's `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and
 context menus come from `nsh_core::ui::desktop` in Rust ([Desktop title bars](./rust.md#desktop-title-bars)) and
 [`nsh/desktop`](../modules/nsh-desktop.md) in TSX.
@@ -140,7 +140,7 @@ makes), so the TSX a view loads imports your Rust components and modules too.
 ## What differs on Windows
 
 The environment is a desktop's: the safe area and the keyboard height are 0, `idiom()` is the desktop
-(`Platform.constants.interfaceIdiom` is `"desktop"`) and `os_version()` (`Platform.Version`) is `"10.0"` (on Windows 11 too: Windows kept the version number). Dark mode
+(`platform.idiom` is `"desktop"`) and `os_version()` (`platform.version`) is `"10.0"` (on Windows 11 too: Windows kept the version number). Dark mode
 follows Settings > Personalization > Colors live, `fontScale()` the Text size setting, reduce motion the animation
 effects setting and the locale the user's regional format. See [Device and environment](./device-and-environment.md).
 
@@ -169,7 +169,7 @@ and scrolling; Alt+F4, F11 and Ctrl+Q cannot be bound.
 Different, or not supported:
 
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
-  page does not blur it. `source.baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
+  page does not blur it. `baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
   stays above everything NSH draws.
 - **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
 - **Zooming scroll views** (`zoomTo`, the zoom props); the scroll indicator cannot be dragged.

@@ -33,7 +33,7 @@ pub(crate) struct InputIvars {
     insets: Cell<UIEdgeInsets>,
     /// Maximum length in UTF-16 units.
     max_length: Cell<Option<u32>>,
-    /// `caretHidden`.
+    /// No caret is drawn (`caret={false}`).
     caret_hidden: Cell<bool>,
     /// What return does (`InputConfig::submit`).
     submit: Cell<SubmitBehavior>,

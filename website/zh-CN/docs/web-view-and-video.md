@@ -16,17 +16,17 @@ Web 视图和视频播放器把平台自己的网页引擎和媒体播放器作�
 
 它们背后的框架（WebKit、AVFoundation）在应用第一次用到时才加载，所以从不显示网页或视频的应用不会在启动时为它们付出代价。
 
-在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollEnabled={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
+在 [macOS](./macos.md) 上，Web 视图没有自己的滚动视图：`scrollable={false}` 时，鼠标滚轮和触控板滚动的是它外面的应用滚动视图，
 而不是页面；页面仍可用键盘和它自己的脚本滚动。
 
 在 [Linux](./linux.md) 上，Web 视图是绘制在它的视图之内的 WebKitGTK 页面：绘制在它上方的 NSH 内容（对话框、sheet）会遮住它，父视图会裁剪它。
-那里的 `webview` 权限同样作用于框架的导航（未获授权的主机的 `iframe` 保持空白），`scrollEnabled: false` 让页面本身不滚动（页面中的元素仍可滚动）。
+那里的 `webview` 权限同样作用于框架的导航（未获授权的主机的 `iframe` 保持空白），`scrollable: false` 让页面本身不滚动（页面中的元素仍可滚动）。
 应用需要装有 WebKitGTK 6.0；不带它构建的运行时显示中性的占位视图。视频能播放哪些格式取决于已安装的
 GStreamer 插件；不支持 `rate`（始终以 1× 播放），`onEnd` 只对不循环的视频触发。
 
 在 [Windows](./windows.md) 上，Web 视图是位于子窗口中的 WebView2 控件，跟随它的视图移动：它会被父视图和圆角裁剪，但绘制在它上方的
 NSH 内容（对话框、sheet）会被它遮住。它需要 WebView2 Runtime（Windows 11 自带，Windows 10 上随 Edge 安装），否则显示占位视图；
-不支持 HTML 的 `source.baseUrl`、`scrollEnabled` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
+不支持 HTML 的 `baseUrl`、`scrollable` 和 `allowsBackForwardNavigationGestures`。视频是普通内容（像其他视图一样被裁剪、
 变换和遮挡），能播放哪些格式取决于已安装的 Media Foundation 解码器；`rate` 可用，没有封面图（poster），开启 `controls` 时控制栏始终显示。
 
 ## WebView
@@ -44,7 +44,7 @@ pub fn App() -> impl IntoElement {
 import { mount, WebView } from "nsh";
 
 function App() {
-  return <WebView source="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
+  return <WebView src="https://en.m.wikipedia.org/wiki/Swift_(programming_language)" style={{ flex: 1 }} />;
 }
 
 mount(App);
@@ -52,25 +52,29 @@ mount(App);
 
 ### 来源
 
-| `source` | 显示内容 |
-|---|---|
-| `"https://…"` 或 `{ uri: "https://…" }` | 一个网页。 |
-| `{ html: "<!doctype html>…" }` | 字符串形式的 HTML。 |
-| `{ html, baseUrl: "https://example.com/" }` | 相对 URL 以 `baseUrl` 为基准解析的 HTML。 |
+网页视图显示 `src` 和 `html` 二者之一：
 
-在 Rust 中，`web_view(url)` 显示网页，`web_view_html(html, base_url)` 显示 HTML（`base_url` 是 `Option<&str>`）；URL 和 HTML 都可以是 signal 或闭包，它读取的值变化时页面会重新加载。改变 `source` 会加载新的页面。
+| 属性 | 显示内容 |
+|---|---|
+| `src="https://…"` | 一个网页。 |
+| `html="<!doctype html>…"` | 字符串形式的 HTML，代替 `src` 显示。 |
+| `html` 加上 `baseUrl="https://example.com/"` | 相对 URL 以 `baseUrl` 为基准解析的 HTML。 |
+
+在 Rust 中，`web_view(url)` 显示网页，`web_view_html(html, base_url)` 显示 HTML（`base_url` 是 `Option<&str>`）；URL 和 HTML 都可以是 signal 或闭包，它读取的值变化时页面会重新加载。改变 `src` 或 `html` 会加载新的页面。
 
 ### 属性
 
-在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scroll_enabled`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
+在 Rust 中，每个属性是一个蛇形命名的构建方法（`injected_java_script`、`java_script_enabled`、`scrollable`、`user_agent`；`injectedJavaScriptBeforeContentLoaded` 对应 `injected_java_script_before_content`，iOS 的 `allowsBackForwardNavigationGestures` 对应 `back_forward_gestures`），每个事件是一个 `on_…` 方法（`on_navigation_state_change`），其监听函数收到 `WebNavigation`（`url`、`title`、`loading`、`can_go_back`、`can_go_forward`），`on_error` 和 `on_message` 收到 `&str`。
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `source` | `string \| { uri } \| { html, baseUrl? }` | | 要显示的内容。 |
+| `src` | `string` | | 要显示的页面的 URL。 |
+| `html` | `string` | | 内联 HTML，代替 `src` 显示。 |
+| `baseUrl` | `string` | | `html` 中相对 URL 的解析基准。 |
 | `injectedJavaScript` | `string` | | 每个页面加载完成后运行。 |
 | `injectedJavaScriptBeforeContentLoaded` | `string` | | 在每个页面自己的脚本之前运行。 |
 | `javaScriptEnabled` | `boolean` | `true` | 页面可以运行脚本。 |
-| `scrollEnabled` | `boolean` | `true` | 用户可以滚动页面。 |
+| `scrollable` | `boolean` | `true` | 用户可以滚动页面。 |
 | `userAgent` | `string` | | 浏览器的 user agent 字符串。 |
 | `ios={{ allowsBackForwardNavigationGestures }}` | `boolean` | | iOS：滑动在页面历史中前进后退。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `boolean` | | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
@@ -156,7 +160,7 @@ function Browser() {
       </Text>
       <WebView
         ref={web}
-        source="https://developer.mozilla.org/"
+        src="https://developer.mozilla.org/"
         style={{ flex: 1 }}
         onNavigationStateChange={(n) => nav.set(n)}
         ios={{ allowsBackForwardNavigationGestures: true }}
@@ -175,7 +179,7 @@ mount(Browser);
 
 ### 页面与应用之间的消息
 
-页面通过 `window.ReactNativeWebView.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。
+页面通过 `window.nsh.postMessage(string)` 向应用发消息，应用收到 `on_message`（`onMessage`）。应用通过 ref 的 `post_message`（`postMessage(string)`）向页面发消息，页面在 `window` 上收到 `message` 事件。消息是字符串；结构化数据请发送 JSON。
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -183,7 +187,7 @@ use nsh_core::ui::prelude::*;
 const PAGE: &str = r#"<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
 <body style="font-family: -apple-system, sans-serif; margin: 16px">
-  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
     Post to the app
   </button>
   <p id="got">Nothing from the app yet.</p>
@@ -227,7 +231,7 @@ import { mount, signal, Text, View, WebView, type YNode } from "nsh";
 const page = `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width"></head>
 <body style="font-family: -apple-system, sans-serif; margin: 16px">
-  <button onclick="window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
+  <button onclick="window.nsh.postMessage(JSON.stringify({ type: 'hello', at: Date.now() }))">
     Post to the app
   </button>
   <p id="got">Nothing from the app yet.</p>
@@ -245,7 +249,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 50, gap: 12 }}>
       <WebView
         ref={web}
-        source={{ html: page }}
+        html={page}
         style={{ height: 240 }}
         onMessage={(e) => last.set(JSON.parse(e.data).type)}
       />
@@ -265,15 +269,15 @@ ref 的 `inject_java_script`（`injectJavaScript(script)`）可以随时在当�
 ```rust tabs
 web_view("https://example.com")
     .injected_java_script_before_content("window.isNativeApp = true;")
-    .injected_java_script("window.ReactNativeWebView.postMessage(document.title);")
+    .injected_java_script("window.nsh.postMessage(document.title);")
     .on_message(|title: &str| log::info!("title {title}"))
 ```
 
 ```tsx tabs
 <WebView
-  source="https://example.com"
+  src="https://example.com"
   injectedJavaScriptBeforeContentLoaded={`window.isNativeApp = true;`}
-  injectedJavaScript={`window.ReactNativeWebView.postMessage(document.title);`}
+  injectedJavaScript={`window.nsh.postMessage(document.title);`}
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
@@ -290,7 +294,7 @@ web_view("https://example.com")
 }
 ```
 
-检查覆盖网页视图的 `source` 以及页面发起的每一次顶层导航（链接、重定向、修改 `location`）；它在平台询问能否继续导航时由原生决定。页面自己的子资源（脚本、图片、iframe）属于网页内容自身的事情，不做检查。`*.example.com` 只匹配子域名；要包括裸域名，还需列出 `example.com`。没有 `"capabilities"` 键的应用可以显示任何页面。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
+检查覆盖网页视图的 `src` 以及页面发起的每一次顶层导航（链接、重定向、修改 `location`）；它在平台询问能否继续导航时由原生决定。页面自己的子资源（脚本、图片、iframe）属于网页内容自身的事情，不做检查。`*.example.com` 只匹配子域名；要包括裸域名，还需列出 `example.com`。没有 `"capabilities"` 键的应用可以显示任何页面。见[沙箱与能力声明](./sandbox-and-capabilities.md)。
 
 ## Video
 
@@ -350,7 +354,7 @@ function Player() {
     <View style={{ flex: 1, justifyContent: "center", padding: 16, gap: 12 }}>
       <Video
         ref={video}
-        source="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
         paused={paused()}
         repeat
         resizeMode="contain"
@@ -380,7 +384,7 @@ mount(Player);
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `source` | `string \| { uri }` | | 视频的 URL。 |
+| `src` | `string` | | 视频的 URL。 |
 | `paused` | `boolean` | `false` | 暂停播放。 |
 | `muted` | `boolean` | `false` | 静音。 |
 | `volume` | `number` | `1` | 0..1。 |
@@ -393,7 +397,7 @@ mount(Player);
 | 事件 | 参数 | 触发时机 |
 |---|---|---|
 | `onLoadStart` | | 开始加载。 |
-| `onLoad` | `{ duration, width, height }` | 视频就绪：时长（秒）与尺寸。 |
+| `onLoad` | `{ duration, size }` | 视频就绪：时长（秒）与尺寸。 |
 | `onProgress` | `{ currentTime, duration }` | 播放期间，每 `progressUpdateInterval` 毫秒一次。 |
 | `onBuffer` | `{ isBuffering }` | 因等待数据而暂停，或恢复播放。 |
 | `onEnd` | | 播放到结尾。 |
@@ -420,7 +424,7 @@ view()
 
 ```tsx tabs
 <View style={{ height: 220 }}>
-  <Video source={url} paused={paused()} style={{ flex: 1 }} />
+  <Video src={url} paused={paused()} style={{ flex: 1 }} />
   <View
     onPress={() => paused.set(!paused())}
     style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }}

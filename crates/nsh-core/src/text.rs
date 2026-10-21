@@ -12,7 +12,7 @@ use crate::{
     ops::{EventMask, NodeId},
     style::{
         Color, DecorationStyle, EllipsizeMode, FontFamily, FontVariant, TextAlign, TextDecoration,
-        TextShadow, TextStyle, TextTransform,
+        TextShadow, TextStyle, TextTransform, VerticalAlign,
     },
 };
 
@@ -294,20 +294,140 @@ pub struct AttributedText {
     pub selection_color: Option<Color>,
     /// Inline views and images, in text order: each is an object
     /// replacement character (U+FFFC) the engine gives the attachment's
-    /// size, sitting on the baseline.
+    /// size. Their optional alignment is passed separately to
+    /// `TextEngine::prepare_aligned`; `prepare` places them on the baseline.
     pub attachments: Vec<TextAttachment>,
 }
 
 /// A view or image inside a text block (see
 /// [`AttributedText::attachments`]).
+///
+/// Optional placement is held by [`AttachmentAlignments`], leaving this
+/// struct's three-field construction compatible with existing engines.
+/// Every engine places it with the same rule: its top
+/// [`ascent`](Self::ascent) above the baseline, the line reserving its
+/// [`extent`](Self::extent) (so a line grows where the attachment reaches
+/// past the font around it). Only the font's metrics are the platform's.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextAttachment {
     /// Its placeholder character (UTF-16 offset).
     pub index: u32,
     /// Width.
     pub width: Points,
-    /// Height (all above the baseline).
+    /// Height.
     pub height: Points,
+}
+
+/// The vertical metrics of the font around an attachment (the style of
+/// its placeholder), which [`TextAttachment::ascent`] places it against.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct FontExtent {
+    /// Above the baseline (positive).
+    pub ascent: Points,
+    /// Below the baseline (positive).
+    pub descent: Points,
+    /// Height of lowercase letters.
+    pub x_height: Points,
+}
+
+impl FontExtent {
+    /// A font's ascent, descent and x height.
+    pub fn new(ascent: Points, descent: Points, x_height: Points) -> Self {
+        Self {
+            ascent,
+            descent,
+            x_height,
+        }
+    }
+}
+
+impl TextAttachment {
+    /// The distance of its top above the baseline (negative: below it),
+    /// in a line of `font`: CSS `vertical-align` for a replaced inline
+    /// box. `baseline` needs no metrics (the height, whatever `font` is).
+    pub fn ascent(&self, font: FontExtent, align: VerticalAlign) -> Points {
+        let h = self.height;
+        match align {
+            VerticalAlign::Baseline => h,
+            VerticalAlign::TextTop => font.ascent,
+            VerticalAlign::TextBottom => h - font.descent,
+            VerticalAlign::Middle => (h + font.x_height) / 2.0,
+        }
+    }
+
+    /// What its line reserves for it above and below the baseline (each
+    /// at least 0): with the font's own, the line's extent, so the line
+    /// grows where the attachment reaches past the font. Engines give the
+    /// placeholder these metrics (a run delegate's ascent and descent, a
+    /// replacement span's font metrics) and draw its top
+    /// [`ascent`](Self::ascent) above the baseline.
+    pub fn extent(&self, font: FontExtent, align: VerticalAlign) -> (Points, Points) {
+        let ascent = self.ascent(font, align);
+        (
+            ascent.max(Points::ZERO),
+            (self.height - ascent).max(Points::ZERO),
+        )
+    }
+}
+
+/// Optional alignment of inline attachments, keyed by their UTF-16 offsets.
+/// Kept separately so existing `TextAttachment` and `AttributedText` literals
+/// and custom text engines remain source compatible.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub struct AttachmentAlignments {
+    values: Vec<(u32, VerticalAlign)>,
+}
+
+impl AttachmentAlignments {
+    /// The alignment at `index`; unspecified attachments stand on the baseline.
+    pub fn get(&self, index: u32) -> VerticalAlign {
+        self.values
+            .binary_search_by_key(&index, |v| v.0)
+            .map_or(VerticalAlign::Baseline, |i| self.values[i].1)
+    }
+
+    /// Sets an attachment's alignment. Baseline needs no stored entry.
+    pub fn set(&mut self, index: u32, align: VerticalAlign) {
+        match self.values.binary_search_by_key(&index, |v| v.0) {
+            Ok(i) if align == VerticalAlign::Baseline => {
+                self.values.remove(i);
+            }
+            Ok(i) => self.values[i].1 = align,
+            Err(i) if align != VerticalAlign::Baseline => self.values.insert(i, (index, align)),
+            Err(_) => {}
+        }
+    }
+
+    /// Appends an attachment and records its alignment.
+    pub fn push(
+        &mut self,
+        text: &mut AttributedText,
+        size: Size<Points>,
+        align: VerticalAlign,
+        style: ResolvedTextStyle,
+    ) {
+        self.set(text.len_utf16(), align);
+        text.push_attachment(size, style);
+    }
+
+    /// Whether all attachments use the default baseline alignment.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// The text's layout hash including attachment alignment.
+    pub fn layout_hash(&self, text: &AttributedText) -> u64 {
+        if self.is_empty() {
+            return text.layout_hash();
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.layout_hash().hash(&mut h);
+        self.hash(&mut h);
+        h.finish()
+    }
 }
 
 /// The character standing for an attachment.
@@ -363,8 +483,7 @@ impl AttributedText {
             .min_by_key(|l| l.end - l.start)
     }
 
-    /// Appends an attachment of `size`: its placeholder character in
-    /// `style` (the line's font around it).
+    /// Appends an attachment of `size` on the baseline.
     pub fn push_attachment(&mut self, size: Size<Points>, style: ResolvedTextStyle) {
         let index = self.len_utf16();
         self.push(ATTACHMENT_CHAR.encode_utf8(&mut [0; 3]), style);
@@ -470,6 +589,17 @@ pub trait TextEngine {
     /// Prepares `text` for measuring and layout.
     fn prepare(&self, text: &AttributedText) -> Self::Prepared;
 
+    /// Prepares text with optional inline alignment. Existing engines retain
+    /// baseline placement until they opt into this extension.
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &AttachmentAlignments,
+    ) -> Self::Prepared {
+        let _ = alignments;
+        self.prepare(text)
+    }
+
     /// Size of the prepared text with an optional maximum width.
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points>;
 
@@ -507,6 +637,14 @@ impl<T: TextEngine> TextEngine for std::rc::Rc<T> {
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
         (**self).prepare(text)
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &AttachmentAlignments,
+    ) -> Self::Prepared {
+        (**self).prepare_aligned(text, alignments)
     }
 
     fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
@@ -560,7 +698,9 @@ pub struct TextLine {
 
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
 /// tests: every character is `0.55 × font size` wide and lines are
-/// `1.2 × font size` tall.
+/// `1.2 × font size` tall, their baseline at the bottom (the font's ascent
+/// is the line, its descent 0, its x height `0.5 × font size`), where
+/// attachments are placed by [`TextAttachment::ascent`] on the first line.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ApproxTextEngine;
 
@@ -569,12 +709,29 @@ impl TextEngine for ApproxTextEngine {
     type Prepared = (usize, Points, u32, Vec<TextAttachment>);
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
+        self.prepare_aligned(text, &AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        text: &AttributedText,
+        alignments: &AttachmentAlignments,
+    ) -> Self::Prepared {
         let size = text.spans.first().map_or(px(14.0), |s| s.style.font_size);
         (
             text.text.chars().count(),
             size,
             text.max_lines,
-            text.attachments.clone(),
+            text.attachments
+                .iter()
+                .map(|a| {
+                    let metrics = FontExtent::new(size * 1.2, Points::ZERO, size * 0.5);
+                    TextAttachment {
+                        height: a.ascent(metrics, alignments.get(a.index)),
+                        ..*a
+                    }
+                })
+                .collect(),
         )
     }
 
@@ -737,5 +894,83 @@ mod tests {
         }
         assert!(cache.get(1, Some(px(99.0))).is_none());
         assert!(cache.get(1000, None).is_none(), "cold entries are evicted");
+    }
+
+    #[test]
+    fn attachments_sit_in_their_line_by_vertical_align() {
+        // A font 10 above and 3 below the baseline, x height 5; a 20 pt
+        // tall attachment.
+        let font = FontExtent::new(px(10.0), px(3.0), px(5.0));
+        let at = || TextAttachment {
+            index: 0,
+            width: px(8.0),
+            height: px(20.0),
+        };
+        let place = |align| {
+            let a = at();
+            (a.ascent(font, align), a.extent(font, align))
+        };
+        // Bottom on the baseline: all of it above.
+        assert_eq!(
+            place(VerticalAlign::Baseline),
+            (px(20.0), (px(20.0), px(0.0)))
+        );
+        // Top at the font's top: 10 above, 10 below (the line grows down).
+        assert_eq!(
+            place(VerticalAlign::TextTop),
+            (px(10.0), (px(10.0), px(10.0)))
+        );
+        // Bottom at the font's bottom (Android's `ImageSpan` default).
+        assert_eq!(
+            place(VerticalAlign::TextBottom),
+            (px(17.0), (px(17.0), px(3.0)))
+        );
+        // Middle 2.5 above the baseline.
+        assert_eq!(
+            place(VerticalAlign::Middle),
+            (px(12.5), (px(12.5), px(7.5)))
+        );
+        // Smaller than the font: what it does not reach reserves nothing.
+        let small = TextAttachment {
+            height: px(4.0),
+            ..at()
+        };
+        assert_eq!(small.ascent(font, VerticalAlign::TextTop), px(10.0));
+        assert_eq!(
+            small.extent(font, VerticalAlign::TextTop),
+            (px(10.0), px(0.0))
+        );
+        let small = TextAttachment {
+            height: px(2.0),
+            ..at()
+        };
+        assert_eq!(small.ascent(font, VerticalAlign::TextBottom), px(-1.0));
+        assert_eq!(
+            small.extent(font, VerticalAlign::TextBottom),
+            (px(0.0), px(3.0))
+        );
+    }
+
+    #[test]
+    fn approx_engine_places_aligned_attachments() {
+        let engine = ApproxTextEngine;
+        let style = ResolvedTextStyle {
+            font_size: px(10.0),
+            ..ResolvedTextStyle::default()
+        };
+        let y = |align| {
+            let mut t = AttributedText::default();
+            t.push("ab", style);
+            let mut alignments = AttachmentAlignments::default();
+            alignments.push(&mut t, size(px(8.0), px(6.0)), align, style);
+            let prepared = engine.prepare_aligned(&t, &alignments);
+            let layout = engine.layout(&prepared, size(px(100.0), px(12.0)));
+            engine.attachments(&layout)[0].map(|p| (p.x, p.y))
+        };
+        // A 12 pt line with its baseline at the bottom, x height 5.
+        assert_eq!(y(VerticalAlign::Baseline), Some((px(11.0), px(6.0))));
+        assert_eq!(y(VerticalAlign::TextTop), Some((px(11.0), px(0.0))));
+        assert_eq!(y(VerticalAlign::TextBottom), Some((px(11.0), px(6.0))));
+        assert_eq!(y(VerticalAlign::Middle), Some((px(11.0), px(6.5))));
     }
 }

@@ -1,17 +1,14 @@
 //! The `js` lines engines log (the app's `console` and its errors),
 //! captured: the logger is the process's, shared by every test, so each
-//! test looks for words only it logs, or for the lines of its own engine's
-//! thread ([`printed_by`]).
+//! test looks for words only it logs.
 
 use std::{
     sync::Mutex,
-    thread::ThreadId,
     time::{Duration, Instant},
 };
 
-/// What was logged: the thread that logged it, whether it is an error, the
-/// line.
-static LINES: Mutex<Vec<(ThreadId, bool, String)>> = Mutex::new(Vec::new());
+/// What was logged: whether it is an error, the line.
+static LINES: Mutex<Vec<(bool, String)>> = Mutex::new(Vec::new());
 
 struct Capture;
 
@@ -24,7 +21,6 @@ impl log::Log for Capture {
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             LINES.lock().unwrap().push((
-                std::thread::current().id(),
                 record.level() == log::Level::Error,
                 record.args().to_string(),
             ));
@@ -52,19 +48,8 @@ pub(crate) fn containing(word: &str) -> Vec<String> {
         .lock()
         .unwrap()
         .iter()
-        .filter(|(_, error, l)| *error && l.contains(word))
-        .map(|(_, _, l)| l.clone())
-        .collect()
-}
-
-/// The lines of every level `thread` logged so far.
-pub(crate) fn printed_by(thread: ThreadId) -> Vec<String> {
-    LINES
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(t, _, _)| *t == thread)
-        .map(|(_, _, l)| l.clone())
+        .filter(|(error, l)| *error && l.contains(word))
+        .map(|(_, l)| l.clone())
         .collect()
 }
 

@@ -82,8 +82,8 @@ pub trait ListLayout: Sized {
     }
 
     /// Whether the scroll indicator shows (default yes).
-    fn shows_indicator(self, shows: impl IntoReactive<bool>) -> Self {
-        self.layout(shows, |c, shows| c.shows_indicator = Some(shows))
+    fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
+        self.layout(shows, |c, shows| c.scrollbar_visible = Some(shows))
     }
 
     /// Padding around the rows.
@@ -308,7 +308,7 @@ impl VirtualList {
     }
 
     /// When rows count as viewable for
-    /// [`Self::on_viewable_items_changed`] (TS: `viewabilityConfig`'s
+    /// [`Self::on_viewable_items_change`] (TS: `viewabilityConfig`'s
     /// thresholds; without one, any visible pixel counts).
     pub fn viewability(mut self, config: Viewability) -> Self {
         super::host::set(&mut self.0, Prop::Viewability(config));
@@ -322,29 +322,29 @@ impl VirtualList {
         self
     }
 
-    /// The viewable rows changed (TS: `onViewableItemsChanged`).
-    pub fn on_viewable_items_changed<M>(
+    /// The viewable rows changed (TS: `onViewableItemsChange`).
+    pub fn on_viewable_items_change<M>(
         self,
         listener: impl IntoListener<ViewableItems, M>,
     ) -> Self {
         self.on(
-            EventKind::ViewableItemsChanged,
+            EventKind::ViewableItemsChange,
             events::typed(listener.into_listener(), viewable),
         )
     }
 
     /// Scrolled close to the end (load more).
-    pub fn on_end_reached<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    pub fn on_load_more<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
-            EventKind::EndReached,
+            EventKind::LoadMore,
             events::typed(listener.into_listener(), events::unit),
         )
     }
 
-    /// How close to the end [`Self::on_end_reached`] fires, in viewports
-    /// (default 1; TS: `onEndReachedThreshold`).
-    pub fn end_reached_threshold(mut self, viewports: f32) -> Self {
-        super::host::set(&mut self.0, Prop::EndReachedThreshold(viewports));
+    /// How close to the end [`Self::on_load_more`] fires, in viewports
+    /// (default 1; TS: `loadMoreThreshold`).
+    pub fn load_more_threshold(mut self, viewports: f32) -> Self {
+        super::host::set(&mut self.0, Prop::LoadMoreThreshold(viewports));
         self
     }
 
@@ -360,7 +360,7 @@ impl VirtualList {
     }
 }
 
-/// The rows a list shows ([`VirtualList::on_viewable_items_changed`]), by
+/// The rows a list shows ([`VirtualList::on_viewable_items_change`]), by
 /// index, and the ones it showed at the report before.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ViewableItems {

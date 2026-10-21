@@ -2,60 +2,22 @@
 //! ([`crate::ui::ambient`]'s functions) beyond commands for the
 //! platform: display frames and the layout direction.
 //!
-//! The surface's direction is its root's (`Prop::LayoutDirection` on the
-//! root, which JS's `I18nManager` sets), else the platform's; components
-//! read it ([`crate::ui::ambient::rtl`]). Once a component sets a policy
-//! (`force_rtl`, `allow_rtl`), and from the start in a Rust app, the core
-//! sets the root's direction from the policy and the platform's language,
-//! again whenever the language changes. In an app whose JS also sets it,
-//! the last one to set it wins.
+//! The surface's direction follows the user's language: its root's
+//! (`Prop::LayoutDirection` on the root, which JS sets from the language),
+//! else the platform's. In a Rust app the core sets the root's direction
+//! from the platform's language from the start, and again whenever the
+//! language changes. A view's `direction` style sets its own subtree's.
 
 use super::Core;
-use crate::{
-    Op, Prop, ROOT_ID, TextEngine,
-    time::Instant,
-    ui::{AnswerSlot, services::Direction},
-};
+use crate::{Op, Prop, ROOT_ID, TextEngine, time::Instant, ui::AnswerSlot};
 
 /// What the core keeps for the services.
+#[derive(Default)]
 pub(super) struct Services {
     /// The tasks waiting for the next display frame.
     frames: Vec<AnswerSlot<Instant>>,
-    /// The policy of the layout direction.
-    direction: DirectionPolicy,
-}
-
-impl Default for Services {
-    fn default() -> Self {
-        Self {
-            frames: Vec::new(),
-            direction: DirectionPolicy {
-                allow: true,
-                force: false,
-                platform: false,
-                active: false,
-            },
-        }
-    }
-}
-
-/// `I18nManager`'s flags, as Rust components set them.
-struct DirectionPolicy {
-    /// A right-to-left language lays out right to left.
-    allow: bool,
-    /// Right to left whatever the language.
-    force: bool,
-    /// The platform's language is written right to left.
-    platform: bool,
-    /// The core sets the root's direction (a component set a policy, or
-    /// the app is Rust).
-    active: bool,
-}
-
-impl DirectionPolicy {
-    fn rtl(&self) -> bool {
-        (self.allow && self.platform) || self.force
-    }
+    /// The core sets the root's direction from the language (a Rust app).
+    owns_direction: bool,
 }
 
 impl<M: TextEngine> Core<M> {
@@ -83,36 +45,20 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The direction components read, the platform's language being
-    /// `platform`; the root follows the policy when the core sets it.
+    /// `platform`; in a Rust app the root follows it.
     pub(super) fn surface_rtl(&mut self, platform: bool) -> bool {
-        let policy = &mut self.components.services.direction;
-        policy.platform = platform;
-        if policy.active {
-            let rtl = policy.rtl();
-            self.set_root_direction(rtl);
-            rtl
+        if self.components.services.owns_direction {
+            self.set_root_direction(platform);
+            platform
         } else {
             self.nodes[self.root as usize].direction.unwrap_or(platform)
         }
     }
 
-    /// A component changed the policy.
-    pub(super) fn change_direction(&mut self, change: Direction) {
-        let policy = &mut self.components.services.direction;
-        policy.active = true;
-        match change {
-            Direction::Force(force) => policy.force = force,
-            Direction::Allow(allow) => policy.allow = allow,
-        }
-        let rtl = policy.rtl();
-        self.set_root_direction(rtl);
-    }
-
     /// A Rust app: the core sets the surface's direction (no JS does).
     pub(super) fn own_direction(&mut self) {
-        let policy = &mut self.components.services.direction;
-        policy.active = true;
-        let rtl = policy.rtl();
+        self.components.services.owns_direction = true;
+        let rtl = self.components.environment.rtl;
         self.set_root_direction(rtl);
     }
 
@@ -123,7 +69,7 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
-    /// The root's direction changed (JS's or the policy's): what read it
+    /// The root's direction changed: what read it
     /// runs again.
     pub(super) fn root_direction_changed(&mut self, rtl: bool) {
         if self.components.environment.rtl != rtl {

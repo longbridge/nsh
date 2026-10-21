@@ -1,6 +1,6 @@
 import { computed, Input, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { LayoutAnimation } from "nsh/animated";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { keyboardFrame, KeyboardAvoidingView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, type Tone, toneColor, toneTint } from "../ui";
@@ -49,7 +49,7 @@ function Grid() {
       style={{ flex: 1 }}
       contentStyle={wide ? { padding: 24, gap: 12 } : { padding: 16, gap: 8 }}
       viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-      onViewableItemsChanged={({ viewableItems }) => {
+      onViewableItemsChange={({ viewableItems }) => {
         first.set(viewableItems.length ? viewableItems[0].index : -1);
         last.set(viewableItems.length ? viewableItems[viewableItems.length - 1].index : -1);
       }}
@@ -273,8 +273,8 @@ function Chat() {
         style={{ flex: 1 }}
         contentStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}
         keyboardDismissMode="interactive"
-        onEndReached={loadOlder}
-        onEndReachedThreshold={0.5}
+        onLoadMore={loadOlder}
+        loadMoreThreshold={0.5}
       >
         {(m) => (
           <View style={{ alignSelf: m().mine ? "flex-end" : "flex-start", maxWidth: "78%", gap: 3, alignItems: m().mine ? "flex-end" : "flex-start" }}>
@@ -325,10 +325,10 @@ function Chat() {
             height: 44,
             fontSize: 15,
             color: colors.text,
-            backgroundColor: colors.inset,
-            ...finish.inset,
+            backgroundColor: colors.field,
+            ...finish.field,
             borderWidth: 1,
-            borderColor: colors.border,
+            borderColor: colors.fieldBorder,
             borderRadius: 22,
             paddingHorizontal: 16,
           }}
@@ -376,14 +376,14 @@ function More() {
             </View>
           </View>
           {/* The mouse does not pull scroll views down: desktops refresh here. */}
-          <If when={Platform.isDesktop}>
+          <If when={platform.idiom === "desktop"}>
             <Button label="Refresh" variant="secondary" disabled={refreshing()} onPress={refresh} />
           </If>
         </Section>
 
         <Section title="Horizontal scroll view" note={range()}>
           <View style={{ marginHorizontal: -14 }}>
-            <Scroll horizontal showsIndicator={false}>
+            <Scroll horizontal scrollbar={false}>
               <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 14 }}>
                 <Each of={ranges}>
                   {(label) => (
@@ -412,7 +412,7 @@ function More() {
 
         <Section title="Horizontal list" note="1,000 recycled cards">
           <View style={{ marginHorizontal: -14 }}>
-            <List each={cards} horizontal estimatedItemSize={130} showsIndicator={false} style={{ height: 124 }} contentStyle={{ paddingHorizontal: 14, gap: 10 }}>
+            <List each={cards} horizontal estimatedItemSize={130} scrollbar={false} style={{ height: 124 }} contentStyle={{ paddingHorizontal: 14, gap: 10 }}>
               {(i) => {
                 const tone = () => tones[i() % (tones.length - 1)];
                 const load = () => ((i() * 37) % 100) / 100;

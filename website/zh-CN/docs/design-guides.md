@@ -301,7 +301,7 @@ NSH 的 flex child 即使设置 `flex-1`，也可能因为长内容拒绝收缩�
 
 ### 表单与设置
 
-每个字段使用可见 label，help 与 validation 放在所描述字段附近。相关字段应对齐，但不要强迫长 label 进入过窄固定列。独立选择用 `Checkbox`，少量可见互斥项用单选组（带 `role="radio"` 的 `Button`），较长集合用列出选项的 `Menu`，立即生效的设置用 [`Switch`](../elements/switch.md)。它们的部件（开关的轨道和滑块、复选框的指示器）由应用设置样式，`checked:`、`indeterminate:` 和 `disabled:` 类名跟随控件：
+每个字段使用可见 label，help 与 validation 放在所描述字段附近。相关字段应对齐，但不要强迫长 label 进入过窄固定列。独立选择用 `Checkbox`，少量可见互斥项用由 `Radio` 组成的 [`RadioGroup`](../elements/radio.md)，较长集合用列出选项的 `Menu`，立即生效的设置用 [`Switch`](../elements/switch.md)。它们的部件（开关的轨道和滑块、复选框的指示器）由应用设置样式，`checked:`、`indeterminate:` 和 `disabled:` 类名跟随控件：
 
 ```rust tabs
 use nsh_base::{switch, theme};
@@ -503,12 +503,11 @@ function FormActions(props: { onCancel: () => void; onCreate: () => void }) {
 选中状态是信息模型的一部分，不是可选润色。标签页、分段选择、可选行、筛选项与导航入口必须持续显示选中状态（`selected`，读屏软件会读出）。拥有菜单的按钮在弹出层关闭前必须保持按下或打开外观；悬停无法说明触发按钮与弹出层之间的关系。
 
 ```rust tabs
-use nsh_base::{button, theme};
+use nsh_base::{tab, theme};
 
-fn tab(label: &'static str, id: Tab, current: Signal<Tab>) -> impl IntoElement {
+fn section_tab(label: &'static str, id: Section, current: Signal<Section>) -> impl IntoElement {
     let selected = move || current.get() == id;
-    button()
-        .role(AccessibilityRole::Tab)
+    tab()
         .selected(selected)
         .on_press(move || current.set(id))
         .rounded(move || theme().radius())
@@ -523,18 +522,17 @@ fn tab(label: &'static str, id: Tab, current: Signal<Tab>) -> impl IntoElement {
 
 ```tsx tabs
 import { Text } from "nsh";
-import { Button } from "nsh/base";
+import { Tab } from "nsh/base";
 
-function Tab(props: { label: string; selected: boolean; onPress: () => void }) {
+function SectionTab(props: { label: string; selected: boolean; onPress: () => void }) {
   return (
-    <Button
-      role="tab"
+    <Tab
       selected={props.selected}
       onPress={props.onPress}
       class="group rounded-(--radius) px-3 py-2 selected:bg-muted"
     >
       <Text class="text-muted-foreground group-selected:text-foreground">{props.label}</Text>
-    </Button>
+    </Tab>
   );
 }
 ```

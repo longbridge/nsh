@@ -848,13 +848,20 @@ fn right_to_left() -> Card {
             .child(text(n).text_size(px(13.0)).text_color(fg).tabular_nums())
     };
     let mono_note = |label: &'static str, note: &'static str| caption_spans(text(label), note);
-    let flip = |_: &()| force_rtl(!rtl());
-    Card::new()
-            .icon(IconName::Nav)
-            .title("Right to left")
-            .subtitle(|| if rtl() { "isRTL: true" } else { "isRTL: false" })
-            .right(Button::new("Flip", flip).variant(ButtonVariant::Secondary))
-            .child(view().flex_row().gap_2().children(boxes))
+    // The card's content in a direction of its own: the app's follows the
+    // user's language.
+    let rtl = signal(false);
+    let flip = move |_: &()| rtl.set(!rtl.get());
+    let content = view()
+        .gap(px(12.0))
+        .direction(move || {
+            if rtl.get() {
+                LayoutDirection::Rtl
+            } else {
+                LayoutDirection::Ltr
+            }
+        })
+        .child(view().flex_row().gap_2().children(boxes))
             .child(
                 text(
                     "Text aligns to the start side; the first box has marginStart 16 and a round top-start corner.",
@@ -867,7 +874,7 @@ fn right_to_left() -> Card {
             .child(
                 scroll()
                     .horizontal()
-                    .shows_indicator(false)
+                    .scrollbar(false)
                     .h(px(40.0))
                     .child(
                         view()
@@ -886,7 +893,7 @@ fn right_to_left() -> Card {
                 })
                 .horizontal()
                 .estimated_item_size(px(46.0))
-                .shows_indicator(false)
+                .scrollbar(false)
                 .h(px(40.0)),
             )
             .child(view().h(px(1.0)).bg(colors::LINE))
@@ -901,7 +908,19 @@ fn right_to_left() -> Card {
                     .text_size(px(13.0))
                     .writing_direction(WritingDirection::Rtl)
                     .text_color(colors::MUTED),
-            )
+            );
+    Card::new()
+        .icon(IconName::Nav)
+        .title("Right to left")
+        .subtitle(move || {
+            if rtl.get() {
+                "direction: rtl"
+            } else {
+                "direction: ltr"
+            }
+        })
+        .right(Button::new("Flip", flip).variant(ButtonVariant::Secondary))
+        .child(content)
 }
 
 /// The demo's page.

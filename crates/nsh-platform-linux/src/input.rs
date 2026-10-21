@@ -574,8 +574,8 @@ fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> 
         if listens {
             let (location_x, location_y) = local(surface, &v, x, y);
             let event = nsh_core::ContextMenuEvent {
-                location: point(Points(location_x), Points(location_y)),
-                page: point(Points(x), Points(y)),
+                position: point(Points(location_x), Points(location_y)),
+                page_position: point(Points(x), Points(y)),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
                     alt: state.contains(gdk::ModifierType::ALT_MASK),
@@ -1729,8 +1729,8 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
         };
         let (location_x, location_y) = local(surface, &v, x, y);
         let event = nsh_core::HoverEvent {
-            location: point(Points(location_x), Points(location_y)),
-            page: point(Points(x), Points(y)),
+            position: point(Points(location_x), Points(location_y)),
+            page_position: point(Points(x), Points(y)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
                 alt: state.contains(gdk::ModifierType::ALT_MASK),
@@ -1765,7 +1765,7 @@ fn scrolls_itself(widget: &gtk::Widget) -> bool {
         }
         let ty = w.type_();
         if ty.name().contains("WebView") {
-            // A page with `scrollEnabled: false` leaves wheels to the
+            // A page with `scrollable: false` leaves wheels to the
             // scroll views around it.
             return !w.has_css_class(crate::native::UNSCROLLABLE);
         }

@@ -67,18 +67,62 @@ pub trait HostList {
     fn item(&self, index: usize) -> Option<Self::Item>;
 }
 
-/// Where decoding reports what it could not take.
+/// Where decoding reports what it could not take, and the element it
+/// decodes for.
 #[derive(Debug, Default)]
 pub struct HostCx {
     /// Warnings for the app's console (`unknown role`).
     pub warnings: Vec<String>,
+    /// The [`on`] bits of the element the props are set on
+    /// ([`element_bits`]); 0 when unknown, which decodes a name several
+    /// elements share as the first prop of that name.
+    pub element: u32,
 }
 
 impl HostCx {
+    /// The context of props set on an element `tag`.
+    pub fn for_element(tag: crate::Tag) -> Self {
+        Self {
+            element: element_bits(tag),
+            ..Self::default()
+        }
+    }
+
     /// Reports `message`.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.warnings.push(message.into());
     }
+
+    /// Whether a prop of the elements `on` applies to the element decoded
+    /// for (always, when it is unknown).
+    pub fn on_element(&self, on: u32) -> bool {
+        self.element == 0 || self.element & on != 0
+    }
+}
+
+/// The [`on`] bits of the props element `tag` takes.
+pub fn element_bits(tag: crate::Tag) -> u32 {
+    use crate::Tag;
+    on::ALL
+        | match tag {
+            Tag::Text => on::TEXT,
+            Tag::Image => on::IMAGE,
+            Tag::Scroll => on::SCROLLING | on::SCROLL,
+            Tag::List => on::SCROLLING | on::LIST,
+            Tag::Input => on::INPUT,
+            Tag::Screen => on::SCREEN,
+            Tag::Modal => on::MODAL,
+            Tag::WebView => on::WEBVIEW,
+            Tag::Video => on::VIDEO,
+            Tag::InputAccessory => on::INPUT_ACCESSORY,
+            Tag::View
+            | Tag::Cell
+            | Tag::Stack
+            | Tag::HeaderItem
+            | Tag::Canvas
+            | Tag::Native
+            | Tag::Overlay => 0,
+        }
 }
 
 /// A prop's value: how it comes out of a JS value and its TypeScript type.
@@ -327,7 +371,7 @@ impl HostValue for EdgeInsets {
     }
 
     fn ts_type(_: &mut TsTypes) -> String {
-        "{ top?: number; right?: number; bottom?: number; left?: number }".into()
+        "Partial<Edges>".into()
     }
 }
 
@@ -336,27 +380,54 @@ pub fn field<T: HostValue, I: HostInput>(input: &I, key: &str, cx: &mut HostCx) 
     input.field(key).and_then(|v| T::decode(&v, cx))
 }
 
-/// The payloads of the host elements' events.
-const EVENT_TYPES: &str = r#"/** Where the core placed an overlay: the payload of `onPosition`. */
+/// The payloads of the host elements' events, and the shapes they are made
+/// of: `nsh_core::geometry`'s `Point`, `Size`, `Bounds` and `Edges` (in
+/// points) and `keymap::Modifiers`, with GPUI's field names.
+const EVENT_TYPES: &str = r#"/** A position, in points (`nsh_core::geometry::Point`). */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** An extent, in points (`nsh_core::geometry::Size`). */
+export interface Size {
+  width: number;
+  height: number;
+}
+
+/** A position and an extent, in points (`nsh_core::geometry::Bounds`). */
+export interface Bounds {
+  /** The top left corner. */
+  origin: Point;
+  size: Size;
+}
+
+/** A length on each side, in points (`nsh_core::geometry::Edges`): insets, a safe area. */
+export interface Edges {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** The modifier keys held (GPUI's `Modifiers`). */
+export interface Modifiers {
+  control: boolean;
+  /** Option on Apple platforms, Alt elsewhere. */
+  alt: boolean;
+  shift: boolean;
+  /** Command on Apple platforms, the Windows / Super key elsewhere. */
+  platform: boolean;
+}
+
+/** Where the core placed an overlay: the payload of `onPosition`. */
 export interface OverlayPosition {
   /** The side of the anchor it went on: the one asked for, or the other one when only that one has room. */
   placement: "top" | "bottom" | "left" | "right";
   /** Its frame in the root view (the surface, or the dialog it is in). */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  bounds: Bounds;
   /** The room on that side, inside the safe area less `margin`: what a menu may grow to. */
-  availableWidth: number;
-  availableHeight: number;
-}
-
-/** A frame relative to the parent: the payload of `onLayout`. */
-export interface LayoutEvent {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  available: Size;
 }
 
 /** A drag: translation since the start and velocity (points / second). */
@@ -371,45 +442,32 @@ export interface PanEvent {
   valueY?: number;
 }
 
-/** Where the mouse is over a hovered view: the payload of `onHoverMove`. */
+/** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
 export interface HoverEvent {
-  /** Position in the view (points, its transforms undone). */
-  locationX: number;
-  locationY: number;
-  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX`. */
-  pageX: number;
-  pageY: number;
-  altKey: boolean;
-  ctrlKey: boolean;
-  /** Command on Apple platforms, the Windows / Super key elsewhere. */
-  metaKey: boolean;
-  shiftKey: boolean;
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+  modifiers: Modifiers;
 }
 
 /** Where a context menu was asked for: the payload of `onContextMenu`. */
 export interface ContextMenuEvent {
-  /** Position in the view (points, its transforms undone). */
-  locationX: number;
-  locationY: number;
-  /** Position in the root view the view is in: where `Menu.popup` opens a menu. */
-  pageX: number;
-  pageY: number;
-  altKey: boolean;
-  ctrlKey: boolean;
-  /** Command on Apple platforms, the Windows / Super key elsewhere. */
-  metaKey: boolean;
-  shiftKey: boolean;
+  /** Position in the view (its transforms undone). */
+  position: Point;
+  /** Position in the root view the view is in: where `Menu.popup` opens a menu (`Menu.popup(items, e.pagePosition)`). */
+  pagePosition: Point;
+  modifiers: Modifiers;
 }
 
 /** Where a scroll view is: the payload of `onScroll`. */
 export interface ScrollEvent {
-  x: number;
-  y: number;
+  /** The content offset. */
+  offset: Point;
   /** The content's size (zoomed). */
-  contentWidth: number;
-  contentHeight: number;
-  width: number;
-  height: number;
+  contentSize: Size;
+  /** The scroll view's size. */
+  size: Size;
   /** The zoom scale (1 unless the scroll view zooms). */
   zoomScale: number;
 }
@@ -417,10 +475,7 @@ export interface ScrollEvent {
 /** A line of a laid-out text (in the text's content box). */
 export interface TextLayoutLine {
   text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  bounds: Bounds;
   ascender: number;
   descender: number;
   capHeight: number;
@@ -468,12 +523,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::ContextMenu,
         on::ALL,
         "(e: ContextMenuEvent) => void",
-        "The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup({ x: e.pageX, y: e.pageY })`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead.",
+        "The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup(items, e.pagePosition)`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead.",
     ),
     (
         EventKind::MouseMove,
         on::ALL,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "The mouse moved inside the view, including with a button down (desktops and web); `x`/`y` are local coordinates in points, delivered at most once per frame.",
     ),
     (
@@ -494,7 +549,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: { uris: string[] }) => void",
         "Local file URLs dropped on this desktop destination.",
     ),
-    (EventKind::Layout, on::ALL, "(e: LayoutEvent) => void", ""),
+    (
+        EventKind::Layout,
+        on::ALL,
+        "(bounds: Bounds) => void",
+        "The frame changed: its bounds in the parent.",
+    ),
     (EventKind::PanStart, on::ALL, "(e: PanEvent) => void", ""),
     (
         EventKind::PanEnd,
@@ -565,7 +625,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::IMAGE,
-        "(e: { width: number; height: number }) => void",
+        "(e: Size) => void",
         "The source image's size in pixels (not the decoded, downsampled one).",
     ),
     (
@@ -577,7 +637,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::VIDEO,
-        "(e: { duration: number; width: number; height: number }) => void",
+        "(e: { duration: number; size: Size }) => void",
         "",
     ),
     (
@@ -599,37 +659,37 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "",
     ),
     (
-        EventKind::ScrollBeginDrag,
+        EventKind::ScrollDragStart,
         on::SCROLLING,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "",
     ),
     (
-        EventKind::ScrollEndDrag,
+        EventKind::ScrollDragEnd,
         on::SCROLLING,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "",
     ),
     (
-        EventKind::MomentumScrollBegin,
+        EventKind::MomentumStart,
         on::SCROLLING,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "",
     ),
     (
-        EventKind::MomentumScrollEnd,
+        EventKind::MomentumEnd,
         on::SCROLLING,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "",
     ),
     (
         EventKind::ScrollEnd,
         on::SCROLL | on::LIST,
-        "(e: { x: number; y: number }) => void",
+        "(e: Point) => void",
         "",
     ),
     (EventKind::Refresh, on::SCROLL | on::LIST, "() => void", ""),
-    (EventKind::EndReached, on::LIST, "() => void", ""),
+    (EventKind::LoadMore, on::LIST, "() => void", ""),
     (
         EventKind::ChangeText,
         on::INPUT,
@@ -665,14 +725,14 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::ContentSizeChange,
         on::INPUT,
-        "(e: { width: number; height: number }) => void",
+        "(e: Size) => void",
         "The size of the text (at the input's width when `multiline`; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it.",
     ),
     (
         EventKind::Message,
         on::WEBVIEW,
         "(e: { data: string }) => void",
-        "The page called `window.ReactNativeWebView.postMessage(data)`.",
+        "The page called `window.nsh.postMessage(data)`.",
     ),
     (
         EventKind::NavigationStateChange,
@@ -690,7 +750,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::PressOutside,
         on::OVERLAY,
-        "(e: { pageX: number; pageY: number }) => void",
+        "(e: { pagePosition: Point }) => void",
         "A press went down outside the overlay, its anchor and the overlays inside it (where, in the root view). Closing is the app's: leave the overlay out.",
     ),
     (
@@ -721,7 +781,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Clipboard,
     EventKind::KeyCommand,
     EventKind::Menu,
-    EventKind::ViewableItemsChanged,
+    EventKind::ViewableItemsChange,
     // `NavPage`'s `onDismiss` / `onBackPress` and `Dialog`'s `onClose` /
     // `onCancel` / `onOpenChange` / `onOpen`: the navigation's handlers
     // (`nsh-js` `navigation.rs`), declared with its components.

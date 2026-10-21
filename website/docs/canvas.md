@@ -186,7 +186,7 @@ Strokes are tested with round joins and without dashes; coordinates given as ani
 
 **Gradients**: `createLinearGradient`, `createRadialGradient`, `createConicGradient`, each with `addColorStop(offset, color)` (`CanvasGradient::linear`, `radial`, `conic` and `add_color_stop` in Rust).
 
-**Images**: `drawImage(image, dx, dy)`, `drawImage(image, dx, dy, dw, dh)`, `drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)` (`draw_image(uri, dest)` and `draw_image_part(..)` in Rust).
+**Images**: `drawImage(image, dx, dy)`, `drawImage(image, dx, dy, dw, dh)`, `drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)` (`draw_image(url, dest)` and `draw_image_part(..)` in Rust).
 
 `cx.canvas.width` and `cx.canvas.height` give the canvas's size in points in TSX.
 
@@ -310,7 +310,7 @@ Font families are the same as in styles: system families and the names of fonts 
 
 ## Images
 
-Drawing an image takes a URL or an asset's URI in Rust (`LOGO.uri`), and a URL, an imported asset (`import logo from "./logo.png"`) or `{ uri }` in TSX. The image is loaded natively, and the canvas draws again once it has loaded, so you do not need to track loading yourself. Remote URLs are subject to the app's [network capabilities](./sandbox-and-capabilities.md).
+Drawing an image takes a URL in Rust (an asset's is `LOGO.url`), and a URL or an imported asset (`import logo from "./logo.png"`) in TSX. The image is loaded natively, and the canvas draws again once it has loaded, so you do not need to track loading yourself. Remote URLs are subject to the app's [network capabilities](./sandbox-and-capabilities.md).
 
 Canvases on iOS, macOS, Android, Windows, Linux and GPUI draw bitmap images (PNG, JPEG, GIF, WebP, ...); on them, an SVG source is an image that fails to load, and the log names it. Show SVG images with [`<Image>`](./images-and-assets.md#svg-images), or draw their shapes as `Path2D` paths. On the web, a canvas draws what the browser draws, SVG included.
 
@@ -323,7 +323,7 @@ canvas(
         .begin_path()
         .arc(60.0, 60.0, 56.0, 0.0, TAU)
         .clip() // a round avatar
-        .draw_image(LOGO.uri, bounds(point(px(4.0), px(4.0)), size(px(112.0), px(112.0))))
+        .draw_image(LOGO.url, bounds(point(px(4.0), px(4.0)), size(px(112.0), px(112.0))))
         .restore(),
 )
 .size(px(120.0))

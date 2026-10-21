@@ -106,6 +106,8 @@ and take their look from the app.
 |---|---|---|---|
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
+| `<Radio>`, `<RadioGroup>` | `nsh_base::radio()`, `radio_group()` | One option of a set the user picks one of, and the set | [Radio](./radio.md) |
+| `<Tab>`, `<Tabs>` | `nsh_base::tab()`, `tabs()` | One tab of a tab list, and the list | [Tabs](./tabs.md) |
 | `<Switch>` | `nsh_base::switch()` | An on / off control with a track and a thumb | [Switch](./switch.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<NavStack>`, `<NavPage>` | `nsh_base::nav_stack()`, `nsh_base::nav_page()` | Native navigation: a stack of pages with the platform's header and back gestures | [NavStack](./nav-stack.md) |
@@ -150,7 +152,7 @@ only hears about it afterwards. Only the innermost pressable view responds; insi
 | `onPressDown` | `.on_press_down(..)` | `() => void` | | A finger went down on the view. |
 | `onPressUp` | `.on_press_up(..)` | `() => void` | | The finger lifted or left. |
 | `delayLongPress` | `.long_press_delay(ms)` | `number` | `500` | Milliseconds before a press becomes a long press. |
-| `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| { top?, right?, bottom?, left? }` | | Extends the touch area beyond the bounds, in points. |
+| `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| Partial<Edges>` | | Extends the touch area beyond the bounds, in points. |
 | `pointerEvents` | `.pointer_events(PointerEvents::BoxNone)` | `"auto" \| "none" \| "box-none" \| "box-only"` | `"auto"` | Which touches the view and its children receive: `"none"` neither, `"box-none"` only the children, `"box-only"` only the view itself. |
 
 The press feedback is the app's: `activeStyle` (or `active:` classes, `.active(..)` in Rust) applies while the view is
@@ -207,9 +209,10 @@ the one under the mouse hear `onHoverIn` too (from the outside in; `onHoverOut` 
 after the fact and never on touches; a move with a button down is a touch (`onTouchMove`, the responder). A view removed
 from under the mouse hears `onHoverOut`, on Linux and Windows at the next mouse move.
 
-`HoverEvent` says where the mouse is: `locationX` / `locationY` in the view (points, its transforms undone), `pageX` /
-`pageY` in the root view it is in, as touches give them, and the modifier keys held (`altKey`, `ctrlKey`, `metaKey`:
-Command on Apple platforms, the Windows key elsewhere, `shiftKey`); in Rust `location`, `page` and `modifiers`. Moves
+`HoverEvent` says where the mouse is, as GPUI's `MouseMoveEvent` does: `position` in the view (a `Point` in points, its
+transforms undone), `pagePosition` in the root view it is in, as touches give it, and the `modifiers` held (`control`,
+`alt`, `shift`, `platform`: Command on Apple platforms, the Windows key elsewhere); in Rust `position`, `page_position`
+and `modifiers`. Moves
 come at most once a frame, the latest one, and always before the `onHoverOut` that follows them, so a handler can
 redraw on each move:
 
@@ -219,7 +222,7 @@ let at = signal(None::<Points>);
 
 view()
     .h(px(200.0))
-    .on_hover_move(move |e: &HoverEvent| at.set(Some(e.location.x)))
+    .on_hover_move(move |e: &HoverEvent| at.set(Some(e.position.x)))
     .on_hover_out(move || at.set(None))
     .child(when(move || at.get().is_some(), move || {
         view()
@@ -236,7 +239,7 @@ view()
 // A crosshair over a chart.
 const at = signal<number | null>(null);
 
-<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+<View onHoverMove={(e) => at.set(e.position.x)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
   <If when={at() !== null}>
     <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
   </If>
@@ -277,23 +280,22 @@ Open the app's own menu there; in TSX, [`Menu.popup`](../modules/nsh-desktop.md)
 let menu_at = signal(None::<Point<Points>>);
 
 view()
-    .on_context_menu(move |e: &ContextMenuEvent| menu_at.set(Some(e.page)))
+    .on_context_menu(move |e: &ContextMenuEvent| menu_at.set(Some(e.page_position)))
     .child(text(row.name.clone()))
 ```
 
 ```tsx tabs
 import { Menu } from "nsh/desktop";
 
-<View onContextMenu={(e) => Menu.popup(rowMenu(row), { x: e.pageX, y: e.pageY })}>…</View>
+<View onContextMenu={(e) => Menu.popup(rowMenu(row), e.pagePosition)}>…</View>
 ```
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
 | `onContextMenu` | `.on_context_menu(..)` | `(e: ContextMenuEvent) => void` | The secondary button was pressed over the view or a view inside it. |
 
-`ContextMenuEvent` has `locationX` / `locationY` in the view, `pageX` / `pageY` in its root view (where `Menu.popup`
-places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`); in Rust `location`, `page` and
-`modifiers`. The nearest view that listens, from the one under the pointer outwards, hears it. A text input, or
+`ContextMenuEvent` has `position` in the view, `pagePosition` in its root view (where `Menu.popup` places a menu:
+`Menu.popup(items, e.pagePosition)`) and the `modifiers`; in Rust `position`, `page_position` and `modifiers`. The nearest view that listens, from the one under the pointer outwards, hears it. A text input, or
 selectable text with an edit menu (Windows, the GPUI backend, browsers), nearer than that view shows its own menu
 instead. The platform decides this as the button goes down, from what is mounted, so the handler is told after the fact
 and nothing has to be cancelled. A `disabled` view leaves the click to the nearest enabled listener around it. On
@@ -334,7 +336,7 @@ view().absolute().inset_0().focusable(false).on_press(close)
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(e: LayoutEvent) => void` | The view's frame relative to its parent, `{ x, y, width, height }`, after each layout that changes it. |
+| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(bounds: Bounds) => void` | The view's frame relative to its parent, `{ origin, size }`, after each layout that changes it. |
 | `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | The native node (see [ref methods](#ref-methods)). `ref={el}` assigns a variable, `ref={fn}` calls a function. |
 | `nativeID` | `.native_id(id)` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |

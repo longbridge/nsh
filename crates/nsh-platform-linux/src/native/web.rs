@@ -14,7 +14,7 @@
 //! are kept from it (`crate::input`).
 //!
 //! As on iOS and macOS, pages talk to the app through
-//! `window.ReactNativeWebView.postMessage(data)` (a script message handler,
+//! `window.nsh.postMessage(data)` (a script message handler,
 //! `onMessage`), and `postMessage()` dispatches a `message` event on the
 //! page's `window`. Events are the iOS ones: `onLoadStart` and
 //! `onNavigationStateChange` when a navigation starts, `onLoad` and
@@ -32,7 +32,7 @@
 //! are user scripts of the top frame (at the document's start and end);
 //! `javaScriptEnabled` is WebKit's `enable-javascript-markup` (the page's
 //! own scripts; injected ones still run, as with WebKit on Apple
-//! platforms); `scrollEnabled: false` is a user style sheet hiding the
+//! platforms); `scrollable: false` is a user style sheet hiding the
 //! top document's overflow (inner scrollable elements still scroll, as
 //! with iOS's scroll view), and wheels over such a page go to the scroll
 //! views around it; `allowsBackForwardNavigationGestures` is
@@ -79,10 +79,10 @@ use crate::{decor::rgba, surface::Surface, view::NshView};
 /// The script message handler the bridge posts to.
 const HANDLER: &str = "nsh";
 
-/// Lets pages talk to the app, like React Native's web view.
-const BRIDGE: &str = "window.ReactNativeWebView = window.ReactNativeWebView || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
+/// Lets pages talk to the app: `window.nsh.postMessage(data)`.
+const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
 
-/// `scrollEnabled: false`: the top document does not scroll.
+/// `scrollable: false`: the top document does not scroll.
 const NO_SCROLL: &str = "html, body { overflow: hidden !important; }";
 
 /// What a web view's signal handlers share.
@@ -208,9 +208,9 @@ impl WebHost {
                 add(js, UserScriptInjectionTime::End);
             }
         }
-        if first || p.scroll_enabled != old.scroll_enabled {
+        if first || p.scrollable != old.scrollable {
             self.content.remove_all_style_sheets();
-            if p.scroll_enabled {
+            if p.scrollable {
                 web.remove_css_class(UNSCROLLABLE);
             } else {
                 self.content.add_style_sheet(&UserStyleSheet::new(

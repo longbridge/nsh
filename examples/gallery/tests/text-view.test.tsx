@@ -22,6 +22,9 @@ test("the Text View demo shows Markdown, HTML and extensions, and streams", asyn
   expect(app.shows("NSH 0.1.0: native UI from TSX")).toBe(true);
   expect(app.shows("@huacnlee")).toBe(true);
   expect(app.shows("HEADS UP")).toBe(true);
+  // A link is a span of its paragraph, pressed by its characters.
+  await app.press("the guide");
+  await app.waitFor("https://github.com/longbridge/nsh");
   await app.press("Stream it");
   await app.clock.runFor(10_000);
   expect(app.shows("That's it. Ping me if anything looks off.")).toBe(true);

@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
 渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 macOS 上，
-`os()` 为 `Os::MacOs`（TSX 中 `Platform.OS` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+`os()` 为 `Os::MacOs`（TSX 中 `platform.os` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
@@ -149,7 +149,7 @@ view.load(Bundle::source(code).into());
 
 ## macOS 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为 macOS 的版本号，
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`platform.idiom` 为 `"desktop"`），`os_version()`（`platform.version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
 输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。`selectable` 文本通过拖动、双击和三击选择，用 Cmd+C 复制。
@@ -184,7 +184,7 @@ Return 不会提交。`onKeyPress` 报告的内容与 React Native 一致：输�
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）。
 - **`mixBlendMode`**，以及大于 1 的 `brightness()`。
 - **输入框**：内容类型与自动填充、键盘类型、自动大写、字间距；输入辅助视图从不显示（没有软键盘），`keyboardShouldPersistTaps` 被忽略。
-- **`WebView` 的 `scrollEnabled={false}`** 让鼠标滚轮和触控板不再滚动页面，而是像 iOS 上一样滚动它外面的应用滚动视图。
+- **`WebView` 的 `scrollable={false}`** 让鼠标滚轮和触控板不再滚动页面，而是像 iOS 上一样滚动它外面的应用滚动视图。
   页面仍可用键盘（空格、方向键）和它自己的脚本滚动，触控板在页面之间的轻扫（`allowsBackForwardNavigationGestures`）也会停用。
 - **无障碍**：自定义 `accessibilityActions`。
 - **状态栏**和**触感反馈**（桌面上没有对应物）。

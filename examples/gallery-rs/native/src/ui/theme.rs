@@ -44,9 +44,9 @@ pub(crate) mod colors {
     /// A control on a card (buttons, fields, tracks).
     pub(crate) const RAISED: AdaptiveColor = tone(rgb(0xfbfbf9), rgb(0x24262a));
     /// Borders of cards and controls.
-    pub(crate) const BORDER: AdaptiveColor = tone(rgb(0xe2e2dd), rgb(0x2c2e33));
+    pub(crate) const BORDER: AdaptiveColor = tone(rgb(0xd8d8d1), rgb(0x2c2e33));
     /// Hairlines inside insets.
-    pub(crate) const LINE: AdaptiveColor = tone(rgb(0xecece8), rgb(0x1f2124));
+    pub(crate) const LINE: AdaptiveColor = tone(rgb(0xe2e2dc), rgb(0x24262a));
     /// Text.
     pub(crate) const TEXT: AdaptiveColor = tone(rgb(0x16171a), rgb(0xeceef1));
     /// Secondary text.
@@ -198,6 +198,19 @@ const fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     }
 }
 
+/// A box shadow under the box, pulled in by `spread` (negative): it lifts the
+/// surface without hazing around its edge.
+const fn lift(y: f32, blur: f32, spread: f32, color: Rgba) -> BoxShadow {
+    BoxShadow {
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(spread),
+        color: color.to_packed(),
+        inset: false,
+    }
+}
+
 /// A box shadow inside the box (`spread`: a rim all around).
 const fn inner(y: f32, blur: f32, spread: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
@@ -270,16 +283,17 @@ const fn stop(light: Rgba, dark: Rgba, at: f32) -> (AdaptiveColor, f32) {
 const CARD: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xffffff), rgb(0x1d1e22), 0.0),
-        stop(rgb(0xfafaf8), rgb(0x17181b), 1.0),
+        stop(rgb(0xffffff), rgb(0x1b1c20), 0.0),
+        stop(rgb(0xfdfdfc), rgb(0x191a1d), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        drop(6.0, 20.0, rgb_a(INK, 0.08)),
+        drop(1.0, 1.0, rgb_a(INK, 0.04)),
+        lift(14.0, 32.0, -18.0, rgb_a(INK, 0.2)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.06)),
-        drop(10.0, 28.0, rgb_a(BLACK, 0.38)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.04)),
+        lift(16.0, 36.0, -20.0, rgb_a(BLACK, 0.75)),
     ],
     border: None,
     backdrop_blur: 0.0,
@@ -297,16 +311,18 @@ const INSET: Look = Look {
 const RAISED: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xffffff), rgb(0x2d2f34), 0.0),
-        stop(rgb(0xf2f2ee), rgb(0x222428), 1.0),
+        stop(rgb(0xffffff), rgb(0x2b2d32), 0.0),
+        stop(rgb(0xf6f6f2), rgb(0x24262a), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        drop(1.0, 2.0, rgb_a(INK, 0.12)),
+        drop(1.0, 1.0, rgb_a(INK, 0.06)),
+        lift(5.0, 12.0, -6.0, rgb_a(INK, 0.18)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.08)),
-        drop(1.0, 2.0, rgb_a(BLACK, 0.45)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.07)),
+        drop(1.0, 1.0, rgb_a(BLACK, 0.4)),
+        lift(6.0, 14.0, -7.0, rgb_a(BLACK, 0.7)),
     ],
     border: None,
     backdrop_blur: 0.0,
@@ -315,16 +331,18 @@ const RAISED: Look = Look {
 const LIGHT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0x2c2e33), rgb(0xfbfbfc), 0.0),
-        stop(rgb(0x16171a), rgb(0xd4d6d9), 1.0),
+        stop(rgb(0x2e3035), rgb(0xfbfbfc), 0.0),
+        stop(rgb(0x1b1c20), rgb(0xe3e5e8), 1.0),
     ],
     light: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.14)),
-        drop(3.0, 10.0, rgb_a(INK, 0.22)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.16)),
+        drop(1.0, 1.0, rgb_a(INK, 0.2)),
+        lift(7.0, 14.0, -7.0, rgb_a(INK, 0.5)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.9)),
-        drop(3.0, 10.0, rgb_a(BLACK, 0.4)),
+        inner(1.0, 0.0, 0.0, rgb(WHITE)),
+        drop(1.0, 1.0, rgb_a(BLACK, 0.4)),
+        lift(8.0, 18.0, -8.0, rgb_a(BLACK, 0.75)),
     ],
     border: None,
     backdrop_blur: 0.0,
@@ -333,16 +351,18 @@ const LIGHT: Look = Look {
 const ACCENT: Look = Look {
     fill: None,
     stops: &[
-        stop(rgb(0xd8f88f), rgb(0xdbf893), 0.0),
-        stop(rgb(0xbde65a), rgb(0xb3dd4e), 1.0),
+        stop(rgb(0xd6f78a), rgb(0xd6f78a), 0.0),
+        stop(rgb(0xc1ea5c), rgb(0xc1ea5c), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.6)),
-        drop(3.0, 10.0, rgb_a(0x6e9614, 0.25)),
+        drop(1.0, 1.0, rgb_a(0x506e0a, 0.2)),
+        lift(7.0, 14.0, -7.0, rgb_a(0x6e9614, 0.55)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.45)),
-        drop(3.0, 12.0, rgb_a(0xc8f26d, 0.22)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.55)),
+        drop(1.0, 1.0, rgb_a(BLACK, 0.4)),
+        lift(8.0, 20.0, -9.0, rgb_a(0xc8f26d, 0.4)),
     ],
     border: None,
     backdrop_blur: 0.0,
@@ -351,8 +371,8 @@ const ACCENT: Look = Look {
 const TRACK: Look = Look {
     fill: None,
     stops: &[],
-    light: &[inner(1.0, 2.0, 0.0, rgb_a(INK, 0.10))],
-    dark: &[inner(1.0, 3.0, 0.0, rgb_a(BLACK, 0.6))],
+    light: &[inner(1.0, 2.0, 0.0, rgb_a(INK, 0.08))],
+    dark: &[inner(1.0, 2.0, 0.0, rgb_a(BLACK, 0.5))],
     border: None,
     backdrop_blur: 0.0,
 };
@@ -373,26 +393,22 @@ const KNOB: Look = Look {
 };
 
 const PILL: Look = Look {
-    fill: Some(tone(rgb(0xffffff), rgb(0x2a2c31))),
+    fill: Some(tone(rgb(0xffffff), rgb(0x2b2d32))),
     stops: &[
-        stop(rgb(0xffffff), rgb(0x383a40), 0.0),
-        stop(rgb(0xfcfcfa), rgb(0x2a2c31), 0.52),
-        stop(rgb(0xf3f3ef), rgb(0x24262a), 1.0),
+        stop(rgb(0xffffff), rgb(0x2f3136), 0.0),
+        stop(rgb(0xf6f6f2), rgb(0x2a2c30), 1.0),
     ],
     light: &[
         inner(1.0, 0.0, 0.0, rgb(WHITE)),
-        inner(0.0, 0.0, 1.0, rgb_a(WHITE, 0.7)),
-        inner(-1.0, 0.0, 0.0, rgb_a(INK, 0.06)),
-        drop(1.0, 3.0, rgb_a(INK, 0.12)),
-        drop(4.0, 10.0, rgb_a(INK, 0.05)),
+        drop(1.0, 1.0, rgb_a(INK, 0.06)),
+        lift(5.0, 12.0, -6.0, rgb_a(INK, 0.18)),
     ],
     dark: &[
-        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.16)),
-        inner(0.0, 0.0, 1.0, rgb_a(WHITE, 0.03)),
-        inner(-1.0, 0.0, 0.0, rgb_a(BLACK, 0.28)),
-        drop(2.0, 6.0, rgb_a(BLACK, 0.35)),
+        inner(1.0, 0.0, 0.0, rgb_a(WHITE, 0.08)),
+        drop(1.0, 1.0, rgb_a(BLACK, 0.4)),
+        lift(6.0, 14.0, -7.0, rgb_a(BLACK, 0.7)),
     ],
-    border: Some(tone(rgb_a(INK, 0.08), rgb_a(WHITE, 0.07))),
+    border: Some(tone(rgb_a(INK, 0.14), rgb_a(WHITE, 0.08))),
     backdrop_blur: 0.0,
 };
 

@@ -53,12 +53,12 @@ fn notify(message: &str) {
 ```
 
 ```tsx tabs
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Toast } from "nsh/android";
 import { AlertDialog } from "nsh/base";
 
 const notify = (message: string) =>
-  Platform.OS === "android"
+  platform.os === "android"
     ? Toast.show(message)
     : AlertDialog.show({ title: "Done", description: message, actions: [{ label: "OK" }] });
 ```
@@ -67,16 +67,16 @@ const notify = (message: string) =>
 
 ```ts
 const BackHandler: {
-  addEventListener(event: "hardwareBackPress", listener: () => boolean | void): { remove(): void };
+  onBackPress(listener: () => boolean | void): () => void;
   exitApp(): void;
 };
 ```
 
-The system back button and back gesture. Dialogs and navigation stacks handle the back press first (a dialog closes, a stack pops); only when none of them takes it do `BackHandler`'s listeners run.
+The system back button and back gesture. Dialogs handle the back press first (a dialog closes); then `BackHandler`'s listeners run, the most recently added first; when none of them handles it, the top navigation stack pops, and with no page to go back to the app exits.
 
 | Member | Rust | Description |
 |---|---|---|
-| `addEventListener("hardwareBackPress", listener)` | `on_back_press(listener)` | `listener` returns `true` when it handled the press. The most recently added listener runs first. If no listener handles it, the app exits. Returns a subscription to `remove()`; in Rust the listener lives as long as the component that added it. |
+| `onBackPress(listener)` | `on_back_press(listener)` | `listener` returns `true` when it handled the press. Returns a function that stops listening; a listener added while a component renders (or an effect runs) stops with it, in Rust and TSX alike. |
 | `exitApp()` | the listener returns `false` | Leaves the app. A Rust listener that returns `false` lets the press go on, so the stack goes back or the app exits. |
 
 ```rust tabs
@@ -103,13 +103,14 @@ fn Editor() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup, signal } from "nsh";
+import { signal } from "nsh";
 import { BackHandler } from "nsh/android";
 import { AlertDialog } from "nsh/base";
 
 function Editor() {
   const dirty = signal(false);
-  const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+  // Stops listening when Editor goes.
+  BackHandler.onBackPress(() => {
     if (!dirty()) return false; // let the app go back or exit
     AlertDialog.show({
       title: "Discard changes?",
@@ -117,12 +118,11 @@ function Editor() {
     }).then((id) => id === "discard" && BackHandler.exitApp());
     return true;
   });
-  cleanup(() => sub.remove());
   // ...
 }
 ```
 
 > [!NOTE]
-> The listener runs after the system has delivered the press: the main thread never waits for the app's code. While at least one listener is registered, NSH takes back presses that dialogs and stacks leave, and exits the app itself when no listener returns `true`.
+> The listener runs after the system has delivered the press: the main thread never waits for the app's code. While at least one listener is registered, NSH takes back presses that dialogs leave, and goes back in the top stack or exits the app itself when no listener returns `true`.
 
 The status bar is set by the `statusBar` of [pages and dialogs](./nsh-base.md#status-bar) from `nsh/base`, on iOS and Android alike.

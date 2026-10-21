@@ -1,0 +1,84 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+platform web desktop
+fontscale 2
+# props-platform-web
+tap id:case-props-platform-web
+expect Link
+# `web={{…}}` wins over the prop set for every platform; `android={{…}}`
+# does not apply.
+prop id:link accessibilityLabel In a browser
+prop id:link elevation 0
+covers [props] web
+# props-text-scaling
+tap id:case-props-text-scaling
+# twice the default.
+style id:scaled fontSize 20
+style id:fixed fontSize 10
+style id:capped fontSize 15
+style id:field fontSize 20
+style id:field-fixed fontSize 10
+style id:field-capped fontSize 15
+covers [props] allowFontScaling
+covers [props] maxFontSizeMultiplier
+# props-media-webview-desktop
+tap id:case-props-media-webview-desktop
+prop id:page src https://example.com/
+prop id:page desktop.allowsBackForwardNavigationGestures true
+covers [props] desktop.allowsBackForwardNavigationGestures
+# base-popups-desktop
+tap id:case-base-popups-desktop
+# A press outside a popover on a desktop closes it, unless it says not to.
+expect StayBody
+touch start text:Elsewhere 5 5
+touch end
+wait 200
+expect StayBody
+expect Log: none
+covers [props] Popover.closeOnPressOutside
+# A menu at the right of its trigger, 7 points away, lined up by its end
+# but kept 5 points from the top.
+tap text:DeskMenu
+expect DeskItem
+frame parent:parent:text:DeskItem 127 5 90 600
+covers [props] Menu.placement
+covers [props] Menu.align
+covers [props] Menu.offset
+covers [props] Menu.margin
+# A context menu where the secondary button went down, 3 points below it,
+# kept 9 points from the right edge.
+event text:RightClickArea onContextMenu pageX=390 pageY=200
+expect DeskCopy
+frame parent:parent:text:DeskCopy 291 203 90 40
+covers [props] ContextMenu.offset
+covers [props] ContextMenu.margin
+# A tooltip after the pointer rested on its trigger for `delay`, gone when
+# the pointer leaves.
+event text:SlowTrigger onHoverIn
+wait 1000
+absent SlowTip
+wait 1500
+expect SlowTip
+expect Log: tooltip true hover
+expect Tip: open
+event text:SlowTrigger onHoverOut
+absent SlowTip
+expect Log: tooltip false hover
+expect Tip: closed
+covers [props] Tooltip.delay
+covers [events] Tooltip.onOpenChange
+covers [events] Tooltip.onOpen
+covers [events] Tooltip.onClose
+# An element's `tooltip`: a text after half a second, gone on a press; an
+# element, gone when the pointer leaves.
+event id:prop-tip onHoverIn
+wait 700
+expect PropTip
+touch start id:prop-tip 5 5
+touch end
+absent PropTip
+event text:ElementTrigger onHoverIn
+wait 700
+expect ElementTip
+event text:ElementTrigger onHoverOut
+absent ElementTip
+covers [props] tooltip

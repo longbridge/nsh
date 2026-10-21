@@ -109,13 +109,13 @@ with the cell and shows up on another item.
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | Between items (one column). |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. In Rust, the rows' identities, so rows keep their cells and sizes when rows come and go before them. |
-| `onEndReached` | `.on_end_reached(..)` | `() => void` | | The end is near: load more. |
-| `onEndReachedThreshold` | `.end_reached_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onEndReached` fires. |
-| `onViewableItemsChanged` | `.on_viewable_items_changed(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | Items became viewable or stopped being viewable. |
+| `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near: load more. |
+| `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onLoadMore` fires. |
+| `onViewableItemsChange` | `.on_viewable_items_change(..)` | `(info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void` | | Items became viewable or stopped being viewable. |
 | `viewabilityConfig` | `.viewability(..)`, `.minimum_view_time(..)` | `ViewabilityConfig` | | When items count as viewable (below). |
 | `refreshing` | `.refreshing(..)` | `boolean` | | The pull-to-refresh spinner shows. |
 | `onRefresh` | `.on_refresh(..)` | `() => void` | | The user pulled to refresh. |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `scrollValue` | `.scroll_value(&value)` | `AnimatedValue` | | An animated value fed with the scroll offset, for scroll-linked animations. |
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `style` | `Styled` methods | `StyleProp<ViewStyle>` | | The list's own style (it needs a bounded size: `flex: 1` or a height). |
@@ -124,7 +124,7 @@ with the cell and shows up on another item.
 
 Lists also take the scrolling props of [`Scroll`](./scroll.md#scrolling) (the `Scrollable` methods in Rust):
 `pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `disableIntervalMomentum`, `decelerationRate`,
-`bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `scrollEventThrottle` and `scrollEnabled`.
+`bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`, `scrollEventThrottle` and `scrollable`.
 Lists keep their scale.
 
 The props every element takes ([common props](./index.md#common-props)) go to the list's scroll view as they are:
@@ -147,11 +147,11 @@ viewable rows, `changed()` the rows that came or went.
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | The offset changed. |
-| `onScrollBeginDrag` / `onScrollEndDrag` | `.on_scroll_begin_drag` / `.on_scroll_end_drag` | `{ x, y }` | Dragging started / stopped. |
-| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `.on_momentum_scroll_begin` / `.on_momentum_scroll_end` | `{ x, y }` | A glide started / stopped. |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` | Dragging started / stopped. |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide started / stopped. |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
-| `onEndReached` | `.on_end_reached` | none | Within `onEndReachedThreshold` viewports of the end. |
-| `onViewableItemsChanged` | `.on_viewable_items_changed` | `{ viewableItems, changed }` (`ViewableItems`) | Viewability changed. |
+| `onLoadMore` | `.on_load_more` | none | Within `loadMoreThreshold` viewports of the end. |
+| `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }` (`ViewableItems`) | Viewability changed. |
 | `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 
 ## Ref methods
@@ -181,7 +181,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 .row_gap(px(8.0))
 .column_gap(px(8.0))
 .viewability(Viewability { item_visible_percent: Some(50.0), ..Viewability::default() })
-.on_viewable_items_changed(move |items: &ViewableItems| {
+.on_viewable_items_change(move |items: &ViewableItems| {
     visible.set(format!("{} visible", items.indices().count()).into())
 })
 .header(
@@ -202,7 +202,7 @@ let list!: YNode;
   estimatedItemSize={120}
   contentStyle={{ padding: 12, gap: 8 }}
   viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-  onViewableItemsChanged={({ viewableItems }) => visible.set(`${viewableItems.length} visible`)}
+  onViewableItemsChange={({ viewableItems }) => visible.set(`${viewableItems.length} visible`)}
   header={<Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>}
   style={{ flex: 1 }}
 >

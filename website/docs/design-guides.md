@@ -447,7 +447,7 @@ overflow.
 
 Use a visible label for each field and place help or validation next to the field it describes. Align related fields,
 but do not force long labels into a narrow fixed column. Use the appropriate control: `Checkbox` for independent
-choices, a radio group (`Button`s with `role="radio"`) for a small visible set, a `Menu` of choices for a longer set,
+choices, a [`RadioGroup`](../elements/radio.md) of `Radio`s for a small visible set, a `Menu` of choices for a longer set,
 and [`Switch`](../elements/switch.md) for a setting that takes effect immediately. Their parts (the switch's track and
 thumb, the checkbox's indicator) are the app's to style, with `checked:`, `indeterminate:` and `disabled:` classes
 that follow the control:
@@ -677,12 +677,11 @@ button that owns a menu must remain visibly pressed or open until the popup clos
 relationship between trigger and surface.
 
 ```rust tabs
-use nsh_base::{button, theme};
+use nsh_base::{tab, theme};
 
-fn tab(label: &'static str, id: Tab, current: Signal<Tab>) -> impl IntoElement {
+fn section_tab(label: &'static str, id: Section, current: Signal<Section>) -> impl IntoElement {
     let selected = move || current.get() == id;
-    button()
-        .role(AccessibilityRole::Tab)
+    tab()
         .selected(selected)
         .on_press(move || current.set(id))
         .rounded(move || theme().radius())
@@ -697,18 +696,17 @@ fn tab(label: &'static str, id: Tab, current: Signal<Tab>) -> impl IntoElement {
 
 ```tsx tabs
 import { Text } from "nsh";
-import { Button } from "nsh/base";
+import { Tab } from "nsh/base";
 
-function Tab(props: { label: string; selected: boolean; onPress: () => void }) {
+function SectionTab(props: { label: string; selected: boolean; onPress: () => void }) {
   return (
-    <Button
-      role="tab"
+    <Tab
       selected={props.selected}
       onPress={props.onPress}
       class="group rounded-(--radius) px-3 py-2 selected:bg-muted"
     >
       <Text class="text-muted-foreground group-selected:text-foreground">{props.label}</Text>
-    </Button>
+    </Tab>
   );
 }
 ```

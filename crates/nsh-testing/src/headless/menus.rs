@@ -35,8 +35,8 @@ impl Headless {
                 .bounds_in_root(id)
                 .map_or(Default::default(), |b| b.origin);
             let event = ContextMenuEvent {
-                location: point(at.x - origin.x, at.y - origin.y),
-                page: at,
+                position: point(at.x - origin.x, at.y - origin.y),
+                page_position: at,
                 modifiers: Default::default(),
             };
             self.send(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));

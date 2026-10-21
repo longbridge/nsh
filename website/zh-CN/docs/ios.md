@@ -9,7 +9,7 @@ group: platforms
 
 NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和模拟器，要求 iOS 15.0 及以上。主要用途是嵌入：现有应用在
 自己的视图中显示 NSH 应用，可以是它链接的 Rust 根组件，也可以是它加载的 TSX，包括它下载的签名包，并按自己设定的限制和能力运行它们。
-也可以运行和打包完整应用，方式与其他平台相同。在 iOS 上，`os()` 是 `Os::Ios`（TSX 中 `Platform.OS` 是 `"ios"`），TSX 的
+也可以运行和打包完整应用，方式与其他平台相同。在 iOS 上，`os()` 是 `Os::Ios`（TSX 中 `platform.os` 是 `"ios"`），TSX 的
 `ios={{…}}` 属性生效。
 
 ## 环境要求

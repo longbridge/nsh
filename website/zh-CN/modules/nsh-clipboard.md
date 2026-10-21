@@ -19,40 +19,39 @@ import { Clipboard } from "nsh/clipboard";
 
 ```ts
 const Clipboard: {
-  setString(text: string): void;
-  getString(): Promise<string>;
-  hasString(): Promise<boolean>;
-  setImage(uri: string): void;
-  getImage(): Promise<ClipboardImage | null>;
+  writeText(text: string): Promise<void>;
+  readText(): Promise<string>;
+  hasText(): Promise<boolean>;
+  writeImage(src: string): Promise<void>;
+  readImage(): Promise<ClipboardImage | null>;
   hasImage(): Promise<boolean>;
-  getFiles(): Promise<string[]>;
+  readFiles(): Promise<string[]>;
 };
 
 interface ClipboardImage {
-  uri: string; // data:image/png;base64,…
-  width: number; // 像素
-  height: number;
+  url: string; // data:image/png;base64,…
+  size: { width: number; height: number }; // 像素
 }
 ```
 
 | TS | Rust（`nsh_core::ui::prelude`） |
 |---|---|
-| `Clipboard.setString(text)` | `set_clipboard(text)` |
-| `await Clipboard.getString()` | `clipboard_string().await -> String` |
-| `await Clipboard.hasString()` | `clipboard_has_string().await -> bool` |
-| `Clipboard.setImage(uri)` | `set_clipboard_image(uri)` |
-| `await Clipboard.getImage()` | `clipboard_image().await -> Option<ClipboardImage>` |
+| `await Clipboard.writeText(text)` | `set_clipboard(text)` |
+| `await Clipboard.readText()` | `clipboard_string().await -> String` |
+| `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
+| `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
+| `await Clipboard.readImage()` | `clipboard_image().await -> Option<ClipboardImage>` |
 | `await Clipboard.hasImage()` | `clipboard_has_image().await -> bool` |
-| `await Clipboard.getFiles()` | `clipboard_files().await -> Vec<String>` |
+| `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
-Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::ui::ClipboardImage`，含 `uri`、`width` 和 `height`（`DevicePixels`）。
+Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::ui::ClipboardImage`，含 `url` 和 `size`（一个 `Size<DevicePixels>`）。
 
 用户也可以自己从[可选文本](../elements/text.md)中复制；剪贴板 API 用于在代码中复制，比如“复制”按钮。
 
-## Clipboard.setString
+## Clipboard.writeText
 
 ```ts
-setString(text: string): void;
+writeText(text: string): Promise<void>;
 ```
 
 把 `text` 放到剪贴板上，替换原有内容。Rust：`set_clipboard(text)`。
@@ -79,8 +78,8 @@ import { Clipboard } from "nsh/clipboard";
 const copied = signal(false);
 
 <View
-  onPress={() => {
-    Clipboard.setString(code());
+  onPress={async () => {
+    await Clipboard.writeText(code());
     copied.set(true);
   }}
 >
@@ -88,10 +87,10 @@ const copied = signal(false);
 </View>;
 ```
 
-## Clipboard.getString
+## Clipboard.readText
 
 ```ts
-getString(): Promise<string>;
+readText(): Promise<string>;
 ```
 
 返回剪贴板上的文本，没有文本时返回 `""`。Rust：`clipboard_string()`。在 iOS 上，读取剪贴板可能会显示系统的粘贴提示（“某应用从……粘贴”）；在 Android 10 及以上，只有前台应用才能读取。请在用户要求粘贴时再读取，而不是每进入一个页面就读。
@@ -106,14 +105,14 @@ spawn(async move {
 ```
 
 ```tsx tabs
-const pasted = await Clipboard.getString();
+const pasted = await Clipboard.readText();
 if (pasted) code.set(pasted.trim());
 ```
 
-## Clipboard.hasString
+## Clipboard.hasText
 
 ```ts
-hasString(): Promise<boolean>;
+hasText(): Promise<boolean>;
 ```
 
 返回剪贴板上是否有文本，但不读取它：iOS 上不会出现粘贴提示。Rust：`clipboard_has_string()`。可以用它决定是否显示“粘贴”按钮。在 Web 上，浏览器只能通过读取来判断，因此可能会请求用户授权。
@@ -125,16 +124,16 @@ spawn(async move { can_paste.set(clipboard_has_string().await) });
 
 ```tsx tabs
 const canPaste = signal(false);
-Clipboard.hasString().then((has) => canPaste.set(has));
+Clipboard.hasText().then((has) => canPaste.set(has));
 ```
 
-## Clipboard.getImage
+## Clipboard.readImage
 
 ```ts
-getImage(): Promise<ClipboardImage | null>;
+readImage(): Promise<ClipboardImage | null>;
 ```
 
-返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`uri` 是图片的 `data:` URI（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(uri)` 拿到它的字节用于上传，在 Rust 中解码逗号之后的 base64 即得到字节。`width` 和 `height` 是像素尺寸。和 `getString` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样 `data:` URI 能放进应用的内存；更大的图片 `getImage` 返回 `null`，`hasImage` 返回 `true`。
+返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 `data:` URL（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节用于上传，在 Rust 中解码逗号之后的 base64 即得到字节。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样 `data:` URL 能放进应用的内存；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。
 
 ```rust tabs
 use base64::Engine as _;
@@ -155,13 +154,13 @@ fn attachments() -> impl IntoElement {
         .child(text("粘贴").on_press(paste))
         .child(each(
             attachments,
-            |shot: &ClipboardImage| shot.uri.clone(),
-            |shot, _| image(move || shot.with(|s| s.uri.clone())).size(px(64.0)).rounded(px(8.0)),
+            |shot: &ClipboardImage| shot.url.clone(),
+            |shot, _| image(move || shot.with(|s| s.url.clone())).size(px(64.0)).rounded(px(8.0)),
         ))
 }
 
 async fn upload(image: &ClipboardImage) -> Result<HttpResponse, String> {
-    let (_, data) = image.uri.split_once(',').ok_or("not a data: URI")?;
+    let (_, data) = image.url.split_once(',').ok_or("not a data: URL")?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|e| e.to_string())?;
@@ -177,19 +176,19 @@ import { Clipboard, type ClipboardImage } from "nsh/clipboard";
 const attachments = signal<ClipboardImage[]>([]);
 
 async function paste() {
-  const image = await Clipboard.getImage();
+  const image = await Clipboard.readImage();
   if (image) attachments.set([...attachments(), image]);
 }
 
 async function upload(image: ClipboardImage) {
   const body = new FormData();
-  body.append("file", await (await fetch(image.uri)).blob(), "screenshot.png");
+  body.append("file", await (await fetch(image.url)).blob(), "screenshot.png");
   await fetch("https://example.com/upload", { method: "POST", body });
 }
 
 <View class="flex-row gap-2">
   <Each of={attachments()}>
-    {(image) => <Image src={image().uri} style={{ width: 64, height: 64, borderRadius: 8 }} />}
+    {(image) => <Image src={image().url} style={{ width: 64, height: 64, borderRadius: 8 }} />}
   </Each>
 </View>;
 ```
@@ -215,7 +214,7 @@ import { keymap } from "nsh/keymap";
 
 keymap.bind("mod+v", async () => {
   if (await Clipboard.hasImage()) return paste();
-  insertText(await Clipboard.getString());
+  insertText(await Clipboard.readText());
 }, { when: "always" });
 ```
 
@@ -227,26 +226,26 @@ hasImage(): Promise<boolean>;
 
 返回剪贴板上是否有图片，不读取内容：iOS 上不会出现粘贴提示。Rust：`clipboard_has_image()`。
 
-## Clipboard.setImage
+## Clipboard.writeImage
 
 ```ts
-setImage(uri: string): void;
+writeImage(src: string): Promise<void>;
 ```
 
-把 `uri`（base64 `data:` URI，例如 `getImage` 给的）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(uri)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
+把 `src`（base64 `data:` URL，例如 `readImage` 给的）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
 
 ```rust tabs
-set_clipboard_image(image.uri.clone());
+set_clipboard_image(image.url.clone());
 ```
 
 ```tsx tabs
-Clipboard.setImage(image.uri);
+await Clipboard.writeImage(image.url);
 ```
 
-## Clipboard.getFiles
+## Clipboard.readFiles
 
 ```ts
-getFiles(): Promise<string[]>;
+readFiles(): Promise<string[]>;
 ```
 
 返回在文件管理器（访达、资源管理器、Files）里复制的文件和文件夹的 `file:` URL，按原顺序，没有时为 `[]`：与[文件拖放](../elements/view.md#桌面文件拖放)给出的 URL 相同。Rust：`clipboard_files()`。解析 URL 得到路径。
@@ -255,14 +254,14 @@ getFiles(): Promise<string[]>;
 let paths: Vec<std::path::PathBuf> = clipboard_files()
     .await
     .iter()
-    .filter_map(|uri| url::Url::parse(uri).ok()?.to_file_path().ok())
+    .filter_map(|file| url::Url::parse(file).ok()?.to_file_path().ok())
     .collect();
 ```
 
 ```tsx tabs
-const files = await Clipboard.getFiles();
-const names = files.map((uri) => decodeURIComponent(new URL(uri).pathname.split("/").pop()!));
+const files = await Clipboard.readFiles();
+const names = files.map((url) => decodeURIComponent(new URL(url).pathname.split("/").pop()!));
 ```
 
 > [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `setString` 和 `setImage` 不做任何事，`getString` 返回 `""`，`getImage` 返回 `null`，`getFiles` 返回 `[]`，`hasString` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `writeText` 和 `writeImage` 不做任何事，`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。

@@ -134,7 +134,12 @@ const KEYFRAMES = `
 .nsh-gone { display: none; }
 .nsh-inert { pointer-events: none; }
 .nsh-clip { overflow: clip; }
-.nsh-stuck { z-index: 5; }
+/* A sticky list cell's range of travel (op_sticky): it lifts the cell above the other cells, and with no breadth
+   across it takes no pointer events. The cell sticks inside it, at its left in either direction. */
+.nsh-track { position: absolute; z-index: 5; }
+.nsh-track > .nsh-v { position: sticky; margin-right: auto; }
+/* A list with sticky cells keeps their z-index to itself: above its other cells, never over the views after it. */
+.nsh-sticky { isolation: isolate; }
 .nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
 img.nsh-fill { pointer-events: none; }
 .nsh-fit-cover { object-fit: cover; }
@@ -404,7 +409,7 @@ function importGlue(url) {
 
 /**
  * The script a web view's HTML starts with: the first message from the
- * player carrying `token` hands it the port `ReactNativeWebView.postMessage`
+ * player carrying `token` hands it the port `window.nsh.postMessage`
  * writes to, and which runs `injectJavaScript` and history steps. The
  * page's own `message` listeners never see that message.
  */
@@ -412,7 +417,7 @@ function webBridge(token) {
   return `(() => {
   let port = null;
   const queue = [];
-  window.ReactNativeWebView = { postMessage(data) { data = String(data); port ? port.postMessage(data) : queue.push(data); } };
+  window.nsh = { postMessage(data) { data = String(data); port ? port.postMessage(data) : queue.push(data); } };
   addEventListener("message", (e) => {
     if (port || e.source !== parent || e.data !== ${JSON.stringify(token)} || !e.ports[0]) return;
     e.stopImmediatePropagation();
@@ -551,6 +556,7 @@ class Player {
         },
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
+        font_x_height: (fp, fl) => this.metrics(this.str(fp, fl))[2],
         register_font: (fp, fl, dp, dl, weight, italic) => {
           const family = this.str(fp, fl);
           const data = this.bytes(dp, dl).slice();
@@ -825,7 +831,8 @@ class Player {
     if (!m) {
       this.measure.font = font;
       const t = this.measure.measureText("Hg");
-      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0];
+      const x = this.measure.measureText("x");
+      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
       this.metricsCache.set(font, m);
     }
     return m;
@@ -1409,9 +1416,10 @@ class Player {
     // card inside the root): the core lays it out at the size reported.
     if (!el || el._kind === "modal") return;
     // A view that had a frame moves from where it shows (a running
-    // animation's frame); a new one's first frame does not animate.
+    // animation's frame); a new one's first frame does not animate, nor
+    // does a sticky cell's (the browser keeps it in its track).
     const update = this.layoutAnimation?.update;
-    const from = update && el._frame && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
+    const from = update && el._frame && !el._track && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
     el._frame = [x, y, w, h];
@@ -1429,6 +1437,10 @@ class Player {
   placeFrame(el) {
     const f = el._frame;
     if (!f) return;
+    if (el._track) {
+      this.placeTrack(el);
+      return;
+    }
     const s = el.style;
     s.left = `${f[0]}px`;
     s.top = `${f[1]}px`;
@@ -1562,14 +1574,9 @@ class Player {
       const [pageX, pageY] = this.point(e);
       const r = el.getBoundingClientRect();
       this.event(el._id, "onHoverMove", {
-        locationX: e.clientX - r.left,
-        locationY: e.clientY - r.top,
-        pageX,
-        pageY,
-        altKey: e.altKey,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        shiftKey: e.shiftKey,
+        position: { x: e.clientX - r.left, y: e.clientY - r.top },
+        pagePosition: { x: pageX, y: pageY },
+        modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
       });
     });
   }
@@ -1798,7 +1805,7 @@ class Player {
   // Images
 
   /**
-   * `source`, `resizeMode`, `defaultSource` (shown until the image loads,
+   * `src`, `resizeMode`, `placeholder` (shown until the image loads,
    * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
    * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
    */
@@ -1901,6 +1908,8 @@ class Player {
     el._content = [w, h];
     this.placeLayer(el);
     this.snapMarkers(el);
+    // The last sticky cell travels to the end of the content.
+    for (const cell of el._tracks?.values() ?? []) this.placeTrack(cell);
   }
 
   op_sb([, id, dx, dy]) {
@@ -1970,24 +1979,83 @@ class Player {
     }
   }
 
+  // Sticky list cells stick with the browser's `position: sticky`, so they
+  // move with its scrolling, in step with the compositor; a shift set from
+  // the page's scroll events trails it by a frame. Each sits in a track
+  // spanning its range of travel, from its frame to the scroll offset
+  // `end` plus its size, out of which the next sticky cell pushes it.
+
   op_sticky([, id, cells]) {
     const el = this.view(id);
     if (!el) return;
-    el._stickyCells = cells;
-    this.updateSticky(el);
-  }
-
-  updateSticky(el) {
-    if (!el._stickyCells) return;
-    const offset = el._horizontal ? el.scrollLeft : el.scrollTop;
-    for (const [cellId, start, end] of el._stickyCells) {
+    const tracks = (el._tracks ??= new Map());
+    const ranges = new Map(cells.map(([cellId, start, end]) => [cellId, [start, end]]));
+    el.classList.toggle("nsh-sticky", ranges.size > 0);
+    // Cells no longer sticky go back to their frames: a recycled cell
+    // shows another item now. Removed ones take their tracks along.
+    for (const [cellId, cell] of tracks) {
+      if (ranges.has(cellId) && this.view(cellId) === cell) continue;
+      tracks.delete(cellId);
+      this.unstick(cell);
+    }
+    for (const [cellId, range] of ranges) {
       const cell = this.view(cellId);
       if (!cell) continue;
-      const shift = Math.min(Math.max(offset - start, 0), end - start);
-      cell._sticky = el._horizontal ? `${shift}px 0` : `0 ${shift}px`;
-      cell.style.translate = cell._sticky;
-      cell.classList.toggle("nsh-stuck", shift > 0);
+      if (!cell._track) {
+        // A frame update earlier in this batch may have started an animation
+        // in content coordinates. Sticky positioning uses insets in the track.
+        cell._frameAnimation?.cancel();
+        cell._frameAnimation = null;
+        const track = document.createElement("div");
+        track.className = "nsh-track";
+        track._list = el;
+        // Where the list's cells are: in it, or in its content layer.
+        const host = el._layer ?? el;
+        host.insertBefore(track, cell.parentNode === host ? cell : null);
+        track.append(cell);
+        cell._track = track;
+        tracks.set(cellId, cell);
+      }
+      cell._range = range;
+      this.placeTrack(cell);
     }
+  }
+
+  /** `cell` leaves its track for its place among the list's cells. */
+  unstick(cell) {
+    const track = cell._track;
+    cell._track = null;
+    cell._range = null;
+    if (cell.parentNode === track) track.replaceWith(cell);
+    else track.remove();
+    this.placeFrame(cell);
+  }
+
+  /** Places `cell`'s track along its range of travel and the cell in it:
+   * it sticks the distance from its range's start to its frame's from the
+   * scroll view's start. */
+  placeTrack(cell) {
+    const f = cell._frame;
+    const range = cell._range;
+    if (!f || !range) return;
+    const list = cell._track._list;
+    const horizontal = !!list._horizontal;
+    const [at, size] = horizontal ? [f[0], f[2]] : [f[1], f[3]];
+    // The last one's range ends past the content: it travels to its end
+    // (not at all before the list's content size arrives).
+    const content = list._content?.[horizontal ? 0 : 1] ?? 0;
+    const length = size + Math.max(0, Math.min(range[1] - range[0], content - at - size));
+    const t = cell._track.style;
+    t.left = `${f[0]}px`;
+    t.top = `${f[1]}px`;
+    t.width = `${horizontal ? length : 0}px`;
+    t.height = `${horizontal ? 0 : length}px`;
+    const s = cell.style;
+    const inset = `${at - range[0]}px`;
+    s.left = horizontal ? inset : "auto";
+    s.top = horizontal ? "auto" : inset;
+    s.width = `${f[2]}px`;
+    s.height = `${f[3]}px`;
   }
 
   // Desktop scroll bars (the desktop idiom): nsh's own, thin, over the
@@ -2068,7 +2136,7 @@ class Player {
       // Snapping would move the content under the thumb: back once it ends.
       el.style.scrollSnapType = "none";
       this.drive(el, 1);
-      this.scrollEvent(el, "onScrollBeginDrag");
+      this.scrollEvent(el, "onScrollDragStart");
       this.pointers.set(e.pointerId, {
         mode: "bar", scroll: el, start: h ? e.clientX : e.clientY, offset: h ? el.scrollLeft : el.scrollTop,
         touchPath: [], states: [],
@@ -2090,7 +2158,7 @@ class Player {
 
   releaseBar(el) {
     el._barHeld = false;
-    this.scrollEvent(el, "onScrollEndDrag");
+    this.scrollEvent(el, "onScrollDragEnd");
     this.drive(el, -1);
     el._restoreSnap = true;
     // Snapping views settle on the nearest snap point.
@@ -2103,13 +2171,12 @@ class Player {
   }
 
   scrolled(el) {
-    this.updateSticky(el);
     if (this.desktopUI) this.showBar(el);
     // Still moving after the finger left (touch scrolling is the
     // browser's): a glide.
     if (el._released && !el._momentum && performance.now() - el._released < 150) {
       el._momentum = true;
-      this.scrollEvent(el, "onMomentumScrollBegin");
+      this.scrollEvent(el, "onMomentumStart");
     }
     // Pulled to refresh, the offset is negative, as on the native backends.
     this.call((w) => w.nsh_scroll(el._id, el.scrollLeft, el.scrollTop - (el._pull ?? 0), el._applied));
@@ -2130,7 +2197,7 @@ class Player {
     }
     if (el._momentum) {
       el._momentum = false;
-      this.scrollEvent(el, "onMomentumScrollEnd");
+      this.scrollEvent(el, "onMomentumEnd");
     }
     this.scrollEvent(el, "onScrollEnd");
   }
@@ -2143,7 +2210,8 @@ class Player {
     if (el._layer) return el._layer;
     const layer = document.createElement("div");
     layer.className = "nsh-layer";
-    for (const child of [...el.children]) if (child._id !== undefined) layer.append(child);
+    // Its views, and the tracks its sticky cells sit in.
+    for (const child of [...el.children]) if (child._id !== undefined || child._list) layer.append(child);
     el.insertBefore(layer, el._spacer.nextSibling);
     el._layer = layer;
     el._zoom = 1;
@@ -3122,10 +3190,10 @@ class Player {
   // Web views and videos
 
   /**
-   * A web view is an <iframe>. HTML (`source={{ html }}`) loads as
+   * A web view is an <iframe>. HTML (`html`) loads as
    * `srcdoc` in a sandbox with an origin of its own (it never reaches the
    * player's page), with a bridge script first: the page's
-   * `window.ReactNativeWebView.postMessage(data)` reaches `onMessage`
+   * `window.nsh.postMessage(data)` reaches `onMessage`
    * through a `MessageChannel`, and `injectJavaScript` runs through it.
    * `injectedJavaScriptBeforeContentLoaded` / `injectedJavaScript` are
    * scripts at the document's start and end. A URL loads as it is
@@ -3353,7 +3421,7 @@ class Player {
 
 
   /**
-   * `Clipboard.setString`. The async Clipboard API needs a secure context
+   * `Clipboard.writeText`. The async Clipboard API needs a secure context
    * (and, in some browsers, a user gesture); a copy command is the fallback.
    */
   writeClipboard(text) {
@@ -3375,9 +3443,9 @@ class Player {
   }
 
   /**
-   * `Clipboard.getString` / `hasString`: browsers only tell by reading,
+   * `Clipboard.readText` / `hasText`: browsers only tell by reading,
    * which may ask the user (Chromium asks once per site; Safari and Firefox
-   * show a paste button), and fails in an insecure context. `hasString`
+   * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
   async readClipboard(request, hasOnly) {
@@ -3392,7 +3460,7 @@ class Player {
     this.event(ROOT_ID, "onClipboard", payload);
   }
 
-  /** `Clipboard.setImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
+  /** `Clipboard.writeImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
   async writeClipboardImage(uri) {
     try {
       const blob = await (await fetch(uri)).blob();
@@ -3402,7 +3470,7 @@ class Player {
     }
   }
 
-  /** `Clipboard.getImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
+  /** `Clipboard.readImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
   async readClipboardImage(request, hasOnly) {
     const app = this.app;
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
@@ -4011,14 +4079,9 @@ class Player {
         const [pageX, pageY] = this.point(e);
         const r = el.getBoundingClientRect();
         this.event(el._id, "onContextMenu", {
-          locationX: e.clientX - r.left,
-          locationY: e.clientY - r.top,
-          pageX,
-          pageY,
-          altKey: e.altKey,
-          ctrlKey: e.ctrlKey,
-          metaKey: e.metaKey,
-          shiftKey: e.shiftKey,
+          position: { x: e.clientX - r.left, y: e.clientY - r.top },
+          pagePosition: { x: pageX, y: pageY },
+          modifiers: { control: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, platform: e.metaKey },
         });
         return true;
       }
@@ -4364,7 +4427,7 @@ class Player {
     const h = !!el._horizontal;
     if (target == null || Math.abs(target - (h ? el.scrollLeft : el.scrollTop)) < 1) return false;
     el._momentum = true;
-    this.scrollEvent(el, "onMomentumScrollBegin");
+    this.scrollEvent(el, "onMomentumStart");
     el.scrollTo({ [h ? "left" : "top"]: target, behavior: "smooth" });
     return true;
   }
@@ -4562,7 +4625,7 @@ class Player {
         p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
         cancelAnimationFrame(p.scroll._zoomAnimation);
         this.drive(p.scroll, 1);
-        this.scrollEvent(p.scroll, "onScrollBeginDrag");
+        this.scrollEvent(p.scroll, "onScrollDragStart");
       }
       if (p.mode || Math.hypot(tx, ty) > 10) {
         this.pressOut(p, false);
@@ -4620,7 +4683,7 @@ class Player {
       const [vx, vy] = this.velocity(p);
       this.call((w) => w.nsh_pan(p.pan._id, 2, p.x - p.startX, p.y - p.startY, vx, vy));
     } else if (p.mode === "scroll") {
-      this.scrollEvent(p.scroll, "onScrollEndDrag");
+      this.scrollEvent(p.scroll, "onScrollDragEnd");
       this.glide(p.scroll, -p.vx, -p.vy);
     } else if (p.press) {
       const rect = p.press.getBoundingClientRect();
@@ -4638,14 +4701,14 @@ class Player {
     el._touchDrag = true;
     el._momentum = false;
     (this.touchDrags ??= new Set()).add(el);
-    this.scrollEvent(el, "onScrollBeginDrag");
+    this.scrollEvent(el, "onScrollDragStart");
     if (!this.touchEndListener) {
       this.touchEndListener = (e) => {
         if (e.touches.length) return;
         for (const v of this.touchDrags) {
           v._touchDrag = false;
           v._released = performance.now();
-          this.scrollEvent(v, "onScrollEndDrag");
+          this.scrollEvent(v, "onScrollDragEnd");
           // Without a glide no scroll follows (nor, sometimes, `scrollend`).
           setTimeout(() => v._released && !v._momentum && this.scrollEnded(v), 200);
         }
@@ -4666,14 +4729,14 @@ class Player {
     const end = () => {
       this.drive(s, -1);
       this.snapMarkers(s);
-      if (momentum) this.scrollEvent(s, "onMomentumScrollEnd");
+      if (momentum) this.scrollEvent(s, "onMomentumEnd");
       this.ownEnd(s);
     };
     if (!v && !w) {
       end();
       return;
     }
-    this.scrollEvent(s, "onMomentumScrollBegin");
+    this.scrollEvent(s, "onMomentumStart");
     const step = (now) => {
       const dt = now - last;
       last = now;

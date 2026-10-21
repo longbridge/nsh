@@ -14,6 +14,13 @@ struct FakeEngine {
     layouts: Cell<u32>,
 }
 
+/// [`FakeEngine`]'s layout: the characters laid out and where its
+/// attachments go.
+struct FakeLayout {
+    chars: usize,
+    points: Vec<Option<Point<Points>>>,
+}
+
 impl TextEngine for FakeEngine {
     /// Characters and attachment offsets.
     type Prepared = (usize, Vec<u32>);
@@ -34,7 +41,7 @@ impl TextEngine for FakeEngine {
         }
     }
 
-    fn layout(&self, (_, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
+    fn layout(&self, (chars, attachments): &(usize, Vec<u32>), _: Size<Points>) -> TextLayout {
         self.layouts.set(self.layouts.get() + 1);
         // One line; the third attachment on is cut off.
         let points: Vec<Option<Point<Points>>> = attachments
@@ -44,13 +51,16 @@ impl TextEngine for FakeEngine {
                 (i < 2).then_some(crate::geometry::point(Points(at as f32 * 8.0), Points(2.0)))
             })
             .collect();
-        TextLayout(Arc::new(points))
+        TextLayout(Arc::new(FakeLayout {
+            chars: *chars,
+            points,
+        }))
     }
 
     fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
-            .downcast::<Vec<Option<Point<Points>>>>()
-            .cloned()
+            .downcast::<FakeLayout>()
+            .map(|l| l.points.clone())
             .unwrap_or_default()
     }
 }
@@ -397,6 +407,89 @@ fn text_update_emits_only_text_and_frames() {
     assert!(matches!(&batch.items[0], MountItem::Text { id: 2, text, .. } if text.text == "abc"));
     // Text blocks stretch to the column width, so only the content changes.
     assert_eq!(batch.items.len(), 1);
+}
+
+#[test]
+fn text_out_of_the_layout_shows_no_glyphs() {
+    // `display: none` leaves a text no box, and a platform that does not
+    // clip text to its box (a browser) would draw what was laid out in it:
+    // a checkbox's hidden check over its shown dash.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: 5,
+                text: "✓".into(),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            class_op(4, "hidden"),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    // The text and how many of its characters are laid out.
+    let text_of = |batch: &MountBatch| {
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text {
+                id: 4,
+                text,
+                layout,
+                ..
+            } => Some((
+                text.text.clone(),
+                layout.downcast::<FakeLayout>().unwrap().chars,
+            )),
+            _ => None,
+        })
+    };
+    // The text stays what it is (tests and screen readers read it); none of
+    // it is laid out.
+    let hidden = Some(("✓".to_owned(), 0));
+    let shown = Some(("✓".to_owned(), 1));
+    assert_eq!(text_of(&c.commit().unwrap()), hidden);
+    let mut toggle = |id, classes, expected: &Option<(String, usize)>| {
+        c.apply(class_op(id, classes)).unwrap();
+        assert_eq!(&text_of(&c.commit().unwrap()), expected, "{id}: {classes}");
+    };
+    toggle(4, "flex", &shown);
+    // Hidden by its own class, then by its parent's.
+    toggle(4, "hidden", &hidden);
+    toggle(4, "flex", &shown);
+    toggle(2, "hidden", &hidden);
+    toggle(2, "flex", &shown);
+    // New text while hidden: sent, still laid out empty.
+    apply(
+        &mut c,
+        vec![
+            class_op(2, "hidden"),
+            Op::SetText {
+                id: 5,
+                text: "–".into(),
+            },
+        ],
+    );
+    assert_eq!(text_of(&c.commit().unwrap()), Some(("–".to_owned(), 0)));
 }
 
 #[test]
@@ -2630,7 +2723,7 @@ fn screens_fill_their_stack_below_the_header() {
         &mut c,
         vec![Op::SetProp {
             id: 3,
-            prop: Prop::Screen(crate::ScreenProp::HeaderShown(false)),
+            prop: Prop::Screen(crate::ScreenProp::HeaderVisible(false)),
         }],
     );
     let batch = c.commit().unwrap();
@@ -4092,12 +4185,12 @@ fn views_inside_text_are_attachments() {
             crate::TextAttachment {
                 index: 2,
                 width: Points(20.0),
-                height: Points(10.0)
+                height: Points(10.0),
             },
             crate::TextAttachment {
                 index: 5,
                 width: Points(12.0),
-                height: Points(12.0)
+                height: Points(12.0),
             },
         ]
     );
@@ -4143,6 +4236,39 @@ fn views_inside_text_are_attachments() {
         .unwrap();
     assert_eq!(text.attachments[0].width, Points(30.0));
     assert_eq!(frame_of(&batch, 4).map(|f| f.size.width.0), Some(30.0));
+
+    // `verticalAlign` builds the text again: the engine places it.
+    let align_of = |c: &mut Core<FakeEngine>, align: &str| {
+        apply(
+            c,
+            vec![style_op(4, &[("verticalAlign", StyleValue::Str(align))])],
+        );
+        let batch = c.commit()?;
+        if !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Text { id: 2, .. }))
+        {
+            return None;
+        }
+        let layout = c.nodes[c.key(2).unwrap() as usize].layout.unwrap();
+        let cx = c.text_cx(layout);
+        Some(cx.alignments.get(cx.text.attachments[0].index))
+    };
+    assert_eq!(
+        align_of(&mut c, "text-top"),
+        Some(crate::VerticalAlign::TextTop)
+    );
+    assert_eq!(
+        align_of(&mut c, "middle"),
+        Some(crate::VerticalAlign::Middle)
+    );
+    // Unchanged: nothing to build.
+    assert_eq!(align_of(&mut c, "middle"), None);
+    assert_eq!(
+        align_of(&mut c, "baseline"),
+        Some(crate::VerticalAlign::Baseline)
+    );
 
     // Taken out of the text: its view leaves the text view.
     apply(
@@ -7014,7 +7140,7 @@ mod components {
                     let has = has.await;
                     let image = image
                         .await
-                        .map(|i| format!("{}x{} {}", i.width.0, i.height.0, i.uri));
+                        .map(|i| format!("{}x{} {}", i.size.width.0, i.size.height.0, i.url));
                     let files = files.await.join(",");
                     pasted.set(format!("{has} {image:?} {files}"));
                 });
@@ -10938,7 +11064,11 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
             .on_hover_move(move |e: &HoverEvent| {
                 at.set(format!(
                     "{} {} {} {} {}",
-                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0, e.modifiers.shift
+                    e.position.x.0,
+                    e.position.y.0,
+                    e.page_position.x.0,
+                    e.page_position.y.0,
+                    e.modifiers.shift
                 ))
             })
             .child(text(move || at.get()))
@@ -10955,8 +11085,8 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
         })
         .expect("the listening view mounts HoverMove in its event mask");
     let event = crate::HoverEvent {
-        location: point(px(4.0), px(5.0)),
-        page: point(px(14.0), px(25.0)),
+        position: point(px(4.0), px(5.0)),
+        page_position: point(px(14.0), px(25.0)),
         modifiers: crate::keymap::Modifiers {
             shift: true,
             ..Default::default()
@@ -10984,7 +11114,7 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
             .on_context_menu(move |e: &ContextMenuEvent| {
                 at.set(format!(
                     "{} {} {} {}",
-                    e.location.x.0, e.location.y.0, e.page.x.0, e.page.y.0
+                    e.position.x.0, e.position.y.0, e.page_position.x.0, e.page_position.y.0
                 ))
             })
             .child(text(move || at.get()))
@@ -11003,8 +11133,8 @@ fn context_menus_reach_rust_listeners_with_their_positions() {
         })
         .expect("the listening view mounts ContextMenu in its event mask");
     let event = crate::ContextMenuEvent {
-        location: point(px(4.0), px(5.0)),
-        page: point(px(14.0), px(25.0)),
+        position: point(px(4.0), px(5.0)),
+        page_position: point(px(14.0), px(25.0)),
         ..Default::default()
     };
     assert!(c.component_event(
@@ -12626,7 +12756,7 @@ fn image_ops(id: NodeId, source: ImageSource, placeholder: Option<ImageSource>) 
     if placeholder.is_some() {
         ops.push(Op::SetProp {
             id,
-            prop: Prop::Image(ImageProp::DefaultSource(placeholder)),
+            prop: Prop::Image(ImageProp::Placeholder(placeholder)),
         });
     }
     ops.push(Op::Insert {
@@ -12838,12 +12968,13 @@ fn image_scales_decode_from_js() {
     let decode = |v: serde_json::Value| ImageSource::decode(&J(v), &mut HostCx::default());
 
     let source = decode(serde_json::json!({
-        "uri": "asset:/a.png", "width": 40, "height": 30, "scales": [1, 2, "3", -1, 2.5, 3]
+        "url": "asset:/a.png", "size": { "width": 40, "height": 30 }, "scales": [1, 2, "3", -1, 2.5, 3]
     }))
     .unwrap();
     assert_eq!(source.size, Some(crate::geometry::size_pt(40.0, 30.0)));
     assert_eq!(source.scales.iter().collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
-    let plain = decode(serde_json::json!({ "uri": "asset:/a.png", "width": 40, "height": 30 }));
+    let plain =
+        decode(serde_json::json!({ "url": "asset:/a.png", "size": { "width": 40, "height": 30 } }));
     assert_eq!(plain.unwrap().scales, ImageScales::NONE);
     assert_eq!(
         decode(serde_json::json!("https://x.org/a.png"))
@@ -12851,11 +12982,11 @@ fn image_scales_decode_from_js() {
             .scales,
         ImageScales::NONE
     );
-    let odd = decode(serde_json::json!({ "uri": "asset:/a.png", "scales": "2" })).unwrap();
+    let odd = decode(serde_json::json!({ "url": "asset:/a.png", "scales": "2" })).unwrap();
     assert!(odd.scales.is_empty());
     // Only the first entries are read.
     let long = decode(serde_json::json!({
-        "uri": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
+        "url": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
     }));
     assert_eq!(long.unwrap().scales.iter().collect::<Vec<_>>(), [1.0]);
 }
@@ -12932,12 +13063,12 @@ mod asset_variants {
     use crate::ui::{ImageAsset, prelude::*};
 
     const FLAG: ImageAsset = ImageAsset {
-        uri: "asset:/@demo/flag.png",
+        url: "asset:/@demo/flag.png",
         size: crate::geometry::size_pt(17.0, 12.0),
         scales: &[1.0, 2.0, 3.0],
     };
     const PLAIN: ImageAsset = ImageAsset {
-        uri: "asset:/@demo/plain.png",
+        url: "asset:/@demo/plain.png",
         size: crate::geometry::size_pt(10.0, 10.0),
         scales: &[],
     };

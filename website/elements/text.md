@@ -120,7 +120,8 @@ text("By continuing you agree to the ")
 ### Inline views and images
 
 Any other element inside a text (a view, an image, even inside spans) is an inline attachment: it is laid out at its
-own size, sits on the baseline and wraps with the words. It takes presses of its own.
+own size, sits on the baseline (or where its `verticalAlign` style puts it: `"text-top"`, `"text-bottom"`,
+`"middle"`, as in CSS; the line grows to hold it) and wraps with the words. It takes presses of its own.
 
 ```rust tabs
 text("Made with ")
@@ -212,7 +213,7 @@ The font is registered before the first frame. See [fonts](../docs/fonts.md).
 |---|---|---|---|
 | `onTextLayout` | | `{ lines: TextLayoutLine[] }` | After each layout of the paragraph. |
 | `onPress`, `onLongPress`, … | `.on_press`, `.on_long_press`, … | none | As on [view](./view.md#events); on a span, presses on its characters. |
-| `onLayout` | `.on_layout` | `{ x, y, width, height }` | The block's frame changed. |
+| `onLayout` | `.on_layout` | `Bounds` | The block's frame changed. |
 
 `TextLayoutLine` is `{ text, x, y, width, height, ascender, descender, capHeight, xHeight }`, in the text's content box:
 

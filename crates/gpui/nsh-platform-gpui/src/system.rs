@@ -973,7 +973,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     }
 }
 
-/// The answer to `Clipboard.getString` / `hasString` read `id`.
+/// The answer to `Clipboard.readText` / `hasString` read `id`.
 fn clipboard_answer(id: u32, has: bool, text: Option<String>) -> EventPayload {
     let mut fields = vec![
         ("id", PayloadValue::Number(id as f64)),
@@ -985,22 +985,22 @@ fn clipboard_answer(id: u32, has: bool, text: Option<String>) -> EventPayload {
     EventPayload::Map(fields)
 }
 
-/// `Clipboard.setImage`: the image of a `data:` URI on GPUI's clipboard,
+/// `Clipboard.writeImage`: the image of a `data:` URI on GPUI's clipboard,
 /// in its own format when GPUI knows it.
 fn set_clipboard_image(uri: &str) {
     let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        log::warn!("Clipboard.writeImage: not a base64 data: URI");
         return;
     };
     let Some(format) = gpui::ImageFormat::from_mime_type(mime) else {
-        log::warn!("Clipboard.setImage: unsupported image type {mime}");
+        log::warn!("Clipboard.writeImage: unsupported image type {mime}");
         return;
     };
     let image = gpui::Image::from_bytes(format, bytes);
     crate::rt::on_app(move |cx| cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image)));
 }
 
-/// `Clipboard.getImage` / `hasImage`: answers read `id` from GPUI's
+/// `Clipboard.readImage` / `hasImage`: answers read `id` from GPUI's
 /// clipboard. Formats other than PNG, JPEG, GIF, BMP and WebP (a TIFF) are
 /// converted to PNG on a worker thread, so every image source shows them.
 fn read_clipboard_image(key: u64, id: u32, has_only: bool) {

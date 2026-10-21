@@ -15,7 +15,7 @@ use crate::{
 /// How an element scrolls: [`super::Scroll`], [`super::VirtualList`] and
 /// [`super::ListElement`] (the app's rows a component places). The
 /// direction and the indicator are [`super::Scroll::horizontal`] /
-/// [`super::ListLayout::horizontal`] and their `shows_indicator`.
+/// [`super::ListLayout::horizontal`] and their `scrollbar`.
 pub trait Scrollable: Element {
     #[doc(hidden)]
     fn set_scroll_prop(mut self, prop: Prop) -> Self {
@@ -85,10 +85,10 @@ pub trait Scrollable: Element {
         self
     }
 
-    /// The user can scroll it (default yes; TS: `scrollEnabled`).
-    fn scroll_enabled(mut self, enabled: impl IntoReactive<bool>) -> Self {
+    /// The user can scroll it (default yes; TS: `scrollable`).
+    fn scrollable(mut self, enabled: impl IntoReactive<bool>) -> Self {
         host::bind_prop(self.node(), enabled, |enabled| {
-            Prop::Native(crate::NativeProp::ScrollEnabled(enabled))
+            Prop::Native(crate::NativeProp::Scrollable(enabled))
         });
         self
     }
@@ -169,36 +169,36 @@ pub trait Scrollable: Element {
     }
 
     /// The user started dragging it.
-    fn on_scroll_begin_drag<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
+    fn on_scroll_drag_start<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
-            EventKind::ScrollBeginDrag,
+            EventKind::ScrollDragStart,
             listener.into_listener(),
             events::offset,
         )
     }
 
     /// The user let go.
-    fn on_scroll_end_drag<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
+    fn on_scroll_drag_end<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
-            EventKind::ScrollEndDrag,
+            EventKind::ScrollDragEnd,
             listener.into_listener(),
             events::offset,
         )
     }
 
     /// It started gliding after a fling.
-    fn on_momentum_scroll_begin<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
+    fn on_momentum_start<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
-            EventKind::MomentumScrollBegin,
+            EventKind::MomentumStart,
             listener.into_listener(),
             events::offset,
         )
     }
 
     /// It stopped gliding.
-    fn on_momentum_scroll_end<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
+    fn on_momentum_end<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
-            EventKind::MomentumScrollEnd,
+            EventKind::MomentumEnd,
             listener.into_listener(),
             events::offset,
         )

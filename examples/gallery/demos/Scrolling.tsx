@@ -91,11 +91,11 @@ function Pager() {
       <Scroll
         horizontal
         pagingEnabled
-        showsIndicator={false}
+        scrollbar={false}
         scrollValue={x}
         style={{ height: 160, borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
-        onLayout={(e) => width.set(e.width)}
-        onMomentumScrollEnd={(e) => page.set(Math.round(e.x / width()))}
+        onLayout={(e) => width.set(e.size.width)}
+        onMomentumEnd={(e) => page.set(Math.round(e.x / width()))}
         onScrollEnd={(e) => page.set(Math.round(e.x / width()))}
       >
         <View style={{ flexDirection: "row" }}>
@@ -164,7 +164,7 @@ function Cards() {
           snapToAlignment={align()}
           decelerationRate="fast"
           disableIntervalMomentum={oneStep()}
-          showsIndicator={false}
+          scrollbar={false}
           style={{ height: 128 }}
           contentStyle={{ gap, paddingHorizontal: 14 }}
         >
@@ -207,7 +207,7 @@ function Cards() {
 
 type Logged = { name: string; y: number; tone: Tone };
 
-/** onScroll (throttled), drag and momentum events, scrollEnabled, bounces, contentInset. */
+/** onScroll (throttled), drag and momentum events, scrollable, bounces, contentInset. */
 function Events() {
   const offset = signal<ScrollEvent | null>(null);
   const log = signal<Logged[]>([]);
@@ -218,30 +218,30 @@ function Events() {
   const note = (name: string, tone: Tone) => (e: { y: number }) => log.update((l) => [{ name, y: Math.round(e.y), tone }, ...l].slice(0, 5));
   const progress = () => {
     const o = offset();
-    return o && o.contentHeight > o.height ? o.y / (o.contentHeight - o.height) : 0;
+    return o && o.contentSize.height > o.size.height ? o.offset.y / (o.contentSize.height - o.size.height) : 0;
   };
   return (
     <View style={{ gap: 12 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
         <View style={{ flex: 1 }}>
-          <Figure value={offset() ? String(Math.round(offset()!.y)) : "0"} unit="pt" note={offset() ? `/ ${Math.round(offset()!.contentHeight)}` : "Scroll the box"} tone="info" />
+          <Figure value={offset() ? String(Math.round(offset()!.offset.y)) : "0"} unit="pt" note={offset() ? `/ ${Math.round(offset()!.contentSize.height)}` : "Scroll the box"} tone="info" />
         </View>
         <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"], paddingBottom: 6 }}>
-          viewport {offset() ? Math.round(offset()!.height) : "—"} pt
+          viewport {offset() ? Math.round(offset()!.size.height) : "—"} pt
         </Text>
       </View>
       <Meter value={progress()} tone="info" />
       <Scroll
         style={{ height: 180, borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
-        scrollEnabled={enabled()}
+        scrollable={enabled()}
         bounces={bounces()}
         contentInset={inset() ? { top: 40, bottom: 40 } : undefined}
         scrollEventThrottle={Number(throttle())}
         onScroll={(v) => offset.set(v)}
-        onScrollBeginDrag={note("begin drag", "accent")}
-        onScrollEndDrag={note("end drag", "warn")}
-        onMomentumScrollBegin={note("momentum begin", "info")}
-        onMomentumScrollEnd={note("momentum end", "up")}
+        onScrollDragStart={note("begin drag", "accent")}
+        onScrollDragEnd={note("end drag", "warn")}
+        onMomentumStart={note("momentum begin", "info")}
+        onMomentumEnd={note("momentum end", "up")}
       >
         <View style={{ paddingVertical: 6 }}>
           <Each of={Array.from({ length: 30 }, (_, i) => i + 1)}>
@@ -272,7 +272,7 @@ function Events() {
         <Segmented size="small" options={options(["0", "100", "500"] as const)} value={throttle()} onChange={(v) => throttle.set(v)} />
       </View>
       <View>
-        <Toggle label="Scroll enabled" code="scrollEnabled" value={enabled()} onChange={(v) => enabled.set(v)} />
+        <Toggle label="Scroll enabled" code="scrollable" value={enabled()} onChange={(v) => enabled.set(v)} />
         <Toggle label="Bounces" code="bounces" value={bounces()} onChange={(v) => bounces.set(v)} />
         <Toggle label="Content inset" note="40 pt at the top and bottom" value={inset()} onChange={(v) => inset.set(v)} />
       </View>
@@ -414,7 +414,7 @@ export function Scrolling() {
         ),
         () => (
           <Section title="Events and behavior">
-            <Api names="onScroll · onScrollBeginDrag · onMomentumScrollEnd" />
+            <Api names="onScroll · onScrollDragStart · onMomentumEnd" />
             <Events />
           </Section>
         ),
@@ -442,10 +442,10 @@ export function Scrolling() {
                 height: 44,
                 fontSize: 15,
                 color: colors.text,
-                backgroundColor: colors.surface,
-                ...finish.inset,
+                backgroundColor: colors.field,
+                ...finish.field,
                 borderWidth: 1,
-                borderColor: colors.border,
+                borderColor: colors.fieldBorder,
                 borderRadius: radius.control,
                 paddingHorizontal: 14,
               }}

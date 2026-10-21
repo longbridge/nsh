@@ -195,7 +195,7 @@ impl Headless {
                     }
                     finger.gate = None;
                     let from = self.scroll_offset(view);
-                    self.send(view, EventKind::ScrollBeginDrag, self.scroll_payload(view));
+                    self.send(view, EventKind::ScrollDragStart, self.scroll_payload(view));
                     finger.mode = Mode::Scroll(view, from, at);
                 }
                 None => {}
@@ -377,7 +377,7 @@ impl Headless {
     /// when pulled far enough past its top, and settles within its content.
     fn scroll_released(&mut self, view: NodeId) {
         let offset = self.scroll_offset(view);
-        self.send(view, EventKind::ScrollEndDrag, self.scroll_payload(view));
+        self.send(view, EventKind::ScrollDragEnd, self.scroll_payload(view));
         if !self.scroll_horizontal(view)
             && self.screen.hears(view, EventKind::Refresh)
             && nsh_core::scroll::refreshes(offset)
@@ -457,8 +457,8 @@ impl Headless {
                 .bounds_in_root(id)
                 .map_or(Point::default(), |b| b.origin);
             let event = nsh_core::HoverEvent {
-                location: point(at.x - origin.x, at.y - origin.y),
-                page: at,
+                position: point(at.x - origin.x, at.y - origin.y),
+                page_position: at,
                 modifiers: nsh_core::keymap::Modifiers::default(),
             };
             self.send(id, EventKind::HoverMove, EventPayload::Hover(event));

@@ -10,7 +10,7 @@ group: platforms
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
 and `x86_64`. An existing app embeds modules in an `NshView` and loads signed packages it downloads, under limits and
 capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms, for
-apps written in Rust and in TSX. On Android, `os()` is `Os::Android` (`Platform.OS` is `"android"` in TSX) and TSX's
+apps written in Rust and in TSX. On Android, `os()` is `Os::Android` (`platform.os` is `"android"` in TSX) and TSX's
 `android={{…}}` props apply.
 
 ## Requirements

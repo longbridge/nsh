@@ -73,7 +73,7 @@ scroll().flex_1().child(
 A horizontal scroll view takes `horizontal` (`.horizontal()`) and a row as its child:
 
 ```rust tabs
-scroll().horizontal().shows_indicator(false).child(
+scroll().horizontal().scrollbar(false).child(
     view().flex_row().gap_2().px_4().children(["Today", "This week", "This month", "This year"].map(|label| {
         text(label).px(px(14.0)).py_2().rounded(px(16.0)).overflow_hidden().bg(white())
     })),
@@ -81,7 +81,7 @@ scroll().horizontal().shows_indicator(false).child(
 ```
 
 ```tsx tabs
-<Scroll horizontal showsIndicator={false}>
+<Scroll horizontal scrollbar={false}>
   <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
     <Each of={["Today", "This week", "This month", "This year"]}>
       {(label) => <Text style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
@@ -92,17 +92,17 @@ scroll().horizontal().shows_indicator(false).child(
 
 Right to left (see [Device and environment](./device-and-environment.md#right-to-left)), a horizontal scroll view starts at its right end and keeps its distance from it.
 
-Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, the mouse scrolls as in desktop apps: with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which shows while the mouse moves over the view and drags as a scroll bar; mouse drags go to the app's pans, responders and text selection. Touchscreens on desktops drag scroll views as fingers do. Horizontal views keep their indicator there even with `showsIndicator={false}`, since it is how a mouse without a horizontal wheel moves them.
+Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, the mouse scrolls as in desktop apps: with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which shows while the mouse moves over the view and drags as a scroll bar; mouse drags go to the app's pans, responders and text selection. Touchscreens on desktops drag scroll views as fingers do. Horizontal views keep their indicator there even with `scrollbar={false}`, since it is how a mouse without a horizontal wheel moves them.
 
 ### Behavior props
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `horizontal` | `.horizontal()` | `boolean` | `false` | Scrolls sideways. |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | The user can scroll it. Scrolling from code still works. |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | The user can scroll it. Scrolling from code still works. |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | Overscroll past the edges. |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
-| `contentInset` | `.content_inset(EdgeInsets { .. })` | `{ top?, right?, bottom?, left? }` | | Room around the content, scrollable into. |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
+| `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | Room around the content, scrollable into. |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | Where it starts. |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | the platform's | How fast a fling slows down: `"normal"`, `"fast"`, or the velocity kept per millisecond (`0.998` is normal, `0.99` fast; `0` is the platform's default). |
 
@@ -154,7 +154,7 @@ pub fn pager() -> impl IntoElement {
             scroll()
                 .horizontal()
                 .paging(true)
-                .shows_indicator(false)
+                .scrollbar(false)
                 .h(px(160.0))
                 .rounded(px(12.0))
                 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
@@ -179,9 +179,9 @@ function Pager() {
       <Scroll
         horizontal
         pagingEnabled
-        showsIndicator={false}
+        scrollbar={false}
         style={{ height: 160, borderRadius: 12 }}
-        onLayout={(e) => width.set(e.width)}
+        onLayout={(e) => width.set(e.size.width)}
         onScrollEnd={settle}
       >
         <View style={{ flexDirection: "row" }}>
@@ -215,7 +215,7 @@ scroll()
     .snap_alignment(SnapAlignment::Center)
     .deceleration(0.99)
     .disable_interval_momentum(true)
-    .shows_indicator(false)
+    .scrollbar(false)
     .child(view().flex_row().gap_3().px_4().children(cards))
 ```
 
@@ -226,7 +226,7 @@ scroll()
   snapToAlignment="center"
   decelerationRate="fast"
   disableIntervalMomentum
-  showsIndicator={false}
+  scrollbar={false}
 >
   <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 16 }}>…</View>
 </Scroll>
@@ -240,13 +240,13 @@ Lists take the same snapping props, which makes them the better choice for a lon
 |---|---|---|---|
 | `onScroll` | `.on_scroll(..)` | `ScrollEvent` | The offset changed. At most once per frame; `scrollEventThrottle` spaces them further. |
 | `scrollEventThrottle` | `.event_throttle(ms)` | `number` | Minimum milliseconds between `onScroll` events. |
-| `onScrollBeginDrag` | `.on_scroll_begin_drag(..)` | `{ x, y }` | The user started dragging. |
-| `onScrollEndDrag` | `.on_scroll_end_drag(..)` | `{ x, y }` | The user lifted the finger. |
-| `onMomentumScrollBegin` | `.on_momentum_scroll_begin(..)` | `{ x, y }` | The glide after a fling started. |
-| `onMomentumScrollEnd` | `.on_momentum_scroll_end(..)` | `{ x, y }` | The glide ended (also when a new drag catches it). |
+| `onScrollDragStart` | `.on_scroll_drag_start(..)` | `{ x, y }` | The user started dragging. |
+| `onScrollDragEnd` | `.on_scroll_drag_end(..)` | `{ x, y }` | The user lifted the finger. |
+| `onMomentumStart` | `.on_momentum_start(..)` | `{ x, y }` | The glide after a fling started. |
+| `onMomentumEnd` | `.on_momentum_end(..)` | `{ x, y }` | The glide ended (also when a new drag catches it). |
 | `onScrollEnd` | `.on_scroll_end(..)` | `{ x, y }` | A user scroll came to rest: after the glide, or at the end of a drag without one. |
 
-`ScrollEvent` carries the offset (`x`, `y`; `offset` in Rust), the content's size, zoomed (`contentWidth`, `contentHeight`; `content_size`), the viewport (`width`, `height`; `size`) and `zoomScale` (`zoom_scale`). The other events carry the offset (a `Point<Points>` in Rust).
+`ScrollEvent` carries the offset (`offset`, a `Point`; the same in Rust), the content's size, zoomed (`contentSize`, a `Size`; `content_size`), the viewport (`size`) and `zoomScale` (`zoom_scale`). The other events carry the offset (a `Point<Points>` in Rust).
 
 ```rust tabs
 let at_bottom = signal(false);
@@ -266,7 +266,7 @@ const atBottom = signal(false);
 <Scroll
   style={{ flex: 1 }}
   scrollEventThrottle={100}
-  onScroll={(e) => atBottom.set(e.y + e.height >= e.contentHeight - 20)}
+  onScroll={(e) => atBottom.set(e.offset.y + e.size.height >= e.contentSize.height - 20)}
 >
   …
 </Scroll>
@@ -413,7 +413,7 @@ A scroll view (lists keep a scale of 1) zooms when its maximum zoom scale is abo
 | `maximumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | The largest zoom; above the minimum, pinching zooms. |
 | `zoomScale` | `.zoom(scale)` | `number` | | Zooms to this scale when the prop changes; the user's zoom is kept otherwise. |
 | `bouncesZoom` | `.bounces_zoom(..)` | `boolean` | `true` | Pinching may go past the limits and springs back. |
-| `pinchGestureEnabled` | `.pinch_gesture_enabled(..)` | `boolean` | `true` | The user can pinch to zoom. |
+| `zoomable` | `.zoomable(..)` | `boolean` | `true` | The user can pinch to zoom. |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | Content smaller than the viewport (zoomed out) is centered. |
 
 The scroll event reports the zoom scale and the zoomed content size. From code, `zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` zooms so that the content point (in unzoomed points) lands in the middle of the viewport; double tap to zoom is a press handler calling it:

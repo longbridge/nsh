@@ -41,7 +41,7 @@
 //! the default theme's), as the root view has none of its own.
 //!
 //! The status bar has no desktop equivalent. The clipboard is Win32's
-//! (`CF_UNICODETEXT`); reads are synchronous, so `Clipboard.getString` is
+//! (`CF_UNICODETEXT`); reads are synchronous, so `Clipboard.readText` is
 //! answered at once.
 
 use std::{
@@ -464,7 +464,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                     log::debug!("windows: cannot set the clipboard");
                 }
             }
-            _ => log::warn!("Clipboard.setImage: Windows takes a base64 PNG data: URI"),
+            _ => log::warn!("Clipboard.writeImage: Windows takes a base64 PNG data: URI"),
         },
         Command::ReadClipboardImage { id, has_only } => {
             let has = clipboard_has_image();
@@ -506,7 +506,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
     }
 }
 
-/// The answer to `Clipboard.getString` / `hasString` read `id`.
+/// The answer to `Clipboard.readText` / `hasString` read `id`.
 fn clipboard_answer(id: u32, has: bool, text: Option<String>) -> EventPayload {
     let mut fields = vec![
         ("id", PayloadValue::Number(id as f64)),

@@ -39,7 +39,7 @@ function App() {
         <View style={{ flex: wide() ? 1 : undefined, justifyContent: "center" }}>
           <Video
             ref={video}
-            source={FLOWER}
+            src={FLOWER}
             paused={paused()}
             muted={muted()}
             repeat={repeat()}
@@ -51,8 +51,8 @@ function App() {
             onLoadStart={() => status.set("onLoadStart")}
             onLoad={(e) => {
               duration.set(e.duration);
-              ratio.set(e.width / e.height);
-              status.set(`onLoad ${e.width} × ${e.height}`);
+              ratio.set(e.size.width / e.size.height);
+              status.set(`onLoad ${e.size.width} × ${e.size.height}`);
             }}
             onProgress={(e) => time.set(e.currentTime)}
             onBuffer={(e) => status.set(e.isBuffering ? "buffering" : "playing")}

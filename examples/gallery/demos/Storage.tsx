@@ -21,7 +21,7 @@ export function StorageDemo() {
   const entries = signal<Entry[]>([]);
 
   const refresh = async () => {
-    const keys = await Storage.getAllKeys();
+    const keys = await Storage.keys();
     entries.set(await Promise.all(keys.map(async (key) => ({ key, length: (await Storage.getItem(key))?.length ?? 0 }))));
   };
 
@@ -86,9 +86,9 @@ export function StorageDemo() {
             borderRadius: radius.control,
             borderCurve: "continuous",
             borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor: colors.inset,
-            ...finish.inset,
+            borderColor: colors.fieldBorder,
+            backgroundColor: colors.field,
+            ...finish.field,
           }}
         >
           <Input
@@ -123,7 +123,7 @@ export function StorageDemo() {
   function Keys() {
     const total = () => entries().reduce((sum, e) => sum + e.key.length + e.length, 0);
     return (
-      <Card icon="lists" title="Stored keys" subtitle="getAllKeys() and each value's length">
+      <Card icon="lists" title="Stored keys" subtitle="keys() and each value's length">
         <If when={entries().length > 0} else={<Caption label="Nothing stored" />}>
           <View>
             <Each of={entries()}>

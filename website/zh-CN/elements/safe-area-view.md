@@ -77,14 +77,14 @@ safe_area_view()
 标题栏可见且不透明的 [NavPage](./nav-stack.md) 已经把内容放在标题栏下方，所以那里的顶部边距为 0。SafeAreaView 用于：
 
 - 没有导航栈的应用的根视图，
-- 设置了 `headerShown={false}` 或 `headerTransparent` 的页面，
+- 设置了 `headerVisible={false}` 或 `headerTransparent` 的页面，
 - 全屏 [Dialog](./dialog.md) 的内容。
 
 <a id="safearea-and-safeareainsets"></a>
 
 ## safeArea 与 safeAreaInsets
 
-需要具体数值时，比如自己为底栏添加内边距，可以直接读取它们。两个 TSX 访问器都返回一个 `Insets` 对象（`{ top, right, bottom, left }`，单位为点），并且是响应式的：读取它们的代码会在它们变化时重新运行，比如旋转屏幕时。
+需要具体数值时，比如自己为底栏添加内边距，可以直接读取它们。两个 TSX 访问器都返回一个 `Edges` 对象（`{ top, right, bottom, left }`，单位为点），并且是响应式的：读取它们的代码会在它们变化时重新运行，比如旋转屏幕时。
 
 | TSX | Rust | 返回 |
 |---|---|---|

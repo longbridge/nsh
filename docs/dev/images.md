@@ -5,7 +5,7 @@
   `BitmapFactory` power-of-two sampling → `LruCache`, same coalescing). During development `asset:/path` goes through the dev
   server's `/assets/`; `nsh build` copies assets to `out/assets/`, `nsh package` puts them in the app. Cache keys include the decode
   size and the blur radius. `blurRadius` is a stack blur on the decoding thread (`blur.rs`, `Blur.java`: the same algorithm, in
-  pixels). `defaultSource` loads after the image request and shows until the image arrives; the image then fades in over
+  pixels). `placeholder` loads after the image request and shows until the image arrives; the image then fades in over
   `fadeDuration` (iOS: `CATransition`; Android: alpha over the placeholder; default 0 on iOS and 300ms on Android, as in React
   Native). Animated images: iOS decodes up to 600 frames into an animated `UIImage` (frames repeated by their delays' common
   divisor) played by a discrete `CAKeyframeAnimation` on `contents` (a tinted animated image shows its first frame); Android
@@ -19,7 +19,7 @@
 - **Pixel-density variants**: an `ImageSource` carries `scales` (`ImageScales`, a `Copy` bitmask over `IMAGE_SCALES`,
   `[1, 1.5, 2, 3, 4]`) when a bundled asset ships `@Nx` siblings (of a JS `scales` list, the first `SCALES_READ`
   entries). The core picks the variant when it emits `MountItem::Image` (`ImageSource::uri_for`, for the source and the
-  `defaultSource` placeholder): React Native's rule, the smallest scale at least the surface's `pixel_ratio`, otherwise
+  `placeholder`): React Native's rule, the smallest scale at least the surface's `pixel_ratio`, otherwise
   the largest, for `asset:/` URIs without a query or a fragment (a bundled file's name has neither). The backends load
   that URI as any other, so their caches and decoding are unchanged; the size in points still comes from the source, so
   layout never depends on the variant. When the pixel ratio changes (`apply_environment`: a window moved to another

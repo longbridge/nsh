@@ -326,6 +326,33 @@ impl JsValue for crate::geometry::DevicePixels {
     }
 }
 
+/// A size in pixels: TS's `Size` (`{ width, height }`).
+impl JsValue for crate::geometry::Size<crate::geometry::DevicePixels> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Size".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("an object with width and height"));
+        }
+        let side = |key: &str| -> Result<crate::geometry::DevicePixels, PropError> {
+            let v = value.field(key)?;
+            crate::geometry::DevicePixels::from_js(v.get())
+                .map_err(|e| PropError(format!("`{key}`: {e}")))
+        };
+        Ok(Self::new(side("width")?, side("height")?))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let owned = JsOwned::new(host, host.new_object()?);
+        let object = owned.get().raw();
+        host.set_field(object, "width", self.width.to_js(host)?.into_raw())?;
+        host.set_field(object, "height", self.height.to_js(host)?.into_raw())?;
+        Ok(owned)
+    }
+}
+
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
         "string".into()

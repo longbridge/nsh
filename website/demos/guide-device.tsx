@@ -1,5 +1,5 @@
-import { mount, Text, View } from "nsh";
-import { colorScheme, fontScale, I18nManager, PixelRatio, Platform, windowSize } from "nsh/device";
+import { mount, signal, Text, View } from "nsh";
+import { colorScheme, fontScale, pixelRatio, platform, windowSize } from "nsh/device";
 
 function Row(props: { label: string; value: string }) {
   return (
@@ -11,7 +11,8 @@ function Row(props: { label: string; value: string }) {
 }
 
 function App() {
-  const hairline = 1 / PixelRatio.get();
+  const hairline = () => 1 / pixelRatio();
+  const rtl = signal(false);
   return (
     <View class="flex-1 bg-[#f3f3ef] dark:bg-[#101113] px-4 pt-6 gap-4">
       <Text class="text-2xl font-bold text-[#15161a] dark:text-[#eceef1]">Environment</Text>
@@ -19,20 +20,19 @@ function App() {
         <Row label="windowSize()" value={`${Math.round(windowSize().width)} × ${Math.round(windowSize().height)}`} />
         <Row label="colorScheme()" value={colorScheme()} />
         <Row label="fontScale()" value={fontScale().toFixed(2)} />
-        <Row label="Platform.OS" value={Platform.OS} />
-        <Row label="Platform.Version" value={String(Platform.Version)} />
-        <Row label="interfaceIdiom" value={Platform.constants.interfaceIdiom} />
+        <Row label="platform.os" value={platform.os} />
+        <Row label="platform.version" value={platform.version} />
+        <Row label="platform.idiom" value={platform.idiom} />
         <Row label="Locale" value={new Intl.DateTimeFormat().resolvedOptions().locale} />
-        <Row label="PixelRatio.get()" value={String(PixelRatio.get())} />
-        <Row label="I18nManager.isRTL" value={String(I18nManager.isRTL)} />
+        <Row label="pixelRatio()" value={String(pixelRatio())} />
       </View>
 
       <Text class="text-[#565a61] dark:text-[#8d9198]">
-        {Platform.select({ ios: "Running on iOS.", android: "Running on Android.", web: "Running in a browser.", default: "Running elsewhere." })}
+        {platform.select({ ios: "Running on iOS.", android: "Running on Android.", web: "Running in a browser.", default: "Running elsewhere." })}
       </Text>
 
       <View class="gap-1">
-        <View class="bg-[#8c9097] dark:bg-[#5a5e65]" style={{ height: hairline }} />
+        <View class="bg-[#8c9097] dark:bg-[#5a5e65]" style={{ height: hairline() }} />
         <Text class="text-xs text-[#8c9097] dark:text-[#5a5e65]">The line above is one device pixel tall.</Text>
       </View>
 
@@ -46,12 +46,13 @@ function App() {
       </View>
 
       <View
-        onPress={() => I18nManager.forceRTL(!I18nManager.isRTL)}
+        onPress={() => rtl.set(!rtl())}
         activeStyle={{ opacity: 0.6 }}
+        style={{ direction: rtl() ? "rtl" : "ltr" }}
         class="flex-row items-center gap-3 rounded-2xl bg-white border border-[#e1e1db] dark:bg-[#18191c] dark:border-[#2c2e33] p-4"
       >
         <Text class="text-lg text-[#4a6a0a] dark:text-[#c8f26d]">⇄</Text>
-        <Text class="flex-1 text-[#15161a] dark:text-[#eceef1]">Lay out right to left: {I18nManager.isRTL ? "on" : "off"}</Text>
+        <Text class="flex-1 text-[#15161a] dark:text-[#eceef1]">Lay out right to left: {rtl() ? "on" : "off"}</Text>
       </View>
     </View>
   );

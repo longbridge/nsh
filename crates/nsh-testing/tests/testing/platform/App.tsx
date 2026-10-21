@@ -59,8 +59,8 @@ function Home() {
             answer.set(chosen ?? "dismissed");
           }}
         />
-        <Press label="Copy" onPress={() => Clipboard.setString("copied text")} />
-        <Press label="Paste" onPress={async () => pasted.set(await Clipboard.getString())} />
+        <Press label="Copy" onPress={() => Clipboard.writeText("copied text")} />
+        <Press label="Paste" onPress={async () => pasted.set(await Clipboard.readText())} />
         <Press label="Move" onPress={() => Animated.timing(x, { toValue: 100, duration: 300 }).start(() => moved.set("done"))} />
         <Press
           label="Measure"

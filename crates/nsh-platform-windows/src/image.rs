@@ -37,7 +37,7 @@
 //!
 //! `blurRadius` is a Direct2D Gaussian blur at draw time, in points, with
 //! a hard border so the edges stay opaque. `tintColor` draws the color
-//! through the image's alpha (a color matrix). `defaultSource` shows until
+//! through the image's alpha (a color matrix). The `placeholder` shows until
 //! the image arrives (and stays on error); an image that had to load then
 //! fades in over `fadeDuration` (default 0, as iOS).
 

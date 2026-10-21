@@ -109,7 +109,7 @@ text("继续即表示你同意")
 
 ### 行内视图和图片
 
-文本中的其他元素（视图、图片，即使位于片段内）都是行内附件：按自身尺寸布局，坐落在基线上，并随文字一起换行。它们可以单独响应按压。
+文本中的其他元素（视图、图片，即使位于片段内）都是行内附件：按自身尺寸布局，坐落在基线上（或由样式 `verticalAlign` 决定位置：`"text-top"`、`"text-bottom"`、`"middle"`，与 CSS 一致；所在行会撑高以容纳它），并随文字一起换行。它们可以单独响应按压。
 
 ```rust tabs
 text("基于 ")
@@ -191,7 +191,7 @@ import Inter from "./fonts/Inter-Regular.ttf";
 |---|---|---|---|
 | `onTextLayout` | | `{ lines: TextLayoutLine[] }` | 段落每次布局之后。 |
 | `onPress`、`onLongPress` 等 | `.on_press`、`.on_long_press` 等 | 无 | 与 [view](./view.md#事件) 相同；在片段上时，指按在其字符上的按压。 |
-| `onLayout` | `.on_layout` | `{ x, y, width, height }` | 文本块的 frame 发生变化。 |
+| `onLayout` | `.on_layout` | `Bounds` | 文本块的 frame 发生变化。 |
 
 `TextLayoutLine` 为 `{ text, x, y, width, height, ascender, descender, capHeight, xHeight }`，坐标位于文本的内容盒中：
 

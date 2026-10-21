@@ -607,7 +607,7 @@ fn emit(host: &impl ScrollHost, kind: EventKind) {
     host.event(kind, EventPayload::Scroll(offset));
 }
 
-/// Ends a glide or a snap a new input interrupts (`onMomentumScrollEnd`,
+/// Ends a glide or a snap a new input interrupts (`onMomentumEnd`,
 /// as UIKit sends when a drag catches a glide).
 fn interrupt(host: &impl ScrollHost) {
     let momentum = matches!(
@@ -616,7 +616,7 @@ fn interrupt(host: &impl ScrollHost) {
     );
     set_phase(host, Phase::Idle);
     if momentum {
-        emit(host, EventKind::MomentumScrollEnd);
+        emit(host, EventKind::MomentumEnd);
     }
 }
 
@@ -669,7 +669,7 @@ fn animate_to(host: &impl ScrollHost, to: f32, duration: f64, momentum: bool, en
         set_phase(host, Phase::Idle);
         moved_to(host, to);
         if momentum {
-            emit(host, EventKind::MomentumScrollEnd);
+            emit(host, EventKind::MomentumEnd);
         }
         if end {
             emit(host, EventKind::ScrollEnd);
@@ -724,7 +724,7 @@ fn release(host: &impl ScrollHost, v: f32, snap_velocity: f32) {
     } else if let Some(target) = target {
         let duration = snap_duration(Points(target - pos), v);
         if duration > 0.0 {
-            emit(host, EventKind::MomentumScrollBegin);
+            emit(host, EventKind::MomentumStart);
         }
         animate_to(host, target, duration, duration > 0.0, true);
     } else if v.abs() > MIN_GLIDE && (v > 0.0 && pos < max || v < 0.0 && pos > min) {
@@ -735,7 +735,7 @@ fn release(host: &impl ScrollHost, v: f32, snap_velocity: f32) {
                 last: host.now(),
             },
         );
-        emit(host, EventKind::MomentumScrollBegin);
+        emit(host, EventKind::MomentumStart);
         ensure_ticking(host);
     } else {
         set_phase(host, Phase::Idle);
@@ -785,7 +785,7 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             moved_to(host, next.clamp(min, max.max(min)));
             if stop {
                 set_phase(host, Phase::Idle);
-                emit(host, EventKind::MomentumScrollEnd);
+                emit(host, EventKind::MomentumEnd);
                 emit(host, EventKind::ScrollEnd);
             } else {
                 set_phase(
@@ -810,7 +810,7 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
             if t >= 1.0 {
                 set_phase(host, Phase::Idle);
                 if momentum {
-                    emit(host, EventKind::MomentumScrollEnd);
+                    emit(host, EventKind::MomentumEnd);
                 }
                 if end {
                     emit(host, EventKind::ScrollEnd);
@@ -1026,7 +1026,7 @@ pub fn drag_begin(host: &impl ScrollHost) {
     interrupt(host);
     let start = host.scroll(|s, _| s.offset()).unwrap_or(0.0);
     set_phase(host, Phase::Drag { start, moved: 0.0 });
-    emit(host, EventKind::ScrollBeginDrag);
+    emit(host, EventKind::ScrollDragStart);
 }
 
 /// The drag moved by `delta` since the last move (content follows the
@@ -1092,7 +1092,7 @@ pub fn drag_end(host: &impl ScrollHost, vx: f32, vy: f32) {
         return;
     };
     set_phase(host, Phase::Idle);
-    emit(host, EventKind::ScrollEndDrag);
+    emit(host, EventKind::ScrollDragEnd);
     if refresh {
         // Shown right away, as UIRefreshControl does; JS turns it off.
         host.scroll_mut(|s, _| s.live.refreshing = true);
@@ -1139,7 +1139,7 @@ pub fn thumb_begin(host: &impl ScrollHost) {
         return;
     }
     host.redraw();
-    emit(host, EventKind::ScrollBeginDrag);
+    emit(host, EventKind::ScrollDragStart);
 }
 
 /// The grabbed indicator was dragged by `moved` since it was grabbed: the
@@ -1177,7 +1177,7 @@ pub fn thumb_end(host: &impl ScrollHost) {
     set_phase(host, Phase::Idle);
     host.scroll_mut(|s, _| s.live.shown = host.now());
     ensure_ticking(host);
-    emit(host, EventKind::ScrollEndDrag);
+    emit(host, EventKind::ScrollDragEnd);
     release(host, 0.0, 0.0);
 }
 
@@ -1198,7 +1198,7 @@ pub fn wheel_begin(host: &impl ScrollHost) {
             gesture: true,
         },
     );
-    emit(host, EventKind::ScrollBeginDrag);
+    emit(host, EventKind::ScrollDragStart);
 }
 
 /// Scrolls the view by `delta` (positive toward the end). Without
@@ -1265,7 +1265,7 @@ pub fn wheel_end(host: &impl ScrollHost, vx: f32, vy: f32) {
     let v = v / 1000.0;
     set_phase(host, Phase::Idle);
     if gesture {
-        emit(host, EventKind::ScrollEndDrag);
+        emit(host, EventKind::ScrollDragEnd);
     }
     let snap = if v == 0.0 && total.abs() >= 1.0 {
         total.signum() * WHEEL_SNAP

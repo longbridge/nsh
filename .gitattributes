@@ -2,5 +2,3 @@
 # (newline_style = "unix") and the tests expect it.
 * text=auto eol=lf
 
-# Fixture apps of the API record: built output, not reviewed line by line.
-api/apps/*/bundle.js linguist-generated -diff

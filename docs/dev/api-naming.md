@@ -8,6 +8,24 @@ API", "Use precise domain words" and "Callback and event wording" in `gpui-kit/w
 (cited below as *guides*). The table at the end lists the renames decided so far; until they land, the code still has
 the old names.
 
+## Where names come from
+
+Each part of the API takes its names from one source, so an app's code never mixes vocabularies:
+
+| Part | Source |
+|---|---|
+| Components and their behavior (`nsh/base`, the interaction props of elements) | `gpui-base`, then GPUI, `gpui-component` (this page) |
+| What primitives show and the web APIs (`src`, `html`, styles, Tailwind, `fetch`, `window`'s events, the clipboard, storage) | HTML, the DOM and CSS, as a browser has them |
+| The standard modules (`process`, `os`, `fs/promises`, ...) | Node's names; values as Rust's `std::env::consts` gives them (`process.platform` is `"macos"`, `arch` `"aarch64"`; decided by the user, 2026-10-21), documented on each |
+| The environment (`nsh` / `nsh/<module>` accessors) | NSH's rules below: a lowercase accessor per value, `set<Value>` beside it |
+| React Native | none: a reference for which capabilities exist; the RN-shaped modules frozen as they are (below) |
+
+**Frozen RN-shaped modules.** `nsh/animated` (`Animated`, `Easing`, `LayoutAnimation`), `nsh/gesture`
+(`PanResponder`) and the responder props (`onTouch*`, `on*ShouldSetResponder*`, `onResponder*`) keep React Native's
+names and semantics as a whole, as they shipped (decided by the user, 2026-10-21): they are consistent in themselves
+and ported from React Native code as they are. The rules of this page do not apply inside them, and new capabilities
+go elsewhere under these rules rather than into them.
+
 ## Translation
 
 - `snake_case` → `camelCase`: `on_open_change` → `onOpenChange`, `close_on_escape` → `closeOnEscape`,
@@ -42,7 +60,48 @@ the old names.
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
   the current item, `checked` / `pressed` the value of a checkbox / toggle (*guides*; `Selectable`, `Disableable`,
   `Toggle::pressed`). Booleans are named after the state, positively (`open`, `hidden`), with no `is` prefix and no
-  `Enabled` suffix when a state word exists.
+  `Enabled` suffix when a state word exists: what the user may do is `gpui-kit`'s adjective (`scrollable`,
+  `zoomable`, `selectable`, `resizable`), and only a feature with no adjective is `<feature>Enabled`
+  (`pagingEnabled`, `javaScriptEnabled`; *guides* "a positive `enabled` / `visible` contract"); what something
+  blocks is `disabled` (a menu item too, `PopupMenu::disabled`). Whether a part shows is a boolean named after the
+  part, default `true` (`scrollbar`, `caret`: `scrollbar={false}`; decided by the user, 2026-10-21); where that name
+  is already a slot it is `<part>Visible` (`headerVisible`, `headerBackVisible`: `header` is a page's slot), never
+  `<part>Shown`, `<part>Hidden` or `shows<Part>`. What only reads a
+  boolean (a constant, a payload's field) is `is<Adjective>` / `has<Noun>`, as `gpui-kit`'s readers (`isAvailable`,
+  `isViewable`, `isBuffering`); props never are (*guides*: builders `disabled(bool)`, readers `is_disabled()`).
+- **Begin and end**: a phase is `<act>Start` / `<act>End` (`gpui-kit`'s `on_start` / `on_end`: `onPanStart`,
+  `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. A pointer over a view is `onHoverIn` /
+  `onHoverOut` (decided by the user, 2026-10-21), a file drag over it `onFileDragEnter` / `onFileDragLeave` (the DOM's
+  `dragenter`).
+- **Geometry**: shapes are GPUI's, the types Rust already has (`nsh_core::geometry`, `geometry.md`), exported by
+  `nsh` with the same fields: `Point { x, y }`, `Size { width, height }`, `Bounds { origin: Point, size: Size }`,
+  `Edges { top, right, bottom, left }` (decided by the user, 2026-10-21). A position and an extent together are a
+  `Bounds` (`onLayout(bounds)`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
+  (`safeArea()`, `hitSlop`, `contentInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
+  together, `<prefix>Width` / `<prefix>X` fields or another name for one shape (`Insets`).
+- **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
+  `<prefix>X` / `<prefix>Y` fields: `position` in the view, `pagePosition` in the root view (the surface or its dialog),
+  and the keys held as `modifiers` (`{ control, alt, shift, platform }`, GPUI's `Modifiers`: `platform` is Command on
+  Apple platforms, the Windows / Super key elsewhere), as GPUI's `MouseMoveEvent { position, modifiers }` (decided by
+  the user, 2026-10-21). The frozen responder events keep React Native's `locationX` / `pageX`.
+- **Intent over geometry**: an event says what the app should do when the act has a name (`onLoadMore`, as
+  `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`).
+- **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
+  (`onChange(text)`, `onOpenChange(open, reason)`); every other event passes one object, even with one field
+  (`onLinkPress({ url })`, `onSubmit({ text })`), so a later field is an addition. An event with nothing to report
+  passes nothing; it can gain an object later. Never several positional arguments outside the frozen modules.
+- **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
+  registered while a component renders goes away with the component (`keymap.bind`); never React Native's
+  `{ remove() }`. An app reads a setting of the system through its accessor (`reduceMotion()`), which is also how it
+  follows the changes: no listeners or `Promise` getters beside it. `addEventListener` is only the DOM's, on the web
+  globals.
+- **Addresses**: what shows a resource takes it as `src` (`Image`, `Video`, `WebView`, `TextViewImage.src`, as HTML's
+  `img`, `video` and `iframe`), any other address is a `url` (`ImageAsset.url`, `WebViewNavigation.url`); never
+  `source` or `{ uri }` wrappers. `onFileDrop({ uris })` keeps its name (decided by the user, 2026-10-21). Inline content has its own prop (`html`,
+  with `baseUrl`, as `srcdoc`).
+- **Environment**: a value that can change while the app runs is an accessor (`colorScheme()`, `pixelRatio()`,
+  `locale()`), with `set<Value>(value | "system")` when the app may override it (`setColorScheme`); a value fixed for the life of the engine is a constant (`platform.os`). Never React Native's
+  static objects (`Platform.OS`, `PixelRatio.get()`, `I18nManager.isRTL`).
 - **Parts**: a component's own `class` / `style` style its main part; every other part gets `<part>Class` /
   `<part>Style`, named after `gpui-base`'s part (`Dialog::backdrop` / `Dialog::popup`; `gpui-component`
   `Settings::header_style`). The part name never repeats the component (`contentStyle`, not `contentContainerStyle`:
@@ -71,6 +130,92 @@ the old names.
 `gpui-base` is the reference, not a rule above judgment: a name is not taken when it reads worse for TSX apps on
 every platform, as the user decided (2026-10-20) for `onSubmit` (a phone's return key is not Enter), `animation`
 (`transition` is a style key), `multiline` (one word) and a page's `onDismiss`. Each such row says "not followed" and why.
+
+## Shapes that can grow
+
+Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
+members, so a shape decides what can ever be added to it.
+
+- Options are one object (`scrollTo({ x, y, animated })`), never a third positional parameter.
+- A mode is a string union, which gains values; never a boolean that later needs a third state.
+- A value has one type: `version: string`, never `string | number`.
+- What a function returns is an object, never a tuple (beside `split`'s, Solid's) or a bare value that may need a second field.
+- Event payloads and listening follow the rules above (objects, `() => void`).
+
+## Renames before the first compatible release
+
+Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, as no release froze
+them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
+(*guides*: "Preserve established public names when changing them would cause needless churn"): `pagingEnabled`,
+`javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`,
+`onHoverIn` / `onHoverOut` and `onFileDrop({ uris })`; and
+`StatusBar`'s `hidden`, as the user decided on 2026-10-20 after UIKit's `prefersStatusBarHidden`.
+
+| Now | New | Rule | Notes |
+|---|---|---|---|
+| **Scroll, List, WebView** | | | |
+| `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
+| `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
+| `showsIndicator` | `scrollbar` (default `true`) | States | The part's name, as `caret` |
+| `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
+| `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
+| List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
+| List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
+| **Every element** | | | |
+| Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's name, as `scrollbar`; replaces the 2026-10-20 row keeping it |
+| `HoverEvent` (`onHoverMove`) `locationX` / `locationY`, `pageX` / `pageY`, `altKey` / `ctrlKey` / `metaKey` / `shiftKey` | `{ position: Point; pagePosition: Point; modifiers: Modifiers }` | Points | GPUI `MouseMoveEvent`; new types `Point`, `Modifiers` in `nsh` |
+| `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
+| `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout(bounds: Bounds)` | Geometry | `LayoutEvent` dropped |
+| `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
+| `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events' `{ x, y }` is the offset's `Point` already |
+| `OverlayPosition` `{ placement, x, y, width, height, availableWidth, availableHeight }` | `{ placement; bounds: Bounds; available: Size }` | Geometry | |
+| `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |
+| `Insets` (type) | `Edges` | Geometry | `safeArea()`, `safeAreaInsets()`; `hitSlop` / `contentInset` take `number \| Partial<Edges>` / `Partial<Edges>` |
+| `contentOffset`, `Overlay` `anchor`, `Menu.popup`'s `at` | typed `Partial<Point>` / `Point` | Geometry | Same fields |
+| `nsh/desktop` `WindowFrame` `{ x, y, width, height, animated, anchorTop }` | `{ origin?: Partial<Point>; size?: Partial<Size>; animated; anchorTop }` | Geometry | |
+| `windowSize()`, `ImageSize`, Image `onLoad`, `onContentSizeChange` | typed `Size` | Geometry | Same fields |
+| `ImageAsset` / `ClipboardImage` `{ url, width, height }`, Video `onLoad` `{ duration, width, height }` | `{ url; size: Size }`, `{ duration; size: Size }` | Geometry | |
+| **Image** | | | |
+| `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
+| `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
+| `Image.getSize(source)`, `Image.prefetch(source)` | `(src: string \| ImageAsset)` | Addresses | |
+| `ImageAsset.uri` | `ImageAsset.url` | Addresses | What `import logo from "./logo.png"` gives |
+| **Video** | | | |
+| `source: string \| { uri }` | `src: string` | Addresses | |
+| **WebView** | | | |
+| `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
+| the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
+| **NavPage** | | | |
+| `headerShown` | `headerVisible` (default `true`) | States | `header` is the page's slot; as `headerBackVisible`, which stays |
+| **TextView** (`nsh/base`) | | | |
+| `onLinkPress(url)` | `onLinkPress({ url })` | Payloads | |
+| `caret` (a slot: the streaming reply's caret) | `streamingCaret` | States | Input's boolean `caret` is the part's switch; `cursor` is a style key. Rust `streaming_caret` |
+| `codeBlockScrollIndicator`, `tableScrollIndicator` | `codeBlockScrollbar`, `tableScrollbar` (default `true`) | States | As `scrollbar`. Rust `code_block_scrollbar`, `table_scrollbar` |
+| **`nsh/desktop`** | | | |
+| `MenuItem.enabled` | `MenuItem.disabled` | States | |
+| **`nsh/device`** | | | |
+| `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
+| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
+| `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
+| `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
+| `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
+| `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
+| `I18nManager` (`isRTL`, `allowRTL`, `forceRTL`, `doLeftAndRightSwapInRTL`, `getConstants`) | (dropped) | Where names come from | Decided by the user: the layout direction follows the locale, a view's `direction` style overrides it (Rust: `.direction(LayoutDirection::..)`; Rust's `rtl()`, `force_rtl` and `allow_rtl` are dropped too); translations, when NSH has them, come from rust-i18n |
+| `OS` (type) | unchanged | | `platform.os`'s type |
+| **`nsh/accessibility`** | | | |
+| `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderEnabled()`, `reduceMotion()` |
+| `AccessibilityInfo.announceForAccessibility(message)` | `announce(message)` | Environment | A function of the module |
+| `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
+| **`nsh/android`** | | | |
+| `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
+| **`nsh/clipboard`** | | | |
+| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
+| `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
+| `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
+| **`nsh/storage`** | | | |
+| `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
+| **Styles** | | | |
+| `experimental_backgroundImage` | (dropped) | Where names come from | React Native's name of `backgroundImage` |
 
 ## Renames
 
@@ -171,6 +316,18 @@ and `Input`'s React Native names follow the rules as well.
 | `CheckboxIndicatorStyles` `checked`, `indeterminate`, `disabled` | `checked:` / `indeterminate:` / `disabled:` in `indicatorClass`; Rust `.checked(..)` / `.indeterminate(..)` / `.disabled_style(..)` in `indicator_style` | `CheckboxStyles::checked` → `checkedStyle` | As `Switch`'s parts |
 | `Checkbox::role(RoleOverride)` | `role` (default `"checkbox"`) | `Button::role` | `RoleOverride::Presentational` is `role="none"` |
 | `Checkbox::tab_index`, `tab_stop`, `track_focus` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
+| **Radio** (`nsh/base`) | | | |
+| `Radio::on_change(bool, &ClickEvent, ..)` | `onChange(checked: boolean)` | `radio.rs` `Radio::on_change` | Only an unchecked, enabled radio reports, and always `true`: a radio cannot uncheck itself |
+| `Radio::set_position(position, size)` | (left out) | | NSH's accessibility state has no position in a set yet; added when every platform can carry it |
+| `Radio::id`, `tab_index`, `tab_stop`, `track_focus` | (left out) | | Identity is the element's; the keyboard focus follows the view tree, as `Button`'s does |
+| `RadioGroup::axis(Axis)` | (left out) | `radio_group.rs` (`aria_orientation`); `gpui-shell`'s `axis` ("semantic only") | It sets only the orientation screen readers hear, which NSH's accessibility layer does not carry yet; the layout is the app's `class` (`flex-row`) |
+| `accessibility_label` on a `RadioGroup` (`gpui-shell`, any element) | (left out) | | A labelled container is one element on iOS, which would hide the radios inside it; added with a container that keeps its children elements |
+| **Tabs** (`nsh/base`) | | | |
+| `Tab::on_click(&ClickEvent, ..)` | `onPress()` | `tabs.rs` `Tab::on_click`; `Button`'s `onPress` | Press, not click (above), as `Button`'s; every press reports, the selected tab's included, as `Tab::on_click` does |
+| `Tab::set_position(position, size)` | (left out) | | As `Radio::set_position`: NSH's accessibility state has no position in a set yet |
+| `Tab::id`, `Tabs::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
+| A tab outside the keyboard focus until its list has roving focus (`Tab`'s doc comment) | each enabled tab is a focus stop, Space / Return press it | `Button`, `Radio` | The keyboard focus follows the view tree, so keyboard users reach every tab; arrow keys, Home / End and roving focus come with the tab list's keyboard model (`gpui-base`'s TODO) |
+| `Tab`'s own layout (`flex`, `items_center`, `justify_center`, a line height of 1) | (none) | `Button` (no layout of its own) | The layout is the app's `class` and `style`, as `Button`'s; centering is `items-center justify-center` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

@@ -45,7 +45,7 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Switch`, safe areas, the keyboard, the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, safe areas, the keyboard, the status
                        bar, `SelectionArea` (texts that select together: `nsh-core`'s `selection.rs`), `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md),
                        the popups on the core's overlays (`Popover`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
                        `Tooltip`, `Sheet`; presented per device: docs/dev/components.md "Popups"), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
@@ -138,12 +138,10 @@ crates/
                        what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
-                       `web` (the WebAssembly runtime and the website's demos), `api` (records `api/`; `--keep <app>`: a fixture app)
-api/                  What apps depend on, append-only, held by the engine's `compat` tests: `runtime.txt` (module exports, `nsh:rt`
-                      and globals), `types/` (declarations), `tailwind.txt` (every class and what it resolves to), `apps/` (fixture apps
-                      as a build wrote them, never changed, with scripts that check the API: the backward-compat test suite),
-                      `cases/` (the sources of the fixtures of single APIs: one app per domain, a module per case), `uncovered.txt` (API no script checks yet; only shrinks), `closed.txt` (the
-                      only removals: closed for security, with reasons)
+                       `web` (the WebAssembly runtime and the website's demos), `compat` (runs `nsh-compat` against this checkout;
+                       `compat record <version>`: records a release there)
+tests/compat/         The apps whose scripts check the API apps use (`nsh-compat` builds and runs them): `cases/<domain>/` (one app per
+                      domain, a module per case, `script.txt`), `examples/<app>.txt` (the scripts of examples)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
@@ -203,7 +201,7 @@ Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing document
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
 cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
-./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX with a crate in native/; asks on a terminal without --template
+./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)
 cargo build -p nsh-ios-host --target aarch64-apple-ios-sim                             # the iOS simulator host (`nsh run --target ios`)
 cargo build -p nsh-ios-app --target aarch64-apple-ios-sim                              # the release runner (`nsh package --target ios-simulator`)
@@ -251,9 +249,8 @@ cargo clippy --workspace --all-targets
 cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
 cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
-cargo xtask api                                                                 # record the API apps use in api/ (after an additive change)
-cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture, when it differs from the app's newest
-cargo test -p nsh-engine --test engine compat::                                 # the API against the record at the merge base with main, and the fixture apps
+cargo xtask compat                                                              # tests/compat's apps, and the API every recorded release froze (nsh-compat)
+cargo xtask compat record <version>                                             # record this checkout as a release in nsh-compat (at release time)
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
 cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targets --features nsh-platform-macos/dev   # the macOS backend (on macOS)
@@ -292,7 +289,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   TSX imports every primitive from `nsh`, as Rust does from `nsh_core::ui::prelude`.
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own
   behavior, state, focus, keyboard and accessibility and leave every visual choice to the app (navigation, dialogs, a
-  button, a checkbox, a switch, popovers, menus, tooltips and sheets, safe areas, system alerts and the keyboard today, with the status bar a
+  button, a checkbox, radios, a switch, tabs, popovers, menus, tooltips and sheets, safe areas, system alerts and the keyboard today, with the status bar a
   prop of pages and dialogs; controls such as toggles, sliders and selects as their behavior is written). Names follow `gpui-base`'s
   (`docs/dev/api-naming.md`). `gpui-component` ↔ nothing: a styled component library is never part of NSH; apps and
   the community build theirs on `nsh-base`, or style the UI in the app itself. Each export has one home (two
@@ -304,17 +301,17 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   checks in Rust) with generated declarations. Exactly these names import; `node:` prefixes and other Node modules
   (`fs`, `events`, `util`, ...) are refused. Files and processes are these modules (`fs/promises`, `process`), never
   an `nsh/<module>`; the catalog grows only by a design decision.
-- **Backward compatible, always.** Apps are delivered to host apps as plugins and may never be built again, so every
-  release runs every app built for an earlier one (from v0.1.2 on, for good, whatever the version). Nothing that
-  reached `main` is removed or renamed: modules, exports and their members, `nsh:rt` (what compiled JSX calls:
-  append-only, signatures and semantics kept), globals, props, events and payload keys, style keys and values, Tailwind
-  utilities. A rename or move keeps the old name as a `@deprecated` alias of the same implementation, for good. Types
-  only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
-  (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
-  (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt` (beside three pre-release changes: an alignment with Tailwind CSS, the fixtures merged by domain and the theme moved to `nsh-base`). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
-  --keep`); fixtures and their steps never change, and while they pass, old apps keep working
-  (`docs/dev/compatibility.md`).
+- **Backward compatible, from the first recorded release on.** Apps are delivered to host apps as plugins and may
+  never be built again, so every release runs every app built for an earlier compatible one. What a release recorded
+  in [`longbridge/nsh-compat`](https://github.com/longbridge/nsh-compat) shipped is never removed or renamed: modules,
+  exports and their members, `nsh:rt` (what compiled JSX calls: append-only, signatures and semantics kept), globals,
+  props, events and payload keys, style keys and values, Tailwind utilities. A rename or move keeps the old name as a
+  `@deprecated` alias of the same implementation, for good. Types only widen; inputs gain optional members only;
+  behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
+  and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
+  security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
+  change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
+  (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are; the one
   exception is `TextView`'s default reading typography, its colors the theme's tokens, every part overridable by the
@@ -456,8 +453,7 @@ release. Files a crate reads from outside its directory (`include_bytes!`, test 
 
 1. `cargo test --workspace`, plus fmt and clippy as listed above (including the Catalyst target, the macOS crates, `cargo xtask clippy-android`, on Linux the Linux crates, on Windows the Windows crates; for changes in `crates/gpui` or to what it uses, its own tests and clippy there).
 2. Changes to the runtime (`nsh-js`), engine or core: run `nsh test --trace` and check item counts and timings. Changes to
-   anything apps use: `cargo test -p nsh-engine --test engine compat::` passes with the fixture apps in `api/apps`
-   untouched, and `api/` records the change (`docs/dev/compatibility.md`).
+   anything apps use: `cargo xtask compat` passes, and `tests/compat/` checks the change (`docs/dev/compatibility.md`).
 3. Changes to the platform layer: launch with `nsh run`, check screenshots and simulate input where needed (the terminal needs the Screen
    Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
    screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.

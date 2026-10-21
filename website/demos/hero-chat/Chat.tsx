@@ -287,7 +287,7 @@ export function Chat(props: { autoplay?: string } = {}) {
     void reply(retried, m.id);
   };
   const copy = (key: string, text: string) => {
-    Clipboard.setString(text);
+    Clipboard.writeText(text);
     copied.set(key);
     setTimeout(() => copied() === key && copied.set(null), 1600);
   };
@@ -320,8 +320,8 @@ export function Chat(props: { autoplay?: string } = {}) {
             borderRadius: 20,
             borderBottomRightRadius: 6,
             borderCurve: "continuous",
+            // A message is read, not pressed: flat, a hairline around it.
             backgroundColor: colors.raised,
-            ...finish.raised,
             borderWidth: 1,
             borderColor: colors.border,
           }}
@@ -516,11 +516,11 @@ export function Chat(props: { autoplay?: string } = {}) {
                 keyboardDismissMode="interactive"
                 maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}
                 scrollEventThrottle={100}
-                onScrollBeginDrag={() => (dragging = true)}
+                onScrollDragStart={() => (dragging = true)}
                 onScroll={(e) => {
-                  if (dragging) following.set(e.y + e.height >= e.contentHeight - 40);
+                  if (dragging) following.set(e.offset.y + e.size.height >= e.contentSize.height - 40);
                 }}
-                onMomentumScrollEnd={() => (dragging = false)}
+                onMomentumEnd={() => (dragging = false)}
                 onScrollEnd={() => (dragging = false)}
               >
                 {(item) => {
@@ -666,7 +666,7 @@ export function Chat(props: { autoplay?: string } = {}) {
 
         {/* Suggestions while the conversation is empty. */}
         <If when={!messages().length}>
-          <Scroll horizontal showsIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
+          <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
               <Each of={chips}>
                 {(chip) => (

@@ -43,8 +43,8 @@ scroll().flex_1().child(
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | 用户可以滚动。 |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动。 |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
 | `pagingEnabled` | `.paging(..)` | `boolean` | `false` | 停在视口尺寸的整数倍处。 |
 | `snapToInterval` | `.snap_interval(px(..))` | `number` | `0` | 停在该长度的整数倍处（0 表示关闭）。 |
@@ -52,7 +52,7 @@ scroll().flex_1().child(
 | `snapToAlignment` | `.snap_alignment(SnapAlignment::Center)` | `"start" \| "center" \| "end"` | `"start"` | 使用 `snapToInterval` 时，条目的哪个位置与视口对齐。 |
 | `disableIntervalMomentum` | `.disable_interval_momentum(..)` | `boolean` | `false` | 一次惯性滑动最多移动一个吸附点。 |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | 平台默认 | 惯性滑动减速的快慢：每毫秒保留的速度比例（`normal` 为 0.998，`fast` 为 0.99）。 |
-| `contentInset` | `.content_inset(EdgeInsets { .. })` | `{ top?, right?, bottom?, left? }` | | 内容四周的留白。 |
+| `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 内容四周的留白。 |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | 初始位置。 |
 | `contentStyle` | 内容视图自身的样式 | `ViewStyle` | | 包住子元素、随它们一起滚动的视图的样式；`flexGrow: 1` 让它至少和视口一样高（居中的空状态）。 |
 | `contentClass` | 内容视图自身的样式 | `string` | | 同上，写成类名，例如 `"grow justify-center p-4"`。 |
@@ -107,7 +107,7 @@ async function reload() {
 | `maximumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | 最大缩放比例。 |
 | `zoomScale` | `.zoom(..)` | `number` | | 值变化时缩放到该比例；否则保留用户的缩放。 |
 | `bouncesZoom` | `.bounces_zoom(..)` | `boolean` | `true` | 捏合可以超出限制并弹回。 |
-| `pinchGestureEnabled` | `.pinch_gesture_enabled(..)` | `boolean` | `true` | 用户可以捏合缩放。 |
+| `zoomable` | `.zoomable(..)` | `boolean` | `true` | 用户可以捏合缩放。 |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | 内容（缩小后）小于视口时居中显示。 |
 
 ```rust tabs
@@ -139,12 +139,12 @@ let photo!: YNode;
 | 事件 | Rust | 载荷 | 触发时机 |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | 偏移量变化（每帧最多一次，且不比 `scrollEventThrottle` 更频繁）。 |
-| `onScrollBeginDrag` / `onScrollEndDrag` | `.on_scroll_begin_drag` / `.on_scroll_end_drag` | `{ x, y }`（`Point<Points>`） | 用户开始 / 停止拖动。 |
-| `onMomentumScrollBegin` / `onMomentumScrollEnd` | `.on_momentum_scroll_begin` / `.on_momentum_scroll_end` | `{ x, y }` | 拖动后的惯性滑动开始 / 停止。被新一次拖动打断的滑动同样以 `onMomentumScrollEnd` 结束。 |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }`（`Point<Points>`） | 用户开始 / 停止拖动。 |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | 拖动后的惯性滑动开始 / 停止。被新一次拖动打断的滑动同样以 `onMomentumEnd` 结束。 |
 | `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | 滚动停了下来。 |
 | `onRefresh` | `.on_refresh` | 无 | 触发了下拉刷新。 |
 
-`ScrollEvent` 为 `{ x, y, contentWidth, contentHeight, width, height, zoomScale }`（Rust 中为 `offset`、`content_size`、`size`、`zoom_scale`）：偏移量、（缩放后的）内容尺寸、视口尺寸和缩放比例（不缩放时为 1）。
+`ScrollEvent` 为 `{ offset: Point; contentSize: Size; size: Size; zoomScale }`（Rust 中为 `offset`、`content_size`、`size`、`zoom_scale`）：偏移量、（缩放后的）内容尺寸、视口尺寸和缩放比例（不缩放时为 1）。
 
 > [!TIP]
 > 要让某个元素随滚动位置移动（收缩的标题栏、视差图片），请把 `scrollValue` 绑定到一个动画值，并在样式中对它插值。它在 UI 线程上以屏幕刷新率运行，而 `onScroll` 是应用代码中每帧一次的事件。参见[动画](../docs/animation.md)。

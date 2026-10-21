@@ -77,6 +77,37 @@ pub enum TextAlign {
     Justify,
 }
 
+/// `verticalAlign`: where an element inside a `<Text>` (an inline
+/// attachment) sits in its line, as CSS's `vertical-align` places a
+/// replaced inline box. The font it is measured against is the text's
+/// around the attachment; the line grows to hold the attachment wherever
+/// it reaches past that font (`TextAttachment::extent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum VerticalAlign {
+    /// `baseline`: its bottom on the baseline.
+    #[default]
+    Baseline,
+    /// `text-top`: its top at the top of the font (its ascent).
+    TextTop,
+    /// `text-bottom`: its bottom at the bottom of the font (its descent).
+    TextBottom,
+    /// `middle`: its middle half the font's x height above the baseline.
+    Middle,
+}
+
+impl VerticalAlign {
+    /// The value named by CSS keyword `name`.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "baseline" => Self::Baseline,
+            "text-top" => Self::TextTop,
+            "text-bottom" => Self::TextBottom,
+            "middle" => Self::Middle,
+            _ => return None,
+        })
+    }
+}
+
 /// A font family name, interned: copying and comparing one is free, so
 /// resolved text styles stay `Copy` and cheap to hash.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -797,6 +828,9 @@ pub struct Style {
     pub animated: Vec<(crate::animation::AnimationProp, crate::animation::NodeId)>,
     /// `zIndex`: stacking order among siblings (higher on top).
     pub z_index: i32,
+    /// `verticalAlign`: where the element sits in its line when it is
+    /// inside a `<Text>`.
+    pub vertical_align: VerticalAlign,
     /// `direction`: right to left (`Some(true)`), left to right, or
     /// inherited (`None`).
     pub direction: Option<bool>,
@@ -1001,6 +1035,7 @@ impl Default for Style {
             text: TextStyle::default(),
             animated: Vec::new(),
             z_index: 0,
+            vertical_align: VerticalAlign::Baseline,
             direction: None,
             logical: Logical::default(),
             pending: Pending::default(),
@@ -1139,7 +1174,6 @@ style_keys! {
     ZIndex = "zIndex": Layout "number" "Order among siblings (stable); also the native stacking order.",
     BoxShadow = "boxShadow": View "string" "CSS `box-shadow`: offsets, blur, spread and color, several separated by commas, `inset` for inner shadows.",
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
-    ExperimentalBackgroundImage = "experimental_backgroundImage": View "string" "React Native's name of `backgroundImage`.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
@@ -1228,6 +1262,7 @@ style_keys! {
     TextAlign = "textAlign": Text "\"auto\" | \"left\" | \"center\" | \"right\" | \"justify\"",
     PlaceholderColor = "placeholderColor": Text "ColorValue" "An input's placeholder (`placeholder:text-*`).",
     SelectionColor = "selectionColor": Text "ColorValue" "An input's caret and selection, a selectable text's selection highlight (`selection:text-*`).",
+    VerticalAlign = "verticalAlign": View "\"baseline\" | \"text-top\" | \"text-bottom\" | \"middle\"" "Where a view or image inside a `<Text>` sits in its line (CSS `vertical-align`, `align-*`): its bottom on the baseline (the default), its top or bottom at the top or bottom of the text's font, or its middle half the font's x height above the baseline. The line grows to hold it.",
 }
 
 /// A style property value as read from JS.
@@ -2022,6 +2057,12 @@ impl Style {
             StyleKey::BorderBottomWidth => self.set_border_width(&[2], value)?,
             StyleKey::BorderLeftWidth => self.set_border_width(&[3], value)?,
             StyleKey::ZIndex => self.z_index = number(value, 0.0)? as i32,
+            StyleKey::VerticalAlign => {
+                self.vertical_align = match keyword(value)? {
+                    None => VerticalAlign::Baseline,
+                    Some(k) => VerticalAlign::parse(k).ok_or(StyleError::InvalidValue)?,
+                }
+            }
             StyleKey::Direction => {
                 self.direction = match keyword(value)? {
                     None | Some("inherit") => None,
@@ -2243,7 +2284,7 @@ impl Style {
                 };
                 self.edit_effects(|e| e.box_shadows = list);
             }
-            StyleKey::BackgroundImage | StyleKey::ExperimentalBackgroundImage => {
+            StyleKey::BackgroundImage => {
                 let list = match keyword(value)? {
                     None => Vec::new(),
                     Some(s) => css::gradients(s).ok_or(StyleError::InvalidValue)?,

@@ -28,7 +28,7 @@ Things that were found the hard way. Read the section of the area you change bef
   by hand in `nsh-js`.
 - **rquickjs converts `Option::None` to `undefined`, not `null`**: compare native results with `== null` in JS.
 - **`on*` props are event handlers to the renderer** (held on the node, sent to the core as a listener flag): settings must not
-  be named `on...` on host elements (`List` sends `onEndReachedThreshold` as `endReachedThreshold`).
+  be named `on...` on host elements (`List` sends `loadMoreThreshold` as `loadMoreThreshold`).
 - **There is no error boundary**: hot component proxies catch what a component throws, report it and render nothing until the
   fix (`nsh-js` `hot.rs`).
 - **Hot proxies return accessors**, not nodes: runtime code that inspects what a component returned (`NavStack` looks for a
@@ -64,7 +64,7 @@ Things that were found the hard way. Read the section of the area you change bef
   before shrinking it; Android sizes the content view at once in `setContentSize` (not at the next layout pass).
 - **Scroll reports can predate the core's own scrolls**: each report carries how many `ScrollBy` / list `ScrollTo` the view
   has applied (`EngineControl::scroll(.., applied)`), and the core adds the ones still pending; otherwise a stale offset
-  moves the window (and fires `onEndReached`) backwards.
+  moves the window (and fires `onLoadMore`) backwards.
 - **Unbound list cells still show their last item**: the core moves them out of sight (never with a NaN frame: cells that
   were never placed are skipped; UIKit throws on NaN geometry).
 - **Tailwind variant order decides between variants**, not their order in the string: `odd:bg-a last:bg-b` gives an odd last row
@@ -359,7 +359,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows
   of other apps (e.g. a Slack huddle bar at window level 1001) silently swallow clicks over a band of the app. When a tap does
   nothing, list the windows at the point (`CGWindowListCopyWindowInfo`) before suspecting hit testing.
-- **Not supported / not verifiable here**: `I18nManager.swapLeftAndRightInRTL(false)` (left / right always swap right to left);
+- **Not supported / not verifiable here**: keeping left and right unswapped right to left (left / right always swap right to left);
   after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms (as in React Native); the iOS simulator cannot
   inject edge swipes (interactive back is untested there); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.

@@ -223,12 +223,18 @@ impl Mounter {
             MountItem::ScrollConfig {
                 id,
                 horizontal,
-                shows_indicator,
+                scrollbar_visible,
                 mirrored,
                 ..
             } => {
                 if let Some(view) = self.get(*id) {
-                    crate::scroll::config(surface, view, *horizontal, *shows_indicator, *mirrored);
+                    crate::scroll::config(
+                        surface,
+                        view,
+                        *horizontal,
+                        *scrollbar_visible,
+                        *mirrored,
+                    );
                 }
             }
             MountItem::ScrollContent { id, size } => {

@@ -53,8 +53,9 @@ pub(crate) enum Template {
     /// An app written in Rust: a Cargo project whose root component
     /// `nsh.json` names (`"root"`), with no QuickJS.
     Rust,
-    /// A TSX app with a Rust crate of its own (`native/`), which exports a
-    /// component, a module and a class to it.
+    /// A TSX app with a Rust crate of its own at its root (`Cargo.toml` and
+    /// `src/lib.rs` beside `App.tsx`), which exports a component, a module
+    /// and a class to it.
     Mixed,
 }
 
@@ -85,8 +86,9 @@ impl Template {
 /// - [`Template::Rust`]: a Cargo project (`Cargo.toml`, `src/lib.rs` with
 ///   the root component, `src/main.rs` for `cargo run`), `nsh.json`
 ///   naming the root, `.gitignore` and a README.
-/// - [`Template::Mixed`]: the TSX app with a crate in `native/` that its
-///   `App.tsx` imports, and a README.
+/// - [`Template::Mixed`]: the TSX app with a crate beside its `App.tsx`
+///   (`Cargo.toml`, `src/lib.rs`; `nsh.json` `"rust": "."`, no `"root"`)
+///   that `App.tsx` imports, and a README.
 ///
 /// The crates depend on nsh's crates on crates.io at this CLI's version,
 /// or by path on the nsh checkout `nsh_source`: where the app's hosts take
@@ -163,22 +165,17 @@ pub(crate) fn init(
             ]);
         }
         Template::Mixed => {
-            config["rust"] = "native".into();
+            // The crate is the app's directory, as a Rust app's; with no
+            // `"root"`, `App.tsx` stays the entry.
+            config["rust"] = ".".into();
             files.extend([
                 ("App.tsx", fill(include_str!("templates/mixed/App.tsx"))),
                 ("tsconfig.json", nsh_bundler::TSCONFIG.to_owned()),
                 (
-                    "native/Cargo.toml",
-                    manifest(
-                        &format!("{}-native", rust_package_name(&name)),
-                        nsh_source.as_deref(),
-                        false,
-                    ),
+                    "Cargo.toml",
+                    manifest(&rust_package_name(&name), nsh_source.as_deref(), false),
                 ),
-                (
-                    "native/src/lib.rs",
-                    fill(include_str!("templates/mixed/lib.rs")),
-                ),
+                ("src/lib.rs", fill(include_str!("templates/mixed/lib.rs"))),
                 ("README.md", fill(include_str!("templates/mixed/README.md"))),
             ]);
         }
@@ -599,8 +596,10 @@ mod tests {
         let dir = directory("mixed");
         init(&dir, Some("My App".into()), Template::Mixed, None).unwrap();
         let config = config(&dir);
-        assert_eq!(config["rust"], "native");
+        // The crate is the app's directory; `App.tsx` stays the entry.
+        assert_eq!(config["rust"], ".");
         assert!(config.get("root").is_none());
+        assert_eq!(crate::entry::resolve(&dir).unwrap(), dir.join("App.tsx"));
         let app = read(&dir, "App.tsx");
         assert!(
             app.contains("import { Badge, Counter, Format } from \"my-app/native\";"),
@@ -611,21 +610,20 @@ mod tests {
                 && app.contains("new Counter()")
                 && app.contains("Format.times(")
         );
-        let lib = read(&dir, "native/src/lib.rs");
+        let lib = read(&dir, "src/lib.rs");
         assert!(lib.contains("#[native_module(\"my-app/native\")]"), "{lib}");
         for export in ["#[component]", "#[module]", "#[class]"] {
             assert!(lib.contains(export), "{export}");
         }
-        let manifest = read(&dir, "native/Cargo.toml");
-        assert!(
-            manifest.contains("name = \"nsh-app-my-app-native\""),
-            "{manifest}"
-        );
+        let manifest = read(&dir, "Cargo.toml");
+        assert!(manifest.contains("name = \"nsh-app-my-app\""), "{manifest}");
+        // No `src/main.rs`: the app runs its TSX entry.
         assert!(!manifest.contains("nsh-platform"), "{manifest}");
         assert_eq!(read(&dir, "tsconfig.json"), nsh_bundler::TSCONFIG);
         assert!(read(&dir, "README.md").contains("my-app/native"));
+        assert_eq!(read(&dir, ".gitignore"), GITIGNORE);
         assert!(dir.join(".nsh/types/nsh/index.d.ts").is_file());
-        for file in ["Cargo.toml", "src"] {
+        for file in ["native", "src/main.rs"] {
             assert!(!dir.join(file).exists(), "{file}");
         }
         fs::remove_dir_all(dir).unwrap();
@@ -636,7 +634,8 @@ mod tests {
         for (template, file) in [
             (Template::Rust, "Cargo.toml"),
             (Template::Rust, "src/lib.rs"),
-            (Template::Mixed, "native/Cargo.toml"),
+            (Template::Mixed, "Cargo.toml"),
+            (Template::Mixed, "src/lib.rs"),
             (Template::Mixed, "App.tsx"),
         ] {
             let dir = directory("conflict");

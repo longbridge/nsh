@@ -27,7 +27,7 @@ function App() {
           style={{ height: 40 }}
           onHoverIn={() => note("in inner")}
           onMouseMove={(e) => note(`mouse ${e.x},${e.y}`)}
-          onHoverMove={(e) => note(`move ${e.locationX},${e.locationY} ${e.pageX},${e.pageY}${e.shiftKey ? " shift" : ""}`)}
+          onHoverMove={(e) => note(`move ${e.position.x},${e.position.y} ${e.pagePosition.x},${e.pagePosition.y}${e.modifiers.shift ? " shift" : ""}`)}
         />
       </View>
       <Text>{"log " + log().join("|")}</Text>
@@ -157,8 +157,8 @@ fn hover_handlers_are_in_the_event_masks_and_hear_their_events() {
     until_log(&rx, "log in outer|in inner");
     let at = |x: f32, shift: bool| {
         EventPayload::Hover(HoverEvent {
-            location: nsh_core::geometry::point(px(x), px(2.0)),
-            page: nsh_core::geometry::point(px(x + 10.0), px(12.0)),
+            position: nsh_core::geometry::point(px(x), px(2.0)),
+            page_position: nsh_core::geometry::point(px(x + 10.0), px(12.0)),
             modifiers: Modifiers {
                 shift,
                 ..Default::default()

@@ -28,12 +28,12 @@ import logo from "./assets/logo@2x.png";
 
 ## 应用内的图片
 
-Rust crate 把文件放在它的 `assets/` 目录中：`asset!("logo@2x.png")`（路径相对于 `assets/`）是一个 `ImageAsset`，即 `{ uri, size, scales }`，在 crate 编译时读取；在 crate 的 `#[native_module]` 函数中调用 `registry.assets(assets!())` 会把该目录中的每个文件随应用发布。在 TSX 中，像导入模块一样导入图片文件：导入得到一个 `ImageAsset`，即 `{ uri, width, height, scales? }`，打包器会把文件随应用一起发布：
+Rust crate 把文件放在它的 `assets/` 目录中：`asset!("logo@2x.png")`（路径相对于 `assets/`）是一个 `ImageAsset`，即 `{ url, size, scales }`，在 crate 编译时读取；在 crate 的 `#[native_module]` 函数中调用 `registry.assets(assets!())` 会把该目录中的每个文件随应用发布。在 TSX 中，像导入模块一样导入图片文件：导入得到一个 `ImageAsset`，即 `{ url, size, scales? }`，打包器会把文件随应用一起发布：
 
 ```rust tabs
 const LOGO: ImageAsset = asset!("logo@2x.png");
 
-// LOGO.uri："asset:/@my-app/logo@2x.png"，LOGO.size：64 × 64 点
+// LOGO.url："asset:/@my-app/logo@2x.png"，LOGO.size：64 × 64 点
 
 #[native_module("app/native")]
 fn native(registry: &mut Registry) {
@@ -44,7 +44,7 @@ fn native(registry: &mut Registry) {
 ```tsx tabs
 import logo from "./assets/logo@2x.png";
 
-logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
+logo; // { url: "asset:/assets/logo@2x.png", size: { width: 64, height: 64 } }
 ```
 
 支持的文件：`.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`、`.heic`，以及 `.svg`（[SVG 图片](#svg-图片)）。
@@ -53,7 +53,7 @@ logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
 
 **自然尺寸。** 当样式没有指定宽度或高度时，来自资源的图片按自然尺寸布局，所以 `image(LOGO)` 和 `<Image src={logo} />` 不需要任何样式。若要改变大小，设置其中一边加宽高比，或同时设置两边。
 
-在 Rust 中，缺失或损坏的文件会让构建失败，文件改动后 crate 会重新构建。在 TSX 中，资源路径相对于导入它的模块解析，其 `uri` 相对于应用根目录（入口文件所在目录）。`nsh build` 会把它们复制到 `out/assets/`，`nsh package` 会把它们放进应用，开发时则由开发服务器提供。
+在 Rust 中，缺失或损坏的文件会让构建失败，文件改动后 crate 会重新构建。在 TSX 中，资源路径相对于导入它的模块解析，其 `url` 相对于应用根目录（入口文件所在目录）。`nsh build` 会把它们复制到 `out/assets/`，`nsh package` 会把它们放进应用，开发时则由开发服务器提供。
 
 > [!TIP]
 > 在 TSX 中，`src` 也接受 `asset:/path` 字符串，被导入的文件才保证会被发布。从未导入的路径在开发服务器下可以使用（它提供整个应用目录），在打包后的应用中却会缺失。请导入你用到的每一张图片。Rust crate 通过 `assets!()` 发布整个 `assets/` 目录。
@@ -78,10 +78,10 @@ const LOGO: ImageAsset = asset!("logo.png");
 ```tsx tabs
 import logo from "./assets/logo.png";
 
-logo; // { uri: "asset:/assets/logo.png", width: 64, height: 64, scales: [1, 2, 3] }
+logo; // { url: "asset:/assets/logo.png", size: { width: 64, height: 64 }, scales: [1, 2, 3] }
 ```
 
-- 对不带后缀的图片，`asset!` 和打包器会查找它的 `@1.5x`、`@2x`、`@3x` 和 `@4x` 同名文件。`scales` 列出它们，其中 1 表示指定的文件本身；没有同名文件的图片没有 scales（在 TSX 中导入为 `{ uri, width, height }`）。打包器发布找到的同名文件，`assets!()` 发布整个目录。
+- 对不带后缀的图片，`asset!` 和打包器会查找它的 `@1.5x`、`@2x`、`@3x` 和 `@4x` 同名文件。`scales` 列出它们，其中 1 表示指定的文件本身；没有同名文件的图片没有 scales（在 TSX 中导入为 `{ url, size }`）。打包器发布找到的同名文件，`assets!()` 发布整个目录。
 - 图片会加载不小于屏幕像素比的最小倍数，否则加载最大的倍数，与 React Native 的选择规则相同：1× 屏幕上加载 `logo.png`，2× 屏幕上加载 `logo@2x.png`，3× 手机上（以及 2.625 时）加载 `logo@3x.png`。在 Web 上只会下载这一个文件。
 - 像素比变化时（窗口移到另一块屏幕、浏览器缩放），选择发生变化的图片会重新加载，并触发各自的[加载事件](#加载事件)。它们的尺寸保持为指定文件的尺寸，以点为单位。
 - 当某个变体的像素尺寸不等于指定文件尺寸乘以其倍数时，TSX 构建会给出警告，Rust 构建会失败。
@@ -98,7 +98,7 @@ logo; // { uri: "asset:/assets/logo.png", width: 64, height: 64, scales: [1, 2, 
 import logo from "./assets/logo.svg"; // <svg width="120" height="40" …>
 import star from "./assets/star.svg"; // <svg viewBox="0 0 24 24" …>
 
-logo; // { uri: "asset:/assets/logo.svg", width: 120, height: 40 }
+logo; // { url: "asset:/assets/logo.svg", size: { width: 120, height: 40 } }
 
 <Image src={logo} />
 <Image src={star} style={{ width: 36, height: 36, tintColor: "#0969da" }} />
@@ -114,7 +114,7 @@ SVG 在显示的尺寸下清晰。浏览器以矢量方式绘制它；iOS、macO
 
 ## 远程图片
 
-给元素一个 URL：在 Rust 中是字符串（会变化的 URL 用闭包），在 TSX 中是 URL 字符串或 `{ uri }`：
+给元素一个 URL：在 Rust 中是字符串（会变化的 URL 用闭包），在 TSX 中是 URL 字符串：
 
 ```rust tabs
 image(move || user.with(|u| u.avatar_url.clone()))
@@ -181,7 +181,7 @@ image(ICON).size(px(24.0)).tint_color(AdaptiveColor::rgb(0x0969da, 0x58a6ff))
 
 | 属性 | Rust | 说明 |
 |---|---|---|
-| `defaultSource` | `.placeholder(..)` | `src` 加载完成前显示的图片；最好是本地资源 |
+| `placeholder` | `.placeholder(..)` | `src` 加载完成前显示的图片，URL 或资源；最好是本地资源 |
 | `fadeDuration` | `.fade_duration(ms)` | 加载完成的图片淡入所用的毫秒数。iOS 默认 0，Android 默认 300 |
 | `blurRadius` | `.blur_radius(px(..))` | 按此半径（点）模糊图片，在解码时一次性应用 |
 
@@ -197,7 +197,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 ```tsx tabs
 <Image
   src={`https://picsum.photos/seed/${id()}/300/300`}
-  defaultSource={placeholder}
+  placeholder={placeholder}
   fadeDuration={250}
   style={{ width: 100, height: 100, borderRadius: 12 }}
 />
@@ -265,30 +265,30 @@ const ok = await Image.prefetch("https://example.com/next.jpg");      // true on
 
 | Rust | TSX | 返回值 |
 |---|---|---|
-| `image_size(uri)` | `Image.getSize(source)` | 图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)）；无法加载时返回错误 |
-| `prefetch_image(uri)` | `Image.prefetch(source)` | 图片字节加载完成后为 `true` |
+| `image_size(src)` | `Image.getSize(src)` | 图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)）；无法加载时返回错误 |
+| `prefetch_image(src)` | `Image.prefetch(src)` | 图片字节加载完成后为 `true` |
 
-在 TSX 中，`source` 是 URL 字符串、`{ uri }` 或导入的图片。对于带有[变体](#像素密度)的导入图片，两者都会加载视图在当前屏幕上加载的那个变体，`getSize` 返回导入文件的尺寸。两者都会为接下来显示该图片的视图保留已下载的字节，因此先预取再显示的图片无需再次下载。
+在 TSX 中，`src` 是 URL 字符串或导入的图片。对于带有[变体](#像素密度)的导入图片，两者都会加载视图在当前屏幕上加载的那个变体，`getSize` 返回导入文件的尺寸。两者都会为接下来显示该图片的视图保留已下载的字节，因此先预取再显示的图片无需再次下载。
 
 一个常见用法是按宽高比确定远程图片的尺寸：
 
 ```rust tabs
-fn remote_image(uri: &'static str) -> impl IntoElement {
+fn remote_image(url: &'static str) -> impl IntoElement {
     let ratio = signal(1.0_f32);
     spawn(async move {
-        if let Ok(size) = image_size(uri).await {
+        if let Ok(size) = image_size(url).await {
             ratio.set(size.width.0 as f32 / size.height.0 as f32);
         }
     });
-    image(uri).w_full().aspect_ratio(ratio)
+    image(url).w_full().aspect_ratio(ratio)
 }
 ```
 
 ```tsx tabs
-function RemoteImage(props: { uri: string }) {
+function RemoteImage(props: { url: string }) {
   const ratio = signal(1);
-  Image.getSize(props.uri).then((s) => ratio.set(s.width / s.height));
-  return <Image src={props.uri} style={{ width: "100%", aspectRatio: ratio() }} />;
+  Image.getSize(props.url).then((s) => ratio.set(s.width / s.height));
+  return <Image src={props.url} style={{ width: "100%", aspectRatio: ratio() }} />;
 }
 ```
 

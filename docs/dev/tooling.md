@@ -220,7 +220,16 @@ The steps name views with selectors (`headless/selector.rs`, Playwright's manner
 with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
 text); `label:`, `text:` and names take `/regex/flags`, ` >> ` looks inside the previous part's matches, `nth=<n>`
 keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
-order below the root, of a stack only its top screen. Steps acting on a view are strict, as Playwright's: the matches
+order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
+visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
+clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`ScrollBehavior::enabled`) or the window
+(`Screen::set_viewport`: the headless viewport; on a host the platform's, which `Agent::sync_viewport` tells the model
+before each step). A scroll view the user can scroll shows all of its content (scrolling brings it in), a modal shows
+over the window wherever it is in the tree, header items and input accessories wherever the platform puts them;
+`opacity` and transforms aside. The spans of a text that take presses (`AttributedText::links`: a nested
+`<Text onPress>`, a `TextView`'s links) are views of the model too (`Screen::set_spans`), inside their text view (or
+the span around them), found by their characters (`text:`, a bare string) and pressed as the platform presses them:
+the events go to the span's node; they are not texts of their own (`texts()` lists the text view's). Steps acting on a view are strict, as Playwright's: the matches
 are mapped to what the step acts on (`Screen::pick`: the pressable ancestor, the input inside, the scroll view around)
 and more than one fails the step; a press whose match, or a view between it and its pressable ancestor, is disabled
 (the accessibility state) fails too. Each step sends what a platform would, to the views that report it:
@@ -235,8 +244,8 @@ and more than one fails the step; a press whose match, or a view between it and 
 - `submit`: the return key as the input's `submitBehavior` resolves (`InputConfig::submit`): `KeyPress` `Enter` and
   `SubmitEditing` (then `Blur` for blur-and-submit), or a line break;
 - `scroll`: the scroll view (the match, the nearest one around it, else the first in it) moves along its axis 10
-  points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
-  `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
+  points per frame within its content (`ScrollDragStart`, offsets with the applied count as platforms report them,
+  `ScrollDragEnd`, `ScrollEnd`), and fails on one the user cannot scroll (`scrollable={false}`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
   command moved the view;
 - `drag` (`headless/pointer.rs`): a finger lands on the match's middle (`Screen::bounds_in_root`), rests 100 ms,
   moves 10 points a frame and lifts, and what takes it is decided as the desktop backends decide it, with
@@ -386,7 +395,9 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
 view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
-one per gesture), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
+one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
+platform's own hit testing gives the press to the span) and acts there with synthesized input
 (`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
 the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
 (`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the
@@ -401,8 +412,17 @@ takes no made-up keys; the phones, without app shortcuts, refuse them),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
 finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
-test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
-`runFor` waits, and `fastForward` and `setSystemTime` fail. `open`'s locale, reduced motion and safe area reach the
+test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
+test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on
+`Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
+test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
+`SceneQuery::Clock`, after which the page pumps its engine), which `Model::move_clock` takes as the headless driver
+does, through `EngineControl::advance_clock`; `wait` moves the clock by its time too (`driver.rs`'s `Remote`). A
+clock that moves with frames (`Clock::moves_with_frames`) is the display's pace on a real platform: each frame the
+platform shows moves it to a frame after the last (`nsh_core::time::FRAME`, 1/60 s) before it runs, and while the
+engine moves it (`Driver::advance` with `frames`) the frames the app waits for run on the way, a frame apart, as a
+headless display's do; the platform's own animations run in real time, as do stubbed responses' delays (the test's
+side holds them, outside the app's clock). `open`'s locale, reduced motion and safe area reach the
 host in the test's setup (`TestEnvironment`, `DevServer::set_test_environment`) and its engine pins them
 (`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports); its clipboard is the
 test's (`EngineConfig::clipboard`: the core serves the app's clipboard commands from a `ClipboardBackend`, here a
@@ -486,13 +506,14 @@ otherwise, so scripts and CI never wait for an answer.
   `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
   that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native
   entry (`cargo run`) and headless tests of its Rust root.
-- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "native"`,
-  a README and the crate `native/` (`Cargo.toml`, `src/lib.rs`: a component, a module function and a class;
-  `templates/mixed/`), a small form of `examples/rust-exports`.
+- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "."`
+  (no `"root"`: `App.tsx` stays the entry), a README and the crate at the app's root, as `rust`'s (`Cargo.toml`,
+  `src/lib.rs`: a component, a module function and a class; no `src/main.rs`; `templates/mixed/`), a small form of
+  `examples/rust-exports`. The bundler follows `App.tsx`'s imports, `nsh test` skips `target/` and the Rust watcher
+  takes the `.rs` files and `Cargo.toml` beside the TSX, so the two share the directory.
 
-The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crates' packages are
-`nsh-app-<slug>` (`rust`) and `nsh-app-<slug>-native` (`mixed`), and `src/main.rs` uses the first one's crate
-identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
+The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crate's package is
+`nsh-app-<slug>` (`rust` and `mixed`), and `src/main.rs` uses its crate identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
 `--nsh-source <dir>` (with `rust` or `mixed`; with `ts` it is an error) writes path dependencies on that checkout's
 crates instead of crates.io's at the CLI's version; the generated host workspaces take nsh's crates from the same
 place, so the app and its hosts share the same core and registry types.

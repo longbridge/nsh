@@ -736,8 +736,8 @@ fn safe_area_and_keyboard_avoiding_views() {
 }
 
 const RUNTIME_MODULES: &str = r#"import { mount, signal, Text } from "nsh";
-import { AccessibilityInfo } from "nsh/accessibility";
-import { Platform } from "nsh/device";
+import { reduceMotion, setAccessibilityFocus } from "nsh/accessibility";
+import { platform } from "nsh/device";
 import { Toast } from "nsh/android";
 import { Image } from "nsh";
 
@@ -745,15 +745,15 @@ const shown = signal("waiting");
 let note: unknown;
 setTimeout(async () => {
   Toast.show("hello", "long");
-  AccessibilityInfo.setAccessibilityFocus(note);
-  const size = await Image.getSize({ uri: "https://example.com/a.png" });
+  setAccessibilityFocus(note);
+  const size = await Image.getSize("https://example.com/a.png");
   let failed = "no";
   try {
     await Image.getSize("https://example.com/missing.png");
   } catch (e) {
     failed = String((e as Error).message);
   }
-  shown.set(`${size.width}x${size.height} ${failed} ${Platform.OS} ${await AccessibilityInfo.isReduceMotionEnabled()}`);
+  shown.set(`${size.width}x${size.height} ${failed} ${platform.os} ${reduceMotion()}`);
 }, 0);
 
 mount(() => <Text ref={note}>{shown()}</Text>);
@@ -823,7 +823,8 @@ const detached = <View ref={(n: YNode) => (ghost = n)} />;
 setTimeout(async () => {
   const m = (await box.measure())!;
   const none = await ghost.measure();
-  shown.set(`at ${m.x},${m.y} ${m.width}x${m.height} page ${m.pageX},${m.pageY} ${none}`);
+  const b = m.bounds;
+  shown.set(`at ${b.origin.x},${b.origin.y} ${b.size.width}x${b.size.height} page ${m.pagePosition.x},${m.pagePosition.y} ${none}`);
 }, 0);
 
 mount(() => (
@@ -831,7 +832,7 @@ mount(() => (
     <Text>{shown()}</Text>
     <Scroll
       style={{ marginTop: 50, height: 300 }}
-      onScroll={async () => shown.set(`scrolled ${(await box.measure())!.pageY}`)}
+      onScroll={async () => shown.set(`scrolled ${(await box.measure())!.pagePosition.y}`)}
     >
       <View style={{ padding: 20, height: 1000 }}>
         <View ref={box} style={{ marginTop: 500, height: 30 }} />
@@ -892,10 +893,10 @@ import { Clipboard } from "nsh/clipboard";
 
 const shown = signal("waiting");
 setTimeout(async () => {
-  const before = await Clipboard.hasString();
-  Clipboard.setString("copied");
-  const has = await Clipboard.hasString();
-  const text = await Clipboard.getString();
+  const before = await Clipboard.hasText();
+  Clipboard.writeText("copied");
+  const has = await Clipboard.hasText();
+  const text = await Clipboard.readText();
   shown.set(`${before} ${has} ${text}`);
 }, 0);
 
@@ -986,11 +987,11 @@ import { Clipboard } from "nsh/clipboard";
 const shown = signal("waiting");
 setTimeout(async () => {
   const before = await Clipboard.hasImage();
-  Clipboard.setImage("data:image/png;base64,aGk=");
-  const image = await Clipboard.getImage();
-  const bytes = new Uint8Array(await (await fetch(image!.uri)).arrayBuffer());
-  const files = await Clipboard.getFiles();
-  shown.set(`${before} ${image!.width}x${image!.height} ${bytes.join(",")} ${files.join(" ")}`);
+  Clipboard.writeImage("data:image/png;base64,aGk=");
+  const image = await Clipboard.readImage();
+  const bytes = new Uint8Array(await (await fetch(image!.url)).arrayBuffer());
+  const files = await Clipboard.readFiles();
+  shown.set(`${before} ${image!.size.width}x${image!.size.height} ${bytes.join(",")} ${files.join(" ")}`);
 }, 0);
 
 mount(() => <Text>{shown()}</Text>);
@@ -1259,7 +1260,7 @@ const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/android";
 
 const presses = signal(0);
-BackHandler.addEventListener("hardwareBackPress", () => {
+BackHandler.onBackPress(() => {
   presses.update((p) => p + 1);
   // The first press is handled, the second one leaves the app.
   return presses() === 1;
@@ -1878,4 +1879,338 @@ fn a_base_checkbox_reports_the_next_value_and_styles_its_indicator() {
     let off_mark = style(mixed, indicator(off));
     assert_eq!(off_mark.opacity, 0.5);
     assert_eq!(off_mark.background_color.0, 0x00ff_00ff);
+}
+
+const BASE_RADIO: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Radio, RadioGroup } from "nsh/base";
+
+function App() {
+  const plan = signal("a");
+  const changes = signal<string[]>([]);
+  const radio = (value: string, label: string, disabled = false) => (
+    <Radio
+      testID={value}
+      checked={plan() === value}
+      disabled={disabled}
+      accessibilityLabel={label}
+      class="group flex-row disabled:opacity-50"
+      checkedStyle={{ backgroundColor: "#0000ff" }}
+      onChange={(next) => {
+        changes.set([...changes(), `${value}:${next}`]);
+        plan.set(value);
+      }}
+    >
+      <View class="w-[20px] group-checked:bg-[#00ff00]" />
+      <Text>{label}</Text>
+    </Radio>
+  );
+  return (
+    <View>
+      <RadioGroup testID="plans" class="flex-row">
+        {radio("a", "Basic")}
+        {radio("b", "Pro")}
+        {radio("c", "Team", true)}
+      </RadioGroup>
+      <Text>{`Changes: ${changes().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role on the
+/// group, the radio role and its checked state on each radio alone, a
+/// press on an unchecked radio asking for `true` while the app owns which
+/// one is checked, a checked or disabled radio reporting nothing, and the
+/// app's dot inside following the radio with `group-checked:`.
+#[test]
+fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
+    use nsh_core::{AccessibilityRole, Checked, ViewProps};
+    let (engine, rx) = start(BASE_RADIO);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Changes: "));
+    let view_props = |batch: &MountBatch, view| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+            _ => None,
+        })
+    };
+    let root = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    // The first view inside `parent`: the app's dot.
+    let dot = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("the dot")
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let state = |props: &ViewProps| props.accessibility.state;
+    let (plans, a, b, c) = (root("plans"), root("a"), root("b"), root("c"));
+    let (dot_a, dot_b) = (dot(a), dot(b));
+    let initial = std::slice::from_ref(&first);
+
+    // The group: a radio group for screen readers, laid out by the app.
+    let group = view_props(&first, plans).unwrap();
+    assert_eq!(group.accessibility.role, AccessibilityRole::Radiogroup);
+    assert_eq!(group.accessibility.label, None);
+
+    // The checked radio: checked and selected for screen readers, its
+    // `checkedStyle`, and the app's dot `group-checked:`.
+    let props = view_props(&first, a).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Radio);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Basic"));
+    assert_eq!(state(&props).checked, Some(Checked::True));
+    assert!(state(&props).selected);
+    assert_eq!(style(initial, a).background_color.0, 0x0000_ffff);
+    assert_eq!(style(initial, dot_a).background_color.0, 0x00ff_00ff);
+    let props = view_props(&first, b).unwrap();
+    assert_eq!(state(&props).checked, Some(Checked::False));
+    assert!(!state(&props).selected);
+    assert_eq!(style(initial, dot_b).background_color.0, 0);
+    // The dot is a part of the radio, no second element.
+    assert!(view_props(&first, dot_a).is_none());
+
+    // A press on an unchecked radio asks for `true`; the app checks it and
+    // unchecks the other, and the styles follow.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| shows(b, "Changes: b:true"));
+    assert!(after.iter().any(|batch| shows(batch, "Changes: b:true")));
+    let now = |view| after.iter().rev().find_map(|batch| view_props(batch, view));
+    assert_eq!(state(&now(b).unwrap()).checked, Some(Checked::True));
+    assert_eq!(state(&now(a).unwrap()).checked, Some(Checked::False));
+    assert_eq!(style(&after, b).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&after, dot_b).background_color.0, 0x00ff_00ff);
+    assert_eq!(style(&after, dot_a).background_color.0, 0);
+
+    // A checked radio cannot uncheck itself: a press on it reports
+    // nothing, so the next change the app sees is `a`'s.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    engine
+        .control()
+        .dispatch_event(a, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Changes: b:true,a:true"));
+    assert!(
+        after
+            .iter()
+            .any(|batch| shows(batch, "Changes: b:true,a:true"))
+    );
+
+    // Disabled: no presses, dimmed for screen readers.
+    let disabled = view_props(&first, c).unwrap();
+    assert!(state(&disabled).disabled);
+    assert_eq!(state(&disabled).checked, Some(Checked::False));
+    assert!(!first.items.iter().any(|i| matches!(
+        i,
+        MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+    )));
+    assert_eq!(style(initial, c).opacity, 0.5);
+}
+
+const BASE_TABS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Tab, Tabs } from "nsh/base";
+
+function App() {
+  const current = signal("a");
+  const presses = signal<string[]>([]);
+  const tab = (value: string, label: string, disabled = false) => (
+    <Tab
+      testID={value}
+      selected={current() === value}
+      disabled={disabled}
+      accessibilityLabel={label}
+      class="group flex-row disabled:opacity-50"
+      selectedStyle={{ backgroundColor: "#0000ff" }}
+      onPress={() => {
+        presses.set([...presses(), value]);
+        current.set(value);
+      }}
+    >
+      <View class="w-[20px] group-selected:bg-[#00ff00]" />
+      <Text>{label}</Text>
+    </Tab>
+  );
+  return (
+    <View>
+      <Tabs testID="sections" class="flex-row">
+        {tab("a", "Overview")}
+        {tab("b", "Activity")}
+        {tab("c", "Billing", true)}
+      </Tabs>
+      <Text>{`Presses: ${presses().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Tab` in `Tabs`: the tab list role on the list, the tab
+/// role and its selected state on each tab alone, a press reported with
+/// `onPress` (the selected tab's too) while the app owns which tab is
+/// selected, a disabled tab reporting nothing, and the app's content
+/// inside following the tab with `group-selected:`.
+#[test]
+fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
+    use nsh_core::{AccessibilityRole, ViewProps};
+    let (engine, rx) = start(BASE_TABS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Presses: "));
+    let view_props = |batch: &MountBatch, view| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+            _ => None,
+        })
+    };
+    let root = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    // The first view inside `parent`: the app's marker.
+    let marker = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("the marker")
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let state = |props: &ViewProps| props.accessibility.state;
+    let (sections, a, b, c) = (root("sections"), root("a"), root("b"), root("c"));
+    let (marker_a, marker_b) = (marker(a), marker(b));
+    let initial = std::slice::from_ref(&first);
+
+    // The list: a tab list for screen readers, laid out by the app.
+    let list = view_props(&first, sections).unwrap();
+    assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
+    assert_eq!(list.accessibility.label, None);
+
+    // The selected tab: selected for screen readers, its `selectedStyle`,
+    // and the app's marker `group-selected:`.
+    let props = view_props(&first, a).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Overview"));
+    assert!(state(&props).selected);
+    assert_eq!(state(&props).checked, None);
+    assert_eq!(style(initial, a).background_color.0, 0x0000_ffff);
+    assert_eq!(style(initial, marker_a).background_color.0, 0x00ff_00ff);
+    let props = view_props(&first, b).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+    assert!(!state(&props).selected);
+    assert_eq!(style(initial, b).background_color.0, 0);
+    assert_eq!(style(initial, marker_b).background_color.0, 0);
+    // The marker is a part of the tab, no second element.
+    assert!(view_props(&first, marker_a).is_none());
+
+    // A press reports `onPress`; the app selects the tab and deselects the
+    // other, and the styles follow.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Presses: b"));
+    let now = |view| after.iter().rev().find_map(|batch| view_props(batch, view));
+    assert!(state(&now(b).unwrap()).selected);
+    assert!(!state(&now(a).unwrap()).selected);
+    assert_eq!(style(&after, b).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&after, marker_b).background_color.0, 0x00ff_00ff);
+    assert_eq!(style(&after, a).background_color.0, 0);
+    assert_eq!(style(&after, marker_a).background_color.0, 0);
+
+    // The selected tab reports its presses too (the app may scroll its
+    // content to the top).
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Presses: b,b"));
+    assert!(after.iter().any(|batch| shows(batch, "Presses: b,b")));
+
+    // Disabled: no presses, dimmed for screen readers.
+    let disabled = view_props(&first, c).unwrap();
+    assert!(state(&disabled).disabled);
+    assert!(!state(&disabled).selected);
+    assert!(!first.items.iter().any(|i| matches!(
+        i,
+        MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+    )));
+    assert_eq!(style(initial, c).opacity, 0.5);
 }

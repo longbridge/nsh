@@ -6,14 +6,14 @@ order: 10
 
 # nsh/accessibility
 
-The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()` and `announce_for_accessibility()` from `nsh_core::ui::prelude` and moves the focus with an `ElementRef`; TSX imports them from `nsh/accessibility`. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
+The accessibility API reads the user's accessibility settings (is a screen reader running, did they ask for less motion) and talks to the screen reader. Rust code calls `screen_reader()`, `reduce_motion()` and `announce_for_accessibility()` from `nsh_core::ui::prelude` and moves the focus with an `ElementRef`; TSX imports `screenReaderEnabled()`, `reduceMotion()`, `announce()` and `setAccessibilityFocus()` from `nsh/accessibility`. The settings are reactive: read them in a binding, `computed` or `effect`, and what reads them updates when the user changes them. The accessibility props of elements (`accessibilityLabel`, `role`, ...) are documented under [Elements](../elements/index.md); the guide is [Accessibility](../docs/accessibility.md).
 
 ```rust tabs
 use nsh_core::ui::prelude::*; // screen_reader, reduce_motion, announce_for_accessibility, element_ref
 ```
 
 ```tsx tabs
-import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/accessibility";
+import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 ```
 
 ## screenReaderEnabled
@@ -60,30 +60,21 @@ const open = () => {
 };
 ```
 
-## AccessibilityInfo
+## announce
 
 ```ts
-const AccessibilityInfo: {
-  announceForAccessibility(message: string): void;
-  setAccessibilityFocus(node: YNode): void;
-  isScreenReaderEnabled(): Promise<boolean>;
-  isReduceMotionEnabled(): Promise<boolean>;
-  addEventListener(
-    event: "screenReaderChanged" | "reduceMotionChanged",
-    listener: (enabled: boolean) => void,
-  ): { remove(): void };
-};
+function announce(message: string): void;
 ```
 
-The system's accessibility settings, read once or followed with listeners. `screenReaderEnabled()` and `reduceMotion()` are their reactive forms; prefer them in components.
+The screen reader reads `message` (a VoiceOver announcement, TalkBack). Use it for results that appear without focus moving, such as "Saved". Rust: `announce_for_accessibility(message)`.
 
-| Member | Rust | Description |
-|---|---|---|
-| `announceForAccessibility(message)` | `announce_for_accessibility(message)` | The screen reader reads `message` (a VoiceOver announcement, TalkBack). Use it for results that appear without focus moving, such as "Saved". |
-| `setAccessibilityFocus(node)` | `ElementRef::set_accessibility_focus()` | Moves the screen reader's focus to `node` (an element's `ref`). |
-| `isScreenReaderEnabled()` | `screen_reader()` | Resolves with whether a screen reader runs. |
-| `isReduceMotionEnabled()` | `reduce_motion()` | Resolves with whether reduced motion is on. |
-| `addEventListener(event, listener)` | an `effect` reading `screen_reader()` or `reduce_motion()` | Calls `listener` with the new value when the setting changes; returns a subscription to `remove()`. |
+## setAccessibilityFocus
+
+```ts
+function setAccessibilityFocus(node: YNode): void;
+```
+
+Moves the screen reader's focus to `node` (an element's `ref`). Rust: `ElementRef::set_accessibility_focus()`.
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -105,17 +96,17 @@ fn Saved() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup, Text, View, type YNode } from "nsh";
-import { AccessibilityInfo } from "nsh/accessibility";
+import { effect, Text, View, type YNode } from "nsh";
+import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 
 function Saved() {
   let note!: YNode;
   const save = () => {
-    AccessibilityInfo.announceForAccessibility("Saved");
-    AccessibilityInfo.setAccessibilityFocus(note);
+    announce("Saved");
+    setAccessibilityFocus(note);
   };
-  const sub = AccessibilityInfo.addEventListener("screenReaderChanged", (on) => console.log("screen reader", on));
-  cleanup(() => sub.remove());
+  // Runs again when the setting changes, until the component goes.
+  effect(() => console.log("screen reader", screenReaderEnabled()));
   return (
     <View style={{ gap: 8 }}>
       <Text onPress={save} role="button">Save</Text>

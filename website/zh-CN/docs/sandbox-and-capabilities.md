@@ -117,7 +117,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 
 ### `network`
 
-涵盖 `fetch`（包括每一次重定向）、WebSocket、远程图片（`<Image>`、`defaultSource`、canvas 图片、`Image.getSize` /
+涵盖 `fetch`（包括每一次重定向）、WebSocket、远程图片（`<Image>`、`placeholder`、canvas 图片、`Image.getSize` /
 `Image.prefetch`）、视频源以及原始 TCP socket（`net.connect`）。
 
 | 键 | 类型 | 说明 |
@@ -151,7 +151,7 @@ WebSocket 握手是一次 HTTP GET：`ws://` 按 `http://`、`wss://` 按 `https
 | `hosts` | `string[]` | [web view](./web-view-and-video.md) 可以显示和导航到的主机（`http` 和 `https`）。没有 `webview` 时，应用完全不能显示网页。 |
 
 web view 内的顶层导航也会在加载前由平台的导航代理检查。页面自身的子资源（脚本、图片、XHR）属于网页内容自己的事，
-不做检查。`about:blank` 和内联 HTML（`source={{ html }}`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
+不做检查。`about:blank` 和内联 HTML（`html`）只要求 web view 被授予即可：`"webview": { "hosts": [] }`
 允许它们，但不允许任何远程页面。
 
 ### `statusBar`
@@ -173,7 +173,7 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | `fetch` | Promise 被 reject；请求根本不会发到网络。 |
 | 远程图片 | 图片加载失败，触发 `onError`。 |
 | 视频源、web view 源、状态栏修改 | 不显示也不修改任何东西。 |
-| 剪贴板 | `setString` 不做任何事；`getString` 返回 `""`，`hasString` 返回 `false`。 |
+| 剪贴板 | `writeText` 和 `writeImage` 不做任何事；`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`。 |
 
 每种拒绝只记录一次日志，并说明需要添加哪个键：
 

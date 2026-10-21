@@ -22,7 +22,7 @@ const Storage: {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
-  getAllKeys(): Promise<string[]>;
+  keys(): Promise<string[]>;
   clear(): Promise<void>;
 };
 ```
@@ -32,7 +32,7 @@ const Storage: {
 | `await Storage.getItem(key)` | `Storage::get_item(key) -> Option<String>` |
 | `await Storage.setItem(key, value)` | `Storage::set_item(key, value) -> Result<(), StorageFull>` |
 | `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
-| `await Storage.getAllKeys()` | `Storage::get_all_keys() -> Vec<String>` |
+| `await Storage.keys()` | `Storage::get_all_keys() -> Vec<String>` |
 | `await Storage.clear()` | `Storage::clear()` |
 
 Rust 函数是同步的，因为数据就在内存中：在组件运行的地方（组件函数体、事件处理函数和任务）调用它们。
@@ -95,10 +95,10 @@ removeItem(key: string): Promise<void>;
 
 删除 `key` 及其值。删除一个没有值的键不做任何事。Rust：`Storage::remove_item(key)`。
 
-## Storage.getAllKeys
+## Storage.keys
 
 ```ts
-getAllKeys(): Promise<string[]>;
+keys(): Promise<string[]>;
 ```
 
 按顺序返回所有键。Rust：`Storage::get_all_keys()`。

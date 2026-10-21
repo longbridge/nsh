@@ -421,7 +421,7 @@ pub(crate) fn Photos() -> impl IntoElement {
                 .scroll_value(&scroll_y)
                 .refreshing(refreshing)
                 .on_refresh(on_refresh)
-                .on_end_reached(load_more)
+                .on_load_more(load_more)
                 .header(header(false))
                 .footer(footer())
         }
@@ -441,7 +441,7 @@ pub(crate) fn Photos() -> impl IntoElement {
             .scroll_value(&scroll_y)
             .refreshing(refreshing)
             .on_refresh(on_refresh)
-            .on_end_reached(load_more)
+            .on_load_more(load_more)
             .header(header(true))
             .footer(footer())
     };

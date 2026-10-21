@@ -17,8 +17,8 @@ use objc2_ui_kit::{UIView, UIViewAutoresizing};
 
 use crate::native_view::NshView;
 
-/// Lets pages talk to the app, like React Native's web view.
-const BRIDGE: &str = "window.ReactNativeWebView = window.ReactNativeWebView || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
+/// Lets pages talk to the app: `window.nsh.postMessage(data)`.
+const BRIDGE: &str = "window.nsh = window.nsh || { postMessage: function (data) { window.webkit.messageHandlers.nsh.postMessage(String(data)); } };";
 
 fn webkit() -> bool {
     static LOADED: OnceLock<bool> = OnceLock::new();
@@ -280,7 +280,7 @@ impl WebHost {
             let ua = p.user_agent.as_deref().map(NSString::from_str);
             let _: () = msg_send![web, setCustomUserAgent: ua.as_deref()];
             let scroll: Retained<AnyObject> = msg_send![web, scrollView];
-            let _: () = msg_send![&scroll, setScrollEnabled: Bool::new(p.scroll_enabled)];
+            let _: () = msg_send![&scroll, setScrollEnabled: Bool::new(p.scrollable)];
             let _: () = msg_send![web, setAllowsBackForwardNavigationGestures: Bool::new(p.back_forward_gestures)];
             let config: Retained<AnyObject> = msg_send![web, configuration];
             let prefs: Retained<AnyObject> = msg_send![&config, defaultWebpagePreferences];

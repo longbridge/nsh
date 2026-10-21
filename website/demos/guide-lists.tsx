@@ -28,8 +28,8 @@ function Feed() {
       estimatedItemSize={56}
       style={{ flex: 1 }}
       contentStyle={{ padding: 12, gap: 8 }}
-      onEndReached={() => posts.update((p) => [...p, ...make(20)])}
-      onEndReachedThreshold={0.5}
+      onLoadMore={() => posts.update((p) => [...p, ...make(20)])}
+      loadMoreThreshold={0.5}
       refreshing={refreshing()}
       onRefresh={() => {
         refreshing.set(true);
@@ -40,7 +40,7 @@ function Feed() {
         }, 800);
       }}
       viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-      onViewableItemsChanged={({ viewableItems }) =>
+      onViewableItemsChange={({ viewableItems }) =>
         visible.set(viewableItems.length ? `${viewableItems[0].index}–${viewableItems[viewableItems.length - 1].index}` : "")
       }
       header={

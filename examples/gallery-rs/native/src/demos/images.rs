@@ -208,7 +208,7 @@ fn placeholders(seed: Signal<u32>) -> AnyElement {
     Card::new()
         .icon(IconName::Photos)
         .title("Placeholder and fade")
-        .subtitle("defaultSource, then a fade")
+        .subtitle("A placeholder, then a fade")
         .right(Button::new("Reload", reload).variant(ButtonVariant::Secondary))
         .child(view().flex_row().gap_3().children(images))
         .child(caption("Loads", Some(move || seed.get().to_string())))

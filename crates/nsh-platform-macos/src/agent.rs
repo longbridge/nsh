@@ -15,9 +15,9 @@ use nsh_testing::agent::{Key, Native};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSApplication, NSEventType, NSWindow,
+    NSApplication, NSEventType, NSView, NSWindow,
 };
-use objc2_foundation::NSSize;
+use objc2_foundation::{NSRect, NSSize};
 
 use crate::{surface::Surface, synth};
 
@@ -79,29 +79,43 @@ impl MacNative {
     }
 }
 
+/// `rect` of view `ns` in the window's content, from its top left; `None`
+/// when the view is not in the window or hidden.
+fn in_window(ns: &NSView, rect: NSRect, window: &NSWindow) -> Option<Bounds<Points>> {
+    if ns.window().is_none() || ns.isHiddenOrHasHiddenAncestor() {
+        return None;
+    }
+    // Window coordinates (from the bottom left), as the content view's are.
+    let rect = ns.convertRect_toView(rect, None);
+    let height = window.contentView()?.frame().size.height;
+    Some(Bounds::new(
+        point(
+            Points(rect.origin.x as f32),
+            Points((height - rect.origin.y - rect.size.height) as f32),
+        ),
+        Size::new(
+            Points(rect.size.width as f32),
+            Points(rect.size.height as f32),
+        ),
+    ))
+}
+
 impl Native for MacNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_main(|surface, window| {
             let mounter = surface.mounter.borrow();
-            let view = mounter.views.get(&id)?;
-            let ns = view.ns();
-            if ns.window().is_none() || ns.isHiddenOrHasHiddenAncestor() {
-                return None;
-            }
-            // Window coordinates (from the bottom left), as the content
-            // view's are.
-            let rect = ns.convertRect_toView(ns.bounds(), None);
-            let height = window.contentView()?.frame().size.height;
-            Some(Bounds::new(
-                point(
-                    Points(rect.origin.x as f32),
-                    Points((height - rect.origin.y - rect.size.height) as f32),
-                ),
-                Size::new(
-                    Points(rect.size.width as f32),
-                    Points(rect.size.height as f32),
-                ),
-            ))
+            let ns = mounter.views.get(&id)?.ns();
+            in_window(ns, ns.bounds(), window)
+        })
+        .flatten()
+    }
+
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        self.on_main(|surface, window| {
+            let mounter = surface.mounter.borrow();
+            let view = mounter.views.get(&text)?;
+            let rect = *crate::text::range_rects(&view.state(), start, end).first()?;
+            in_window(view.ns(), rect, window)
         })
         .flatten()
     }

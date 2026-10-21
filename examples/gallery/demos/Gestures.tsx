@@ -427,7 +427,7 @@ function Hover() {
         testID="hover-pad"
         onHoverIn={() => over.set(true)}
         onHoverOut={() => over.set(false)}
-        onHoverMove={(e) => at.set({ x: Math.round(e.locationX), y: Math.round(e.locationY) })}
+        onHoverMove={(e) => at.set({ x: Math.round(e.position.x), y: Math.round(e.position.y) })}
         class="hover:bg-paper-card dark:hover:bg-graphite-card"
         style={{ ...stage(), height: 100, alignItems: "center", justifyContent: "center" }}
       >

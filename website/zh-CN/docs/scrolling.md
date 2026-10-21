@@ -73,7 +73,7 @@ scroll().flex_1().child(
 横向滚动视图使用 `horizontal`（`.horizontal()`），并以一个横排视图作为子元素：
 
 ```rust tabs
-scroll().horizontal().shows_indicator(false).child(
+scroll().horizontal().scrollbar(false).child(
     view().flex_row().gap_2().px_4().children(["Today", "This week", "This month", "This year"].map(|label| {
         text(label).px(px(14.0)).py_2().rounded(px(16.0)).overflow_hidden().bg(white())
     })),
@@ -81,7 +81,7 @@ scroll().horizontal().shows_indicator(false).child(
 ```
 
 ```tsx tabs
-<Scroll horizontal showsIndicator={false}>
+<Scroll horizontal scrollbar={false}>
   <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
     <Each of={["Today", "This week", "This month", "This year"]}>
       {(label) => <Text style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, overflow: "hidden", backgroundColor: "#ffffff" }}>{label()}</Text>}
@@ -92,17 +92,17 @@ scroll().horizontal().shows_indicator(false).child(
 
 在从右到左布局中（见[设备与环境](./device-and-environment.md#从右到左)），横向滚动视图从最右端开始，并保持与右端的距离。
 
-手指拖动滚动视图。在桌面（macOS、Windows、Linux）和浏览器中，鼠标像在桌面应用中一样滚动：用滚轮（Shift + 滚轮横向滚动）、触控板、键盘和滚动指示条（鼠标在视图上移动时显示，可以像滚动条一样拖动）；鼠标拖动交给应用的拖拽手势、响应者和文字选择。桌面上的触摸屏像手指一样拖动滚动视图。即使设置了 `showsIndicator={false}`，横向视图在这些平台上也保留指示条，因为没有横向滚轮的鼠标要靠它来移动视图。
+手指拖动滚动视图。在桌面（macOS、Windows、Linux）和浏览器中，鼠标像在桌面应用中一样滚动：用滚轮（Shift + 滚轮横向滚动）、触控板、键盘和滚动指示条（鼠标在视图上移动时显示，可以像滚动条一样拖动）；鼠标拖动交给应用的拖拽手势、响应者和文字选择。桌面上的触摸屏像手指一样拖动滚动视图。即使设置了 `scrollbar={false}`，横向视图在这些平台上也保留指示条，因为没有横向滚轮的鼠标要靠它来移动视图。
 
 ### 行为属性
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `horizontal` | `.horizontal()` | `boolean` | `false` | 横向滚动。 |
-| `scrollEnabled` | `.scroll_enabled(..)` | `boolean` | `true` | 用户可以滚动。从代码滚动不受影响。 |
+| `scrollable` | `.scrollable(..)` | `boolean` | `true` | 用户可以滚动。从代码滚动不受影响。 |
 | `bounces` | `.bounces(..)` | `boolean` | `true` | 允许越过边缘回弹。 |
-| `showsIndicator` | `.shows_indicator(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
-| `contentInset` | `.content_inset(EdgeInsets { .. })` | `{ top?, right?, bottom?, left? }` | | 内容四周可以滚动进入的留白。 |
+| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
+| `contentInset` | `.content_inset(EdgeInsets { .. })` | `Partial<Edges>` | | 内容四周可以滚动进入的留白。 |
 | `contentOffset` | `.content_offset(point(..))` | `{ x?, y? }` | | 初始位置。 |
 | `decelerationRate` | `.deceleration(rate)` | `"normal" \| "fast" \| number` | 平台默认 | 惯性滑动减速的快慢：`"normal"`、`"fast"`，或每毫秒保留的速度比例（`0.998` 为 normal，`0.99` 为 fast；`0` 表示平台默认）。 |
 
@@ -154,7 +154,7 @@ pub fn pager() -> impl IntoElement {
             scroll()
                 .horizontal()
                 .paging(true)
-                .shows_indicator(false)
+                .scrollbar(false)
                 .h(px(160.0))
                 .rounded(px(12.0))
                 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
@@ -179,9 +179,9 @@ function Pager() {
       <Scroll
         horizontal
         pagingEnabled
-        showsIndicator={false}
+        scrollbar={false}
         style={{ height: 160, borderRadius: 12 }}
-        onLayout={(e) => width.set(e.width)}
+        onLayout={(e) => width.set(e.size.width)}
         onScrollEnd={settle}
       >
         <View style={{ flexDirection: "row" }}>
@@ -215,7 +215,7 @@ scroll()
     .snap_alignment(SnapAlignment::Center)
     .deceleration(0.99)
     .disable_interval_momentum(true)
-    .shows_indicator(false)
+    .scrollbar(false)
     .child(view().flex_row().gap_3().px_4().children(cards))
 ```
 
@@ -226,7 +226,7 @@ scroll()
   snapToAlignment="center"
   decelerationRate="fast"
   disableIntervalMomentum
-  showsIndicator={false}
+  scrollbar={false}
 >
   <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 16 }}>…</View>
 </Scroll>
@@ -240,13 +240,13 @@ scroll()
 |---|---|---|---|
 | `onScroll` | `.on_scroll(..)` | `ScrollEvent` | 偏移改变。每帧最多一次；`scrollEventThrottle` 可以进一步拉开间隔。 |
 | `scrollEventThrottle` | `.event_throttle(ms)` | `number` | 两次 `onScroll` 之间的最少毫秒数。 |
-| `onScrollBeginDrag` | `.on_scroll_begin_drag(..)` | `{ x, y }` | 用户开始拖动。 |
-| `onScrollEndDrag` | `.on_scroll_end_drag(..)` | `{ x, y }` | 用户抬起手指。 |
-| `onMomentumScrollBegin` | `.on_momentum_scroll_begin(..)` | `{ x, y }` | 快速滑动后的惯性滑行开始。 |
-| `onMomentumScrollEnd` | `.on_momentum_scroll_end(..)` | `{ x, y }` | 惯性滑行结束（被新的拖动打断时也会触发）。 |
+| `onScrollDragStart` | `.on_scroll_drag_start(..)` | `{ x, y }` | 用户开始拖动。 |
+| `onScrollDragEnd` | `.on_scroll_drag_end(..)` | `{ x, y }` | 用户抬起手指。 |
+| `onMomentumStart` | `.on_momentum_start(..)` | `{ x, y }` | 快速滑动后的惯性滑行开始。 |
+| `onMomentumEnd` | `.on_momentum_end(..)` | `{ x, y }` | 惯性滑行结束（被新的拖动打断时也会触发）。 |
 | `onScrollEnd` | `.on_scroll_end(..)` | `{ x, y }` | 用户的滚动停了下来：惯性滑行结束后，或没有惯性的拖动结束时。 |
 
-`ScrollEvent` 包含偏移（`x`、`y`；Rust 中为 `offset`）、内容尺寸，含缩放（`contentWidth`、`contentHeight`；`content_size`）、视口（`width`、`height`；`size`）以及 `zoomScale`（`zoom_scale`）。其他事件携带偏移（Rust 中为 `Point<Points>`）。
+`ScrollEvent` 包含偏移（`offset`，一个 `Point`；Rust 中同名）、内容尺寸，含缩放（`contentSize`，一个 `Size`；`content_size`）、视口（`size`）以及 `zoomScale`（`zoom_scale`）。其他事件携带偏移（Rust 中为 `Point<Points>`）。
 
 ```rust tabs
 let at_bottom = signal(false);
@@ -266,7 +266,7 @@ const atBottom = signal(false);
 <Scroll
   style={{ flex: 1 }}
   scrollEventThrottle={100}
-  onScroll={(e) => atBottom.set(e.y + e.height >= e.contentHeight - 20)}
+  onScroll={(e) => atBottom.set(e.offset.y + e.size.height >= e.contentSize.height - 20)}
 >
   …
 </Scroll>
@@ -413,7 +413,7 @@ iOS 上的控件是 UIRefreshControl；在 Mac Catalyst 的 Mac 界面风格中�
 | `maximumZoomScale` | `.zoom_range(min, max)` | `number` | `1` | 最大缩放；大于最小值时捏合即可缩放。 |
 | `zoomScale` | `.zoom(scale)` | `number` | | 该属性改变时缩放到这个比例；否则保留用户的缩放。 |
 | `bouncesZoom` | `.bounces_zoom(..)` | `boolean` | `true` | 捏合可以越过限制并弹回。 |
-| `pinchGestureEnabled` | `.pinch_gesture_enabled(..)` | `boolean` | `true` | 用户可以捏合缩放。 |
+| `zoomable` | `.zoomable(..)` | `boolean` | `true` | 用户可以捏合缩放。 |
 | `centerContent` | `.center_content(..)` | `boolean` | `false` | 比视口小的内容（缩小时）居中显示。 |
 
 滚动事件会报告缩放比例和缩放后的内容尺寸。在代码中，`zoom_to(scale, center, animated)` / `zoomTo({ scale, x, y, animated })` 会缩放，使内容中的点（未缩放的点坐标）落在视口中央；双击放大就是在按压处理函数里调用它：

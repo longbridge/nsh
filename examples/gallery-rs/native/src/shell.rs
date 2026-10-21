@@ -157,7 +157,7 @@ pub(crate) fn desktop_layout() -> AnyElement {
                 .child(
                     nav_page()
                         .key("pane")
-                        .header_shown(false)
+                        .header_visible(false)
                         .child(demo_pane()),
                 )
                 .child(pushed()),

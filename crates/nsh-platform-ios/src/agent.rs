@@ -14,6 +14,7 @@ use nsh_core::{
     geometry::{Bounds, Point, Points, Size, point},
 };
 use nsh_testing::agent::{Key, Native};
+use objc2_core_foundation::CGRect;
 use objc2_ui_kit::{UIView, UIWindow};
 use rustc_hash::FxHashMap;
 
@@ -110,12 +111,12 @@ impl IosNative {
     }
 }
 
-/// `view`'s bounds in `window`'s points, if it shows.
-fn bounds_in(view: &UIView, window: &UIWindow) -> Option<Bounds<Points>> {
+/// `rect` of `view` in `window`'s points, if the view shows.
+fn bounds_in(view: &UIView, rect: CGRect, window: &UIWindow) -> Option<Bounds<Points>> {
     if view.window().is_none() || view.isHidden() {
         return None;
     }
-    let r = view.convertRect_toView(view.bounds(), Some(window));
+    let r = view.convertRect_toView(rect, Some(window));
     Some(Bounds::new(
         point(Points(r.origin.x as f32), Points(r.origin.y as f32)),
         Size::new(Points(r.size.width as f32), Points(r.size.height as f32)),
@@ -126,7 +127,16 @@ impl Native for IosNative {
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         self.on_main(move |view, window| {
             let ui = view.with_mounter(|m| m.ui_view(id))??;
-            bounds_in(&ui, window)
+            bounds_in(&ui, ui.bounds(), window)
+        })
+        .flatten()
+    }
+
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        self.on_main(move |view, window| {
+            let text = view.with_mounter(|m| m.text_view(text))??;
+            let (rect, ..) = *text.range_rects(start as usize, end as usize).first()?;
+            bounds_in(&text, rect, window)
         })
         .flatten()
     }

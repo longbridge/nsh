@@ -18,8 +18,9 @@
 //! Line heights follow Pango's (and so the Linux and Windows backends')
 //! model: each span is as tall as its own font's ascent and descent (a
 //! fallback font for CJK or emoji does not grow the line), an explicit
-//! `lineHeight` spreads evenly above and below it, and an attachment stands
-//! on the baseline.
+//! `lineHeight` spreads evenly above and below it, and an attachment sits
+//! where its `verticalAlign` puts it in its placeholder's font (on the
+//! baseline by default), the line holding it.
 //!
 //! The final layout ([`GpuiLayout`]) is plain data: per line its metrics,
 //! its clusters' boxes (hit testing, selections, decorations) and glyphs
@@ -804,6 +805,7 @@ impl SpanBox {
 
 /// The text shaped for measuring and layout.
 pub(crate) struct Prepared {
+    alignments: nsh_core::AttachmentAlignments,
     text: AttributedText,
     /// The paragraphs' base direction is right to left.
     rtl: bool,
@@ -834,6 +836,25 @@ struct Broken {
 }
 
 impl Prepared {
+    /// How far attachment `a`'s top is above the baseline, and what its
+    /// line reserves above and below it (`TextAttachment::ascent` and
+    /// `extent` in its placeholder's font).
+    fn attachment_box(&self, a: &nsh_core::TextAttachment) -> (f32, f32, f32) {
+        let alignments = &self.alignments;
+        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+            nsh_core::FontExtent::default()
+        } else {
+            let i = self
+                .spans
+                .partition_point(|s| s.end <= a.index)
+                .min(self.spans.len() - 1);
+            let s = &self.spans[i];
+            nsh_core::FontExtent::new(Points(s.ascent), Points(s.descent), Points(s.x))
+        };
+        let (up, down) = a.extent(font, alignments.get(a.index));
+        (a.ascent(font, alignments.get(a.index)).0, up.0, down.0)
+    }
+
     /// The width of clusters `start..end` without trailing whitespace.
     fn width(&self, start: u32, end: u32) -> f32 {
         let mut visible = end;
@@ -943,8 +964,9 @@ impl Prepared {
             }
             for t in attachments {
                 if t.index >= start && t.index < end {
-                    ascent = ascent.max(t.height.0);
-                    descent = descent.max(0.0);
+                    let (_, up, down) = self.attachment_box(t);
+                    ascent = ascent.max(up);
+                    descent = descent.max(down);
                 }
             }
         }
@@ -1223,6 +1245,14 @@ impl TextEngine for GpuiTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
+        self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        t: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let s = t.text.as_str();
         let mut utf16 = Vec::with_capacity(s.len() + 1);
         let mut u = 0u32;
@@ -1328,6 +1358,7 @@ impl TextEngine for GpuiTextEngine {
             prefix.push(sum);
         }
         Prepared {
+            alignments: alignments.clone(),
             text: t.clone(),
             rtl,
             clusters: b.clusters,
@@ -1788,8 +1819,8 @@ impl GpuiTextEngine {
             g.x += shift;
             g.y += baseline;
         }
-        // Attachments on the baseline; cap and x height of the largest
-        // font.
+        // Attachments by their `verticalAlign`; cap and x height of the
+        // largest font.
         let mut largest: Option<&SpanBox> = None;
         for (item, b) in order
             .iter()
@@ -1800,7 +1831,8 @@ impl GpuiTextEngine {
             let c = &p.clusters[ci as usize];
             if c.flags & ATTACHMENT != 0 {
                 if let Some(k) = t.attachments.iter().position(|a| a.index == c.utf16) {
-                    out.attachments[k] = Some((b.x, baseline - t.attachments[k].height.0));
+                    let (top, _, _) = p.attachment_box(&t.attachments[k]);
+                    out.attachments[k] = Some((b.x, baseline - top));
                 }
                 continue;
             }
@@ -2413,6 +2445,21 @@ pub(crate) fn draw_silhouette(
         }
     }
     paint_glyphs(cx, glyphs);
+}
+
+/// The first rectangle (view coordinates: x, y, width, height) the
+/// characters `start..end` of the text view with `state` cover (the test
+/// agent's spans).
+#[cfg(feature = "dev")]
+pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32, f32, f32, f32)> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<GpuiLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut first = None;
+    layout.selection_rects((start, end), |x, y, w, h| {
+        first.get_or_insert((cx + x, cy + y, w, h));
+    });
+    first
 }
 
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
@@ -3298,6 +3345,48 @@ mod tests {
             names.iter().any(|n| n == "Segoe UI"),
             &names[..names.len().min(8)],
         );
+    }
+
+    #[test]
+    fn attachments_sit_by_vertical_align() {
+        let Some(engine) = engine() else {
+            return;
+        };
+        let style = ResolvedTextStyle::default();
+        // The first line's top of a 30 pt attachment after "Ax", and the
+        // line's extent above and below its baseline.
+        let place = |align| {
+            let mut t = text(&[("Ax", style)]);
+            let mut alignments = nsh_core::AttachmentAlignments::default();
+            alignments.push(
+                &mut t,
+                nsh_core::geometry::size(Points(10.0), Points(30.0)),
+                align,
+                style,
+            );
+            let prepared = engine.prepare_aligned(&t, &alignments);
+            let size = engine.measure(&prepared, None);
+            let layout = engine.layout(&prepared, size);
+            let line = engine.lines(&layout).remove(0);
+            let top = engine.attachments(&layout)[0].expect("shown").y.0;
+            (top, line.ascender.0, line.descender.0)
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // Its bottom on the baseline.
+        let (top, up, _) = place(nsh_core::VerticalAlign::Baseline);
+        assert!(near(top + 30.0, up), "{top} {up}");
+        // Its top at the font's: the line grows below the baseline.
+        let (top, up, down) = place(nsh_core::VerticalAlign::TextTop);
+        assert!(near(top, 0.0) && near(up + down, 30.0), "{top} {up} {down}");
+        // Its bottom at the font's: the line grows above the baseline.
+        let (top, up, down) = place(nsh_core::VerticalAlign::TextBottom);
+        assert!(
+            near(top + 30.0, up + down) && near(top, 0.0),
+            "{top} {up} {down}"
+        );
+        // Its middle above the baseline.
+        let (top, up, _) = place(nsh_core::VerticalAlign::Middle);
+        assert!(top + 15.0 < up, "{top} {up}");
     }
 
     #[test]

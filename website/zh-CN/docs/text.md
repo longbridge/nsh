@@ -146,6 +146,14 @@ text("Made with ")
 
 被 `numberOfLines` 或省略号截掉的行内元素会被隐藏；复制文字时也不会包含它们。
 
+样式键 `verticalAlign` 决定行内元素在所在行中的位置，与 CSS 的 `vertical-align` 摆放图片的方式一致：`"baseline"`（默认）让元素底边落在基线上，`"text-top"` 和 `"text-bottom"` 让元素顶边或底边对齐文本字体的顶部或底部，`"middle"` 让元素中心位于基线上方半个 x 高度处。元素超出字体的部分会撑高所在行。段首图标若要像 Android 的 `ImageSpan` 那样与文字底部对齐，使用 `"text-bottom"`。对应的类是 `align-baseline`、`align-text-top`、`align-text-bottom` 和 `align-middle`；Rust 中是同名的 `.align_text_bottom()` 等方法。
+
+```tsx
+<Text style={{ fontSize: 16 }}>
+  <Image src={badge} style={{ width: 16, height: 16, verticalAlign: "text-bottom" }} /> 认证卖家
+</Text>
+```
+
 ## 文字样式
 
 | 属性 | 取值 | Rust |
@@ -279,7 +287,7 @@ text(move || body.get()).on(EventKind::TextLayout, move |e: &EventPayload| {
 <Text
   onTextLayout={(e) => {
     lines.set(e.lines.length);
-    console.log(e.lines.map((l) => `${l.text} (${l.width.toFixed(0)}pt)`));
+    console.log(e.lines.map((l) => `${l.text} (${l.bounds.size.width.toFixed(0)}pt)`));
   }}
 >
   {body()}

@@ -52,12 +52,13 @@ Rust 代码用 Rust 标准库和 crates.io 完成同样的工作，作为应用�
 - `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）与 Node 一样是对象自身的属性，`isFile()`、`isDirectory()` 和 `isSymbolicLink()` 在其原型上。
 - `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal }`（由运行时结束子进程时还带有 `error`）。`on` 返回子进程本身。
 - 子进程的环境是宿主的一小组变量加上应用获授权的变量名；它在应用的数据目录中运行，或在 `fs.write` 根目录内的 `cwd` 中运行（见[进程](#进程)）。
+- `process.platform`、`process.arch`、`os.platform()` 和 `os.arch()` 给出 Rust 的 `std::env::consts` 名称，与 gpui-shell 一致：`"macos"`、`"windows"`、`"linux"`、`"ios"`、`"android"`；`"aarch64"`、`"x86_64"`（见[系统元数据](#系统元数据与日志)）。
 - 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主关闭当前应用界面。
 - 限制是每个接口的一部分：大小、数量和超时在下面各模块中列出。
 
 ## 系统元数据与日志
 
-`os.platform(): string` 和 `os.arch(): string` 返回实际原生宿主的系统与架构；`os.EOL: string` 是系统换行符。`os.homedir(): string` 返回配置为绝对路径的宿主主目录，在缺少此配置时抛出错误。返回目录路径只是元数据，文件操作仍需要 `fs.read` / `fs.write` 授权。
+`os.platform(): string` 和 `os.arch(): string` 返回实际原生宿主的系统与架构，`process.platform` 和 `process.arch` 的值与之相同。它们是 Rust 的 `std::env::consts::OS` 和 `ARCH` 的名称，与 gpui-shell 一致：系统为 `"macos"`、`"windows"`、`"linux"`、`"ios"`、`"android"`，架构为 `"aarch64"`、`"x86_64"`，应用直接与它们比较（`process.platform === "macos"`）。`os.EOL: string` 是宿主的换行符。`os.homedir(): string` 返回配置为绝对路径的宿主主目录，在缺少此配置时抛出错误。返回目录路径只是元数据，文件操作仍需要 `fs.read` / `fs.write` 授权。
 
 浏览器应用读取的 `process.env` 是空对象，调用 `os.homedir()` 会收到错误；主目录路径与环境变量属于原生宿主。
 

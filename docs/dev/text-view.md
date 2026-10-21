@@ -38,7 +38,7 @@ colored with the theme's tokens; the app restyles each part over it.
   texts around the view ("Selection areas" in `text.md`).
 - **Tables** (`Cx::table`) lay out as gpui-kit's: columns fit their content when there is room, shrink (their cells
   wrapping) down to a floor per column when the view is narrower, and below the floors the table scrolls horizontally
-  (`tableScroll`; `tableScrollIndicator` hides its indicator, as `codeBlockScrollIndicator` a code block's). The cells are one CSS grid, so columns line up across rows: each column is a `minmax(<floor>,
+  (`tableScroll`; `tableScrollbar` hides its indicator, as `codeBlockScrollbar` a code block's). The cells are one CSS grid, so columns line up across rows: each column is a `minmax(<floor>,
   auto)` track (the spare width is shared out as CSS shares it among `auto` tracks), and the grid is `w-full` with
   the floors' sum as its `min-width`, so past the floors it is wider than the scroll view. Taffy has no
   `display: contents` and text has no min-content (longest word) measure, so the floor is computed in the component
@@ -47,7 +47,7 @@ colored with the theme's tokens; the app restyles each part over it.
   view behind its cells (`row_start`, `col_span_full`, before them in the grid), so `tableRow` / `tableHead` draw
   backgrounds and borders; their text styles do not reach the cells, which are siblings (`tableCell` /
   `tableHeaderCell` take them).
-- **The caret slot** (`caret`, `Option<Slot>`) is placed inline at the end of the last text of the last block
+- **The caret slot** (`streamingCaret`, `streaming_caret`, `Option<Slot>`) is placed inline at the end of the last text of the last block
   (descending into quotes, lists and custom nodes' content; after the code of a code block; a table's last cell), else
   on a line of its own after the last block (a rule, a render function's content), so it follows the text as it
   streams.
@@ -62,7 +62,7 @@ colored with the theme's tokens; the app restyles each part over it.
   in and fades back after 1.6 s); a press reports `onCodeBlockAction`. Each render has a key of the block's position (`code:3`,
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
-- **Links report presses**: `onLinkPress(url)`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
+- **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
   footnote reference `#footnote-<label>`. Nothing opens a URL: the app decides.
 
 ## Parts and their default styles
@@ -226,7 +226,7 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 | Table actions | `renderTableActions` |
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |
-| Link clicks | `onLinkPress(url)` |
+| Link clicks | `onLinkPress({ url })` |
 | Streaming fade / motion | The app's: the blocks are views it styles and animates (`nsh/animated`, layout animation) |
 
 ## Limits

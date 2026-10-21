@@ -1241,6 +1241,9 @@ struct Driver<M: TextEngine + 'static> {
     posts: nsh_core::ui::Posts,
     /// The engine's clock, its thread's ([`Clock::enter`]).
     clock: Clock,
+    /// When the last display frame ran, on a clock that moves with the
+    /// display's frames: the next one comes a frame after it.
+    last_frame: Option<Instant>,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -1377,6 +1380,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             last_gc: Instant::now(),
             posts: posts.clone(),
             clock: config.clock.clone(),
+            last_frame: None,
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -1495,9 +1499,19 @@ impl<M: TextEngine + 'static> Driver<M> {
     fn handle(&mut self, message: Message, rx: &Receiver<Message>) -> bool {
         match message {
             Message::Advance(by, done) => {
-                let running = self.advance(by, rx);
+                let running = self.advance(by, rx, self.clock.moves_with_frames());
                 done();
                 running
+            }
+            // A test's clock on a real platform: the display's frame moves it
+            // to the frame's time first (a frame after the last, else now),
+            // as a headless run's frames do.
+            Message::Frame if self.clock.moves_with_frames() => {
+                // The frame runs there, once, as the frames a move runs on
+                // the way do (whatever the messages handled meanwhile do).
+                self.state.frame_requested = true;
+                let by = self.next_frame() - self.clock.now();
+                self.advance(by, rx, true)
             }
             message => handle(self.script.as_ref(), &mut self.state, message),
         }
@@ -1505,8 +1519,12 @@ impl<M: TextEngine + 'static> Driver<M> {
 
     /// Moves a manual clock forward by `by` ([`EngineControl::advance_clock`]):
     /// to each time something comes due on the way, running it (and the
-    /// messages its alarms sent) before going on; false on shutdown.
-    fn advance(&mut self, by: std::time::Duration, rx: &Receiver<Message>) -> bool {
+    /// messages its alarms sent) before going on; with `frames`, also to
+    /// each display frame's time ([`nsh_core::time::FRAME`]) while the app
+    /// waits for frames, running the frame there, as a headless run's
+    /// display does (a clock that moves with a real display's frames:
+    /// [`Clock::with_frames`]). False on shutdown.
+    fn advance(&mut self, by: std::time::Duration, rx: &Receiver<Message>, frames: bool) -> bool {
         if !self.clock.is_manual() {
             // What the messages before it did is submitted before `done`.
             self.turn();
@@ -1516,7 +1534,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         for round in 0.. {
             // A timer that keeps scheduling itself at once (`setTimeout(f,
             // 0)` in `f`) would hold the clock at one time for good.
-            let next = [self.due(), self.clock.next_alarm()]
+            let frame = (frames && self.state.frame_requested).then(|| self.next_frame());
+            let next = [self.due(), self.clock.next_alarm(), frame]
                 .into_iter()
                 .flatten()
                 .min()
@@ -1534,12 +1553,38 @@ impl<M: TextEngine + 'static> Driver<M> {
                     return false;
                 }
             }
+            // Once: what was handled meanwhile may have run it already.
+            if frame.is_some_and(|f| f <= at && self.last_frame.is_none_or(|last| last < f))
+                && self.state.frame_requested
+            {
+                self.frame();
+            }
             self.turn();
             if next.is_none() {
                 break;
             }
         }
         true
+    }
+
+    /// When the next display frame of a clock that moves with the
+    /// display's frames is: a frame after the last, at the display's pace
+    /// whatever else comes due meanwhile, else (the first, or after a
+    /// pause) a frame from now or now.
+    fn next_frame(&self) -> Instant {
+        let now = self.clock.now();
+        self.last_frame
+            .map_or(now + nsh_core::time::FRAME, |last| {
+                last + nsh_core::time::FRAME
+            })
+            .max(now)
+    }
+
+    /// Runs a display frame of a clock that moves with the display's
+    /// frames, now.
+    fn frame(&mut self) {
+        self.last_frame = Some(self.clock.now());
+        handle(self.script.as_ref(), &mut self.state, Message::Frame);
     }
 
     /// Runs what the handled messages and the time made due, and submits
@@ -1645,7 +1690,7 @@ struct State<M: TextEngine> {
     ops: Vec<Op>,
     /// List render requests not yet sent to JS.
     binds: Vec<ListBind>,
-    /// Events raised by the core (e.g. `onEndReached`, `onLayout`).
+    /// Events raised by the core (e.g. `onLoadMore`, `onLayout`).
     events: Vec<JsEvent>,
     trace: bool,
     /// Where commit timings go ([`EngineControl::set_perf_monitor`]).
@@ -1919,12 +1964,12 @@ impl<M: TextEngine> State<M> {
             e.last = Some(now);
             let n = |v: f32| PayloadValue::Number(v as f64);
             let payload = EventPayload::Map(vec![
-                ("x", n(e.x)),
-                ("y", n(e.y)),
-                ("contentWidth", n(e.content.width.0)),
-                ("contentHeight", n(e.content.height.0)),
-                ("width", n(e.viewport.width.0)),
-                ("height", n(e.viewport.height.0)),
+                (
+                    "offset",
+                    PayloadValue::Point(geometry::point(Points(e.x), Points(e.y))),
+                ),
+                ("contentSize", PayloadValue::Size(e.content)),
+                ("size", PayloadValue::Size(e.viewport)),
                 ("zoomScale", n(e.zoom)),
             ]);
             // A Rust component's scroll view is the component's.

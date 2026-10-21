@@ -100,8 +100,6 @@ pub(crate) enum Action {
     Hint(NodeId),
     /// The start of the next display frame resolves the slot.
     Frame(AnswerSlot<Instant>),
-    /// Changes the layout direction's policy.
-    Direction(super::services::Direction),
     /// Sets the app's appearance.
     Appearance(crate::platform::Appearance),
     /// Measures the node with the layout of the commit the action goes out
@@ -123,27 +121,19 @@ pub(crate) enum ClipboardRead {
     Files(AnswerSlot<Vec<String>>),
 }
 
-/// An image read from the system clipboard (`Clipboard.getImage`).
+/// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {
-    /// The image as a `data:` URI (`data:image/png;base64,…`): an image's
-    /// source, and `fetch(uri)` gives its bytes.
-    pub uri: String,
-    /// Width in pixels.
-    pub width: DevicePixels,
-    /// Height in pixels.
-    pub height: DevicePixels,
-}
-
-impl ClipboardImage {
+    /// The image as a `data:` URL (`data:image/png;base64,…`): an image's
+    /// `src`, and `fetch(url)` gives its bytes.
+    pub url: String,
     /// Its size in pixels.
-    pub fn size(&self) -> Size<DevicePixels> {
-        Size::new(self.width, self.height)
-    }
+    pub size: Size<DevicePixels>,
 }
 
-/// An image's size in pixels (`Image.getSize`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, super::JsObject)]
+/// An image's size in pixels (`Image.getSize`); TS: `ImageSize`, an alias of
+/// `Size`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ImageSize {
     /// Width.
     pub width: DevicePixels,
@@ -161,6 +151,41 @@ impl ImageSize {
 impl From<ImageSize> for Size<DevicePixels> {
     fn from(s: ImageSize) -> Self {
         s.size()
+    }
+}
+
+/// TS: `type ImageSize = Size` (`{ width, height }`, in pixels here).
+impl super::JsValue for ImageSize {
+    fn ts_type(types: &mut super::TsTypes) -> String {
+        types.declare("ImageSize", |_| {
+            "/** An image's size in pixels (`Image.getSize`). */\nexport type ImageSize = Size;"
+                .into()
+        })
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {
+        if value.kind() != super::JsKind::Object {
+            return Err(value.expected("an object"));
+        }
+        let side = |key: &str| -> Result<DevicePixels, super::PropError> {
+            let v = value.field(key)?;
+            DevicePixels::from_js(v.get()).map_err(|e| super::PropError(format!("`{key}`: {e}")))
+        };
+        Ok(ImageSize {
+            width: side("width")?,
+            height: side("height")?,
+        })
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn super::JsHost,
+    ) -> Result<super::JsOwned<'a>, super::PropError> {
+        let owned = super::JsOwned::new(host, host.new_object()?);
+        let object = owned.get().raw();
+        host.set_field(object, "width", self.width.to_js(host)?.into_raw())?;
+        host.set_field(object, "height", self.height.to_js(host)?.into_raw())?;
+        Ok(owned)
     }
 }
 

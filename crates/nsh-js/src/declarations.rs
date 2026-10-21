@@ -91,9 +91,9 @@ export interface TextProps extends CommonProps, TextHostProps {
 
 /** An image asset (`import logo from "./logo.png"`), sized in points. */
 export interface ImageAsset {
-  uri: string;
-  width: number;
-  height: number;
+  url: string;
+  /** Its size in points. */
+  size: Size;
   /** The pixel densities it ships in, 1 being the imported file:
    * `[1, 2, 3]` when `logo@2x.png` and `logo@3x.png` sit next to
    * `logo.png`. The image loads the one for the screen's pixel ratio.
@@ -141,14 +141,7 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
  * tooltip, layout events and the ref (`ref.command(name, args)`). */
 export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
-export interface Insets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-/** An operating system (`Platform.OS`). */
+/** An operating system (`platform.os`). */
 export type OS = "ios" | "android" | "macos" | "windows" | "linux" | "web";
 
 export declare namespace JSX {

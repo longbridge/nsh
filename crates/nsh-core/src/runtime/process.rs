@@ -26,10 +26,14 @@ pub(crate) struct Process;
 
 #[module(flat, default)]
 impl Process {
-    /// The native operating system name.
+    /// The native operating system's name, as Rust's `std::env::consts::OS`
+    /// and gpui-shell's say it: `"macos"`, `"windows"`, `"linux"`, `"ios"`,
+    /// `"android"` (not Node's `"darwin"` / `"win32"`).
     #[allow(non_upper_case_globals)]
     pub(crate) const platform: &'static str = std::env::consts::OS;
-    /// The native CPU architecture name.
+    /// The native CPU architecture's name, as Rust's
+    /// `std::env::consts::ARCH` and gpui-shell's say it: `"aarch64"`,
+    /// `"x86_64"` (not Node's `"arm64"` / `"x64"`).
     #[allow(non_upper_case_globals)]
     pub(crate) const arch: &'static str = std::env::consts::ARCH;
 

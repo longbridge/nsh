@@ -34,10 +34,10 @@ const FORWARDED: &[&str] = &[
     "style",
     "testID",
     "horizontal",
-    "showsIndicator",
+    "scrollbar",
     "refreshing",
     "onRefresh",
-    "onEndReached",
+    "onLoadMore",
     "onScrollEnd",
     "scrollValue",
     "keyboardDismissMode",
@@ -54,7 +54,7 @@ const FORWARDED: &[&str] = &[
     "snapToOffsets",
     "snapToAlignment",
     "decelerationRate",
-    "scrollEnabled",
+    "scrollable",
     "bounces",
     "contentInset",
     "contentOffset",
@@ -62,10 +62,10 @@ const FORWARDED: &[&str] = &[
     "scrollEventThrottle",
     "disableIntervalMomentum",
     "onScroll",
-    "onScrollBeginDrag",
-    "onScrollEndDrag",
-    "onMomentumScrollBegin",
-    "onMomentumScrollEnd",
+    "onScrollDragStart",
+    "onScrollDragEnd",
+    "onMomentumStart",
+    "onMomentumEnd",
 ];
 
 /// The props the list itself uses: every other prop the app passes (the
@@ -78,9 +78,9 @@ const OWN: &[&str] = &[
     "ref",
     "keyExtractor",
     "estimatedItemSize",
-    "onEndReachedThreshold",
+    "loadMoreThreshold",
     "initialScrollIndex",
-    "onViewableItemsChanged",
+    "onViewableItemsChange",
     "header",
     "footer",
     "empty",
@@ -95,12 +95,12 @@ pub(crate) const ITEMS_PROPS: &[&str] = &[
     "keyExtractor",
     "stickyHeaderIndices",
     "initialScrollIndex",
-    "onViewableItemsChanged",
+    "onViewableItemsChange",
     "viewabilityConfig",
     "refreshing",
     "onRefresh",
-    "onEndReached",
-    "onEndReachedThreshold",
+    "onLoadMore",
+    "loadMoreThreshold",
     "header",
     "footer",
     "empty",
@@ -294,10 +294,10 @@ pub(crate) fn render(cx: *mut JsContext, props: JsValue) -> Result<JsValue, JsVa
         let r = reactive::render_effect(cx, func);
         unsafe { qjs::JS_FreeValue(cx, r) };
     }
-    if has(cx, props, "onViewableItemsChanged") {
+    if has(cx, props, "onViewableItemsChange") {
         let mut data = [qjs::JS_NewFloat64(id as f64)];
         let on = native(cx, on_viewable, 1, &mut data);
-        let r = dom::set_handler(cx, id, EventKind::ViewableItemsChanged, on);
+        let r = dom::set_handler(cx, id, EventKind::ViewableItemsChange, on);
         unsafe { qjs::JS_FreeValue(cx, on) };
         r.map_err(fail)?;
     }
@@ -456,7 +456,7 @@ unsafe extern "C" fn forward_run(
         let (node, props, prev, rest) = (*data, *data.add(1), *data.add(2), *data.add(3));
         let names = FORWARDED.iter().map(|&n| (n, n)).chain([
             ("estimatedItemSize", "estimatedItemSize"),
-            ("endReachedThreshold", "onEndReachedThreshold"),
+            ("loadMoreThreshold", "loadMoreThreshold"),
         ]);
         let mut at = 0;
         for (wire, key) in names {
@@ -507,13 +507,13 @@ fn forward(
         if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
             value = match wire {
                 "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
-                "endReachedThreshold" => qjs::JS_NewFloat64(1.0),
+                "loadMoreThreshold" => qjs::JS_NewFloat64(1.0),
                 _ => value,
             };
         }
         let old = qjs::JS_GetPropertyUint32(cx, prev, at);
-        let first = qjs::JS_IsUndefined(old)
-            && !matches!(wire, "estimatedItemSize" | "endReachedThreshold");
+        let first =
+            qjs::JS_IsUndefined(old) && !matches!(wire, "estimatedItemSize" | "loadMoreThreshold");
         let result = if qjs::JS_IsStrictEqual(cx, old, value) || first && qjs::JS_IsUndefined(value)
         {
             Ok(())
@@ -1020,7 +1020,7 @@ unsafe extern "C" fn report_later(
     report(cx, id as NodeId)
 }
 
-/// Calls `onViewableItemsChanged` with the items now viewable and those
+/// Calls `onViewableItemsChange` with the items now viewable and those
 /// that changed, unless the range is the one reported last.
 fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
     let (props, (first, last), (prev_first, prev_last)) = {
@@ -1116,7 +1116,7 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
             c"changed".as_ptr(),
             qjs::JS_NewArrayFrom(cx, c.len() as c_int, c.as_mut_ptr()),
         );
-        let handler = get(cx, props, "onViewableItemsChanged");
+        let handler = get(cx, props, "onViewableItemsChange");
         let mut args = [info];
         let r = if qjs::JS_IsFunction(cx, handler) {
             qjs::JS_Call(cx, handler, UNDEFINED, 1, args.as_mut_ptr())
@@ -1181,17 +1181,17 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
   separator?: ListSlot;
   /** Scrolls to this item before the first frame. */
   initialScrollIndex?: number;
-  /** Key of an item in `onViewableItemsChanged` tokens (default: `item.key`, `item.id`, or the index). */
+  /** Key of an item in `onViewableItemsChange` tokens (default: `item.key`, `item.id`, or the index). */
   keyExtractor?: (item: T, index: number) => string;
-  onViewableItemsChanged?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
+  onViewableItemsChange?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;
   /** Padding and gaps of the content as classes (`p-*`, `gap-*`);
    * `contentStyle` wins over them. */
   contentClass?: string;
   /** The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). */
   testID?: string;
-  /** How close to the end (in viewports) `onEndReached` fires; default 1. */
-  onEndReachedThreshold?: number;
+  /** How close to the end (in viewports) `onLoadMore` fires; default 1. */
+  loadMoreThreshold?: number;
   ref?: YNode | ((node: YNode) => void);
   /** Renders one row. Called once per recycled cell; `item` and `index`
    * change when the cell is reused for another item. */
@@ -1201,7 +1201,7 @@ export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHost
 /** What an app passes to a Rust component that lays out a list of rows
  * (an `Items` prop): the data and the rows; the component decides the
  * layout. */
-export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChanged" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onEndReached" | "onEndReachedThreshold" | "header" | "footer" | "empty">;
+export type ListItemsProps<T> = Pick<ListProps<T>, "each" | "children" | "keyExtractor" | "stickyHeaderIndices" | "initialScrollIndex" | "onViewableItemsChange" | "viewabilityConfig" | "refreshing" | "onRefresh" | "onLoadMore" | "loadMoreThreshold" | "header" | "footer" | "empty">;
 "#;
 
 #[cfg(test)]

@@ -95,9 +95,9 @@ fn images(batch: &MountBatch) -> Vec<(NodeId, String)> {
 const APP: &str = r#"import { mount, View } from "nsh";
 import { Image } from "nsh/image";
 
-const icon = { uri: "asset:/img.png", width: 40, height: 30, scales: [1, 2, 3] };
-const single = { uri: "asset:/single.png", width: 10, height: 10 };
-const big = { uri: "asset:/big.png", width: 20, height: 20, scales: [1, 2, 4] };
+const icon = { url: "asset:/img.png", size: { width: 40, height: 30 }, scales: [1, 2, 3] };
+const single = { url: "asset:/single.png", size: { width: 10, height: 10 } };
+const big = { url: "asset:/big.png", size: { width: 20, height: 20 }, scales: [1, 2, 4] };
 
 mount(() => (
   <View>
@@ -197,11 +197,11 @@ fn variant_repick_item_counts_stay_bounded() {
 const INFO_APP: &str = r#"import { mount, signal, Text } from "nsh";
 import { Image } from "nsh/image";
 
-const icon = { uri: "asset:/img.png", width: 40, height: 30, scales: [1, 2, 3] };
+const icon = { url: "asset:/img.png", size: { width: 40, height: 30 }, scales: [1, 2, 3] };
 const shown = signal("waiting");
 setTimeout(async () => {
   const size = await Image.getSize(icon);
-  const plain = await Image.getSize({ uri: "asset:/single.png", width: 999, height: 999 });
+  const plain = await Image.getSize({ url: "asset:/single.png", size: { width: 999, height: 999 } });
   const ready = await Image.prefetch(icon);
   shown.set(`${size.width}x${size.height} ${plain.width}x${plain.height} ${ready}`);
 }, 0);
@@ -294,4 +294,75 @@ fn variant_info_get_size_keeps_imported_dimensions_for_mismatched_variants() {
             "getSize still loads the image before returning"
         );
     }
+}
+
+/// `src` and `placeholder` are names several elements take: each decodes
+/// as its element's prop (an image's placeholder is an image, an input's a
+/// text), and a web view's `src`, `html` and `baseUrl` make one source.
+#[test]
+fn shared_names_decode_as_their_elements_props() {
+    use nsh_core::{NativeProps, WebSource, geometry::Points};
+    const APP: &str = r#"import { Input, mount, View, Video, WebView } from "nsh";
+import { Image } from "nsh/image";
+
+const logo = { url: "asset:/logo.png", size: { width: 10, height: 10 } };
+
+mount(() => (
+  <View>
+    <Image src="https://example.com/a.png" placeholder={logo} />
+    <Input placeholder="Name" />
+    <Video src="https://example.com/a.mp4" />
+    <WebView src="https://example.com/start" />
+    <WebView baseUrl="https://example.com/" src="https://example.com/start" html="<p>Hi</p>" />
+  </View>
+));
+"#;
+    let (_engine, rx) = start(APP, 1.0);
+    let mut placeholder = None;
+    let mut input = None;
+    let mut video = None;
+    let mut web: Vec<(NodeId, WebSource)> = Vec::new();
+    for batch in sent(&rx) {
+        for item in batch.items {
+            match item {
+                MountItem::Image { options, .. } => {
+                    placeholder = options.placeholder.map(|p| (p.uri.to_string(), p.size));
+                }
+                MountItem::Input { config, .. } => input = Some(config.placeholder.clone()),
+                MountItem::NativeProps {
+                    props: NativeProps::Video(v),
+                    ..
+                } => video = v.source.as_deref().map(str::to_owned),
+                MountItem::NativeProps {
+                    id,
+                    props: NativeProps::WebView(w),
+                } => {
+                    web.retain(|(i, _)| *i != id);
+                    web.push((id, w.source.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+    web.sort_by_key(|(id, _)| *id);
+    assert_eq!(
+        placeholder,
+        Some((
+            "asset:/logo.png".to_owned(),
+            Some(nsh_core::geometry::size(Points(10.0), Points(10.0)))
+        ))
+    );
+    assert_eq!(input.as_deref(), Some("Name"));
+    assert_eq!(video.as_deref(), Some("https://example.com/a.mp4"));
+    let sources: Vec<WebSource> = web.into_iter().map(|(_, s)| s).collect();
+    assert_eq!(
+        sources,
+        [
+            WebSource::Uri("https://example.com/start".into()),
+            WebSource::Html {
+                html: "<p>Hi</p>".into(),
+                base_url: Some("https://example.com/".into()),
+            },
+        ]
+    );
 }

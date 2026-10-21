@@ -1,6 +1,5 @@
 import { Image, type JSX, List, Scroll, signal, Text, View, type ViewStyle } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh/animated";
-import { I18nManager } from "nsh/device";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, hint, isDark, mono, Press, radius, Segmented, tints, Toggle } from "../ui";
 
 /** The stage every specimen stands on: the card's light, without its drop shadow. */
@@ -337,13 +336,13 @@ function FlipCard() {
             ...(isDark()
               ? {
                   backgroundColor: "#1a2134",
-                  backgroundImage: "linear-gradient(180deg, #212a42 0%, #171d2d 100%)",
+                  backgroundImage: "linear-gradient(180deg, #1e263b 0%, #1a2134 100%)",
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 24px rgba(0,0,0,0.4)",
                   borderColor: "#2b3a5c",
                 }
               : {
                   backgroundColor: "#eef2fc",
-                  backgroundImage: "linear-gradient(180deg, #f5f8fe 0%, #e6ecfa 100%)",
+                  backgroundImage: "linear-gradient(180deg, #f0f4fd 0%, #ebf0fb 100%)",
                   boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
                   borderColor: "#cdd8f3",
                 }),
@@ -365,13 +364,13 @@ function FlipCard() {
             ...(isDark()
               ? {
                   backgroundColor: "#202814",
-                  backgroundImage: "linear-gradient(180deg, #283219 0%, #1b2211 100%)",
+                  backgroundImage: "linear-gradient(180deg, #242d16 0%, #1f2714 100%)",
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 24px rgba(0,0,0,0.4)",
                   borderColor: "#3b4a22",
                 }
               : {
                   backgroundColor: "#f1f7e2",
-                  backgroundImage: "linear-gradient(180deg, #f7fbec 0%, #e9f2d2 100%)",
+                  backgroundImage: "linear-gradient(180deg, #f2f8e4 0%, #eef5da 100%)",
                   boxShadow: "inset 0 1px 0 #ffffff, 0 8px 20px rgba(20,20,10,0.10)",
                   borderColor: "#d3e3a8",
                 }),
@@ -468,17 +467,20 @@ function Numerals() {
   );
 }
 
-/** Rows, `marginStart` and text under a right-to-left layout. */
+/** Rows, `marginStart` and text under a right-to-left layout: the app's
+ * language decides it, and `direction` sets a view's own. */
 function RightToLeft() {
+  const rtl = signal(false);
   const tones = ["danger", "info", "up"] as const;
   const chip = { width: 40, height: 40, borderRadius: 10, borderCurve: "continuous", alignItems: "center", justifyContent: "center" } as const;
   return (
     <Card
       icon="nav"
       title="Right to left"
-      subtitle={I18nManager.isRTL ? "isRTL: true" : "isRTL: false"}
-      right={<Button label="Flip" variant="secondary" onPress={() => I18nManager.forceRTL(!I18nManager.isRTL)} />}
+      subtitle={rtl() ? "direction: rtl" : "direction: ltr"}
+      right={<Button label="Flip" variant="secondary" onPress={() => rtl.set(!rtl())} />}
     >
+      <View style={{ direction: rtl() ? "rtl" : "ltr", gap: 12 }}>
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Each of={["1", "2", "3"]}>
           {(n, i) => (
@@ -503,7 +505,7 @@ function RightToLeft() {
         Text aligns to the start side; the first box has marginStart 16 and a round top-start corner.
       </Text>
       <Caption label="Horizontal scroll view" note={<Text style={{ fontFamily: mono }}>Scroll</Text>} />
-      <Scroll horizontal showsIndicator={false} style={{ height: 40 }}>
+      <Scroll horizontal scrollbar={false} style={{ height: 40 }}>
         <View style={{ flexDirection: "row", gap: 6 }}>
           <Each of={Array.from({ length: 12 }, (_, i) => i + 1)}>
             {(n) => (
@@ -515,7 +517,7 @@ function RightToLeft() {
         </View>
       </Scroll>
       <Caption label="Horizontal list" note={<Text style={{ fontFamily: mono }}>List</Text>} />
-      <List each={Array.from({ length: 30 }, (_, i) => i + 1)} horizontal estimatedItemSize={46} showsIndicator={false} style={{ height: 40 }}>
+      <List each={Array.from({ length: 30 }, (_, i) => i + 1)} horizontal estimatedItemSize={46} scrollbar={false} style={{ height: 40 }}>
         {(n) => (
           <View style={{ ...chip, marginEnd: 6, backgroundColor: tints.accent }}>
             <Text style={{ fontSize: 13, color: colors.accent, fontVariant: ["tabular-nums"] }}>{String(n())}</Text>
@@ -525,6 +527,7 @@ function RightToLeft() {
       <View style={{ height: 1, backgroundColor: colors.line }} />
       <Text style={{ fontSize: 13, textAlign: "left", color: colors.muted }}>textAlign left (the start side right to left)</Text>
       <Text style={{ fontSize: 13, writingDirection: "rtl", color: colors.muted }}>مرحبا بالعالم — writingDirection rtl</Text>
+      </View>
     </Card>
   );
 }

@@ -393,11 +393,9 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
     (
         "measure",
         0,
+        decl!("(): Promise<{ bounds: Bounds; pagePosition: Point } | null>"),
         decl!(
-            "(): Promise<{ x: number; y: number; width: number; height: number; pageX: number; pageY: number } | null>"
-        ),
-        decl!(
-            "Where the view is once this turn's changes are laid out: `x` / `y` / `width` / `height` its frame in its parent (as `onLayout`), `pageX` / `pageY` its top left corner in the root view it is in (the surface, or its modal), the coordinates of touches' `pageX` / `pageY`: `event.pageX - m.pageX` is a touch's position in the view. Scroll offsets and zoom scales of the scroll views and lists around it are applied, transforms (animations included) are not. `null` when the view is not in the tree."
+            "Where the view is once this turn's changes are laid out: `bounds` its frame in its parent (as `onLayout`), `pagePosition` its top left corner in the root view it is in (the surface, or its modal), the coordinates of touches' `pageX` / `pageY`: `event.pageX - m.pagePosition.x` is a touch's position in the view. Scroll offsets and zoom scales of the scroll views and lists around it are applied, transforms (animations included) are not. `null` when the view is not in the tree."
         ),
     ),
     (
@@ -1282,7 +1280,9 @@ fn set_prop(
     let v = unsafe { Value::from_raw(js_cx, qjs::JS_DupValue(cx, value)) };
     // Decoding may run JS (getters): no borrow is held meanwhile.
     let mut warnings = crate::protocol::Warnings::deferred();
-    let decoded = crate::protocol::decode_prop(id, name, v, &mut warnings);
+    // SAFETY: live node data.
+    let tag = unsafe { (*p).tag };
+    let decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),

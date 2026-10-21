@@ -14,7 +14,7 @@ final class Native {
     static final int PAN_START = 2;
     static final int PAN_END = 3;
     static final int REFRESH = 4;
-    static final int END_REACHED = 5;
+    static final int LOAD_MORE = 5;
     static final int SCROLL_END = 6;
     static final int LOAD = 7;
     static final int ERROR = 8;
@@ -40,13 +40,13 @@ final class Native {
     static final int PROGRESS = 28;
     static final int END = 29;
     static final int BUFFER = 30;
-    static final int VIEWABLE_ITEMS_CHANGED = 31;
+    static final int VIEWABLE_ITEMS_CHANGE = 31;
     static final int BACK_PRESS = 32;
     static final int SCROLL = 33;
-    static final int SCROLL_BEGIN_DRAG = 34;
-    static final int SCROLL_END_DRAG = 35;
-    static final int MOMENTUM_SCROLL_BEGIN = 36;
-    static final int MOMENTUM_SCROLL_END = 37;
+    static final int SCROLL_DRAG_START = 34;
+    static final int SCROLL_DRAG_END = 35;
+    static final int MOMENTUM_START = 36;
+    static final int MOMENTUM_END = 37;
     static final int DIALOG = 38;
     static final int TOUCH = 39;
     static final int SELECTION_CHANGE = 40;

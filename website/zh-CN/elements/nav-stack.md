@@ -208,7 +208,7 @@ TSX 的子函数接收路由值本身，以及一个表示它在栈中位置的 
 |---|---|---|---|---|
 | `header` | `.header(..)` | `JSX.Element` | 无 | 桌面平台和 Web：页面的标题栏，放在页面顶部，与页面同宽，高度由它的布局决定，内容位于其下方。 |
 | `title` | `.title(..)` | `string` | 无 | iOS 和 Android：系统标题栏的标题。 |
-| `headerShown` | `.header_shown(..)` | `boolean` | `true` | iOS 和 Android：显示系统标题栏。 |
+| `headerVisible` | `.header_visible(..)` | `boolean` | `true` | iOS 和 Android：显示系统标题栏。 |
 | `headerTransparent` | `.header_transparent(..)` | `boolean` | `false` | iOS 和 Android：内容延伸到透明的系统标题栏之下。 |
 | `headerLargeTitle` | `.header_large_title(..)` | `boolean` | `false` | iOS：大标题，随内容滚动收进标题栏；内容在标题栏之下滚动。 |
 | `headerBackTitle` | `.header_back_title(..)` | `string` | 无 | iOS 和 Android：返回到这个页面的返回按钮的文字（在 Android 上是它给屏幕阅读器的描述）。 |
@@ -266,7 +266,7 @@ fn profile(edit: impl Fn() + 'static) -> Screen {
 </NavPage>
 ```
 
-页面的内容从标题栏下方开始：在 iOS 和 Android 上位于不透明的系统标题栏之下，在桌面平台和 Web 上位于 `header` 之下。使用 `headerTransparent`、`headerLargeTitle` 或 `headerShown={false}` 时，在 iOS 和 Android 上内容从页面顶部开始；用 [SafeAreaView](./safe-area-view.md) 或 `safeAreaInsets()` 让它避开标题栏和状态栏。
+页面的内容从标题栏下方开始：在 iOS 和 Android 上位于不透明的系统标题栏之下，在桌面平台和 Web 上位于 `header` 之下。使用 `headerTransparent`、`headerLargeTitle` 或 `headerVisible={false}` 时，在 iOS 和 Android 上内容从页面顶部开始；用 [SafeAreaView](./safe-area-view.md) 或 `safeAreaInsets()` 让它避开标题栏和状态栏。
 
 ```rust tabs
 nav_page()

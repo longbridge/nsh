@@ -742,6 +742,21 @@ impl SpanBox {
     }
 }
 
+/// An attachment as its line holds it: placed by its `verticalAlign` in
+/// its placeholder's font (`TextAttachment::ascent` and `extent`).
+#[derive(Debug, Clone, Copy)]
+struct AttachmentBox {
+    /// Its placeholder (UTF-16 offset).
+    index: u32,
+    width: f32,
+    height: f32,
+    /// How far its top is above the baseline.
+    top: f32,
+    /// What its line reserves above and below the baseline.
+    up: f32,
+    down: f32,
+}
+
 /// A part of the original text placed in a layout's text: `(start, end)`
 /// of the original at offset `at`.
 type Piece = (u32, u32, u32);
@@ -798,8 +813,8 @@ pub(crate) struct Prepared {
     spans: Vec<SpanBox>,
     /// The line box of text without spans.
     base: (f32, f32),
-    /// Attachments: offset, width and height.
-    attachments: Vec<(u32, f32, f32)>,
+    /// The attachments, in order.
+    attachments: Vec<AttachmentBox>,
     no_wrap: bool,
     max_lines: u32,
     /// `head` / `middle` ellipses are made by cutting the text (one line).
@@ -1178,7 +1193,7 @@ impl DWriteTextEngine {
         let placeholders = |a: u32, b: u32| {
             p.attachments
                 .iter()
-                .filter(|&&(i, _, _)| i >= a && i < b)
+                .filter(|t| t.index >= a && t.index < b)
                 .count() as u32
         };
         if start >= end {
@@ -1202,10 +1217,10 @@ impl DWriteTextEngine {
                 ascent = ascent.max(up);
                 descent = descent.max(down);
             }
-            for &(i, _, height) in &p.attachments {
-                if i >= start && i < end {
-                    ascent = ascent.max(height);
-                    descent = descent.max(0.0);
+            for t in &p.attachments {
+                if t.index >= start && t.index < end {
+                    ascent = ascent.max(t.up);
+                    descent = descent.max(t.down);
                 }
             }
         }
@@ -1521,6 +1536,14 @@ impl TextEngine for DWriteTextEngine {
     type Prepared = Prepared;
 
     fn prepare(&self, t: &AttributedText) -> Prepared {
+        self.prepare_aligned(t, &nsh_core::AttachmentAlignments::default())
+    }
+
+    fn prepare_aligned(
+        &self,
+        t: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> Prepared {
         let text: Vec<u16> = t.text.encode_utf16().collect();
         let rtl = t
             .writing_direction
@@ -1590,7 +1613,31 @@ impl TextEngine for DWriteTextEngine {
             attachments: t
                 .attachments
                 .iter()
-                .map(|a| (a.index, a.width.0, a.height.0))
+                .map(|a| {
+                    let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+                        nsh_core::FontExtent::default()
+                    } else {
+                        let style = t
+                            .span_at(a.index)
+                            .map_or_else(Default::default, |s| s.style);
+                        let m = self.face(&style).metrics;
+                        let size = style.font_size.0;
+                        nsh_core::FontExtent::new(
+                            Points(m.ascent * size),
+                            Points(m.descent * size),
+                            Points(m.x * size),
+                        )
+                    };
+                    let (up, down) = a.extent(font, alignments.get(a.index));
+                    AttachmentBox {
+                        index: a.index,
+                        width: a.width.0,
+                        height: a.height.0,
+                        top: a.ascent(font, alignments.get(a.index)).0,
+                        up: up.0,
+                        down: down.0,
+                    }
+                })
                 .collect(),
             no_wrap: t.no_wrap,
             max_lines: t.max_lines,
@@ -1774,12 +1821,14 @@ impl TextEngine for DWriteTextEngine {
         };
         let mut objects = vec![None; p.attachments.len()];
         for &(n, x, oy) in &recording.objects {
-            let Some(&(_, _, height)) = p.attachments.get(n) else {
+            let Some(a) = p.attachments.get(n) else {
                 continue;
             };
-            let line = line_of(oy + height);
+            // The placeholder stands on DirectWrite's baseline (its
+            // `GetMetrics`); the lines are stacked from their boxes.
+            let line = line_of(oy + a.height);
             if let Some(&(_, _, top, ascent, _)) = tops.get(line) {
-                out.attachments[n] = Some((x, top + ascent - height));
+                out.attachments[n] = Some((x, top + ascent - a.top));
                 objects[n] = Some((line, x));
             }
         }
@@ -1805,7 +1854,7 @@ impl TextEngine for DWriteTextEngine {
                 if let Some((line, x)) = o
                     && *line == k
                 {
-                    let w = p.attachments.get(i).map_or(0.0, |a| a.1);
+                    let w = p.attachments.get(i).map_or(0.0, |a| a.width);
                     left = left.min(*x);
                     right = right.max(*x + w);
                 }
@@ -2386,6 +2435,21 @@ fn draw_shadow(
             );
         }
     }
+}
+
+/// The first rectangle (view coordinates: x, y, width, height) the
+/// characters `start..end` of the text view with `state` cover (the test
+/// agent's spans).
+#[cfg(feature = "dev")]
+pub(crate) fn range_rect(state: &ViewState, start: u32, end: u32) -> Option<(f32, f32, f32, f32)> {
+    let drawn = state.text.as_ref()?;
+    let layout = drawn.layout.downcast::<WinLayout>()?;
+    let (cx, cy) = (drawn.content.origin.x.0, drawn.content.origin.y.0);
+    let mut first = None;
+    layout.selection_rects(&drawn.text, (start, end), |x, y, w, h| {
+        first.get_or_insert((cx + x, cy + y, w, h));
+    });
+    first
 }
 
 /// The UTF-16 offset of the character at `(x, y)` (view coordinates), if
@@ -3232,6 +3296,46 @@ mod tests {
             "{proportional} {}",
             digits(0)
         );
+    }
+
+    #[test]
+    fn attachments_sit_by_vertical_align() {
+        let engine = engine();
+        let style = ResolvedTextStyle::default();
+        // The first line's top of a 30 pt attachment after "Ax", and the
+        // line's extent above and below its baseline.
+        let place = |align| {
+            let mut t = text(&[("Ax", style)]);
+            let mut alignments = nsh_core::AttachmentAlignments::default();
+            alignments.push(
+                &mut t,
+                nsh_core::geometry::size(Points(10.0), Points(30.0)),
+                align,
+                style,
+            );
+            let prepared = engine.prepare_aligned(&t, &alignments);
+            let size = engine.measure(&prepared, None);
+            let layout = engine.layout(&prepared, size);
+            let line = engine.lines(&layout).remove(0);
+            let top = engine.attachments(&layout)[0].expect("shown").y.0;
+            (top, line.ascender.0, line.descender.0)
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // Its bottom on the baseline.
+        let (top, up, _) = place(nsh_core::VerticalAlign::Baseline);
+        assert!(near(top + 30.0, up), "{top} {up}");
+        // Its top at the font's: the line grows below the baseline.
+        let (top, up, down) = place(nsh_core::VerticalAlign::TextTop);
+        assert!(near(top, 0.0) && near(up + down, 30.0), "{top} {up} {down}");
+        // Its bottom at the font's: the line grows above the baseline.
+        let (top, up, down) = place(nsh_core::VerticalAlign::TextBottom);
+        assert!(
+            near(top + 30.0, up + down) && near(top, 0.0),
+            "{top} {up} {down}"
+        );
+        // Its middle above the baseline.
+        let (top, up, _) = place(nsh_core::VerticalAlign::Middle);
+        assert!(top + 15.0 < up, "{top} {up}");
     }
 
     #[test]

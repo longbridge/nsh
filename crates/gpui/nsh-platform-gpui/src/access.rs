@@ -58,7 +58,7 @@
 //! surface element registers its focus handle after it, so keys still go
 //! to the surface.
 //!
-//! Announcements (`announceForAccessibility`, [`announce`]) are a polite
+//! Announcements (`announce`, [`announce`]) are a polite
 //! live `Label` node added under the surface's: all three adapters read a
 //! live node that appears.
 //!
@@ -799,7 +799,7 @@ pub(crate) fn focused(surface: &Surface) -> Option<NshView> {
     }
 }
 
-/// Has assistive technologies read `text` (`announceForAccessibility`).
+/// Has assistive technologies read `text` (`announce`).
 pub(crate) fn announce(surface: &Rc<Surface>, text: &str) {
     if text.is_empty() {
         return;

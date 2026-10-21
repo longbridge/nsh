@@ -409,14 +409,14 @@ let origin = 0;
   onStartShouldSetResponder={() => true}
   onResponderGrant={async (e) => {
     const x = e.pageX;
-    origin = (await track.measure())?.pageX ?? 0;
+    origin = (await track.measure())?.pagePosition.x ?? 0;
     seek(x - origin);
   }}
   onResponderMove={(e) => seek(e.pageX - origin)}
 />;
 ```
 
-It resolves once the changes made so far are laid out: in Rust to a `Measurement` (`frame`, the frame in the parent as the layout handler reports it, and `page`, the top left corner), in TSX to `{ x, y, width, height, pageX, pageY }`. The corner is in the surface, or in the dialog the view is in, the same coordinates as touches' page positions. The offsets of the scroll views and lists around it are taken into account; transforms (animations included) are not. It resolves to `None` / `null` for a view that is not on screen.
+It resolves once the changes made so far are laid out: in Rust to a `Measurement` (`frame`, the frame in the parent as the layout handler reports it, and `page`, the top left corner), in TSX to `{ bounds, pagePosition }`. The corner is in the surface, or in the dialog the view is in, the same coordinates as touches' page positions. The offsets of the scroll views and lists around it are taken into account; transforms (animations included) are not. It resolves to `None` / `null` for a view that is not on screen.
 
 ## The responder system
 

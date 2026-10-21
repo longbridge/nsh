@@ -243,6 +243,7 @@ view()
 |---|---|
 | `text-left`、`text-center`、`text-right`、`text-justify` | `textAlign` |
 | `text-start` | `textAlign: "auto"` |
+| `align-baseline`、`align-text-top`、`align-text-bottom`、`align-middle` | `verticalAlign`（文本中的视图和图片） |
 | `text-end` | `textAlign: "right"` |
 | `uppercase`、`lowercase`、`capitalize`、`normal-case` | `textTransform` |
 | `truncate` | 单行、尾部省略、不换行、`overflow: hidden` |

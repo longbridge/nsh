@@ -906,6 +906,21 @@ pub enum WritingDirection {
     Rtl,
 }
 
+/// The layout direction of a view and its subtree (`direction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum LayoutDirection {
+    /// Its parent's (the default): the surface's follows the user's
+    /// language.
+    #[default]
+    Inherit,
+    /// Left to right.
+    Ltr,
+    /// Right to left: rows run from the right, and left / right
+    /// properties mean start and end.
+    Rtl,
+}
+crate::static_reactive!(LayoutDirection: LayoutDirection);
+
 /// The shape of rounded corners (`borderCurve`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BorderCurve {
@@ -2862,6 +2877,23 @@ pub trait Styled: Sized {
         font_variant(self, 0, 0xff)
     }
 
+    /// The layout direction of the view and its subtree (by default its
+    /// parent's; the surface's follows the user's language).
+    fn direction(mut self, direction: impl IntoReactive<LayoutDirection>) -> Self {
+        self.style()
+            .bind_value(direction, |s, direction: LayoutDirection| {
+                s.keyword(
+                    StyleKey::Direction,
+                    match direction {
+                        LayoutDirection::Inherit => "inherit",
+                        LayoutDirection::Ltr => "ltr",
+                        LayoutDirection::Rtl => "rtl",
+                    },
+                );
+            });
+        self
+    }
+
     /// The text's base direction (by default its content's).
     fn writing_direction(mut self, direction: WritingDirection) -> Self {
         self.style().keyword(
@@ -2960,6 +2992,34 @@ pub trait Styled: Sized {
     /// Text aligned right.
     fn text_right(mut self) -> Self {
         self.style().keyword(StyleKey::TextAlign, "right");
+        self
+    }
+
+    /// Inside a text, its bottom on the baseline (the default:
+    /// `align-baseline`).
+    fn align_baseline(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "baseline");
+        self
+    }
+
+    /// Inside a text, its top at the top of the text's font
+    /// (`align-text-top`).
+    fn align_text_top(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "text-top");
+        self
+    }
+
+    /// Inside a text, its bottom at the bottom of the text's font
+    /// (`align-text-bottom`).
+    fn align_text_bottom(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "text-bottom");
+        self
+    }
+
+    /// Inside a text, its middle half the font's x height above the
+    /// baseline (`align-middle`).
+    fn align_middle(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "middle");
         self
     }
 
@@ -3544,6 +3604,10 @@ mod tests {
         same(s().uppercase().tabular_nums(), "uppercase tabular-nums");
         same(s().small_caps().oldstyle_nums(), "small-caps oldstyle-nums");
         same(s().capitalize().text_justify(), "capitalize text-justify");
+        same(s().align_baseline(), "align-baseline");
+        same(s().align_text_top(), "align-text-top");
+        same(s().align_text_bottom(), "align-text-bottom");
+        same(s().align_middle(), "align-middle");
         // Unlike classes, the two lines add up.
         let both = s().underline().line_through().lower();
         let mut style = Style::default();

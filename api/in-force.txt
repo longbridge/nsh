@@ -1,4 +1,0 @@
-# The API's record and test suite (`api/`, the engine's `compat` tests) are
-# in force from the commit that added this file on: a pull request is held
-# to the record of its merge base with `main` when that base has this file
-# (docs/dev/compatibility.md, "How it is enforced"). Never delete it.

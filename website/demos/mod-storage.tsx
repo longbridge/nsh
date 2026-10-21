@@ -13,12 +13,12 @@ function App() {
     await Storage.setItem("opened", String(count));
     await Storage.setItem("lastOpened", new Date().toISOString());
     opened.set(count);
-    keys.set(await Storage.getAllKeys());
+    keys.set(await Storage.keys());
   };
   const reset = async () => {
     await Storage.clear();
     opened.set(0);
-    keys.set(await Storage.getAllKeys());
+    keys.set(await Storage.keys());
   };
   start();
 

@@ -2,7 +2,7 @@
 
 `crates/nsh-platform-web` runs NSH apps in a browser page, rendering to the DOM: apps published with `NSH package
 --target web`, the web development host (`NSH run --target web`) and the website's live demos (`website/demos/*.tsx`).
-`Platform.OS` is `"web"` (`Os::Web`).
+`platform.os` is `"web"` (`Os::Web`).
 User-facing page: `website/docs/web.md`.
 
 ## Two runtimes
@@ -301,8 +301,8 @@ calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium has no pointer: it measures as a tablet or phone), `pad` for a screen
 whose short side is at least 600, else `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `Platform.select`'s `desktop` key and
-`Platform.isDesktop`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
+(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key and
+`platform.idiom`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
 there is at its top. The browser's bars are the browser's: the web ignores `Command::StatusBar` (pages' and dialogs' `statusBar`).
 
@@ -450,7 +450,7 @@ browsers' touches into what phones report:
   notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
   event goes on to the page around (an embedding page scrolls). Ctrl + wheel (a touchpad's pinch) pinches the view
   under the pointer and never zooms the page. Scroll events follow the desktop backends: touch drags send
-  `onScrollBeginDrag` / `EndDrag`, glides and snaps `onMomentumScrollBegin` / `End`, every scroll ends with one
+  `onScrollDragStart` / `EndDrag`, glides and snaps `onMomentumStart` / `End`, every scroll ends with one
   `onScrollEnd` (the browser's `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
 - **Mouse drags never scroll**, in every idiom, as on the desktop backends: dragging the content is a touchscreen's
   way to scroll, the mouse has the wheel, the keyboard and the scroll bar. Its drags go to pans, the responder system
@@ -460,9 +460,9 @@ browsers' touches into what phones report:
   (they would take 6 px from content the core laid out for the whole view), and a 4 px thumb in a sticky, zero-size
   `.nsh-bar` at the view's top left (it stays put as the content scrolls, in step with the compositor) shows while
   the view scrolls or the mouse reaches its draggable thumb and fades 700 ms after.
-  Hovering content leaves its visibility and fade timer unchanged. Views along one axis with `showsIndicator`, and
+  Hovering content leaves its visibility and fade timer unchanged. Views along one axis with `scrollbar`, and
   horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
-  (`grabBar`: `onScrollBeginDrag` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
+  (`grabBar`: `onScrollDragStart` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
   nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
@@ -549,6 +549,15 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
   as that; a mouse notch is 1.25×), Safari's touchpad pinches come as `gesture*` events. `zoomTo` and `zoomScale` animate or jump with the
   content point to the middle. Canvases inside are drawn again at the zoomed resolution when a zoom ends (up to 4×).
 
+Sticky list cells (`MountItem::StickyCells`) stick with the browser's `position: sticky`, in step with the compositor
+as the scroll bar is; a shift set from `scroll` events would trail it by a frame. Each sits in a `.nsh-track`
+(`op_sticky`, `placeTrack`) beside the other cells, in the list or its layer: a box from the cell's frame along its
+range of travel, with no breadth across it, so it takes no pointer events, at `z-index: 5` above the other cells. The
+list isolates that z-index (`nsh-sticky`): as natively, a sticky cell never covers the views after the list, such as a
+bar the content scrolls under. The next sticky cell's track starts where it pushes the cell out, the last one's ends
+with the content, and a cell no longer sticky goes back to its frame. Entering a track cancels any frame
+animation already running on the cell, so its content coordinates cannot override the sticky insets.
+
 ## Platform services
 
 - **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`
@@ -564,14 +573,14 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
 - **Toasts** (`Toast.show` from `nsh/android`, which the desktop backends also show) are a pill at the bottom of the
   root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
-  `hasString`, since browsers cannot tell without reading) needs a secure context and may ask the user.
+  `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user.
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
-  runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `defaultSource` as a second
+  runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden
   (`Image.getSize` / `prefetch`: under Networking). `onProgress` is not reported.
 - **Web views** are `<iframe>`s. HTML loads as `srcdoc` in a sandbox without `allow-same-origin` (an origin of its
   own: it cannot reach the player's page), after a bridge script (`webBridge`): the first message from the player
-  carrying a random token hands it a `MessageChannel` port, over which `ReactNativeWebView.postMessage` reaches
+  carrying a random token hands it a `MessageChannel` port, over which `window.nsh.postMessage` reaches
   `onMessage` and `injectJavaScript` and `goBack` / `goForward` run; the page's own `message` listeners never see that
   message. The injected scripts are `<script>`s at the start and end (after a doctype). A URL loads as it is, keeping
   its origin unless it is the player's own (which must not reach it either); the browser hides what such a page

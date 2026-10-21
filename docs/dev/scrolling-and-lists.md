@@ -1,9 +1,9 @@
 # Scrolling and lists
 
 - **Scrolling**: `pagingEnabled`, `snapToInterval` / `snapToOffsets` / `snapToAlignment`, `disableIntervalMomentum`,
-  `decelerationRate`, `scrollEnabled`, `bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`
-  (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollBeginDrag` /
-  `EndDrag`, `onMomentumScrollBegin` / `End` (a glide caught by a new drag ends with `onMomentumScrollEnd`). Snapping is decided
+  `decelerationRate`, `scrollable`, `bounces`, `contentInset`, `contentOffset`, `keyboardShouldPersistTaps`
+  (`never` / `handled` / `always`), `onScroll` (+ `scrollEventThrottle`; at most once per engine turn), `onScrollDragStart` /
+  `EndDrag`, `onMomentumStart` / `End` (a glide caught by a new drag ends with `onMomentumEnd`). Snapping is decided
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
   the velocity. Lists keep the visible rows in place when items are inserted above them (`splice`).
 - **Input**: fingers (and pens) drag scroll views; on the desktop backends and the web the mouse never does (dragging
@@ -11,7 +11,7 @@
   indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). On Linux, Windows and desktop Web, the indicator shows while scrolling or when the pointer reaches its draggable thumb;
   moving over content leaves its visibility and fade timer unchanged. macOS follows the system's scroll-bar
   visibility preference (`WhenScrolling` suppresses content-hover reveal). Horizontal
-  views keep theirs with `showsIndicator={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
+  views keep theirs with `scrollbar={false}` (the platforms' `scroll::config`; on the web `barShown`, in the
   desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
   mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
 - **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
@@ -19,7 +19,7 @@
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in
   the scroll view itself, so without it nothing changes (no extra view).
 - **Zooming** (`<Scroll>`, not lists): `maximumZoomScale` above `minimumZoomScale` makes the content zoomable; `zoomScale`
-  zooms when it changes, `bouncesZoom`, `pinchGestureEnabled`, `centerContent` (content smaller than the viewport is centered);
+  zooms when it changes, `bouncesZoom`, `zoomable`, `centerContent` (content smaller than the viewport is centered);
   ref `zoomTo({ scale, x, y, animated })` (content point `x`, `y` in the middle); `onScroll` reports `zoomScale` and the zoomed
   content size. iOS: the children live in a `NshZoomView` (`zoom.rs`) that UIKit scales (`viewForZoomingInScrollView:`), its
   bounds the unzoomed content size, so the core's frames stay valid; texts and canvases are drawn again at the zoomed
@@ -32,12 +32,14 @@
   that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
   below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts it from the sticky ranges, so platforms pin as they do without one), `header` /
   `footer` / `empty` / `separator` (a component or an element), `contentStyle`
-  (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onEndReached` + `onEndReachedThreshold`, `onViewableItemsChanged` +
+  (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`, `onViewableItemsChange` +
   `viewabilityConfig` (`itemVisiblePercentThreshold` / `viewAreaCoveragePercentThreshold` / `minimumViewTime`), `keyExtractor`,
   `refreshing` / `onRefresh`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
   props, ...) goes to the scroll view as on a `<Scroll>` (`list.rs` `OWN`: the names are read once, when the list is
   made; their values follow their getters). Positions, columns, sticky travel and viewability are all computed in the core; sticky cells
-  are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset - start, 0, end - start)`).
+  are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset - start, 0, end - start)`);
+  the web, whose scroll events trail the browser's scrolling by a frame, puts each in a track spanning that travel
+  instead and lets the browser's `position: sticky` keep it pinned (`nsh.js` `op_sticky`).
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in

@@ -6,14 +6,14 @@ order: 10
 
 # nsh/accessibility
 
-无障碍 API 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果），并与屏幕阅读器交互。Rust 代码调用 `nsh_core::ui::prelude` 中的 `screen_reader()`、`reduce_motion()` 和 `announce_for_accessibility()`，用 `ElementRef` 移动焦点；TSX 从 `nsh/accessibility` 导入它们。元素的无障碍属性（`accessibilityLabel`、`role` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
+无障碍 API 读取用户的无障碍设置（屏幕阅读器是否在运行、是否要求减弱动态效果），并与屏幕阅读器交互。Rust 代码调用 `nsh_core::ui::prelude` 中的 `screen_reader()`、`reduce_motion()` 和 `announce_for_accessibility()`，用 `ElementRef` 移动焦点；TSX 从 `nsh/accessibility` 导入 `screenReaderEnabled()`、`reduceMotion()`、`announce()` 和 `setAccessibilityFocus()`。这些设置是响应式的：在绑定、`computed` 或 `effect` 中读取它们，用户修改设置时，读取它们的地方会随之更新。元素的无障碍属性（`accessibilityLabel`、`role` 等）见[元素](../elements/index.md)；教程见[无障碍](../docs/accessibility.md)。
 
 ```rust tabs
 use nsh_core::ui::prelude::*; // screen_reader、reduce_motion、announce_for_accessibility、element_ref
 ```
 
 ```tsx tabs
-import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/accessibility";
+import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 ```
 
 ## screenReaderEnabled
@@ -60,30 +60,21 @@ const open = () => {
 };
 ```
 
-## AccessibilityInfo
+## announce
 
 ```ts
-const AccessibilityInfo: {
-  announceForAccessibility(message: string): void;
-  setAccessibilityFocus(node: YNode): void;
-  isScreenReaderEnabled(): Promise<boolean>;
-  isReduceMotionEnabled(): Promise<boolean>;
-  addEventListener(
-    event: "screenReaderChanged" | "reduceMotionChanged",
-    listener: (enabled: boolean) => void,
-  ): { remove(): void };
-};
+function announce(message: string): void;
 ```
 
-系统的无障碍设置，可以读取一次，也可以用监听器跟踪变化。`screenReaderEnabled()` 和 `reduceMotion()` 是它们的响应式版本，在组件中优先使用它们。
+让屏幕阅读器读出 `message`（VoiceOver 播报、TalkBack）。适用于焦点没有移动就出现的结果，比如“已保存”。Rust：`announce_for_accessibility(message)`。
 
-| 成员 | Rust | 说明 |
-|---|---|---|
-| `announceForAccessibility(message)` | `announce_for_accessibility(message)` | 让屏幕阅读器读出 `message`（VoiceOver 播报、TalkBack）。适用于焦点没有移动就出现的结果，比如“已保存”。 |
-| `setAccessibilityFocus(node)` | `ElementRef::set_accessibility_focus()` | 把屏幕阅读器的焦点移到 `node`（某个元素的 `ref`）。 |
-| `isScreenReaderEnabled()` | `screen_reader()` | resolve 为屏幕阅读器是否在运行。 |
-| `isReduceMotionEnabled()` | `reduce_motion()` | resolve 为是否开启了减弱动态效果。 |
-| `addEventListener(event, listener)` | 读取 `screen_reader()` 或 `reduce_motion()` 的 `effect` | 设置变化时以新值调用 `listener`；返回一个可 `remove()` 的订阅。 |
+## setAccessibilityFocus
+
+```ts
+function setAccessibilityFocus(node: YNode): void;
+```
+
+把屏幕阅读器的焦点移到 `node`（某个元素的 `ref`）。Rust：`ElementRef::set_accessibility_focus()`。
 
 ```rust tabs
 use nsh_core::ui::prelude::*;
@@ -105,17 +96,17 @@ fn Saved() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { cleanup, Text, View, type YNode } from "nsh";
-import { AccessibilityInfo } from "nsh/accessibility";
+import { effect, Text, View, type YNode } from "nsh";
+import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh/accessibility";
 
 function Saved() {
   let note!: YNode;
   const save = () => {
-    AccessibilityInfo.announceForAccessibility("Saved");
-    AccessibilityInfo.setAccessibilityFocus(note);
+    announce("Saved");
+    setAccessibilityFocus(note);
   };
-  const sub = AccessibilityInfo.addEventListener("screenReaderChanged", (on) => console.log("screen reader", on));
-  cleanup(() => sub.remove());
+  // 设置变化时再次运行，直到组件移除。
+  effect(() => console.log("screen reader", screenReaderEnabled()));
   return (
     <View style={{ gap: 8 }}>
       <Text onPress={save} role="button">Save</Text>

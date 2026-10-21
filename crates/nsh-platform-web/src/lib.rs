@@ -1,6 +1,6 @@
 //! WebAssembly backend for nsh: runs an app in a browser page and renders
 //! it to the DOM: apps published with `nsh package --target web`, the web
-//! development host and the website's live demos. `Platform.OS` is `"web"`;
+//! development host and the website's live demos. `platform.os` is `"web"`;
 //! the page reports the idiom (phone, tablet or desktop browser), locale
 //! and the user's settings ([`nsh_environment`]).
 //!
@@ -566,6 +566,13 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     // crate, through wasm-bindgen) asks the page to pump, as input does.
     engine.set_wake(std::sync::Arc::new(ffi::request_pump));
     let control = engine.control();
+    // The test moves its clock through the engine.
+    #[cfg(feature = "dev")]
+    TEST_MODEL.with(|m| {
+        if let Some(model) = &*m.borrow() {
+            model.engine_started(control.clone());
+        }
+    });
     APP.with(|a| {
         *a.borrow_mut() = Some(Running {
             engine,
@@ -823,11 +830,21 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
         }
         Ok(step) => {
             let model = TEST_MODEL.with(|m| m.borrow().clone());
-            match model.and_then(|m| nsh_testing::agent::answer(&m, &step)) {
+            let answer = match model.and_then(|m| nsh_testing::agent::answer(&m, &step)) {
                 Some(Ok(value)) => serde_json::json!({ "done": value }),
                 Some(Err(message)) => serde_json::json!({ "failed": message }),
                 None => serde_json::json!({ "page": true }),
+            };
+            // The engine runs on this thread: the clock gets there before the
+            // step is answered, and the page then waits for what comes next.
+            if let nsh_dev::protocol::TestStep::Scene {
+                query: nsh_dev::protocol::SceneQuery::Clock { .. },
+            } = step
+            {
+                pump();
+                ffi::request_pump();
             }
+            answer
         }
     };
     TEST_ANSWER.with(|a| {
@@ -1060,12 +1077,10 @@ pub unsafe extern "C" fn nsh_event(
     };
     let payload = match kind {
         EventKind::ScrollEnd
-        | EventKind::ScrollBeginDrag
-        | EventKind::ScrollEndDrag
-        | EventKind::MomentumScrollBegin
-        | EventKind::MomentumScrollEnd => {
-            EventPayload::Scroll(point(Points(num("x")), Points(num("y"))))
-        }
+        | EventKind::ScrollDragStart
+        | EventKind::ScrollDragEnd
+        | EventKind::MomentumStart
+        | EventKind::MomentumEnd => EventPayload::Scroll(point(Points(num("x")), Points(num("y")))),
         // A video's and a web view's loads carry more than an image's.
         EventKind::Load if value.get("duration").is_none() && value.get("url").is_none() => {
             // `naturalWidth` / `naturalHeight`: whole pixels.
@@ -1077,31 +1092,44 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
-        EventKind::HoverMove => {
-            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-            EventPayload::Hover(nsh_core::HoverEvent {
-                location: point(Points(num("locationX")), Points(num("locationY"))),
-                page: point(Points(num("pageX")), Points(num("pageY"))),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flag("ctrlKey"),
-                    alt: flag("altKey"),
-                    shift: flag("shiftKey"),
-                    cmd: flag("metaKey"),
-                },
-            })
-        }
-        EventKind::ContextMenu => {
-            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-            EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
-                location: point(Points(num("locationX")), Points(num("locationY"))),
-                page: point(Points(num("pageX")), Points(num("pageY"))),
-                modifiers: nsh_core::keymap::Modifiers {
-                    ctrl: flag("ctrlKey"),
-                    alt: flag("altKey"),
-                    shift: flag("shiftKey"),
-                    cmd: flag("metaKey"),
-                },
-            })
+        EventKind::HoverMove | EventKind::ContextMenu => {
+            // `{ position, pagePosition, modifiers }`, as handlers get it.
+            let at = |k: &str| {
+                let p = value.get(k);
+                let n = |c: &str| {
+                    p.and_then(|p| p.get(c))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as f32
+                };
+                point(Points(n("x")), Points(n("y")))
+            };
+            let flag = |k: &str| {
+                value
+                    .get("modifiers")
+                    .and_then(|m| m.get(k))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            };
+            let (position, page_position) = (at("position"), at("pagePosition"));
+            let modifiers = nsh_core::keymap::Modifiers {
+                ctrl: flag("control"),
+                alt: flag("alt"),
+                shift: flag("shift"),
+                cmd: flag("platform"),
+            };
+            if kind == EventKind::HoverMove {
+                EventPayload::Hover(nsh_core::HoverEvent {
+                    position,
+                    page_position,
+                    modifiers,
+                })
+            } else {
+                EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                    position,
+                    page_position,
+                    modifiers,
+                })
+            }
         }
         EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
             text: text("text"),

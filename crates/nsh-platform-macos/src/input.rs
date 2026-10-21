@@ -565,8 +565,8 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
         if listens {
             let (location_x, location_y) = local(surface, &v, x, y);
             let event = nsh_core::ContextMenuEvent {
-                location: point(Points(location_x), Points(location_y)),
-                page: point(Points(x), Points(y)),
+                position: point(Points(location_x), Points(location_y)),
+                page_position: point(Points(x), Points(y)),
                 modifiers: nsh_core::keymap::Modifiers {
                     ctrl: flags.contains(NSEventModifierFlags::Control),
                     alt: flags.contains(NSEventModifierFlags::Option),
@@ -1749,8 +1749,8 @@ fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
         };
         let (location_x, location_y) = local(surface, &v, x, y);
         let event = nsh_core::HoverEvent {
-            location: point(Points(location_x), Points(location_y)),
-            page: point(Points(x), Points(y)),
+            position: point(Points(location_x), Points(location_y)),
+            page_position: point(Points(x), Points(y)),
             modifiers: nsh_core::keymap::Modifiers {
                 ctrl: flags.contains(NSEventModifierFlags::Control),
                 alt: flags.contains(NSEventModifierFlags::Option),

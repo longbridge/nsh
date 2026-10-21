@@ -40,10 +40,8 @@ const Window: {
   toggleMaximize(): void;
   toggleFullScreen(): void;
   setFrame(frame: {
-    x?: number;
-    y?: number;
-    width?: number;
-    height?: number;
+    origin?: Partial<Point>;
+    size?: Partial<Size>;
     animated?: boolean;
     anchorTop?: boolean;
   }): void;
@@ -62,7 +60,7 @@ Rust 列给出 `nsh_core::ui::desktop` 中的函数。
 | `minimize()` | | 最小化窗口。 |
 | `toggleMaximize()` | | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | | 进入或退出全屏。 |
-| `setFrame(frame)` | | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `width`、`height` 包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`x`、`y` 在 macOS 屏幕坐标中表示窗口左下角，在 Windows 上表示左上角。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。`anchorTop: true` 在只改 `height` 而不给 `y` 时保持顶边不动：窗口从底边伸缩。 |
+| `setFrame(frame)` | | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`） 在 macOS 屏幕坐标中表示窗口左下角，在 Windows 上表示左上角。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。`anchorTop: true` 在只改 `height` 而不给 `y` 时保持顶边不动：窗口从底边伸缩。 |
 | `setLevel(level)` | | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
 | `orderFront()` | | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
 | `close()` | `close_window()` | 关闭窗口，应用随之结束。 |
@@ -156,14 +154,14 @@ const titleBar: Accessor<{ height: number; left: number; right: number }>;
 ```ts
 const Menu: {
   setApplicationMenu(items: MenuItem[] | null): void;
-  popup(items: MenuItem[], at?: { x: number; y: number }): Promise<void>;
+  popup(items: MenuItem[], at?: Point): Promise<void>;
 };
 ```
 
 | 成员 | 说明 |
 |---|---|
 | `setApplicationMenu(items)` | 设置应用菜单：每个顶层项是一个子菜单（`File`、`Edit`……）。在 macOS 上是菜单栏，第一个菜单是应用菜单（AppKit 以应用名作为标题）。在 Windows 和 Linux 上是窗口的菜单栏，隐藏标题栏时不显示；它的快捷键仍然有效，自定义标题栏可以用 `Menu.popup` 打开这些菜单。`null` 恢复平台默认菜单。 |
-| `popup(items, at?)` | 显示右键菜单，左上角在 `at`（窗口坐标，单位为点），省略时在指针处。菜单关闭时（无论是否选中了菜单项）返回的 Promise 会 resolve：打开它的按钮可以在此之前一直保持按下样式。 |
+| `popup(items, at?)` | 显示右键菜单，左上角在 `at`（窗口坐标，单位为点：`onContextMenu` 的 `e.pagePosition`），省略时在指针处。菜单关闭时（无论是否选中了菜单项）返回的 Promise 会 resolve：打开它的按钮可以在此之前一直保持按下样式。 |
 
 再次调用 `setApplicationMenu` 即可修改菜单。放在 `effect` 里时，它会跟随读取的 signal：依赖应用状态的勾选或可用状态始终保持最新。
 
@@ -176,7 +174,7 @@ type MenuItem =
       label?: string;
       role?: MenuRole;
       shortcut?: string;
-      enabled?: boolean;
+      disabled?: boolean;
       checked?: boolean;
       onSelect?: () => void;
       submenu?: MenuItem[];
@@ -188,7 +186,7 @@ type MenuItem =
 | `label` | 菜单项显示的文字。带 role 的菜单项省略时使用自己的默认文字。 |
 | `onSelect` | 菜单项被选中时调用，无论是点击还是快捷键。 |
 | `shortcut` | 快捷键：修饰键和一个按键用 `+` 连接，例如 `"mod+n"`、`"mod+shift+z"`、`"alt+f4"` 或 `"f11"`。修饰键见下表。按键可以是字母、数字和标点，写作它在美式键盘上不按 Shift 时输入的字符（`,`、`/`；`?` 写作 `"shift+/"`），也可以是名称：`plus`（`=` / `+` 键，也可写 `=`）、`minus`（也可写 `-`）、`space`、`enter`（`return`）、`escape`（`esc`）、`tab`、`backspace`、`delete`（`del`）、`insert`、方向键 `up`、`down`、`left`、`right`（`arrowup` 等）、`home`、`end`、`pageup`、`pagedown`、`f1`–`f24`。大小写不影响（`"Mod+Shift+N"` 就是 `"mod+shift+n"`；大写字母表示同一个键，并不意味着 Shift），推荐全小写的写法。无效的快捷键（`"mod-n"`、`"mod++"`、`"mod+?"`）会抛出错误并给出正确的写法。`nsh/keymap` 使用同样的按键写法。菜单按各平台自己的样式显示快捷键（macOS 上是 `⇧⌘N`，Windows 上是 `Ctrl+Shift+N`）。 |
-| `enabled` | `false` 时菜单项变灰（默认 `true`）。 |
+| `disabled` | `true` 时菜单项变灰（默认 `false`）。 |
 | `checked` | 设置（为 `true` 或 `false`）后菜单项带勾选标记。 |
 | `submenu` | 让菜单项成为子菜单（需要 `label`）。 |
 | `role` | 由平台执行的标准菜单项（见下）。 |
@@ -222,10 +220,10 @@ Role：
 
 ```tsx
 import { effect, signal } from "nsh";
-import { Platform } from "nsh/device";
+import { platform } from "nsh/device";
 import { Menu } from "nsh/desktop";
 
-const mac = Platform.OS === "macos";
+const mac = platform.os === "macos";
 const wrap = signal(true);
 
 effect(() => {

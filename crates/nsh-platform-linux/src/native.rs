@@ -414,7 +414,7 @@ pub(crate) fn page_of(_widget: &gtk::Widget) -> Option<gtk::Widget> {
 }
 
 /// The CSS class of a web view whose page does not scroll
-/// (`scrollEnabled: false`): wheels over it go to the scroll views around
+/// (`scrollable: false`): wheels over it go to the scroll views around
 /// it (`crate::input`).
 pub(crate) const UNSCROLLABLE: &str = "nsh-unscrollable";
 

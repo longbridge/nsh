@@ -62,6 +62,21 @@ const QUIET: Duration = Duration::from_millis(100);
 const SETTLE: Duration = Duration::from_secs(2);
 /// How often waits look again while nothing comes.
 const POLL: Duration = Duration::from_millis(20);
+/// The wall time `ms` milliseconds from the Unix epoch (before it when
+/// negative).
+fn unix_time(ms: f64) -> std::time::SystemTime {
+    let since = Duration::from_secs_f64(ms.abs() / 1000.0);
+    if ms >= 0.0 {
+        std::time::UNIX_EPOCH + since
+    } else {
+        std::time::UNIX_EPOCH - since
+    }
+}
+
+/// How long moving the app's clock may take at most (the timers due on
+/// the way run meanwhile).
+#[cfg(not(target_arch = "wasm32"))]
+const CLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 /// A long press's hold when the view does not say (`delayLongPress`).
 const LONG_PRESS: Duration = Duration::from_millis(500);
 /// How many gestures scrolling a view into view takes at most.
@@ -87,6 +102,11 @@ struct Setup {
     forwarder: Arc<forward::Forwarder>,
     /// Where each batch's items go when the test traces the app.
     trace: Option<SendOutgoing>,
+    /// The manual clock the app runs on, when the test gave it one.
+    clock: Option<nsh_core::time::Clock>,
+    /// The engine of the app ([`Model::engine_started`]): it moves the
+    /// clock.
+    engine: Option<nsh_engine::EngineControl>,
 }
 
 #[derive(Default)]
@@ -169,6 +189,10 @@ impl Model {
             )),
             trace: trace.then(|| send.clone()),
             forwarder: forward::Forwarder::new(send),
+            clock: environment
+                .clock
+                .map(|ms| nsh_core::time::Clock::manual(unix_time(ms)).with_frames()),
+            engine: None,
         });
     }
 
@@ -176,8 +200,11 @@ impl Model {
     /// says ([`Model::set_up`]; nothing before): its storage is the test's,
     /// its requests go to the test (which answers them or lets them through
     /// to the host's network), a traced app's engine logs each commit's
-    /// timings, the environment keeps what the test fixed, and the app's
-    /// clipboard calls are served from the test's clipboard.
+    /// timings, the environment keeps what the test fixed, the app's
+    /// clipboard calls are served from the test's clipboard, and it runs on
+    /// the test's manual clock when there is one (which also moves with the
+    /// display's frames). The host hands the engine back once it started
+    /// ([`Model::engine_started`]).
     pub fn set_up_engine(&self, config: &mut nsh_engine::EngineConfig) {
         let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
         let Some(setup) = &*setup else { return };
@@ -190,6 +217,73 @@ impl Model {
         config.pinned = setup.pins;
         config.clipboard =
             Some(setup.clipboard.clone() as Arc<dyn nsh_core::clipboard::ClipboardBackend>);
+        if let Some(clock) = &setup.clock {
+            config.clock = clock.clone();
+        }
+    }
+
+    /// The engine [`Model::set_up_engine`] set up started: the test moves
+    /// its clock through it.
+    pub fn engine_started(&self, engine: nsh_engine::EngineControl) {
+        if let Some(setup) = &mut *self.setup.lock().unwrap_or_else(|e| e.into_inner()) {
+            setup.engine = Some(engine);
+        }
+    }
+
+    /// Moves the app's manual clock as `change` says, as the headless
+    /// driver moves it; an error when the app runs on the system's clock.
+    /// Off WebAssembly it returns once the engine got there (what ran was
+    /// submitted); the web's page, whose thread the engine runs on, pumps
+    /// it right after.
+    pub fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        use nsh_dev::protocol::ClockChange;
+        let (clock, engine) = {
+            let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+            let setup = setup.as_ref();
+            match (
+                setup.and_then(|s| s.clock.clone()),
+                setup.and_then(|s| s.engine.clone()),
+            ) {
+                (Some(clock), Some(engine)) => (clock, engine),
+                (None, _) => {
+                    return Err(
+                        "the app runs on the system's clock: open it with a manual one \
+                                (`open(entry, { clock: {} })`)"
+                            .into(),
+                    );
+                }
+                (Some(_), None) => return Err("the app's engine did not start".into()),
+            }
+        };
+        let by = match change {
+            ClockChange::RunFor { ms } => Duration::from_millis(ms),
+            ClockChange::FastForward { ms } => {
+                clock.advance_to(clock.now() + Duration::from_millis(ms));
+                Duration::ZERO
+            }
+            ClockChange::SetSystemTime { unix_ms } => {
+                clock.set_system_time(unix_time(unix_ms));
+                return Ok(());
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            engine.advance_clock(by, move || {
+                let _ = tx.send(());
+            });
+            rx.recv_timeout(CLOCK_TIMEOUT).map_err(|_| {
+                format!(
+                    "the app's clock did not get there in {} s",
+                    CLOCK_TIMEOUT.as_secs()
+                )
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            engine.advance_clock(by, || {});
+            Ok(())
+        }
     }
 
     /// The text on the test's clipboard (after [`Model::set_up`]).
@@ -283,6 +377,14 @@ pub trait Scene: Send + Sync {
     fn clipboard(&self) -> Result<Option<String>, String>;
     /// The app's storage's entries.
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String>;
+    /// The window's content is `size` ([`Native::viewport`]): what lies
+    /// outside it, and no scroll view brings in, is not on screen.
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String>;
+    /// The text view showing span `id` (a nested text that takes presses)
+    /// and where in its text the span is (UTF-16 units); `None` for a view.
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String>;
+    /// Moves the app's manual clock ([`Model::move_clock`]).
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String>;
 }
 
 impl Scene for Model {
@@ -366,6 +468,16 @@ impl Scene for Model {
     }
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         Ok(self.storage_entries())
+    }
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
+        self.lock().screen.set_viewport(size);
+        Ok(())
+    }
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
+        Ok(self.lock().screen.span(id))
+    }
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        Model::move_clock(self, change)
     }
 }
 
@@ -504,6 +616,11 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::MenuClosed => model.menu_closed().map(|()| Value::Null),
             SceneQuery::Clipboard => Ok(Value::from(model.clipboard_text())),
             SceneQuery::Storage => json(to_value(model.storage_entries())),
+            SceneQuery::SetViewport { width, height } => model
+                .set_viewport(Size::new(Points(*width), Points(*height)))
+                .map(|()| Value::Null),
+            SceneQuery::Span { id } => model.span(*id).and_then(|s| json(to_value(s))),
+            SceneQuery::Clock { change } => model.move_clock(*change).map(|()| Value::Null),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
             | SceneQuery::InputText { .. }
@@ -620,6 +737,20 @@ impl Scene for RemoteScene {
     fn storage(&self) -> Result<std::collections::BTreeMap<String, String>, String> {
         self.query(SceneQuery::Storage)
     }
+    fn set_viewport(&self, size: Size<Points>) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::SetViewport {
+            width: size.width.0,
+            height: size.height.0,
+        })
+        .map(drop)
+    }
+    fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
+        self.query(SceneQuery::Span { id })
+    }
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::Clock { change })
+            .map(drop)
+    }
 }
 
 /// A key the agent presses.
@@ -640,6 +771,15 @@ pub trait Native: Send + Sync {
     /// The view `id`'s bounds in the window's content, in points from its
     /// top-left (`None`: it has no native view on screen).
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
+    /// Where the characters `start..end` (UTF-16 units) of text view
+    /// `text` are on screen: the part on their first line, in the
+    /// window's content as [`Native::bounds`] (`None`: not on screen, or
+    /// the platform cannot say). A press there goes to the span they are
+    /// (a nested text that takes presses), as the platform finds it.
+    fn text_bounds(&self, text: NodeId, start: u32, end: u32) -> Option<Bounds<Points>> {
+        let _ = (text, start, end);
+        None
+    }
     /// The size of the window's content, in points.
     fn viewport(&self) -> Size<Points>;
     /// A press (a click, a tap) at `at`.
@@ -872,11 +1012,17 @@ impl Tester {
     }
 }
 
-/// Whether `at` is inside `bounds` clear of its edges: of the outer tenth
-/// of each side, 48 points at most.
-fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
-    let margin_x = (bounds.size.width.0 * 0.1).min(48.0);
-    let margin_y = (bounds.size.height.0 * 0.1).min(48.0);
+/// Whether `at` is inside `bounds` clear of its edges along the axis a
+/// scroll view moves it (`horizontal`): of the outer tenth of each side,
+/// 48 points at most. Across that axis only inside: scrolling cannot move
+/// it there (a button at a row's end).
+fn well_inside(bounds: &Bounds<Points>, at: Point<Points>, horizontal: bool) -> bool {
+    let margin = |length: f32| (length * 0.1).min(48.0);
+    let (margin_x, margin_y) = if horizontal {
+        (margin(bounds.size.width.0), 0.0)
+    } else {
+        (0.0, margin(bounds.size.height.0))
+    };
     let (x0, y0) = (bounds.origin.x.0 + margin_x, bounds.origin.y.0 + margin_y);
     let (x1, y1) = (
         bounds.origin.x.0 + bounds.size.width.0 - margin_x,
@@ -889,12 +1035,18 @@ fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
     native: Box<dyn Native>,
+    /// The window's size the scene was told last.
+    viewport: Mutex<Option<Size<Points>>>,
 }
 
 impl Agent {
     /// An agent on the app `scene` sees, acting through `native`.
     pub fn new(scene: std::sync::Arc<dyn Scene>, native: Box<dyn Native>) -> Agent {
-        Agent { scene, native }
+        Agent {
+            scene,
+            native,
+            viewport: Mutex::new(None),
+        }
     }
 
     /// Takes `step`; blocks until it is done and the app is quiet.
@@ -908,6 +1060,11 @@ impl Agent {
     fn run(&self, step: TestStep) -> Result<serde_json::Value, String> {
         use serde_json::Value;
         let done = |r: Result<(), String>| r.map(|()| Value::Null);
+        // What is on screen depends on the window: the scene knows it before
+        // it answers.
+        if !matches!(step, TestStep::Scene { .. }) {
+            self.sync_viewport()?;
+        }
         match step {
             TestStep::Ready { timeout_ms } => done(self.ready(Duration::from_millis(timeout_ms))),
             TestStep::Press { selector } => done(self.press(&selector)),
@@ -934,6 +1091,9 @@ impl Agent {
             TestStep::Wait { ms } => {
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
+            }
+            TestStep::Clock { change } => {
+                done(self.scene.move_clock(change).and_then(|()| self.settled()))
             }
             TestStep::WaitFor {
                 selector,
@@ -986,6 +1146,17 @@ impl Agent {
         }
     }
 
+    /// Tells the scene the window's size when it changed.
+    fn sync_viewport(&self) -> Result<(), String> {
+        let size = self.native.viewport();
+        let mut told = self.viewport.lock().unwrap_or_else(|e| e.into_inner());
+        if *told != Some(size) {
+            self.scene.set_viewport(size)?;
+            *told = Some(size);
+        }
+        Ok(())
+    }
+
     /// Answers an agent elsewhere with this one's scene and platform.
     fn scene_query(&self, query: SceneQuery) -> Result<serde_json::Value, String> {
         use serde_json::{Value, to_value};
@@ -1011,6 +1182,11 @@ impl Agent {
             SceneQuery::MenuClosed => scene.menu_closed().map(|()| Value::Null),
             SceneQuery::Clipboard => scene.clipboard().map(Value::from),
             SceneQuery::Storage => scene.storage().and_then(|e| json(to_value(e))),
+            SceneQuery::SetViewport { width, height } => scene
+                .set_viewport(Size::new(Points(width), Points(height)))
+                .map(|()| Value::Null),
+            SceneQuery::Span { id } => scene.span(id).and_then(|s| json(to_value(s))),
+            SceneQuery::Clock { change } => scene.move_clock(change).map(|()| Value::Null),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
                     [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]
@@ -1057,7 +1233,11 @@ impl Agent {
                 "`{selector}` matches {n} {what}s: say which (`{selector} >> nth=0`), or look inside \
                  a view around it (`id:list >> {selector}`)"
             )),
-            Pick::Disabled => Err(format!("`{selector}` is disabled; {}", self.on_screen())),
+            Pick::Disabled => Err(format!(
+                "`{selector}` {}; {}",
+                crate::screen::disabled(what),
+                self.on_screen()
+            )),
         }
     }
 
@@ -1073,7 +1253,24 @@ impl Agent {
         self.settled()?;
         let picked = self.scene.pick(selector, target)?;
         let id = self.picked(picked, selector, what)?;
-        Ok((id, self.scroll_into_view(id, selector)?))
+        let Some((text, start, end)) = self.scene.span(id)? else {
+            return Ok((id, self.scroll_into_view(id, selector)?));
+        };
+        // A span of a text: its text view comes into view, then the finger
+        // goes on its characters.
+        self.scroll_into_view(text, selector)?;
+        let at = self
+            .native
+            .text_bounds(text, start, end)
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "`{selector}` is a span of a text, and this platform does not say where its \
+                     characters are; {}",
+                    self.on_screen()
+                )
+            })?;
+        Ok((id, at.center()))
     }
 
     /// The middle of view `id` on screen, scrolled into view first when it
@@ -1093,11 +1290,7 @@ impl Agent {
 
     /// [`Agent::scroll_into_view`]'s gestures: the view's middle, and
     /// whether a gesture moved anything.
-    fn bring_into_view(
-        &self,
-        id: NodeId,
-        selector: &str,
-    ) -> Result<(Point<Points>, bool), String> {
+    fn bring_into_view(&self, id: NodeId, selector: &str) -> Result<(Point<Points>, bool), String> {
         let not_on_screen = || {
             format!(
                 "`{selector}` is not on screen (it has no native view); {}",
@@ -1135,13 +1328,12 @@ impl Agent {
             // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
                 let b = self.native.bounds(scroller)?;
-                (!well_inside(&b, at)).then_some((scroller, horizontal, b))
+                (!well_inside(&b, at, horizontal)).then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
-                (!well_inside(&window, at))
-                    .then(|| scrollers.last())
-                    .flatten()
-                    .and_then(|&(s, h)| Some((s, h, self.native.bounds(s)?)))
+                let &(s, h) = scrollers.last()?;
+                (!well_inside(&window, at, h)).then_some(())?;
+                Some((s, h, self.native.bounds(s)?))
             });
             let Some((_, horizontal, scroller)) = hiding else {
                 if window.contains(&at) {

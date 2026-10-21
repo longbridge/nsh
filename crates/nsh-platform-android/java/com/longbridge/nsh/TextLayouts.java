@@ -296,13 +296,13 @@ final class TextLayouts {
             }
         }
         if (background != null) s.setSpan(background, backgroundStart, backgroundEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        // Attachments (offset, width, height in dp): placeholders of their
-        // size on the baseline.
-        for (int i = 0; i + 2 < attachments.length; i += 3) {
+        // Attachments (offset, width, height in dp, vertical alignment):
+        // placeholders of their size, placed in their line.
+        for (int i = 0; i + 3 < attachments.length; i += 4) {
             int at = (int) attachments[i];
             if (at < 0 || at >= text.length()) continue;
-            s.setSpan(new Attachment(Math.round(attachments[i + 1] * density), Math.round(attachments[i + 2] * density)),
-                    at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            s.setSpan(new Attachment(Math.round(attachments[i + 1] * density), Math.round(attachments[i + 2] * density),
+                    (int) attachments[i + 3]), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         // `encode` packs the writing direction and the layout direction in.
         int writing = (align >> 4) & 3;
@@ -454,28 +454,56 @@ final class TextLayouts {
             // Right to left, the placeholder extends left of its offset.
             if (l.isRtlCharAt(at)) x -= a.width;
             out[i * 2] = x / density;
-            out[i * 2 + 1] = (l.getLineBaseline(line) - a.height) / density;
+            out[i * 2 + 1] = (l.getLineBaseline(line) - a.ascent) / density;
         }
         return out;
     }
 
-    /** An attachment's placeholder: its size, all above the baseline; draws nothing. */
+    /**
+     * An attachment's placeholder: its size, placed in its line by its
+     * `verticalAlign` (as `TextAttachment::ascent` in nsh-core places it, with
+     * the run's font metrics); the line grows to hold it. Draws nothing.
+     */
     static final class Attachment extends android.text.style.ReplacementSpan {
-        final int width, height;
+        /** `verticalAlign`: on the baseline, at the font's top, at its bottom, in the middle. */
+        static final int BASELINE = 0, TEXT_TOP = 1, TEXT_BOTTOM = 2, MIDDLE = 3;
+        final int width, height, align;
+        /** How far its top is above the baseline (px; negative: below), set by {@link #getSize}. */
+        int ascent;
 
-        Attachment(int width, int height) {
+        Attachment(int width, int height, int align) {
             this.width = width;
             this.height = height;
+            this.align = align;
+            this.ascent = height;
         }
 
         @Override
         public int getSize(Paint paint, CharSequence text, int start, int end, Paint.FontMetricsInt fm) {
+            if (align != BASELINE) {
+                // The font around it, unrounded (as the other platforms read it).
+                Paint.FontMetrics font = paint.getFontMetrics();
+                switch (align) {
+                    case TEXT_TOP:
+                        ascent = Math.round(-font.ascent);
+                        break;
+                    case TEXT_BOTTOM:
+                        ascent = Math.round(height - font.descent);
+                        break;
+                    default: {
+                        android.graphics.Rect x = new android.graphics.Rect();
+                        paint.getTextBounds("x", 0, 1, x);
+                        ascent = Math.round((height - x.top) / 2f);
+                        break;
+                    }
+                }
+            }
             if (fm != null) {
                 Paint.FontMetricsInt own = paint.getFontMetricsInt();
-                fm.ascent = Math.min(own.ascent, -height);
+                fm.ascent = Math.min(own.ascent, -Math.max(0, ascent));
                 fm.top = Math.min(own.top, fm.ascent);
-                fm.descent = own.descent;
-                fm.bottom = own.bottom;
+                fm.descent = Math.max(own.descent, height - ascent);
+                fm.bottom = Math.max(own.bottom, fm.descent);
                 fm.leading = own.leading;
             }
             return width;

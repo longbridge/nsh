@@ -30,7 +30,7 @@
 //! `blurRadius` is a GSK blur at draw time, in points; the image is drawn
 //! enlarged under a clip to its own rectangle so the blur's edges stay
 //! opaque. `tintColor` draws the color through the image's alpha.
-//! `defaultSource` shows until the image arrives (and stays on error); an
+//! The `placeholder` shows until the image arrives (and stays on error); an
 //! image that had to load then fades in over `fadeDuration` (default 0, as
 //! iOS).
 

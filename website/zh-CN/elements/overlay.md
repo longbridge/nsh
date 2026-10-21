@@ -83,7 +83,7 @@ function MoreButton() {
 
 有 `anchor` 时，NSH 把它放在锚点旁边：
 
-- `anchor` 是一个视图（一个 `ref`），或根视图坐标系中的一个点 `{ x, y }`，即触摸的 `pageX` / `pageY`（显示在指针位置的菜单）。
+- `anchor` 是一个视图（一个 `ref`），或根视图坐标系中的一个 `Point`（`{ x, y }`），即触摸的 `pageX` / `pageY`（显示在指针位置的菜单）。
 - `placement` 是它所在的一侧：`"top"`、`"bottom"`（默认）、`"left"` 或 `"right"`。这一侧放不下而另一侧放得下时，它会去另一侧；两侧都放不下时，它会去空间更大的一侧。
 - `align` 决定它沿这一侧如何对齐：`"start"`、`"center"`（默认）或 `"end"`。在锚点上方和下方时，start 和 end 跟随布局方向：start 是左边缘，在从右到左的布局中是右边缘。
 - `offset` 是锚点与浮层之间的间距；`margin` 是它与安全区边缘保持的距离，它始终位于安全区之内：放不下时会沿所在一侧滑动。
@@ -95,7 +95,7 @@ function MoreButton() {
   anchor={anchor}
   onPosition={(e) => {
     side.set(e.placement); // "top" when it flipped
-    maxHeight.set(e.availableHeight);
+    maxHeight.set(e.available.height);
   }}
 />
 ```
@@ -133,9 +133,9 @@ function MoreButton() {
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onPressOutside` | `.on_press_outside(\|point\| ..)` | 一次按压在它、它的锚点以及它内部的浮层之外按下（`pageX`、`pageY`）。 |
+| `onPressOutside` | `.on_press_outside(\|point\| ..)` | 一次按压在它、它的锚点以及它内部的浮层之外按下（`pagePosition`，一个 `Point`）。 |
 | `onCancel` | `.on_cancel(\|\| ..)` | Escape 或 Android 返回键，在它是监听这些按键的最上层浮层时。 |
-| `onPosition` | `.on_position(\|position\| ..)` | NSH 放置了它：`placement`（它所在的一侧）、在根视图中的 `x`、`y`、`width`、`height`，以及 `availableWidth` / `availableHeight`（这一侧的可用空间）。 |
+| `onPosition` | `.on_position(\|position\| ..)` | NSH 放置了它：`placement`（它所在的一侧）、在根视图中的 `bounds`，以及 `available`（一个 `Size`：这一侧的可用空间）。 |
 
 <a id="platform-notes"></a>
 
