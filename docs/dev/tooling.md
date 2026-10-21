@@ -481,13 +481,14 @@ otherwise, so scripts and CI never wait for an answer.
   `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
   that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native
   entry (`cargo run`) and headless tests of its Rust root.
-- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "native"`,
-  a README and the crate `native/` (`Cargo.toml`, `src/lib.rs`: a component, a module function and a class;
-  `templates/mixed/`), a small form of `examples/rust-exports`.
+- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "."`
+  (no `"root"`: `App.tsx` stays the entry), a README and the crate at the app's root, as `rust`'s (`Cargo.toml`,
+  `src/lib.rs`: a component, a module function and a class; no `src/main.rs`; `templates/mixed/`), a small form of
+  `examples/rust-exports`. The bundler follows `App.tsx`'s imports, `nsh test` skips `target/` and the Rust watcher
+  takes the `.rs` files and `Cargo.toml` beside the TSX, so the two share the directory.
 
-The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crates' packages are
-`nsh-app-<slug>` (`rust`) and `nsh-app-<slug>-native` (`mixed`), and `src/main.rs` uses the first one's crate
-identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
+The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crate's package is
+`nsh-app-<slug>` (`rust` and `mixed`), and `src/main.rs` uses its crate identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
 `--nsh-source <dir>` (with `rust` or `mixed`; with `ts` it is an error) writes path dependencies on that checkout's
 crates instead of crates.io's at the CLI's version; the generated host workspaces take nsh's crates from the same
 place, so the app and its hosts share the same core and registry types.

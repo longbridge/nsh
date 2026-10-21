@@ -352,7 +352,7 @@ pub(crate) fn of(entry: &Path) -> anyhow::Result<Option<RustApp>> {
 /// (`#[native_module("…")]`, [`specifier_of`]) would make two sets one
 /// import cannot tell apart.
 fn crates(dir: &Path, rust: &serde_json::Value) -> anyhow::Result<Vec<AppCrate>> {
-    const WHAT: &str = "nsh.json: \"rust\" is the path of the app's crate (\"native\") or a list of them (\"native/charts\", \"native/storage\")";
+    const WHAT: &str = "nsh.json: \"rust\" is the path of the app's crate (\".\", \"native\") or a list of them (\"native/charts\", \"native/storage\")";
     let paths: Vec<&str> = match rust {
         serde_json::Value::String(path) => vec![path],
         serde_json::Value::Array(paths) if !paths.is_empty() => paths

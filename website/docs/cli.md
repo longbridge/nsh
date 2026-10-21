@@ -63,7 +63,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 |---|---|
 | `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run` and `nsh package` mount the root with no QuickJS on every target (`nsh test` opens it for TypeScript tests), the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
 | `ts` | A TSX app: `App.tsx`, its test `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
-| `mixed` | A TSX app with a Rust crate of its own: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "native"`, `.gitignore`, `.nsh/types`, a README, and the crate in `native/`, whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. |
+| `mixed` | A TSX app with a Rust crate of its own at its root: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "."`, `.gitignore`, `.nsh/types`, a README, and the crate beside `App.tsx` (`Cargo.toml`, `src/lib.rs`), whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. With no `"root"`, `App.tsx` is the entry. |
 
 | Flag | Description |
 |---|---|

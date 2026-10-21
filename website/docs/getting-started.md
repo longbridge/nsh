@@ -66,7 +66,8 @@ a new directory.
 
 For both, the display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes
 `com.example.<name>`: change it in `nsh.json` before you ship. `nsh init my-app --template mixed` creates a TSX app
-with a Rust crate in `native/` whose component, module and class `App.tsx` imports ([Building with Rust](./rust.md)).
+that is also a Rust crate (`Cargo.toml` and `src/lib.rs` beside `App.tsx`), whose component, module and class
+`App.tsx` imports ([Building with Rust](./rust.md)).
 
 ### The root component
 

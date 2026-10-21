@@ -2,7 +2,7 @@ import { mount, signal, Text } from "nsh";
 import { SafeAreaView } from "nsh/base";
 import { Badge, Counter, Format } from "__SPECIFIER__";
 
-// Its count lives in Rust (`native/src/lib.rs`).
+// Its count lives in Rust (`src/lib.rs`).
 const counter = new Counter();
 
 function App() {

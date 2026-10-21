@@ -61,7 +61,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 |---|---|
 | `rust` | 用 Rust 编写的应用：一个 Cargo 项目（`Cargo.toml`、包含根组件的 `src/lib.rs`、供 `cargo run` 使用的 `src/main.rs`），设置了 `"rust": "."` 和 `"root": "App"` 的 `nsh.json`、`.gitignore` 和 README（其中也说明了之后如何添加 TSX 入口）。`nsh run` 和 `nsh package` 在所有目标（包括浏览器）上挂载根组件，不使用 QuickJS（`nsh test` 为 TypeScript 测试打开它）（见[用 Rust 开发](./rust.md)）；`cargo run` 直接在 macOS、Windows 或 Linux 上启动它。 |
 | `ts` | TSX 应用：`App.tsx`、它的测试 `App.test.tsx`（`nsh test`）、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
-| `mixed` | 带有自己 Rust crate 的 TSX 应用：`App.tsx`、`tsconfig.json`、设置了 `"rust": "native"` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及 `native/` 中的 crate，它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。 |
+| `mixed` | 根目录即一个 Rust crate 的 TSX 应用：`App.tsx`、`tsconfig.json`、设置了 `"rust": "."` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及与 `App.tsx` 并列的 crate（`Cargo.toml`、`src/lib.rs`），它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。没有 `"root"`，入口就是 `App.tsx`。 |
 
 | 参数 | 说明 |
 |---|---|

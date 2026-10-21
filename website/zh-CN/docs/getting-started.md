@@ -60,7 +60,7 @@ TSX 应用是一个或多个带入口的 `.tsx` 文件：它是 `nsh run` 运行
 已存在的文件会被保留，所以你可以在已经有部分文件的目录里运行它；Rust 应用则在一个新目录中创建。
 
 两者的显示名称都默认是目录名；可以用 `--name "My App"` 指定其他名称。id 会是 `com.example.<name>`：发布前请在 `nsh.json`
-中修改。`nsh init my-app --template mixed` 创建一个 TSX 应用，`native/` 中带一个 Rust crate，`App.tsx` 导入它的组件、模块和类（[用 Rust 开发](./rust.md)）。
+中修改。`nsh init my-app --template mixed` 创建一个同时也是 Rust crate 的 TSX 应用（`Cargo.toml` 和 `src/lib.rs` 与 `App.tsx` 并列），`App.tsx` 导入它的组件、模块和类（[用 Rust 开发](./rust.md)）。
 
 ### 根组件
 

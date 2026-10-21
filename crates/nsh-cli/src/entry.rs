@@ -66,6 +66,10 @@ mod tests {
             dir.join("Other.tsx")
         );
         assert!(resolve(&dir.join("missing.tsx")).is_err());
+        // A TSX app whose directory is its crate (`nsh init --template
+        // mixed`): with no `"root"`, its `App.tsx`.
+        std::fs::write(dir.join("nsh.json"), r#"{ "rust": "." }"#).unwrap();
+        assert_eq!(resolve(&dir).unwrap(), dir.join("app.tsx"));
         // A Rust app: its `nsh.json`, unless the TSX entry is named.
         std::fs::write(dir.join("nsh.json"), r#"{ "rust": ".", "root": "App" }"#).unwrap();
         assert_eq!(resolve(&dir).unwrap(), dir.join("nsh.json"));
