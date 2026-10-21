@@ -555,7 +555,8 @@ as the scroll bar is; a shift set from `scroll` events would trail it by a frame
 range of travel, with no breadth across it, so it takes no pointer events, at `z-index: 5` above the other cells. The
 list isolates that z-index (`nsh-sticky`): as natively, a sticky cell never covers the views after the list, such as a
 bar the content scrolls under. The next sticky cell's track starts where it pushes the cell out, the last one's ends
-with the content, and a cell no longer sticky goes back to its frame.
+with the content, and a cell no longer sticky goes back to its frame. Entering a track cancels any frame
+animation already running on the cell, so its content coordinates cannot override the sticky insets.
 
 ## Platform services
 

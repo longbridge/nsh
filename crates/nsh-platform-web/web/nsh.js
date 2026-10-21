@@ -2005,6 +2005,10 @@ class Player {
       const cell = this.view(cellId);
       if (!cell) continue;
       if (!cell._track) {
+        // A frame update earlier in this batch may have started an animation
+        // in content coordinates. Sticky positioning uses insets in the track.
+        cell._frameAnimation?.cancel();
+        cell._frameAnimation = null;
         const track = document.createElement("div");
         track.className = "nsh-track";
         track._list = el;
