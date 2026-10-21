@@ -271,6 +271,7 @@ impl AppView {
         self.surface.stop();
     }
 
+    #[cfg(feature = "dev")]
     pub(crate) fn surface(&self) -> &Rc<Surface> {
         &self.surface
     }

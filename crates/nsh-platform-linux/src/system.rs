@@ -1189,7 +1189,7 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
 
 /// Tests: the system's color scheme is now dark (or light), as the
 /// portal would say.
-#[cfg(any(feature = "dev", test))]
+#[cfg(feature = "dev")]
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SYSTEM.with(|s| s.borrow_mut().portal_dark = Some(dark));
     system_changed();

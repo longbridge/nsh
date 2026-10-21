@@ -1427,7 +1427,7 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
 
 /// Characters typed into the focused field (the test agent's), as the
 /// input handler's `replace_text_in_range` brings them.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", all(test, feature = "shot")))]
 pub(crate) fn char_input(surface: &Rc<Surface>, text: &str) {
     ime::replace_text_in_range(surface, None, text);
 }
