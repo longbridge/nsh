@@ -69,13 +69,13 @@ go elsewhere under these rules rather than into them.
   boolean (a constant, a payload's field) is `is<Adjective>` / `has<Noun>`, as `gpui-kit`'s readers (`isAvailable`,
   `isViewable`, `isBuffering`); props never are (*guides*: builders `disabled(bool)`, readers `is_disabled()`).
 - **Begin and end**: a phase is `<act>Start` / `<act>End` (`gpui-kit`'s `on_start` / `on_end`: `onPanStart`,
-  `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. Hovering is one callback with the state,
-  `onHover(hovered)` (GPUI `on_hover(&bool)`); a drag over a view is `Enter` / `Leave` (`onFileDragEnter`, the DOM's
-  `dragenter`), never `In` / `Out`.
+  `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. A pointer over a view is `onHoverIn` /
+  `onHoverOut` (decided by the user, 2026-10-21), a file drag over it `onFileDragEnter` / `onFileDragLeave` (the DOM's
+  `dragenter`).
 - **Intent over geometry**: an event says what the app should do when the act has a name (`onLoadMore`, as
   `gpui-component`'s `ListDelegate::load_more`), not where the user got to (`onEndReached`).
 - **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
-  (`onChange(text)`, `onOpenChange(open, reason)`, `onHover(hovered)`); every other event passes one object, even with one field
+  (`onChange(text)`, `onOpenChange(open, reason)`); every other event passes one object, even with one field
   (`onLinkPress({ url })`, `onSubmit({ text })`), so a later field is an addition. An event with nothing to report
   passes nothing; it can gain an object later. Never several positional arguments outside the frozen modules.
 - **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
@@ -84,8 +84,8 @@ go elsewhere under these rules rather than into them.
   follows the changes: no listeners or `Promise` getters beside it. `addEventListener` is only the DOM's, on the web
   globals.
 - **Addresses**: what shows a resource takes it as `src` (`Image`, `Video`, `WebView`, `TextViewImage.src`, as HTML's
-  `img`, `video` and `iframe`), any other address is a `url` (`ImageAsset.url`, `onFileDrop({ urls })`,
-  `WebViewNavigation.url`); never `uri`, `source` or `{ uri }` wrappers. Inline content has its own prop (`html`,
+  `img`, `video` and `iframe`), any other address is a `url` (`ImageAsset.url`, `WebViewNavigation.url`); never
+  `source` or `{ uri }` wrappers. `onFileDrop({ uris })` keeps its name (decided by the user, 2026-10-21). Inline content has its own prop (`html`,
   with `baseUrl`, as `srcdoc`).
 - **Environment**: a value that can change while the app runs is an accessor (`colorScheme()`, `pixelRatio()`,
   `layoutDirection()`), with `set<Value>(value | "system")` when the app may override it (`setColorScheme`,
@@ -137,7 +137,8 @@ Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecat
 in `api/closed.txt` as made before the first compatible release (`compatibility.md` rule 7). The frozen RN-shaped
 modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
 (*guides*: "Preserve established public names when changing them would cause needless churn"): `pagingEnabled`,
-`javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`; and
+`javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`,
+`onHoverIn` / `onHoverOut` and `onFileDrop({ uris })`; and
 `StatusBar`'s `hidden`, as the user decided on 2026-10-20 after UIKit's `prefersStatusBarHidden`.
 
 | Now | New | Rule | Notes |
@@ -151,9 +152,7 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | List `onEndReached`, `onEndReachedThreshold` | `onLoadMore`, `loadMoreThreshold` | Intent over geometry | `ListDelegate::load_more`, `load_more_threshold`; also in `ListItemsProps` |
 | List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
 | **Every element** | | | |
-| `onHoverIn`, `onHoverOut` | `onHover(hovered: boolean)` | Begin and end | GPUI `on_hover(&bool)`; `onHoverMove` stays |
 | Input `caretHidden` | `caretVisible` (default `true`) | States | `gpui-component` `cursor_visible`; replaces the 2026-10-20 row keeping it |
-| `onFileDrop({ uris })` | `onFileDrop({ urls })` | Addresses | `file:` URLs |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
