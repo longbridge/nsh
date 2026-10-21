@@ -1,15 +1,15 @@
 ---
-title: nsh/list
+title: List
 description: List, a virtualized and recycling list on a native scroll view, with all its props, events and ref methods.
-order: 4
+order: 2.1
 ---
 
-# nsh/list
+# List
 
-`nsh/list` exports `List`: a virtualized list on a native scroll view. Only the rows near the viewport exist, and their cells are reused as you scroll. Which rows exist, where they are, columns, sticky headers and viewability are all computed natively, so scrolling a list of ten thousand items runs no JS except the row bindings that change when a cell is reused.
+`nsh` exports `List`: a virtualized list on a native scroll view. Only the rows near the viewport exist, and their cells are reused as you scroll. Which rows exist, where they are, columns, sticky headers and viewability are all computed natively, so scrolling a list of ten thousand items runs no JS except the row bindings that change when a cell is reused.
 
 ```ts
-import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh/list";
+import { List, type ListProps, type ViewToken, type ViewabilityConfig } from "nsh";
 ```
 
 See [Lists](../docs/lists.md) for the guide and [`<List>`](../elements/list.md) for the element's props.
@@ -21,8 +21,7 @@ function List<T>(props: ListProps<T>): YNode;
 ```
 
 ```tsx
-import { mount, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { List, mount, Text, View } from "nsh";
 
 const contacts = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), name: `Contact ${i}` }));
 
@@ -152,8 +151,7 @@ A list's `ref` receives a `YNode` with these methods:
 | `scrollTo({ x?, y?, animated? })` | Scrolls to an offset. |
 
 ```tsx
-import { Text, View, type YNode } from "nsh";
-import { List } from "nsh/list";
+import { List, Text, View, type YNode } from "nsh";
 
 let list!: YNode;
 

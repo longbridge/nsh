@@ -1,6 +1,6 @@
 ---
 title: Android
-description: Run NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
+description: Run Rust and TSX NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
 order: 12
 group: platforms
 ---
@@ -9,8 +9,9 @@ group: platforms
 
 NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
 and `x86_64`. An existing app embeds modules in an `NshView` and loads signed packages it downloads, under limits and
-capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms. On Android, `Platform.OS` is
-`"android"` and the `android={{…}}` props apply.
+capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms, for
+apps written in Rust and in TSX. On Android, `os()` is `Os::Android` (`Platform.OS` is `"android"` in TSX) and TSX's
+`android={{…}}` props apply.
 
 ## Requirements
 
@@ -20,19 +21,27 @@ capabilities it sets: that is the main use. Running and packaging whole apps wor
 
 ## Running an app
 
+A Rust app runs from its directory, a TSX app names its entry:
+
 ```sh
-nsh run my-app --target android
+nsh run --target android               # a Rust app
+nsh run App.tsx --target android       # a TSX app
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). `nsh` installs a
-development host APK (rebuilt only when the runtime changes) and forwards the dev server's port with `adb reverse`, so
-it works over USB without a shared network; the app updates as you save, with logs in the terminal.
+Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). For a Rust app, `nsh`
+builds the app's `libnsh.so` with your crate, installs the APK and starts it; a change to the crate's Rust code builds
+and installs it again. For a TSX app, it installs a development host APK (rebuilt only when the runtime changes) and
+forwards the dev server's port with `adb reverse`, so it works over USB without a shared network; the app updates as
+you save, with logs in the terminal.
 
 ## Packaging
 
 ```sh
-nsh package my-app --target android --run     # out/<Name>.apk, installed and launched
+nsh package --target android --run             # a Rust app: .nsh/out/<Name>.apk, installed and launched
+nsh package App.tsx --target android --run     # a TSX app
 ```
+
+A Rust app's APK holds its own `libnsh.so`, built with your crate, whose activity mounts the root.
 
 The APK is built with the SDK's build tools, without Gradle, and signed with the debug key unless you pass a release
 keystore. Signing for release and icons: [Packaging](./packaging.md#android).
@@ -40,7 +49,8 @@ keystore. Signing for release and icons: [Packaging](./packaging.md#android).
 ## Embedding in an Android app
 
 An existing Android app can show NSH apps inside its own UI. The runtime ships as an Android library, `nsh.aar`: you
-create a `com.longbridge.nsh.NshView` (a `FrameLayout`), add it to any layout and load an app into it. The NSH app
+create a `com.longbridge.nsh.NshView` (a `FrameLayout`), add it to any layout and load a TSX app or a signed package
+into it. An app written in Rust ships on Android as the APK `nsh package --target android` builds. The NSH app
 renders with ordinary Android views next to your own.
 
 Each `NshView` is one independent engine with its own JS VM; there are no global singletons, so several can run at
@@ -75,7 +85,7 @@ dependencies {
 
 ## Ship a bundle with the app
 
-Build the NSH app into the app's assets:
+Build the TSX app into the app's assets:
 
 ```sh
 nsh build App.tsx --release --out app/src/main/assets/nsh
@@ -270,7 +280,7 @@ config of the app may override it). The release `nsh.aar` does not.
   or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
-  `SafeAreaView` / `safeAreaInsets()`.
+  `SafeAreaView` / `safeAreaInsets()` (`safe_area()` in Rust).
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
   again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
 
@@ -285,6 +295,7 @@ config of the app may override it). The release `nsh.aar` does not.
 
 ## See also
 
+- [Building with Rust](./rust.md)
 - [Embedding in iOS apps](./embedding-ios.md)
 - [Native components](./native-components.md)
 - [Signed packages](./signed-packages.md)

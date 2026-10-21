@@ -5,7 +5,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_base::theme;
+use nsh_base::{dialog, theme};
 use nsh_core::ui::{Registry, prelude::*};
 
 /// The module the tests' apps import these components from.
@@ -415,7 +415,7 @@ pub(crate) struct SheetProps {
 pub(crate) fn Sheet(props: SheetProps) -> impl IntoElement {
     let children = props.children;
     view().child(If::new(props.open, move || {
-        modal().animation(ModalAnimation::None).child(
+        dialog().animation(ModalAnimation::None).child(
             view()
                 .absolute()
                 .left_0()

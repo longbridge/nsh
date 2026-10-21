@@ -42,8 +42,6 @@
 //! Input accessory views (`inputAccessoryViewID`) belong over a software
 //! keyboard and have no meaning on the desktop: they are never shown.
 
-mod model;
-
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -54,6 +52,7 @@ use nsh_core::{
     TextAlign,
     geometry::{Point, Size},
     tailwind::state,
+    text_edit::{self as model, Composition, Model, Unit, key_of, pasted, utf16_to_byte},
 };
 use rustc_hash::FxHashMap;
 use windows::{
@@ -100,7 +99,6 @@ use windows::{
 };
 use windows_numerics::Vector2;
 
-use self::model::{Composition, Model, Unit, key_of, pasted, utf16_to_byte};
 use crate::{
     input::{KeyEvent, Modifiers, PointerKind},
     render::{DrawCx, rect_f},
@@ -1007,11 +1005,7 @@ fn read_composition(himc: HIMC) -> Composition {
     let attrs = composition_attributes(himc);
     let target =
         target_clause(&attrs).map(|(s, e)| (utf16_to_byte(&text, s), utf16_to_byte(&text, e)));
-    Composition {
-        text,
-        cursor,
-        target,
-    }
+    Composition::new(text, cursor, target)
 }
 
 /// The clause being converted (UTF-16 range) from composition attributes.

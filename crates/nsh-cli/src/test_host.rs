@@ -27,20 +27,25 @@ const CONNECT: Duration = Duration::from_secs(60);
 
 /// Starts the apps tests open on `target`'s host; `browser` is the one
 /// `--target web` runs them in (else the one found on this machine).
-pub(crate) fn starter(target: Target, browser: Option<&Path>) -> anyhow::Result<StartHost> {
+pub(crate) fn starter(
+    target: Target,
+    browser: Option<&Path>,
+    work: &Path,
+) -> anyhow::Result<StartHost> {
     if browser.is_some() && target != Target::Web {
         anyhow::bail!("--browser goes with --target web");
     }
-    if target == Target::Web {
-        return crate::test_web::starter(browser);
+    match target {
+        Target::Web => return crate::test_web::starter(browser),
+        Target::Ios => return crate::test_ios::starter(work),
+        Target::Android => return crate::test_android::starter(work),
+        _ => {}
     }
     if !matches!(
         target,
         Target::Macos | Target::Linux | Target::Windows | Target::Gpui
     ) {
-        anyhow::bail!(
-            "nsh test --target runs on macos, linux, windows, gpui and web for now (the mobile platforms' test agents follow)"
-        );
+        anyhow::bail!("nsh test --target takes macos, linux, windows, gpui, web, ios or android");
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::file(target.platform(), false)?;
@@ -95,12 +100,7 @@ fn start(
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
     // in every test, as headless runs' does.
-    let data = std::env::temp_dir().join(format!(
-        "nsh-test-{}-{}",
-        std::process::id(),
-        NEXT_APP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&data).map_err(|e| format!("cannot make {}: {e}", data.display()))?;
+    let data = fresh_data_dir()?;
     let mut command = Command::new(host);
     command
         .env("NSH_DEV_APP_DIR", dir)
@@ -192,6 +192,18 @@ pub(crate) fn serve(entry: &Path) -> Result<DevServer, String> {
         built.ui_sets,
     );
     Ok(server)
+}
+
+/// A data directory of its own for an app a test opens: what the app
+/// keeps (its storage) starts empty in every test, as headless runs' does.
+pub(crate) fn fresh_data_dir() -> Result<std::path::PathBuf, String> {
+    let data = std::env::temp_dir().join(format!(
+        "nsh-test-{}-{}",
+        std::process::id(),
+        NEXT_APP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&data).map_err(|e| format!("cannot make {}: {e}", data.display()))?;
+    Ok(data)
 }
 
 /// The apps started so far: each gets a data directory of its own.

@@ -12,7 +12,8 @@
 //! result as design tokens ([`Tokens`]), which Tailwind classes name
 //! (`bg-primary`, `rounded-(--radius)`), and reads `nsh.json`'s theme with
 //! [`tokens_of`], which `nsh/base`'s registry brings. What draws with them
-//! is the app's: no component of `nsh/base` reads them.
+//! is the app's: no component of `nsh/base` reads them, but for the
+//! default reading typography of `TextView`, whose colors are these tokens.
 
 use std::sync::{Arc, LazyLock};
 
@@ -117,6 +118,18 @@ semantic! {
     primary_foreground = "primary.foreground",
     /// Focus rings.
     ring = "ring",
+    /// Links in text.
+    link = "link",
+    /// Information: notes, hints.
+    info = "info.background",
+    /// Success: done, tips.
+    success = "success.background",
+    /// Warnings.
+    warning = "warning.background",
+    /// The background of selected text.
+    selection = "selection.background",
+    /// The header rows of tables and lists.
+    list_head = "list.head.background",
 }
 
 impl Theme {

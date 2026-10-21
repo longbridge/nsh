@@ -240,6 +240,30 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Tiling window managers ignore the host's `--window-size`** (the window's default size): a test's screenshots have the size
   the window got, and so does `app.setViewport` (it resizes on X11 and floating windows).
 
+## iOS, the test agent's input
+
+- **Touches made in process do not move the first responder**: a made-up tap on a text field leaves the keyboard's
+  focus where it was, so the agent focuses the input a tap lands in itself (as KIF does).
+- **`UITextField.insertText:` skips the field's delegate** (no `shouldChangeCharactersInRange`, so no `maxLength`):
+  typing goes through `UIKeyboardImpl`, which asks it, as the software keyboard does. Keys typed faster than a
+  controlled input's value comes back lose characters, so keys come at a typist's pace.
+- **A finger at rest still reports its position**: a drag that stops sending events before it lifts keeps its last
+  velocity and flings. A drag whose path leaves the scroll view moves it much further than the finger.
+- **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
+  scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
+  it only stops it.
+- **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
+  pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
+
+## Android, the test agent's input
+
+- **Ctrl+key presses are shortcuts first**: the window's input stage (`ViewRootImpl`) offers them as
+  `dispatchKeyShortcutEvent` before the key event, and a `TextView` selects all only there; key events dispatched
+  to the views directly skip it, so the agent offers them as shortcuts itself.
+- **A view's motion is not observable as one value**: scroll views fling with a private `OverScroller` and views
+  animate with `ViewPropertyAnimator`s, so the agent compares a signature of every shown view's place, offset,
+  scroll position and opacity between looks.
+
 ## macOS, AppKit
 
 - **Closing a window synchronously calls its delegate**, which stops the surface and clears its mounter.

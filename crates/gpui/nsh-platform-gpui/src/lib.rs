@@ -44,10 +44,10 @@ mod keys;
 mod mount;
 mod native;
 mod navigation;
-mod net;
 mod render;
 mod rt;
 mod scroll;
+mod selection_area;
 mod stats;
 mod surface;
 #[cfg(feature = "dev")]

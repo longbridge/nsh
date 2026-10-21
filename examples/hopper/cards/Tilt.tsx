@@ -1,5 +1,4 @@
-import { computed, signal, Text, View } from "nsh";
-import { Canvas } from "nsh/canvas";
+import { Canvas, computed, signal, Text, View } from "nsh";
 import { gimbalCommands, HOP_LENGTH, tiltAt, tiltLimit } from "../store";
 import { color, mono } from "../theme";
 import { Caption, Panel, track } from "../ui";

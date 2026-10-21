@@ -2,14 +2,15 @@
 //! platform's part played by an animation graph here: a composite goes out
 //! as one operation and runs step after step in the graph (no engine round
 //! trips between steps); its end, its stop and its reset come back to the
-//! component's task, and so does a value read where it moves.
+//! component's task, and so does a value read where it moves. A drag let go
+//! moves on natively with its velocity.
 
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size,
-    animation::{AnimationOp, AnimationProp, Finished, Graph},
+    animation::{AnimationOp, AnimationProp, Driver, Finished, Graph},
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
@@ -257,4 +258,102 @@ fn rust_composites_run_natively_and_report_their_ends() {
     let at = p.x();
     assert!(at > 0.0, "{at}");
     assert!(p.shows(&format!("at {at:.2}")), "{:?}", p.texts);
+}
+
+/// A card dragged natively: let go, it springs home with the drag's
+/// velocity the first time and glides with it after.
+#[component]
+fn Thrown() -> impl IntoElement {
+    let (x, y) = (animated_value(0.0), animated_value(0.0));
+    let releases = stored(0_u32);
+    view()
+        .flex_1()
+        .bind_translate_x(&x)
+        .bind_translate_y(&y)
+        .pan_values(Some(&x), Some(&y))
+        .on_pan_end(move |e: &PanEvent| {
+            let first = releases.with(|r| {
+                *r += 1;
+                *r == 1
+            });
+            let spring = |velocity| Spring {
+                velocity: Some(velocity),
+                ..Spring::default()
+            };
+            if first {
+                let _ = x.spring(0.0, spring(e.velocity_x));
+                let _ = y.spring(0.0, spring(e.velocity_y));
+            } else {
+                let _ = x.decay(Some(e.velocity_x), 0.998);
+                let _ = y.decay(Some(e.velocity_y), 0.998);
+            }
+        })
+}
+
+#[test]
+fn a_release_moves_on_with_the_drags_velocity() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let engine = Engine::start(
+        EngineConfig::new(Root::of::<Thrown>()),
+        || ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .unwrap();
+    // The drivers of the animations started after the batches that came.
+    let started = |rx: &Receiver<MountBatch>| {
+        let mut drivers = Vec::new();
+        let mut card = None;
+        while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
+            for item in batch.items {
+                match item {
+                    MountItem::Animation(AnimationOp::Start { driver, .. }) => drivers.push(driver),
+                    MountItem::Events { id, events } if events.contains(EventKind::PanEnd) => {
+                        card = Some(id)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (drivers, card)
+    };
+    let (_, card) = started(&rx);
+    let card = card.expect("the card hears its drags end");
+    let release = || {
+        engine.control().dispatch_event(
+            card,
+            EventKind::PanEnd,
+            EventPayload::Pan {
+                translation: nsh_core::geometry::point(px(80.0), px(20.0)),
+                velocity_x: 300.0,
+                velocity_y: -400.0,
+                value_x: Some(px(80.0)),
+                value_y: Some(px(20.0)),
+            },
+        )
+    };
+    release();
+    let spring = |velocity| {
+        let Spring {
+            stiffness,
+            damping,
+            mass,
+            ..
+        } = Spring::default();
+        Driver::Spring {
+            to: 0.0,
+            stiffness,
+            damping,
+            mass,
+            velocity: Some(velocity),
+        }
+    };
+    assert_eq!(started(&rx).0, [spring(300.0), spring(-400.0)]);
+    release();
+    let decay = |velocity| Driver::Decay {
+        velocity: Some(velocity),
+        deceleration: 0.998,
+        clamp: None,
+        bounce: 0.0,
+    };
+    assert_eq!(started(&rx).0, [decay(300.0), decay(-400.0)]);
 }

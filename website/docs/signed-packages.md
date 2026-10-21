@@ -11,6 +11,11 @@ A signed package (`.nshpkg`) is how a host app runs NSH code it did not ship wit
 or a third-party mini app. `nsh publish` builds the app and signs it; the host app verifies the signature, the
 certificate chain, revocations and the build number before anything runs.
 
+A package holds TSX. The host app's Rust code (an app written in Rust, its crates' components, modules and classes)
+is part of the host app itself and is delivered with it, and the TSX of a package imports it by its specifiers, as
+any TSX does ([Building with Rust](./rust.md#extending-a-rust-app-with-tsx)). So a Rust app keeps its core in Rust and
+delivers the screens that change often as signed packages.
+
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/signed-packages-light.svg" alt="Signed packages: an offline root key certifies a release key for app ids; nsh publish signs the package with it; on the device, NshTrust trusts only the root and the newest revocation list, checks the certificate, revocations, signature, app id, file hashes and build number, then runs the module or refuses it.">
 <img class="diagram diagram-dark" src="/diagrams/signed-packages-dark.svg" alt="Signed packages: an offline root key certifies a release key for app ids; nsh publish signs the package with it; on the device, NshTrust trusts only the root and the newest revocation list, checks the certificate, revocations, signature, app id, file hashes and build number, then runs the module or refuses it.">
@@ -85,7 +90,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 ```
 
 ```text
-out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
+.nsh/out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
 ```
 
 `nsh publish` builds the app in release mode and signs it. The app id, name, version and build come from `nsh.json`
@@ -95,7 +100,7 @@ next to the entry, overridden by the flags:
 |---|---|
 | `--key <file>` | The release key's secret key. |
 | `--cert <file>` | Its certificate. |
-| `-o, --out <file>` | The package to write. Default `out/<id>-<build>.nshpkg`. |
+| `-o, --out <file>` | The package to write. Default `.nsh/out/<id>-<build>.nshpkg`. |
 | `--id <id>` | App id, such as `com.example.app`. |
 | `--app-version <version>` | Version, such as `1.2.0`. |
 | `--build <n>` | Build number. Required (here or in `nsh.json`); it must grow with every release. |
@@ -162,7 +167,7 @@ What was left out is logged when the package loads.
 `nsh verify` checks a package exactly as a host app trusting the given roots would:
 
 ```sh
-nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub
+nsh verify .nsh/out/com.example.counter-2.nshpkg --root keys/root.pub
 ```
 
 ```text
@@ -225,6 +230,21 @@ record it later, once the new package proved healthy (`verify_package`, then `ac
 Verification hashes the whole package and extracts its assets (once per package, under the trust store's directory),
 so it runs off the UI thread; running the result happens on it.
 
+**GPUI (Rust)**, where the host app can also accept a package only once it proved healthy:
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
+
 **iOS (Swift)**:
 
 ```swift
@@ -246,21 +266,6 @@ NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws N
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
 
-**GPUI (Rust)**, where the host app can also accept a package only once it proved healthy:
-
-```rust
-use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
-
-let mut trust = TrustStore::open(state_dir)?;
-trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
-
-// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
-let package = verify_package(&trust, &bytes, &packages_dir)?;
-view.read(cx).run_package(&package);
-// Later, once its first frame showed and no fatal error came for a while:
-accept_package(&mut trust, &package)?;
-```
-
 Until a package is accepted, the build accepted before still verifies, so a host app whose new package fails can go
 back to the one it ran (`AppView::on_error`'s fatal errors, or a crash before accepting, are the signals). Builds
 older than the accepted one stay refused, and a package revoked in between is not accepted. `load_package` verifies and
@@ -269,7 +274,7 @@ accepts at once, as `openPackage` does on iOS and Android.
 The package's declared [capabilities](./sandbox-and-capabilities.md) travel with it: a package can do only what it
 declares, and only what the host app grants on top.
 
-Full API: [Embedding in iOS apps](./embedding-ios.md#signed-packages),
+Full API: [GPUI](./gpui.md#embedding-in-a-gpui-app), [Embedding in iOS apps](./embedding-ios.md#signed-packages),
 [Embedding in Android apps](./embedding-android.md#signed-packages).
 
 ## Errors from published packages
@@ -290,14 +295,14 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-
 ```
 
 ```text
-✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+✓ wrote the source map to .nsh/out/com.example.counter-2.nshpkg.map (6.1 KB)
 ```
 
 Devices then report the bundle's positions (`at n (bundle.js:1:80)`). Keep the map with the package it belongs to,
 and map what the host app reported with `nsh symbolicate`:
 
 ```sh
-nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+nsh symbolicate .nsh/out/com.example.counter-2.nshpkg.map report.txt
 ```
 
 ```text
@@ -318,14 +323,14 @@ installed the host in the simulator (`--target ios`):
 
 ```sh
 xcrun simctl launch booted com.longbridge.nsh.host \
-  --package "$PWD/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
+  --package "$PWD/.nsh/out/com.example.counter-2.nshpkg" --root "$PWD/keys/root.pub"
 ```
 
 On Android, the development host (`DevActivity`, installed by `nsh run --target android`) takes the extras `package`
 (a path on the device) and `root` (base64 public keys, comma-separated):
 
 ```sh
-adb push out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
+adb push .nsh/out/com.example.counter-2.nshpkg /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg
 adb shell am start -S -n com.longbridge.nsh.host/com.longbridge.nsh.DevActivity \
   --es package /sdcard/Android/data/com.longbridge.nsh.host/files/app.nshpkg \
   --es root "$(cat keys/root.pub)"

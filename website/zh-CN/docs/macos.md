@@ -1,6 +1,6 @@
 ---
 title: macOS
-description: 在 macOS 上用 AppKit 窗口运行 NSH 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 上的差异。
+description: 在 macOS 上用 AppKit 窗口运行 Rust 和 TSX 编写的 NSH 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 上的差异。
 order: 13
 group: platforms
 ---
@@ -8,22 +8,35 @@ group: platforms
 # macOS
 
 NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
-渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 macOS 上，
-`Platform.OS` 为 `"macos"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
-菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
+渲染器、Taffy 布局以及原生模块与 iOS、Android 上完全相同，因此同一个应用可以在所有平台上运行。在 macOS 上，
+`os()` 为 `Os::MacOs`（TSX 中 `Platform.OS` 为 `"macos"`），并会应用 TSX 的 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
+菜单栏和右键菜单在 Rust 中由 `nsh_core::ui::desktop` 提供（[桌面标题栏](./rust.md#桌面标题栏)），在 TSX 中由
+[`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可调整大小的窗口，覆盖窗口的对话框和菜单栏。
 
 ## 环境要求
 
 - 运行应用的机器需要 **macOS 14** 及以上。
-- Xcode 命令行工具（`xcode-select --install`），用于从源码构建 NSH 的 macOS 运行时以及打包应用（`codesign`、`sips`）。
-  在 Mac 上用 `cargo xtask dist` 制作的发行版把运行时放在 `runtime/macos/` 中。
+- Xcode 命令行工具（`xcode-select --install`），用于构建 Rust 应用的 runner、从源码构建 NSH 的 macOS 运行时以及打包应用
+  （`codesign`、`sips`）。在 Mac 上用 `cargo xtask dist` 制作的发行版把 TSX 应用的运行时放在 `runtime/macos/` 中。
 
 ## 运行应用
 
+Rust 应用在自己的目录里运行：
+
 ```sh
-nsh run my-app --target macos
+nsh run --target macos         # Mac 上的默认目标
+```
+
+`nsh` 用你的 crate 构建一个 debug runner，在窗口中打开应用，并在终端显示它的日志（`log::info!` 等）；修改 crate 的 Rust 代码会重新构建
+runner 并重启应用。`cargo run` 从 crate 的 `src/main.rs`（由 `nsh init --template rust` 生成）启动同一个根组件：用
+`AppSource::Rust` 调用 [`run_app`](#嵌入-mac-应用)。
+
+TSX 应用需写明入口：
+
+```sh
+nsh run App.tsx --target macos
 ```
 
 应用会在一个 AppKit 窗口（默认 1200×800）中打开，和其他目标一样支持热重载、在终端显示日志并提供错误浮层；Cmd+R 重新加载最新构建。
@@ -35,12 +48,14 @@ nsh build my-app --release -o build
 dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # 源码仓库中：target/debug/nsh-macos-host
 ```
 
-`--window-size` 是窗口的初始尺寸；窗口可以调整大小。
+`--window-size` 是窗口的初始尺寸（TSX 应用）；窗口可以调整大小。
+
+`nsh test --target macos` 在 macOS 窗口中运行 TSX 应用的测试：测试打开的每个应用都有自己的窗口，步骤用系统的输入在选择器指向的视图上点击、输入和滚动（[测试](./testing-and-trace.md#在真实平台上运行)）。
 
 ### 性能监视器
 
-`--fps`（`nsh run my-app --target macos --fps`、宿主的 `--fps`、打包后应用的 `open -a MyApp --args --fps`，嵌入时用
-`AppOptions { fps: true, .. }` / `AppView::set_fps_monitor(true)`）会在应用右上角显示一个每秒刷新两次的面板：
+`--fps`（Rust 应用在 `run_app` 中用 `AppOptions { fps: true, .. }`，嵌入时用 `AppView::set_fps_monitor(true)`，
+以及 `nsh run App.tsx --target macos --fps`、宿主的 `--fps`、打包后 TSX 应用的 `open -a MyApp --args --fps`）会在应用右上角显示一个每秒刷新两次的面板：
 
 | 行 | 测量内容 |
 |---|---|
@@ -57,17 +72,18 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1
 ## 打包
 
 ```sh
-nsh package my-app --target macos [--run]
+nsh package --target macos [--run]           # Rust 应用，在它的目录里
+nsh package App.tsx --target macos [--run]   # TSX 应用
 ```
 
 会写出一个应用包：
 
 ```text
-out/<Name>.app/Contents/
+.nsh/out/<Name>.app/Contents/
   Info.plist
-  MacOS/<Name>               可执行文件（nsh 的发布版运行器）
-  Resources/nsh/bundle.nshc  编译后的应用
-  Resources/nsh/assets/…     应用导入的资源
+  MacOS/<Name>               可执行文件：Rust 应用是用它的 crate 构建的自有 runner；TSX 应用是 nsh 的发布版运行器
+  Resources/nsh/bundle.nshc  编译后的 TSX 应用
+  Resources/nsh/assets/…     应用导入的资源（也包括 Rust crate 的 `assets!()`）
   Resources/nsh/app.json     窗口标题和应用的外观
   Resources/AppIcon.icns     图标（nsh.json 指定了图标时，用 sips 转换）
 ```
@@ -77,38 +93,52 @@ out/<Name>.app/Contents/
 ## 嵌入 Mac 应用
 
 `nsh-platform-macos` crate（位于 NSH 仓库中）为 Rust 编写的 Mac 应用提供 `AppView`：一个作为 `NSView` 的 NSH 引擎。每个
-`AppView` 相互独立，可以同时运行多个。
+`AppView` 相互独立，可以同时运行多个。它运行一个 Rust 根组件，即你的 crate 的根组件：
 
 ```rust
 use std::rc::Rc;
 use nsh_platform_macos::{
-    objc2::MainThreadMarker, objc2_app_kit::NSWindow, AppOptions, AppView, AssetBase, Bundle,
+    objc2::MainThreadMarker, objc2_app_kit::NSWindow, set_ui_sets, AppOptions, AppView, Root,
 };
 
 fn show(window: &NSWindow) -> Rc<AppView> {
+    // 在第一个视图之前设置一次：应用导入的 UI 集合（NSH 的和你的 crate 的）。
+    set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
     let mtm = MainThreadMarker::new().expect("main thread");
-    let view = AppView::new(mtm, AppOptions {
-        asset_base: Some(AssetBase::Directory("app/assets".into())),
-        ..AppOptions::default()
-    });
+    let view = AppView::new(mtm, AppOptions::default());
     // 在加载之前注册原生组件
-    let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-    view.load(Bundle::source(code).into());
+    view.load(Root::of::<my_app::App>().into());
     window.setContentView(Some(&view.view()));
     // 窗口显示视图期间保留它；窗口关闭时调用 `stop`。
     view
 }
 ```
 
+`Root::tokens` 为根组件设置[主题](./rust.md#主题)（`nsh_base::Theme::from_json(json)?.into_tokens()`），`Root::app_id`
+设置保存其数据所用的 id。`nsh build` 写出的 TSX bundle 也加载到同一种视图中：
+
+```rust
+use nsh_platform_macos::{AppOptions, AppView, AssetBase, Bundle};
+
+let view = AppView::new(mtm, AppOptions {
+    asset_base: Some(AssetBase::Directory("app/assets".into())),
+    ..AppOptions::default()
+});
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(Bundle::source(code).into());
+```
+
 `AppView::load` 会替换正在运行的内容；`stop` 结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory`
 或 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }` 加载：字节码是受信任的输入，
-只能从你自己应用的文件中加载。如果应用只是一个 NSH 应用，`run_app(source, options)` 会在窗口中打开一个 `AppView`，带有标准菜单
+只能从你自己应用的文件中加载。如果应用只是一个 NSH 应用，`run_app(source, options)`（`AppSource::Rust(root)` 或 `AppSource::Bundle(bundle)`）会在窗口中打开一个 `AppView`，带有标准菜单
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-macos-上注册rust)。
+`set_ui_sets(sets)` 设置每个引擎提供的 UI 集合：NSH 的（`nsh_base::registry()`）和你的 crate 的（`my_app::registry()`，
+由 `#[native_module]` 生成），这样视图加载的 TSX 也能导入你的 Rust 组件和模块。
 
 默认情况下，关闭窗口或选择退出会停止引擎，并从 `run_app` 返回；调用方可以继续完成清理或重新启动可执行文件。
 
@@ -119,7 +149,7 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 
 ## macOS 上的差异
 
-运行环境是桌面环境：安全区和键盘高度为 0，`Platform.constants.interfaceIdiom` 为 `"desktop"`，`Platform.Version` 为 macOS 的版本号，
+运行环境是桌面环境：安全区和键盘高度为 0，`idiom()` 是桌面（`Platform.constants.interfaceIdiom` 为 `"desktop"`），`os_version()`（`Platform.Version`）为 macOS 的版本号，
 深色模式实时跟随系统外观。见[设备与环境](./device-and-environment.md)。
 
 输入是桌面输入：鼠标、触控板（带惯性的滚动、捏合和旋转）和键盘。`selectable` 文本通过拖动、双击和三击选择，用 Cmd+C 复制。

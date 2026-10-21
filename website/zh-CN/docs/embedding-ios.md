@@ -1,6 +1,6 @@
 ---
 title: iOS
-description: 在 iOS 上用 UIKit 视图运行 NSH 应用（模拟器或真机），打包成 .app 和 .ipa，并通过 NativeShell.xcframework 和 NshAppView 嵌入现有 iOS 应用。
+description: 在 iOS 上用 UIKit 视图运行 Rust 和 TSX 编写的 NSH 应用（模拟器或真机），打包成 .app 和 .ipa，并通过 AppView 或 NativeShell.xcframework 的 NshAppView 嵌入现有 iOS 应用。
 order: 11
 group: platforms
 ---
@@ -8,8 +8,9 @@ group: platforms
 # iOS
 
 NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和模拟器，要求 iOS 15.0 及以上。主要用途是嵌入：现有应用在
-`NshAppView` 中显示模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。也可以运行和打包完整应用，方式与其他平台相同。在 iOS
-上，`Platform.OS` 是 `"ios"`，`ios={{…}}` 属性生效。
+自己的视图中显示 NSH 应用，可以是它链接的 Rust 根组件，也可以是它加载的 TSX，包括它下载的签名包，并按自己设定的限制和能力运行它们。
+也可以运行和打包完整应用，方式与其他平台相同。在 iOS 上，`os()` 是 `Os::Ios`（TSX 中 `Platform.OS` 是 `"ios"`），TSX 的
+`ios={{…}}` 属性生效。
 
 ## 环境要求
 
@@ -18,36 +19,70 @@ NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和
 
 ## 运行应用
 
+Rust 应用在自己的目录里运行，TSX 应用写明入口：
+
 ```sh
-nsh run my-app --target ios
-nsh run my-app --target ios --device "iPhone 16 Pro"
+nsh run --target ios                                  # Rust 应用
+nsh run --target ios --device "iPhone 16 Pro"
+nsh run App.tsx --target ios                          # TSX 应用
 ```
 
-`nsh` 会使用已启动的模拟器，或者启动最新的 iPhone，把开发宿主安装进去，并在你保存时更新应用，日志显示在终端中。`--device`
+`nsh` 会使用已启动的模拟器，或者启动最新的 iPhone。对 Rust 应用，它用你的 crate 构建应用自己的 runner 并安装，在终端显示日志；
+修改 crate 的 Rust 代码会重新构建并重启应用。对 TSX 应用，它安装开发宿主，并在你保存时更新应用，日志显示在终端中。`--device`
 按名称或 UDID 选择模拟器。想要不用模拟器、更快的开发循环，在 Mac 上运行 `nsh run --target catalyst`，会在一个 iPhone 尺寸的
 [Mac Catalyst](./getting-started.md#mac-catalyst) 窗口中打开同一个 UIKit 后端。
 
 ## 打包
 
 ```sh
-nsh package my-app --target ios-simulator --run      # out/<Name>.app，安装到模拟器并启动
-nsh package my-app --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" --profile AppStore.mobileprovision
+nsh package --target ios-simulator --run      # .nsh/out/<Name>.app，安装到模拟器并启动
+nsh package --target ios --sign "Apple Distribution: Example Inc (ABCDE12345)" --profile AppStore.mobileprovision
 ```
+
+在 Rust 应用的目录里，应用是用你的 crate 构建的 iOS runner；TSX 应用需写明入口（`nsh package App.tsx --target ios-simulator --run`）。
 
 `--target ios` 为真机、TestFlight 或 App Store 生成签名的 `.ipa`。签名身份、描述文件和图标见[打包](./packaging.md#ios-真机)。
 
 ## 嵌入 iOS 应用
 
-现有的 iOS 应用可以在自己的界面中显示 NSH 应用。运行时以 `NativeShell.xcframework` 的形式提供，这是一个带 Swift
-模块的 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个应用即可。你的原生页面、导航和
-NSH 应用共处同一个 UIKit 视图层级。
+现有的 iOS 应用可以在自己的界面中显示 NSH 应用。带 Rust 代码的 iOS 应用链接你的 crate 和 `nsh-platform-ios` crate，在
+`AppView` 中显示你的根组件（[嵌入 Rust 应用](#嵌入-rust-应用)）。Swift 应用链接 `NativeShell.xcframework`，这是一个带 Swift
+模块的 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个 TSX 应用或签名包即可。
+你的原生页面、导航和 NSH 应用共处同一个 UIKit 视图层级。
 
-每个 `NshAppView` 都是一个独立的引擎，拥有自己的 JS VM；没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
+每个视图都是一个独立的引擎；没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
 <img class="diagram diagram-dark" src="/diagrams/host-app-dark.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
 </div>
+
+## 嵌入 Rust 应用
+
+`nsh_platform_ios::AppView` 是用 Rust 构建的 iOS 应用里一个以 `UIView` 形式存在的引擎：它挂载你的 crate 的根组件，不涉及
+JavaScript 虚拟机。
+
+```rust
+use nsh_platform_ios::{set_ui_sets, AppView, Root, SurfaceOptions};
+use objc2::MainThreadMarker;
+use objc2_ui_kit::UIView;
+
+fn show(container: &UIView) -> AppView {
+    // 在第一个视图之前设置一次：应用导入的 UI 集合（NSH 的和你的 crate 的）。
+    set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
+    let mtm = MainThreadMarker::new().expect("main thread");
+    let app = AppView::new(mtm, container.bounds(), SurfaceOptions::default());
+    container.addSubview(app.view());
+    app.run(Root::of::<my_app::App>());
+    // 保留 AppView：丢弃它就会停止应用。
+    app
+}
+```
+
+视图随父视图调整大小。`AppView::run` 替换正在运行的内容；`AppView::load` 则运行 TSX bundle（`Bundle::source`，或对应用包内的
+`bundle.nshc` 使用 `unsafe { Bundle::bytecode(bytes) }`）。`SurfaceOptions` 包含限制、授予的能力、数据目录和原生组件，与下文
+`NshAppView` 的成员对应；`AppView::set_locale`、`set_font_scale` 和 `set_error_handler` 对应 `locale`、`fontScale` 和 `onError`。
+`nsh package --target ios` 会为你构建这种应用，并挂载好根组件。
 
 ## 获取 framework
 
@@ -87,7 +122,7 @@ cargo xtask ios-embed --dynamic
 
 ## 随应用附带 bundle
 
-把 NSH 应用构建到一个文件夹里，再以名为 `nsh` 的文件夹引用（folder reference）把它加入应用资源：
+Swift 应用以 bundle 的形式附带 TSX 应用。把 NSH 应用构建到一个文件夹里，再以名为 `nsh` 的文件夹引用（folder reference）把它加入应用资源：
 
 ```sh
 nsh build App.tsx --release --out MyApp/nsh
@@ -124,7 +159,7 @@ final class EmbedController: UIViewController {
             app.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        guard let url = Bundle.main.url(forResource: "bundle", withExtension: "qbc", subdirectory: "nsh") else { return }
+        guard let url = Bundle.main.url(forResource: "bundle", withExtension: "nshc", subdirectory: "nsh") else { return }
         do {
             try app.loadBundle(at: url)
         } catch {
@@ -274,12 +309,13 @@ try app.loadBundle(at: bundledURL)
 - **线程。** `NshAppView` 隔离在 main actor 上。`NshTrust`、`NshPackage` 和 `NshComponentContext` 是线程安全的。JS
   引擎运行在自己的线程上；主线程从不等待它。
 - **状态栏。** 嵌入应用的页面和对话框（`statusBar`）会改变 `NshAppView.preferredStatusBarStyle` 等属性的返回值；宿主视图控制器必须像上面的示例那样转发它们。
-- **安全区域。** 应用照常使用 [`nsh/base`](../modules/nsh-base.md#safeareaview) 中的 `SafeAreaView` 或
-  `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
+- **安全区域。** 应用照常在 Rust 中使用 `safe_area()`，在 TSX 中使用 [`nsh/base`](../modules/nsh-base.md#safeareaview) 中的
+  `SafeAreaView` 或 `safeAreaInsets()`。放在你自己标题栏下方的 `NshAppView` 拿到的是适用于它自身的 insets，而不是整个窗口的。
 - **Mac Catalyst。** 同一个 framework 也可用于 Catalyst 应用。
 
 ## 另请参阅
 
+- [用 Rust 开发](./rust.md)
 - [嵌入 Android 应用](./embedding-android.md)
 - [原生组件](./native-components.md)
 - [签名包](./signed-packages.md)

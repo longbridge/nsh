@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: Embed NSH apps in a GPUI or GPUI Kit app with AppView, drawn by GPUI on macOS, Windows and Linux, try them in the GPUI development host, and what the GPUI backend does differently.
+description: Embed Rust and TSX NSH apps in a GPUI or GPUI Kit app with AppView, drawn by GPUI on macOS, Windows and Linux, try TSX apps in the GPUI development host, and what the GPUI backend does differently.
 order: 15.5
 group: platforms
 ---
@@ -9,12 +9,13 @@ group: platforms
 
 The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
 GPUI Kit is built on, on macOS, Windows and Linux alike. It is the backend for embedding in GPUI and GPUI Kit apps: an
-`AppView` is a GPUI view, so a GPUI or GPUI Kit app shows NSH modules anywhere in its own element tree. Standalone apps
+`AppView` is a GPUI view, so a GPUI or GPUI Kit app shows NSH apps, a Rust root of its own or TSX it loads, anywhere
+in its own element tree. Standalone apps
 run and are packaged with each desktop's own backend: [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32)
 and [Linux](./linux.md) (GTK). The core, the reactive graph, the renderer,
-Taffy layout and the native modules are the same as on every other platform, so one bundle runs
-everywhere. `Platform.OS` is the OS it runs on (`"macos"`, `"windows"` or `"linux"`) and the `desktop={{…}}` props
-apply.
+Taffy layout and the native modules are the same as on every other platform, so one app runs
+everywhere. `os()` (`Platform.OS` in TSX) is the OS it runs on (macOS, Windows or Linux) and TSX's `desktop={{…}}`
+props apply.
 
 Every element and module of the [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32) and
 [Linux](./linux.md) (GTK) backends is there; where GPUI draws something its own way, [Differences](#differences)
@@ -35,7 +36,7 @@ says how.
 ## Requirements
 
 - macOS, Windows or Linux, with a GPU GPUI can draw with (Metal on macOS, DirectX on Windows, Vulkan on Linux).
-- On macOS, building the runtime from a checkout uses Xcode's Metal Toolchain (`xcodebuild -downloadComponent
+- On macOS, building your GPUI app or the runtime from a checkout uses Xcode's Metal Toolchain (`xcodebuild -downloadComponent
   MetalToolchain`), which compiles GPUI's shaders ahead of time. On a Mac without it, `nsh run` builds
   the runtime with GPUI's `runtime-shaders` feature and say so: the shaders are compiled when the app starts (a fraction
   of a second the first time, cached by macOS after that).
@@ -52,11 +53,17 @@ says how.
 
 ## Running an app
 
+A Rust app runs inside your GPUI app: embed its root with `AppView` ([Embedding in a GPUI app](#embedding-in-a-gpui-app))
+and `cargo run` the GPUI app; your crate and the app are one Cargo build. On its own, a Rust app runs on this OS's own
+backend (`nsh run --target macos`, `windows` or `linux`).
+
+A TSX app runs in the GPUI development host:
+
 ```sh
-nsh run my-app --target gpui
+nsh run App.tsx --target gpui
 ```
 
-Opens the app in a GPUI window (1200×800 by default), as a GPUI app that embeds it shows it, with hot reload, logs in
+It opens the app in a GPUI window (1200×800 by default), as a GPUI app that embeds it shows it, with hot reload, logs in
 the terminal and the error overlay as on the other targets. The development host (`nsh-gpui-host`) runs in place on
 every OS, with no app bundle around it. In a checkout, `nsh run` builds it first; the distribution ships it in `runtime/gpui/`. The host also runs a built
 bundle on its own:
@@ -68,12 +75,9 @@ dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --window-size 390
 
 `--window-size` is the window's size in points (`<width>x<height>`).
 
-The host runs TSX and JavaScript apps. A Rust app (`nsh.json` `"root"`) runs on this OS's own backend (`--target
-macos`, `windows` or `linux`), and a GPUI app embeds its root with `AppView` (`App::Rust`).
-
 ## Packaging
 
-A GPUI app ships NSH inside its own executable: it embeds the app's bundle with `AppView` ([Embedding in a GPUI
+A GPUI app ships NSH inside its own executable: it embeds the app's Rust root or TSX bundle with `AppView` ([Embedding in a GPUI
 app](#embedding-in-a-gpui-app)) and is built and distributed as the GPUI app it is. A standalone NSH app is packaged
 with this OS's own target: [`--target macos`](./macos.md#packaging), [`--target windows`](./windows.md#packaging) or
 [`--target linux`](./linux.md#packaging) ([Packaging](./packaging.md)).
@@ -87,23 +91,35 @@ on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debia
 
 The `nsh-platform-gpui` crate (from the NSH repository) gives a Rust GPUI app `AppView`: one NSH engine as a GPUI
 view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent; several
-can run at once.
+can run at once. It runs a Rust root, the root component of your crate:
 
 ```rust
-use gpui::{AppContext, Application, WindowOptions};
-use nsh_platform_gpui::{App, AppOptions, AppView, Bundle};
+use gpui::{AppContext, WindowOptions};
+use nsh_platform_gpui::{set_ui_sets, App, AppOptions, AppView, Root};
 
+// Once, before the first view: the UI sets the apps import (NSH's and your crate's).
+set_ui_sets(vec![nsh_base::registry(), my_app::registry()]);
 gpui_platform::application().run(|cx| {
     cx.open_window(WindowOptions::default(), |window, cx| {
         cx.new(|cx| {
             let view = AppView::new(AppOptions::default(), window, cx);
-            let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
-            view.load(App::Js(Bundle::source(code)));
+            view.load(App::Rust(Root::of::<my_app::App>()));
             view
         })
     })
     .unwrap();
 });
+```
+
+`Root::tokens` gives the root its [theme](./rust.md#theme) (`nsh_base::Theme::from_json(json)?.into_tokens()`,
+`Theme` is re-exported here) and `Root::app_id` the id its data is kept under. A TSX bundle that `nsh build` wrote
+loads into the same view:
+
+```rust
+use nsh_platform_gpui::{App, Bundle};
+
+let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
+view.load(App::Js(Bundle::source(code)));
 ```
 
 Put the entity in your element tree like any other view (a GPUI Kit `Root`, a panel, a dock). `AppView::load`
@@ -130,8 +146,8 @@ so only load it from your own app's files.
   follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 - `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
   from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.
-- `set_ui_sets(sets)` sets the UI sets every engine serves, for apps with Rust components of their own ([Rust](./rust.md)), and gives
-  your app's own sets: an app reaches the functions and classes of one by name with
+- `set_ui_sets(sets)` sets the UI sets every engine serves: NSH's (`nsh_base::registry()`) and your crates'
+  (`my_app::registry()`, which `#[native_module]` makes; [Building with Rust](./rust.md)), and gives your app's own sets: an app reaches the functions and classes of one by name with
   [`nativeModule`](../modules/nsh-native.md#nativemodule) and is built with the stock `nsh build`. The repository's
   `examples/embed-gpui` keeps a trading desk in the host this way, which two embedded order tickets and the host's
   own widgets share.
@@ -166,6 +182,7 @@ For comparison, each native backend's own list: [macOS](./macos.md#what-differs-
 
 ## See also
 
+- [Building with Rust](./rust.md): the crate whose root a GPUI app embeds
 - [CLI](./cli.md): `nsh run --target gpui`
 - [Packaging](./packaging.md): standalone apps, with each OS's own target
 - [Platform overview](./platforms.md)

@@ -1,18 +1,26 @@
 ---
 title: 开发服务器与调试
-description: 用 nsh run 和 nsh dev 运行应用，连接模拟器、Android 模拟器和真机，并使用模块热替换、日志、错误浮层和经 source map 映射的调用栈。
+description: 用 nsh run 和 nsh dev 运行 Rust 和 TSX 应用，连接模拟器、Android 模拟器和真机，并使用重新构建、模块热替换、日志、错误浮层和经 source map 映射的调用栈。
 order: 60
 group: tools
 ---
 
 # 开发服务器与调试
 
-开发期间，NSH 会在每次保存时构建应用，并推送给所有已连接的宿主，宿主就地更新。有两条命令可以做到这一点：
+开发期间，NSH 会在每次保存时构建应用。Rust 应用（`nsh.json` 写明 `"root"`）构建成它自己的 runner，由 `nsh run` 启动；修改它的
+crate 会重新构建并重启应用。TSX 应用则推送给所有已连接的宿主，宿主就地更新。有两条命令可以做到这一点：
 
-- `nsh run` 启动开发服务器，**并且** 启动一个开发宿主：Mac Catalyst 或 AppKit 窗口、Linux 上的 GTK 窗口、Windows 上的 Win32 窗口、iOS 模拟器，或者 Android 真机或模拟器。
-- `nsh dev --server-only` 启动开发服务器，宿主由你自己启动：集成了开发版 SDK 的自有应用、网络中的某台设备，或同时连接多个宿主。
+- `nsh run` 构建应用 **并且** 启动它：Mac Catalyst 或 AppKit 窗口、Linux 上的 GTK 窗口、Windows 上的 Win32 窗口、iOS 模拟器、
+  Android 真机或模拟器，或者一个浏览器页面。对 TSX，它还会启动开发服务器，由开发宿主连接。
+- `nsh dev --server-only` 为 TSX 启动开发服务器，宿主由你自己启动：集成了开发版 SDK 的自有应用、网络中的某台设备，或同时连接多个宿主。
 
 ```sh
+# Rust 应用，在它的目录里
+nsh run                             # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
+nsh run --target ios                # iOS simulator
+nsh run --target android            # Android device or emulator
+
+# TSX 应用
 nsh run App.tsx                     # AppKit window (macOS); GTK window (Linux); Win32 window (Windows)
 nsh run App.tsx --target macos      # AppKit window (macOS)
 nsh run App.tsx --target ios        # iOS simulator
@@ -26,11 +34,11 @@ nsh dev App.tsx --server-only       # server only
 
 | 参数 | 说明 |
 |---|---|
-| `--target <catalyst \| ios \| android \| macos \| linux \| windows>` | 在哪里运行。macOS 上默认 `macos`（AppKit 窗口），Linux 上默认 `linux`，Windows 上默认 `windows`。 |
+| `--target <catalyst \| ios \| android \| macos \| linux \| windows \| gpui \| web>` | 在哪里运行。macOS 上默认 `macos`（AppKit 窗口），Linux 上默认 `linux`，Windows 上默认 `windows`。Rust 应用可以在除 `gpui` 之外的所有目标上运行；GPUI 应用嵌入它的根组件（[GPUI](./gpui.md)）。 |
 | `--device <name or UDID>` | 要使用的 iOS 模拟器。默认：已启动的那个，否则使用最新的 iPhone（会自动为你启动）。 |
 | `--port <port>` | 开发服务器端口。默认 8790；如被占用，则使用下一个空闲端口。 |
-| `--release` | 提供 release 构建（压缩、无调试信息、无热更新）。 |
-| `--trace` | 在宿主上记录每次提交（commit）的耗时。 |
+| `--release` | 提供 TSX 的 release 构建（压缩、无调试信息、无热更新）。 |
+| `--trace` | 在宿主上记录每次提交（commit）的耗时（TSX 应用）。 |
 
 各个目标的行为：
 
@@ -47,7 +55,9 @@ nsh dev App.tsx --server-only       # server only
   自己的 `127.0.0.1` 能访问到服务器，然后启动它。支持模拟器或 USB 连接的设备。需要 Android SDK（`ANDROID_HOME`）。
   `nsh run` 结束时（包括 Ctrl-C）会停止宿主并移除这条端口转发，因此该宿主不会接入下一次会话。
 
-这些宿主是通用的：服务器发来的任何 NSH 应用都能运行，因此不需要为每个应用单独构建宿主。
+对 Rust 应用，每个目标都运行应用自己的、用它的 crate 构建的 runner：桌面平台直接运行 debug 构建，输出显示在终端；iOS 和 Android
+安装它的一个包。对 TSX，这些宿主是通用的：服务器发来的任何 NSH 应用都能运行，因此不需要为每个应用单独构建宿主（带有自己 crate
+的应用会得到用它构建的宿主）。
 
 ## `nsh dev`
 
@@ -80,9 +90,15 @@ UI 集，例如为另一个应用构建的开发宿主）不会收到构建：�
 > 局域网中的设备需要能通过开发服务器端口访问你的电脑：处于同一网络，中间没有防火墙。资源（图片、字体）也通过同一端口
 > 以普通 HTTP 提供。
 
+## 修改 Rust 代码
+
+Rust 需要编译：修改应用的 crate，或它以路径依赖的 crate，会重新构建应用，`nsh run` 用新代码重启它。应用的状态从头开始；需要在重启后
+保留的内容请放进[存储](../modules/nsh-storage.md)。构建错误会打印在终端，下一次能编译通过的保存会重新运行。在同时有 Rust 和 TSX
+的应用中，修改 TSX 仍是热更新（见下文），修改 Rust 会重启应用。
+
 ## 模块热替换
 
-开发构建为每个源文件保留一个模块。保存时，NSH 重新构建，把各模块与上一次成功的构建比较，然后只发送包含变更模块的
+TSX 的开发构建为每个源文件保留一个模块。保存时，NSH 重新构建，把各模块与上一次成功的构建比较，然后只发送包含变更模块的
 **补丁**。宿主在远不到一毫秒的时间内就地应用补丁；从保存文件到看到变化大约需要 120 ms。
 
 对你的应用来说，会发生这些事：
@@ -98,7 +114,7 @@ UI 集，例如为另一个应用构建的开发宿主）不会收到构建：�
 
 在以下情况下，宿主会 **重新加载整个应用**，而不是打补丁：
 
-- 变更导入了正在运行的应用此前未导入过的 NSH 模块（例如第一次 `import … from "nsh/list"`）；
+- 变更导入了正在运行的应用此前未导入过的 NSH 模块（例如第一次 `import … from "nsh/animated"`）；
 - `nsh.json` 中应用的 `capabilities` 发生变化；
 - 宿主运行的不是补丁所基于的那个构建（它刚刚连接，或者上一次加载失败）；
 - 补丁无法应用。
@@ -112,7 +128,10 @@ UI 集，例如为另一个应用构建的开发宿主）不会收到构建：�
 
 ## 日志
 
-`console.log`、`console.info`、`console.debug`、`console.warn` 和 `console.error` 会以 target `js` 输出到原生日志。
+Rust 应用用 `log` crate 记录日志（`log::info!`、`log::warn!`、`log::error!`）：在桌面平台和 iOS 模拟器上，`nsh run` 把这些日志行和应用的
+输出一起显示在终端。
+
+在 TSX 中，`console.log`、`console.info`、`console.debug`、`console.warn` 和 `console.error` 会以 target `js` 输出到原生日志。
 宿主连接期间，它的日志行会转发到运行 `nsh run` / `nsh dev` 的终端：你的 `console.log` 原样输出（连接了多台设备时前面加上
 设备名），警告和错误写在设备名之后：
 
@@ -197,8 +216,8 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 - **应用保留了你以为会重置的旧状态**：热替换会刻意保留未变化组件的状态。用 Ctrl-C 后重新 `nsh run` 重启，或者修改入口
   模块。
 - **请求只在打包或嵌入的构建中失败**：检查应用的[能力](./sandbox-and-capabilities.md)；被拒绝时日志会写明需要添加的键。
-- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh test --trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
-  原生视图操作。
+- **某些操作很慢**：用 [`nsh test --trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个原生视图操作；
+  或者给 TSX 应用加上 `--trace` 运行。
 - **编辑器中出现类型错误**：`nsh run` 和 `nsh dev` 会保持 `.nsh/types` 为最新；参见[项目结构](./project-structure.md)。
 
 ## 另请参阅

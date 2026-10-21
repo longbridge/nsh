@@ -77,6 +77,8 @@ pub struct Screen {
     /// Clipboard reads to answer: the request, and whether it asks only if
     /// the clipboard holds text.
     clipboard_reads: Vec<(u32, bool)>,
+    /// The `Image.getSize` / `Image.prefetch` requests to answer.
+    image_infos: Vec<u32>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -106,6 +108,9 @@ struct View {
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
+    /// A selection area (`SelectionArea` of `nsh/base`): its texts share
+    /// one selection.
+    selection_area: bool,
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -208,6 +213,7 @@ impl Screen {
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
                 view.long_press_delay = props.long_press_delay;
+                view.selection_area = props.selection_area;
             }
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
@@ -272,10 +278,9 @@ impl Screen {
             Command::ReadClipboardFiles { .. } => {
                 self.unsupported.push("reading files from the clipboard");
             }
-            Command::ImageInfo { .. } => {
-                self.unsupported
-                    .push("an image's size (`Image.getSize`, `Image.prefetch`)");
-            }
+            // Headless runs load no images: the size is answered as a
+            // failed load (a `TextView` asks for its images' sizes).
+            Command::ImageInfo { id, .. } => self.image_infos.push(*id),
             Command::Back => self.back_asked = true,
             Command::Focus if self.input(id).is_some() => self.focused = Some(id),
             Command::Blur if id == ROOT || self.focused == Some(id) => self.focused = None,
@@ -451,6 +456,10 @@ impl Screen {
 
     /// What the app asked that only a real platform answers, since the
     /// last call.
+    pub(crate) fn take_image_infos(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.image_infos)
+    }
+
     pub(crate) fn take_unsupported(&mut self) -> Vec<&'static str> {
         std::mem::take(&mut self.unsupported)
     }
@@ -573,6 +582,29 @@ impl Screen {
                 Ok(!self.disabled_from(id, None)
                     && self.input(id).is_none_or(|i| i.config.editable))
             }
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// Whether the view `selector` names is in a selection area (it or a
+    /// view around it is one: `SelectionArea` of `nsh/base`, a selectable
+    /// `TextView`); an error when none or several match.
+    pub fn in_selection_area(&self, selector: &str) -> Result<bool, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [mut id] => loop {
+                let Some(view) = self.nodes.get(&id) else {
+                    return Ok(false);
+                };
+                if view.selection_area {
+                    return Ok(true);
+                }
+                match view.parent {
+                    Some(parent) => id = parent,
+                    None => return Ok(false),
+                }
+            },
             [] => Err(format!("no view matches `{selector}`")),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }

@@ -737,7 +737,7 @@ const RUNTIME_MODULES: &str = r#"import { mount, signal, Text } from "nsh";
 import { AccessibilityInfo } from "nsh/accessibility";
 import { Platform } from "nsh/device";
 import { Toast } from "nsh/android";
-import { Image } from "nsh/image";
+import { Image } from "nsh";
 
 const shown = signal("waiting");
 let note: unknown;

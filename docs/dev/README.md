@@ -12,6 +12,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [reactive-components.md](reactive-components.md) | Rust components on the shared reactive graph (run once, fine-grained bindings, no diff) |
 | [elements.md](elements.md) | Host elements and `nsh/base`'s components, touch, accessibility, the environment, why the main thread never waits for JS |
 | [text.md](text.md) | Text blocks, spans, inline attachments |
+| [text-view.md](text-view.md) | `TextView` (`nsh/base`): Markdown, HTML and documents shown with the primitives, streaming, parts, extensions |
 | [styles.md](styles.md) | Tailwind, effects, view styles, Android differences |
 | [geometry.md](geometry.md) | Units and geometry (`nsh_core::geometry`, as GPUI's): the types, the conversion boundaries, the `unit_types` check, the migration |
 | [scrolling-and-lists.md](scrolling-and-lists.md) | Scroll views, zooming, `List` |

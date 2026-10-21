@@ -31,7 +31,7 @@ struct App {
 
 /// The two benchmark screens, parameterized by the Button under test.
 const BUTTONS: &str = r#"import { type Component, Scroll, signal, Text, View } from "nsh";
-import { List } from "nsh/list";
+import { List } from "nsh";
 
 export interface BenchButtonProps {
   title: string;

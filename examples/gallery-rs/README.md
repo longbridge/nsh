@@ -43,9 +43,14 @@ Rust changes take effect on the next `cargo run`; `nsh run` rebuilds and restart
 
 ```sh
 cargo run -p gallery-native
-cargo test -p gallery-native
+./target/debug/nsh test examples/gallery-rs   # the app's tests, headless
+cargo test -p gallery-native                  # the crate's unit tests
 ```
 
-The headless tests exercise the gallery's Rust root, demo navigation, state changes and desktop layouts. The
-native entry is checked on Linux, macOS and Windows, including a dependency check for the Rust-only engine path.
-Create an independent Rust app with `nsh init my-app --template rust`, then `cd my-app` and `cargo run`.
+The app's tests are TypeScript, as a user takes the steps: the `*.test.tsx` files next to `nsh.json`, about a demo
+each, open the root (`open(".")`), press, type, scroll and go back, and check what shows, what storage keeps and
+what the app asks of the platform (`website/docs/testing-and-trace.md`). `nsh test` runs them in a headless runner
+it builds with the crate. What NSH itself does with the gallery's components (mount items, canvas operations, the
+responder, the animation graph) is tested in NSH's crates, with components of their own. The native entry is
+checked on Linux, macOS and Windows, including a dependency check for the Rust-only engine path. Create an
+independent Rust app with `nsh init my-app --template rust`, then `cd my-app` and `cargo run`.

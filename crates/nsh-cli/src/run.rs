@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::{dev::DevSession, runtime::Platform, ui};
 
 const APP_NAME: &str = "NshDev";
-const BUNDLE_ID: &str = "com.longbridge.nsh.host";
+pub(crate) const BUNDLE_ID: &str = "com.longbridge.nsh.host";
 
 /// Where `nsh dev` and `nsh run` run the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -568,69 +568,13 @@ fn run_android(
     work: &Path,
     trace: bool,
 ) -> anyhow::Result<()> {
-    use crate::android::{self, Apk, Signing};
+    use crate::android;
     let sdk = android::Sdk::find()?;
     let serial = android::device(&sdk)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, port, release, limits)?;
-    let runtime = crate::runtime::android(true)?;
-    let apk_path = work.join("android/NshDev.apk");
-    fs::create_dir_all(apk_path.parent().context("apk dir")?)?;
-    let stamp = work.join("android/runtime.stamp");
-    // Every app's development host is the same package: another app's run
-    // (an app with its own Rust crate has its own runtime) or another
-    // device replaces what this app installed. The device's install time
-    // tells whether the host there is still the one this app installed.
-    let installed = work.join("android/installed");
-    let version = runtime_version(&runtime)?;
-    let built =
-        apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
-    if !built {
-        let step = ui::Step::start("building the Android development host");
-        android::build_apk(
-            &sdk,
-            &Apk {
-                package: BUNDLE_ID,
-                label: APP_NAME,
-                version_name: "0.1.0",
-                version_code: 1,
-                activity: "com.longbridge.nsh.DevActivity",
-                dev: true,
-                rust: false,
-                dark: false,
-                runtime: &runtime,
-                icon: None,
-                assets: Vec::new(),
-                signing: Signing::Debug,
-            },
-            &apk_path,
-        )?;
-        step.done("built the Android development host");
-        // Until it is installed, no device has this build.
-        let _ = fs::remove_file(&installed);
-        fs::write(&stamp, &version)?;
-    }
-    let on_device =
-        |sdk: &android::Sdk| installed_host(sdk, &serial).map(|time| format!("{serial} {time}"));
-    let current = fs::read_to_string(&installed).ok();
-    if current.is_none() || current != on_device(&sdk) {
-        let step = ui::Step::start(format!("installing it on {serial}"));
-        android::adb(
-            &sdk,
-            &serial,
-            &["install", "-r", "-t", &apk_path.to_string_lossy()],
-        )?;
-        step.done(format!(
-            "installed the Android development host on {serial}"
-        ));
-        match on_device(&sdk) {
-            Some(record) => fs::write(&installed, record)?,
-            None => {
-                let _ = fs::remove_file(&installed);
-            }
-        }
-    }
+    install_android_host(&sdk, &serial, work)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -655,6 +599,75 @@ fn run_android(
     let result = session.watch(|| Ok(false));
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     result
+}
+
+/// Builds the Android development host (when its runtime changed) into
+/// `work` and installs it on device `serial` (when the device does not have
+/// this build).
+pub(crate) fn install_android_host(
+    sdk: &crate::android::Sdk,
+    serial: &str,
+    work: &Path,
+) -> anyhow::Result<()> {
+    use crate::android::{self, Apk, Signing};
+    let runtime = crate::runtime::android(true)?;
+    let apk_path = work.join("android/NshDev.apk");
+    fs::create_dir_all(apk_path.parent().context("apk dir")?)?;
+    let stamp = work.join("android/runtime.stamp");
+    // Every app's development host is the same package: another app's run
+    // (an app with its own Rust crate has its own runtime) or another
+    // device replaces what this app installed. The device's install time
+    // tells whether the host there is still the one this app installed.
+    let installed = work.join("android/installed");
+    let version = runtime_version(&runtime)?;
+    let built =
+        apk_path.exists() && fs::read_to_string(&stamp).ok().as_deref() == Some(version.as_str());
+    if !built {
+        let step = ui::Step::start("building the Android development host");
+        android::build_apk(
+            sdk,
+            &Apk {
+                package: BUNDLE_ID,
+                label: APP_NAME,
+                version_name: "0.1.0",
+                version_code: 1,
+                activity: "com.longbridge.nsh.DevActivity",
+                dev: true,
+                rust: false,
+                dark: false,
+                runtime: &runtime,
+                icon: None,
+                assets: Vec::new(),
+                signing: Signing::Debug,
+            },
+            &apk_path,
+        )?;
+        step.done("built the Android development host");
+        // Until it is installed, no device has this build.
+        let _ = fs::remove_file(&installed);
+        fs::write(&stamp, &version)?;
+    }
+    let on_device =
+        |sdk: &android::Sdk| installed_host(sdk, serial).map(|time| format!("{serial} {time}"));
+    let current = fs::read_to_string(&installed).ok();
+    if current.is_none() || current != on_device(sdk) {
+        let step = ui::Step::start(format!("installing it on {serial}"));
+        android::adb(
+            sdk,
+            serial,
+            &["install", "-r", "-t", &apk_path.to_string_lossy()],
+        )?;
+        step.done(format!(
+            "installed the Android development host on {serial}"
+        ));
+        match on_device(sdk) {
+            Some(record) => fs::write(&installed, record)?,
+            None => {
+                let _ = fs::remove_file(&installed);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// When the development host on device `serial` was installed or last
@@ -700,7 +713,7 @@ fn package_catalyst(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
 
 /// Creates (or refreshes) `<work>/ios/NshDev.app`, a flat iOS app bundle,
 /// signed ad hoc (the simulator requires a signature).
-fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn package_ios(work: &Path, host: &Path) -> anyhow::Result<PathBuf> {
     let app = work.join("ios").join(format!("{APP_NAME}.app"));
     fs::create_dir_all(&app)?;
     fs::write(app.join("Info.plist"), info_plist(Target::Ios))?;

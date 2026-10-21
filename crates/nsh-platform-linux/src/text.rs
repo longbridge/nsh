@@ -122,9 +122,14 @@ pub(crate) fn font_description(
         None => desc.set_family(ui_family),
     }
     desc.set_weight(weight(style.font_weight));
-    if style.italic {
-        desc.set_style(pango::Style::Italic);
-    }
+    // Always set: a run's font attribute leaves unset fields to the
+    // layout's base font, which is the first run's (an italic comment
+    // first would make the whole text italic).
+    desc.set_style(if style.italic {
+        pango::Style::Italic
+    } else {
+        pango::Style::Normal
+    });
     desc.set_absolute_size(f64::from(style.font_size.0) * f64::from(pango::SCALE));
     desc
 }
@@ -1043,7 +1048,7 @@ pub(crate) struct DrawnText {
     /// Where the layout goes in the view.
     pub(crate) content: Bounds<Points>,
     /// The engine's layout of it.
-    layout: TextLayout,
+    pub(crate) layout: TextLayout,
     /// The render node, built on first draw.
     node: OnceCell<Option<gsk::RenderNode>>,
     /// The selection of `selectable` text, kept across new content.
@@ -1106,7 +1111,13 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
             snapshot.pop();
         });
     }
-    if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get())
+    // A selectable text's own selection, or its part of its area's.
+    let range = drawn
+        .selection
+        .as_ref()
+        .and_then(|s| s.range.get())
+        .or(state.area_selection);
+    if let Some(range) = range
         && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
     {
         // iOS tints the selection with the view's tint at about 30%.
@@ -1363,9 +1374,9 @@ pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
 /// How far (points) the mouse moves on selectable text before a drag
 /// selects: past input's press slop where the press would fire (a link, an
 /// `onPress`), so a click never does both.
-const SELECT_SLOP: f32 = 3.0;
+pub(crate) const SELECT_SLOP: f32 = 3.0;
 /// The same over a press target.
-const SELECT_SLOP_PRESS: f32 = 10.0;
+pub(crate) const SELECT_SLOP_PRESS: f32 = 10.0;
 
 /// What a drag extends the selection by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1593,7 +1604,9 @@ fn select(view: &NshView, range: Option<(u32, u32)>) {
 
 /// A press of the primary button (`n`: the click count).
 fn pressed(view: &NshView, n: i32, x: f32, y: f32, modifiers: gtk::gdk::ModifierType) {
-    let Some(s) = view_selection(view) else {
+    // In a selection area the area selects (`selection_area.rs`).
+    let Some(s) = view_selection(view).filter(|_| crate::selection_area::area_of(view).is_none())
+    else {
         return;
     };
     let (caret, char_index, text, over_press) = {
@@ -1650,7 +1663,8 @@ fn pressed(view: &NshView, n: i32, x: f32, y: f32, modifiers: gtk::gdk::Modifier
 
 /// The pressed mouse moved by `(dx, dy)` to `(x, y)` (view coordinates).
 fn dragged(view: &NshView, dx: f32, dy: f32, x: f32, y: f32) {
-    let Some(s) = view_selection(view) else {
+    let Some(s) = view_selection(view).filter(|_| crate::selection_area::area_of(view).is_none())
+    else {
         return;
     };
     if !s.dragging.get() {
@@ -1799,7 +1813,7 @@ impl LinuxLayout {
     /// The caret position (UTF-16 offset) nearest `(x, y)` in content
     /// coordinates: on the line at that height (the first above the text,
     /// the last below it), at the glyph edge nearest x.
-    fn caret_at(&self, x: f32, y: f32) -> u32 {
+    pub(crate) fn caret_at(&self, x: f32, y: f32) -> u32 {
         let Some(line) = self
             .lines
             .iter()

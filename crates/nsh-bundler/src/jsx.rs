@@ -62,24 +62,32 @@ pub(crate) enum Compiled {
     Component(&'static str),
 }
 
-/// nsh's primitives, by their one home (module, export), and what their
-/// tags compile to. Each host element apps can make is in here once.
+/// nsh's primitives, by their home (module, export), and what their tags
+/// compile to: `nsh`'s, `nsh/base`'s `Dialog` and `nsh/ios`'s
+/// `InputAccessoryView`, then the modules that exported them before `nsh`
+/// did (deprecated, still compiled alike). The first home of a name is the
+/// one hints name.
 pub(crate) const PRIMITIVES: &[(&str, &str, Compiled)] = &[
     ("nsh", "View", Compiled::Host("view")),
     ("nsh", "Text", Compiled::Host("text")),
     ("nsh", "Scroll", Compiled::Host("scroll")),
     ("nsh", "Input", Compiled::Host("input")),
-    ("nsh/image", "Image", Compiled::Host("image")),
-    ("nsh/webview", "WebView", Compiled::Host("webview")),
-    ("nsh/video", "Video", Compiled::Host("video")),
-    ("nsh/list", "List", Compiled::List),
-    ("nsh/canvas", "Canvas", Compiled::Component("canvas")),
+    ("nsh", "Image", Compiled::Host("image")),
+    ("nsh", "WebView", Compiled::Host("webview")),
+    ("nsh", "Video", Compiled::Host("video")),
+    ("nsh", "List", Compiled::List),
+    ("nsh", "Canvas", Compiled::Component("canvas")),
     ("nsh/base", "Dialog", Compiled::Component("modal")),
     (
         "nsh/ios",
         "InputAccessoryView",
         Compiled::Component("inputaccessory"),
     ),
+    ("nsh/image", "Image", Compiled::Host("image")),
+    ("nsh/webview", "WebView", Compiled::Host("webview")),
+    ("nsh/video", "Video", Compiled::Host("video")),
+    ("nsh/list", "List", Compiled::List),
+    ("nsh/canvas", "Canvas", Compiled::Component("canvas")),
 ];
 
 /// The control flow tags, global unless a binding of the name shadows them.
@@ -1476,6 +1484,32 @@ mod tests {
         assert!(!code.contains("nsh/list"), "{code}");
     }
 
+    /// Every primitive compiles alike imported from `nsh`, where it lives
+    /// now, as from the module it was first exported from.
+    #[test]
+    fn primitives_from_nsh_compile_in_place() {
+        let code = flat(
+            &compile(
+                r#"import { Canvas, Image, List, Text, Video, View, WebView } from "nsh";
+            export const a = <View><Text>t</Text><Image src="x" /><WebView source="about:blank" /><Video source="v" /></View>;
+            export const b = <List each={[1]}>{(i) => <Text>{i()}</Text>}</List>;
+            export const c = <Canvas draw={() => {}} />;
+            Image.prefetch("x");"#,
+            )
+            .unwrap(),
+        );
+        for tag in ["view", "text", "image", "webview", "video"] {
+            assert!(code.contains(&format!(r#"_$element("{tag}")"#)), "{code}");
+        }
+        assert!(code.contains("_$component(_$list, {"), "{code}");
+        assert!(code.contains("_$component(Canvas, {"), "{code}");
+        // What is used as a value or called stays imported.
+        assert!(
+            code.contains(r#"import { Canvas, Image } from "nsh";"#),
+            "{code}"
+        );
+    }
+
     #[test]
     fn bindings_in_scope_win_over_primitives_and_globals() {
         let code = flat(
@@ -1516,7 +1550,7 @@ mod tests {
         );
         let err = error("export const a = <web-view />;");
         assert!(
-            err.contains(r#"write <WebView> and `import { WebView } from "nsh/webview"`"#),
+            err.contains(r#"write <WebView> and `import { WebView } from "nsh"`"#),
             "{err}"
         );
         let err = error("export const a = <input-accessory />;");
@@ -1565,17 +1599,26 @@ mod tests {
             "inputaccessory",
         ] {
             assert!(nsh_core::Tag::from_name(tag).is_some(), "{tag}");
-            let homes = PRIMITIVES
+            let names: std::collections::HashSet<&str> = PRIMITIVES
                 .iter()
                 .filter(
                     |(.., c)| matches!(c, Compiled::Host(t) | Compiled::Component(t) if *t == tag),
                 )
-                .count();
-            assert_eq!(homes, 1, "<{tag}>");
+                .map(|(_, export, _)| *export)
+                .collect();
+            assert_eq!(names.len(), 1, "<{tag}>");
         }
         let mut seen = std::collections::HashSet::new();
-        for (module, export, _) in PRIMITIVES {
-            assert!(seen.insert(*export), "{export} twice");
+        for (module, export, compiled) in PRIMITIVES {
+            assert!(seen.insert((*module, *export)), "{module} {export} twice");
+            // A name is one primitive in every module that exports it.
+            assert!(
+                PRIMITIVES
+                    .iter()
+                    .filter(|(_, e, _)| e == export)
+                    .all(|(.., c)| c == compiled),
+                "{export}"
+            );
             assert!(
                 nsh_core::js::NATIVE_MODULES.contains(module) || *module == "nsh/base",
                 "{module}"

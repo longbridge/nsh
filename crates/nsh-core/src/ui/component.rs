@@ -207,6 +207,10 @@ pub enum PropKind {
     /// A value: decoded in the JS call ([`PropSpec::decode`]), set by the
     /// core.
     Value,
+    /// A render function (`Option<Renderer<T>>`): decoded in the JS call
+    /// as a value is (a function, or none), its content rendered by JS
+    /// when the core asks for it ([`super::JsEvent::Render`]).
+    Renderer,
     /// A named slot: JSX in a holder node.
     Slot,
     /// The JSX children.
@@ -399,6 +403,14 @@ impl ComponentSpec {
         self.props
             .iter()
             .filter(|p| p.kind == PropKind::Slot)
+            .map(|p| p.name)
+    }
+
+    /// Its render functions ([`PropKind::Renderer`]).
+    pub fn renderers(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.props
+            .iter()
+            .filter(|p| p.kind == PropKind::Renderer)
             .map(|p| p.name)
     }
 

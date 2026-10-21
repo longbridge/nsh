@@ -1,6 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`), navigation (stacks and pages), dialogs, safe areas,
+//! selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
 //! tokens (`Theme`, as `gpui-base`'s).
 //!
@@ -13,7 +14,10 @@
 mod alert_dialog;
 mod button;
 mod keyboard;
+mod navigation;
 mod safe_area;
+mod selection_area;
+pub mod text_view;
 mod theme;
 
 use std::sync::Arc;
@@ -27,7 +31,14 @@ pub use crate::{
     },
     button::{Button, ButtonEvent, ButtonProps},
     keyboard::{AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewProps},
+    navigation::{dialog, nav_page, nav_stack},
     safe_area::{Edge, SafeAreaView, SafeAreaViewProps},
+    selection_area::{SelectionArea, SelectionAreaProps},
+    text_view::{
+        CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
+        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewEvent,
+        TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewStyles,
+    },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
 };
 
@@ -41,8 +52,11 @@ pub fn registry() -> Registry {
         .register::<Button>()
         .register::<SafeAreaView>()
         .register::<KeyboardAvoidingView>()
+        .register::<SelectionArea>()
+        .register::<TextView>()
         .module::<AlertDialog>()
         .module::<Keyboard>()
+        .module::<TextView>()
         // The environment's accessors and hooks, as they are.
         .reexport(
             &["safeArea", "safeAreaInsets", "keyboardFrame"],
@@ -71,10 +85,16 @@ mod tests {
         let components: Vec<_> = registry.specs().iter().map(|s| s.export.clone()).collect();
         assert_eq!(
             components,
-            ["Button", "KeyboardAvoidingView", "SafeAreaView"]
+            [
+                "Button",
+                "KeyboardAvoidingView",
+                "SafeAreaView",
+                "SelectionArea",
+                "TextView"
+            ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
-        assert_eq!(modules, ["AlertDialog", "Keyboard"]);
+        assert_eq!(modules, ["AlertDialog", "Keyboard", "TextView"]);
     }
 
     /// Every export TS sees has a doc comment (the declarations show it).

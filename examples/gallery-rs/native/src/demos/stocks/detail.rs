@@ -5,6 +5,7 @@
 
 use std::f32::consts::TAU;
 
+use nsh_base::dialog;
 use nsh_core::{
     Bounds, ModalPresentation, Points,
     animation::{Curve, EaseMode},
@@ -294,7 +295,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     // a click outside closes it).
     let ticket_shown = if wide {
         If::new(ticket, move || {
-            modal()
+            dialog()
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)
                 })

@@ -8,7 +8,7 @@ group: platforms
 # 原生组件
 
 原生组件是由**嵌入方应用**按名称注册的视图：地图、相机预览、图表库，或者 iOS 上任意的 `UIView`、Android 上任意的
-`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用通过 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它，然后像使用其他组件一样使用它。NSH
+`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用像使用其他元素一样使用它：Rust 应用用 `nsh_core::ui::prelude` 的 `native(name)` 创建它，TSX 应用用 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它。NSH
 会把它和应用的其余部分一起布局，向它发送 props，把它的事件交给对应的处理函数，并转发通过 `ref` 发出的命令。
 
 NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里多出来的一个子视图：不存在层级叠放问题，它会像 `<View>`
@@ -25,11 +25,55 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 2. NSH 应用为这个名称声明一个组件，列出它用到的 props 和事件。
 3. 元素创建时，NSH 先创建一个容器视图（和普通视图一样负责装饰、定位和命中测试），再向工厂请求一个组件，并把组件的视图放进容器、铺满容器。
 4. 组件创建后会立即收到所有 props，之后每当某个 prop 变化时再收到该 prop。
-5. 组件可以发出事件、上报自身尺寸；JS 通过 `ref` 调用它的命令。
+5. 组件可以发出事件、上报自身尺寸；应用通过 `ref` 调用它的命令。
 
-## 在 JS 中声明组件
+## 在应用中使用组件
 
-```tsx
+在 Rust 中，`native(name)` 创建这个元素：`.prop(name, value)` 给它一个 prop（`serde_json::Value`，或者它的 signal 或闭包，变化时重新发送），
+`.on_native_event(..)` 以 `NativeEvent { name, data }` 接收它的事件，用 `.element_ref(&r)` 挂上的 `element_ref()` 的方法发送它的命令。
+在 TSX 中，`nativeComponent()` 为这个名称声明一个组件，列出它用到的 props 和事件。
+
+```rust tabs
+use nsh_base::safe_area_view;
+use nsh_core::ui::prelude::*;
+use serde_json::json;
+
+const COLORS: [&str; 4] = ["#8250df", "#0969da", "#1a7f37", "#cf222e"];
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let taps = signal(0_u64);
+    let badge = element_ref();
+    safe_area_view()
+        .flex_1()
+        .p(px(20.0))
+        .gap(px(16.0))
+        .bg(rgb(0xf6f8fa))
+        .child(text("Rendered by nsh").text_size(px(22.0)).font_weight(FontWeight::BOLD))
+        .child(
+            // The host app's badge: a label it draws, sized to its text.
+            native("embed.badge")
+                .element_ref(&badge)
+                .prop("text", move || match taps.get() {
+                    0 => json!("Tap the native badge"),
+                    n => json!(format!("Tapped {n}×")),
+                })
+                .prop("color", move || json!(COLORS[taps.get() as usize % COLORS.len()]))
+                .on_native_event(move |e: &NativeEvent| {
+                    if &*e.name == "tap" {
+                        taps.set(e.data["count"].as_u64().unwrap_or(0));
+                        badge.command("pulse", json!(null));
+                    }
+                })
+                .self_start()
+                .rounded(px(8.0))
+                .overflow_hidden(),
+        )
+        .child(text(move || format!("Rust saw {} taps", taps.get())))
+}
+```
+
+```tsx tabs
 import { mount, signal, Text, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
 import { SafeAreaView } from "nsh/base";
@@ -66,7 +110,7 @@ function App() {
 mount(App);
 ```
 
-这就是 `examples/embedded/App.tsx`，仓库里的两个嵌入示例运行的都是它。
+TSX 版本就是 `examples/embedded/App.tsx`，仓库里的两个嵌入示例运行的都是它。
 
 ### `nativeComponent(name, spec)`
 
@@ -95,22 +139,39 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 
 ## Props
 
-每个自有 prop 都以 JSON 形式发送，所以它的值可以是任意 JSON 值：字符串、数字、布尔值、`null`、数组和普通对象。Props
-和其他属性一样是响应式的：当 `text={label()}` 读取了一个 signal，signal 变化时（且仅在此时）新值才会被发送。
+每个自有 prop 都以 JSON 形式发送，所以它的值可以是任意 JSON 值：字符串、数字、布尔值、`null`、数组和普通对象。props
+和其他属性一样是响应式的：当 Rust 中 prop 的闭包（`.prop("text", move || json!(label.get()))`）或 TSX 的 `text={label()}` 读取了一个 signal，signal 变化时（且仅在此时）新值才会被发送。
 
-| JS 中发生了什么 | 组件收到什么 |
+| 应用中发生了什么 | 组件收到什么 |
 |---|---|
 | 元素被创建 | 组件创建后立即收到所有已设置的自有 prop |
 | 某个 prop 的值变化 | 该 prop 及其新值 |
 | 某个 prop 变为 `undefined` | 该 prop，但没有值（Swift 中为 `nil`，Java 中为 `null`） |
 
-非 JSON 值（函数、类实例、`AnimatedValue`）无法跨越边界；接口只传数据。
+Props 携带 JSON 值；接口只传数据（函数、类实例和 `AnimatedValue` 留在应用中）。
 
 ## 事件
 
-组件按名称发出事件，可附带一个 JSON 负载。NSH 把它投递到引擎线程，并用该负载调用对应的处理函数：
+组件按名称发出事件，可附带一个 JSON 负载。NSH 把它投递到引擎线程，并用该负载调用对应的处理函数（在 Rust 中是那个 `on_native_event` 监听函数，带着事件的 `name` 和 `data`）：
 
-```tsx
+```rust tabs
+use serde_json::json;
+
+native("acme.map")
+    .prop("latitude", json!(52.52))
+    .prop("longitude", json!(13.405))
+    .on_native_event(move |e: &NativeEvent| match &*e.name {
+        "regionChange" => center.set((
+            e.data["latitude"].as_f64().unwrap_or_default(),
+            e.data["longitude"].as_f64().unwrap_or_default(),
+        )),
+        "markerPress" => open(e.data["id"].as_str().unwrap_or_default()),
+        _ => {}
+    })
+    .flex_1()
+```
+
+```tsx tabs
 const MapView = nativeComponent<
   { latitude: number; longitude: number; zoom?: number },
   { regionChange: { latitude: number; longitude: number }; markerPress: { id: string } }
@@ -128,14 +189,26 @@ const MapView = nativeComponent<
 />;
 ```
 
-事件是异步的：主线程从不等待 JS。如果组件必须当场做出决定（这个手势能否开始、这个区域能否改变），就只能在原生端根据之前收到的
+事件是异步的：主线程从不等待应用的代码。如果组件必须当场做出决定（这个手势能否开始、这个区域能否改变），就只能在原生端根据之前收到的
 props 来决定。
 
 ## 命令
 
-命令式调用（缩放到某个点、开始播放、播放一段动画）通过元素的 `ref` 发起：
+命令式调用（缩放到某个点、开始播放、播放一段动画）通过元素的 ref 发起（Rust 中是 `element_ref()`，TSX 中是 `ref`）：
 
-```tsx
+```rust tabs
+let map = element_ref();
+
+native("acme.map")
+    .element_ref(&map)
+    .prop("latitude", json!(52.52))
+    .prop("longitude", json!(13.405))
+    .flex_1()
+
+map.command("zoomTo", json!({ "level": 3 }));
+```
+
+```tsx tabs
 let map: YNode | undefined;
 
 <MapView ref={(node) => (map = node)} latitude={52.52} longitude={13.405} style={{ flex: 1 }} />;
@@ -143,7 +216,7 @@ let map: YNode | undefined;
 map?.command("zoomTo", { level: 3 });
 ```
 
-`command(name, args?)` 把名称和参数（任意 JSON 值）发送给组件的 `command` 方法。命令会和在它之前做出的变更按顺序应用，所以紧跟在
+`command(name, args)`（TSX：`command(name, args?)`）把名称和参数（任意 JSON 值）发送给组件的 `command` 方法。命令会和在它之前做出的变更按顺序应用，所以紧跟在
 prop 变更之后发出的命令能看到新的 prop。
 
 ## 尺寸

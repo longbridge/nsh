@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
+use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, Size,
     ui::{Root, prelude::*},
@@ -143,12 +144,12 @@ fn a_rust_app_starts_in_its_appearance() {
 #[component]
 fn Navigation() -> impl IntoElement {
     let routes = signal(vec![0_u32, 1]);
-    stack().flex_1().child(Each::new(
+    nav_stack().flex_1().child(Each::new(
         move || routes.get(),
         |&route: &u32| route,
         move |route, _| {
             let route = route.get_untracked();
-            screen()
+            nav_page()
                 .title(format!("page {route}"))
                 .header_right(text("more"))
                 .on_dismiss(move |_: &()| routes.update(|r| r.retain(|r| *r < route)))
@@ -394,6 +395,77 @@ fn rust_components_take_the_back_button() {
             ..
         }
     )));
+}
+
+/// Takes the back button while a switch is on: the listener is made in an
+/// effect, and goes with it when the switch turns off.
+#[component]
+fn BackSwitch() -> impl IntoElement {
+    let on = signal(false);
+    let caught = signal(0);
+    effect(move || {
+        if on.get() {
+            on_back_press(move || {
+                caught.update(|c| *c += 1);
+                true
+            });
+        }
+    });
+    view()
+        .flex_1()
+        .child(text("Switch").on_press(move |_: &()| on.update(|on| *on = !*on)))
+        .child(text(move || format!("caught {}", caught.get())))
+}
+
+#[test]
+fn a_rust_back_listener_goes_with_its_owner() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let engine = Engine::start(
+        EngineConfig::new(Root::of::<BackSwitch>()),
+        || ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .unwrap();
+    let mut switch = None;
+    // Whether the root listens to the back button after what came.
+    let listens = |rx: &Receiver<MountBatch>, switch: &mut Option<u32>| {
+        let mut listens = None;
+        while let Ok(batch) = rx.recv_timeout(Duration::from_millis(300)) {
+            for item in &batch.items {
+                match item {
+                    MountItem::Events {
+                        id: nsh_core::ROOT_ID,
+                        events,
+                    } => listens = Some(events.contains(EventKind::BackPress)),
+                    MountItem::Text { id, text, .. } if text.text == "Switch" => {
+                        *switch = Some(*id)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        listens
+    };
+    assert_eq!(listens(&rx, &mut switch), None, "no listener while off");
+    let switch = switch.expect("the switch");
+    let press = |id| {
+        engine
+            .control()
+            .dispatch_event(id, EventKind::Press, EventPayload::None)
+    };
+    press(switch);
+    assert_eq!(listens(&rx, &mut None), Some(true), "it listens while on");
+    engine
+        .control()
+        .dispatch_event(nsh_core::ROOT_ID, EventKind::BackPress, EventPayload::None);
+    let caught = shown(&rx, Duration::from_secs(5), "caught 1").map(|s| s.0);
+    assert_eq!(caught.as_deref(), Some("caught 1"), "the listener took it");
+    press(switch);
+    assert_eq!(
+        listens(&rx, &mut None),
+        Some(false),
+        "the listener goes when switched off"
+    );
 }
 
 /// The core's events (a layout) and throttled scroll events reach a Rust

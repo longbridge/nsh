@@ -31,7 +31,7 @@ nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
 nsh-testing = { version = "0.1.1", path = "../nsh-testing", default-features = false }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }
-nsh-base = { version = "0.1.1", path = "../nsh-base" }
+nsh-base = { version = "0.1.1", path = "../nsh-base", default-features = false }
 # The JSX compiler alone (tests compile their apps).
 nsh-bundler = { version = "0.1.1", path = "../nsh-bundler", default-features = false }
 nsh-platform-gpui = { version = "0.1.1", path = "nsh-platform-gpui", default-features = false }
@@ -88,4 +88,13 @@ codegen-units = 1
 [profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
+opt-level = 3
+[profile.dev.package.syntect]
+opt-level = 3
+[profile.dev.package.fancy-regex]
+opt-level = 3
+# What fancy-regex runs its regexes with (also `regex`'s).
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
 opt-level = 3

@@ -1,6 +1,4 @@
-import { signal, Text, View, type YNode } from "nsh";
-import { Video } from "nsh/video";
-import { WebView, type WebViewNavigation } from "nsh/webview";
+import { signal, Text, Video, View, WebView, type WebViewNavigation, type YNode } from "nsh";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Meter, Press, radius, RoundButton, Segmented } from "../ui";
 

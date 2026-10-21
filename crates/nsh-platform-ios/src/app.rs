@@ -42,6 +42,10 @@ pub struct AppOptions {
     /// Where bundled image assets are (for [`AppSource::Bundle`]); dev
     /// servers serve them themselves.
     pub asset_base: Option<AssetBase>,
+    /// Where the apps keep their data, each in `<data_dir>/<app id>`:
+    /// `None` uses the app's own data directory
+    /// ([`SurfaceOptions::data_dir`]'s default).
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 /// Whether `path` is inside the app's own bundle (which the system verifies
@@ -181,6 +185,9 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
         SurfaceOptions {
             trace: options.trace,
             asset_base: options.asset_base,
+            data_dir: options
+                .data_dir
+                .or_else(|| SurfaceOptions::default().data_dir),
             // An app on its own (the development host, the release runner),
             // not a module embedded in another app.
             limits: nsh_engine::Limits::standalone(),

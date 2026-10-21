@@ -795,6 +795,9 @@ fn props_json(p: &ViewProps) -> String {
     if p.focusable == Some(false) {
         s.push_str(",\"focusable\":false");
     }
+    if p.selection_area {
+        s.push_str(",\"selectionArea\":true");
+    }
     s.push('}');
     s
 }

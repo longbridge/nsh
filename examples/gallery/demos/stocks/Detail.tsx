@@ -1,6 +1,5 @@
-import { cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
+import { Canvas, cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
 import { Dialog, NavPage, safeAreaInsets } from "nsh/base";
 import { Icon } from "../../icons";
 import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat } from "../../ui";

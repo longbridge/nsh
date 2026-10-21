@@ -924,6 +924,58 @@ impl ModalHost {
     }
 }
 
+/// The back button a user taps in the header shown over `window`: the
+/// navigation bar's (UIKit draws it, so it is found by what it is).
+#[cfg(feature = "dev")]
+pub(crate) fn back_button(window: &objc2_ui_kit::UIWindow) -> Option<Retained<UIView>> {
+    fn bars(view: &UIView, out: &mut Vec<Retained<UIView>>) {
+        if view.isHidden() || view.alpha() < 0.01 {
+            return;
+        }
+        if view.isKindOfClass(<UINavigationBar as objc2::ClassType>::class()) {
+            out.push(objc2::Message::retain(view));
+        }
+        for sub in view.subviews().iter() {
+            bars(&sub, out);
+        }
+    }
+    fn named(view: &UIView, part: &str) -> bool {
+        view.class().name().to_string_lossy().contains(part)
+    }
+    // A bar button that carries the back chevron's mask.
+    fn back(view: &UIView) -> Option<Retained<UIView>> {
+        let subviews = view.subviews();
+        if named(view, "ButtonBarButton")
+            && !view.isHidden()
+            && view.alpha() > 0.01
+            && subviews.iter().any(|v| named(&v, "BackButton"))
+        {
+            return Some(objc2::Message::retain(view));
+        }
+        subviews.iter().find_map(|v| back(&v))
+    }
+    let mut found = Vec::new();
+    bars(window, &mut found);
+    // The front one: the last drawn.
+    found.iter().rev().find_map(|bar| back(bar))
+}
+
+/// The sheet presented over `window`'s app (a modal), whose swipe down
+/// goes back; `None` without one (alerts are dialogs, not sheets).
+#[cfg(feature = "dev")]
+pub(crate) fn presented_sheet(window: &objc2_ui_kit::UIWindow) -> Option<Retained<UIView>> {
+    let mut top = window.rootViewController()?;
+    let mut sheet = None;
+    while let Some(next) = top.presentedViewController() {
+        if next.isKindOfClass(<objc2_ui_kit::UIAlertController as objc2::ClassType>::class()) {
+            break;
+        }
+        sheet = next.view();
+        top = next;
+    }
+    sheet
+}
+
 /// The view controller whose view contains `view`.
 pub(crate) fn controller_of(view: &UIView) -> Option<Retained<UIViewController>> {
     let mut responder: Option<Retained<UIResponder>> = view.nextResponder();
