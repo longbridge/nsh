@@ -365,8 +365,8 @@ fn the_module_formats_money() {
 ```
 
 `nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_testing::start` hands the
-batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way,
-`examples/gallery-rs` its Rust root.
+batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way;
+`examples/gallery-rs` tests its Rust root in TypeScript, a test file for about each demo.
 
 ## Theme
 
