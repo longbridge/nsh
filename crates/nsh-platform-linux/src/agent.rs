@@ -44,20 +44,10 @@ impl LinuxNative {
     ) -> Option<R> {
         let (tx, rx) = mpsc::channel();
         let key = self.key;
-        let asked = std::time::Instant::now();
         glib::MainContext::default().invoke_with_priority(glib::Priority::DEFAULT, move || {
-            let ran = asked.elapsed();
-            let started = std::time::Instant::now();
             let _ = tx.send(Surface::by_key(key).map(|surface| f(&surface)));
-            if ran.as_millis() > 300 || started.elapsed().as_millis() > 300 {
-                log::info!("DEBUG main call waited {ran:?}, ran {:?}", started.elapsed());
-            }
         });
-        let r = rx.recv_timeout(MAIN);
-        if r.is_err() {
-            log::info!("DEBUG main call timed out after {:?}", asked.elapsed());
-        }
-        r.ok().flatten()
+        rx.recv_timeout(MAIN).ok().flatten()
     }
 
     /// `f` with the surface's window on the main thread.
