@@ -1373,13 +1373,14 @@ mod tests {
         ))
     }
 
-    /// The approximate engine's lines: characters 0.55 em wide, the em
-    /// above the baseline and a fifth of it below, 1.2 em lines.
+    /// The approximate engine's line: characters 0.55 em wide, the line
+    /// 1.2 em with its baseline at the bottom, so the ascent is the line
+    /// and the descent is 0.
     #[test]
     fn text_metrics_are_the_engines_line() {
         let mut app = Headless::start(EngineConfig::new(Root::of::<Metrics>())).unwrap();
         app.first_render().unwrap();
-        app.wait_for("33 20 4 24").unwrap();
+        app.wait_for("33 24 0 24").unwrap();
     }
 
     /// A name field that says hello and keeps what was sent.

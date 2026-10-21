@@ -13,11 +13,9 @@ use std::{
 };
 
 use nsh_core::{
-use nsh_core::{
     AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
     MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
     ui::PropEnum,
-};
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -226,6 +224,7 @@ impl Clip {
             Clip::Within(clip) => Clip::Within(clip.intersect(&bounds)),
         }
     }
+}
 
 /// Which views a selector matched, for a step that acts on one.
 #[derive(Debug, Clone, PartialEq, Eq)]

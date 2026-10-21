@@ -766,13 +766,28 @@ impl TextEngine for ApproxTextEngine {
                 ))
             })
             .collect();
-        TextLayout(Arc::new((size, points)))
+        // Baseline at the bottom of the line: the ascent is the line and
+        // the descent is 0, the same extent attachments are placed against.
+        let metrics = TextLine {
+            width: size.width,
+            height: line,
+            ascender: line,
+            x_height: *font * 0.5,
+            ..TextLine::default()
+        };
+        TextLayout(Arc::new((size, points, metrics)))
+    }
+
+    fn lines(&self, layout: &TextLayout) -> Vec<TextLine> {
+        layout
+            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>, TextLine)>()
+            .map_or_else(Vec::new, |(_, _, line)| vec![line.clone()])
     }
 
     fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
-            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>)>()
-            .map_or_else(Vec::new, |(_, p)| p.clone())
+            .downcast::<(Size<Points>, Vec<Option<Point<Points>>>, TextLine)>()
+            .map_or_else(Vec::new, |(_, p, _)| p.clone())
     }
 
     fn register_font(&self, _: &[u8]) -> Result<(), String> {
