@@ -83,7 +83,7 @@ final class ImageBox extends View implements Node {
     /** What it fades in over (a placeholder). */
     private Object previous;
     /**
-     * The size {@code center} shows an SVG's bitmap at, in pixels: its intrinsic size at the display's density (0:
+     * The size {@code center} shows an SVG's bitmap at, in pixels: its intrinsic size at the display's density, bounded by the decoded raster (0:
      * a bitmap, shown a pixel per pixel).
      */
     private float contentWidth, contentHeight, previousWidth, previousHeight;
@@ -166,8 +166,8 @@ final class ImageBox extends View implements Node {
     }
 
     /**
-     * Draws {@code image} placed by the resize mode, inside the view's shape; {@code center} shows it at its intrinsic
-     * pixel size (0: a pixel per pixel).
+     * Draws {@code image} placed by the resize mode, inside the view's shape; {@code center} uses its intrinsic
+     * pixel size within the decoded raster (0: a pixel per pixel).
      */
     private void draw(Canvas canvas, Object image, float naturalWidth, float naturalHeight, Paint paint, int alpha) {
         float w = getWidth(), h = getHeight();
@@ -185,9 +185,9 @@ final class ImageBox extends View implements Node {
                 matrix.setScale(w / bw, h / bh);
                 break;
             case 3: {
-                // Keep the intrinsic SVG size even when the view decoded a smaller raster.
-                float sx = naturalWidth > 0 ? naturalWidth / bw : 1;
-                float sy = naturalHeight > 0 ? naturalHeight / bh : 1;
+                // Preserve the intrinsic SVG dimensions within the decoded raster, as before.
+                float sx = naturalWidth > 0 ? Math.min(1, naturalWidth / bw) : 1;
+                float sy = naturalHeight > 0 ? Math.min(1, naturalHeight / bh) : 1;
                 matrix.setScale(sx, sy);
                 matrix.postTranslate((w - bw * sx) / 2, (h - bh * sy) / 2);
                 break;

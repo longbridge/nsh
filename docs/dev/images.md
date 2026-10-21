@@ -22,9 +22,9 @@
   draw with resvg. iOS, macOS and Android draw for the requested pixel size, the view's longer side (the size bitmaps
   are downsampled to), with the SVG's shorter side that long (`svg::rasterize_covering`: shown in the view, an image's
   shorter side never exceeds it, so no resize mode, `cover` included, enlarges the raster; Android through
-  `Native.svg`), and an image at its natural size at the screen's scale (`svg::rasterize_scaled`; `center` shows the
-  SVG at its intrinsic size: iOS through the `UIImage`'s scale, Android through `ImageBox`, with unrounded
-  dimensions carried separately from the whole-point load reports over JNI). Windows, Linux and GPUI
+  `Native.svg`), and an image at its natural size at the screen's scale (`svg::rasterize_scaled`; `center` uses the SVG's
+  intrinsic dimensions with the platform's existing fitting rules: iOS through the `UIImage`'s scale, Android
+  through `ImageBox`, with unrounded dimensions carried separately from the whole-point load reports over JNI). Windows, Linux and GPUI
   draw once at `svg::OVERSAMPLE` (4) pixels per point, at most `svg::MAX_OVERSAMPLED_SIDE` (2048) a side
   (`svg::rasterize_oversampled`), since they cache one bitmap per location. The premultiplied RGBA raster then takes
   the bitmap path (blur, color matrix, tint through alpha, cache). `onLoad` and `Image.getSize` report the intrinsic
