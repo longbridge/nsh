@@ -14,7 +14,7 @@ activation, the disabled state, and the switch role and its value for screen rea
 children (a label), and the app styles each part, with `checked:` and `disabled:` classes that follow the switch.
 
 ```rust tabs
-use nsh_base::switch;
+use nsh_base::{switch, theme};
 use nsh_core::ui::prelude::*;
 
 fn wifi() -> impl IntoElement {
@@ -29,14 +29,14 @@ fn wifi() -> impl IntoElement {
             s.w(px(44.0))
                 .p(px(2.0))
                 .rounded_full()
-                .bg(rgb(0xd4d4d8))
+                .bg(move || theme().muted())
                 .transition_colors()
-                .checked(|s| s.bg(rgb(0x10b981)))
+                .checked(|s| s.bg(move || theme().primary()))
         })
         .thumb_style(|s| {
             s.size(px(20.0))
                 .rounded_full()
-                .bg(white())
+                .bg(move || theme().background())
                 .shadow_sm()
                 .transition_transform()
                 .checked(|s| s.translate_x(px(20.0)))
@@ -56,8 +56,8 @@ function App() {
       checked={on()}
       onChange={(next) => on.set(next)}
       class="flex-row items-center gap-3"
-      trackClass="w-11 rounded-full bg-zinc-300 p-0.5 transition-colors checked:bg-emerald-500"
-      thumbClass="size-5 rounded-full bg-white shadow-sm transition-transform checked:translate-x-5"
+      trackClass="w-11 rounded-full bg-muted p-0.5 transition-colors checked:bg-primary"
+      thumbClass="size-5 rounded-full bg-background shadow-sm transition-transform checked:translate-x-5"
     >
       <Text>Wi-Fi</Text>
     </Switch>
@@ -119,8 +119,8 @@ its track and thumb apply, over their `checked:` ones:
   disabled={!online()}
   onChange={(next) => on.set(next)}
   class="flex-row items-center gap-3 disabled:opacity-50"
-  trackClass="w-11 rounded-full bg-zinc-300 p-0.5 checked:bg-emerald-500 disabled:bg-zinc-200"
-  thumbClass="size-5 rounded-full bg-white checked:translate-x-5"
+  trackClass="w-11 rounded-full bg-muted p-0.5 checked:bg-primary disabled:bg-muted"
+  thumbClass="size-5 rounded-full bg-background checked:translate-x-5"
 >
   <Text>Sync over cellular</Text>
 </Switch>
