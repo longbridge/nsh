@@ -159,3 +159,12 @@ and `Input`'s React Native names follow the rules as well.
 | `onPressIn`, `onPressOut` (every view, Button) | `onPressDown`, `onPressUp` | UIKit `.touchDown` / `.touchUp*`; GPUI `on_mouse_down` / `on_mouse_up` | Decided by the user: *down* / *up* are both frameworks' words, *press* any input's; `onPressUp` is the press's end (released, moved away or cancelled). Rust `on_press_down` / `on_press_up` |
 | `selected` styles | `selectedStyle`, `selected:` classes | `ButtonStyles::selected` | |
 | `checked` styles (new) | `checkedStyle`, `checked:` classes | `CheckboxStyles::checked`, `SwitchStyles::checked`, `RadioStyles::checked` | From `accessibilityState.checked`; mixed is not checked |
+| **Overlays and popups** (new) | | | |
+| `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
+| `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |
+| `onPosition` | | `Positioner::on_position` (`ResolvedPosition`) | The payload is `OverlayPosition`: the side it went on, its frame, the room on that side |
+| `onPressOutside` | | none (`DialogChangeReason::*Press`) | The act, a press, named after where it went down |
+| `onCancel` | | `Dialog::on_cancel`, `actions::Cancel` (Escape in `Popover`) | Escape and the Android back button, as for dialogs |
+| `Popover`, `Tooltip`, `Sheet` (`nsh/base`) | | `popover.rs`, `tooltip.rs`, `sheet.rs` | Parts as `Dialog`'s: `popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`; `trigger` and `content` slots |
+| `Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu` (`nsh/base`) | | `gpui-component` `PopupMenu`, `ContextMenu` (`gpui-base` has no menu) | `MenuItem::on_select` as `PopupMenu`'s items; `Submenu`'s `back` slot is the row a sheet shows above its items |
+| `onOpenChange(open, reason)` of the popups | | `Popover::on_open_change`, `DialogChangeReason` | `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`, `"select"`, `"hover"`, `"longPress"`, `"contextMenu"` |

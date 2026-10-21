@@ -11,7 +11,8 @@ demo: ui-navigation
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
 [Modules](./index.md#three-layers)). It provides controls (`Button`), documents of Markdown or HTML (`TextView`), selections across texts
-(`SelectionArea`), navigation (a `NavStack` of `NavPage`s driven
+(`SelectionArea`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
+`MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
 (`SafeAreaView`, `safeArea()` and `safeAreaInsets()`), the system's alert dialogs (`AlertDialog`), the software
 keyboard (`Keyboard`, `keyboardFrame()` and `KeyboardAvoidingView`). Pages and dialogs also decide the status bar
@@ -31,8 +32,9 @@ use nsh_base::{
 
 ```tsx tabs
 import {
-  AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
+  AlertDialog, Button, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
+  MenuItem, MenuSeparator, NavPage, NavStack, Popover, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
+  Submenu, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
@@ -56,6 +58,10 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`AlertDialog`](../elements/alert-dialog.md) | `alert_dialog()` | The platform's alert or action sheet. |
 | [`TextView`](../elements/text-view.md) | `text_view()` | A document of Markdown, HTML or blocks, drawn with texts and views, for streamed AI replies. |
 | [`SelectionArea`](../elements/selection-area.md) | `selection_area()` | One selection across the texts inside it. |
+| [`Popover`](../elements/popover.md) | `popover()` | Content anchored to a trigger, on top of everything. |
+| [`Menu`, `ContextMenu`, `MenuItem`, `MenuSeparator`, `Submenu`](../elements/menu.md) | `menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones. |
+| [`Tooltip`](../elements/tooltip.md) | `tooltip()` | A hint next to its trigger. |
+| [`Sheet`](../elements/sheet.md) | `sheet()` | A panel at an edge of the screen over a backdrop. |
 | `statusBar` on pages and dialogs | `.status_bar(..)` | The status bar while a page or dialog is up. See [Status bar](#status-bar). |
 
 In Rust, `theme()` reads the app's theme as design tokens (`theme().primary()`, `theme().radius()`), the same tokens

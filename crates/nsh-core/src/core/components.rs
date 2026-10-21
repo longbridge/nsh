@@ -4132,6 +4132,7 @@ impl<M: TextEngine> Core<M> {
         // finger: the components hear theirs, JS its own.
         if kind == EventKind::Touch && id == ROOT_ID {
             if let EventPayload::Touch(touch) = payload {
+                self.overlay_touches(touch);
                 self.touches(payload, touch);
             }
             return false;
@@ -4526,6 +4527,10 @@ impl<M: TextEngine> Core<M> {
                 if binding < crate::ui::keys::FIRST_ID {
                     return false;
                 }
+                if binding == super::overlay::ESCAPE_BINDING {
+                    self.overlay_cancel();
+                    return true;
+                }
                 let found = self.components.executor.keys.borrow().handler(binding);
                 // A binding removed since the platform matched it.
                 if let Some((text, handler)) = found {
@@ -4538,6 +4543,10 @@ impl<M: TextEngine> Core<M> {
                 true
             }
             EventKind::BackPress if id == crate::ROOT_ID => {
+                // The top overlay listening takes it first.
+                if self.overlay_cancel() {
+                    return true;
+                }
                 let listeners = self.components.executor.back.borrow().newest_first();
                 for listener in listeners {
                     if self.back_pressed(&listener) {
@@ -4623,7 +4632,7 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::BackPress,
-            enabled: rust || self.components.js_back,
+            enabled: rust || self.components.js_back || self.overlay_state.cancel,
         });
     }
 
@@ -4645,7 +4654,7 @@ impl<M: TextEngine> Core<M> {
         let _ = self.apply_op(Op::Listen {
             id: crate::ROOT_ID,
             event: EventKind::KeyCommand,
-            enabled: rust || self.components.js_keys,
+            enabled: rust || self.components.js_keys || self.overlay_state.cancel,
         });
     }
 
@@ -4653,7 +4662,8 @@ impl<M: TextEngine> Core<M> {
     /// may fire wins, so a view's wins over JS's of the same keystroke).
     fn keymap(&self) -> Arc<crate::keymap::Keymap> {
         let keys = self.components.executor.keys.borrow();
-        if keys.list.is_empty() {
+        let overlay = self.overlay_key_binding();
+        if keys.list.is_empty() && overlay.is_none() {
             return self.components.js_keymap.clone();
         }
         let bindings = self
@@ -4663,6 +4673,7 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .copied()
             .chain(keys.list.iter().map(|k| k.binding))
+            .chain(overlay)
             .collect();
         Arc::new(crate::keymap::Keymap::new(bindings))
     }

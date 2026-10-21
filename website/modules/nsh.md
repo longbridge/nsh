@@ -6,10 +6,10 @@ order: 2
 
 # nsh
 
-`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, the host elements `View`, `Text`, `Scroll` and `Input`, and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
+`nsh` is the core module: the reactive API (signals, computed values, effects, context), `mount`, the host elements `View`, `Text`, `Scroll`, `Input` and `Overlay`, and the TypeScript types of elements, styles and events. The reactive graph itself runs natively in Rust; reading a signal is a call into the runtime that costs a few nanoseconds, and only your own closures run in the JavaScript interpreter.
 
 ```ts
-import { batch, cleanup, computed, context, effect, Input, mount, Scroll, signal, split, Text, untracked, View } from "nsh";
+import { batch, cleanup, computed, context, effect, Input, mount, Overlay, Scroll, signal, split, Text, untracked, View } from "nsh";
 ```
 
 NSH's reactivity follows the same model as SolidJS: a component function runs **once**, and the parts of the UI that read signals are updated in place when those signals change. There is no re-render of the component and no virtual DOM. See [Reactivity](../docs/reactivity.md) for the guide.
@@ -215,16 +215,18 @@ function LabeledInput(props: InputProps & { label: string }) {
 }
 ```
 
-## View, Text, Scroll, Input
+## View, Text, Scroll, Input, Overlay
 
 ```ts
 function View(props: ViewProps): YNode;
 function Text(props: TextProps): YNode;
 function Scroll(props: ScrollProps): YNode;
 function Input(props: InputProps): YNode;
+function Overlay(props: OverlayProps): YNode;
 ```
 
-The host elements `nsh` exports, written as tags: `<View>`, `<Text>`, `<Scroll>`, `<Input>`. The compiler makes the
+The host elements `nsh` exports, written as tags: `<View>`, `<Text>`, `<Scroll>`, `<Input>`, `<Overlay>` (its
+children on top of the window, placed against an anchor: [Overlay](../elements/overlay.md)). The compiler makes the
 native view in place for a tag that names one of them through its import (an alias too), so importing them costs
 nothing at run time. They are components like any other, so they can also be passed around (`const Tag = inline ? Text : View`).
 `nsh` exports the other primitives the same way: [`List`](./nsh-list.md), [`Image`](./nsh-image.md),

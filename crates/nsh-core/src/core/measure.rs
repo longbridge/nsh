@@ -79,6 +79,10 @@ impl<M: TextEngine> Core<M> {
                 x += n.frame.origin.x.0;
                 y += n.frame.origin.y.0;
             }
+            // An overlay is placed in its root view.
+            if n.kind == Kind::Overlay {
+                break;
+            }
             let parent = n.parent;
             if parent == NO_KEY {
                 break;

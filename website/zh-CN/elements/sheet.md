@@ -1,0 +1,87 @@
+---
+title: Sheet
+description: Sheet 组件：位于屏幕一侧边缘、覆盖在背景层之上的面板，点击背景层、Escape 和返回键会关闭它，样式由应用决定。
+order: 29
+group: base
+---
+
+# Sheet
+
+Sheet 是位于屏幕一侧边缘的面板，背后的背景层覆盖其余部分：筛选条件、分享面板、侧边抽屉。按下背景层、Escape 和 Android 返回键会关闭它。它显示在所在窗口中一切内容之上，在每种设备上都一样，自己不绘制任何东西：面板和背景层都属于应用。
+
+```rust tabs
+use nsh_base::{OpenChangeReason, Sheet, SheetEvent, SheetProps};
+use nsh_core::ui::prelude::*;
+
+fn filters(open: Signal<bool>) -> impl IntoElement {
+    Sheet::element(SheetProps {
+        open: Prop::bind(move || Some(open.get())),
+        ..SheetProps::default()
+    })
+    .on_event(move |e: &SheetEvent| {
+        if let SheetEvent::OpenChange(next, _) = e {
+            open.set(*next);
+        }
+    })
+    .child(
+        view()
+            .gap_3()
+            .p_6()
+            .rounded_t(px(16.0))
+            .bg(white())
+            .child(text("Filters").font_weight(FontWeight::SEMIBOLD))
+            .child(view().on_press(move || open.set(false)).child(text("Done"))),
+    )
+}
+```
+
+```tsx tabs
+import { signal, Text, View } from "nsh";
+import { Sheet } from "nsh/base";
+
+function Filters() {
+  const open = signal(false);
+  return (
+    <>
+      <View onPress={() => open.set(true)}><Text>Filters</Text></View>
+      <Sheet
+        open={open()}
+        onOpenChange={(next) => open.set(next)}
+        popupClass="gap-3 rounded-t-2xl bg-white p-6"
+        backdropClass="bg-black/40"
+      >
+        <Text class="font-semibold">Filters</Text>
+        <View onPress={() => open.set(false)}><Text>Done</Text></View>
+      </Sheet>
+    </>
+  );
+}
+```
+
+`Sheet` 来自 [`nsh/base`](../modules/nsh-base.md)。它的内容在每次打开时创建。`side` 把它放在屏幕的 `"bottom"`（默认）或 `"top"`，宽度与屏幕相同；或放在 `"left"` 或 `"right"`，高度与屏幕相同；它另一个方向的尺寸由面板决定，来自其内容或 `popupClass`。
+
+Sheet 由 NSH 在应用的窗口中绘制，样式由应用决定。要使用平台自己呈现的 sheet（iOS 上的 page sheet），请使用 `presentation="pageSheet"` 的 [Dialog](./dialog.md)。
+
+<a id="props"></a>
+
+## 属性
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `open` | `open` | `boolean` | 无 | 是否打开，由应用控制。 |
+| `defaultOpen` | `default_open` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
+| `side` | `side` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 它所在的边缘。 |
+| `closeOnEscape` | `close_on_escape` | `boolean` | `true` | Escape 和 Android 返回键会关闭它。 |
+| `closeOnBackdropPress` | `close_on_backdrop_press` | `boolean` | `true` | 按下背景层会关闭它。 |
+| `popupClass`、`popupStyle` | `popup_class`、`popup_style` | `string`、`StyleProp<ViewStyle>` | 无 | 面板的外观。 |
+| `backdropClass`、`backdropStyle` | `backdrop_class`、`backdrop_style` | `string`、`StyleProp<ViewStyle>` | 无 | 背景层的外观，比如半透明的颜色。 |
+| `children` | `.child(..)` | `JSX.Element` | 无 | 内容。 |
+
+<a id="events"></a>
+
+## 事件
+
+| 事件 | Rust | 说明 |
+|---|---|---|
+| `onOpenChange` | `SheetEvent::OpenChange(open, reason)` | 它关闭了：`"backdropPress"` 或 `"cancel"`。 |
+| `onCancel` | `SheetEvent::Cancel` | 打开时按下 Escape 或 Android 返回键，无论它是否关闭。 |

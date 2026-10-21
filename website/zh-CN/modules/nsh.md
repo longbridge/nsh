@@ -6,10 +6,10 @@ order: 2
 
 # nsh
 
-`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、宿主元素 `View`、`Text`、`Scroll` 和 `Input`，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
+`nsh` 是核心模块：响应式 API（signal、computed、effect、context）、`mount`、宿主元素 `View`、`Text`、`Scroll`、`Input` 和 `Overlay`，以及元素、样式和事件的 TypeScript 类型。响应式图本身以 Rust 原生运行；读取一个 signal 是一次对运行时的调用，只需几纳秒，只有你自己写的闭包会在 JavaScript 解释器中执行。
 
 ```ts
-import { batch, cleanup, computed, context, effect, Input, mount, Scroll, signal, split, Text, untracked, View } from "nsh";
+import { batch, cleanup, computed, context, effect, Input, mount, Overlay, Scroll, signal, split, Text, untracked, View } from "nsh";
 ```
 
 NSH 的响应式模型与 SolidJS 相同：组件函数只运行**一次**，界面中读取了 signal 的部分会在 signal 变化时就地更新。组件不会重新渲染，也没有虚拟 DOM。教程见[响应式](../docs/reactivity.md)。
@@ -215,16 +215,17 @@ function LabeledInput(props: InputProps & { label: string }) {
 }
 ```
 
-## View、Text、Scroll、Input
+## View、Text、Scroll、Input、Overlay
 
 ```ts
 function View(props: ViewProps): YNode;
 function Text(props: TextProps): YNode;
 function Scroll(props: ScrollProps): YNode;
 function Input(props: InputProps): YNode;
+function Overlay(props: OverlayProps): YNode;
 ```
 
-`nsh` 导出的宿主元素，写作标签：`<View>`、`<Text>`、`<Scroll>`、`<Input>`。当标签通过导入（包括别名）指向它们之一时，编译器会就地创建原生视图，所以导入它们在运行时没有任何开销。它们也是普通的组件，可以作为值传递（`const Tag = inline ? Text : View`）。`nsh` 以同样的方式导出其他原语：[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)、[`Canvas`](./nsh-canvas.md)、[`WebView`](./nsh-webview.md) 和 [`Video`](./nsh-video.md)，各有自己的参考页面。它们的属性见[元素](../elements/index.md)。
+`nsh` 导出的宿主元素，写作标签：`<View>`、`<Text>`、`<Scroll>`、`<Input>`、`<Overlay>`（把子元素显示在窗口之上，相对锚点放置：[Overlay](../elements/overlay.md)）。当标签通过导入（包括别名）指向它们之一时，编译器会就地创建原生视图，所以导入它们在运行时没有任何开销。它们也是普通的组件，可以作为值传递（`const Tag = inline ? Text : View`）。`nsh` 以同样的方式导出其他原语：[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)、[`Canvas`](./nsh-canvas.md)、[`WebView`](./nsh-webview.md) 和 [`Video`](./nsh-video.md)，各有自己的参考页面。它们的属性见[元素](../elements/index.md)。
 
 ## 类型
 

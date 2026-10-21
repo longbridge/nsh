@@ -45,6 +45,7 @@ mod rust_inputs;
 mod rust_lists;
 mod rust_media;
 mod rust_platform;
+mod rust_popups;
 mod rust_renderers;
 mod rust_scrolling;
 mod rust_styles;

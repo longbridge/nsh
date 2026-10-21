@@ -38,6 +38,9 @@ export type AlertDialogPresentation = "alert" | "actionSheet";
 /** What an `AlertDialogAction` means. */
 export type AlertDialogRole = "default" | "cancel" | "destructive";
 
+/** How an overlay lines up with its anchor along the side it is on (`align`), as `gpui-base`'s `Align`: `start` and `end` follow the layout direction above or below the anchor. */
+export type Align = "start" | "center" | "end";
+
 /** How a `KeyboardAvoidingView` makes room. */
 export type AvoidBehavior = "padding" | "height";
 
@@ -73,6 +76,12 @@ export interface MarkdownOptions {
   /** The text is still arriving (a reply streamed by an AI model): syntax its end leaves open (`**bold`, `` `code ``, `[link](`, a table's header alone) is shown as if it were closed, not as literal characters until the rest arrives (default false). */
   streaming?: boolean;
 }
+
+/** Why a popup opened or closed (`onOpenChange`'s `reason`). */
+export type OpenChangeReason = "triggerPress" | "pressOutside" | "backdropPress" | "cancel" | "select" | "hover" | "longPress" | "contextMenu";
+
+/** The side of the anchor an overlay goes on (`placement`), as `gpui-base`'s `Placement`. */
+export type Placement = "top" | "bottom" | "left" | "right";
 
 /** The kind of an alert (GitHub's `> [!NOTE]`). */
 export type TextViewAlert = "note" | "tip" | "important" | "warning" | "caution";
@@ -468,6 +477,34 @@ export interface ButtonProps extends ComponentHostProps {
 /** A press target that owns its behavior (presses, the disabled and selected states, its role for screen readers) and leaves its look to the app: no colors, sizes or label of its own. The app's `class` and `style` style it, its states with `active:`, `hover:`, `focus:`, `selected:` and `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`, `selectedStyle` and `disabledStyle`, and its children are its content. */
 export declare const Button: ((props: ButtonProps) => JSX.Element);
 
+export interface ContextMenuProps extends ComponentHostProps {
+  /** Open (controlled): the app owns the value and changes it in `onOpenChange`. Without it the menu keeps its own state. */
+  open?: boolean | null;
+  /** No menu: the secondary button and held fingers do nothing. */
+  disabled?: boolean;
+  /** Desktops: the gap between the pointer and the popup. */
+  offset?: number;
+  /** Desktops: the distance it keeps from the edges of the safe area. */
+  margin?: number;
+  /** The classes of the popup (desktops) or of the sheet (touch screens). */
+  popupClass?: string | null;
+  /** The inline style of the popup or sheet, over its classes. */
+  popupStyle?: StyleProp<ViewStyle>;
+  /** Touch screens: the classes of the backdrop behind the sheet. */
+  backdropClass?: string | null;
+  /** The inline style of the backdrop, over its classes. */
+  backdropStyle?: StyleProp<ViewStyle>;
+  /** What it is about: the secondary button on it (desktops) or a finger held on it (touch screens) opens the menu. */
+  trigger?: JSX.Element;
+  /** The items, made on each opening. */
+  children?: JSX.Element;
+  /** It opened or closed (by the trigger, a press outside or on the backdrop, Escape or back, an item chosen), with why: set `open` to follow it. */
+  onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+}
+
+/** A menu about its trigger: the secondary button (a right click, a two-finger click) opens it where the pointer is on the desktops; a finger held on the trigger opens it as a sheet at the bottom of the screen on phones and tablets. Its items are those of `Menu`, and so is how it closes and how it is styled. */
+export declare const ContextMenu: ((props: ContextMenuProps) => JSX.Element);
+
 export interface KeyboardAvoidingViewProps extends ComponentHostProps {
   /** Avoid the keyboard (default true). */
   enabled?: boolean;
@@ -481,6 +518,94 @@ export interface KeyboardAvoidingViewProps extends ComponentHostProps {
 
 /** A view that keeps its content above the software keyboard, animated with the keyboard. For content outside scroll views, such as a message bar at the bottom of a screen (inputs inside scroll views are kept visible natively). It assumes it reaches the bottom of the surface, as a screen's content does. Where the window shrinks for the keyboard instead (an Android host that resizes), nothing moves. */
 export declare const KeyboardAvoidingView: ((props: KeyboardAvoidingViewProps) => JSX.Element);
+
+export interface MenuProps extends ComponentHostProps {
+  /** Open (controlled): the app owns the value and changes it in `onOpenChange`. Without it the menu keeps its own state. */
+  open?: boolean | null;
+  /** Open at first, while `open` is not set. */
+  defaultOpen?: boolean;
+  /** Desktops: the side of the trigger it goes on (default `"bottom"`); the other side when only that one has room. */
+  placement?: Placement;
+  /** Desktops: how it lines up with the trigger (default `"start"`). */
+  align?: Align;
+  /** Desktops: the gap between the trigger and the popup. */
+  offset?: number;
+  /** Desktops: the distance it keeps from the edges of the safe area. */
+  margin?: number;
+  /** The classes of the popup the items are in (desktops), or of the sheet (touch screens); its submenus' popups take them too. */
+  popupClass?: string | null;
+  /** The inline style of the popup or sheet, over its classes. */
+  popupStyle?: StyleProp<ViewStyle>;
+  /** Touch screens: the classes of the backdrop behind the sheet (pressing it closes the menu). */
+  backdropClass?: string | null;
+  /** The inline style of the backdrop, over its classes. */
+  backdropStyle?: StyleProp<ViewStyle>;
+  /** What opens it when pressed. */
+  trigger?: JSX.Element;
+  /** The items (`MenuItem`, `MenuSeparator`, `Submenu`, anything else), made on each opening. */
+  children?: JSX.Element;
+  /** It opened or closed (by the trigger, a press outside or on the backdrop, Escape or back, an item chosen), with why: set `open` to follow it. */
+  onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+}
+
+/** A menu its trigger opens: a popup at the trigger on the desktops, a sheet at the bottom of the screen on phones and tablets (over a backdrop), whose items are `MenuItem`s, `MenuSeparator`s and `Submenu`s (cascading popups on the desktops, the sheet's next items on touch screens). Choosing an item, a press outside, Escape and the Android back button close it. It looks like nothing: style the popup or sheet with `popupClass` / `popupStyle`, the backdrop with `backdropClass` / `backdropStyle`, and the items. */
+export declare const Menu: ((props: MenuProps) => JSX.Element);
+
+export interface MenuItemProps extends ComponentHostProps {
+  /** Not chosen: no presses, `disabled:` styles apply, screen readers say it is dimmed. */
+  disabled?: boolean;
+  /** Choosing it closes the menu (default true). */
+  closeOnSelect?: boolean;
+  /** What screen readers say, when its content is not enough. */
+  accessibilityLabel?: string | null;
+  /** The content. */
+  children?: JSX.Element;
+  /** It was chosen. */
+  onSelect?: () => void;
+}
+
+/** An item of a `Menu`, `ContextMenu` or `Submenu`: pressing it chooses it (`onSelect`) and closes the menu. Its look is the app's: `class`, `style` and the `active:`, `hover:`, `disabled:` states. */
+export declare const MenuItem: ((props: MenuItemProps) => JSX.Element);
+
+export interface MenuSeparatorProps extends ComponentHostProps {
+}
+
+/** A line between groups of a menu's items: a view the app styles (`class`, `style`), shown with its level's items. */
+export declare const MenuSeparator: ((props: MenuSeparatorProps) => JSX.Element);
+
+export interface PopoverProps extends ComponentHostProps {
+  /** Open (controlled): the app owns the value and changes it in `onOpenChange`. Without it the popover keeps its own state. */
+  open?: boolean | null;
+  /** Open at first, while `open` is not set. */
+  defaultOpen?: boolean;
+  /** The side of the trigger it goes on (default `"bottom"`); the other side when only that one has room. */
+  placement?: Placement;
+  /** How it lines up with the trigger along that side (default `"center"`). */
+  align?: Align;
+  /** The gap between the trigger and the popup. */
+  offset?: number;
+  /** The distance it keeps from the edges of the safe area. */
+  margin?: number;
+  /** Escape and the Android back button close it (default true); either way `onCancel` hears them. */
+  closeOnEscape?: boolean;
+  /** A press outside it closes it (default true). On phones and tablets the press only closes it (a transparent backdrop takes it); on the desktops it goes on to what is under the pointer. */
+  closeOnPressOutside?: boolean;
+  /** The classes of the popup: the box its content is in, placed by the core. */
+  popupClass?: string | null;
+  /** The inline style of the popup, over its classes. */
+  popupStyle?: StyleProp<ViewStyle>;
+  /** What opens it: pressing it toggles the popover, and the popover is placed against it. */
+  trigger?: JSX.Element;
+  /** The content, made on each opening. */
+  children?: JSX.Element;
+  /** It opened or closed (by the trigger, a press outside, Escape or back), with why: set `open` to follow it. */
+  onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+  /** Escape or the Android back button while it is open, whether or not `closeOnEscape` closed it. */
+  onCancel?: () => void;
+}
+
+/** Content anchored to a trigger, shown on top of everything in its root view (the surface, or the dialog it is in) whatever clips the trigger: pressing the trigger toggles it, a press outside, Escape and the Android back button close it. It goes on the `placement` side of the trigger, on the other side when only that one has room, kept inside the safe area, and follows the trigger as it scrolls. It looks like nothing: style the popup with `popupClass` / `popupStyle` and the content as you like. */
+export declare const Popover: ((props: PopoverProps) => JSX.Element);
 
 export interface SafeAreaViewProps extends ComponentHostProps {
   /** The edges to pad (all by default). */
@@ -499,6 +624,50 @@ export interface SelectionAreaProps extends ComponentHostProps {
 
 /** A view whose texts share one selection, as a browser page's do: a selection runs from a place in one text to a place in another, across views and `TextView`s. On desktops it is made by dragging, a double click (a word) or a triple click (a paragraph), and extended by Shift-clicks; on touch screens by a long press, then the handles. Copy and Select All are in the menu, Ctrl / Cmd+A and Ctrl / Cmd+C select all and copy, Escape clears. Texts with `selectable={false}` stay out of it; an area inside another is part of the outer one. It has no look of its own: the highlight is the platform's, in each text's `selectionColor`. */
 export declare const SelectionArea: ((props: SelectionAreaProps) => JSX.Element);
+
+export interface SheetProps extends ComponentHostProps {
+  /** Open (controlled): the app owns the value and changes it in `onOpenChange`. Without it the sheet keeps its own state. */
+  open?: boolean | null;
+  /** Open at first, while `open` is not set. */
+  defaultOpen?: boolean;
+  /** The edge it is on (default `"bottom"`): as wide as the screen at the top and bottom, as tall at the left and right. */
+  side?: Placement;
+  /** Escape and the Android back button close it (default true); either way `onCancel` hears them. */
+  closeOnEscape?: boolean;
+  /** A press on the backdrop closes it (default true). */
+  closeOnBackdropPress?: boolean;
+  /** The classes of the panel. */
+  popupClass?: string | null;
+  /** The inline style of the panel, over its classes. */
+  popupStyle?: StyleProp<ViewStyle>;
+  /** The classes of the backdrop behind the panel, which covers the screen and takes its presses. */
+  backdropClass?: string | null;
+  /** The inline style of the backdrop, over its classes. */
+  backdropStyle?: StyleProp<ViewStyle>;
+  /** The content, made on each opening. */
+  children?: JSX.Element;
+  /** It closed (a press on the backdrop, Escape or back), with why: set `open` to follow it. */
+  onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+  /** Escape or the Android back button while it is open, whether or not `closeOnEscape` closed it. */
+  onCancel?: () => void;
+}
+
+/** A panel at an edge of the screen (`side`) over a backdrop that covers the rest and takes its presses, on top of everything in its root view; the same on every device. A press on the backdrop, Escape and the Android back button close it. It looks like nothing: style the panel with `popupClass` / `popupStyle` and the backdrop with `backdropClass` / `backdropStyle` (a translucent color). */
+export declare const Sheet: ((props: SheetProps) => JSX.Element);
+
+export interface SubmenuProps extends ComponentHostProps {
+  /** It does not open. */
+  disabled?: boolean;
+  /** The item that opens it, among its menu's items. */
+  trigger?: JSX.Element;
+  /** Touch screens: the row above its items that returns to the items it is among (Escape and back do too). */
+  back?: JSX.Element;
+  /** Its items. */
+  children?: JSX.Element;
+}
+
+/** A menu inside a menu: on the desktops its items are a popup beside its trigger, opened as the pointer comes over the trigger or presses it; on touch screens pressing the trigger shows its items in the sheet instead of the ones around it, with its `back` row first. Its popups take the menu's `popupClass` / `popupStyle`. */
+export declare const Submenu: ((props: SubmenuProps) => JSX.Element);
 
 export interface TextViewProps extends ComponentHostProps {
   /** The document as Markdown (CommonMark and GitHub's: tables, task lists, footnotes, alerts; formulas; HTML inside). A reply streamed by an AI model can be passed as it grows (with `options={{ streaming: true }}`): only the blocks that changed are shown again. */
@@ -554,6 +723,38 @@ export declare const TextView: ((props: TextViewProps) => JSX.Element) & {
   /** The text of `document` without markup (what copying a whole reply gives): blocks separated by blank lines, list items and table rows by line breaks, cells by tabs. */
   plainText(document: TextViewDocument): string;
 };
+
+export interface TooltipProps extends ComponentHostProps {
+  /** Shown (controlled): the app owns the value and changes it in `onOpenChange`. Without it the tooltip keeps its own state. */
+  open?: boolean | null;
+  /** Shown at first, while `open` is not set. */
+  defaultOpen?: boolean;
+  /** The side of the trigger it goes on (default `"top"`); the other side when only that one has room. */
+  placement?: Placement;
+  /** How it lines up with the trigger along that side (default `"center"`). */
+  align?: Align;
+  /** The gap between the trigger and the tooltip. */
+  offset?: number;
+  /** The distance it keeps from the edges of the safe area. */
+  margin?: number;
+  /** Milliseconds the pointer rests on the trigger before it shows (desktops; default 500). */
+  delay?: number;
+  /** No tooltip: it neither shows nor opens. */
+  disabled?: boolean;
+  /** The classes of the popup the content is in. */
+  popupClass?: string | null;
+  /** The inline style of the popup, over its classes. */
+  popupStyle?: StyleProp<ViewStyle>;
+  /** What it says. */
+  content?: JSX.Element;
+  /** The trigger: what it is about. */
+  children?: JSX.Element;
+  /** It showed or hid, with why: set `open` to follow it. */
+  onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+}
+
+/** A hint about its children, shown next to them on top of everything: on the desktops while the pointer rests on them (after `delay`), on touch screens while a finger is held on them and a moment after it lifts. It never takes the pointer or presses, so the trigger works as it does without it. It looks like nothing: style the popup with `popupClass` / `popupStyle` and the `content`. */
+export declare const Tooltip: ((props: TooltipProps) => JSX.Element);
 
 /** The system's alert dialog (UIAlertController, AlertDialog). */
 export interface AlertDialogModule {

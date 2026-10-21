@@ -11697,3 +11697,413 @@ mod rust_selection_area {
         ));
     }
 }
+
+/// Creates `id` of `tag` with `style`, in `parent`.
+fn add(
+    c: &mut Core<FakeEngine>,
+    id: NodeId,
+    tag: Tag,
+    parent: NodeId,
+    s: &[(&str, StyleValue<'_>)],
+) {
+    apply(
+        c,
+        vec![
+            Op::Create { id, tag },
+            style_op(id, s),
+            Op::Insert {
+                parent,
+                child: id,
+                before: None,
+            },
+        ],
+    );
+}
+
+fn inserts(batch: &MountBatch) -> Vec<(NodeId, NodeId, Option<NodeId>)> {
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Insert {
+                parent,
+                child,
+                before,
+            } => Some((*parent, *child, *before)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn overlay_prop(id: NodeId, prop: crate::OverlayProp) -> Op {
+    Op::SetProp {
+        id,
+        prop: Prop::Overlay(prop),
+    }
+}
+
+#[test]
+fn overlays_show_in_their_root_view_above_its_children() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A clipping box with an overlay deep inside.
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("height", Number(100.0)),
+            ("overflow", StyleValue::Str("hidden")),
+        ],
+    );
+    add(&mut c, 4, Tag::View, 2, &[("padding", Number(5.0))]);
+    add(
+        &mut c,
+        6,
+        Tag::Overlay,
+        4,
+        &[("left", Number(10.0)), ("top", Number(300.0))],
+    );
+    add(
+        &mut c,
+        8,
+        Tag::View,
+        6,
+        &[("width", Number(50.0)), ("height", Number(20.0))],
+    );
+    let batch = c.commit().unwrap();
+    let creates = batch.items.iter().find_map(|i| match i {
+        MountItem::Create { id: 6, kind } => Some(*kind),
+        _ => None,
+    });
+    assert_eq!(creates, Some(ViewKind::View));
+    let ins = inserts(&batch);
+    assert!(ins.contains(&(ROOT_ID, 6, None)), "{ins:?}");
+    assert!(!ins.iter().any(|&(p, c, _)| p == 4 && c == 6));
+    assert!(ins.contains(&(6, 8, None)));
+    // `position: fixed` in the root view, out of its parent's layout.
+    assert_eq!(frame_of(&batch, 6), Some(rect(10.0, 300.0, 50.0, 20.0)));
+    assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 320.0, 10.0)));
+    // Measured in the root view.
+    let m = c.measure(8).unwrap();
+    assert_eq!(m.page, point(px(10.0), px(300.0)));
+
+    // The root view's children go below the overlays.
+    add(&mut c, 10, Tag::View, ROOT_ID, &[("height", Number(10.0))]);
+    let batch = c.commit().unwrap();
+    assert_eq!(inserts(&batch), vec![(ROOT_ID, 10, Some(6))]);
+
+    // Out of the tree: out of the root view; back in: on top.
+    add(&mut c, 12, Tag::Overlay, ROOT_ID, &[]);
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: ROOT_ID,
+            child: 2,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id: 6 }))
+    );
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: Some(10),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let ins = inserts(&batch);
+    assert!(ins.contains(&(ROOT_ID, 2, Some(10))), "{ins:?}");
+    assert!(ins.contains(&(ROOT_ID, 6, None)), "{ins:?}");
+    assert_eq!(c.overlays.last().map(|&k| c.nodes[k as usize].id), Some(6));
+    // Released with its parent's subtree.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 2,
+            },
+            Op::Release { id: 6 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Delete { id: 6 }))
+    );
+    assert_eq!(c.overlays.len(), 1);
+    // `display: none` around it hides it.
+    add(&mut c, 14, Tag::View, ROOT_ID, &[]);
+    add(&mut c, 16, Tag::Overlay, 14, &[]);
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![style_op(14, &[("display", StyleValue::Str("none"))])],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id: 16 }))
+    );
+}
+
+#[test]
+fn anchored_overlays_go_beside_their_anchor_and_follow_it() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(
+        &mut c,
+        2,
+        Tag::Scroll,
+        ROOT_ID,
+        &[("height", Number(480.0))],
+    );
+    add(&mut c, 4, Tag::View, 2, &[("height", Number(100.0))]);
+    add(
+        &mut c,
+        6,
+        Tag::View,
+        2,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+            ("marginLeft", Number(20.0)),
+        ],
+    );
+    add(&mut c, 8, Tag::View, 2, &[("height", Number(1000.0))]);
+    add(&mut c, 10, Tag::Overlay, 6, &[]);
+    add(
+        &mut c,
+        12,
+        Tag::View,
+        10,
+        &[("width", Number(120.0)), ("height", Number(60.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                10,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(6)),
+            ),
+            overlay_prop(10, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(10, crate::OverlayProp::Offset(px(4.0))),
+            Op::Listen {
+                id: 10,
+                event: EventKind::Position,
+                enabled: true,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(20.0, 144.0, 120.0, 60.0)));
+    let events = js_events(&mut c);
+    assert!(events.iter().any(|(id, kind, payload)| *id == 10
+        && *kind == EventKind::Position
+        && matches!(payload, EventPayload::Map(m) if m.contains(&("placement", PayloadValue::Str("bottom".into()))))));
+
+    // The scroll view scrolled: it follows.
+    c.set_scroll_offset(2, point(px(0.0), px(30.0)), 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(20.0, 114.0, 120.0, 60.0)));
+    // Near the bottom of the screen it goes above.
+    c.set_scroll_offset(2, point(px(0.0), px(-300.0)), 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(20.0, 336.0, 120.0, 60.0)));
+    let events = js_events(&mut c);
+    assert!(events.iter().any(|(_, kind, payload)| *kind == EventKind::Position
+        && matches!(payload, EventPayload::Map(m) if m.contains(&("placement", PayloadValue::Str("top".into()))))));
+
+    // Kept inside the safe area less the margin.
+    c.set_scroll_offset(2, point(px(0.0), px(0.0)), 0);
+    c.set_safe_area(EdgeInsets {
+        left: px(30.0),
+        ..EdgeInsets::default()
+    });
+    apply(
+        &mut c,
+        vec![overlay_prop(10, crate::OverlayProp::Margin(px(8.0)))],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10).map(|f| f.origin.x), Some(px(38.0)));
+
+    // A point anchor.
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            10,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Point(point(
+                px(200.0),
+                px(50.0),
+            ))),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 10), Some(rect(192.0, 54.0, 120.0, 60.0)));
+}
+
+fn touch_down(path: Vec<NodeId>) -> EventPayload {
+    EventPayload::Touch(Box::new(crate::TouchEvent {
+        phase: crate::TouchPhase::Start,
+        timestamp: 0.0,
+        points: vec![crate::TouchPoint {
+            id: 1,
+            target: path[0],
+            path,
+            page: point(px(5.0), px(6.0)),
+            location: point(px(5.0), px(6.0)),
+            changed: true,
+        }],
+        activated: None,
+    }))
+}
+
+#[test]
+fn overlays_hear_presses_outside_and_cancel_from_the_top() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 4, Tag::Overlay, 2, &[]);
+    add(&mut c, 6, Tag::Overlay, 4, &[]);
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                4,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            Op::Listen {
+                id: 4,
+                event: EventKind::PressOutside,
+                enabled: true,
+            },
+            Op::Listen {
+                id: 4,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+            Op::Listen {
+                id: 6,
+                event: EventKind::Cancel,
+                enabled: true,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // The overlays, the anchor and the root listen to touches.
+    for id in [ROOT_ID, 2, 4, 6] {
+        let events = batch.items.iter().find_map(|i| match i {
+            MountItem::Events { id: i, events } if *i == id => Some(*events),
+            _ => None,
+        });
+        assert!(events.is_some_and(|e| e.contains(EventKind::Touch)), "{id}");
+    }
+    // Escape is bound, back listened to.
+    let keymap = batch.items.iter().find_map(|i| match i {
+        MountItem::Keymap(k) => Some(k.clone()),
+        _ => None,
+    });
+    assert!(keymap.is_some_and(|k| k.bindings().iter().any(|b| b.id == overlay::ESCAPE_BINDING)));
+    js_events(&mut c);
+
+    for (path, outside) in [
+        (vec![ROOT_ID], true),
+        (vec![2, ROOT_ID], false),
+        (vec![4, ROOT_ID], false),
+        (vec![6, ROOT_ID], false),
+    ] {
+        c.component_event(ROOT_ID, EventKind::Touch, &touch_down(path.clone()));
+        let events = js_events(&mut c);
+        let pressed = events
+            .iter()
+            .any(|(id, kind, _)| *id == 4 && *kind == EventKind::PressOutside);
+        assert_eq!(pressed, outside, "{path:?}");
+    }
+
+    // The top one listening hears Escape and back.
+    c.component_event(
+        ROOT_ID,
+        EventKind::KeyCommand,
+        &EventPayload::Value(PayloadValue::Number(overlay::ESCAPE_BINDING as f64)),
+    );
+    c.commit();
+    let events = js_events(&mut c);
+    assert!(
+        events.contains(&(6, EventKind::Cancel, EventPayload::None)),
+        "{events:?}"
+    );
+    assert!(!events.iter().any(|(id, ..)| *id == 4));
+    apply(
+        &mut c,
+        vec![Op::Listen {
+            id: 6,
+            event: EventKind::Cancel,
+            enabled: false,
+        }],
+    );
+    c.commit();
+    assert!(c.component_event(ROOT_ID, EventKind::BackPress, &EventPayload::None));
+    c.commit();
+    let events = js_events(&mut c);
+    assert!(
+        events.contains(&(4, EventKind::Cancel, EventPayload::None)),
+        "{events:?}"
+    );
+
+    // Closed: nothing is listened to any more.
+    apply(
+        &mut c,
+        vec![Op::Remove {
+            parent: 2,
+            child: 4,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    let root_events = batch.items.iter().find_map(|i| match i {
+        MountItem::Events {
+            id: ROOT_ID,
+            events,
+        } => Some(*events),
+        _ => None,
+    });
+    assert!(root_events.is_some_and(|e| !e.contains(EventKind::Touch)));
+}
+
+#[test]
+fn overlays_in_a_modal_show_in_it() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::Modal, ROOT_ID, &[]);
+    add(&mut c, 4, Tag::View, 2, &[("height", Number(40.0))]);
+    add(
+        &mut c,
+        6,
+        Tag::Overlay,
+        4,
+        &[("right", Number(0.0)), ("bottom", Number(0.0))],
+    );
+    add(
+        &mut c,
+        8,
+        Tag::View,
+        6,
+        &[("width", Number(10.0)), ("height", Number(10.0))],
+    );
+    c.set_root_size(2, size_pt(200.0, 300.0), EdgeInsets::default());
+    let batch = c.commit().unwrap();
+    assert!(inserts(&batch).contains(&(2, 6, None)));
+    assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
+}

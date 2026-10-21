@@ -3,7 +3,7 @@ import { computed, effect, Scroll, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, Platform, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Dialog, safeArea } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 
@@ -1004,34 +1004,28 @@ function Loading(props: { failed: string }) {
 }
 
 /**
- * A panel that slides up from the bottom over a dimmed backdrop while
- * `open`; a tap on the backdrop, Escape or the back button closes it (`onClose`:
- * set `open` to false).
+ * A panel at the bottom over a dimmed backdrop while `open` (`nsh/base`'s
+ * `Sheet`, in the gallery's look); a press on the backdrop, Escape or the
+ * back button closes it (`onClose`: set `open` to false).
  */
 export function Sheet(props: { open: boolean; onClose: () => void; children: JSX.Element }) {
   return (
-    <Dialog open={props.open} animation="slide" onOpenChange={(open) => !open && props.onClose()}>
-      <View style={{ flex: 1, justifyContent: "flex-end" }}>
-        <View
-          accessibilityLabel="Close"
-          onPress={props.onClose}
-          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }}
-        />
-        <View
-          style={{
-            gap: 12,
-            paddingTop: 8,
-            paddingHorizontal: 16,
-            paddingBottom: safeArea().bottom + 16,
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-            backgroundColor: colors.surface,
-          }}
-        >
-          <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
-          {props.children}
-        </View>
-      </View>
-    </Dialog>
+    <BaseSheet
+      open={props.open}
+      onOpenChange={(open) => !open && props.onClose()}
+      backdropStyle={{ backgroundColor: "rgba(0,0,0,0.4)" }}
+      popupStyle={{
+        gap: 12,
+        paddingTop: 8,
+        paddingHorizontal: 16,
+        paddingBottom: safeArea().bottom + 16,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        backgroundColor: colors.surface,
+      }}
+    >
+      <View style={{ width: 36, height: 5, borderRadius: 3, alignSelf: "center", backgroundColor: colors.raised }} />
+      {props.children}
+    </BaseSheet>
   );
 }

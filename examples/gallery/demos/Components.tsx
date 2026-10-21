@@ -3,7 +3,7 @@ import { AccessibilityInfo, reduceMotion, screenReaderEnabled } from "nsh/access
 import { LayoutAnimation } from "nsh/animated";
 import { PixelRatio, Platform } from "nsh/device";
 import { InputAccessoryView } from "nsh/ios";
-import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView } from "nsh/base";
+import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView, safeArea, Sheet } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";
@@ -145,23 +145,30 @@ function PressableSheet() {
         <Text style={{ fontSize: 15, fontWeight: "600", color: colors.onAccent }}>Open a sheet</Text>
       </View>
       <Caption label="Scales and darkens while pressed" note="active:scale-[0.97]" />
-      <Dialog open={sheet()} presentation="pageSheet" animation="slide" onOpenChange={(open) => sheet.set(open)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-          <View style={{ flex: 1, padding: 16, gap: 16 }}>
-            <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
-              <View style={{ flexDirection: "row" }}>
-                <Badge label="pageSheet" tone="accent" />
-              </View>
-              <Text style={{ fontSize: 28, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>A sheet</Text>
-              <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted }}>
-                {hint("Swipe down (iOS) or press back (Android) to close.", "Press Escape or click outside the card to close.")}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }} />
-            <Button label="Close" onPress={() => sheet.set(false)} />
+      <Sheet
+        open={sheet()}
+        onOpenChange={(open) => sheet.set(open)}
+        backdropStyle={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+        popupStyle={{
+          gap: 16,
+          padding: 20,
+          paddingBottom: safeArea().bottom + 20,
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          backgroundColor: colors.background,
+        }}
+      >
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: "row" }}>
+            <Badge label="Sheet" tone="accent" />
           </View>
-        </SafeAreaView>
-      </Dialog>
+          <Text style={{ fontSize: 28, fontWeight: "700", letterSpacing: -0.5, color: colors.text }}>A sheet</Text>
+          <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted }}>
+            {hint("Tap outside it or press back (Android) to close.", "Press Escape or click outside it to close.")}
+          </Text>
+        </View>
+        <Button label="Close" onPress={() => sheet.set(false)} />
+      </Sheet>
     </Card>
   );
 }

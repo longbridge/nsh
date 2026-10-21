@@ -144,6 +144,17 @@ pub struct NativeEvent {
     pub data: JsonValue,
 }
 
+/// Where the core placed an overlay (`Overlay::on_position`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct OverlayPosition {
+    /// The side of the anchor it went on.
+    pub placement: crate::overlay::Placement,
+    /// Its frame in the root view.
+    pub bounds: Bounds<Points>,
+    /// The room on that side, inside the safe area less the margin.
+    pub available: Size<Points>,
+}
+
 /// A field of a map payload.
 fn field<'a>(payload: &'a EventPayload, key: &str) -> Option<&'a PayloadValue> {
     match payload {
@@ -189,6 +200,38 @@ pub(crate) fn typed<T: ?Sized + ToOwned + 'static>(
 /// Events without data.
 pub(crate) fn unit(_: &EventPayload) -> Option<Cow<'_, ()>> {
     Some(Cow::Owned(()))
+}
+
+pub(crate) fn overlay_position(p: &EventPayload) -> Option<Cow<'_, OverlayPosition>> {
+    use crate::overlay::Placement;
+    let placement = match string(p, "placement")? {
+        "top" => Placement::Top,
+        "left" => Placement::Left,
+        "right" => Placement::Right,
+        _ => Placement::Bottom,
+    };
+    Some(Cow::Owned(OverlayPosition {
+        placement,
+        bounds: Bounds {
+            origin: point(px(number(p, "x")), px(number(p, "y"))),
+            size: Size {
+                width: px(number(p, "width")),
+                height: px(number(p, "height")),
+            },
+        },
+        available: Size {
+            width: px(number(p, "availableWidth")),
+            height: px(number(p, "availableHeight")),
+        },
+    }))
+}
+
+/// Where a press went down, in the root view (`Overlay::on_press_outside`).
+pub(crate) fn page_point(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
+    Some(Cow::Owned(point(
+        px(number(p, "pageX")),
+        px(number(p, "pageY")),
+    )))
 }
 
 pub(crate) fn layout(p: &EventPayload) -> Option<Cow<'_, Bounds<Points>>> {

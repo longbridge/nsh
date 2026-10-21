@@ -102,6 +102,14 @@ export interface InputProps extends CommonProps, InputHostProps {
 /** iOS-only props of `<Input>`. */
 export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
 
+/** `<Overlay>`: its children shown on top of the root view it is in (the
+ * surface, or the dialog around it), outside its parent's layout and
+ * clipping; laid out as a `position: fixed` box of that root view, or
+ * placed against `anchor`. */
+export interface OverlayProps extends CommonProps, OverlayHostProps {
+  style?: StyleProp<ViewStyle>;
+}
+
 /** What JS sets on a Rust component's host itself: the app's classes
  * (appended to the component's own), its inline and state styles, its test id, layout
  * events and the ref (`ref.command(name, args)`). */
@@ -353,6 +361,20 @@ export interface ImageStyle extends ViewStyle {
   tintColor?: ColorValue;
 }
 
+/** Where the core placed an overlay: the payload of `onPosition`. */
+export interface OverlayPosition {
+  /** The side of the anchor it went on: the one asked for, or the other one when only that one has room. */
+  placement: "top" | "bottom" | "left" | "right";
+  /** Its frame in the root view (the surface, or the dialog it is in). */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The room on that side, inside the safe area less `margin`: what a menu may grow to. */
+  availableWidth: number;
+  availableHeight: number;
+}
+
 /** A frame relative to the parent: the payload of `onLayout`. */
 export interface LayoutEvent {
   x: number;
@@ -450,6 +472,9 @@ export interface AccessibilityState {
   expanded?: boolean;
 }
 
+/** How an overlay lines up with its anchor along the side it is on (`align`), as `gpui-base`'s `Align`: `start` and `end` follow the layout direction above or below the anchor. */
+export type Align = "start" | "center" | "end";
+
 /** Automatic capitalization (`autoCapitalize`). */
 export type AutoCapitalize = "none" | "sentences" | "words" | "characters";
 
@@ -487,6 +512,9 @@ export type LiveRegion = "none" | "polite" | "assertive";
 
 /** How a modal covers the screen (`presentation`). */
 export type ModalPresentation = "fullScreen" | "pageSheet" | "formSheet";
+
+/** The side of the anchor an overlay goes on (`placement`), as `gpui-base`'s `Placement`. */
+export type Placement = "top" | "bottom" | "left" | "right";
 
 /** Which touches a view and its children receive (`pointerEvents`). */
 export type PointerEvents = "auto" | "none" | "box-none" | "box-only";
@@ -904,6 +932,26 @@ export interface VideoHostProps {
   onError?: (e: { message: string }) => void;
   onEnd?: () => void;
   onBuffer?: (e: { isBuffering: boolean }) => void;
+}
+
+/** The props of `<Overlay>`. */
+export interface OverlayHostProps {
+  /** The view (a ref) or the point (`{ x, y }` in the root view, as touches' `pageX` / `pageY`) it is placed against, following a view as it moves; without one it is laid out as a `position: fixed` box of its root view. */
+  anchor?: YNode | { x: number; y: number } | null;
+  /** The side of the anchor it goes on (default `"bottom"`); the other side when only that one has room. */
+  placement?: Placement;
+  /** How it lines up with the anchor along that side (default `"center"`; `"start"` / `"end"` follow the layout direction above and below). */
+  align?: Align;
+  /** The gap between the anchor and the overlay (default 0). */
+  offset?: number;
+  /** The distance it keeps from the edges of the root view's safe area (default 0). */
+  margin?: number;
+  /** A press went down outside the overlay, its anchor and the overlays inside it (where, in the root view). Closing is the app's: leave the overlay out. */
+  onPressOutside?: (e: { pageX: number; pageY: number }) => void;
+  /** Escape or the Android back button, while this is the top overlay listening to it (it takes the key from the overlays below, the pages and `BackHandler`). Closing is the app's. */
+  onCancel?: () => void;
+  /** The core placed the overlay (again: the anchor moved, the overlay changed size, it went to the other side). */
+  onPosition?: (e: OverlayPosition) => void;
 }
 
 /** A finger of a touch event (points). */

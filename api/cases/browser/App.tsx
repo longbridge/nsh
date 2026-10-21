@@ -4,6 +4,7 @@
 // the steps after it are that case's. Kept with
 // `cargo xtask api --keep api/cases/browser`.
 import { type JSX, View, mount, signal } from "nsh";
+import BasePopupsDesktop from "./base-popups-desktop";
 import PropsPlatformWeb from "./props-platform-web";
 import PropsTextScaling from "./props-text-scaling";
 import PropsMediaWebviewDesktop from "./props-media-webview-desktop";
@@ -12,6 +13,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-platform-web": PropsPlatformWeb,
   "props-text-scaling": PropsTextScaling,
   "props-media-webview-desktop": PropsMediaWebviewDesktop,
+  "base-popups-desktop": BasePopupsDesktop,
 };
 const shown = signal("");
 

@@ -120,6 +120,14 @@ export interface InputProps extends CommonProps, InputHostProps {
 /** iOS-only props of `<Input>`. */
 export interface IOSInputProps extends IOSProps, IOSInputHostProps {}
 
+/** `<Overlay>`: its children shown on top of the root view it is in (the
+ * surface, or the dialog around it), outside its parent's layout and
+ * clipping; laid out as a `position: fixed` box of that root view, or
+ * placed against `anchor`. */
+export interface OverlayProps extends CommonProps, OverlayHostProps {
+  style?: StyleProp<ViewStyle>;
+}
+
 /** What JS sets on a Rust component's host itself: the app's classes
  * (appended to the component's own), its inline and state styles, its test id, layout
  * events and the ref (`ref.command(name, args)`). */

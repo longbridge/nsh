@@ -235,6 +235,14 @@ const NSH: &[Item] = &[
             &["(props: InputProps): YNode"],
         ),
     ),
+    (
+        "Overlay",
+        Export::Value(|cx| dom::host_component(cx, "overlay", true)),
+        Ts::function(
+            "Its children on top of the root view it is in (the surface, or the dialog\naround it), outside its parent's layout and clipping, while it stays its\nparent's child for everything else (context, events, lifetime): popovers,\nmenus, tooltips. Without `anchor` it is a `position: fixed` box of that\nroot view; with one it goes on the `placement` side of the anchor, on the\nother when only that one has room, kept inside the safe area, and follows\nthe anchor as it moves. `onPressOutside` and `onCancel` (Escape, Android\nback) report what closes it; closing is the app's.",
+            &["(props: OverlayProps): YNode"],
+        ),
+    ),
 ];
 
 /// `nsh`'s types; its element and style types and `JSX` are `types.d.ts`'s.

@@ -3,7 +3,7 @@
 import type { CanvasContextMethods, CanvasGradient, CanvasNumber, CanvasPaint, CanvasPath, CanvasPathMethods, CanvasProperties, CanvasProps, CanvasRenderingContext2D, CanvasSize, CanvasTextAlign, CanvasTextBaseline, LineCap, LineJoin, Path2D, TextMetrics } from "./canvas";
 import type { ImageModule, ImageSize } from "./image";
 import type { ListItemsProps, ListProps, ListSlot, ViewToken, ViewabilityConfig } from "./list";
-import type { ImageProps, InputProps, JSX, ScrollProps, TextProps, ViewProps, YNode } from "./types";
+import type { ImageProps, InputProps, JSX, OverlayProps, ScrollProps, TextProps, ViewProps, YNode } from "./types";
 import type { VideoProps } from "./video";
 import type { WebViewProps } from "./webview";
 
@@ -140,6 +140,18 @@ export declare function Scroll(props: ScrollProps): YNode;
  * `focus()`, `blur()` and `setSelection(start, end)`.
  */
 export declare function Input(props: InputProps): YNode;
+
+/**
+ * Its children on top of the root view it is in (the surface, or the dialog
+ * around it), outside its parent's layout and clipping, while it stays its
+ * parent's child for everything else (context, events, lifetime): popovers,
+ * menus, tooltips. Without `anchor` it is a `position: fixed` box of that
+ * root view; with one it goes on the `placement` side of the anchor, on the
+ * other when only that one has room, kept inside the safe area, and follows
+ * the anchor as it moves. `onPressOutside` and `onCancel` (Escape, Android
+ * back) report what closes it; closing is the app's.
+ */
+export declare function Overlay(props: OverlayProps): YNode;
 
 /**
  * An image (a URL or `import logo from "./logo.png"`), decoded and cached

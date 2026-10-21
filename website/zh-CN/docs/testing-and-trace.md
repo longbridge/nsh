@@ -283,8 +283,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 | 步骤 | 说明 |
 |---|---|
-| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressDown`、`onPressUp`、`onPress`。视图被禁用时 reject。 |
-| `await app.longPress(selector)` | 按住它，持续它的 `delayLongPress`（500 ms）：依次触发 `onPressDown`、`onLongPress`、`onPressUp`，之后不再触发 `onPress`。 |
+| `await app.press(selector)` | 按下该视图，或者它外层最近的可按压视图（文字外面的按钮）：依次触发 `onPressDown`、`onPressUp`、`onPress`，期间手指按下再抬起，外层监听触摸的视图都能收到（例如 Overlay 的 `onPressOutside`）。视图被禁用时 reject。 |
+| `await app.longPress(selector)` | 按住它（或它外层最近的可按压或监听触摸的视图），持续它的 `delayLongPress`（500 ms）：依次触发 `onPressDown`、`onLongPress`、`onPressUp`，之后不再触发 `onPress`。触摸处理函数能收到这根手指（`ContextMenu`、`Tooltip` 会打开）。 |
 | `await app.clear(selector)` | 清空输入框，相当于全选后删除。 |
 | `await app.type(selector, text)` | 在输入框（或该视图内的第一个输入框；`text:` 也匹配输入框的内容或占位文字）已有内容的末尾逐键输入：输入框先获得焦点，然后每个字符触发一次 `onKeyPress` 和一次 `onChange`，不超过 `maxLength`。单行输入框中的 `\n` 相当于回车键。 |
 | `await app.submit(selector)` | 在输入框中按回车键，行为由它的 `submitBehavior` 决定：触发 `onSubmit`（单行输入框随后失去焦点），或者在多行输入框中换行。 |

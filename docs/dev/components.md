@@ -11,8 +11,9 @@ come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
   `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `SelectionArea` (texts that select
-  together, `text.md` "Selection areas"), `TextView` (`text-view.md`) and the modules `AlertDialog`,
-  `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
+  together, `text.md` "Selection areas"), `TextView` (`text-view.md`), the popups on the core's overlays (`Popover`,
+  `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below) and the
+  modules `AlertDialog`, `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it); Rust apps use `nsh_base::{SafeAreaView, …}`, and make navigation and
@@ -149,7 +150,10 @@ reasons: `reactive-components.md`.
   its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
   any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
   event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
-  variant names it (`onSelect?: (index: number) => void`). Value types
+  variant names it (`onSelect?: (index: number) => void`). A variant of several unnamed fields names each
+  (`#[args(open, reason)] OpenChange(bool, OpenChangeReason)`): the handler takes them as its arguments
+  (`onOpenChange?: (open: boolean, reason: OpenChangeReason) => void`; `Event::spread`, the data a JS array the JS face
+  spreads). Value types
   implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
@@ -289,7 +293,7 @@ reasons: `reactive-components.md`.
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
   | a function returning its value (`checksum(bytes)`) | a `#[module]` function without `cx` (not `async`): it runs in the call |
   | a callback TS passes (`items.sort((a, b) => ..)`, a listener) | a `Callback<A, R>` parameter: `call(args)` inside a synchronous call, `post(args)` / `call_async(args).await` from tasks; kept in a class's field, it is collected with a cycle through the object |
-  | a portal | none (TS has none either); overlays are `nsh_base::dialog()` (a transparent layer over the window, the look the app's) |
+  | `<Overlay anchor={ref} placement="bottom" onPressOutside onCancel>` (`nsh`) | `overlay().anchor(&r).placement(Placement::Bottom).on_press_outside(\|p: &Point<Points>\| ..).on_cancel(..)` (`.anchor_point(p)` for a point, `.align`, `.offset`, `.margin`, `.on_position(\|p: &OverlayPosition\| ..)`): on top of the root view, outside the parent's layout and clipping (`elements.md` "Overlays"); a whole-window layer is `.inset_0()`, a dialog `nsh_base::dialog()` |
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (`frame: Bounds<Points>`, `page: Point<Points>`) to await in a task |
   | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(px(10.0), px(10.0)))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
@@ -785,3 +789,28 @@ blocked last wins while both do, and the other's block comes back when it lets g
 `nsh/native`'s `nativeComponent` is the other kind: a platform view the embedding app registered (Swift / Java
 `NshComponent`, `docs/dev/embedding.md`). Those are views of their own on the main thread; Rust components are
 compositions of primitives in the core.
+
+## Popups
+
+`nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`) are made of
+the core's overlays (`elements.md` "Overlays"), which place them and report presses outside, Escape and back; the
+components decide to close. Their open state is controlled (`open` + `onOpenChange(open, reason)`, `defaultOpen`
+without `open`; the reason is `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
+`"select"`, `"hover"`, `"longPress"`, `"contextMenu"`). They draw nothing: the app styles each part (`popupClass` /
+`popupStyle`, `backdropClass` / `backdropStyle`) and its content.
+
+How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
+is for, never by replacing one popup with another everywhere:
+
+| | Desktops (and desktop browsers) | Phones and tablets |
+|---|---|---|
+| `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
+| `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
+| `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | while a finger is held on the trigger (400 ms in), and 1.5 s after it lifts |
+| `Sheet` | an edge panel (`side`) over a backdrop | the same |
+
+The menus' items reach their menu through context (`MenuContext`: the close function, the sheet's path of submenus,
+the level's open submenu), so the app arranges them freely. Every item of a sheet's hidden levels is out of the tree
+(its content is not placed), so screen readers and tests see only the shown level. `Dialog` stays the modal
+presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s menus stay the system's.
