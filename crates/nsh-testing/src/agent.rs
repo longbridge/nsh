@@ -908,11 +908,17 @@ impl Tester {
     }
 }
 
-/// Whether `at` is inside `bounds` clear of its edges: of the outer tenth
-/// of each side, 48 points at most.
-fn well_inside(bounds: &Bounds<Points>, at: Point<Points>) -> bool {
-    let margin_x = (bounds.size.width.0 * 0.1).min(48.0);
-    let margin_y = (bounds.size.height.0 * 0.1).min(48.0);
+/// Whether `at` is inside `bounds` clear of its edges along the axis a
+/// scroll view moves it (`horizontal`): of the outer tenth of each side,
+/// 48 points at most. Across that axis only inside: scrolling cannot move
+/// it there (a button at a row's end).
+fn well_inside(bounds: &Bounds<Points>, at: Point<Points>, horizontal: bool) -> bool {
+    let margin = |length: f32| (length * 0.1).min(48.0);
+    let (margin_x, margin_y) = if horizontal {
+        (margin(bounds.size.width.0), 0.0)
+    } else {
+        (0.0, margin(bounds.size.height.0))
+    };
     let (x0, y0) = (bounds.origin.x.0 + margin_x, bounds.origin.y.0 + margin_y);
     let (x1, y1) = (
         bounds.origin.x.0 + bounds.size.width.0 - margin_x,
@@ -1214,13 +1220,12 @@ impl Agent {
             // when the window does.
             let hiding = scrollers.iter().find_map(|&(scroller, horizontal)| {
                 let b = self.native.bounds(scroller)?;
-                (!well_inside(&b, at)).then_some((scroller, horizontal, b))
+                (!well_inside(&b, at, horizontal)).then_some((scroller, horizontal, b))
             });
             let hiding = hiding.or_else(|| {
-                (!well_inside(&window, at))
-                    .then(|| scrollers.last())
-                    .flatten()
-                    .and_then(|&(s, h)| Some((s, h, self.native.bounds(s)?)))
+                let &(s, h) = scrollers.last()?;
+                (!well_inside(&window, at, h)).then_some(())?;
+                Some((s, h, self.native.bounds(s)?))
             });
             let Some((_, horizontal, scroller)) = hiding else {
                 if window.contains(&at) {
