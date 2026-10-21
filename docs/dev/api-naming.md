@@ -8,6 +8,24 @@ API", "Use precise domain words" and "Callback and event wording" in `gpui-kit/w
 (cited below as *guides*). The table at the end lists the renames decided so far; until they land, the code still has
 the old names.
 
+## Where names come from
+
+Each part of the API takes its names from one source, so an app's code never mixes vocabularies:
+
+| Part | Source |
+|---|---|
+| Components and their behavior (`nsh/base`, the interaction props of elements) | `gpui-base`, then GPUI, `gpui-component` (this page) |
+| What primitives show and the web APIs (`src`, `html`, styles, Tailwind, `fetch`, `window`'s events, the clipboard, storage) | HTML, the DOM and CSS, as a browser has them |
+| The standard modules (`process`, `os`, `fs/promises`, ...) | Node's names; values as Rust's `std::env::consts` gives them (`process.platform` is `"macos"`, `arch` `"aarch64"`; decided by the user, 2026-10-21), documented on each |
+| The environment (`nsh` / `nsh/<module>` accessors) | NSH's rules below: a lowercase accessor per value, `set<Value>` beside it |
+| React Native | none: a reference for which capabilities exist; the RN-shaped modules frozen as they are (below) |
+
+**Frozen RN-shaped modules.** `nsh/animated` (`Animated`, `Easing`, `LayoutAnimation`), `nsh/gesture`
+(`PanResponder`) and the responder props (`onTouch*`, `on*ShouldSetResponder*`, `onResponder*`) keep React Native's
+names and semantics as a whole, as they shipped (decided by the user, 2026-10-21): they are consistent in themselves
+and ported from React Native code as they are. The rules of this page do not apply inside them, and new capabilities
+go elsewhere under these rules rather than into them.
+
 ## Translation
 
 - `snake_case` → `camelCase`: `on_open_change` → `onOpenChange`, `close_on_escape` → `closeOnEscape`,
@@ -42,7 +60,30 @@ the old names.
 - **States**: `disabled` blocks interaction, `readonly` allows selecting but not editing, `selected` is membership /
   the current item, `checked` / `pressed` the value of a checkbox / toggle (*guides*; `Selectable`, `Disableable`,
   `Toggle::pressed`). Booleans are named after the state, positively (`open`, `hidden`), with no `is` prefix and no
-  `Enabled` suffix when a state word exists.
+  `Enabled` suffix when a state word exists: what the user may do is an adjective (`scrollable`, `zoomable`,
+  `selectable`), what something blocks is `disabled` (a menu item too, never `enabled`). A part shown by default is
+  `<part>Hidden` (default `false`: `headerHidden`, `indicatorHidden`, `caretHidden`), never `<part>Shown`,
+  `<part>Visible` or `shows<Part>`.
+- **Begin and end**: a phase is `<act>Start` / `<act>End` (`onPanStart`, `onLoadStart`, `onScrollDragStart`,
+  `onMomentumEnd`), never `Begin`; a pointer over a view is `Enter` / `Leave` (`onHoverEnter`, `onFileDragEnter`,
+  DOM `pointerenter`), never `In` / `Out`.
+- **Payloads**: a value's change is `on<Value>Change(next, details?)`, the value first and anything else after it
+  (`onChange(text)`, `onOpenChange(open, reason)`); every other event passes one object, even with one field
+  (`onLinkPress({ url })`, `onSubmit({ text })`), so a later field is an addition. An event with nothing to report
+  passes nothing; it can gain an object later. Never several positional arguments outside the frozen modules.
+- **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
+  registered while a component renders goes away with the component (`keymap.bind`); never React Native's
+  `{ remove() }`. An app reads a setting of the system through its accessor (`reduceMotion()`), which is also how it
+  follows the changes: no listeners or `Promise` getters beside it. `addEventListener` is only the DOM's, on the web
+  globals.
+- **Addresses**: what shows a resource takes it as `src` (`Image`, `Video`, `WebView`, `TextViewImage.src`, as HTML's
+  `img`, `video` and `iframe`), any other address is a `url` (`ImageAsset.url`, `onFileDrop({ urls })`,
+  `WebViewNavigation.url`); never `uri`, `source` or `{ uri }` wrappers. Inline content has its own prop (`html`,
+  with `baseUrl`, as `srcdoc`).
+- **Environment**: a value that can change while the app runs is an accessor (`colorScheme()`, `pixelRatio()`,
+  `layoutDirection()`), with `set<Value>(value | "system")` when the app may override it (`setColorScheme`,
+  `setLayoutDirection`); a value fixed for the life of the engine is a constant (`platform.os`). Never React Native's
+  static objects (`Platform.OS`, `PixelRatio.get()`, `I18nManager.isRTL`).
 - **Parts**: a component's own `class` / `style` style its main part; every other part gets `<part>Class` /
   `<part>Style`, named after `gpui-base`'s part (`Dialog::backdrop` / `Dialog::popup`; `gpui-component`
   `Settings::header_style`). The part name never repeats the component (`contentStyle`, not `contentContainerStyle`:
@@ -71,6 +112,86 @@ the old names.
 `gpui-base` is the reference, not a rule above judgment: a name is not taken when it reads worse for TSX apps on
 every platform, as the user decided (2026-10-20) for `onSubmit` (a phone's return key is not Enter), `animation`
 (`transition` is a style key), `multiline` (one word) and a page's `onDismiss`. Each such row says "not followed" and why.
+
+## Shapes that can grow
+
+Apps built once run on every later release (`compatibility.md`): types only widen and inputs only gain optional
+members, so a shape decides what can ever be added to it.
+
+- Options are one object (`scrollTo({ x, y, animated })`), never a third positional parameter.
+- A mode is a string union, which gains values; never a boolean that later needs a third state.
+- A value has one type: `version: string`, never `string | number`.
+- What a function returns is an object, never a tuple (beside `split`'s, Solid's) or a bare value that may need a second field.
+- Event payloads and listening follow the rules above (objects, `() => void`).
+
+## Renames before the first compatible release
+
+Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, their old names listed
+in `api/closed.txt` as made before the first compatible release (`compatibility.md` rule 7). The frozen RN-shaped
+modules keep their names.
+
+| Now | New | Rule | Notes |
+|---|---|---|---|
+| **Scroll, List, WebView** | | | |
+| `scrollEnabled` | `scrollable` (default `true`) | States | The user's scrolling; `scrollTo` still scrolls |
+| `pagingEnabled` | `paging` | States | |
+| `pinchGestureEnabled` | `zoomable` (default `true`) | States | The user's pinch; `zoomTo` still zooms |
+| `showsIndicator` | `indicatorHidden` (default `false`) | States | |
+| `onScrollBeginDrag`, `onScrollEndDrag` | `onScrollDragStart`, `onScrollDragEnd` | Begin and end | `onDrag*` stays free for drag and drop |
+| `onMomentumScrollBegin`, `onMomentumScrollEnd` | `onMomentumStart`, `onMomentumEnd` | Begin and end | |
+| List `onEndReached`, `onEndReachedThreshold` | `onEndReach`, `endReachThreshold` | Events (present tense) | Also in `ListItemsProps` |
+| List `onViewableItemsChanged` | `onViewableItemsChange` | Events | |
+| `ViewToken.isViewable` | `ViewToken.viewable` | States (no `is` prefix) | |
+| **Every element** | | | |
+| `onHoverIn`, `onHoverOut` | `onHoverEnter`, `onHoverLeave` | Begin and end | As `onFileDragEnter` / `onFileDragLeave`; `onHoverMove` stays |
+| `onFileDrop({ uris })` | `onFileDrop({ urls })` | Addresses | `file:` URLs |
+| **Image** | | | |
+| `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
+| `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
+| `Image.getSize(source)`, `Image.prefetch(source)` | `(src: string \| ImageAsset)` | Addresses | |
+| `ImageAsset.uri` | `ImageAsset.url` | Addresses | What `import logo from "./logo.png"` gives |
+| **Video** | | | |
+| `source: string \| { uri }` | `src: string` | Addresses | |
+| `onBuffer({ isBuffering })` | `onBuffer({ buffering })` | States (no `is` prefix) | |
+| **WebView** | | | |
+| `source: string \| { uri } \| { html, baseUrl }` | `src?: string`; `html?: string`, `baseUrl?: string` | Addresses | One of `src` and `html` |
+| `javaScriptEnabled` | `javaScript` (default `true`) | States | |
+| the page's `window.ReactNativeWebView.postMessage(data)` | `window.nsh.postMessage(data)` | Where names come from | Decided by the user: only `window.nsh` is injected |
+| **NavPage** | | | |
+| `headerShown` | `headerHidden` (default `false`) | States | |
+| `headerBackVisible` | `headerBackHidden` (default `false`) | States | |
+| **TextView** (`nsh/base`) | | | |
+| `onLinkPress(url)` | `onLinkPress({ url })` | Payloads | |
+| **`nsh/desktop`** | | | |
+| `MenuItem.enabled` | `MenuItem.disabled` | States | |
+| **`nsh/device`** | | | |
+| `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
+| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
+| `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
+| `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
+| `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
+| `PixelRatio.getPixelSizeForLayoutSize`, `roundToNearestPixel` | (dropped) | | `Math.round(x * pixelRatio()) / pixelRatio()` |
+| `I18nManager.isRTL`, `getConstants()` | `layoutDirection(): "ltr" \| "rtl"` (accessor) | Environment | |
+| `I18nManager.forceRTL`, `allowRTL` | `setLayoutDirection("ltr" \| "rtl" \| "system")` | Environment | As `setColorScheme`; `allowRTL(false)` is `"ltr"` |
+| `I18nManager.doLeftAndRightSwapInRTL` | (dropped) | | Always true, documented with `direction` |
+| `OS` (type) | unchanged | | `platform.os`'s type |
+| **`nsh/accessibility`** | | | |
+| `AccessibilityInfo.isScreenReaderEnabled()`, `isReduceMotionEnabled()`, `addEventListener` | (dropped) | Listening | `screenReaderRunning()`, `reduceMotion()` |
+| `screenReaderEnabled` (accessor) | `screenReaderRunning` | States | UIKit's `isVoiceOverRunning` |
+| `AccessibilityInfo.announceForAccessibility(message)` | `announce(message)` | Environment | A function of the module |
+| `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
+| **`nsh/android`** | | | |
+| `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
+| **`nsh/clipboard`** | | | |
+| `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard` |
+| `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
+| `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
+| **`nsh/storage`** | | | |
+| `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
+| **`nsh/ios`, `nsh/android`, `nsh/desktop`** | | | |
+| `isAvailable` | `available` | States (no `is` prefix) | |
+| **Styles** | | | |
+| `experimental_backgroundImage` | (dropped) | Where names come from | React Native's name of `backgroundImage` |
 
 ## Renames
 
