@@ -13,7 +13,7 @@
 //!   offsets, shifts); hit-testing is the main thread's layout of each
 //!   text ([`LinuxLayout::caret_at`]).
 //! - Gestures come from `input.rs`, whose pointer handlers serve real and
-//!   simulated (`--script`) input alike: a mouse press in an area presses
+//!   simulated (`nsh test --target linux`) input alike: a mouse press in an area presses
 //!   the model (the click count as GTK counts double clicks; Shift+click
 //!   extends), drags past [`SELECT_SLOP`] (or [`SELECT_SLOP_PRESS`] over a
 //!   press target inside the area, so links still press) drag it and
@@ -667,23 +667,6 @@ fn key_in(surface: &Rc<Surface>, id: NodeId, key: gdk::Key, modifiers: gdk::Modi
         _ => return false,
     }
     true
-}
-
-/// A key pressed: the area with a selection takes it (`--script`'s keys,
-/// which GTK never sees).
-pub(crate) fn key_pressed(
-    surface: &Rc<Surface>,
-    key: gdk::Key,
-    modifiers: gdk::ModifierType,
-) -> bool {
-    let active = surface
-        .selection
-        .areas
-        .borrow()
-        .iter()
-        .find(|(_, a)| !a.model.is_empty())
-        .map(|(&id, _)| id);
-    active.is_some_and(|id| key_in(surface, id, key, modifiers))
 }
 
 /// The selected text of area `id`, as a copy gives it.
