@@ -1,7 +1,8 @@
 // The Controls demo: `nsh/base`'s switches in a settings list (one that
 // needs another on), checkboxes under a "select all" that shows a partial
-// selection, a plan picker of radios with a disabled plan. Every row is the
-// control, its label included. Also the gallery's own `Toggle`, a `Switch`.
+// selection, a plan picker of radios with a disabled plan, tabs that switch
+// a section. Every row is the control, its label included. Also the
+// gallery's own `Toggle` (a `Switch`) and `Segmented` (`Tabs`).
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -66,6 +67,34 @@ test("a radio picks one plan of the set, and a disabled plan takes no press", as
   expect(app.texts()).toContain("Continue: Team, $12 / mo");
   await app.press("Free");
   await app.waitFor("Continue with Free");
+});
+
+test("tabs show the section the app selects, and a disabled tab takes no press", async () => {
+  expect(app.count("role:tab")).toBe(4);
+  expect(app.texts()).toContain("Visitors");
+  await app.press("Activity");
+  await app.waitFor("Tab: Activity");
+  expect(app.texts()).toContain("Deployed to production");
+  expect(app.texts()).not.toContain("Visitors");
+  await expect(() => app.press("Billing")).rejects.toThrow("is disabled");
+  await app.press("role:tab[Members]");
+  await app.waitFor("Grace Hopper");
+  // The selected tab reports its presses too.
+  await app.press("Overview");
+  await app.waitFor("Tab: Overview");
+  await app.press("Overview");
+  expect(app.texts()).toContain("Visitors");
+});
+
+test("the gallery's segmented control is a tab list", async () => {
+  await app.back();
+  await app.press("role:button[System]");
+  await app.waitFor("Status bar");
+  expect(app.texts()).toContain('foreground: "dark"');
+  await app.press("role:tab[Light]");
+  await app.waitFor('foreground: "light"');
+  await app.press("role:tab[Auto]");
+  await app.waitFor('foreground: "auto"');
 });
 
 test("the gallery's toggle is a switch", async () => {

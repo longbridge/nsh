@@ -1,5 +1,6 @@
 import { computed, signal, Text, View } from "nsh";
-import { Checkbox, Radio, RadioGroup, Switch } from "nsh/base";
+import { Checkbox, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { platform } from "nsh/device";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, switchLook } from "../ui";
 
@@ -7,13 +8,24 @@ import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, switchLoo
 // screen readers say; every value is the app's, and so is the look: the
 // gallery's own here.
 
+/**
+ * The sizes of the page. Touch screens take the standard tier (44 pt and
+ * more to press); a pointer the compact one desktops' settings and filters
+ * use: smaller controls, rows and type, whatever the window's width.
+ */
+const size =
+  platform.idiom === "desktop"
+    ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dash: 8, dot: 6, tabs: 30, line: 32, switch: "small" as const }
+    : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dash: 10, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
+const pointer = platform.idiom === "desktop";
+
 /** A control's row: the control and its label, the whole row pressable. */
 const row = (first: boolean) => ({
-  minHeight: 56,
+  minHeight: size.row,
   flexDirection: "row" as const,
   alignItems: "center" as const,
-  gap: 12,
-  paddingVertical: 8,
+  gap: size.gap,
+  paddingVertical: size.padding,
   borderTopWidth: first ? 0 : 1,
   borderTopColor: colors.line,
 });
@@ -30,9 +42,9 @@ type Mark = "check" | "dash" | null;
 
 /** A checkbox's box: empty, or citrus with a check or a dash. */
 const box = (mark: Mark) => ({
-  width: 22,
-  height: 22,
-  borderRadius: 7,
+  width: size.control,
+  height: size.control,
+  borderRadius: size.corner,
   alignItems: "center" as const,
   justifyContent: "center" as const,
   borderWidth: 1,
@@ -44,10 +56,10 @@ function BoxMark(props: { mark: Mark }) {
   return (
     <>
       <If when={props.mark === "check"}>
-        <Icon name="check" size={16} tint={colors.onAccent} />
+        <Icon name="check" size={size.check} tint={colors.onAccent} />
       </If>
       <If when={props.mark === "dash"}>
-        <View style={{ width: 10, height: 2, borderRadius: 1, backgroundColor: colors.onAccent }} />
+        <View style={{ width: size.dash, height: 2, borderRadius: 1, backgroundColor: colors.onAccent }} />
       </If>
     </>
   );
@@ -56,9 +68,11 @@ function BoxMark(props: { mark: Mark }) {
 /** A radio's ring: empty, or citrus with a dot. */
 function Ring(props: { on: boolean }) {
   return (
-    <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1, ...fill(props.on) }}>
+    <View
+      style={{ width: size.control, height: size.control, borderRadius: size.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...fill(props.on) }}
+    >
       <If when={props.on}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.onAccent }} />
+        <View style={{ width: size.dot, height: size.dot, borderRadius: size.dot / 2, backgroundColor: colors.onAccent }} />
       </If>
     </View>
   );
@@ -68,9 +82,9 @@ function Ring(props: { on: boolean }) {
 function Label(props: { label: string; detail?: string }) {
   return (
     <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: 15, color: colors.text }}>{props.label}</Text>
+      <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        <Text style={{ fontSize: 13, color: colors.muted }}>{props.detail}</Text>
+        <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -90,11 +104,40 @@ const PLANS: { name: string; detail: string; price: string; disabled?: boolean }
   { name: "Enterprise", detail: "Set up by your organization", price: "—", disabled: true },
 ];
 
+const SECTIONS: { name: string; rows: [string, string][]; disabled?: boolean }[] = [
+  {
+    name: "Overview",
+    rows: [
+      ["Visitors", "12,480"],
+      ["Sign-ups", "342"],
+      ["Conversion", "2.74%"],
+    ],
+  },
+  {
+    name: "Activity",
+    rows: [
+      ["Deployed to production", "09:41"],
+      ["Invoice paid", "08:15"],
+      ["A member joined", "07:02"],
+    ],
+  },
+  {
+    name: "Members",
+    rows: [
+      ["Ada Lovelace", "Owner"],
+      ["Grace Hopper", "Admin"],
+      ["Alan Turing", "Member"],
+    ],
+  },
+  { name: "Billing", rows: [], disabled: true },
+];
+
 const count = (n: number) => n.toLocaleString("en-US");
 
 /**
- * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup` in
- * the settings, filters and pickers apps use them for.
+ * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup`,
+ * `Tab` and `Tabs` in the settings, filters, pickers and section switchers
+ * apps use them for.
  */
 export function Controls() {
   const last = signal("—");
@@ -105,7 +148,7 @@ export function Controls() {
     const haptics = signal(false);
     const lowData = signal(false);
     function Setting(props: { label: string; detail: string; on: boolean; set: (on: boolean) => void; disabled?: boolean; first?: boolean }) {
-      const look = switchLook(() => props.on);
+      const look = switchLook(() => props.on, size.switch);
       return (
         <Switch
           checked={props.on}
@@ -170,7 +213,7 @@ export function Controls() {
             indicatorStyle={box(mark())}
             indicator={<BoxMark mark={mark()} />}
           >
-            <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>Select all</Text>
+            <Text style={{ flex: 1, fontSize: size.label, fontWeight: "600", color: colors.text }}>Select all</Text>
           </Checkbox>
           <Each of={KINDS}>
             {(kind) => (
@@ -181,13 +224,13 @@ export function Controls() {
                   last.set(`${kind().name}: ${on}`);
                 }}
                 // One level under "Select all": the boxes line up with its label.
-                style={{ ...row(false), paddingStart: 34 }}
+                style={{ ...row(false), paddingStart: size.control + size.gap }}
                 activeStyle={pressed}
                 indicatorStyle={box(has(kind().name) ? "check" : null)}
                 indicator={<BoxMark mark={has(kind().name) ? "check" : null} />}
               >
-                <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{kind().name}</Text>
-                <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{count(kind().count)}</Text>
+                <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{kind().name}</Text>
+                <Text style={{ fontSize: size.detail, color: colors.faint, fontVariant: ["tabular-nums"] }}>{count(kind().count)}</Text>
               </Checkbox>
             )}
           </Each>
@@ -218,12 +261,73 @@ export function Controls() {
               >
                 <Ring on={plan() === p().name} />
                 <Label label={p().name} detail={p().detail} />
-                <Text style={{ fontSize: 15, color: plan() === p().name ? colors.text : colors.muted, fontVariant: ["tabular-nums"] }}>{p().price}</Text>
+                <Text style={{ fontSize: size.label, color: plan() === p().name ? colors.text : colors.muted, fontVariant: ["tabular-nums"] }}>{p().price}</Text>
               </Radio>
             )}
           </Each>
         </RadioGroup>
-        <Button label={`Continue with ${plan()}`} onPress={() => last.set(`Continue: ${chosen().name}, ${chosen().price}`)} />
+        {/* The commit of the picker: under it on a phone, at its trailing edge with a pointer. */}
+        <View style={{ alignItems: pointer ? "flex-end" : "stretch" }}>
+          <Button
+            label={`Continue with ${plan()}`}
+            size={pointer ? "small" : "regular"}
+            onPress={() => last.set(`Continue: ${chosen().name}, ${chosen().price}`)}
+          />
+        </View>
+      </Card>
+    );
+  }
+
+  function Sections() {
+    const section = signal("Overview");
+    const shown = () => SECTIONS.find((s) => s.name === section())!;
+    // The track's padding and border: a tab is a pill inside them.
+    const inner = size.tabs - 2 * (3 + 1);
+    return (
+      <Card icon="controls" title="Tabs" subtitle="A section switcher: the app shows the selected one">
+        <Tabs
+          style={{
+            height: size.tabs,
+            flexDirection: "row",
+            gap: 2,
+            padding: 3,
+            borderRadius: size.tabs / 2,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.inset,
+            boxShadow: finish.track.boxShadow,
+          }}
+        >
+          <Each of={SECTIONS}>
+            {(s) => (
+              <Tab
+                selected={section() === s().name}
+                disabled={s().disabled}
+                onPress={() => {
+                  section.set(s().name);
+                  last.set(`Tab: ${s().name}`);
+                }}
+                style={{ flex: 1, borderRadius: inner / 2, borderWidth: 1, borderColor: "transparent", alignItems: "center", justifyContent: "center" }}
+                selectedStyle={finish.pill}
+                disabledStyle={dimmed}
+              >
+                <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
+                  {s().name}
+                </Text>
+              </Tab>
+            )}
+          </Each>
+        </Tabs>
+        <View>
+          <Each of={shown().rows}>
+            {(r, i) => (
+              <View style={{ ...row(i() === 0), minHeight: size.line, paddingVertical: 0 }}>
+                <Text style={{ flex: 1, fontSize: size.label, color: colors.text }}>{r()[0]}</Text>
+                <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"] }}>{r()[1]}</Text>
+              </View>
+            )}
+          </Each>
+        </View>
       </Card>
     );
   }
@@ -236,5 +340,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Last]} />;
 }

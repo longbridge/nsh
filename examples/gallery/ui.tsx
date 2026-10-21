@@ -654,8 +654,9 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
 /**
- * A button, 44 pt tall: `primary` is light (the main action), `secondary`
- * dark, `accent` citrus. A `color` fills it with that color instead.
+ * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
+ * `primary` is light (the main action), `secondary` dark, `accent` citrus.
+ * A `color` fills it with that color instead.
  */
 export function Button(props: {
   label: string;
@@ -665,8 +666,10 @@ export function Button(props: {
   disabled?: boolean;
   /** Grows to share a row with its siblings. */
   flex?: number;
+  size?: "small" | "regular";
   onPress: () => void;
 }) {
+  const small = () => props.size === "small";
   // `nsh/base`'s Button gives the behavior (presses, disabled, the button
   // role); the look below is the gallery's own.
   const scale = createAnimatedValue(1);
@@ -685,14 +688,14 @@ export function Button(props: {
     >
       <View
         style={{
-          height: 44,
-          paddingHorizontal: 18,
-          borderRadius: radius.control,
+          height: small() ? 32 : 44,
+          paddingHorizontal: small() ? 12 : 18,
+          borderRadius: small() ? 8 : radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "center",
-          gap: 8,
+          gap: small() ? 6 : 8,
           backgroundColor: bg(),
           ...(props.color || variant() === "ghost"
             ? {}
@@ -706,9 +709,9 @@ export function Button(props: {
         }}
       >
         <If when={props.icon}>
-          <Icon name={props.icon!} size={16} tint={fg()} />
+          <Icon name={props.icon!} size={small() ? 14 : 16} tint={fg()} />
         </If>
-        <Text style={{ fontSize: 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
+        <Text style={{ fontSize: small() ? 13 : 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
       </View>
     </BaseButton>
   );
@@ -816,11 +819,15 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
  * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
  * track that turns citrus and a knob that springs across, both natively.
  * `on` is the value the app owns: the knob follows it, from a press or from
- * elsewhere. Read the styles in JSX, so the appearance is followed.
+ * elsewhere. `small` is 38 × 22, for pointer-sized rows. Read the styles in
+ * JSX, so the appearance is followed.
  */
-export function switchLook(on: () => boolean): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
+export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
+  // The track's size and inset, and the knob: it travels what is left inside
+  // the border and the padding.
+  const [width, height, inset, knob] = size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
   const t = createAnimatedValue(on() ? 1 : 0);
-  const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] });
+  const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
   let shown = on();
   effect(() => {
     const next = on();
@@ -831,10 +838,10 @@ export function switchLook(on: () => boolean): { readonly trackStyle: ViewStyle;
   return {
     get trackStyle(): ViewStyle {
       return {
-        width: 50,
-        height: 30,
-        borderRadius: 15,
-        padding: 3,
+        width,
+        height,
+        borderRadius: height / 2,
+        padding: inset,
         backgroundColor: t.interpolate({ inputRange: [0, 1], outputRange: [colors.track, colors.accentFill] }),
         borderWidth: 1,
         borderColor: colors.border,
@@ -843,9 +850,9 @@ export function switchLook(on: () => boolean): { readonly trackStyle: ViewStyle;
     },
     get thumbStyle(): ViewStyle {
       return {
-        width: 22,
-        height: 22,
-        borderRadius: 11,
+        width: knob,
+        height: knob,
+        borderRadius: knob / 2,
         backgroundColor: on() ? colors.onAccent : colors.knob,
         // A drop of glass: a specular top over the knob's color.
         backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
