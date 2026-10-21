@@ -595,10 +595,13 @@ class Player {
         }),
       },
     };
-    // One request either way: a host that does not serve `application/wasm`
-    // gets the body compiled whole instead of streamed.
+    // One request either way: a host that does not serve exactly
+    // `application/wasm` (streaming compilation rejects any other type,
+    // parameters such as `; charset=utf-8` included) gets the body compiled
+    // whole instead of streamed.
     const response = await (typeof url === "string" || url instanceof URL ? fetch(url) : url);
-    const module = response.headers.get("Content-Type")?.startsWith("application/wasm") && WebAssembly.compileStreaming
+    const type = response.headers.get("Content-Type")?.trim().toLowerCase();
+    const module = type === "application/wasm" && WebAssembly.compileStreaming
       ? await WebAssembly.compileStreaming(response)
       : await WebAssembly.compile(await response.arrayBuffer());
     // The compiler's dependencies link wasm-bindgen glue they never call
