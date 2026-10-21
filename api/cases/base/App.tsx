@@ -17,6 +17,7 @@ import BaseRadio from "./base-radio";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseSelectionArea from "./base-selection-area";
 import BaseSwitch from "./base-switch";
+import BaseTabs from "./base-tabs";
 import BaseTextView from "./base-text-view";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -34,6 +35,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-switch": BaseSwitch,
   "base-checkbox": BaseCheckbox,
   "base-radio": BaseRadio,
+  "base-tabs": BaseTabs,
 };
 const shown = signal("");
 

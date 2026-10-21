@@ -273,6 +273,8 @@ SelectionArea function
 Sheet function
 Submenu function
 Switch function
+Tab function
+Tabs function
 TextView function
 TextView.parse function
 TextView.parseHtml function

@@ -2050,3 +2050,167 @@ fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
     )));
     assert_eq!(style(initial, c).opacity, 0.5);
 }
+
+const BASE_TABS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Tab, Tabs } from "nsh/base";
+
+function App() {
+  const current = signal("a");
+  const presses = signal<string[]>([]);
+  const tab = (value: string, label: string, disabled = false) => (
+    <Tab
+      testID={value}
+      selected={current() === value}
+      disabled={disabled}
+      accessibilityLabel={label}
+      class="group flex-row disabled:opacity-50"
+      selectedStyle={{ backgroundColor: "#0000ff" }}
+      onPress={() => {
+        presses.set([...presses(), value]);
+        current.set(value);
+      }}
+    >
+      <View class="w-[20px] group-selected:bg-[#00ff00]" />
+      <Text>{label}</Text>
+    </Tab>
+  );
+  return (
+    <View>
+      <Tabs testID="sections" class="flex-row">
+        {tab("a", "Overview")}
+        {tab("b", "Activity")}
+        {tab("c", "Billing", true)}
+      </Tabs>
+      <Text>{`Presses: ${presses().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Tab` in `Tabs`: the tab list role on the list, the tab
+/// role and its selected state on each tab alone, a press reported with
+/// `onPress` (the selected tab's too) while the app owns which tab is
+/// selected, a disabled tab reporting nothing, and the app's content
+/// inside following the tab with `group-selected:`.
+#[test]
+fn a_base_tab_reports_presses_and_its_list_holds_no_value() {
+    use nsh_core::{AccessibilityRole, ViewProps};
+    let (engine, rx) = start(BASE_TABS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Presses: "));
+    let view_props = |batch: &MountBatch, view| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+            _ => None,
+        })
+    };
+    let root = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    // The first view inside `parent`: the app's marker.
+    let marker = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("the marker")
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let state = |props: &ViewProps| props.accessibility.state;
+    let (sections, a, b, c) = (root("sections"), root("a"), root("b"), root("c"));
+    let (marker_a, marker_b) = (marker(a), marker(b));
+    let initial = std::slice::from_ref(&first);
+
+    // The list: a tab list for screen readers, laid out by the app.
+    let list = view_props(&first, sections).unwrap();
+    assert_eq!(list.accessibility.role, AccessibilityRole::Tablist);
+    assert_eq!(list.accessibility.label, None);
+
+    // The selected tab: selected for screen readers, its `selectedStyle`,
+    // and the app's marker `group-selected:`.
+    let props = view_props(&first, a).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Overview"));
+    assert!(state(&props).selected);
+    assert_eq!(state(&props).checked, None);
+    assert_eq!(style(initial, a).background_color.0, 0x0000_ffff);
+    assert_eq!(style(initial, marker_a).background_color.0, 0x00ff_00ff);
+    let props = view_props(&first, b).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+    assert!(!state(&props).selected);
+    assert_eq!(style(initial, b).background_color.0, 0);
+    assert_eq!(style(initial, marker_b).background_color.0, 0);
+    // The marker is a part of the tab, no second element.
+    assert!(view_props(&first, marker_a).is_none());
+
+    // A press reports `onPress`; the app selects the tab and deselects the
+    // other, and the styles follow.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Presses: b"));
+    let now = |view| after.iter().rev().find_map(|batch| view_props(batch, view));
+    assert!(state(&now(b).unwrap()).selected);
+    assert!(!state(&now(a).unwrap()).selected);
+    assert_eq!(style(&after, b).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&after, marker_b).background_color.0, 0x00ff_00ff);
+    assert_eq!(style(&after, a).background_color.0, 0);
+    assert_eq!(style(&after, marker_a).background_color.0, 0);
+
+    // The selected tab reports its presses too (the app may scroll its
+    // content to the top).
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Presses: b,b"));
+    assert!(after.iter().any(|batch| shows(batch, "Presses: b,b")));
+
+    // Disabled: no presses, dimmed for screen readers.
+    let disabled = view_props(&first, c).unwrap();
+    assert!(state(&disabled).disabled);
+    assert!(!state(&disabled).selected);
+    assert!(!first.items.iter().any(|i| matches!(
+        i,
+        MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+    )));
+    assert_eq!(style(initial, c).opacity, 0.5);
+}

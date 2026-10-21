@@ -777,6 +777,32 @@ export interface SwitchProps extends ComponentHostProps {
 /** A control that is on or off and takes effect at once (a setting). It owns its behavior (presses, keyboard activation, the disabled state, the switch role and its value for screen readers) and leaves its look to the app: no colors, sizes, motion or label of its own. Its parts are a track and a thumb inside it, then its children; the app's `class` and `style` style the switch, `trackClass` / `trackStyle` and `thumbClass` / `thumbStyle` the parts, and `checked:` and `disabled:` classes on each follow the switch's state (or `checkedStyle` and `disabledStyle` on the switch). */
 export declare const Switch: ((props: SwitchProps) => JSX.Element);
 
+export interface TabProps extends ComponentHostProps {
+  /** The current tab of its list: screen readers say it is selected, and `selected:` styles apply. The app owns the value: a press reports `onPress`, and the app selects the tab and shows its content. */
+  selected?: boolean;
+  /** No presses, no press feedback; `disabled:` styles apply, and screen readers say it is dimmed. */
+  disabled?: boolean;
+  /** The style while selected (and not disabled), as `selected:` classes. */
+  selectedStyle?: StyleProp<ViewStyle>;
+  /** What screen readers say: the tab's name, when its children have no text that says it (an icon). */
+  accessibilityLabel?: string | null;
+  /** The content: the app's label, icon or badge, which screen readers say. */
+  children?: JSX.Element;
+  /** The tab was pressed (a tap, a click, Space or Return, a screen reader's activation), the selected tab included. It runs before anything changes: the tab shows the `selected` the app passes back. */
+  onPress?: () => void;
+}
+
+/** One tab of a tab list (a section of a page, a view of a document), in `Tabs` with the others. It owns its behavior (presses, keyboard activation, the disabled state, the tab role and its selected state for screen readers) and leaves its look to the app: no colors, sizes, indicator or label of its own. The app's `class` and `style` style it, `selected:` and `disabled:` classes (or `selectedStyle` and `disabledStyle`) its states, and its children are its content, whose `group-selected:` classes follow the tab under `group` in its `class`. */
+export declare const Tab: ((props: TabProps) => JSX.Element);
+
+export interface TabsProps extends ComponentHostProps {
+  /** The tabs of the list, and whatever the app lays out between them. */
+  children?: JSX.Element;
+}
+
+/** The tab list around a set of `Tab`s: screen readers hear the tabs inside it as one list, each still an element of its own. It holds no value and no content: each tab is told whether it is selected and reports a press with `onPress`, and the app keeps which one is and shows that tab's content next to the list. Its layout and look are the app's `class` and `style` (`flex-row` for a row). */
+export declare const Tabs: ((props: TabsProps) => JSX.Element);
+
 export interface TextViewProps extends ComponentHostProps {
   /** The document as Markdown (CommonMark and GitHub's: tables, task lists, footnotes, alerts; formulas; HTML inside). A reply streamed by an AI model can be passed as it grows (with `options={{ streaming: true }}`): only the blocks that changed are shown again. */
   markdown?: string | null;

@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`), documents of Markdown or HTML (`TextView`), selections across texts
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`, `Tab` in `Tabs`), documents of Markdown or HTML (`TextView`), selections across texts
 (`SelectionArea`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
@@ -26,8 +26,8 @@ from the `nsh-base` crate (`nsh_base::{button, safe_area_view, …}`).
 ```rust tabs
 use nsh_base::{
     AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog,
-    keyboard_avoiding_view, nav_page, nav_stack, radio, radio_group, safe_area_view, selection_area, switch, text_view,
-    theme,
+    keyboard_avoiding_view, nav_page, nav_stack, radio, radio_group, safe_area_view, selection_area, switch, tab, tabs,
+    text_view, theme,
 };
 ```
 
@@ -35,12 +35,12 @@ use nsh_base::{
 import {
   AlertDialog, Button, Checkbox, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
   MenuItem, MenuSeparator, NavPage, NavStack, Popover, Radio, RadioGroup, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
-  Submenu, Switch, TextView, Tooltip,
+  Submenu, Switch, Tab, Tabs, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   CheckboxProps, DialogChangeReason, DialogProps, Edge, Edges, HeaderStyle, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
+  RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TabProps, TabsProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -53,6 +53,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | A checked, unchecked or indeterminate control with an indicator the app styles and marks. |
 | [`Radio`](../elements/radio.md), [`RadioGroup`](../elements/radio.md) | `radio()`, `radio_group()` | One option of a set the user picks one of, and the set; the app owns which one is checked. |
 | [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
+| [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | Content presented over everything else: sheets, full-screen flows, dialogs. |
 | [`SafeAreaView`](../elements/safe-area-view.md) | `safe_area_view()` | A view padded clear of system UI and headers. |
@@ -101,6 +102,14 @@ An on / off control that owns its behavior and has no look: presses, keyboard ac
 switch role and value for screen readers, with the value owned by the app (`checked`, `onChange`). The app styles the
 switch, its track and its thumb, whose `checked:` and `disabled:` classes follow the switch. See
 [Switch](../elements/switch.md).
+
+### Tab and Tabs
+
+The tabs of a tab list and the list around them. A tab owns its behavior and has no look: presses, keyboard
+activation, the disabled state and the tab role and selected state for screen readers. The list is the tab list
+screen readers announce and holds no value: the app tells each tab whether it is selected (`selected`), hears
+presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
+`group-selected:` classes follow it. See [Tabs](../elements/tabs.md).
 
 ## Documents
 
@@ -271,7 +280,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md),
   [SelectionArea](../elements/selection-area.md), [Text](../elements/text.md) and
