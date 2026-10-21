@@ -62,6 +62,14 @@ test("a row's menu changes the list", async () => {
   expect(app.texts()).not.toContain("Holiday.jpg");
 });
 
+test("the placement and alignment change the menu's trigger", async () => {
+  await app.press("Top");
+  await app.press("End");
+  await app.waitFor("top · end");
+  await app.press("top · end");
+  await app.waitFor("Three");
+});
+
 test("a long menu scrolls, and the app opens a menu itself", async () => {
   await app.press("UTC+8 Hong Kong");
   await app.waitFor("UTC−10 Honolulu");

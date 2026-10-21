@@ -304,13 +304,13 @@ export function Menus() {
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
           value={placement()}
-          onChange={placement.set}
+          onChange={(v) => placement.set(v)}
         />
         <Segmented
           size="small"
           options={[{ value: "start", label: "Start" }, { value: "center", label: "Center" }, { value: "end", label: "End" }]}
           value={align()}
-          onChange={align.set}
+          onChange={(v) => align.set(v)}
         />
         <View style={{ alignItems: "center", paddingVertical: 24 }}>
           <Menu placement={placement()} align={align()} offset={6} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("Placed")} trigger={<Chip label={`${placement()} · ${align()}`} />}>
