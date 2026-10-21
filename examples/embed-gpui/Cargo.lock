@@ -5945,7 +5945,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "html5ever 0.27.0",
  "log",
@@ -5962,7 +5962,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-bundler"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dunce",
@@ -5986,7 +5986,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "cap-std",
  "flate2",
@@ -6008,7 +6008,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -6025,7 +6025,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-js"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -6045,7 +6045,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -6056,7 +6056,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -6070,7 +6070,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-gpui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
