@@ -76,7 +76,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>]
 ```
 
 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
@@ -94,7 +94,6 @@ Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运
 | `--fps` | | 在应用上方显示性能监视器：帧率、每帧和每次 commit 的开销、CPU、GPU 和内存（[macOS](./macos.md#性能监视器)；目前仅限 `--target macos`）。 |
 | `--name <NAME>` | `nsh.json` 的 name | 菜单栏中的应用显示名称及初始窗口标题（`--target macos`，TSX 入口）。 |
 | `--window-size <WIDTHxHEIGHT>` | 宿主默认值 | 初始窗口尺寸，单位为点，例如 `800x600`（`--target macos`、`linux`、`windows` 和 `gpui`，TSX 入口）。 |
-| `--script <STEPS>` | | 执行以分号分隔的自动化步骤，例如 `"wait 800; shot a.png; quit"`（`--target macos`、`linux`、`windows` 和 `gpui`；用 Rust 编写的应用：`macos`、`linux` 和 `windows`）。脚本中有 `quit` 时，命令随脚本结束：带有自己 Rust crate 的应用截图也无需手动启动宿主。在 macOS 上，纯截图脚本在后台启动；脚本中的按下操作会按需激活应用。 |
 
 使用 `--target android` 时，会选用 `adb devices` 列出的第一台设备；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 
@@ -134,7 +133,7 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>]
 | `--filter <NAME>` | 只运行名称（前面带上所在 `describe` 块的名称）包含 `NAME` 的测试。 |
 | `--trace` | 打印测试所打开应用的每个挂载批次，标注它所属的步骤（`── press(Add): 7 items`），以及每次 commit 的耗时：首帧、一个步骤或一帧滚动的开销。 |
 | `--junit <FILE>` | 同时把结果以 JUnit XML 报告写入 `FILE`，CI 服务按这种格式展示测试结果：每个测试文件一个 `testsuite`，每个测试一个 `testcase`。 |
-| `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（目前为 `macos`、`gpui` 和 `web`；`web` 在 headless 的 Chrome、Edge 或 Chromium 里运行）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)）。 |
+| `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（目前为 `macos`、`linux`、`windows`、`gpui` 和 `web`；`web` 在 headless 的 Chrome、Edge 或 Chromium 里运行）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)）。 |
 | `--browser <PATH>` | `--target web` 运行应用所用的 Chrome、Edge 或 Chromium 可执行文件（默认：本机安装的那个）。 |
 
 ## nsh build

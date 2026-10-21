@@ -30,7 +30,6 @@ fn main() -> impl std::process::Termination {
             asset_base: Some(platform::AssetBase::Directory(assets)),
             app_id: app_id.to_owned(),
             size: (1200, 800),
-            script: std::env::var("NSH_SCRIPT").ok(),
             ..Default::default()
         },
     )

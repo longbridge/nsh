@@ -35,14 +35,16 @@ WORKFLOWS = {
             "nsh-platform-linux", "nsh-linux-host", "nsh-linux-app",
             "nsh-cli", "nsh-dev", "xtask",
         ],
-        "files": ["examples/gallery/fonts/**"],
+        # `nsh test --target` runs the examples' tests.
+        "files": ["examples/counter/**", "examples/gallery/**"],
     },
     "windows.yml": {
         "packages": [
             "nsh-platform-windows", "nsh-windows-host", "nsh-windows-app",
             "nsh-cli", "nsh-dev", "xtask",
         ],
-        "files": ["examples/gallery/fonts/**"],
+        # `nsh test --target` runs the examples' tests.
+        "files": ["examples/counter/**", "examples/gallery/**"],
     },
     "rust-app.yml": {
         "packages": ["gallery-native", "rust-exports-native", "nsh-cli", "nsh-platform-web"],

@@ -138,43 +138,48 @@ bubble back up. What NSH adds:
 an empty input too), and `"Escape"`, as on macOS. Pasted and undone text, and the deletion of a selection typed over,
 report nothing: the key being handled is kept until the main loop is idle, and `paste-clipboard` marks the paste.
 
-## Checking a change: `--script`
+## Checking a change: `nsh test --target linux`
 
-`nsh-linux-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or new
-lines (`script.rs`), so a change can be checked without touching the screen:
+The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
+implements `nsh_testing::agent::Native`, each call on the GTK main thread (`MainContext::invoke`), with the input
+`synth.rs` makes. GTK 4 cannot be handed a made-up event, so the input goes through the handlers real input reaches:
 
-| Step | Does |
-|---|---|
-| `wait <ms>` | Waits. |
-| `shot <file.png>` | Renders the window's content to a PNG, offscreen at scale 1, whatever covers the window. |
-| `tap <x> <y>` | Presses and releases a finger at a point (points, root coordinates). |
-| `drag <x0> <y0> <x1> <y1> [ms]` | Presses the mouse, moves in steps over `ms` (default 300), releases; `touch` the same with a finger (whose drags scroll). |
-| `wheel <x> <y> <dx> <dy>` | A wheel / touchpad scroll. |
-| `hover <x> <y>` | Moves the pointer. |
-| `type <text>` | Types into the focused field. |
-| `key <name>` | Presses a key (GDK names: `Return`, `BackSpace`, ...). |
-| `dark` / `light` | Switches the system's appearance (an app that forces one keeps it). |
-| `resize <w> <h>` | Resizes the window. |
-| `quit` | Closes the window. |
+- a press is the mouse's down and up at the view's middle through `input::simulate` (after a hover), and a release on
+  a hosted widget (a text field) focuses it, as a real click would;
+- typing inserts each character into the focused `GtkText` / `GtkTextView` at its caret (`insert_text`, so the
+  field's checks see each one), Return activates a line (a new line in an area), Backspace emits `backspace`, select
+  all selects the field's text;
+- a scroll is smooth wheel events of at most 20 points, a frame apart;
+- back is Escape (`navigation::key_pressed`), twice when a field has the focus (the first only leaves it);
+- a dialog's button is the `GtkButton` with that label, clicked; closing it without one is its dismissal (a click
+  outside the card);
+- a screenshot renders the window's content offscreen at its scale after the next frame is painted
+  (`GtkWidgetPaintable`), whatever covers the window; the appearance is the portal's, simulated; the size is the
+  window's default size.
+
+`dev.rs` hands the model to the surface on the server's test session (idle sources keep their order, so it comes
+before the first bundle). On a machine without a display, the tests run on a virtual one:
 
 ```sh
-nsh dev examples/gallery &       # or: nsh build examples/gallery and --bundle <path>/bundle.nshc
-./target/debug/nsh-linux-host --window-size 390x844 --script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png; quit"
+xvfb-run -a ./target/debug/nsh test examples/gallery --target linux
+echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await app.screenshot("b.png")' \
+  | xvfb-run -a ./target/debug/nsh test examples/gallery/App.tsx --target linux   # steps from stdin
 ```
 
-`key` emits the field's signals rather than a key event (GTK 4 cannot make one). For real key events (modifiers,
-input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a window manager
-such as openbox makes full screen work):
+The agent's keys are the field's signals rather than key events (GTK 4 cannot make one). For real key events
+(modifiers, input methods, shortcuts) run the host under Xvfb with the X11 backend and drive it with `xdotool` (a
+window manager such as openbox makes full screen work):
 
 ```sh
 Xvfb :77 & export DISPLAY=:77 GDK_BACKEND=x11
-./target/debug/nsh-linux-host --bundle out/bundle.qbc --script "wait 20000; quit" & sleep 2
+./target/debug/nsh-linux-host --bundle out/bundle.qbc & sleep 2
 W=$(xdotool search --pid $! | tail -1)
 xdotool mousemove --window $W 100 30 click 1; xdotool type --window $W "hi"; xdotool key --window $W shift+Return
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings; `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
+`--trace` logs per-commit timings; `--data-dir <dir>` keeps the apps' data there (`nsh test` gives each app a fresh
+one); `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
 Windows and GPUI hosts) names the GTK application and the directory of its web view data (the app's storage follows the id
 the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
 `testID` as its name.
@@ -185,7 +190,7 @@ the bundle carries). GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tr
   `iframe` of a host that is not granted stays empty), as WebKitGTK's `decide-policy` does not say which frame a
   navigation is for; iOS and macOS only check the main frame's. A new window (`target="_blank"`, `window.open`) opens
   nothing, as on iOS. Script dialogs (`alert`, `confirm`) are WebKitGTK's own, drawn inside the page (iOS and macOS show
-  none). Simulated taps (`--script`'s `tap`) focus a page but do not click into it (GTK never sees them). Without the
+  none). The test agent's presses focus a page but do not click into it (GTK never sees them). Without the
   feature a `WebView` shows a neutral placeholder and ignores its commands.
 - **Video**: GTK streams have no playback rate, so `rate` is ignored (warned once); a looping video never ends, so
   `onEnd` only comes for videos that do not loop. Which formats play depends on the installed GStreamer plugins.

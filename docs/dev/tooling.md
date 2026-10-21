@@ -329,8 +329,8 @@ failures and log records come back as `RunnerMessage`s; batches of `--trace` go 
 
 ### On a real platform (`--target`)
 
-`nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `gpui`,
-`web`). `App` drives either kind
+`nsh test --target <platform>` runs the apps tests open on the platform's development host (`macos`, `linux`,
+`windows`, `gpui`, `web`). `App` drives either kind
 of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
 `nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
 For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
@@ -353,13 +353,19 @@ test's side saves them, as the host may run on another machine. A manual clock d
 routes, storage, clipboard, locale, reduced motion, safe area).
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
-and key events (which `--script` steps use too), `NSView` frames converted to the content's top-left points, `NSAlert`
+and key events, `NSView` frames converted to the content's top-left points, `NSAlert`
 buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
 attaches the model to the surface on the server's test session (before the first bundle) and starts the agent's
 thread. GPUI (`nsh-platform-gpui`, feature `dev`): `agent.rs` on GPUI's main thread, input through the handlers real
 input goes through (`synth.rs`), back the mouse's back button, dialogs pressed at their buttons' laid-out middles
-(`docs/dev/gpui.md`). Both use `nsh_testing::agent::Tester`, which turns the dev client's test events into an agent's
-steps on a `Worker` thread.
+(`docs/dev/gpui.md`). Linux (`nsh-platform-linux`, feature `dev`): input through `input::simulate` and the focused
+GTK field's own signals (GTK 4 takes no made-up events), dialogs' `GtkButton`s clicked, screenshots rendered
+offscreen (`docs/dev/linux.md`). Windows (`nsh-platform-windows`, feature `dev`): input at the input module's entry
+points as on GPUI, screenshots captured with `PrintWindow` (`docs/dev/windows.md`). All four use
+`nsh_testing::agent::Tester`, which turns the dev client's test events into an agent's steps on a `Worker` thread.
+These hosts are also how a change to a platform is checked by hand: `nsh test <entry> --target <platform>` with steps
+on standard input (`app.screenshot("a.png")`, `app.press(…)`) opens the app in the platform's window, takes them and
+closes it.
 
 The web (`--target web`, `nsh-cli/src/test_web.rs`): the agent runs in the CLI, the app in a page of a headless
 Chromium browser (Chrome, Edge or Chromium; `--browser <PATH>`, else the one installed where `cdp.rs` looks; nsh never
@@ -383,7 +389,7 @@ otherwise, so scripts and CI never wait for an answer.
   that exist are kept; only a directory that has them all is refused.
 - **`rust`**: an independent Cargo workspace: `Cargo.toml`, `src/main.rs` (a native desktop entry using
   `AppSource::Rust(Root::of::<App>())`; the platform dependencies are target-specific and disable default features,
-  so `cargo run` mounts the Rust root directly and accepts `NSH_SCRIPT` for window checks), `src/lib.rs` (the root
+  so `cargo run` mounts the Rust root directly), `src/lib.rs` (the root
   component and its `#[native_module("<slug>/native")]` registry, which exports `App` for a TSX entry added later),
   `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
   that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native

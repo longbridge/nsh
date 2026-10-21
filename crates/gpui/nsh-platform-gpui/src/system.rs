@@ -98,7 +98,7 @@ const VK_RIGHT: u16 = 0x27;
 const VK_DOWN: u16 = 0x28;
 
 thread_local! {
-    /// The system appearance a script switched to (`dark` / `light`).
+    /// The system appearance a test switched to (`nsh test --target`).
     static SIMULATED: Cell<Option<bool>> = const { Cell::new(None) };
     /// The surfaces whose environment this module keeps.
     static WATCHED: RefCell<Vec<Watched>> = const { RefCell::new(Vec::new()) };
@@ -142,7 +142,9 @@ struct Settings {
     os_version: (u16, u16),
 }
 
-/// Makes the system look dark (or light) from now on (`--script`).
+/// Makes the system look dark (or light) from now on (`nsh test
+/// --target`'s color scheme).
+#[cfg(feature = "dev")]
 pub(crate) fn simulate_system_scheme(dark: bool) {
     SIMULATED.with(|s| s.set(Some(dark)));
     let surfaces: Vec<Rc<Surface>> = WATCHED.with(|w| {
@@ -177,7 +179,7 @@ fn settings_changed() {
     }
 }
 
-/// True when the window looks dark (or a script made the system look so).
+/// True when the window looks dark (or a test made the system look so).
 fn window_dark(window: &Window) -> bool {
     if let Some(dark) = SIMULATED.with(Cell::get) {
         return dark;
@@ -280,7 +282,7 @@ pub(crate) fn window_prepaint(surface: &Rc<Surface>, window: &mut Window, cx: &m
     }
 }
 
-/// The environment changed (from the system, the app or a script): the
+/// The environment changed (from the system, the app or a test): the
 /// root's background follows its scheme.
 pub(crate) fn environment_applied(surface: &Surface) {
     surface.invalidate();

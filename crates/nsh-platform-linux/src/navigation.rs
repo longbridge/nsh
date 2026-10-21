@@ -476,6 +476,12 @@ impl Nav {
             .or_insert_with(|| ScreenNav::new(view))
     }
 
+    /// Whether a transition runs.
+    #[cfg(feature = "dev")]
+    pub(crate) fn transitioning(&self) -> bool {
+        !self.transitions.is_empty()
+    }
+
     /// Ends the transitions `which` selects at once.
     fn finish(&mut self, surface: &Surface, which: impl Fn(&Transition) -> bool) {
         let mut i = 0;
@@ -1107,7 +1113,7 @@ pub(crate) fn default_back(surface: &Rc<Surface>) {
 
 /// The window of `surface`, when a text field (a `gtk::TextView` or any
 /// `gtk::Editable`) or a web view's page has its keyboard focus.
-fn focused_field(surface: &Surface) -> Option<gtk::Root> {
+pub(crate) fn focused_field(surface: &Surface) -> Option<gtk::Root> {
     let root = surface.root.root()?;
     let focus = root.focus()?;
     (focus.is::<gtk::TextView>()

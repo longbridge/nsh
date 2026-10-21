@@ -42,7 +42,7 @@ Install the backend's development libraries before building (`docs/dev/linux.md`
 Rust changes take effect on the next `cargo run`; `nsh run` rebuilds and restarts its host on Rust changes.
 
 ```sh
-NSH_SCRIPT='wait 800; shot target/rust-gallery.png; quit' cargo run -p gallery-native
+cargo run -p gallery-native
 cargo test -p gallery-native
 ```
 
