@@ -477,6 +477,36 @@ export interface ButtonProps extends ComponentHostProps {
 /** A press target that owns its behavior (presses, the disabled and selected states, its role for screen readers) and leaves its look to the app: no colors, sizes or label of its own. The app's `class` and `style` style it, its states with `active:`, `hover:`, `focus:`, `selected:` and `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`, `selectedStyle` and `disabledStyle`, and its children are its content. */
 export declare const Button: ((props: ButtonProps) => JSX.Element);
 
+export interface CheckboxProps extends ComponentHostProps {
+  /** Checked or not. The app owns the value: a press reports the next one with `onChange`, and the checkbox shows the value the app passes back. */
+  checked?: boolean;
+  /** Neither checked nor unchecked (a "select all" over a partial selection), over `checked` while it holds: screen readers say it is mixed, and a press asks for checked. */
+  indeterminate?: boolean;
+  /** No presses, no press feedback; `disabled:` styles apply to the checkbox and its indicator, and screen readers say it is dimmed. */
+  disabled?: boolean;
+  /** The style while checked (and not disabled), as `checked:` classes. */
+  checkedStyle?: StyleProp<ViewStyle>;
+  /** The style while indeterminate (and not disabled), as `indeterminate:` classes. */
+  indeterminateStyle?: StyleProp<ViewStyle>;
+  /** What screen readers say: what the checkbox selects, when its children have no text that says it. */
+  accessibilityLabel?: string | null;
+  /** What it is for screen readers (default `"checkbox"`; a menu item that is checked, ...). */
+  role?: AccessibilityRole | null;
+  /** The Tailwind classes of the indicator, the box that shows the value; `checked:`, `indeterminate:` and `disabled:` follow the checkbox. */
+  indicatorClass?: string | null;
+  /** The style of the indicator, over `indicatorClass`. */
+  indicatorStyle?: StyleProp<ViewStyle>;
+  /** The content of the indicator: the mark (a check, a dash for indeterminate), which the app shows by the value it owns. */
+  indicator?: JSX.Element;
+  /** The content after the indicator: a label, which screen readers say. */
+  children?: JSX.Element;
+  /** The checkbox was pressed (a tap, a click, Space or Return): the value it asks for, `true` from unchecked and from indeterminate, `false` from checked. */
+  onChange?: (checked: boolean) => void;
+}
+
+/** A control that is checked, unchecked or indeterminate (an option, an item of a selection, "select all"). It owns its behavior (presses, keyboard activation, the disabled state, the checkbox role and its value for screen readers) and leaves its look to the app: no box, mark, colors, sizes or label of its own. Its parts are an indicator (the box, with the app's mark inside: `indicator`), then its children; the app's `class` and `style` style the checkbox, `indicatorClass` / `indicatorStyle` the indicator, and `checked:`, `indeterminate:` and `disabled:` classes on each follow the checkbox's state (or `checkedStyle`, `indeterminateStyle` and `disabledStyle` on the checkbox). */
+export declare const Checkbox: ((props: CheckboxProps) => JSX.Element);
+
 export interface ContextMenuProps extends ComponentHostProps {
   /** Open (controlled): the app owns the value and changes it in `onOpenChange`. Without it the menu keeps its own state. */
   open?: boolean | null;

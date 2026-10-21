@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、开关、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、复选框、开关、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
@@ -13,20 +13,20 @@ demo: ui-navigation
 
 ```rust tabs
 use nsh_base::{
-    AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, dialog, keyboard_avoiding_view,
-    nav_page, nav_stack, safe_area_view, selection_area, switch, text_view, theme,
+    AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog,
+    keyboard_avoiding_view, nav_page, nav_stack, safe_area_view, selection_area, switch, text_view, theme,
 };
 ```
 
 ```tsx tabs
 import {
-  AlertDialog, Button, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
+  AlertDialog, Button, Checkbox, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
   MenuItem, MenuSeparator, NavPage, NavStack, Popover, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
   Submenu, Switch, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
-  DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
+  CheckboxProps, DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
   SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
@@ -36,6 +36,7 @@ import type {
 | TSX | Rust | 是什么 |
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | 带禁用和选中状态、面向屏幕阅读器有角色的按压目标。 |
+| [`Checkbox`](../elements/checkbox.md) | `checkbox()` | 勾选 / 未勾选 / 半选控件，指示器及其中的标记由应用设置。 |
 | [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | 在所有内容之上呈现的内容：sheet、全屏流程、对话框。 |
@@ -63,6 +64,12 @@ import type {
 ### Button
 
 一个只负责行为、没有外观的按压目标：处理按压、禁用和选中状态，并向屏幕阅读器报告它的角色。它的外观是应用的 `class` 和 `style` 加上状态变体，内容是它的子元素。见 [Button](../elements/button.md)。
+
+<a id="checkbox"></a>
+
+### Checkbox
+
+一个只负责行为、没有外观的勾选 / 未勾选 / 半选控件：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告复选框角色和它的值（半选时为部分选中）；值由应用持有（`checked`、`indeterminate`、`onChange`）。应用为复选框和它的指示器设置样式，指示器上的 `checked:`、`indeterminate:` 和 `disabled:` 类跟随复选框，应用自己的标记放在指示器里（`indicator`）。见 [Checkbox](../elements/checkbox.md)。
 
 <a id="switch"></a>
 
@@ -245,6 +252,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[Switch](../elements/switch.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Switch](../elements/switch.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。

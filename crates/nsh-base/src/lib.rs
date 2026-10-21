@@ -1,6 +1,6 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, `Switch`), navigation (stacks and pages), dialogs, popups on
+//! controls (`Button`, `Checkbox`, `Switch`), navigation (stacks and pages), dialogs, popups on
 //! the core's overlays (`Popover`, `Menu`, `ContextMenu`, `Tooltip`,
 //! `Sheet`), safe areas, selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
@@ -14,6 +14,7 @@
 
 mod alert_dialog;
 mod button;
+mod checkbox;
 mod keyboard;
 mod menu;
 mod navigation;
@@ -37,6 +38,7 @@ pub use crate::{
         AlertDialogRole, alert_dialog,
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
+    checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
         KeyboardAvoidingViewProps, keyboard_avoiding_view,
@@ -83,6 +85,7 @@ pub fn registry() -> Registry {
         .register::<SafeAreaView>()
         .register::<KeyboardAvoidingView>()
         .register::<SelectionArea>()
+        .register::<Checkbox>()
         .register::<Switch>()
         .register::<TextView>()
         .module::<AlertDialog>()
@@ -118,6 +121,7 @@ mod tests {
             components,
             [
                 "Button",
+                "Checkbox",
                 "ContextMenu",
                 "KeyboardAvoidingView",
                 "Menu",

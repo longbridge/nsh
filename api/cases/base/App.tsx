@@ -7,6 +7,7 @@ import { type JSX, View, mount, signal } from "nsh";
 import BaseStatusBar from "./base-status-bar";
 import BaseAlertDialog from "./base-alert-dialog";
 import BaseButton from "./base-button";
+import BaseCheckbox from "./base-checkbox";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseNavPage from "./base-nav-page";
@@ -30,6 +31,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-text-view": BaseTextView,
   "base-selection-area": BaseSelectionArea,
   "base-switch": BaseSwitch,
+  "base-checkbox": BaseCheckbox,
 };
 const shown = signal("");
 

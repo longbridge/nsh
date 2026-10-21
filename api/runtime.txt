@@ -254,6 +254,7 @@ createAnimatedValue function
 AlertDialog object
 AlertDialog.show function
 Button function
+Checkbox function
 ContextMenu function
 Dialog function
 Keyboard object
