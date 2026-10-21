@@ -73,6 +73,12 @@ go elsewhere under these rules rather than into them.
   `onLoadStart`, `onScrollDragStart`, `onMomentumEnd`), never `Begin`. A pointer over a view is `onHoverIn` /
   `onHoverOut` (decided by the user, 2026-10-21), a file drag over it `onFileDragEnter` / `onFileDragLeave` (the DOM's
   `dragenter`).
+- **Geometry**: shapes are GPUI's, the types Rust already has (`nsh_core::geometry`, `geometry.md`), exported by
+  `nsh` with the same fields: `Point { x, y }`, `Size { width, height }`, `Bounds { origin: Point, size: Size }`,
+  `Edges { top, right, bottom, left }` (decided by the user, 2026-10-21). A position and an extent together are a
+  `Bounds` (`onLayout(bounds)`), an extent beside other fields is a `size` (`ImageAsset.size`), insets are `Edges`
+  (`safeArea()`, `hitSlop`, `contentInset`; inputs take `Partial<Edges>`); never flat `x` / `y` / `width` / `height`
+  together, `<prefix>Width` / `<prefix>X` fields or another name for one shape (`Insets`).
 - **Points**: a position is a `Point` (`{ x, y }`, GPUI's `Point<Pixels>`, Rust `Point<Points>`), never separate
   `<prefix>X` / `<prefix>Y` fields: `position` in the view, `pagePosition` in the root view (the surface or its dialog),
   and the keys held as `modifiers` (`{ control, alt, shift, platform }`, GPUI's `Modifiers`: `platform` is Command on
@@ -160,6 +166,16 @@ modules keep their names. A name that already follows `gpui-kit` stays, even whe
 | Input `caretHidden` | `caret` (default `true`) | States | Decided by the user: the part's name, as `scrollbar`; replaces the 2026-10-20 row keeping it |
 | `HoverEvent` (`onHoverMove`) `locationX` / `locationY`, `pageX` / `pageY`, `altKey` / `ctrlKey` / `metaKey` / `shiftKey` | `{ position: Point; pagePosition: Point; modifiers: Modifiers }` | Points | GPUI `MouseMoveEvent`; new types `Point`, `Modifiers` in `nsh` |
 | `ContextMenuEvent` (`onContextMenu`), the same fields | the same shape | Points | `Menu.popup(items, e.pagePosition)` |
+| `onLayout(e: LayoutEvent)` `{ x, y, width, height }` | `onLayout(bounds: Bounds)` | Geometry | `LayoutEvent` dropped |
+| `ref.measure()` → `{ x, y, width, height, pageX, pageY }` | `{ bounds: Bounds; pagePosition: Point }` | Geometry | |
+| `ScrollEvent` (`onScroll`) `{ x, y, contentWidth, contentHeight, width, height, zoomScale }` | `{ offset: Point; contentSize: Size; size: Size; zoomScale }` | Geometry | The other scroll events' `{ x, y }` is the offset's `Point` already |
+| `OverlayPosition` `{ placement, x, y, width, height, availableWidth, availableHeight }` | `{ placement; bounds: Bounds; available: Size }` | Geometry | |
+| `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |
+| `Insets` (type) | `Edges` | Geometry | `safeArea()`, `safeAreaInsets()`; `hitSlop` / `contentInset` take `number \| Partial<Edges>` / `Partial<Edges>` |
+| `contentOffset`, `Overlay` `anchor`, `Menu.popup`'s `at` | typed `Partial<Point>` / `Point` | Geometry | Same fields |
+| `nsh/desktop` `WindowFrame` `{ x, y, width, height, animated, anchorTop }` | `{ origin?: Partial<Point>; size?: Partial<Size>; animated; anchorTop }` | Geometry | |
+| `windowSize()`, `ImageSize`, Image `onLoad`, `onContentSizeChange` | typed `Size` | Geometry | Same fields |
+| `ImageAsset` / `ClipboardImage` `{ url, width, height }`, Video `onLoad` `{ duration, width, height }` | `{ url; size: Size }`, `{ duration; size: Size }` | Geometry | |
 | **Image** | | | |
 | `src: string \| ImageAsset \| { uri }` | `src: string \| ImageAsset` | Addresses | |
 | `defaultSource` | `placeholder: string \| ImageAsset` | Addresses | Shown until `src` loads, as `Input`'s `placeholder` until text |
