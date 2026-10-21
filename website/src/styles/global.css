@@ -236,8 +236,8 @@ html.light {
   --glass-thumb: linear-gradient(180deg, #ffffff, rgb(255 255 255 / 81.1%));
   --glass-edge: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 -1px 0 rgb(0 0 0 / 5%), inset 0 0 0 1px rgb(0 0 0 / 6%), 0 2px 8px rgb(20 20 10 / 8%);
   --glass-thumb-edge: inset 0 1px 0 #ffffff, inset 0 -1px 0 rgb(0 0 0 / 6%), 0 1px 3px rgb(20 20 10 / 14%);
-  --logo-top: #5f9e26;
-  --logo-bottom: #2a6812;
+  --logo-top: #a3d13a;
+  --logo-bottom: #6a9a12;
   --nav-active: rgb(0 0 0 / 4.5%);
   --nav-hover: rgb(0 0 0 / 2.8%);
   --callout-tint: 7%;
