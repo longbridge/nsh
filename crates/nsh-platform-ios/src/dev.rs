@@ -251,7 +251,10 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             show_status(ui, container, "Dev server disconnected — reconnecting…")
         }
         // The client's thread hands them to the test agent.
-        DevEvent::Testing | DevEvent::Step { .. } => {}
+        DevEvent::Testing
+        | DevEvent::Step { .. }
+        | DevEvent::TestSetup { .. }
+        | DevEvent::Fetch { .. } => {}
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => {
             show_error(ui, container, "Build failed", &message, false)

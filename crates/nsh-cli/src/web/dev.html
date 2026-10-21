@@ -171,6 +171,13 @@
             player.runRust();
           }
           break;
+        case "test_setup":
+          player.onTestSend = send;
+          player.testSetup(message.storage);
+          break;
+        case "fetch":
+          player.testFetchReply(message.id, message.reply);
+          break;
         case "step":
           send({ type: "step_done", id: message.id, outcome: player.testStep(message.step) });
           break;

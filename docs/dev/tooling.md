@@ -349,8 +349,19 @@ then waits until neither a batch came nor a native animation ran for 100 ms (2 s
 finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
 test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
-`runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (stubbed
-routes, storage, clipboard, locale, reduced motion, safe area).
+`runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (clipboard,
+locale, reduced motion, safe area).
+
+Routes and storage reach the host through the dev server (`HostOptions`, `DevServer::set_test_storage` and
+`set_test_network`). Before the first bundle, the server sends the test host a `ServerMessage::TestSetup` with the
+seeded storage; the host's `Tester` hands it to `Model::set_up`, and the engine starts with `Model::engine_storage`
+(a `MemoryStorage` holding those entries) and `Model::engine_network` (`agent/forward.rs`'s `ForwardNetwork`). Each
+request the app makes goes back as a `ClientMessage::Fetch` with an id (`FetchCancel` when the app drops it); the
+test's side answers it from its routes (`protocol::TestNetwork`, `run.rs`'s `HostRoutes` over the same
+`StubNetwork` headless runs use, recording every request for `app.requests()`) with `ServerMessage::Fetch` replies:
+`Head`, `Data` (base64) and `End`, or `Failed`, or `Pass` for `network: "live"`, when the host's own network makes
+the request. `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
+(`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
 and key events, `NSView` frames converted to the content's top-left points, `NSAlert`

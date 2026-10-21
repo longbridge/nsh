@@ -132,7 +132,10 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
         DevEvent::Connected => host.dev_status(None),
         DevEvent::Disconnected => host.dev_status(Some("Dev server disconnected — reconnecting…")),
         // The client's thread hands them to the test agent.
-        DevEvent::Testing | DevEvent::Step { .. } => {}
+        DevEvent::Testing
+        | DevEvent::Step { .. }
+        | DevEvent::TestSetup { .. }
+        | DevEvent::Fetch { .. } => {}
         DevEvent::Building => {}
         DevEvent::BuildFailed(message) => host.dev_error(Some(("Build failed", &message)), false),
         DevEvent::CannotRun { message, .. } => {

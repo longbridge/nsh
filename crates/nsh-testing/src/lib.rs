@@ -43,6 +43,7 @@ mod run;
 mod runner;
 mod screen;
 mod selector;
+mod storage;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};
@@ -58,10 +59,9 @@ use nsh_engine::{Bundle, EngineConfig};
 pub use self::headless::UreqNetwork;
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::headless::{
-    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubHandler,
-    StubNetwork, StubReply, StubResponse, StubRoute, WAIT, default_answer, print_batch, start,
+    DialogAnswer, DirectoryAssets, Headless, RecordingNetwork, StubHandler, StubNetwork, StubReply,
+    StubResponse, StubRoute, WAIT, default_answer, print_batch, start,
 };
-pub use self::screen::{Pick, Screen};
 #[cfg(feature = "js")]
 pub use self::{
     driver::Host,
@@ -74,6 +74,10 @@ pub use self::{
         TestStatus, run_file,
     },
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
+};
+pub use self::{
+    screen::{Pick, Screen},
+    storage::MemoryStorage,
 };
 
 /// The sets the entry `nsh test` makes for a test file is built against

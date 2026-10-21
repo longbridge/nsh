@@ -1,14 +1,12 @@
-//! Stand-ins for a device's services in tests: a network that answers
-//! from a list ([`StubNetwork`]) and storage that starts with given entries
-//! ([`MemoryStorage`]).
+//! A stand-in for a device's network in tests: a network that answers
+//! from a list ([`StubNetwork`]), and one that keeps what it is asked
+//! ([`RecordingNetwork`]). Storage's is [`crate::MemoryStorage`].
 
 use std::{
-    collections::BTreeMap,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use nsh_core::storage::{StorageBackend, StorageChange};
 use nsh_engine::{
     Clock, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network,
 };
@@ -303,6 +301,13 @@ impl RecordingNetwork {
         })
     }
 
+    /// Keeps `request` as made, though it is not made through this
+    /// network (a host made it on its own).
+    #[cfg(feature = "js")]
+    pub(crate) fn record(&self, request: HttpRequest) {
+        self.requests.lock().expect("requests").push(request);
+    }
+
     /// The requests made so far, in order (bodies streamed by JS are not
     /// kept).
     pub fn requests(&self) -> Vec<HttpRequest> {
@@ -317,46 +322,6 @@ impl Network for RecordingNetwork {
             .expect("requests")
             .push(request.clone());
         self.inner.fetch(request, events)
-    }
-}
-
-/// Storage in memory that starts with the entries given: an app's data as
-/// a test sets it up. Shared ([`Arc`]), it shows what the app wrote.
-#[derive(Debug, Default)]
-pub struct MemoryStorage {
-    entries: Mutex<BTreeMap<String, String>>,
-}
-
-impl MemoryStorage {
-    /// Storage holding `entries`.
-    pub fn new(entries: impl IntoIterator<Item = (String, String)>) -> Arc<Self> {
-        Arc::new(Self {
-            entries: Mutex::new(entries.into_iter().collect()),
-        })
-    }
-
-    /// The entries now.
-    pub fn entries(&self) -> BTreeMap<String, String> {
-        self.entries.lock().expect("entries").clone()
-    }
-}
-
-impl StorageBackend for MemoryStorage {
-    fn load(&self) -> Result<BTreeMap<String, String>, String> {
-        Ok(self.entries())
-    }
-
-    fn write(&self, change: StorageChange) {
-        let mut entries = self.entries.lock().expect("entries");
-        match change {
-            StorageChange::Set(key, value) => {
-                entries.insert(key, value);
-            }
-            StorageChange::Remove(key) => {
-                entries.remove(&key);
-            }
-            StorageChange::Clear => entries.clear(),
-        }
     }
 }
 
@@ -490,17 +455,5 @@ mod tests {
             &fetch_within(&network, HttpRequest::get("https://api.test/todo"), wait)[0],
             FetchEvent::Failed(_)
         ));
-    }
-
-    #[test]
-    fn storage_starts_with_its_entries_and_keeps_changes() {
-        let storage = MemoryStorage::new([("todos".to_owned(), "[]".to_owned())]);
-        assert_eq!(storage.load().unwrap()["todos"], "[]");
-        storage.write(StorageChange::Set("theme".into(), "dark".into()));
-        storage.write(StorageChange::Remove("todos".into()));
-        assert_eq!(
-            storage.entries().into_iter().collect::<Vec<_>>(),
-            [("theme".to_owned(), "dark".to_owned())]
-        );
     }
 }

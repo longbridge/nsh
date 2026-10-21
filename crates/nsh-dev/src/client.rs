@@ -31,6 +31,21 @@ pub enum DevEvent {
         /// What to do.
         step: TestStep,
     },
+    /// What a test session's app starts with
+    /// ([`crate::protocol::ServerMessage::TestSetup`]): the storage it
+    /// finds. Its requests go to the test ([`DevClient::fetch`]).
+    TestSetup {
+        /// The storage's entries.
+        storage: Vec<(String, String)>,
+    },
+    /// The test's answer to request `id` ([`DevClient::fetch`]): one
+    /// event of it.
+    Fetch {
+        /// The request's id.
+        id: u64,
+        /// The event.
+        reply: crate::protocol::FetchReply,
+    },
     /// A rebuild started.
     Building,
     /// The build failed.
@@ -156,6 +171,17 @@ impl DevClient {
         Ok(DevClient { logs, replies })
     }
 
+    /// Forwards the app's request `id` to the test, which answers with
+    /// [`DevEvent::Fetch`]es of that id (a test session's).
+    pub fn fetch(&self, id: u64, request: crate::protocol::WireRequest) {
+        let _ = self.replies.send(ClientMessage::Fetch { id, request });
+    }
+
+    /// The app no longer wants the answer to request `id`.
+    pub fn fetch_cancel(&self, id: u64) {
+        let _ = self.replies.send(ClientMessage::FetchCancel { id });
+    }
+
     /// Sends the outcome of the step `id` ([`DevEvent::Step`]).
     pub fn step_done(&self, id: u64, outcome: StepOutcome) {
         let _ = self.replies.send(ClientMessage::StepDone { id, outcome });
@@ -233,6 +259,10 @@ fn session(
                     }
                 }
                 Ok(ServerMessage::Step { id, step }) => on_event(DevEvent::Step { id, step }),
+                Ok(ServerMessage::TestSetup { storage }) => {
+                    on_event(DevEvent::TestSetup { storage })
+                }
+                Ok(ServerMessage::Fetch { id, reply }) => on_event(DevEvent::Fetch { id, reply }),
                 Ok(ServerMessage::Building) => on_event(DevEvent::Building),
                 Ok(ServerMessage::BuildFailed { message }) => {
                     on_event(DevEvent::BuildFailed(message))

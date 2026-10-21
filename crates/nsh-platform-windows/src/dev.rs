@@ -333,7 +333,10 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
         DevEvent::Connected => hide_status(ui),
         DevEvent::Disconnected => show_status(ui, Status::Reconnecting),
         // The client's thread hands them to the test agent.
-        DevEvent::Testing | DevEvent::Step { .. } => {}
+        DevEvent::Testing
+        | DevEvent::Step { .. }
+        | DevEvent::TestSetup { .. }
+        | DevEvent::Fetch { .. } => {}
         DevEvent::Building => show_status(ui, Status::Building),
         DevEvent::BuildFailed(message) => {
             hide_status(ui);

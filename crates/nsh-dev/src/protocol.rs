@@ -57,6 +57,19 @@ pub enum ClientMessage {
         /// What it gave, or why it failed.
         outcome: StepOutcome,
     },
+    /// A request of a test session's app, which the test answers
+    /// ([`ServerMessage::Fetch`] of the same id).
+    Fetch {
+        /// The request's id, chosen by the host.
+        id: u64,
+        /// The request.
+        request: WireRequest,
+    },
+    /// The app no longer wants the answer to request `id`.
+    FetchCancel {
+        /// The request's id.
+        id: u64,
+    },
     /// A log line from the host (JS console or native).
     Log {
         /// Severity.
@@ -112,6 +125,22 @@ pub enum ServerMessage {
         /// need from the first bundle on ([`ServerMessage::Step`]).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         test: bool,
+    },
+    /// What a test session's app starts with (after [`ServerMessage::Hello`],
+    /// before the first bundle): the storage it finds, in place of its
+    /// own. Its requests go to the test ([`ClientMessage::Fetch`]).
+    TestSetup {
+        /// The storage's entries.
+        #[serde(default)]
+        storage: Vec<(String, String)>,
+    },
+    /// What the test answers to the app's request `id`
+    /// ([`ClientMessage::Fetch`]), a message per event, in order.
+    Fetch {
+        /// The request's id.
+        id: u64,
+        /// The event.
+        reply: FetchReply,
     },
     /// A step of a test, which the host answers with a
     /// [`ClientMessage::StepDone`] of the same id.
@@ -343,6 +372,8 @@ pub enum SceneQuery {
     },
     /// The oldest dialog was answered.
     Answered,
+    /// The app's storage: its entries.
+    Storage,
     /// View `id`'s bounds on screen, in points from the viewport's top left.
     Bounds {
         /// The view.
@@ -363,6 +394,86 @@ pub enum SceneQuery {
         /// The button's text.
         button: Option<String>,
     },
+}
+
+/// An app's HTTP request, as a test session's host forwards it
+/// ([`ClientMessage::Fetch`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WireRequest {
+    /// Upper-case method.
+    pub method: String,
+    /// Absolute URL.
+    pub url: String,
+    /// Header names and values, in order.
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// The body (a streamed one, gathered).
+    #[serde(default, with = "base64_bytes")]
+    pub body: Vec<u8>,
+    /// Follow redirects.
+    #[serde(default)]
+    pub follow_redirects: bool,
+}
+
+/// What a test answers to an app's request ([`ServerMessage::Fetch`]).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "reply", rename_all = "snake_case")]
+pub enum FetchReply {
+    /// The host makes the request itself, on its own network (the test
+    /// lets requests through).
+    Pass,
+    /// The response's status and headers.
+    Head {
+        /// The status code.
+        status: u16,
+        /// Header names and values.
+        headers: Vec<(String, String)>,
+        /// The response's URL.
+        url: String,
+    },
+    /// Bytes of the body, in order.
+    Data {
+        /// The bytes.
+        #[serde(with = "base64_bytes")]
+        bytes: Vec<u8>,
+    },
+    /// The body is complete.
+    End,
+    /// The request failed.
+    Failed {
+        /// Why.
+        message: String,
+    },
+}
+
+/// What answers the requests of a test session's app (the test's routes):
+/// `DevServer::set_test_network`.
+pub trait TestNetwork: Send + Sync {
+    /// Answers `request` through `reply`, an event at a time in order, from
+    /// any thread ([`FetchReply::Pass`]: the host makes it itself). The
+    /// function returned cancels it.
+    fn fetch(
+        &self,
+        request: WireRequest,
+        reply: Box<dyn FnMut(FetchReply) + Send>,
+    ) -> Box<dyn FnOnce() + Send>;
+}
+
+/// Bytes as base64 text in JSON.
+mod base64_bytes {
+    use base64::Engine as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// What a step acts on, which decides the view a selector names

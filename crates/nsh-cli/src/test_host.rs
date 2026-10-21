@@ -95,7 +95,7 @@ fn start(
     entry: &Path,
     options: &HostOptions,
 ) -> Result<TestHost, String> {
-    let server = serve(entry)?;
+    let server = serve(entry, options)?;
     let dir = entry.parent().unwrap_or(Path::new("."));
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
@@ -154,7 +154,7 @@ fn start(
 /// A dev server in a test session serving `entry`'s build, as `nsh run`
 /// serves it (the app's assets, its log lines shown as `nsh run` shows
 /// them).
-pub(crate) fn serve(entry: &Path) -> Result<DevServer, String> {
+pub(crate) fn serve(entry: &Path, options: &HostOptions) -> Result<DevServer, String> {
     let built = build::compile(entry, false).map_err(|e| e.plain)?;
     let dir = entry.parent().unwrap_or(Path::new("."));
     let server = DevServer::start(
@@ -179,6 +179,11 @@ pub(crate) fn serve(entry: &Path) -> Result<DevServer, String> {
     .map_err(|e| format!("cannot start a dev server: {e}"))?;
     server.serve_files(build::crate_assets().map(|a| (a.path, a.source)));
     server.test_session();
+    // What the app starts with and what answers its requests: the test's.
+    server.set_test_storage(options.storage.clone());
+    if let Some(network) = &options.network {
+        server.set_test_network(network.clone());
+    }
     let capabilities = built.capabilities_json();
     server.publish(
         built.bytecode,

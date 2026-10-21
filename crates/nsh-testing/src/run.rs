@@ -30,10 +30,10 @@ use nsh_engine::{
 };
 
 use crate::{
+    MemoryStorage,
     driver::{Driver, Host, Remote},
     headless::{
-        DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, StubNetwork, UreqNetwork, WAIT,
-        print_batch,
+        DirectoryAssets, Headless, RecordingNetwork, StubNetwork, UreqNetwork, WAIT, print_batch,
     },
     module::{Case, Hook, Item, Launch, MobilePlatform, Mode, NetworkSetup, SafeArea, Suite},
 };
@@ -93,12 +93,79 @@ pub type StartHost =
     Arc<dyn Fn(&Path, &HostOptions) -> Result<Box<dyn Host>, String> + Send + Sync>;
 
 /// How [`StartHost`] starts an app.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct HostOptions {
     /// The window's (viewport's) size in points: the headless phone's,
     /// 390 × 844, unless `open` says.
     pub size: Option<Size<Points>>,
+    /// The storage the app starts with, in place of its own
+    /// (`nsh_dev::DevServer::set_test_storage`).
+    pub storage: Vec<(String, String)>,
+    /// What answers the app's requests (`nsh_dev::DevServer::set_test_network`):
+    /// the test's routes, the network itself, or none.
+    pub network: Option<Arc<dyn nsh_dev::protocol::TestNetwork>>,
+}
+
+impl std::fmt::Debug for HostOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostOptions")
+            .field("size", &self.size)
+            .field("storage", &self.storage)
+            .field("network", &self.network.is_some())
+            .finish()
+    }
+}
+
+/// The test's side of a host's app's requests: they are kept (`requests()`),
+/// then answered from the routes, failed, or let through to the host's own
+/// network (`network: "live"`).
+struct HostRoutes {
+    requests: Arc<RecordingNetwork>,
+    /// Let through: the host's network makes them.
+    live: bool,
+}
+
+impl nsh_dev::protocol::TestNetwork for HostRoutes {
+    fn fetch(
+        &self,
+        request: nsh_dev::protocol::WireRequest,
+        mut reply: Box<dyn FnMut(nsh_dev::protocol::FetchReply) + Send>,
+    ) -> Box<dyn FnOnce() + Send> {
+        use nsh_dev::protocol::FetchReply;
+        use nsh_engine::{FetchEvent, HttpBody, HttpRequest, Network as _};
+        let request = HttpRequest {
+            method: request.method,
+            url: request.url,
+            headers: request.headers,
+            body: if request.body.is_empty() {
+                HttpBody::Empty
+            } else {
+                HttpBody::Bytes(request.body)
+            },
+            follow_redirects: request.follow_redirects,
+        };
+        if self.live {
+            self.requests.record(request);
+            reply(FetchReply::Pass);
+            return Box::new(|| {});
+        }
+        let task = self.requests.fetch(
+            request,
+            Box::new(move |event| match event {
+                FetchEvent::Head(head) => reply(FetchReply::Head {
+                    status: head.status,
+                    headers: head.headers,
+                    url: head.url,
+                }),
+                FetchEvent::Data(bytes) => reply(FetchReply::Data { bytes }),
+                FetchEvent::End => reply(FetchReply::End),
+                FetchEvent::Failed(message) => reply(FetchReply::Failed { message }),
+                FetchEvent::BodyWanted => {}
+            }),
+        );
+        Box::new(move || task.cancel())
+    }
 }
 
 /// How a test ended.
@@ -446,11 +513,6 @@ impl Session {
         // What a real platform cannot be given yet: refused rather than
         // left out, so a test never passes on what it did not set up.
         let refused = [
-            (!launch.storage.0.is_empty(), "`storage`"),
-            (
-                matches!(launch.network, NetworkSetup::Stub(_)),
-                "stubbed `network` routes",
-            ),
             (launch.clipboard.is_some(), "`clipboard`"),
             (launch.locale.is_some(), "`locale`"),
             (launch.reduced_motion, "`reducedMotion`"),
@@ -461,6 +523,15 @@ impl Session {
                 "open({entry:?}): {what} runs headless only for now: run the test without `--target`"
             ));
         }
+        // The app's requests come to the test, as on a headless engine:
+        // answered from the routes, failed without any, or let through.
+        let (inner, live): (Arc<dyn nsh_engine::Network>, bool) = match launch.network {
+            NetworkSetup::Live => (Arc::new(StubNetwork::default()), true),
+            NetworkSetup::Stub(routes) => (Arc::new(StubNetwork::new(routes)), false),
+            NetworkSetup::None => (Arc::new(StubNetwork::default()), false),
+        };
+        let requests = RecordingNetwork::new(inner);
+        let storage: Vec<(String, String)> = launch.storage.0.into_iter().collect();
         let size = match (launch.width, launch.height) {
             (None, None) => None,
             (w, h) => Some(Size::new(
@@ -470,6 +541,11 @@ impl Session {
         };
         let options = HostOptions {
             size: size.or(Some(Size::new(Points(390.0), Points(844.0)))),
+            storage,
+            network: Some(Arc::new(HostRoutes {
+                requests: requests.clone(),
+                live,
+            })),
         };
         let host = start(path, &options).map_err(|e| format!("open({entry:?}): {e}"))?;
         let remote = Remote::new(host);
@@ -484,7 +560,7 @@ impl Session {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(app.clone());
-        Ok((app, None, None))
+        Ok((app, None, Some(requests)))
     }
 
     /// The app at `path`, built once.

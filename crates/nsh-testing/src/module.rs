@@ -16,10 +16,9 @@ use nsh_core::{
 use nsh_engine::{HttpBody, HttpRequest};
 
 use crate::{
+    MemoryStorage,
     driver::{Driver, headless_only},
-    headless::{
-        self, MemoryStorage, RecordingNetwork, StubReply, StubResponse, StubRoute, default_answer,
-    },
+    headless::{self, RecordingNetwork, StubReply, StubResponse, StubRoute, default_answer},
     run::{OpenApp, Session},
 };
 
@@ -1105,11 +1104,13 @@ impl App {
 
     /// What the app's storage holds now.
     pub fn storage(&self) -> Result<Entries, String> {
-        let storage = self
-            .storage
-            .as_ref()
-            .ok_or_else(|| headless_only("`storage()`"))?;
-        Ok(Entries(storage.entries()))
+        if let Some(storage) = &self.storage {
+            return Ok(Entries(storage.entries()));
+        }
+        // On a real host: as the host's app keeps it.
+        let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        let driver = app.as_mut().ok_or("the app is closed")?;
+        Ok(Entries(driver.storage()?))
     }
 
     /// Goes back as the user does (a header's back button, swiping a sheet

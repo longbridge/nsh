@@ -47,6 +47,11 @@ pub(crate) trait Driver: Send {
     fn clipboard(&mut self) -> Result<Option<String>, String>;
     /// A picture of the app's window, as a PNG.
     fn screenshot(&mut self) -> Result<Vec<u8>, String>;
+    /// The app's storage's entries, as a host keeps them (a headless
+    /// engine's `App` reads its storage itself).
+    fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
+        Err(headless_only("reading the storage this way"))
+    }
 }
 
 impl Driver for Headless {
@@ -327,6 +332,11 @@ impl Driver for Remote {
         base64::engine::general_purpose::STANDARD
             .decode(png)
             .map_err(|e| format!("the host sent a broken picture: {e}"))
+    }
+    fn storage(&mut self) -> Result<std::collections::BTreeMap<String, String>, String> {
+        self.query(TestStep::Scene {
+            query: nsh_dev::protocol::SceneQuery::Storage,
+        })
     }
 }
 

@@ -430,7 +430,10 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
         DevEvent::Connected => dev.hide_status(),
         DevEvent::Disconnected => dev.show_status(Status::Reconnecting),
         // The client's thread hands them to the test agent.
-        DevEvent::Testing | DevEvent::Step { .. } => {}
+        DevEvent::Testing
+        | DevEvent::Step { .. }
+        | DevEvent::TestSetup { .. }
+        | DevEvent::Fetch { .. } => {}
         DevEvent::Building => dev.show_status(Status::Building),
         DevEvent::BuildFailed(message) => {
             dev.hide_status();

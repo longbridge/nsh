@@ -365,9 +365,10 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
 窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕。时间是真实的：`clock` 和系统时钟一样走，所以
-`app.clock.runFor(ms)` 会真的等待这么久，而真实时间做不到的 `fastForward` 和 `setSystemTime` 会 reject。真实平台暂时还给不了的
-选项会让 `open` reject，而不是被忽略：模拟的 `network` 路由、`storage`、`clipboard`、`locale`、`reducedMotion` 和 `safeArea`；请求会
-发往真实网络。`app.storage()` 和 `app.requests()` 只在 headless 下可用。带有自己 Rust crate 的应用暂时只在 headless 下运行测试。
+`app.clock.runFor(ms)` 会真的等待这么久，而真实时间做不到的 `fastForward` 和 `setSystemTime` 会 reject。应用的请求和 headless
+时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
+`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。真实平台暂时还给不了的选项会让 `open` reject，而不是被忽略：
+`clipboard`、`locale`、`reducedMotion` 和 `safeArea`。带有自己 Rust crate 的应用暂时只在 headless 下运行测试。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或
 `--browser <PATH>` 指定的可执行文件（需要有浏览器：找不到时 `nsh test` 会列出它找过的位置）。整个运行共用一个浏览器，

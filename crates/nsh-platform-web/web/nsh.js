@@ -535,6 +535,7 @@ class Player {
         },
         request_frame: () => this.requestFrame(),
         report_error: (p, l) => this.showError(this.str(p, l)),
+        test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
           const message = this.str(p, l);
           (level <= 1 ? console.error : level === 2 ? console.warn : console.log)("[nsh]", message);
@@ -634,6 +635,22 @@ class Player {
    */
   testStart() {
     this.wasm.nsh_test_start?.();
+  }
+
+  /**
+   * What the test sets the app up with (`ServerMessage::TestSetup`): the
+   * storage it starts with. Its requests then go to the test through
+   * `onTestSend` (`{type: "fetch", id, request}`, `{type: "fetch_cancel", id}`).
+   */
+  testSetup(storage) {
+    if (!this.wasm.nsh_test_setup) return;
+    this.withStrings([JSON.stringify(storage ?? [])], (p, l) => this.wasm.nsh_test_setup(p, l));
+  }
+
+  /** The test's answer to the app's request `id` (`ServerMessage::Fetch`). */
+  testFetchReply(id, reply) {
+    if (!this.wasm.nsh_test_fetch_reply) return;
+    this.withStrings([JSON.stringify({ id, reply })], (p, l) => this.wasm.nsh_test_fetch_reply(p, l));
   }
 
   /** Whether this runtime answers test steps (the development host's). */
