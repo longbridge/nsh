@@ -142,12 +142,10 @@ export interface TextViewClasses {
   taskMarkerChecked?: string | null;
   /** The column of an item's blocks. */
   listItemContent?: string | null;
-  /** Code blocks (a column: the header, then the code). */
+  /** Code blocks (the code, the actions floating over it). */
   codeBlock?: string | null;
-  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row over the block's top right corner (only with one of them). */
+  /** The row of a code block's actions (`codeBlockActions`), floating over its top right corner (only with actions). */
   codeBlockHeader?: string | null;
-  /** The language a code block names. */
-  codeBlockLanguage?: string | null;
   /** The horizontal scroll view of a code block's code. */
   codeBlockScroll?: string | null;
   /** The code of a code block (monospace, as written). */
@@ -170,6 +168,8 @@ export interface TextViewClasses {
   superscript?: string | null;
   /** Subscript (smaller). */
   subscript?: string | null;
+  /** Smaller text (`<small>`). */
+  small?: string | null;
   /** Links (in the theme's link color, underlined). */
   link?: string | null;
   /** Images: alone in a paragraph or a cell, as wide as they ask (their natural size when they ask for nothing), at most the text's width; in a line of text, the size they ask for, else three quarters of a line tall. */
@@ -208,6 +208,22 @@ export interface TextViewClasses {
   footnoteReference?: string | null;
   /** Custom nodes shown as their content (no `renderCustom`). */
   custom?: string | null;
+}
+
+/** An action of the code blocks of a `TextView` (`codeBlockActions`). */
+export interface TextViewCodeAction {
+  /** Which it is: `"copy"` (built in: copies the code, then shows a check for a moment), or an id of the app's. */
+  id: string;
+  /** What screen readers say for it (default: its id). */
+  label?: string | null;
+}
+
+/** A press on a code block's action (`onCodeBlockAction`). */
+export interface TextViewCodeActionEvent {
+  /** The action's id. */
+  id: string;
+  /** The code block. */
+  code: TextViewCodeBlock;
 }
 
 /** A block of code. */
@@ -271,7 +287,7 @@ export interface TextViewImage {
 /** Inline content of a `TextViewBlock`, by its `type`. */
 export type TextViewInline =
   | { type: "text"; text: string }
-  | { type: "strong" | "emphasis" | "strikethrough" | "underline" | "superscript" | "subscript"; content: TextViewInline[] }
+  | { type: "strong" | "emphasis" | "strikethrough" | "underline" | "superscript" | "subscript" | "small"; content: TextViewInline[] }
   | { type: "highlight"; content: TextViewInline[]; color?: string }
   | { type: "code"; code: string }
   | { type: "keyboard"; text: string }
@@ -350,12 +366,10 @@ export interface TextViewStyles {
   taskMarkerChecked?: StyleProp<TextStyle> | null;
   /** The column of an item's blocks. */
   listItemContent?: StyleProp<TextStyle> | null;
-  /** Code blocks (a column: the header, then the code). */
+  /** Code blocks (the code, the actions floating over it). */
   codeBlock?: StyleProp<TextStyle> | null;
-  /** The header of a code block: its language and the app's `renderCodeBlockActions`, in a row over the block's top right corner (only with one of them). */
+  /** The row of a code block's actions (`codeBlockActions`), floating over its top right corner (only with actions). */
   codeBlockHeader?: StyleProp<TextStyle> | null;
-  /** The language a code block names. */
-  codeBlockLanguage?: StyleProp<TextStyle> | null;
   /** The horizontal scroll view of a code block's code. */
   codeBlockScroll?: StyleProp<TextStyle> | null;
   /** The code of a code block (monospace, as written). */
@@ -378,6 +392,8 @@ export interface TextViewStyles {
   superscript?: StyleProp<TextStyle> | null;
   /** Subscript (smaller). */
   subscript?: StyleProp<TextStyle> | null;
+  /** Smaller text (`<small>`). */
+  small?: StyleProp<TextStyle> | null;
   /** Links (in the theme's link color, underlined). */
   link?: StyleProp<TextStyle> | null;
   /** Images: alone in a paragraph or a cell, as wide as they ask (their natural size when they ask for nothing), at most the text's width; in a line of text, the size they ask for, else three quarters of a line tall. */
@@ -423,9 +439,9 @@ export interface TextViewTable {
   /** The alignment of each column. */
   align?: ("none" | "left" | "center" | "right")[];
   /** The header row's cells. */
-  head: { content: TextViewInline[] }[];
+  head: { content: TextViewInline[]; colspan?: number }[];
   /** The body's rows. */
-  rows?: { content: TextViewInline[] }[][];
+  rows?: { content: TextViewInline[]; colspan?: number }[][];
 }
 
 export interface ButtonProps extends ComponentHostProps {
@@ -511,16 +527,22 @@ export interface TextViewProps extends ComponentHostProps {
   renderCustom?: (value: TextViewCustomNode) => JSX.Element;
   /** Shows a code block in place of the default (the code in a horizontal scroll view): syntax highlighting of the app's. */
   renderCodeBlock?: (value: TextViewCodeBlock) => JSX.Element;
-  /** Content of the app's in the header of each code block, after its language (a copy button). */
-  renderCodeBlockActions?: (value: TextViewCodeBlock) => JSX.Element;
+  /** Content of the app's floating over each code block's top right The icon of a code block's action of the app's (`codeBlockActions`): the button around it (its size, hover and press backgrounds) is the text view's, so every action looks alike. Without it, an action shows its label. */
+  renderCodeBlockAction?: (value: TextViewCodeAction) => JSX.Element;
+  /** The buttons over each code block's top right corner, in order: `{ id: "copy" }` is built in (it copies the code and shows a check for a moment), other ids are the app's (their icon from `renderCodeBlockAction`, a press reported by `onCodeBlockAction`). All are ghost buttons that show while a pointer hovers the block on desktops, always on touch screens. */
+  codeBlockActions?: (TextViewCodeAction)[];
   /** Content of the app's above each table (a copy or export button). */
   renderTableActions?: (value: TextViewTable) => JSX.Element;
   /** Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its TeX shows as code. */
   renderMath?: (value: TextViewMath) => JSX.Element;
-  /** Shows an image in place of the default: alone in a paragraph, the image at the size it asks for (`width` / `height`) or its natural size, at most as wide as the text; in a line of text, the size it asks for, else three quarters of a line tall. A press on an image in a link reports the link (`onLinkPress`). */
+  /** Shows an image in place of the default: alone in a paragraph, the image at the size it asks for (`width` / `height`) or its natural size, at most as wide as the text; in a line of text, the size it asks for, else three quarters of a line tall. A press on an image in a link reports the link (`onLinkPress`), on another the image (`onImagePress`). */
   renderImage?: (value: TextViewImage) => JSX.Element;
   /** A link was pressed: its URL (`#anchor` for a heading of the document, `#footnote-<label>` for a footnote). Nothing opens it: the app decides. */
   onLinkPress?: (url: string) => void;
+  /** An image that is not in a link was pressed: the image (its `src`, `alt`, `title`, size), for the app to show it larger (a zoomable viewer of its own). */
+  onImagePress?: (image: TextViewImage) => void;
+  /** An action of a code block was pressed (after the built-in `copy` copied): its id and the code block. */
+  onCodeBlockAction?: (event: TextViewCodeActionEvent) => void;
 }
 
 /** A document of Markdown, HTML or the app's own blocks (`markdown`, `html` or `document`), shown with texts, views and images: headings, paragraphs, emphasis, links, lists and task lists, quotes and alerts, code, tables, images, formulas, footnotes and disclosures, and the custom nodes of the app's extensions. It has a reading typography of its own (15pt text in 25.5pt lines, semibold headings with room above them, tinted alerts, code in bordered boxes, ruled tables), colored with the theme's tokens, so a theme or the dark appearance reaches it natively. The app restyles each part with `classes` or `styles` (or a Rust view's `TextViewParts`), its root with `class` and `style` (text styles there pass to every part): they apply over these defaults. Links report presses (`onLinkPress`). Content of the app's goes in with render functions: custom nodes (`renderCustom`), code blocks and their actions, tables' actions, formulas, images. Made for replies streamed by AI models: blocks are kept by position, so only those that changed are made again, and `caret` follows the end of the text. */

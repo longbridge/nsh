@@ -3,12 +3,14 @@
 // heading, a link, a list, a table, code), HTML, the app's own blocks
 // (`document`), streaming repair (`options`) with a `caret`, an extension
 // of each kind shown by `renderCustom`, the other render functions
-// (`renderCodeBlock`, `renderCodeBlockActions`, `renderTableActions`,
+// (`renderCodeBlock`, `renderCodeBlockAction`, `renderTableActions`,
 // `renderMath`, `renderImage`), parts styled by `classes` and `styles`
 // (the root's text styles passing to every part), code blocks without
 // their scroll indicator (`codeBlockScrollIndicator`), tables without
 // theirs (`tableScrollIndicator`),
-// `selectable`, link presses (`onLinkPress`), and the static functions
+// code blocks' actions (`codeBlockActions`, the built-in copy and one of
+// the app's: `onCodeBlockAction`), `selectable`, link presses (`onLinkPress`),
+// images' presses (`onImagePress`), and the static functions
 // (`TextView.parse`, `TextView.parseHtml`, `TextView.plainText`). Each
 // document's texts are its own, so the script finds them. Its script
 // checks each.
@@ -55,6 +57,8 @@ const extensions = [
 
 function App() {
   const link = signal("none");
+  const action = signal("none");
+  const image = signal("none");
   const parsed = TextView.parse("**a** b");
   const first = parsed.blocks[0];
   const extended = TextView.parse("Hi @x", { math: false }, [{ name: "m", pattern: "@(\\w+)" }]).blocks[0];
@@ -66,10 +70,14 @@ function App() {
         tableScrollIndicator={false}
         classes={{ root: "text-[#0000ff]" }}
         onLinkPress={(url) => link.set(url)}
-        renderCodeBlockActions={(code) => <Text>{`Copy ${code.language}`}</Text>}
+        codeBlockActions={[{ id: "copy", label: "Copy code" }, { id: "run", label: "Run code" }]}
+        renderCodeBlockAction={(action) => <Text>{`Action ${action.id}`}</Text>}
+        onCodeBlockAction={(event) => action.set(`${event.id} ${event.code.language}`)}
         renderTableActions={(table) => <Text>{`Rows: ${table.rows?.length ?? 0}, columns: ${table.head.length}`}</Text>}
       />
       <Text>{`Link: ${link()}`}</Text>
+      <Text>{`Code action: ${action()}`}</Text>
+      <Text>{`Image pressed: ${image()}`}</Text>
       <TextView html="<h2>From HTML</h2><p>An <b>hypertext</b> paragraph.</p>" />
       <TextView document={{ blocks: [{ type: "paragraph", content: [{ type: "text", text: "From a document" }] }] }} />
       <TextView
@@ -103,6 +111,7 @@ function App() {
         renderCodeBlock={(code) => <Text>{`Code ${code.language}: ${code.code}`}</Text>}
         renderMath={(math) => <Text>{`Math ${math.display ? "block" : "inline"}: ${math.tex}`}</Text>}
         renderImage={(image) => <Text>{`Image ${image.alt}: ${image.src}`}</Text>}
+        onImagePress={(pressed) => image.set(pressed.alt ?? "")}
       />
       <TextView
         markdown={"# Classed heading\n\nStyled paragraph."}

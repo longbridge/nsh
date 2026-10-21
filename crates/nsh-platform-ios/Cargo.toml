@@ -26,7 +26,7 @@ embed = ["js"]
 [dependencies]
 nsh-core.workspace = true
 nsh-engine.workspace = true
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["highlight"] }
 serde_json.workspace = true
 log.workspace = true
 nsh-dev = { workspace = true, features = ["client"], optional = true }

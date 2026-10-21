@@ -265,6 +265,11 @@ pub enum Inline {
         /// Its content.
         content: Vec<Inline>,
     },
+    /// Smaller text (`<small>`).
+    Small {
+        /// Its content.
+        content: Vec<Inline>,
+    },
     /// Subscript (`<sub>`).
     Subscript {
         /// Its content.
@@ -338,6 +343,7 @@ pub(crate) fn inline_text(inlines: &[Inline], out: &mut String) {
             | Inline::Highlight { content, .. }
             | Inline::Superscript { content }
             | Inline::Subscript { content }
+            | Inline::Small { content }
             | Inline::Link { content, .. } => inline_text(content, out),
             Inline::Image(image) => out.push_str(&image.alt),
             Inline::Break => out.push('\n'),
@@ -396,10 +402,11 @@ pub struct Table {
 impl Table {
     /// The number of columns.
     pub fn columns(&self) -> usize {
+        let width = |row: &Vec<TableCell>| row.iter().map(TableCell::span).sum::<usize>();
         self.rows
             .iter()
-            .map(Vec::len)
-            .chain([self.head.len(), self.align.len()])
+            .map(width)
+            .chain([width(&self.head), self.align.len()])
             .max()
             .unwrap_or(0)
     }
@@ -412,12 +419,23 @@ impl Table {
 pub struct TableCell {
     /// Its content.
     pub content: Vec<Inline>,
+    /// The columns it spans (HTML's `colspan`), when more than one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colspan: Option<u32>,
 }
 
 impl TableCell {
     /// A cell of `content`.
     pub fn new(content: Vec<Inline>) -> Self {
-        Self { content }
+        Self {
+            content,
+            colspan: None,
+        }
+    }
+
+    /// The columns it spans (at least one).
+    pub fn span(&self) -> usize {
+        self.colspan.map_or(1, |n| n.max(1) as usize)
     }
 }
 
@@ -735,7 +753,7 @@ export type TextViewBlock =
 const INLINE: &str = "/** Inline content of a `TextViewBlock`, by its `type`. */
 export type TextViewInline =
   | { type: \"text\"; text: string }
-  | { type: \"strong\" | \"emphasis\" | \"strikethrough\" | \"underline\" | \"superscript\" | \"subscript\"; content: TextViewInline[] }
+  | { type: \"strong\" | \"emphasis\" | \"strikethrough\" | \"underline\" | \"superscript\" | \"subscript\" | \"small\"; content: TextViewInline[] }
   | { type: \"highlight\"; content: TextViewInline[]; color?: string }
   | { type: \"code\"; code: string }
   | { type: \"keyboard\"; text: string }
@@ -761,9 +779,9 @@ export interface TextViewTable {
   /** The alignment of each column. */
   align?: (\"none\" | \"left\" | \"center\" | \"right\")[];
   /** The header row's cells. */
-  head: { content: TextViewInline[] }[];
+  head: { content: TextViewInline[]; colspan?: number }[];
   /** The body's rows. */
-  rows?: { content: TextViewInline[] }[][];
+  rows?: { content: TextViewInline[]; colspan?: number }[][];
 }";
 
 const LIST_ITEM: &str = "/** An item of a list. */

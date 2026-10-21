@@ -648,8 +648,8 @@ impl<'a> Converter<'a> {
     fn row(&mut self, row: &mdast::TableRow) -> Vec<TableCell> {
         row.children
             .iter()
-            .map(|cell| TableCell {
-                content: self.content(cell.children().map_or(&[][..], Vec::as_slice)),
+            .map(|cell| {
+                TableCell::new(self.content(cell.children().map_or(&[][..], Vec::as_slice)))
             })
             .collect()
     }
@@ -758,8 +758,8 @@ impl<'a> Converter<'a> {
         /// Stands for the content while the opening tag is read.
         const CONTENT: &str = "\u{e000}";
         const FORMATTING: &[&str] = &[
-            "a", "b", "cite", "del", "dfn", "em", "i", "ins", "mark", "s", "strike", "strong",
-            "sub", "sup", "u", "var",
+            "a", "b", "cite", "del", "dfn", "em", "i", "ins", "mark", "s", "small", "strike",
+            "strong", "sub", "sup", "u", "var",
         ];
         let Node::Html(tag) = &nodes[open] else {
             return None;
@@ -778,6 +778,7 @@ impl<'a> Converter<'a> {
             | Inline::Highlight { content, .. }
             | Inline::Superscript { content }
             | Inline::Subscript { content }
+            | Inline::Small { content }
             | Inline::Link { content, .. } => content,
             _ => return None,
         };

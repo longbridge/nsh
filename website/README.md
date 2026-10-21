@@ -2,7 +2,8 @@
 
 The documentation site for nsh, published at <https://nsh.dev>
 (`src/lib/site.ts`). Astro (static output), Tailwind 4, Pagefind search,
-Shiki highlighting; [Bun](https://bun.com) runs everything.
+Shiki highlighting (the site's themes, `src/light.theme.json` / `src/dark.theme.json`, are Allsum's code
+palette, the one `TextView`'s built-in highlighting colors code with); [Bun](https://bun.com) runs everything.
 
 ```sh
 bun run dev        # http://localhost:4321, live reload (search needs a build)

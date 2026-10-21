@@ -65,9 +65,20 @@ pub struct TextViewProps {
     /// Shows a code block in place of the default (the code in a
     /// horizontal scroll view): syntax highlighting of the app's.
     pub render_code_block: Prop<Option<Renderer<CodeBlock>>>,
-    /// Content of the app's in the header of each code block, after its
-    /// language (a copy button).
-    pub render_code_block_actions: Prop<Option<Renderer<CodeBlock>>>,
+    /// Content of the app's floating over each code block's top right
+    /// The icon of a code block's action of the app's (`codeBlockActions`):
+    /// the button around it (its size, hover and press backgrounds) is the
+    /// text view's, so every action looks alike. Without it, an action
+    /// shows its label.
+    pub render_code_block_action: Prop<Option<Renderer<TextViewCodeAction>>>,
+    /// The buttons over each code block's top right corner, in order:
+    /// `{ id: "copy" }` is built in (it copies the code and shows a check
+    /// for a moment), other ids are the app's (their icon from
+    /// `renderCodeBlockAction`, a press reported by `onCodeBlockAction`).
+    /// All are ghost buttons that show while a pointer hovers the block on
+    /// desktops, always on touch screens.
+    #[prop(default)]
+    pub code_block_actions: Prop<Vec<TextViewCodeAction>>,
     /// Content of the app's above each table (a copy or export button).
     pub render_table_actions: Prop<Option<Renderer<Table>>>,
     /// Shows a formula (`$…$` in text, `$$…$$` blocks); without it, its
@@ -77,7 +88,8 @@ pub struct TextViewProps {
     /// image at the size it asks for (`width` / `height`) or its natural
     /// size, at most as wide as the text; in a line of text, the size it
     /// asks for, else three quarters of a line tall. A press on an image in
-    /// a link reports the link (`onLinkPress`).
+    /// a link reports the link (`onLinkPress`), on another the image
+    /// (`onImagePress`).
     pub render_image: Prop<Option<Renderer<Image>>>,
 }
 
@@ -98,6 +110,50 @@ pub enum TextViewEvent {
     /// the app decides.
     #[args(url)]
     LinkPress(SharedString),
+    /// An image that is not in a link was pressed: the image (its `src`,
+    /// `alt`, `title`, size), for the app to show it larger (a zoomable
+    /// viewer of its own).
+    #[args(image)]
+    ImagePress(Image),
+    /// An action of a code block was pressed (after the built-in `copy`
+    /// copied): its id and the code block.
+    #[args(event)]
+    CodeBlockAction(TextViewCodeActionEvent),
+}
+
+/// An action of the code blocks of a [`TextView`] (`codeBlockActions`).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub struct TextViewCodeAction {
+    /// Which it is: `"copy"` (built in: copies the code, then shows a check
+    /// for a moment), or an id of the app's.
+    pub id: SharedString,
+    /// What screen readers say for it (default: its id).
+    pub label: Option<SharedString>,
+}
+
+impl TextViewCodeAction {
+    /// Action `id`.
+    pub fn new(id: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            label: None,
+        }
+    }
+
+    /// With label `label` for screen readers.
+    pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
+/// A press on a code block's action (`onCodeBlockAction`).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub struct TextViewCodeActionEvent {
+    /// The action's id.
+    pub id: SharedString,
+    /// The code block.
+    pub code: CodeBlock,
 }
 
 /// A document of Markdown, HTML or the app's own blocks (`markdown`,
@@ -216,10 +272,11 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
 }
 
 /// Syntax highlighting of code blocks, for Rust views: given to the text
-/// views below with `provide_context`. NSH has no highlighter of its own:
-/// the app brings one (`syntect`, `tree-sitter`, ...) and returns the
-/// styles of byte ranges of the code; the text view shows the code with
-/// them. A TS app shows highlighted code with `renderCodeBlock`.
+/// views below with `provide_context`, in place of the built-in one
+/// (feature `highlight`, on by default: syntect, in Allsum's reading palette). The
+/// app's (`tree-sitter`, its own theme, ...) returns the styles of byte
+/// ranges of the code; the text view shows the code with them. A TS app
+/// shows its own highlighted code with `renderCodeBlock`.
 ///
 /// ```ignore
 /// provide_context(CodeHighlighter::new(|code: &CodeBlock| my_highlighter(code)));
@@ -285,7 +342,8 @@ struct Cx {
     caret: Option<Slot>,
     render_custom: Option<Renderer<CustomNode>>,
     render_code_block: Option<Renderer<CodeBlock>>,
-    render_code_block_actions: Option<Renderer<CodeBlock>>,
+    render_code_block_action: Option<Renderer<TextViewCodeAction>>,
+    code_block_actions: Vec<TextViewCodeAction>,
     render_table_actions: Option<Renderer<Table>>,
     render_math: Option<Renderer<TextViewMath>>,
     render_image: Option<Renderer<Image>>,
@@ -321,7 +379,8 @@ impl Cx {
             caret: props.caret.get(),
             render_custom: props.render_custom.get(),
             render_code_block: props.render_code_block.get(),
-            render_code_block_actions: props.render_code_block_actions.get(),
+            render_code_block_action: props.render_code_block_action.get(),
+            code_block_actions: props.code_block_actions.get(),
             render_table_actions: props.render_table_actions.get(),
             render_math: props.render_math.get(),
             render_image: props.render_image.get(),
@@ -707,54 +766,61 @@ impl Cx {
                 .render(format!("code:{key}"), code.clone())
                 .into_element();
         }
-        let has_header = code.language.is_some() || self.render_code_block_actions.is_some();
-        let header = has_header.then(|| {
-            let language = code.language.as_ref().map(|l| {
-                let label = text(l.clone())
-                    .text_size(px(11.0))
-                    .line_height(px(16.0))
-                    .letter_spacing(px(11.0 * 0.02))
-                    .text_color(move || theme().muted_foreground());
-                self.part(label, Part::CodeBlockLanguage)
-            });
-            // Over the top right corner, the actions after the language.
+        // The app's actions float over the top right corner, so the code
+        // keeps its first line (no row is kept for them). Where a pointer
+        // hovers (desktops, desktop browsers) they show while it is over the
+        // block; touch screens have no hover, so there they always show.
+        let hover = is_desktop();
+        let header = (!self.code_block_actions.is_empty()).then(|| {
             let header = view()
                 .absolute()
-                .top(px(7.0))
-                .right(px(12.0))
+                .top(px(6.0))
+                .right(px(6.0))
                 .flex_row()
                 .items_center()
-                .gap(px(8.0));
-            self.part(header, Part::CodeBlockHeader)
-                .child(language)
-                .child(
-                    self.render_code_block_actions
-                        .as_ref()
-                        .map(|r| r.render(format!("actions:{key}"), code.clone())),
-                )
+                .gap(px(2.0))
+                .when(hover, |h| {
+                    h.opacity(0.0)
+                        .group_hover(|s| s.opacity(1.0))
+                        .transition_opacity()
+                        .duration(150.0)
+                });
+            self.part(header, Part::CodeBlockHeader).children(
+                self.code_block_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, action)| self.code_action(action, code, &format!("{key}.{i}"))),
+            )
         });
+        // The app's highlighter, else the built-in one (which may color the
+        // code a moment after it shows), else plain.
         let body = match &self.highlighter {
             Some(h) => text("").children(h.spans(code)),
-            None => text(code.code.clone()),
+            None => match super::highlight::built_in(code) {
+                Some(spans) => text("").children(spans),
+                None => text(code.code.clone()),
+            },
         };
-        // The side padding is the code's, so it scrolls to the edges.
+        // The padding is the code's, inside the scroll view: the code
+        // scrolls to the edges, and the scroll bar sits in the bottom
+        // padding rather than over the last line.
         let body = self.caret_after(
             body.font_family("monospace")
                 .px(px(16.0))
+                .py(px(14.0))
                 .when(self.selectable, |t| t.selectable(true)),
             tail,
         );
         let block = view()
             .flex_col()
-            .pt(px(if has_header { 28.0 } else { 14.0 }))
-            .pb(px(14.0))
+            .when(hover, |b| b.group())
             .rounded(px(8.0))
             .border_1()
             .border_color(move || theme().border())
             .bg(move || theme().muted())
             .text_size(px(CODE_SIZE))
             .line_height(px(CODE_SIZE * CODE_LINE));
-        // The header last, so it is drawn over the code.
+        // The actions last, so they are drawn over the code.
         self.part(block, Part::CodeBlock)
             .child(
                 self.part(
@@ -784,14 +850,88 @@ impl Cx {
         })
     }
 
+    /// A code block's action: a ghost button (its background shows while
+    /// hovered or pressed) around the action's icon.
+    fn code_action(&self, action: &TextViewCodeAction, code: &CodeBlock, key: &str) -> AnyElement {
+        let scope = self.scope;
+        let copy = action.id.as_ref() == "copy";
+        let label = action.label.clone().unwrap_or_else(|| action.id.clone());
+        // 0: the action's icon, 1: the check a copy shows for a moment.
+        let done = animated_value(0.0);
+        let icon = if copy {
+            copy_icon(&done)
+        } else if let Some(render) = &self.render_code_block_action {
+            render
+                .render(format!("action:{key}"), action.clone())
+                .into_element()
+        } else {
+            text(label.clone())
+                .text_size(px(11.0))
+                .text_color(move || theme().muted_foreground())
+                .into_element()
+        };
+        let event = TextViewCodeActionEvent {
+            id: action.id.clone(),
+            code: code.clone(),
+        };
+        let hovered = theme().foreground().opacity(0.08);
+        let pressed = theme().foreground().opacity(0.14);
+        view()
+            .min_w(px(24.0))
+            .h(px(24.0))
+            .px(px(5.0))
+            .rounded(px(6.0))
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|s| s.bg(hovered))
+            .active(|s| s.bg(pressed))
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .on_press(move || {
+                if copy {
+                    set_clipboard(event.code.code.clone());
+                    let _ = done.spring(
+                        1.0,
+                        Spring {
+                            stiffness: 320.0,
+                            damping: 18.0,
+                            ..Spring::default()
+                        },
+                    );
+                    set_timeout(std::time::Duration::from_millis(1600), move || {
+                        let _ = done.timing(0.0, 180.0, Easing::EaseOut);
+                    });
+                }
+                scope.emit(TextViewEvent::CodeBlockAction(event.clone()));
+            })
+            .child(icon)
+            .into_element()
+    }
+
     fn table_grid(&self, table: &Table, key: &str, tail: bool) -> AnyElement {
         let last_row = table.rows.len();
         let columns = table.columns();
         let align = |i: usize| table.align.get(i).copied().unwrap_or_default();
+        // The cells that start at column `c` and span it alone (a spanning
+        // cell's width is shared by its columns).
+        let at = |row: &'_ [super::TableCell], c: usize| -> Option<usize> {
+            let mut col = 0;
+            for (i, cell) in row.iter().enumerate() {
+                if col == c {
+                    return (cell.span() == 1).then_some(i);
+                }
+                col += cell.span();
+                if col > c {
+                    return None;
+                }
+            }
+            None
+        };
         let floors: Vec<f32> = (0..columns)
             .map(|c| {
                 let cells = std::iter::once(&table.head).chain(&table.rows);
-                column_floor(cells.filter_map(|row| row.get(c)))
+                column_floor(cells.filter_map(|row| at(row, c).map(|i| &row[i])))
             })
             .collect();
         let tracks = floors
@@ -820,9 +960,21 @@ impl Cx {
                 .col_span_full()
                 .when(head, |v| v.bg(move || theme().list_head()));
             grid.push(self.parts(row, row_parts).into_element());
-            grid.extend((0..columns).map(|c| {
-                let content = cells.get(c).map(|c| c.content.as_slice()).unwrap_or(&[]);
-                let end = tail && r == last_row && c + 1 == columns;
+            // Each cell where it starts, as wide as it spans; the columns no
+            // cell covers (a short row) are empty cells.
+            let mut placed = Vec::new();
+            let mut col = 0;
+            for cell in cells.iter() {
+                if col >= columns {
+                    break;
+                }
+                let span = cell.span().min(columns - col);
+                placed.push((col, span, cell.content.as_slice()));
+                col += span;
+            }
+            placed.extend((col..columns).map(|c| (c, 1, &[][..])));
+            grid.extend(placed.into_iter().map(|(c, span, content)| {
+                let end = tail && r == last_row && c + span == columns;
                 let key = format!("{key}.{r}.{c}");
                 let t = match only_images(content) {
                     Some(images) => {
@@ -850,7 +1002,9 @@ impl Cx {
                 // and left ones: no line is drawn twice.
                 let cell = view()
                     .row_start(line)
+                    // Start and end lines: a span would replace the start.
                     .col_start(i16::try_from(c + 1).unwrap_or(i16::MAX))
+                    .col_end(i16::try_from(c + 1 + span).unwrap_or(i16::MAX))
                     .py(px(8.0))
                     .px(px(12.0))
                     .border_r_1()
@@ -995,16 +1149,20 @@ impl Cx {
             Inline::Highlight { content, color } => {
                 // The document's color, else the view's own.
                 let color = color.as_deref().and_then(|c| c.parse::<Hsla>().ok());
-                self.part(
-                    self.span(content, key)
-                        .bg(move || {
-                            color
-                                .map_or_else(|| theme().warning().opacity(0.4), AdaptiveColor::from)
-                        })
-                        .rounded(px(3.0)),
-                    Part::Highlight,
-                )
-                .into_element()
+                let span = self
+                    .span(content, key)
+                    .bg(move || {
+                        color.map_or_else(|| theme().warning().opacity(0.4), AdaptiveColor::from)
+                    })
+                    .rounded(px(3.0));
+                // A solid color of the document's is the same in both
+                // appearances: its text takes the ink that reads on it
+                // (as Allsum's `--mark-solid-text`), not the page's.
+                let span = match color {
+                    Some(c) => span.text_color(ink_on(c)),
+                    None => span,
+                };
+                self.part(span, Part::Highlight).into_element()
             }
             Inline::Superscript { content } => self
                 .part(
@@ -1017,6 +1175,10 @@ impl Cx {
                     self.span(content, key).text_size(rems(0.75)),
                     Part::Subscript,
                 )
+                .into_element(),
+            // As a browser's `smaller`: 13 of the body's 15.
+            Inline::Small { content } => self
+                .part(self.span(content, key).text_size(px(13.0)), Part::Small)
                 .into_element(),
             Inline::Code { code } => self
                 .part(code_span(text(code.clone())), Part::Code)
@@ -1127,12 +1289,24 @@ impl Cx {
         key: &str,
     ) -> AnyElement {
         let scope = self.scope;
-        let press = link.map(|url| move || scope.emit(TextViewEvent::LinkPress(url.clone())));
+        let pressed = image.clone();
+        let is_link = link.is_some();
+        // In a link it is the link's; else a press reports the image.
+        let press = Some(move || match &link {
+            Some(url) => scope.emit(TextViewEvent::LinkPress(url.clone())),
+            None => scope.emit(TextViewEvent::ImagePress(pressed.clone())),
+        });
+        let role = if is_link {
+            AccessibilityRole::Link
+        } else {
+            AccessibilityRole::ImageButton
+        };
         if let Some(render) = &self.render_image {
             let el = render.render(format!("image:{key}"), image.clone());
             return match press {
                 Some(press) => view()
-                    .role(AccessibilityRole::Link)
+                    .role(role)
+                    .label(SharedString::from(image.alt.clone()))
                     .on_press(press)
                     .child(el)
                     .into_element(),
@@ -1195,7 +1369,7 @@ impl Cx {
                     .w_full()
                     .aspect_ratio(move || ratio.or_else(aspect).unwrap_or(1.0));
                 let el = match press {
-                    Some(press) => el.role(AccessibilityRole::Link).on_press(press),
+                    Some(press) => el.role(role).on_press(press),
                     None => el.role(AccessibilityRole::Image),
                 };
                 return view()
@@ -1208,11 +1382,18 @@ impl Cx {
             // line, as gpui-kit's text flow sizes images.
             ImageFlow::Inline(line) => {
                 let size = move || inline_image_size(width, height, aspect(), line);
-                el.w(move || size().width).h(move || size().height)
+                // An attachment sits on the baseline; moved down (drawing
+                // only) so its middle is the middle of the lowercase
+                // letters, about 0.35 em above the baseline: centered on
+                // the line. The text's size is its line's over 1.7.
+                let em = line / 1.7;
+                el.w(move || size().width)
+                    .h(move || size().height)
+                    .translate_y(move || size().height / 2.0 - px(0.35 * em))
             }
         };
         let el = match press {
-            Some(press) => el.role(AccessibilityRole::Link).on_press(press),
+            Some(press) => el.role(role).on_press(press),
             None => el.role(AccessibilityRole::Image),
         };
         self.part(el, Part::Image).into_element()
@@ -1480,6 +1661,90 @@ fn text_width(line: &str) -> f32 {
             _ => 0.6,
         })
         .sum()
+}
+
+/// The built-in copy action's icon (the gallery's copy glyph), which fades
+/// and shrinks away as a check springs in once `done` goes to 1.
+fn copy_icon(done: &AnimatedValue) -> AnyElement {
+    let muted = theme().muted_foreground();
+    let ok = theme().success();
+    // The gallery's copy and check glyphs, drawn on a 20 unit grid scaled
+    // to the icon's 14 pt.
+    const K: f32 = 14.0 / 20.0;
+    let polyline = |painter: Painter, points: &[f32]| {
+        let mut painter = painter.begin_path().move_to(points[0] * K, points[1] * K);
+        for p in points[2..].chunks(2) {
+            painter = painter.line_to(p[0] * K, p[1] * K);
+        }
+        painter.stroke()
+    };
+    let pen = |painter: Painter, c| {
+        painter
+            .stroke_style(c)
+            .line_width(1.6 * K)
+            .line_cap(nsh_core::canvas::LineCap::Round)
+            .line_join(nsh_core::canvas::LineJoin::Round)
+    };
+    let sheets = canvas(move || {
+        let painter = pen(Painter::new(), color(muted))
+            .begin_path()
+            .round_rect(
+                bounds(
+                    point(px(7.0 * K), px(7.0 * K)),
+                    size(px(10.0 * K), px(10.0 * K)),
+                ),
+                px(2.5 * K),
+            )
+            .stroke();
+        polyline(
+            painter,
+            &[
+                13.0, 4.5, 13.0, 4.0, 12.0, 3.0, 4.0, 3.0, 3.0, 4.0, 3.0, 12.0, 4.0, 13.0, 4.5,
+                13.0,
+            ],
+        )
+    });
+    let check = canvas(move || {
+        polyline(
+            pen(Painter::new(), color(ok)),
+            &[4.5, 10.5, 8.5, 14.0, 15.5, 6.0],
+        )
+    });
+    let layer = |v: View| v.absolute().inset(px(0.0));
+    view()
+        .size(px(14.0))
+        .child(
+            layer(view())
+                .bind_opacity(&done.interpolate(&[0.0, 1.0], &[1.0, 0.0]))
+                .bind_scale(&done.interpolate(&[0.0, 1.0], &[1.0, 0.4]))
+                .child(sheets.size(px(14.0))),
+        )
+        .child(
+            layer(view())
+                .bind_opacity(&done.interpolate(&[0.0, 1.0], &[0.0, 1.0]))
+                .bind_scale(&done.interpolate(&[0.0, 1.0], &[0.4, 1.0]))
+                .child(check.size(px(14.0))),
+        )
+        .into_element()
+}
+
+/// The text color that reads on background `bg`: near black on a light
+/// color, near white on a dark one (by relative luminance).
+fn ink_on(bg: Hsla) -> Hsla {
+    let c = nsh_core::color::Rgba::from(bg);
+    let lin = |v: f32| {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    if luminance > 0.18 {
+        rgb(0x1f1e1c).into()
+    } else {
+        rgb(0xf4f3f0).into()
+    }
 }
 
 #[cfg(test)]

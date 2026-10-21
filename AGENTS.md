@@ -307,7 +307,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are; the one
   exception is `TextView`'s default reading typography, its colors the theme's tokens, every part overridable by the
-  app's `classes` / `styles` / `TextViewParts`); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
+  app's `classes` / `styles` / `TextViewParts`, and its built-in syntax highlighting colors, Allsum's code palette, which an app's
+  `CodeHighlighter` or `renderCodeBlock` replaces); a component takes the app's styles (`class`, `style`, styles per state) and children, and exposes its
   parts instead of fixed markup. Its state is controlled (it reports changes, the app owns the value). The platforms
   draw nothing of NSH's either: no header where the system has none (the desktops and the web place a page's `header`
   slot), no dialog card, scrim or shadow, no native press fade (press feedback is the app's `activeStyle` /

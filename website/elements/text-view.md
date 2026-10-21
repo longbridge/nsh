@@ -13,8 +13,7 @@ is made for the replies of AI models in a chat: the reply streams in as Markdown
 formatting in place. Parsing happens in Rust, and the document is drawn with [`Text`](./text.md) elements and views.
 
 It owns behavior and comes with a reading typography of its own: 15pt text in generous 25.5pt lines, semibold
-headings with room above them, links underlined in the theme's link color, code in a bordered, rounded box with its
-language at the top right, tables ruled on every side with a tinted header row, quotes with a line at their side and
+headings with room above them, links underlined in the theme's link color, code in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
 alerts as tinted boxes with an icon. Its colors are the theme's tokens (`foreground`, `muted.foreground`, `border`,
 `muted.background`, `link`, `list.head.background` and the status colors), so a theme and the dark appearance reach
 it. `classes` and `styles` restyle each part over these defaults.
@@ -116,7 +115,6 @@ class that changes a part's size sets its line height too (Tailwind's `text-*` c
     blockquote: "border-l-2 border-neutral-300 pl-3 text-neutral-600",
     codeBlock: "rounded-lg bg-neutral-100",
     codeBlockHeader: "px-3 pt-2",
-    codeBlockLanguage: "text-xs text-neutral-500",
     codeBlockCode: "p-3 text-[13px]",
     table: "rounded-lg border border-neutral-200",
     tableHead: "bg-neutral-50",
@@ -150,8 +148,7 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `taskMarkerChecked` | The marker of a done task item, after `taskMarker`. |
 | `listItemContent` | The column of an item's blocks. |
 | `codeBlock` | Code blocks: a bordered, rounded box of the code, with the header over it. |
-| `codeBlockHeader` | A code block's header row over its top right corner: its language, then `renderCodeBlockActions`. |
-| `codeBlockLanguage` | The language a code block names, small and muted. |
+| `codeBlockHeader` | The row of a code block's actions (`codeBlockActions`), floating over its top right corner. |
 | `codeBlockScroll` | The horizontal scroll view around a code block's code. |
 | `codeBlockCode` | The code of a code block (monospace, as written). |
 | `code` | Code in text (monospace, on a rounded background). |
@@ -243,34 +240,39 @@ rendered again.
 | Prop | Value | Replaces or adds |
 |---|---|---|
 | `renderCodeBlock` | `TextViewCodeBlock` | Replaces a code block (syntax highlighting of your own). |
-| `renderCodeBlockActions` | `TextViewCodeBlock` | Adds content at the end of a code block's header, after its language (a copy button). |
+| `renderCodeBlockAction` | `TextViewCodeAction` | The icon of a code block action of the app's (`codeBlockActions`); the button around it is `TextView`'s. |
 | `renderTableActions` | `TextViewTable` | Adds content above a table (copy, export). |
 | `renderMath` | `TextViewMath` | Replaces a formula: `{ tex, display }`, `display` for a `$$…$$` block. |
 | `renderImage` | `TextViewImage` | Replaces an image (`{ src, alt, title }`): your own loading, sizing, a viewer on press. |
 | `renderCustom` | `TextViewCustomNode` | Shows a custom node, by its `name` ([Markdown extensions](#markdown-extensions)). |
 
-A copy button in each code block's header:
+Code blocks carry actions over their top right corner, all drawn alike: ghost buttons whose background shows while
+hovered or pressed, shown while a pointer is over the block on desktops and always on touch screens. `copy` is built
+in: it copies the code and shows a check for a moment. Other actions are the app's: `renderCodeBlockAction` draws
+their icon and `onCodeBlockAction` reports their presses (the built-in `copy` too, after it copied). `copy` writes the
+clipboard as `nsh/clipboard` does, so it needs the app's `clipboard` capability (`nsh.json`).
 
 ```tsx
 import { Text } from "nsh";
-import { Button, TextView } from "nsh/base";
-import { Clipboard } from "nsh/clipboard";
+import { TextView } from "nsh/base";
 
 <TextView
   markdown={reply()}
-  classes={{ codeBlockHeader: "px-3 py-1.5", codeBlockLanguage: "text-xs text-neutral-500" }}
-  renderCodeBlockActions={(code) => (
-    <Button onPress={() => Clipboard.setString(code.code)} class="rounded px-2 py-1 active:bg-neutral-200">
-      <Text class="text-xs">Copy</Text>
-    </Button>
-  )}
+  codeBlockActions={[
+    { id: "copy", label: "Copy code" },
+    { id: "run", label: "Run" },
+  ]}
+  renderCodeBlockAction={(action) => <Text class="text-xs">▶</Text>}
+  onCodeBlockAction={({ id, code }) => id === "run" && run(code.code)}
 />
 ```
 
-Syntax highlighting is the app's: NSH ships no highlighter and leaves the choice of one (and its themes and
-languages) to the app. A TS app shows highlighted code with `renderCodeBlock`, from its own component or one of its Rust
-crate; a Rust view gives `TextView` its highlighter with [`CodeHighlighter`](#syntax-highlighting). Here code with
-highlighting of the app's own, and an image that fills the width:
+Code blocks are highlighted out of the box: for a language named on the fence (`ts`, `tsx`, `rust`, `python`, `bash`,
+`json`, `toml`, `yaml`, `diff` and about two hundred more), the code shows in Allsum's code palette, light or dark with the
+appearance; a block without a language shows plain. An app with highlighting of its own shows its code with
+`renderCodeBlock`, from its own component or one of its Rust crate; a Rust view gives `TextView` its highlighter with
+[`CodeHighlighter`](#syntax-highlighting). Here code with highlighting of the app's own, and an image that fills the
+width:
 
 ```tsx
 import { View } from "nsh";
@@ -453,14 +455,14 @@ pub fn Reply(props: ReplyProps) -> impl IntoElement {
         }
         .into(),
         selectable: true.into(),
-        render_code_block_actions: Some(Renderer::new(|code: &CodeBlock| copy_button(code.code.clone()))).into(),
+        code_block_actions: vec![TextViewCodeAction::new("copy").with_label("Copy code")].into(),
         ..Default::default()
     })
     .on_event(|TextViewEvent::LinkPress(url): &TextViewEvent| open_link(url))
 }
 ```
 
-Here `copy_button` and `open_link` stand for the app's own functions. The functions of
+Here `open_link` stands for the app's own function. The functions of
 [Parsing and plain text](#parsing-and-plain-text) are associated functions in Rust: `TextView::parse(markdown,
 options, extensions)`, `TextView::parse_html(html, extensions)` and `TextView::plain_text(document)`. The document
 types are under `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock`, `Table`, `Image`, `CustomNode`,
@@ -469,10 +471,13 @@ types are under `nsh_base::text_view` (`Document`, `Block`, `Inline`, `CodeBlock
 
 ### Syntax highlighting
 
-`CodeHighlighter` is the app's highlighter, given to every `TextView` below a view with `provide_context`. It gets each
-code block and returns the styles of byte ranges of its code (in order, not overlapping; what they leave out is plain);
-`TextView` shows the code as spans with those styles, inside its usual code block (header, actions, scroll view,
-parts). The highlighter is the app's own: `syntect`, `tree-sitter` or anything else that turns code into styled ranges.
+`TextView` highlights code with syntect in Allsum's code palette (`nsh-base`'s feature `highlight`, on by default);
+a large block shows plain at once and takes its colors when a background thread has highlighted it.
+`CodeHighlighter` is the app's highlighter in its place, given to every `TextView` below a view with `provide_context`.
+It gets each code block and returns the styles of byte ranges of its code (in order, not overlapping; what they leave
+out is plain); `TextView` shows the code as spans with those styles, inside its usual code block (header, actions,
+scroll view, parts). The highlighter can be anything that turns code into styled ranges: `tree-sitter`, syntect with
+a theme of the app's, ...
 
 ```rust
 use std::ops::Range;
@@ -575,11 +580,14 @@ markdown-rs's syntax, and `ParseContext` reads a node's children as the parser d
 | `caret` | `JSX.Element` | | Shown at the end of the document: inline after the last text, else on its own line. |
 | `renderCustom` | `(node: TextViewCustomNode) => JSX.Element` | | Shows custom nodes. |
 | `renderCodeBlock` | `(code: TextViewCodeBlock) => JSX.Element` | | Shows code blocks. |
-| `renderCodeBlockActions` | `(code: TextViewCodeBlock) => JSX.Element` | | Content in each code block's header. |
+| `codeBlockActions` | `TextViewCodeAction[]` | `[]` | The actions over each code block's top right corner: `{ id: "copy" }` built in, others the app's. |
+| `renderCodeBlockAction` | `(action: TextViewCodeAction) => JSX.Element` | | The icon of an action of the app's. |
 | `renderTableActions` | `(table: TextViewTable) => JSX.Element` | | Content above each table. |
 | `renderMath` | `(math: TextViewMath) => JSX.Element` | | Shows formulas. |
 | `renderImage` | `(image: TextViewImage) => JSX.Element` | | Shows images. |
 | `onLinkPress` | `(url: string) => void` | | A link was pressed: its URL, `#anchor` for a heading, `#footnote-<label>` for a footnote. |
+| `onCodeBlockAction` | `(event: { id: string; code: TextViewCodeBlock }) => void` | | A code block's action was pressed (after `copy` copied). |
+| `onImagePress` | `(image: TextViewImage) => void` | | An image not in a link was pressed: the image, for the app to show it larger (a zoomable viewer of its own). |
 | `class`, `style` | `string`, `StyleProp<ViewStyle>` | | The root, a column of the blocks; its text styles pass to every part (typed text styles: `styles.root`). |
 
 ## Accessibility

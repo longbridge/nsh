@@ -461,10 +461,12 @@ impl<'p> Reader<'p> {
             return;
         };
         let rows: Vec<_> = rows.collect();
+        // Columns by the cells' spans, not their count.
+        let width = |row: &[TableCell]| row.iter().map(TableCell::span).sum::<usize>();
         let columns = rows
             .iter()
-            .map(|(r, _)| r.len())
-            .chain([head.len()])
+            .map(|(r, _)| width(r))
+            .chain([width(&head)])
             .max()
             .unwrap_or(0);
         if columns == 0 {
@@ -482,7 +484,8 @@ impl<'p> Reader<'p> {
             }
         }
         let pad = |mut row: Vec<TableCell>| {
-            row.resize_with(columns, TableCell::default);
+            let missing = columns.saturating_sub(width(&row));
+            row.extend(std::iter::repeat_with(TableCell::default).take(missing));
             row
         };
         let table = Table {
@@ -506,12 +509,11 @@ impl<'p> Reader<'p> {
                 .unwrap_or(1)
                 .clamp(1, MAX_COLSPAN);
             let a = cell_align(&cell);
-            cells.push(TableCell::new(self.inline_content(&cell, depth)));
-            align.push(a);
-            for _ in 1..span {
-                cells.push(TableCell::default());
-                align.push(a);
-            }
+            let mut c = TableCell::new(self.inline_content(&cell, depth));
+            c.colspan = (span > 1).then_some(span as u32);
+            cells.push(c);
+            // Each column it spans takes its alignment.
+            align.extend(std::iter::repeat_n(a, span));
         }
         (cells, align)
     }
@@ -580,6 +582,9 @@ impl<'p> Reader<'p> {
                 color: mark_color(node),
             },
             "sup" => Inline::Superscript {
+                content: self.inline_vec(node, depth),
+            },
+            "small" => Inline::Small {
                 content: self.inline_vec(node, depth),
             },
             "sub" => Inline::Subscript {
@@ -772,6 +777,9 @@ fn collapse(inlines: Vec<Inline>, ws: &mut Whitespace) -> Vec<Inline> {
             Inline::Subscript { content } => wrap(&mut out, content, ws, |content| {
                 Inline::Subscript { content }
             }),
+            Inline::Small { content } => {
+                wrap(&mut out, content, ws, |content| Inline::Small { content })
+            }
             Inline::Link {
                 url,
                 title,

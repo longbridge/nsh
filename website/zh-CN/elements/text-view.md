@@ -9,7 +9,7 @@ demo: text-view
 
 `TextView` 显示用 Markdown、HTML 或应用自己构建的文档块写成的文档：标题、段落、强调、链接、列表与任务列表、引用和 GitHub 的提示块（alert）、代码、表格、图片、公式、脚注和折叠块。它为 AI 模型在聊天中的回复而设计：回复以 Markdown 流式到达，每来一段，文本就带着格式显示出来。解析在 Rust 中完成，文档用 [`Text`](./text.md) 元素和视图绘制。
 
-它负责行为，并自带一套阅读排版：15pt 正文、宽松的 25.5pt 行高，半粗体标题且上方留有空间，链接以主题的链接色加下划线，代码放在带边框的圆角框中、语言标在右上角，表格四边都有线、表头行带底色，引用在一侧带一条线，提示块是带图标的着色框。颜色取自主题的令牌（`foreground`、`muted.foreground`、`border`、`muted.background`、`link`、`list.head.background` 和各状态色），因此主题和深色外观都会作用于它。`classes` 和 `styles` 在这些默认样式之上为每个部件重新设定样式。
+它负责行为，并自带一套阅读排版：15pt 正文、宽松的 25.5pt 行高，半粗体标题且上方留有空间，链接以主题的链接色加下划线，代码放在带边框的圆角框中，表格四边都有线、表头行带底色，引用在一侧带一条线，提示块是带图标的着色框。颜色取自主题的令牌（`foreground`、`muted.foreground`、`border`、`muted.background`、`link`、`list.head.background` 和各状态色），因此主题和深色外观都会作用于它。`classes` 和 `styles` 在这些默认样式之上为每个部件重新设定样式。
 
 ```tsx
 import { mount, Scroll } from "nsh";
@@ -96,7 +96,6 @@ mount(App);
     blockquote: "border-l-2 border-neutral-300 pl-3 text-neutral-600",
     codeBlock: "rounded-lg bg-neutral-100",
     codeBlockHeader: "px-3 pt-2",
-    codeBlockLanguage: "text-xs text-neutral-500",
     codeBlockCode: "p-3 text-[13px]",
     table: "rounded-lg border border-neutral-200",
     tableHead: "bg-neutral-50",
@@ -127,8 +126,7 @@ mount(App);
 | `taskMarkerChecked` | 已完成任务项的标记，在 `taskMarker` 之后。 |
 | `listItemContent` | 列表项的文档块组成的一列。 |
 | `codeBlock` | 代码块：带边框的圆角框，标题行浮在代码之上。 |
-| `codeBlockHeader` | 代码块的标题行，位于右上角：语言，然后是 `renderCodeBlockActions`。 |
-| `codeBlockLanguage` | 代码块标明的语言，字号小、颜色淡。 |
+| `codeBlockHeader` | 代码块操作按钮（`codeBlockActions`）所在的行，浮在代码块右上角。 |
 | `codeBlockScroll` | 包住代码块代码的水平滚动视图。 |
 | `codeBlockCode` | 代码块的代码（等宽，按原样）。 |
 | `code` | 文本中的代码（等宽，带圆角底色）。 |
@@ -215,7 +213,7 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 | 属性 | 值 | 替换或添加 |
 |---|---|---|
 | `renderCodeBlock` | `TextViewCodeBlock` | 替换代码块（应用自己的语法高亮）。 |
-| `renderCodeBlockActions` | `TextViewCodeBlock` | 在代码块标题行末尾、语言之后添加内容（复制按钮）。 |
+| `renderCodeBlockAction` | `TextViewCodeAction` | 应用自己的代码块操作（`codeBlockActions`）的图标；外面的按钮由 `TextView` 绘制。 |
 | `renderTableActions` | `TextViewTable` | 在表格上方添加内容（复制、导出）。 |
 | `renderMath` | `TextViewMath` | 替换公式：`{ tex, display }`，`display` 表示 `$$…$$` 公式块。 |
 | `renderImage` | `TextViewImage` | 替换图片（`{ src, alt, title }`）：自己的加载方式、尺寸、点击查看大图。 |
@@ -223,23 +221,24 @@ function Reply(props: { stream: AsyncIterable<string> }) {
 
 在每个代码块的标题行放一个复制按钮：
 
+代码块的右上角浮动着操作按钮，外观统一：幽灵按钮，悬停或按下时显示背景；桌面上指针悬停在代码块上时显示，触摸屏上始终显示。`copy` 是内置的：复制代码，并短暂显示一个对勾。其他操作由应用定义：`renderCodeBlockAction` 绘制它们的图标，`onCodeBlockAction` 报告按下（内置的 `copy` 复制后也会报告）。`copy` 与 `nsh/clipboard` 一样写入剪贴板，因此需要应用的 `clipboard` 权限（`nsh.json`）。
+
 ```tsx
 import { Text } from "nsh";
-import { Button, TextView } from "nsh/base";
-import { Clipboard } from "nsh/clipboard";
+import { TextView } from "nsh/base";
 
 <TextView
   markdown={reply()}
-  classes={{ codeBlockHeader: "px-3 py-1.5", codeBlockLanguage: "text-xs text-neutral-500" }}
-  renderCodeBlockActions={(code) => (
-    <Button onPress={() => Clipboard.setString(code.code)} class="rounded px-2 py-1 active:bg-neutral-200">
-      <Text class="text-xs">Copy</Text>
-    </Button>
-  )}
+  codeBlockActions={[
+    { id: "copy", label: "Copy code" },
+    { id: "run", label: "Run" },
+  ]}
+  renderCodeBlockAction={(action) => <Text class="text-xs">▶</Text>}
+  onCodeBlockAction={({ id, code }) => id === "run" && run(code.code)}
 />
 ```
 
-语法高亮由应用负责：NSH 不附带高亮器，选用哪个高亮器（以及它的主题和语言）由应用决定。TS 应用用 `renderCodeBlock` 显示高亮后的代码，使用它自己的组件或它的 Rust crate 中的组件；Rust 视图通过 [`CodeHighlighter`](#syntax-highlighting) 把高亮器交给 `TextView`。下面用应用自己的高亮显示代码，并让图片占满宽度：
+代码块开箱即有语法高亮：围栏上标明语言（`ts`、`tsx`、`rust`、`python`、`bash`、`json`、`toml`、`yaml`、`diff` 等约两百种）时，代码以 Allsum 的代码配色显示，随外观切换浅色或深色；未标明语言的代码块按原样显示。应用想用自己的高亮时，用 `renderCodeBlock` 显示代码，使用它自己的组件或它的 Rust crate 中的组件；Rust 视图通过 [`CodeHighlighter`](#syntax-highlighting) 把高亮器交给 `TextView`。下面用应用自己的高亮显示代码，并让图片占满宽度：
 
 ```tsx
 import { View } from "nsh";
@@ -424,7 +423,7 @@ pub fn Reply(props: ReplyProps) -> impl IntoElement {
         }
         .into(),
         selectable: true.into(),
-        render_code_block_actions: Some(Renderer::new(|code: &CodeBlock| copy_button(code.code.clone()))).into(),
+        code_block_actions: vec![TextViewCodeAction::new("copy").with_label("Copy code")].into(),
         ..Default::default()
     })
     .on_event(|TextViewEvent::LinkPress(url): &TextViewEvent| open_link(url))
@@ -437,7 +436,7 @@ pub fn Reply(props: ReplyProps) -> impl IntoElement {
 
 ### 语法高亮
 
-`CodeHighlighter` 是应用的高亮器，通过 `provide_context` 交给一个视图下面的所有 `TextView`。它收到每个代码块，返回代码中各字节范围的样式（按顺序、互不重叠；未覆盖的部分保持原样）；`TextView` 以带这些样式的片段显示代码，仍放在它通常的代码块中（标题行、操作、滚动视图、部件）。高亮器是应用自己的：`syntect`、`tree-sitter`，或任何能把代码变成带样式范围的工具。
+`TextView` 用 syntect 以 Allsum 的代码配色高亮代码（`nsh-base` 的 feature `highlight`，默认开启）；较大的代码块先按原样显示，在后台线程高亮后再着色。`CodeHighlighter` 是代替它的应用自己的高亮器，通过 `provide_context` 交给一个视图下面的所有 `TextView`。它收到每个代码块，返回代码中各字节范围的样式（按顺序、互不重叠；未覆盖的部分保持原样）；`TextView` 以带这些样式的片段显示代码，仍放在它通常的代码块中（标题行、操作、滚动视图、部件）。高亮器可以是任何能把代码变成带样式范围的工具：`tree-sitter`、使用应用自己主题的 syntect 等。
 
 ```rust
 use std::ops::Range;
@@ -539,11 +538,14 @@ pub fn Chat() -> impl IntoElement {
 | `caret` | `JSX.Element` | | 显示在文档末尾：在最后一段文本之后以行内方式显示，否则单独一行。 |
 | `renderCustom` | `(node: TextViewCustomNode) => JSX.Element` | | 显示自定义节点。 |
 | `renderCodeBlock` | `(code: TextViewCodeBlock) => JSX.Element` | | 显示代码块。 |
-| `renderCodeBlockActions` | `(code: TextViewCodeBlock) => JSX.Element` | | 每个代码块标题行中的内容。 |
+| `codeBlockActions` | `TextViewCodeAction[]` | `[]` | 每个代码块右上角的操作：`{ id: "copy" }` 内置，其余由应用定义。 |
+| `renderCodeBlockAction` | `(action: TextViewCodeAction) => JSX.Element` | | 应用自己的操作的图标。 |
 | `renderTableActions` | `(table: TextViewTable) => JSX.Element` | | 每个表格上方的内容。 |
 | `renderMath` | `(math: TextViewMath) => JSX.Element` | | 显示公式。 |
 | `renderImage` | `(image: TextViewImage) => JSX.Element` | | 显示图片。 |
 | `onLinkPress` | `(url: string) => void` | | 链接被点击：其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
+| `onCodeBlockAction` | `(event: { id: string; code: TextViewCodeBlock }) => void` | | 代码块的操作被按下（`copy` 会在复制后报告）。 |
+| `onImagePress` | `(image: TextViewImage) => void` | | 不在链接中的图片被点击：该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 | `class`、`style` | `string`、`StyleProp<ViewStyle>` | | 根节点，即各文档块组成的一列；其文本样式传给每个部件（带类型的文本样式：`styles.root`）。 |
 
 <a id="accessibility"></a>

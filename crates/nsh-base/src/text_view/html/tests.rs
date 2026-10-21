@@ -152,7 +152,10 @@ fn inline_elements() {
                 title: Some("I".into()),
                 ..Image::default()
             }),
-            t("\u{201c}q\u{201d}absm"),
+            t("\u{201c}q\u{201d}ab"),
+            Inline::Small {
+                content: vec![t("sm")]
+            },
         ])]
     );
 }
@@ -328,7 +331,10 @@ fn table_without_head_and_spans() {
         vec![Block::Table(Table {
             align: vec![ColumnAlign::Right, ColumnAlign::Right],
             head: vec![cell("a"), cell("b")],
-            rows: vec![vec![cell("c"), cell("")]],
+            rows: vec![vec![TableCell {
+                colspan: Some(2),
+                ..cell("c")
+            }]],
         })]
     );
 }

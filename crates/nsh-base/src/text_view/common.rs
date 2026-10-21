@@ -88,6 +88,9 @@ fn apply(patterns: &[(&str, Regex)], inlines: Vec<Inline>) -> Vec<Inline> {
             Inline::Subscript { content } => out.push(Inline::Subscript {
                 content: apply(patterns, content),
             }),
+            Inline::Small { content } => out.push(Inline::Small {
+                content: apply(patterns, content),
+            }),
             other => out.push(other),
         }
     }

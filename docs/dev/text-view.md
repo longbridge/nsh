@@ -32,7 +32,7 @@ colored with the theme's tokens; the app restyles each part over it.
   `TextView`'s own; the website page links to the Text page for them rather than describing them again.
 - **Each block is made with primitives** (`Cx::block`): a paragraph or heading is one `text` whose children are spans
   (`Inline` → nested texts, inline images, slots), lists are rows of a marker text and a column, code blocks a column
-  with a header row and a horizontal `scroll`, tables one grid in a horizontal `scroll` (below), disclosures a
+  with floating actions and a horizontal `scroll`, tables one grid in a horizontal `scroll` (below), disclosures a
   pressable summary and an `If`. With `selectable`, every text carries `selectable` and the root is a selection area
   (`Element::selection_area`), so one selection runs across the blocks, and inside a `SelectionArea` on into the
   texts around the view ("Selection areas" in `text.md`).
@@ -56,8 +56,10 @@ colored with the theme's tokens; the app restyles each part over it.
   whole reply gives); in Rust the same associated functions. The document types stay under `nsh_base::text_view`
   (short names such as `Block` and `Image` would clash at the crate root); their TS names are `TextView*`.
 - **Render functions** (`Option<Renderer<T>>` props, `docs/dev/components.md`) put the app's content in place of a part
-  (`renderCodeBlock`, `renderMath`, `renderImage`, `renderCustom`) or beside it (`renderCodeBlockActions` in the code
-  block's header, `renderTableActions` above a table). Each render has a key of the block's position (`code:3`,
+  (`renderCodeBlock`, `renderMath`, `renderImage`, `renderCustom`) or beside it (`renderCodeBlockAction`, the icon of an
+  app's action in `codeBlockActions`, `renderTableActions` above a table). Code block actions are `TextView`'s ghost
+  buttons (24 pt, a background while hovered or pressed); `copy` is built in (the clipboard, then a check that springs
+  in and fades back after 1.6 s); a press reports `onCodeBlockAction`. Each render has a key of the block's position (`code:3`,
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
 - **Links report presses**: `onLinkPress(url)`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
@@ -75,8 +77,8 @@ background (spans have no padding); lists indented 1.4 em, their markers (`•`,
 the indent (so `10.` reaches further left and the items stay in line), items 0.25 em apart, tasks a
 15 pt box drawn as a view (filled with a `✓` when done, the item's text then muted and struck); quotes a 2 pt line at
 their side (the text's color at 15 %, as rules), their text softer; alerts a tinted, bordered box (radius 8, padding 12 / 16) with a ring icon (`alertIcon`);
-code blocks a bordered, rounded box (padding 28 / 16 / 14, 13 in 20.8 lines) with their header over the top right
-corner (the language at 11, then the actions); tables at 14 in lines of 1.55, cells padded 8 / 12 with 1 pt lines
+code blocks a bordered, rounded box (padding 14 / 16 on the code, inside its scroll view, 13 in 20.8 lines) with the app's actions floating over the
+top right corner (no language label, no row kept for them); tables at 14 in lines of 1.55, cells padded 8 / 12 with 1 pt lines
 (each cell its right and bottom ones, the grid the top and left ones), the header row on the list head color with
 13 pt muted text; a rule 1 pt with 1.6 em above and below; images rounded 8; footnotes at 13, muted. Colors are
 the theme's (`nsh_base::theme()`: `foreground`, `muted_foreground`, `border`, `muted`, `link`, `list_head`, the
@@ -95,11 +97,68 @@ refines a part's `StyleRefinement` (theme colors stay adaptive) before the app's
 
 ## Syntax highlighting
 
-Syntax highlighting is the app's: NSH ships no highlighter (no grammars, no themes). A TS app replaces code blocks with
-`renderCodeBlock`. A Rust view provides a `CodeHighlighter` (`provide_context`): a function from a `CodeBlock` to
-`(Range<usize>, StyleRefinement)` pairs, byte ranges in order (`syntect`, `tree-sitter`, ...); `TextView` turns them
-into spans of the code block's text, skipping ranges out of order, overlapping or off a character boundary, and keeps
-its header, actions, scroll view and parts. `renderCodeBlock` wins over the highlighter.
+Code blocks are highlighted by a `CodeHighlighter`: a function from a `CodeBlock` to `(Range<usize>, StyleRefinement)`
+pairs, byte ranges in order; `TextView` turns them into spans of the code block's text, skipping ranges out of order,
+overlapping or off a character boundary, and keeps its header, actions, scroll view and parts. Which one, first to
+last: the app's `renderCodeBlock` (TS and Rust: the whole block is the app's), the app's `CodeHighlighter`
+(`provide_context`, Rust: `tree-sitter`, a theme of its own, ...), the built-in one.
+
+The built-in highlighter (`highlight.rs`, `nsh-base`'s feature `highlight`, on by default) is syntect 5 with pure-Rust
+regexes (`regex-fancy`, so it builds for WebAssembly; no Oniguruma) and two-face's syntaxes (bat's set: syntect's own
+plus TypeScript / TSX, TOML, Dockerfile, ...). A block's language is found by extension or name, case-insensitive
+(`ts`, `tsx`, `rs`, `py`, `sh`, `yml`, `md`, `Rust`, ...) plus the other names fences use (`jsx`, `shell`, `golang`,
+`c++`, `csharp`, `jsonc`, ...); no language, `text` or one syntect does not know leaves the block plain.
+
+Colors: Allsum's reading palette (its `--hl-*` tokens, light and dark). TextMate scopes map to its kinds of token in code
+(`token()`), not through syntect themes: one parse gives one range list whose colors are `AdaptiveColor`s, so both
+appearances come from it and an appearance change re-highlights nothing; what maps to nothing keeps the code's own
+color (the `codeBlockCode` part's).
+
+| Token | Light / dark | Scopes |
+|---|---|---|
+| comment (italic) | `#6e7781` / `#7d7a72` | `comment` |
+| keyword | `#8250df` / `#c4a7ff` | `keyword`, `storage`, operators that are words (`as`, `typeof`; symbols stay plain), declaring `storage.type` (`fn`, `let`, `class`), headings (`markup.heading`, `entity.name.section`) |
+| string | `#116329` / `#9fd68a` | `string`, regular expressions, escapes, `markup.inserted` |
+| number | `#953800` / `#f5b27a` | `constant` (numbers, literals such as `true` / `null`, other constants), `support.constant`, `variable.other.constant` |
+| title | `#0550ae` / `#82b8ff` | `entity.name` (function and class names), `entity.other.inherited-class`, `support.function` / `.class`, `variable.function` |
+| attr | `#7d4e00` / `#f0c674` | attribute names, parameters, `self` / `this` (`variable.language`), properties and members, object / mapping keys, YAML / TOML keys, shell variables |
+| built | `#0a7285` / `#6fd3d8` | `support.function.builtin`, `support.macro` (`println!`), `support.type`, type `storage.type` (`f32`, `int`), `entity.name.tag` |
+| deletion | `#cf222e` / `#f87171` | `markup.deleted` |
+
+Markdown's `markup.bold` / `markup.italic` are bold / italic; everything else (punctuation, plain identifiers, operator
+symbols) keeps the code's own color. The kinds and what they cover are Allsum's mapping of highlight.js's classes onto
+its `--hl-*` tokens (allsum-io `web/src/tokens.css`, `web/src/docs/app.css`).
+
+Some grammars give declarations and types one scope (Rust's `let`, `const` and `f32` are all `storage.type.rust`, `as`
+is `keyword.operator.rust`): those settle by their text (`Token::settle`). The website's Shiki themes
+(`website/src/light.theme.json` / `dark.theme.json`, `allsum-light` / `allsum-dark`) color the same scopes with the same
+palette, so the site's code looks as an app's does. These colors are the one look NSH ships beyond `TextView`'s
+typography; an app with its own palette provides its own `CodeHighlighter`.
+
+Cost (release, x86-64, 500 lines of real files): a fresh block takes 22 ms in Rust, 139 ms in TSX (TypeScript's
+grammar is the heaviest), 2-3x that for the first block of a language, which compiles its regexes; loading the
+syntaxes takes tens of milliseconds more. So the engine thread parses only what is cheap:
+
+- The last 64 blocks are kept (one cache for the process, behind a mutex) with the parser's state at the start of their
+  last line: a block shown again costs a few µs, and a block that grew (an AI reply streaming its code) is parsed only
+  from its last line on (0.08-0.4 ms per line).
+- Each syntax's speed (ns per byte) is measured as it parses; a fresh block, or what a block grew by, is parsed on the
+  spot only when its expected cost is under 2 ms. A syntax not measured yet, or syntaxes not loaded yet, never are.
+- Otherwise the code shows at once (plain, or with the colors of the part it starts with) and is highlighted on a
+  blocking thread (`blocking`): the spans are a `dynamic` over a signal that the result sets, so only that text is
+  made again, with the same characters (no layout moves). The syntaxes load on that thread too, with the first block
+  that has a language. A block that goes away before its colors arrive leaves its tokens in the cache.
+- WebAssembly has no threads: there the work is done after the frame that shows the block plain (`next_frame`), so
+  the block appears at once but that later frame pays for the parsing.
+
+`bench_highlight` (ignored: `cargo test --release -p nsh-base bench_highlight -- --ignored --nocapture`) prints these
+numbers.
+
+Size: the feature adds 1.2 MB to the web runtime (`--profile web`, 9.65 → 10.86 MB; brotli 2.31 → 3.17 MB) and
+1.4 MB to a release `nsh-linux-host` (24.2 → 25.6 MB), mostly the syntaxes. `nsh-base`'s
+default features have it; in this workspace the dependency is declared without them and the platforms
+(`nsh-platform-*`, the GPUI backend's too) turn it on, so the CLI, the bundler, the engine and the headless test driver
+build without syntect. Without the feature, code blocks the app does not highlight are plain.
 
 ## Extensions
 
@@ -162,8 +221,8 @@ role `checkbox` with their checked state, a disclosure's summary role `button` w
 | `TextView::markdown` / `::html` | `markdown` / `html` props; `document` for blocks the app builds |
 | `TextViewStyle` (colors, code block style, heading sizes) | A default typography in the theme's colors; `classes` / `styles` by part; `TextViewParts` (typed, Rust) |
 | Selection across the view | `selectable`: the view is a selection area, one selection across its blocks (drag, double / triple click, Shift+click; long press and handles); `SelectionArea` joins several views and texts |
-| Code block actions (copy) | `renderCodeBlockActions` |
-| Highlighter (tree-sitter) | The app's: `CodeHighlighter` (Rust, styled ranges) or `renderCodeBlock` (TS) |
+| Code block actions (copy) | `codeBlockActions` (`copy` built in, the app's with `renderCodeBlockAction` / `onCodeBlockAction`) |
+| Highlighter (tree-sitter) | Built in (syntect, Allsum's palette, feature `highlight`); the app's `CodeHighlighter` (Rust, styled ranges) or `renderCodeBlock` replaces it |
 | Table actions | `renderTableActions` |
 | `MarkdownPlugin` | `MarkdownPlugin` (Rust) and `MarkdownExtension` (declared, from TS too) |
 | `image_source` / image loading | `renderImage`; the default loads the URL with the runtime's image loader |

@@ -457,8 +457,11 @@ expect Alpha
 expect 12
 expect Rows: 1, columns: 2
 expect let a = 1;
-expect ts
-expect Copy ts
+expect Action run
+tap label:Run code
+expect Code action: run ts
+tap label:Copy code
+expect Code action: copy ts
 # The code's scroll view without its indicator; the root's color
 # passes to every part.
 prop scroll:text:"let a = 1;" horizontal true
@@ -490,6 +493,8 @@ expect Code js: const b = 2;
 expect Math inline: E=mc^2
 expect Math block: x^2
 expect Image Logo: https://example.com/logo.png
+tap label:Logo
+expect Image pressed: Logo
 # Parts styled by `classes` and `styles`; `selectable`.
 style text:"Classed heading" color #ff0000ff
 style text:"Classed heading" fontWeight 600
@@ -515,11 +520,14 @@ covers [props] TextView.tableScrollIndicator
 covers [props] TextView.caret
 covers [props] TextView.renderCustom
 covers [props] TextView.renderCodeBlock
-covers [props] TextView.renderCodeBlockActions
+covers [props] TextView.codeBlockActions
+covers [props] TextView.renderCodeBlockAction
 covers [props] TextView.renderTableActions
 covers [props] TextView.renderMath
 covers [props] TextView.renderImage
 covers [events] TextView.onLinkPress
+covers [events] TextView.onCodeBlockAction
+covers [events] TextView.onImagePress
 # base-selection-area
 tap id:case-base-selection-area
 # One area around a text, a TextView, a label kept out and an inner

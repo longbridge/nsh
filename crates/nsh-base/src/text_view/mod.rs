@@ -5,6 +5,7 @@
 mod common;
 pub mod document;
 mod extension;
+mod highlight;
 mod html;
 mod markdown;
 mod parts;
@@ -20,5 +21,8 @@ pub use self::{
         mdast,
     },
     parts::{PartStyle, TextViewClasses, TextViewPart, TextViewParts, TextViewStyles},
-    view::{CodeHighlighter, TextView, TextViewEvent, TextViewMath, TextViewProps},
+    view::{
+        CodeHighlighter, TextView, TextViewCodeAction, TextViewCodeActionEvent, TextViewEvent,
+        TextViewMath, TextViewProps,
+    },
 };

@@ -108,14 +108,11 @@ parts! {
     task_marker_checked => TaskMarkerChecked,
     /// The column of an item's blocks.
     list_item_content => ListItemContent,
-    /// Code blocks (a column: the header, then the code).
+    /// Code blocks (the code, the actions floating over it).
     code_block => CodeBlock,
-    /// The header of a code block: its language and the app's
-    /// `renderCodeBlockActions`, in a row over the block's top right
-    /// corner (only with one of them).
+    /// The row of a code block's actions (`codeBlockActions`), floating
+    /// over its top right corner (only with actions).
     code_block_header => CodeBlockHeader,
-    /// The language a code block names.
-    code_block_language => CodeBlockLanguage,
     /// The horizontal scroll view of a code block's code.
     code_block_scroll => CodeBlockScroll,
     /// The code of a code block (monospace, as written).
@@ -139,6 +136,8 @@ parts! {
     superscript => Superscript,
     /// Subscript (smaller).
     subscript => Subscript,
+    /// Smaller text (`<small>`).
+    small => Small,
     /// Links (in the theme's link color, underlined).
     link => Link,
     /// Images: alone in a paragraph or a cell, as wide as they ask (their

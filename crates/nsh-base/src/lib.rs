@@ -36,8 +36,8 @@ pub use crate::{
     selection_area::{SelectionArea, SelectionAreaProps},
     text_view::{
         CodeHighlighter, MarkdownExtension, MarkdownOptions, MarkdownPlugin, MarkdownPlugins,
-        TextView, TextViewClasses, TextViewEvent, TextViewMath, TextViewPart, TextViewParts,
-        TextViewProps, TextViewStyles,
+        TextView, TextViewClasses, TextViewCodeAction, TextViewCodeActionEvent, TextViewEvent,
+        TextViewMath, TextViewPart, TextViewParts, TextViewProps, TextViewStyles,
     },
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, tokens_of},
 };
