@@ -752,6 +752,20 @@ fn view(out: &mut Decls, style: &Style, default: &Style) {
     out.diff("zIndex", &style.z_index, &default.z_index, |v| {
         v.to_string()
     });
+    out.diff(
+        "verticalAlign",
+        &style.vertical_align,
+        &default.vertical_align,
+        |v| {
+            match v {
+                nsh_core::VerticalAlign::Baseline => "baseline",
+                nsh_core::VerticalAlign::TextTop => "text-top",
+                nsh_core::VerticalAlign::TextBottom => "text-bottom",
+                nsh_core::VerticalAlign::Middle => "middle",
+            }
+            .into()
+        },
+    );
     out.diff("direction", &style.direction, &default.direction, |v| {
         match v {
             None => "inherit",

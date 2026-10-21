@@ -397,6 +397,8 @@ struct Node {
     events: EventMask,
     /// `zIndex`: native views are ordered by it (stable) among siblings.
     z_index: i32,
+    /// `verticalAlign`: where it sits in its line as an attachment.
+    vertical_align: crate::style::VerticalAlign,
     /// Laid out right to left (the resolved `direction`).
     rtl: bool,
     /// `direction`: `None` inherits.
@@ -510,6 +512,7 @@ impl Node {
             insets: None,
             events: EventMask::default(),
             z_index: 0,
+            vertical_align: crate::style::VerticalAlign::Baseline,
             rtl: false,
             direction: None,
             logical: None,
@@ -1699,6 +1702,7 @@ impl<M: TextEngine> Core<M> {
             text,
             animated,
             z_index,
+            vertical_align,
             direction,
             logical,
             pending: _,
@@ -1751,10 +1755,17 @@ impl<M: TextEngine> Core<M> {
         let text_changed = node.text_style != text || span_background_changed;
         let animation_changed = node.animated != animated;
         let z_changed = node.z_index != z_index;
+        // An attachment's place in its line is part of its block's text.
+        let align_changed =
+            node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
         node.view_style = view;
         node.text_style = text;
         node.animated = animated;
         node.z_index = z_index;
+        node.vertical_align = vertical_align;
+        if align_changed {
+            self.mark_text_block(key);
+        }
         if z_changed {
             self.restack(key);
         }
@@ -3744,8 +3755,9 @@ impl<M: TextEngine> Core<M> {
                 _ => {
                     if let Some(l) = child.layout {
                         let size = self.layout.layout(l).expect("taffy layout").size;
-                        out.push_attachment(
+                        out.push_aligned_attachment(
                             crate::geometry::size_pt(size.width, size.height),
+                            child.vertical_align,
                             style,
                         );
                     }

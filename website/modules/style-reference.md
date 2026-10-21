@@ -299,6 +299,7 @@ view().p_4().rounded(px(12.0)).bg(white()).shadow([
 | `visibility` | `"visible" \| "hidden" \| "collapse"` | | Hidden views keep their space in layout (unlike `display: "none"`). |
 | `overflow` | `"visible" \| "hidden"` | `.overflow_hidden()` | `"hidden"` clips children to the view's bounds (and corners). |
 | `backfaceVisibility` | `"visible" \| "hidden"` | `.backface_hidden()`, `.backface_visible()` | `"hidden"`: invisible while a 3D rotation turns it away. |
+| `verticalAlign` | `"baseline" \| "text-top" \| "text-bottom" \| "middle"` | `.align_baseline()`, `.align_text_top()`, `.align_text_bottom()`, `.align_middle()` | Where a view or image inside a `<Text>` sits in its line, as CSS's `vertical-align`: its bottom on the baseline (default), its top or bottom at the text font's top or bottom, or its middle half the x height above the baseline. The line grows to hold it. |
 
 ### Transforms
 

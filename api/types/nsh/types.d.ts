@@ -325,6 +325,8 @@ export interface ViewStyle extends LayoutStyle {
   transformOrigin?: string | (number | string)[];
   opacity?: number | AnimatedNode;
   overflow?: "visible" | "hidden";
+  /** Where a view or image inside a `<Text>` sits in its line (CSS `vertical-align`, `align-*`): its bottom on the baseline (the default), its top or bottom at the top or bottom of the text's font, or its middle half the font's x height above the baseline. The line grows to hold it. */
+  verticalAlign?: "baseline" | "text-top" | "text-bottom" | "middle";
   transform?: TransformStep[];
   /** Default `{ width: 0, height: -3 }`, as in React Native. */
   shadowOffset?: { width: number; height: number };

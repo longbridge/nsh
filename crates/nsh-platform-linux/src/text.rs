@@ -301,8 +301,9 @@ pub(crate) struct Prepared {
     layout: pango::Layout,
     /// UTF-16 offset of each byte offset of the text.
     utf16: Box<[u32]>,
-    /// Byte offsets of the attachments' placeholders, in order, with the
-    /// attachment's height.
+    /// Byte offsets of the attachments' placeholders, in order, with how
+    /// far the attachment's top is above the baseline
+    /// (`TextAttachment::ascent`).
     attachments: Vec<(u32, f32)>,
     max_lines: u32,
     ellipsize: pango::EllipsizeMode,
@@ -435,6 +436,30 @@ fn context(font_map: &pango::FontMap, hint: pangocairo::cairo::HintStyle) -> pan
 impl PangoTextEngine {
     /// Ascent and descent of the font `desc` names (its primary face,
     /// not fallbacks), in Pango units; cached.
+    /// The metrics of the font around attachment `a` of `text` (its
+    /// placeholder's), which its `verticalAlign` places it against.
+    fn attachment_font(
+        &self,
+        context: &pango::Context,
+        text: &AttributedText,
+        a: &nsh_core::TextAttachment,
+    ) -> nsh_core::FontExtent {
+        let style = text
+            .span_at(a.index)
+            .map_or_else(Default::default, |s| s.style);
+        let desc = font_description(&style, &self.ui_family);
+        let (ascent, descent) = self.natural_metrics(context, &desc);
+        let size = style.font_size.0;
+        let x = context
+            .load_font(&desc)
+            .map_or(size * X_HEIGHT, |f| cap_and_x_height(&f, size).1);
+        nsh_core::FontExtent::new(
+            Points(from_pango(ascent)),
+            Points(from_pango(descent)),
+            Points(x),
+        )
+    }
+
     fn natural_metrics(
         &self,
         context: &pango::Context,
@@ -676,18 +701,33 @@ impl TextEngine for PangoTextEngine {
             let start = utf16_to_byte(s, at, a.index);
             at = (start, a.index);
             let end = start + s[start..].chars().next().map_or(0, char::len_utf8);
-            // All above the baseline, as the other platforms place them.
-            let rect = pango::Rectangle::new(
+            // Placed by its `verticalAlign` in its placeholder's font, as
+            // the other platforms place them: the ink is the attachment,
+            // the logical rectangle what its line reserves.
+            let font = if a.align == nsh_core::VerticalAlign::Baseline {
+                nsh_core::FontExtent::default()
+            } else {
+                self.attachment_font(context, text, a)
+            };
+            let top = a.ascent(font);
+            let (up, down) = a.extent(font);
+            let ink = pango::Rectangle::new(
                 0,
-                -to_pango(a.height.0),
+                -to_pango(top.0),
                 to_pango(a.width.0),
                 to_pango(a.height.0),
             );
-            let mut shape = pango::AttrShape::new(&rect, &rect);
+            let logical = pango::Rectangle::new(
+                0,
+                -to_pango(up.0),
+                to_pango(a.width.0),
+                to_pango((up + down).0),
+            );
+            let mut shape = pango::AttrShape::new(&ink, &logical);
             shape.set_start_index(start as u32);
             shape.set_end_index(end as u32);
             attrs.insert(shape);
-            attachments.push((start as u32, a.height.0));
+            attachments.push((start as u32, top.0));
         }
         layout.set_attributes(Some(&attrs));
         natural_line_heights(&layout, &attrs, s, &natural, &placeholders);

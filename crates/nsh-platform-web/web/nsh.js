@@ -551,6 +551,7 @@ class Player {
         },
         font_ascent: (fp, fl) => this.metrics(this.str(fp, fl))[0],
         font_descent: (fp, fl) => this.metrics(this.str(fp, fl))[1],
+        font_x_height: (fp, fl) => this.metrics(this.str(fp, fl))[2],
         register_font: (fp, fl, dp, dl, weight, italic) => {
           const family = this.str(fp, fl);
           const data = this.bytes(dp, dl).slice();
@@ -825,7 +826,8 @@ class Player {
     if (!m) {
       this.measure.font = font;
       const t = this.measure.measureText("Hg");
-      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0];
+      const x = this.measure.measureText("x");
+      m = [t.fontBoundingBoxAscent ?? 0, t.fontBoundingBoxDescent ?? 0, x.actualBoundingBoxAscent ?? 0];
       this.metricsCache.set(font, m);
     }
     return m;

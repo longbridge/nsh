@@ -2963,6 +2963,34 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Inside a text, its bottom on the baseline (the default:
+    /// `align-baseline`).
+    fn align_baseline(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "baseline");
+        self
+    }
+
+    /// Inside a text, its top at the top of the text's font
+    /// (`align-text-top`).
+    fn align_text_top(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "text-top");
+        self
+    }
+
+    /// Inside a text, its bottom at the bottom of the text's font
+    /// (`align-text-bottom`).
+    fn align_text_bottom(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "text-bottom");
+        self
+    }
+
+    /// Inside a text, its middle half the font's x height above the
+    /// baseline (`align-middle`).
+    fn align_middle(mut self) -> Self {
+        self.style().keyword(StyleKey::VerticalAlign, "middle");
+        self
+    }
+
     /// Extra space between letters.
     fn letter_spacing(mut self, spacing: impl IntoReactive<AbsoluteLength>) -> Self {
         self.style()
@@ -3544,6 +3572,10 @@ mod tests {
         same(s().uppercase().tabular_nums(), "uppercase tabular-nums");
         same(s().small_caps().oldstyle_nums(), "small-caps oldstyle-nums");
         same(s().capitalize().text_justify(), "capitalize text-justify");
+        same(s().align_baseline(), "align-baseline");
+        same(s().align_text_top(), "align-text-top");
+        same(s().align_text_bottom(), "align-text-bottom");
+        same(s().align_middle(), "align-middle");
         // Unlike classes, the two lines add up.
         let both = s().underline().line_through().lower();
         let mut style = Style::default();

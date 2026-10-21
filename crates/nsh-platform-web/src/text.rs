@@ -46,6 +46,8 @@ pub(crate) struct WebTextEngine {
     widths: RefCell<FxHashMap<(Arc<str>, String), f32>>,
     /// Ascent and descent of a font.
     metrics: RefCell<FxHashMap<Arc<str>, (f32, f32)>>,
+    /// The x height of a font (attachments in the middle of a line).
+    x_heights: RefCell<FxHashMap<Arc<str>, f32>>,
 }
 
 impl WebTextEngine {
@@ -54,6 +56,20 @@ impl WebTextEngine {
     pub(crate) fn clear_caches(&self) {
         self.widths.borrow_mut().clear();
         self.metrics.borrow_mut().clear();
+        self.x_heights.borrow_mut().clear();
+    }
+
+    fn x_height(&self, font: &Arc<str>, size: f32) -> f32 {
+        if let Some(&x) = self.x_heights.borrow().get(font) {
+            return x;
+        }
+        let x = match ffi::font_x_height(font) {
+            x if x > 0.0 => x,
+            // As `TextLine::x_height` estimates it.
+            _ => size * 0.5,
+        };
+        self.x_heights.borrow_mut().insert(font.clone(), x);
+        x
     }
 
     fn width(&self, font: &Arc<str>, text: &str) -> f32 {
@@ -120,8 +136,10 @@ enum AtomKind {
     Space,
     /// A forced line break.
     Newline,
-    /// An inline attachment (`width` × `height`).
-    Attachment(f32, f32),
+    /// An inline attachment: width, how far its top is above the baseline,
+    /// and what its line reserves above and below the baseline
+    /// (`TextAttachment::ascent` and `extent`).
+    Attachment(f32, f32, f32, f32),
 }
 
 /// A piece of text that is never broken across lines (except words wider
@@ -247,6 +265,11 @@ impl WebTextEngine {
             // style for an empty line).
             let mut height = 0.0f32;
             let mut above = 0.0f32;
+            // Below the baseline, and whether an attachment reaches below
+            // it (the line is then as tall as its extents; lines of
+            // attachments on the baseline keep their height).
+            let mut below = 0.0f32;
+            let mut reaches_below = false;
             let range = if line.start < end {
                 line.start..end
             } else {
@@ -257,10 +280,16 @@ impl WebTextEngine {
                 let (h, lead) = s.line();
                 height = height.max(h);
                 above = above.max(lead + s.ascent);
-                if let AtomKind::Attachment(_, ah) = atom.kind {
-                    above = above.max(ah);
-                    height = height.max(ah);
+                below = below.max(h - lead - s.ascent);
+                if let AtomKind::Attachment(_, _, up, down) = atom.kind {
+                    above = above.max(up);
+                    height = height.max(up + down);
+                    below = below.max(down);
+                    reaches_below |= down > 0.0;
                 }
+            }
+            if reaches_below {
+                height = height.max(above + below);
             }
             if height == 0.0 && !p.styles.is_empty() {
                 let s = &p.styles[0];
@@ -295,7 +324,7 @@ impl WebTextEngine {
                 }
                 AtomKind::Text | AtomKind::Attachment(..) => {
                     let w = match atom.kind {
-                        AtomKind::Attachment(w, _) => w,
+                        AtomKind::Attachment(w, ..) => w,
                         _ => atom.width,
                     };
                     if let Some(max) = max
@@ -322,11 +351,30 @@ impl TextEngine for WebTextEngine {
     fn prepare(&self, text: &AttributedText) -> Prepared {
         let mut styles: Vec<RunStyle> = Vec::with_capacity(text.spans.len());
         let mut atoms = Vec::new();
-        // UTF-16 offset -> attachment size.
-        let attachments: FxHashMap<u32, (f32, f32)> = text
+        // UTF-16 offset -> attachment: width, top above the baseline,
+        // extent above and below it.
+        let attachments: FxHashMap<u32, (f32, f32, f32, f32)> = text
             .attachments
             .iter()
-            .map(|a| (a.index, (a.width.0, a.height.0)))
+            .map(|a| {
+                let font = if a.align == nsh_core::VerticalAlign::Baseline {
+                    nsh_core::FontExtent::default()
+                } else {
+                    let style = text
+                        .span_at(a.index)
+                        .map_or_else(Default::default, |s| s.style);
+                    let css: Arc<str> = css_font(&style).into();
+                    let size = style.font_size.0;
+                    let (ascent, descent) = self.metrics(&css, size);
+                    nsh_core::FontExtent::new(
+                        Points(ascent),
+                        Points(descent),
+                        Points(self.x_height(&css, size)),
+                    )
+                };
+                let (up, down) = a.extent(font);
+                (a.index, (a.width.0, a.ascent(font).0, up.0, down.0))
+            })
             .collect();
         let units: Vec<u16> = text.text.encode_utf16().collect();
         for span in &text.spans {
@@ -356,7 +404,7 @@ impl TextEngine for WebTextEngine {
                         self.width(&font, &text) + spacing * text.chars().count() as f32
                     }
                     // Its placeholder's room on the line.
-                    AtomKind::Attachment(w, _) => w,
+                    AtomKind::Attachment(w, ..) => w,
                     AtomKind::Newline => 0.0,
                 };
                 atoms.push(Atom {
@@ -384,11 +432,11 @@ impl TextEngine for WebTextEngine {
                     }
                     if c == '\n' {
                         push(&mut atoms, String::new(), AtomKind::Newline, at, at + len);
-                    } else if let Some(&(w, h)) = attachment {
+                    } else if let Some(&(w, top, up, down)) = attachment {
                         push(
                             &mut atoms,
                             String::new(),
-                            AtomKind::Attachment(w, h),
+                            AtomKind::Attachment(w, top, up, down),
                             at,
                             at + len,
                         );
@@ -558,9 +606,9 @@ impl TextEngine for WebTextEngine {
                     ascent: Points(if attachment { 0.0 } else { s.ascent }),
                     descent: Points(if attachment { 0.0 } else { s.descent }),
                 });
-                if let AtomKind::Attachment(_, h) = kind {
+                if let AtomKind::Attachment(_, top, ..) = kind {
                     if let Some(slot) = attachments.get_mut(attachment_index) {
-                        *slot = Some((x, baseline - h));
+                        *slot = Some((x, baseline - top));
                     }
                     attachment_index += 1;
                     x += w;

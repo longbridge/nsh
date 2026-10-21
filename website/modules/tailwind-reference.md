@@ -243,6 +243,7 @@ Container widths (points): `3xs` 256, `2xs` 288, `xs` 320, `sm` 384, `md` 448, `
 |---|---|
 | `text-left`, `text-center`, `text-right`, `text-justify` | `textAlign` |
 | `text-start` | `textAlign: "auto"` |
+| `align-baseline`, `align-text-top`, `align-text-bottom`, `align-middle` | `verticalAlign` (views and images inside a text) |
 | `text-end` | `textAlign: "right"` |
 | `uppercase`, `lowercase`, `capitalize`, `normal-case` | `textTransform` |
 | `truncate` | one line, tail ellipsis, no wrapping, `overflow: hidden` |

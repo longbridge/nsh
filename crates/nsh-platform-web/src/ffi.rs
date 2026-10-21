@@ -10,6 +10,8 @@ unsafe extern "C" {
     fn js_font_ascent(font: *const u8, font_len: usize) -> f64;
     #[link_name = "font_descent"]
     fn js_font_descent(font: *const u8, font_len: usize) -> f64;
+    #[link_name = "font_x_height"]
+    fn js_font_x_height(font: *const u8, font_len: usize) -> f64;
     #[link_name = "register_font"]
     fn js_register_font(
         family: *const u8,
@@ -112,6 +114,12 @@ pub(crate) fn font_metrics(font: &str) -> (f32, f32) {
             js_font_descent(font.as_ptr(), font.len()) as f32,
         )
     }
+}
+
+/// The x height of CSS `font` (0 when the browser cannot tell).
+pub(crate) fn font_x_height(font: &str) -> f32 {
+    // SAFETY: the slice is valid for the call; JS only reads it.
+    unsafe { js_font_x_height(font.as_ptr(), font.len()) as f32 }
 }
 
 /// Adds a font (`FontFace`) to the document.

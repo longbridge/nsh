@@ -629,6 +629,10 @@ z-{int} zIndex: {int}
 2xl:p-4 - | width 1700: padding: 16
 absolute position: absolute
 active:p-4 - | pressed: padding: 16
+align-baseline -
+align-middle verticalAlign: middle
+align-text-bottom verticalAlign: text-bottom
+align-text-top verticalAlign: text-top
 android:p-4 - | android: padding: 16
 animate-bounce animationName: bounce; animationDuration: 1000ms; animationDelay: 0ms; animationTimingFunction: cubic-bezier(0.8, 0, 1, 1); animationIterationCount: infinite
 animate-none -

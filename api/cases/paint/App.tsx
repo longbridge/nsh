@@ -6,6 +6,7 @@
 import { type JSX, View, mount, signal } from "nsh";
 import PaintBorders from "./paint-borders";
 import PaintEffects from "./paint-effects";
+import PaintInlineAlign from "./paint-inline-align";
 import PaintMisc from "./paint-misc";
 import PaintMotion from "./paint-motion";
 import PaintShadows from "./paint-shadows";
@@ -24,6 +25,7 @@ const cases: Record<string, () => JSX.Element> = {
   "state-styles": StateStyles,
   "state-checked": StateChecked,
   "state-indeterminate": StateIndeterminate,
+  "paint-inline-align": PaintInlineAlign,
 };
 const shown = signal("");
 

@@ -1025,6 +1025,13 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         "text-justify" => sets(K::TextAlign, "justify"),
         "text-start" => sets(K::TextAlign, "auto"),
         "text-end" => sets(K::TextAlign, "right"),
+        // `vertical-align` of views and images inside a text (`align-top`,
+        // `align-bottom`, `align-sub` and `align-super` are the line box's
+        // or the baseline's, which NSH does not place by).
+        "align-baseline" => sets(K::VerticalAlign, "baseline"),
+        "align-text-top" => sets(K::VerticalAlign, "text-top"),
+        "align-text-bottom" => sets(K::VerticalAlign, "text-bottom"),
+        "align-middle" => sets(K::VerticalAlign, "middle"),
         "text-ellipsis" => Decl::Prop(PropDecl::Ellipsize(EllipsizeMode::Tail)),
         "text-clip" => Decl::Prop(PropDecl::Ellipsize(EllipsizeMode::Clip)),
         "truncate" => {

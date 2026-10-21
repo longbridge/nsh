@@ -4092,12 +4092,14 @@ fn views_inside_text_are_attachments() {
             crate::TextAttachment {
                 index: 2,
                 width: Points(20.0),
-                height: Points(10.0)
+                height: Points(10.0),
+                align: crate::VerticalAlign::Baseline,
             },
             crate::TextAttachment {
                 index: 5,
                 width: Points(12.0),
-                height: Points(12.0)
+                height: Points(12.0),
+                align: crate::VerticalAlign::Baseline,
             },
         ]
     );
@@ -4143,6 +4145,33 @@ fn views_inside_text_are_attachments() {
         .unwrap();
     assert_eq!(text.attachments[0].width, Points(30.0));
     assert_eq!(frame_of(&batch, 4).map(|f| f.size.width.0), Some(30.0));
+
+    // `verticalAlign` builds the text again: the engine places it.
+    let align_of = |c: &mut Core<FakeEngine>, align: &str| {
+        apply(
+            c,
+            vec![style_op(4, &[("verticalAlign", StyleValue::Str(align))])],
+        );
+        let batch = c.commit()?;
+        batch.items.iter().find_map(|i| match i {
+            MountItem::Text { id: 2, text, .. } => Some(text.attachments[0].align),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        align_of(&mut c, "text-top"),
+        Some(crate::VerticalAlign::TextTop)
+    );
+    assert_eq!(
+        align_of(&mut c, "middle"),
+        Some(crate::VerticalAlign::Middle)
+    );
+    // Unchanged: nothing to build.
+    assert_eq!(align_of(&mut c, "middle"), None);
+    assert_eq!(
+        align_of(&mut c, "baseline"),
+        Some(crate::VerticalAlign::Baseline)
+    );
 
     // Taken out of the text: its view leaves the text view.
     apply(

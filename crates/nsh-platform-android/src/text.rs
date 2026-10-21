@@ -133,10 +133,21 @@ impl TextEngine for AndroidTextEngine {
         };
         let density = self.density;
         let shadow = text.shadow;
+        // Offset, width, height and `verticalAlign` (0 baseline, 1 text
+        // top, 2 text bottom, 3 middle): `TextLayouts.Attachment` places it
+        // as `TextAttachment::ascent` does, with the run's font metrics.
         let attachments: Vec<f32> = text
             .attachments
             .iter()
-            .flat_map(|a| [a.index as f32, a.width.0, a.height.0])
+            .flat_map(|a| {
+                let align = match a.align {
+                    nsh_core::VerticalAlign::Baseline => 0.0,
+                    nsh_core::VerticalAlign::TextTop => 1.0,
+                    nsh_core::VerticalAlign::TextBottom => 2.0,
+                    nsh_core::VerticalAlign::Middle => 3.0,
+                };
+                [a.index as f32, a.width.0, a.height.0, align]
+            })
             .collect();
         Prepared(with_env(|env| {
             let j = java();
