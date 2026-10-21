@@ -51,9 +51,10 @@ Changes to existing public items go under `## Breaking Changes` with a `diff` bl
 usage, even when the old form still works. Additive changes are not breaking, but they are still listed.
 
 What apps use — JS exports, `nsh:rt`, globals, elements, props, events, style keys, Tailwind utilities, their
-declarations and behavior — is never broken: apps built for an earlier release keep running unchanged
-([docs/dev/compatibility.md](docs/dev/compatibility.md)). Such a change adds and deprecates instead of removing, and
-commits its record in `api/` (`cargo xtask api`); the tests hold it to the record as of the merge base with `main`.
+declarations and behavior — is never broken once a release shipped it: apps built for an earlier compatible release
+keep running unchanged ([docs/dev/compatibility.md](docs/dev/compatibility.md)). Such a change adds and deprecates
+instead of removing. Releases are recorded in [nsh-compat](https://github.com/longbridge/nsh-compat), and
+`cargo xtask compat` holds a checkout to them; a new API comes with a case in `tests/compat/` whose script checks it.
 
 Well-prepared pull requests are easier for us to review and may be merged very quickly. If a contribution is already
 in good shape, maintainers may directly help polish small details and move it forward.

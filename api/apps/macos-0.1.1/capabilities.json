@@ -1,1 +1,0 @@
-{"network":{"hosts":[],"http":[]},"process":{"execute":[],"exit":false,"env":[]},"fs":{"read":["${dataDir}"],"write":["${dataDir}"]},"statusBar":false,"clipboard":false}

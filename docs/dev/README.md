@@ -28,7 +28,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [windows.md](windows.md) | The Windows backend (Win32, Direct2D): building, how each area maps to Windows, `nsh test --target windows`, what differs |
 | [gpui.md](gpui.md) | The GPUI backend (macOS, Windows, Linux): building, the surface element and `DrawCx`, embedding as a GPUI view, what differs |
 | [web.md](web.md) | The WebAssembly runtime of the website's demos: `LocalEngine`, the clock, the DOM protocol |
-| [compatibility.md](compatibility.md) | The backward compatibility contract: what apps depend on, the rules, `api/` and its tests |
+| [compatibility.md](compatibility.md) | The backward compatibility contract: what apps depend on, the rules, `nsh-compat` and `tests/compat/` |
 | [performance.md](performance.md) | Baselines |
 | [pitfalls.md](pitfalls.md) | Verified constraints and pitfalls, by area |
 

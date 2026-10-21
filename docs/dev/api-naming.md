@@ -144,9 +144,8 @@ members, so a shape decides what can ever be added to it.
 
 ## Renames before the first compatible release
 
-Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, their old names listed
-in `api/closed.txt` as made before the first compatible release (`compatibility.md` rule 7). The frozen RN-shaped
-modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
+Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, as no release froze
+them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
 (*guides*: "Preserve established public names when changing them would cause needless churn"): `pagingEnabled`,
 `javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`,
 `onHoverIn` / `onHoverOut` and `onFileDrop({ uris })`; and

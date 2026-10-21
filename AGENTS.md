@@ -138,12 +138,10 @@ crates/
                        what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
-                       `web` (the WebAssembly runtime and the website's demos), `api` (records `api/`; `--keep <app>`: a fixture app)
-api/                  What apps depend on, append-only, held by the engine's `compat` tests: `runtime.txt` (module exports, `nsh:rt`
-                      and globals), `types/` (declarations), `tailwind.txt` (every class and what it resolves to), `apps/` (fixture apps
-                      as a build wrote them, never changed, with scripts that check the API: the backward-compat test suite),
-                      `cases/` (the sources of the fixtures of single APIs: one app per domain, a module per case), `uncovered.txt` (API no script checks yet; only shrinks), `closed.txt` (the
-                      only removals: closed for security, with reasons)
+                       `web` (the WebAssembly runtime and the website's demos), `compat` (runs `nsh-compat` against this checkout;
+                       `compat record <version>`: records a release there)
+tests/compat/         The apps whose scripts check the API apps use (`nsh-compat` builds and runs them): `cases/<domain>/` (one app per
+                      domain, a module per case, `script.txt`), `examples/<app>.txt` (the scripts of examples)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
@@ -251,9 +249,8 @@ cargo clippy --workspace --all-targets
 cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
 cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
-cargo xtask api                                                                 # record the API apps use in api/ (after an additive change)
-cargo xtask api --keep <app>...                                                 # keep this checkout's build of an app as a fixture, when it differs from the app's newest
-cargo test -p nsh-engine --test engine compat::                                 # the API against the record at the merge base with main, and the fixture apps
+cargo xtask compat                                                              # tests/compat's apps, and the API every recorded release froze (nsh-compat)
+cargo xtask compat record <version>                                             # record this checkout as a release in nsh-compat (at release time)
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
 cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targets --features nsh-platform-macos/dev   # the macOS backend (on macOS)
@@ -304,17 +301,17 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   checks in Rust) with generated declarations. Exactly these names import; `node:` prefixes and other Node modules
   (`fs`, `events`, `util`, ...) are refused. Files and processes are these modules (`fs/promises`, `process`), never
   an `nsh/<module>`; the catalog grows only by a design decision.
-- **Backward compatible, always.** Apps are delivered to host apps as plugins and may never be built again, so every
-  release runs every app built for an earlier one (from v0.1.2 on, for good, whatever the version). Nothing that
-  reached `main` is removed or renamed: modules, exports and their members, `nsh:rt` (what compiled JSX calls:
-  append-only, signatures and semantics kept), globals, props, events and payload keys, style keys and values, Tailwind
-  utilities. A rename or move keeps the old name as a `@deprecated` alias of the same implementation, for good. Types
-  only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
-  (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
-  (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt` (beside the pre-release changes: an alignment with Tailwind CSS, the fixtures merged by domain, the theme moved to `nsh-base` and the renames of `docs/dev/api-naming.md`). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
-  --keep`); fixtures and their steps never change, and while they pass, old apps keep working
-  (`docs/dev/compatibility.md`).
+- **Backward compatible, from the first recorded release on.** Apps are delivered to host apps as plugins and may
+  never be built again, so every release runs every app built for an earlier compatible one. What a release recorded
+  in [`longbridge/nsh-compat`](https://github.com/longbridge/nsh-compat) shipped is never removed or renamed: modules,
+  exports and their members, `nsh:rt` (what compiled JSX calls: append-only, signatures and semantics kept), globals,
+  props, events and payload keys, style keys and values, Tailwind utilities. A rename or move keeps the old name as a
+  `@deprecated` alias of the same implementation, for good. Types only widen; inputs gain optional members only;
+  behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. The record
+  and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
+  security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
+  change. A new API lands with its test, a case in `tests/compat/cases/<domain>/` whose script checks it
+  (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
   in `nsh-base`'s components (its theme's default tokens are the app's to draw with, as `gpui-base`'s are; the one
   exception is `TextView`'s default reading typography, its colors the theme's tokens, every part overridable by the
@@ -456,8 +453,7 @@ release. Files a crate reads from outside its directory (`include_bytes!`, test 
 
 1. `cargo test --workspace`, plus fmt and clippy as listed above (including the Catalyst target, the macOS crates, `cargo xtask clippy-android`, on Linux the Linux crates, on Windows the Windows crates; for changes in `crates/gpui` or to what it uses, its own tests and clippy there).
 2. Changes to the runtime (`nsh-js`), engine or core: run `nsh test --trace` and check item counts and timings. Changes to
-   anything apps use: `cargo test -p nsh-engine --test engine compat::` passes with the fixture apps in `api/apps`
-   untouched, and `api/` records the change (`docs/dev/compatibility.md`).
+   anything apps use: `cargo xtask compat` passes, and `tests/compat/` checks the change (`docs/dev/compatibility.md`).
 3. Changes to the platform layer: launch with `nsh run`, check screenshots and simulate input where needed (the terminal needs the Screen
    Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
    screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.

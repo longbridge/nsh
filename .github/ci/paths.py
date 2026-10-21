@@ -28,7 +28,16 @@ WORKFLOWS = {
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
             "nsh-bundler", "nsh-package", "nsh-base", "nsh-testing",
         ],
-        "files": ["api/**", "examples/counter/**", "examples/gallery/**", "examples/bench/**"],
+        "files": ["examples/counter/**", "examples/gallery/**", "examples/bench/**"],
+    },
+    "compat.yml": {
+        # `nsh build` builds the apps, nsh-compat's checks link the rest.
+        "packages": ["nsh-cli", "nsh-core", "nsh-js", "nsh-base", "nsh-engine"],
+        # The apps it builds and runs.
+        "files": [
+            "tests/compat/**", "examples/counter/**", "examples/desktop/**",
+            "examples/gallery/**", "examples/hopper/**",
+        ],
     },
     "linux.yml": {
         "packages": [
