@@ -320,8 +320,8 @@ export function Chat(props: { autoplay?: string } = {}) {
             borderRadius: 20,
             borderBottomRightRadius: 6,
             borderCurve: "continuous",
+            // A message is read, not pressed: flat, a hairline around it.
             backgroundColor: colors.raised,
-            ...finish.raised,
             borderWidth: 1,
             borderColor: colors.border,
           }}
