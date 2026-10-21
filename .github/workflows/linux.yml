@@ -116,7 +116,7 @@ jobs:
       - name: Run the examples' tests in GTK windows
         run: |
           cargo build -p nsh-cli
-          run() { xvfb-run -a ./target/debug/nsh test "$@" --target linux; }
+          run() { xvfb-run -a ./target/debug/nsh test -v "$@" --target linux; }
           run examples/counter
           for file in form navigation photos; do
             run "examples/gallery/tests/$file.test.tsx"
