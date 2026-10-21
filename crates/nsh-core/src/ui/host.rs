@@ -120,6 +120,12 @@ macro_rules! host_element {
         impl Accessible for $name {}
         impl Interactive for $name {}
 
+        impl super::element::IntoTooltip for $name {
+            fn apply_tooltip(self, node: &mut ElNode) {
+                self.into_element().apply_tooltip(node);
+            }
+        }
+
         // Not every element has props of its own and events.
         #[allow(dead_code)]
         impl $name {
@@ -811,6 +817,36 @@ impl Overlay {
     /// [`super::on_back_press`]).
     pub fn on_cancel<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.listen(EventKind::Cancel, listener.into_listener(), events::unit)
+    }
+
+    /// Makes it a hint (a tooltip): shown once the pointer rested on its
+    /// anchor (its parent without one) for `delay`, until the pointer
+    /// leaves or presses the anchor, on the desktops only; it is placed
+    /// against the anchor and should not take the pointer
+    /// ([`Interactive::pointer_events`] none). [`Self::hint_open`] decides
+    /// instead of the pointer.
+    pub fn hint(self, delay: impl IntoReactive<std::time::Duration>) -> Self {
+        self.bind_prop(delay, |d| Prop::Overlay(OverlayProp::Hint(Some(d))))
+    }
+
+    /// A hint shown (`Some(true)`) or hidden (`Some(false)`) whatever the
+    /// pointer does: its owner follows [`Self::on_hint_show`] /
+    /// [`Self::on_hint_hide`] (a `Tooltip` controlled by the app). `None`:
+    /// the pointer decides.
+    pub fn hint_open(self, open: impl IntoReactive<Option<bool>>) -> Self {
+        self.bind_prop(open, |o| Prop::Overlay(OverlayProp::Open(o)))
+    }
+
+    /// The pointer rested on a hint's anchor for its delay: it asks to
+    /// show (and shows, unless [`Self::hint_open`] decides).
+    pub fn on_hint_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Show, listener.into_listener(), events::unit)
+    }
+
+    /// The pointer left or pressed a hint's anchor, or the hint left the
+    /// view, after it asked to show: it asks to hide.
+    pub fn on_hint_hide<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
     }
 
     /// The core placed it against its anchor: the side it went on, its

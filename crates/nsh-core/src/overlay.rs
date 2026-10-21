@@ -11,6 +11,14 @@
 //! for, the other one when it does not fit there, kept inside the root
 //! view's safe area. This module has the options and that placement, which
 //! has no state.
+//!
+//! A hint overlay (a tooltip, [`OverlayConfig::hint`]) is shown by the
+//! core itself: on the desktops, once the pointer rested on its anchor (its
+//! parent without one) for the hint's delay, until the pointer leaves the
+//! anchor or presses it, as GPUI's tooltips are. An element's `tooltip`
+//! ([`TooltipContent`]) is one the core makes.
+
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     geometry::{Bounds, Point, Points, Size, point, rect, size},
@@ -106,6 +114,33 @@ pub struct OverlayConfig {
     pub offset: Points,
     /// The distance it keeps from the edges of the root view's safe area.
     pub margin: Points,
+    /// A hint (a tooltip), shown after the pointer rested on the anchor
+    /// this long: placed against its parent when it has no anchor, shown
+    /// while the pointer stays on the anchor (desktops) or [`Self::open`]
+    /// says, never taking the pointer itself. `None`: shown whenever its
+    /// views around it are.
+    pub hint: Option<Duration>,
+    /// A hint shown (`Some(true)`) or hidden (`Some(false)`) whatever the
+    /// pointer does: its owner decides from what the hint asks for
+    /// (`EventKind::Show` / `EventKind::Dismiss`). `None`: the pointer
+    /// decides.
+    pub open: Option<bool>,
+}
+
+/// The delay of a hint before it shows (500 ms, as the desktops' tooltips).
+pub const HINT_DELAY: Duration = Duration::from_millis(500);
+
+/// What an element's `tooltip` shows, in a hint overlay the core makes
+/// above the element ([`OverlayConfig::hint`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum TooltipContent {
+    /// No tooltip.
+    #[default]
+    None,
+    /// A text, in a minimal bubble drawn with the theme's `popover` tokens.
+    Text(Arc<str>),
+    /// An element (JS's: a node it made), shown as it is.
+    Node(NodeId),
 }
 
 /// Where [`place`] put an overlay.

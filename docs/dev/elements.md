@@ -264,6 +264,27 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape or the Android back button,
   to the top overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
   the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
+- **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
+  JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),
+  its anchor (its parent, the nearest node with a layout, when it has none) listens to `onHoverIn` / `onHoverOut` and
+  touches (`Node::overlay_watched`'s `watch::HINT` bit, mounted with the events JS asked for, hover also while the view
+  is disabled). `onHoverIn` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
+  engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
+  for out of its root view). `onHoverOut`, a touch down whose path holds the anchor, or the hint leaving the view hide
+  it. The overlay hears what the pointer asks for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`), and
+  `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
+  is controlled or not). Touch screens never watch: a hint shows there only when `open` says so. The overlay should
+  not take the pointer (`pointerEvents: "none"`).
+- **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
+  overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
+  placement never moves it), placed on top with a 4 pt gap: a text in a bubble of the theme's tokens
+  (`bg-popover`, `text-popover-foreground`, `border-border`, `rounded-md`, `px-2 py-1`, `text-xs`; NSH's one default
+  look of this kind, all the theme's), or the element JS made (retained by the node, moved into the overlay, detached
+  again when the prop changes). An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
+  made its root one) replaces the core's overlay, with its own placement, delay, look and events
+  (`adopt_hint_tooltips`, each commit before the overlays are shown). Released with the element. It counts for nothing else: text skips overlays, and
+  positional classes (`first:`, `last:`) skip a tooltip's overlay. Rust's element tooltips are an overlay child of the
+  element (`IntoTooltip for AnyElement`), `nsh_base`'s `TooltipElement` the hint overlay itself.
 - **Limits**: one surface (no window of its own); an overlay in a `HeaderItem` or `InputAccessoryView` shows in the
   surface's root view while its anchor is measured in the header's; an anchor in another root view than the overlay's
   is measured in its own. A dialog's native Escape and back handling comes before the overlays inside it.

@@ -87,6 +87,8 @@ pub(crate) fn sample() -> Tokens {
         ("primary.background", 0x171717, 0xfafafa),
         ("primary.active.background", 0x0a0a0a, 0xe5e5e5),
         ("primary.foreground", 0xfafafa, 0x171717),
+        ("popover.background", 0xffffff, 0x0a0a0a),
+        ("popover.foreground", 0x0a0a0a, 0xfafafa),
     ] {
         tokens.set_color(key, AdaptiveColor::rgb(light, dark));
     }

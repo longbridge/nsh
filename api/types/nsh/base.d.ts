@@ -500,6 +500,12 @@ export interface ContextMenuProps extends ComponentHostProps {
   children?: JSX.Element;
   /** It opened or closed (by the trigger, a press outside or on the backdrop, Escape or back, an item chosen), with why: set `open` to follow it. */
   onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+  /** It is shown (a sheet once it came in). */
+  onOpen?: () => void;
+  /** It is gone (a sheet once it went; also when the app closed it). */
+  onClose?: () => void;
+  /** The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). */
+  onCancel?: () => void;
 }
 
 /** A menu about its trigger: the secondary button (a right click, a two-finger click) opens it where the pointer is on the desktops; a finger held on the trigger opens it as a sheet at the bottom of the screen on phones and tablets. Its items are those of `Menu`, and so is how it closes and how it is styled. */
@@ -546,6 +552,12 @@ export interface MenuProps extends ComponentHostProps {
   children?: JSX.Element;
   /** It opened or closed (by the trigger, a press outside or on the backdrop, Escape or back, an item chosen), with why: set `open` to follow it. */
   onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+  /** It is shown (a sheet once it came in). */
+  onOpen?: () => void;
+  /** It is gone (a sheet once it went; also when the app closed it). */
+  onClose?: () => void;
+  /** The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). */
+  onCancel?: () => void;
 }
 
 /** A menu its trigger opens: a popup at the trigger on the desktops, a sheet at the bottom of the screen on phones and tablets (over a backdrop), whose items are `MenuItem`s, `MenuSeparator`s and `Submenu`s (cascading popups on the desktops, the sheet's next items on touch screens). Choosing an item, a press outside, Escape and the Android back button close it. It looks like nothing: style the popup or sheet with `popupClass` / `popupStyle`, the backdrop with `backdropClass` / `backdropStyle`, and the items. */
@@ -600,7 +612,11 @@ export interface PopoverProps extends ComponentHostProps {
   children?: JSX.Element;
   /** It opened or closed (by the trigger, a press outside, Escape or back), with why: set `open` to follow it. */
   onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
-  /** Escape or the Android back button while it is open, whether or not `closeOnEscape` closed it. */
+  /** It is shown. */
+  onOpen?: () => void;
+  /** It is gone (also when the app closed it). */
+  onClose?: () => void;
+  /** The user tried to close it (Escape or back, a press outside), whether or not `closeOnEscape` / `closeOnPressOutside` let it close. */
   onCancel?: () => void;
 }
 
@@ -648,11 +664,15 @@ export interface SheetProps extends ComponentHostProps {
   children?: JSX.Element;
   /** It closed (a press on the backdrop, Escape or back), with why: set `open` to follow it. */
   onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
-  /** Escape or the Android back button while it is open, whether or not `closeOnEscape` closed it. */
+  /** It came in: it is all there. */
+  onOpen?: () => void;
+  /** It went: it is all gone (also when the app closed it). */
+  onClose?: () => void;
+  /** The user tried to close it (Escape or back, a press on the backdrop), whether or not `closeOnEscape` / `closeOnBackdropPress` let it close. */
   onCancel?: () => void;
 }
 
-/** A panel at an edge of the screen (`side`) over a backdrop that covers the rest and takes its presses, on top of everything in its root view; the same on every device. A press on the backdrop, Escape and the Android back button close it. It looks like nothing: style the panel with `popupClass` / `popupStyle` and the backdrop with `backdropClass` / `backdropStyle` (a translucent color). */
+/** A panel at an edge of the screen (`side`) over a backdrop that covers the rest and takes its presses, on top of everything in its root view; the same on every device. It slides in from its edge as its backdrop fades in, and back out as it closes (at once when the user asked for less motion): the backdrop's opacity and the panel's translation are the sheet's, so color the backdrop with its background. A press on the backdrop, Escape and the Android back button close it. It looks like nothing: style the panel with `popupClass` / `popupStyle` and the backdrop with `backdropClass` / `backdropStyle` (a translucent color). */
 export declare const Sheet: ((props: SheetProps) => JSX.Element);
 
 export interface SubmenuProps extends ComponentHostProps {
@@ -733,27 +753,25 @@ export interface TooltipProps extends ComponentHostProps {
   placement?: Placement;
   /** How it lines up with the trigger along that side (default `"center"`). */
   align?: Align;
-  /** The gap between the trigger and the tooltip. */
+  /** The gap between the trigger and the tooltip (default 4). */
   offset?: number;
-  /** The distance it keeps from the edges of the safe area. */
+  /** The distance it keeps from the edges of the safe area (default 4). */
   margin?: number;
-  /** Milliseconds the pointer rests on the trigger before it shows (desktops; default 500). */
+  /** Milliseconds the pointer rests on the trigger before it shows (default 500). */
   delay?: number;
-  /** No tooltip: it neither shows nor opens. */
+  /** No tooltip: it neither shows nor asks to. */
   disabled?: boolean;
-  /** The classes of the popup the content is in. */
-  popupClass?: string | null;
-  /** The inline style of the popup, over its classes. */
-  popupStyle?: StyleProp<ViewStyle>;
-  /** What it says. */
-  content?: JSX.Element;
-  /** The trigger: what it is about. */
+  /** What it shows: the bubble is the tooltip itself, styled with its `class` / `style`. */
   children?: JSX.Element;
-  /** It showed or hid, with why: set `open` to follow it. */
+  /** The pointer rested on the trigger, or left or pressed it (`reason` `"hover"`): set `open` to follow it. */
   onOpenChange?: (open: boolean, reason: OpenChangeReason) => void;
+  /** It is shown. */
+  onOpen?: () => void;
+  /** It is gone (also when the app hid it). */
+  onClose?: () => void;
 }
 
-/** A hint about its children, shown next to them on top of everything: on the desktops while the pointer rests on them (after `delay`), on touch screens while a finger is held on them and a moment after it lifts. It never takes the pointer or presses, so the trigger works as it does without it. It looks like nothing: style the popup with `popupClass` / `popupStyle` and the `content`. */
+/** A hint about an element, given as the element's `tooltip` (`<View tooltip={<Tooltip>…</Tooltip>}>`, Rust `.tooltip(tooltip().child(..))`), as GPUI's `.tooltip(..)`: shown on top of everything next to the element on the desktops while the pointer rests on it (after `delay`), until the pointer leaves or presses it; touch screens show it only when the app opens it (`open`). It never takes the pointer or presses, so the element works as it does without it. It looks like nothing: it is the bubble, styled with its `class` / `style`, and its children are what it says. A text `tooltip` is the short form, in a minimal bubble of the theme's tokens. */
 export declare const Tooltip: ((props: TooltipProps) => JSX.Element);
 
 /** The system's alert dialog (UIAlertController, AlertDialog). */

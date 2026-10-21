@@ -211,6 +211,28 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+<a id="tooltips"></a>
+
+### 工具提示
+
+`tooltip` 为任意元素加上提示：在桌面平台（macOS、Windows、Linux、GPUI 后端和桌面浏览器）上，指针在元素上停留半秒后显示在它上方，指针离开或按下时隐藏。手机和平板不显示。提示从不接收指针或按压，所以元素的行为与没有它时完全一样。
+
+| 属性 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `tooltip` | `.tooltip(..)` | `string \| JSX.Element` | 文字，显示在用主题 `popover` 令牌（`bg-popover`、`text-popover-foreground`、`border-border`，外观由主题决定）绘制的小气泡中；或一个元素，按原样显示（`nsh/base` 的 `Tooltip` 就是工具提示本身）。 |
+
+```rust tabs
+view().on_press(save).tooltip("保存文档").child(text("💾"))
+```
+
+```tsx tabs
+<View onPress={save} tooltip="保存文档">
+  <Text>💾</Text>
+</View>
+```
+
+需要自己的外观、位置、延迟或事件时，把 `nsh/base` 的 [`Tooltip`](tooltip.md) 作为 `tooltip` 传入，与 GPUI 的 `.tooltip(..)` 相同。
+
 ### 上下文菜单
 
 `onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有键盘的菜单键。在这里打开应用自己的菜单；在 TSX 中，[`Menu.popup`](../modules/nsh-desktop.md) 显示系统菜单：

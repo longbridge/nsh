@@ -597,7 +597,7 @@ impl Components {
         components
     }
 
-    fn alloc(&mut self) -> NodeId {
+    pub(super) fn alloc(&mut self) -> NodeId {
         let id = self.next_id;
         self.next_id += 2;
         id
@@ -4137,6 +4137,10 @@ impl<M: TextEngine> Core<M> {
             }
             return false;
         }
+        // Hints follow the pointer on their anchors, whoever else listens.
+        if matches!(kind, EventKind::HoverIn | EventKind::HoverOut) {
+            self.overlay_hover(id, kind);
+        }
         if self.platform_event(id, kind, payload) {
             return true;
         }
@@ -4339,6 +4343,7 @@ impl<M: TextEngine> Core<M> {
                 }));
             }
             Action::ReportViewable(list) => self.report_viewable(list),
+            Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Direction(change) => self.change_direction(change),
             Action::Appearance(appearance) => self.set_appearance(appearance),

@@ -41,7 +41,8 @@ function Trigger(props: { label: string }) {
 /**
  * Overlays: `<Overlay>` shows its children on top of the screen whatever
  * clips them, and `nsh/base`'s popups are built on it: a popover, a
- * tooltip, a sheet (menus have a demo of their own, `Menus.tsx`).
+ * tooltip (and the `tooltip` prop every element has), a sheet (menus have
+ * a demo of their own, `Menus.tsx`).
  */
 export function Overlays() {
   const last = signal("—");
@@ -96,16 +97,35 @@ export function Overlays() {
   }
 
   function Tooltips() {
+    const hovered = signal(false);
+    const pinned = signal(false);
     return (
-      <Card icon="text" title="Tooltip" subtitle={Platform.isDesktop ? "Rest the pointer on the button" : "Hold a finger on the button"}>
-        <Tooltip
-          offset={6}
-          delay={400}
-          popupStyle={{ backgroundColor: colors.text, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
-          content={<Text style={{ fontSize: 12, color: colors.background }}>Saves the document</Text>}
-        >
-          <Button label="Save" variant="secondary" onPress={() => last.set("pressed Save")} />
-        </Tooltip>
+      <Card icon="text" title="Tooltip" subtitle={Platform.isDesktop ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {/* A text: the core's bubble, drawn with the theme's popover tokens. */}
+          <View tooltip="Saves the document">
+            <Button label="Save" variant="secondary" onPress={() => last.set("pressed Save")} />
+          </View>
+          {/* `Tooltip` of `nsh/base` as the tooltip: the bubble is the app's, and it reports. */}
+          <View
+            tooltip={
+              <Tooltip
+                open={pinned() || hovered()}
+                onOpenChange={(open, reason) => {
+                  hovered.set(open);
+                  last.set(`tooltip ${open ? "shown" : "hidden"} (${reason})`);
+                }}
+                placement="bottom"
+                delay={300}
+                style={{ backgroundColor: colors.text, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
+              >
+                <Text style={{ fontSize: 12, color: colors.background }}>Shown while pinned or hovered</Text>
+              </Tooltip>
+            }
+          >
+            <Button label={pinned() ? "Unpin the tooltip" : "Pin the tooltip"} variant="secondary" onPress={() => pinned.set(!pinned())} />
+          </View>
+        </View>
       </Card>
     );
   }

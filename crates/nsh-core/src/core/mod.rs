@@ -438,8 +438,9 @@ struct Node {
     /// A text block: its attachments (inline views and images, in text
     /// order) whose native views are inside its own.
     attached: Vec<NodeId>,
-    /// Listens to touches for an overlay's `onPressOutside`.
-    overlay_watched: bool,
+    /// What the overlays have it listen to ([`overlay::watch`]): touches
+    /// for an overlay's `onPressOutside`, the pointer for a hint's.
+    overlay_watched: u8,
 }
 
 impl Node {
@@ -449,13 +450,18 @@ impl Node {
     /// on it goes on to the nearest enabled listener around it.
     fn mounted_events(&self) -> EventMask {
         let mut events = self.events;
-        if self.overlay_watched {
+        if self.overlay_watched != 0 {
             events.set(EventKind::Touch, true);
         }
         if self.states & crate::tailwind::state::DISABLED != 0 {
             for e in DISABLED_OFF {
                 events.set(e, false);
             }
+        }
+        // A disabled view still shows its hint, as the desktops' do.
+        if self.overlay_watched & overlay::watch::HINT != 0 {
+            events.set(EventKind::HoverIn, true);
+            events.set(EventKind::HoverOut, true);
         }
         events
     }
@@ -524,7 +530,7 @@ impl Node {
             frame: Bounds::UNSET,
             overflow: None,
             attached: Vec::new(),
-            overlay_watched: false,
+            overlay_watched: 0,
             elevation: Points::ZERO,
             dirty: 0,
             queued: false,
@@ -2442,7 +2448,13 @@ impl<M: TextEngine> Core<M> {
                     OverlayProp::Align(v) => c.align = v,
                     OverlayProp::Offset(v) => c.offset = v,
                     OverlayProp::Margin(v) => c.margin = v,
+                    OverlayProp::Hint(v) => c.hint = v,
+                    OverlayProp::Open(v) => c.open = v,
                 });
+                return Ok(());
+            }
+            Prop::Tooltip(content) => {
+                self.set_tooltip(key, content);
                 return Ok(());
             }
             Prop::HeaderSlot(slot) => {
@@ -2885,6 +2897,10 @@ impl<M: TextEngine> Core<M> {
         let key = self.key(id)?;
         if key == self.root {
             return Ok(());
+        }
+        // What the core made for its `tooltip` goes first, out of it.
+        if !self.overlay_state.tooltips.is_empty() {
+            self.tooltip_released(id);
         }
         if self.nodes[key as usize].parent != NO_KEY {
             // Deleting the view also detaches it natively.
@@ -3612,6 +3628,8 @@ impl<M: TextEngine> Core<M> {
                         });
                     }
                 }
+                // Placed in its root view, not in the text.
+                Kind::Overlay => {}
                 // An attachment, laid out by `update_attachments`.
                 _ => {
                     if let Some(l) = child.layout {

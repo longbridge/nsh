@@ -3,7 +3,7 @@ import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Subm
 import { Platform } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, tints } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented } from "../ui";
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
@@ -30,9 +30,16 @@ const surface = () =>
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 
-/** An item under the pointer, and pressed: the accent, so it reads on the popup's gray. */
-const hovered = () => ({ backgroundColor: tints.accent });
-const pressed = () => ({ backgroundColor: isDark() ? "rgba(200,242,109,0.32)" : "rgba(124,170,20,0.28)" });
+/** An item under the pointer, and pressed: the website's current item, a
+ * citrus tint with a hairline of it (`global.css` `.sidebar-item.active`). */
+const hovered = () =>
+  isDark()
+    ? { backgroundColor: "rgba(200,242,109,0.08)", borderColor: "rgba(200,242,109,0.22)" }
+    : { backgroundColor: "rgba(124,170,20,0.10)", borderColor: "rgba(124,170,20,0.26)" };
+const pressed = () =>
+  isDark()
+    ? { backgroundColor: "rgba(200,242,109,0.14)", borderColor: "rgba(200,242,109,0.32)" }
+    : { backgroundColor: "rgba(124,170,20,0.16)", borderColor: "rgba(124,170,20,0.36)" };
 
 /** One row of a menu: a mark (a check, a dot, an icon), the label, a note (a shortcut, a value). */
 function Item(props: {
@@ -54,8 +61,13 @@ function Item(props: {
       hoverStyle={hovered()}
       activeStyle={pressed()}
       disabledStyle={{ opacity: 0.35 }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingHorizontal: 8, borderRadius: 7 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}
     >
+      <Text style={{ flex: 1, fontSize: 14, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
+      <If when={props.shortcut ?? props.note}>
+        <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.shortcut ?? props.note}</Text>
+      </If>
+      {/* The check or the dot at the trailing edge. */}
       <If when={props.mark !== undefined}>
         <View style={{ width: 16, alignItems: "center" }}>
           <If when={props.mark === "check"}>
@@ -65,10 +77,6 @@ function Item(props: {
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }} />
           </If>
         </View>
-      </If>
-      <Text style={{ flex: 1, fontSize: 14, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
-      <If when={props.shortcut ?? props.note}>
-        <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{props.shortcut ?? props.note}</Text>
       </If>
     </MenuItem>
   );
@@ -84,14 +92,14 @@ function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boo
         <View
           hoverStyle={hovered()}
           activeStyle={pressed()}
-          style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, opacity: props.disabled ? 0.35 : 1 }}
+          style={{ flexDirection: "row", alignItems: "center", height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent", opacity: props.disabled ? 0.35 : 1 }}
         >
           <Text style={{ flex: 1, fontSize: 14, color: colors.text }}>{props.label}</Text>
           <Icon name="chevron" size={14} tint={colors.faint} />
         </View>
       }
       back={
-        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7 }}>
+        <View activeStyle={pressed()} style={{ flexDirection: "row", alignItems: "center", gap: 6, height, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: "transparent" }}>
           <Icon name="back" size={14} tint={colors.accent} />
           <Text style={{ fontSize: 14, fontWeight: "600", color: colors.accent }}>{props.label}</Text>
         </View>
@@ -281,7 +289,7 @@ export function Menus() {
                     <Icon name={file().starred ? "star" : "text"} size={16} tint={file().starred ? colors.accent : colors.muted} />
                     <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, color: colors.text }}>{file().name}</Text>
                     <Menu align="end" offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} trigger={
-                      <View accessibilityLabel={`Actions for ${file().name}`} hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingHorizontal: 8, height: 28, justifyContent: "center" }}>
+                      <View accessibilityLabel={`Actions for ${file().name}`} tooltip="More actions" hitSlop={8} activeStyle={{ opacity: 0.5 }} style={{ paddingHorizontal: 8, height: 28, justifyContent: "center" }}>
                         <Text style={{ fontSize: 18, color: colors.muted }}>⋯</Text>
                       </View>
                     }>

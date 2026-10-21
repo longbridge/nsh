@@ -12113,17 +12113,286 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     use StyleValue::Number;
     let mut c = core();
     // A wrapper the root stretches, around an 80 × 30 trigger.
-    add(&mut c, 2, Tag::View, ROOT_ID, &[("paddingTop", Number(50.0))]);
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[("paddingTop", Number(50.0))],
+    );
     add(&mut c, 4, Tag::View, 2, &[]);
-    add(&mut c, 6, Tag::View, 4, &[("width", Number(80.0)), ("height", Number(30.0)), ("alignSelf", StyleValue::Str("flex-start"))]);
+    add(
+        &mut c,
+        6,
+        Tag::View,
+        4,
+        &[
+            ("width", Number(80.0)),
+            ("height", Number(30.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
     add(&mut c, 8, Tag::Overlay, 2, &[]);
-    add(&mut c, 10, Tag::View, 8, &[("width", Number(40.0)), ("height", Number(20.0))]);
-    apply(&mut c, vec![overlay_prop(8, crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(4)))]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(40.0)), ("height", Number(20.0))],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(4)),
+        )],
+    );
     let batch = c.commit().unwrap();
     // Centered below the trigger (0, 50, 80 × 30), not the 320-wide wrapper.
     assert_eq!(frame_of(&batch, 8), Some(rect(20.0, 80.0, 40.0, 20.0)));
     // Against the wrapper itself: centered on its width.
-    apply(&mut c, vec![overlay_prop(8, crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)))]);
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(4)),
+        )],
+    );
     let batch = c.commit().unwrap();
     assert_eq!(frame_of(&batch, 8), Some(rect(140.0, 80.0, 40.0, 20.0)));
+}
+
+/// The texts a batch lays out.
+fn texts_of(batch: &MountBatch) -> Vec<String> {
+    batch
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Text { text, .. } => Some(text.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether the batch mounts `id` listening to `kind`.
+fn mounts_listening(batch: &MountBatch, id: NodeId, kind: EventKind) -> Option<bool> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::Events { id: i, events } if *i == id => Some(events.contains(kind)),
+        _ => None,
+    })
+}
+
+#[test]
+fn tooltips_show_after_the_pointer_rests_and_hide_when_it_leaves_or_presses() {
+    use StyleValue::Number;
+    let clock = crate::time::Clock::manual(std::time::SystemTime::UNIX_EPOCH);
+    let _clock = clock.enter();
+    let mut c = core();
+    c.set_environment(crate::ui::Environment {
+        os: crate::platform::Os::Linux,
+        idiom: crate::platform::Idiom::Desktop,
+        ..crate::ui::Environment::default()
+    });
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginTop", Number(100.0)),
+            ("width", Number(80.0)),
+            ("height", Number(40.0)),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Saves it".into())),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    // The element follows the pointer; the tooltip waits out of the view.
+    assert_eq!(mounts_listening(&batch, 2, EventKind::HoverIn), Some(true));
+    assert!(texts_of(&batch).is_empty(), "{:?}", texts_of(&batch));
+
+    c.component_event(2, EventKind::HoverIn, &EventPayload::None);
+    c.run_component_tasks();
+    assert!(c.commit().is_none());
+    clock.advance_to(crate::time::now() + std::time::Duration::from_millis(499));
+    c.run_component_tasks();
+    assert!(c.commit().is_none());
+    clock.advance_to(crate::time::now() + std::time::Duration::from_millis(1));
+    c.run_component_tasks();
+    let batch = c.commit().unwrap();
+    assert_eq!(texts_of(&batch), ["Saves it"]);
+    // In the root view, above the element.
+    let overlay = inserts(&batch)
+        .into_iter()
+        .find(|&(p, ..)| p == ROOT_ID)
+        .map(|(_, child, _)| child)
+        .expect("the tooltip's overlay in the root view");
+    let frame = frame_of(&batch, overlay).unwrap();
+    assert_eq!(frame.bottom(), px(96.0));
+    // A bubble of the theme's `popover` tokens.
+    let style = batch.items.iter().find_map(|i| match i {
+        MountItem::ViewStyle { id, style } if *id == overlay => Some(style.clone()),
+        _ => None,
+    });
+    assert!(
+        style.is_some_and(|s| s.background_color != Color::default() && s.border_radius.0 > 0.0)
+    );
+
+    // Leaving hides it.
+    c.component_event(2, EventKind::HoverOut, &EventPayload::None);
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay))
+    );
+
+    // A press hides it too, until the pointer comes again.
+    c.component_event(2, EventKind::HoverIn, &EventPayload::None);
+    clock.advance_to(crate::time::now() + std::time::Duration::from_millis(500));
+    c.run_component_tasks();
+    assert!(c.commit().is_some());
+    c.component_event(ROOT_ID, EventKind::Touch, &touch_down(vec![2, ROOT_ID]));
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Remove { id } if *id == overlay))
+    );
+    clock.advance_to(crate::time::now() + std::time::Duration::from_millis(1000));
+    c.run_component_tasks();
+    assert!(c.commit().is_none());
+
+    // No tooltip: the element no longer follows the pointer.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(mounts_listening(&batch, 2, EventKind::HoverIn), Some(false));
+}
+
+#[test]
+fn tooltips_wait_for_nothing_on_touch_screens() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Saves it".into())),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(mounts_listening(&batch, 2, EventKind::HoverIn), None);
+}
+
+#[test]
+fn a_tooltip_element_is_shown_as_it_is() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    add(&mut c, 4, Tag::Text, ROOT_ID, &[]);
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 4,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(4)),
+            },
+            // Shown whatever the pointer does.
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(4)),
+            },
+        ],
+    );
+    c.commit();
+    let key = c.key(4).unwrap();
+    let overlay = c.nodes[key as usize].parent;
+    assert_eq!(c.nodes[overlay as usize].kind, Kind::Overlay);
+    assert_eq!(c.nodes[c.nodes[overlay as usize].parent as usize].id, 2);
+    // A text in place of the element: it leaves (still JS's).
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Hi".into())),
+        }],
+    );
+    c.commit();
+    assert_eq!(c.nodes[c.key(4).unwrap() as usize].parent, NO_KEY);
+    // Released with the element.
+    let made = c.overlay_state.tooltips[&2];
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 2,
+            },
+            Op::Release { id: 2 },
+        ],
+    );
+    c.commit();
+    assert!(c.overlay_state.tooltips.is_empty());
+    assert!(c.key(made.overlay).is_err());
+}
+
+#[test]
+fn a_tooltip_element_that_is_a_hint_overlay_is_the_tooltip_itself() {
+    use StyleValue::Number;
+    let mut c = core();
+    add(&mut c, 2, Tag::View, ROOT_ID, &[("height", Number(40.0))]);
+    // As `nsh-base`'s `Tooltip` makes it: a hint overlay, out of the tree.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Overlay,
+            },
+            overlay_prop(
+                4,
+                crate::OverlayProp::Hint(Some(std::time::Duration::from_millis(300))),
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Tooltip(crate::overlay::TooltipContent::Node(4)),
+            },
+        ],
+    );
+    let wrapper = c.overlay_state.tooltips[&2].overlay;
+    c.commit();
+    let made = c.overlay_state.tooltips[&2];
+    assert_eq!(made.overlay, 4);
+    assert!(c.key(wrapper).is_err(), "the core's own overlay is gone");
+    let key = c.key(4).unwrap();
+    assert_eq!(c.nodes[c.nodes[key as usize].parent as usize].id, 2);
+    // Another tooltip: it leaves the element, still JS's.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Tooltip(crate::overlay::TooltipContent::Text("Hi".into())),
+        }],
+    );
+    c.commit();
+    assert_eq!(c.nodes[c.key(4).unwrap() as usize].parent, NO_KEY);
+    assert_ne!(c.overlay_state.tooltips[&2].overlay, 4);
 }

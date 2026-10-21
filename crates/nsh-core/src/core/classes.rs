@@ -695,7 +695,9 @@ impl<M: TextEngine> Core<M> {
             .children
             .iter()
             .copied()
-            .filter(|&c| self.nodes[c as usize].kind != Kind::RawText)
+            .filter(|&c| {
+                self.nodes[c as usize].kind != Kind::RawText && !self.is_tooltip_overlay(c)
+            })
             .collect();
         let i = siblings.iter().position(|&c| c == key).unwrap_or(0);
         let n = siblings.len();

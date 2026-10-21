@@ -111,9 +111,9 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
 }
 
 /** What JS sets on a Rust component's host itself: the app's classes
- * (appended to the component's own), its inline and state styles, its test id, layout
- * events and the ref (`ref.command(name, args)`). */
-export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "onLayout" | "ref">;
+ * (appended to the component's own), its inline and state styles, its test id, its
+ * tooltip, layout events and the ref (`ref.command(name, args)`). */
+export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
 export interface Insets {
   top: number;
@@ -574,6 +574,8 @@ export interface HostProps {
   accessibilityActions?: { name: string; label?: string }[];
   /** An identifier for UI tests. */
   testID?: string;
+  /** A hint about the view, shown above it on the desktops while the pointer rests on it (after half a second) until the pointer leaves or presses it, never on touch screens; it never takes the pointer. A string shows in a minimal bubble drawn with the theme's `popover` tokens; an element is shown as it is (style it, or use `Tooltip` of `nsh/base` for its placement, delay and events). */
+  tooltip?: JSX.Element;
   /** Whether a view that takes presses is a stop of the keyboard focus (Tab, on the platforms that move it between pressables); `false` leaves it to the pointer (a backdrop that closes a popover). Default true. */
   focusable?: boolean;
   /** Two-finger pinches drive `scale` natively. */

@@ -3,9 +3,11 @@
 // trigger (controlled and not; its side, alignment, gap and margin; Escape
 // heard without closing), a `Menu` presented as a sheet whose `Submenu`
 // replaces its items, its `MenuItem`s (disabled, kept open, labelled) and a
-// `MenuSeparator`, a `ContextMenu` a held finger opens, a `Tooltip` shown
-// while a finger is held, a `Sheet` at an edge over a backdrop; every part
-// styled by the app, every change reported with its reason. Its script
+// `MenuSeparator`, a `ContextMenu` a held finger opens, `Tooltip`s given as
+// elements' `tooltip` the app opens (a touch screen shows none of its own, nor an
+// element's `tooltip`), a `Sheet` at an edge over a backdrop; every part
+// styled by the app, every change reported with its reason, their
+// lifecycles (`onOpen`, `onClose`) and Escape or back heard (`onCancel`). Its script
 // checks each.
 import { Text, View, signal } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, Popover, Sheet, Submenu, Tooltip } from "nsh/base";
@@ -18,6 +20,9 @@ function App() {
   const ctx = signal(false);
   const menu = signal(false);
   const tip = signal(false);
+  const tipOn = signal(false);
+  const life = signal("Life: none");
+  const heard = signal("Heard: none");
   return (
     <View style={{ flex: 1, paddingTop: 60, paddingLeft: 20, paddingRight: 20, gap: 8 }}>
       <Text>{log()}</Text>
@@ -27,6 +32,8 @@ function App() {
           pop.set(open);
           log.set(`Log: popover ${open} ${reason}`);
         }}
+        onOpen={() => life.set("Life: popover open")}
+        onClose={() => life.set("Life: popover closed")}
         onCancel={() => log.set("Log: popover cancel")}
         closeOnEscape={false}
         placement="top"
@@ -48,6 +55,9 @@ function App() {
           menu.set(open);
           log.set(`Log: menu ${open} ${reason}`);
         }}
+        onOpen={() => life.set("Life: menu open")}
+        onClose={() => life.set("Life: menu closed")}
+        onCancel={() => heard.set("Heard: menu cancel")}
         popupClass="bg-[#00ff00]"
         popupStyle={{ padding: 4 }}
         backdropClass="bg-[#000000]"
@@ -77,6 +87,9 @@ function App() {
           ctx.set(open);
           log.set(`Log: context ${open} ${reason}`);
         }}
+        onOpen={() => life.set("Life: context open")}
+        onClose={() => life.set("Life: context closed")}
+        onCancel={() => heard.set("Heard: context cancel")}
         popupClass="bg-[#ff0000]"
         popupStyle={{ padding: 2 }}
         backdropClass="bg-[#0000ff]"
@@ -87,24 +100,35 @@ function App() {
       </ContextMenu>
       <View onPress={() => ctxOff.set(!ctxOff())}><Text>ToggleContext</Text></View>
       <View onPress={() => ctx.set(true)}><Text>ShowContext</Text></View>
-      <Tooltip
-        placement="bottom"
-        align="start"
-        offset={4}
-        margin={30}
-        popupClass="bg-[#333333]"
-        popupStyle={{ width: 60 }}
-        onOpenChange={(open, reason) => log.set(`Log: tooltip ${open} ${reason}`)}
-        content={<Text>TipText</Text>}
+      <View
+        onPress={() => tipOn.set(!tipOn())}
+        style={{ height: 30 }}
+        tooltip={
+          <Tooltip
+            open={tipOn()}
+            placement="bottom"
+            align="start"
+            offset={4}
+            margin={30}
+            class="bg-[#333333]"
+            style={{ width: 60 }}
+            onOpenChange={(open, reason) => log.set(`Log: tooltip ${open} ${reason}`)}
+          >
+            <Text>TipText</Text>
+          </Tooltip>
+        }
       >
-        <View style={{ height: 30 }}><Text>TipTrigger</Text></View>
-      </Tooltip>
-      <Tooltip disabled content={<Text>NeverTip</Text>}>
-        <View style={{ height: 30 }}><Text>OffTrigger</Text></View>
-      </Tooltip>
-      <Tooltip defaultOpen content={<Text>ShownTip</Text>}>
-        <View style={{ height: 30 }}><Text>ShownTrigger</Text></View>
-      </Tooltip>
+        <Text>TipTrigger</Text>
+      </View>
+      <View style={{ height: 30 }} tooltip={<Tooltip disabled defaultOpen><Text>NeverTip</Text></Tooltip>}>
+        <Text>OffTrigger</Text>
+      </View>
+      <View style={{ height: 30 }} tooltip={<Tooltip defaultOpen><Text>ShownTip</Text></Tooltip>}>
+        <Text>ShownTrigger</Text>
+      </View>
+      <View style={{ height: 30 }} tooltip="PropTip">
+        <Text>PropTrigger</Text>
+      </View>
       <View onPress={() => sheet.set(true)}><Text>OpenSheet</Text></View>
       <Sheet
         open={sheet()}
@@ -112,6 +136,8 @@ function App() {
           sheet.set(open);
           log.set(`Log: sheet ${open} ${reason}`);
         }}
+        onOpen={() => life.set("Life: sheet open")}
+        onClose={() => life.set("Life: sheet closed")}
         onCancel={() => log.set("Log: sheet cancel")}
         side="top"
         closeOnEscape={false}
@@ -130,9 +156,14 @@ function App() {
         <MenuItem><Text>OpenAtStart</Text></MenuItem>
       </Menu>
       <View onPress={() => tip.set(true)}><Text>ShowTip</Text></View>
-      <Tooltip open={tip()} content={<Text>AskedTip</Text>}>
-        <View style={{ height: 30 }}><Text>AskedTrigger</Text></View>
-      </Tooltip>
+      <View style={{ height: 30 }} tooltip={<Tooltip open={tip()}><Text>AskedTip</Text></Tooltip>}>
+        <Text>AskedTrigger</Text>
+      </View>
+      {/* Out of the column's flow: the lifecycle and what was heard. */}
+      <View style={{ position: "absolute", left: 0, bottom: 0 }}>
+        <Text>{life()}</Text>
+        <Text>{heard()}</Text>
+      </View>
     </View>
   );
 }

@@ -560,6 +560,7 @@ expect OwnBody
 expect ShownTip
 expect StuckSheet
 expect OpenAtStart
+expect Life: popover open
 # The popover: above its trigger (20, 85, 350 × 30), 6 points away, its end
 # at the trigger's but kept 30 points from the edge; 80 wide; the app's
 # class.
@@ -573,6 +574,7 @@ expect PopoverBody
 tap text:PopTrigger
 expect Log: popover false triggerPress
 absent PopoverBody
+expect Life: popover closed
 covers [nsh/base] Popover
 covers [props] Popover.open
 covers [props] Popover.defaultOpen
@@ -589,6 +591,7 @@ covers [events] Popover.onCancel
 tap text:MenuTrigger
 expect NewItem
 expect Log: menu true triggerPress
+expect Life: menu open
 style parent:parent:text:NewItem backgroundColor #00ff00ff
 frame parent:text:NewItem 4 4 382 17
 style below:parent:parent:text:NewItem backgroundColor #000000ff
@@ -615,9 +618,14 @@ expect NewItem
 tap text:NewItem
 expect Log: menu false select
 absent NewItem
-# The app opens it.
+expect Life: menu closed
+# The app opens it; Escape or back is heard, and closes it.
 tap text:ShowMenu
 expect NewItem
+event text:NewItem onCancel
+expect Heard: menu cancel
+expect Log: menu false cancel
+absent NewItem
 covers [nsh/base] Menu
 covers [nsh/base] MenuItem
 covers [nsh/base] MenuSeparator
@@ -640,6 +648,7 @@ wait 600
 touch end
 expect CopyItem
 expect Log: context true longPress
+expect Life: context open
 style parent:parent:text:CopyItem backgroundColor #ff0000ff
 frame parent:text:CopyItem 2 2 386 17
 style below:parent:parent:text:CopyItem backgroundColor #0000ffff
@@ -647,6 +656,7 @@ style below:parent:parent:text:CopyItem opacity 0.25
 tap text:CopyItem
 expect Log: context false select
 absent CopyItem
+expect Life: context closed
 # Disabled, a held finger does nothing; the app still opens it.
 tap text:ToggleContext
 touch start text:HoldArea 5 5
@@ -655,6 +665,10 @@ touch end
 absent CopyItem
 tap text:ShowContext
 expect CopyItem
+event text:CopyItem onCancel
+expect Heard: context cancel
+expect Log: context false cancel
+absent CopyItem
 covers [nsh/base] ContextMenu
 covers [props] ContextMenu.open
 covers [props] ContextMenu.popupClass
@@ -663,40 +677,49 @@ covers [props] ContextMenu.backdropClass
 covers [props] ContextMenu.backdropStyle
 covers [props] ContextMenu.trigger
 covers [events] ContextMenu.onOpenChange
-# The tooltip: shown while a finger is held on its trigger (20, 287,
-# 350 × 30): below it, 4 points away, from its start but 30 points from
-# the edge; 60 wide.
+# The tooltips: a touch screen shows none of its own, nor an element's
+# `tooltip`; one the app opens shows below its trigger (20, 287, 350 × 30),
+# 4 points away, from its start but 30 points from the edge; 60 wide; the
+# app's class.
 touch start text:TipTrigger 5 5
-wait 600
+wait 1000
+touch end
+absent PropTip
+tap text:TipTrigger
 expect TipText
-expect Log: tooltip true longPress
-frame parent:parent:text:TipText 30 321 60 17
-style parent:parent:text:TipText backgroundColor #333333ff
-touch end
-wait 2000
+frame parent:text:TipText 30 321 60 17
+style parent:text:TipText backgroundColor #333333ff
+tap text:TipTrigger
 absent TipText
-expect Log: tooltip false longPress
-# Disabled: never shown.
-touch start text:OffTrigger 5 5
-wait 600
+touch start text:PropTrigger 5 5
+wait 1000
 touch end
+absent PropTip
+# Disabled: never shown.
 absent NeverTip
 tap text:ShowTip
 expect AskedTip
 covers [nsh/base] Tooltip
+covers [events] Popover.onOpen
+covers [events] Popover.onClose
+covers [events] Menu.onOpen
+covers [events] Menu.onClose
+covers [events] Menu.onCancel
+covers [events] ContextMenu.onOpen
+covers [events] ContextMenu.onClose
+covers [events] ContextMenu.onCancel
+covers [events] Sheet.onOpen
+covers [events] Sheet.onClose
 covers [props] Tooltip.open
 covers [props] Tooltip.defaultOpen
 covers [props] Tooltip.placement
 covers [props] Tooltip.align
 covers [props] Tooltip.offset
 covers [props] Tooltip.margin
-covers [props] Tooltip.popupClass
-covers [props] Tooltip.popupStyle
-covers [props] Tooltip.content
-covers [events] Tooltip.onOpenChange
 # The sheet: at the top, 50 tall, over a backdrop.
 tap text:OpenSheet
 expect SheetBody
+expect Life: sheet open
 frame parent:text:SheetBody 0 0 390 50
 style parent:text:SheetBody backgroundColor #abcdefff
 style below:parent:text:SheetBody backgroundColor #111111ff
@@ -707,6 +730,7 @@ expect SheetBody
 tap below:parent:text:SheetBody
 expect Log: sheet false backdropPress
 absent SheetBody
+expect Life: sheet closed
 # `closeOnBackdropPress={false}`: its backdrop keeps it.
 tap below:parent:text:StuckSheet
 expect StuckSheet

@@ -17,17 +17,72 @@
 //! and Escape / the back button (`onCancel`, to the top overlay listening:
 //! a binding of the root's table and the root's back listener while one
 //! is shown). Closing is the app's (`nsh-base`'s components).
+//!
+//! A hint overlay ([`OverlayConfig::hint`]) is shown by the core: its
+//! anchor (its parent without one) listens to the pointer coming and going
+//! while the overlay is in the view on a desktop; the pointer resting on it
+//! for the hint's delay shows the hint (a task of the components' executor
+//! wakes the engine then), the pointer leaving or pressing it hides it, as
+//! GPUI's tooltips do. The overlay hears what it asks for (`Show`,
+//! `Dismiss`), so a component owning it (`nsh-base`'s `Tooltip`) can
+//! decide instead ([`OverlayConfig::open`]). An element's `tooltip` is a
+//! hint overlay the core makes inside the element ([`Core::set_tooltip`]).
 
+use rustc_hash::FxHashMap;
 use taffy::NodeId as LayoutId;
 
 use super::{Core, Key, Kind, NO_KEY, definite};
 use crate::{
-    EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID, TextEngine, TouchEvent, TouchPhase,
-    geometry::{Bounds, Point, Points, Size, rect},
+    EventKind, EventPayload, NodeId, PayloadValue, Prop, ROOT_ID, Tag, TextEngine, TouchEvent,
+    TouchPhase,
+    geometry::{Bounds, Point, Points, Size, px, rect},
     keymap::{KeyBinding, Keystroke, When},
     mount::MountItem,
-    overlay::{OverlayAnchor, OverlayConfig, Placed, inset, place},
+    ops::{Op, OverlayProp},
+    overlay::{
+        HINT_DELAY, OverlayAnchor, OverlayConfig, Placed, Placement, TooltipContent, inset, place,
+    },
+    props::PointerEvents,
+    ui::task::{Action, Task, act_after},
 };
+
+/// What the overlays have a node listen to (`Node::overlay_watched`).
+pub(super) mod watch {
+    /// Touches, for an overlay's `onPressOutside`.
+    pub(in crate::core) const PRESS: u8 = 1;
+    /// The pointer coming and going and touches, for a hint.
+    pub(in crate::core) const HINT: u8 = 2;
+}
+
+/// The classes of the bubble of an element's text `tooltip`: as little as
+/// shows it, drawn with the theme's `popover` tokens (the app's to change).
+const TOOLTIP_CLASS: &str = "rounded-md border border-border bg-popover px-2 py-1";
+/// The classes of its text.
+const TOOLTIP_TEXT_CLASS: &str = "text-xs text-popover-foreground";
+/// The gap between an element and its `tooltip`, and the distance the
+/// tooltip keeps from the safe area's edges.
+const TOOLTIP_GAP: f32 = 4.0;
+
+/// A hint's wait for the pointer to rest (dropping it cancels it).
+pub(super) struct HintTimer(#[allow(dead_code)] Task<()>);
+
+impl std::fmt::Debug for HintTimer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HintTimer")
+    }
+}
+
+/// The nodes the core made for an element's `tooltip`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CoreTooltip {
+    /// The hint overlay, a child of the element.
+    pub(super) overlay: NodeId,
+    /// The text block of a text tooltip and its raw text, inside the
+    /// overlay.
+    text: Option<(NodeId, NodeId)>,
+    /// The element shown as the tooltip, inside the overlay (JS's).
+    content: Option<NodeId>,
+}
 
 /// The binding id of Escape while an overlay listens to `onCancel`: above
 /// any JS gives and any view's ([`crate::ui::keys::FIRST_ID`] counts up).
@@ -46,6 +101,11 @@ pub(super) struct OverlayState {
     pub(super) host: Option<NodeId>,
     /// Where it was placed last, as `onPosition` reported it.
     pub(super) placed: Option<(Placed, Bounds<Points>)>,
+    /// A hint: the pointer rested on its anchor, and has not left or
+    /// pressed it since.
+    pub(super) hinted: bool,
+    /// A hint: the pointer is on its anchor, resting until it shows.
+    pub(super) waiting: Option<HintTimer>,
 }
 
 /// What the overlays add to the native side: the nodes listening to
@@ -59,6 +119,11 @@ pub(super) struct Overlays {
     /// A shown overlay listens to `onCancel`: Escape is bound and the back
     /// button listened to.
     pub(super) cancel: bool,
+    /// The anchors of the hints in the view listening to the pointer
+    /// (desktops), checked by id.
+    pub(super) hinting: Vec<(Key, NodeId)>,
+    /// The elements with a `tooltip`, by id: the nodes made for it.
+    pub(super) tooltips: FxHashMap<NodeId, CoreTooltip>,
 }
 
 impl<M: TextEngine> Core<M> {
@@ -74,6 +139,8 @@ impl<M: TextEngine> Core<M> {
                 wrapper,
                 host: None,
                 placed: None,
+                hinted: false,
+                waiting: None,
             }));
         }
         self.overlays.push(key);
@@ -84,6 +151,26 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn overlay_released(&mut self, key: Key, wrapper: LayoutId) {
         self.overlays.retain(|&k| k != key);
         let _ = self.layout.remove(wrapper);
+    }
+
+    /// Node `id` is released: the nodes made for its `tooltip` go with it.
+    pub(super) fn tooltip_released(&mut self, id: NodeId) {
+        if let Some(made) = self.overlay_state.tooltips.remove(&id) {
+            self.release_tooltip(made);
+        }
+    }
+
+    /// Whether `key` is the overlay of an element's `tooltip`: not one of
+    /// its children for its classes (`first:`, `last:`, ...).
+    pub(super) fn is_tooltip_overlay(&self, key: Key) -> bool {
+        let node = &self.nodes[key as usize];
+        node.kind == Kind::Overlay
+            && node.parent != NO_KEY
+            && self
+                .overlay_state
+                .tooltips
+                .get(&self.nodes[node.parent as usize].id)
+                .is_some_and(|t| t.overlay == node.id)
     }
 
     pub(super) fn overlay(&self, key: Key) -> Option<&OverlayState> {
@@ -178,13 +265,20 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Shows the overlays whose views around them are shown, in their root
-    /// views, and hides the others; then what they listen to (once per
-    /// commit, before the dirty views are flushed).
+    /// views, and hides the others (and the hints the pointer has not
+    /// asked for); then what they listen to (once per commit, before the
+    /// dirty views are flushed).
     pub(super) fn sync_overlays(&mut self) {
-        if self.overlays.is_empty() && self.overlay_state.watched.is_empty() {
+        if self.overlays.is_empty()
+            && self.overlay_state.watched.is_empty()
+            && self.overlay_state.hinting.is_empty()
+        {
             return;
         }
         // The overlays around one first: theirs say where it goes.
+        if !self.overlay_state.tooltips.is_empty() {
+            self.adopt_hint_tooltips();
+        }
         let mut order: Vec<(u32, Key)> = self
             .overlays
             .iter()
@@ -192,13 +286,27 @@ impl<M: TextEngine> Core<M> {
             .collect();
         order.sort_by_key(|&(depth, _)| depth);
         let mut opened = Vec::new();
+        // The hints in the view, whose anchors listen to the pointer.
+        let mut hints = Vec::new();
         for (_, key) in order {
-            let target = self.overlay_host(key);
-            let target_id = target.map(|h| self.nodes[h as usize].id);
+            let mut target = self.overlay_host(key);
             let Some(state) = self.overlay(key) else {
                 continue;
             };
-            let current = state.host;
+            if state.config.hint.is_some() {
+                if target.is_some() {
+                    hints.push(key);
+                } else {
+                    // Out of the view: the pointer starts again.
+                    self.unhint(key);
+                }
+                let state = self.overlay(key).expect("overlay");
+                if !state.config.open.unwrap_or(state.hinted) {
+                    target = None;
+                }
+            }
+            let target_id = target.map(|h| self.nodes[h as usize].id);
+            let current = self.overlay(key).expect("overlay").host;
             if current == target_id {
                 continue;
             }
@@ -232,11 +340,12 @@ impl<M: TextEngine> Core<M> {
             self.overlays.retain(|k| !opened.contains(k));
             self.overlays.extend(opened);
         }
-        self.sync_overlay_listeners();
+        self.sync_overlay_listeners(&hints);
     }
 
-    /// The touches and keys the shown overlays need.
-    fn sync_overlay_listeners(&mut self) {
+    /// The touches and keys the shown overlays need, and the pointer the
+    /// anchors of `hints` (in the view) follow.
+    fn sync_overlay_listeners(&mut self, hints: &[Key]) {
         let mut watched: Vec<(Key, NodeId)> = Vec::new();
         let mut cancel = false;
         let watching = self.overlays.iter().any(|&k| {
@@ -269,26 +378,417 @@ impl<M: TextEngine> Core<M> {
         watched.sort_unstable();
         watched.dedup();
         let old = std::mem::take(&mut self.overlay_state.watched);
-        for &(k, id) in &old {
-            if !watched.contains(&(k, id)) && self.nodes.get(k as usize).is_some_and(|n| n.id == id)
-            {
-                self.nodes[k as usize].overlay_watched = false;
-                self.mark(k, super::dirty::EVENTS);
-            }
-        }
-        for &(k, id) in &watched {
-            if !old.contains(&(k, id)) {
-                self.nodes[k as usize].overlay_watched = true;
-                self.mark(k, super::dirty::EVENTS);
-            }
-        }
+        self.rewatch(&old, &watched, watch::PRESS);
         self.overlay_state.watched = watched;
+        // Hints only follow a pointer (the desktops).
+        let mut hinting: Vec<(Key, NodeId)> = Vec::new();
+        if self
+            .components
+            .environment
+            .idiom
+            .desktop_on(self.components.environment.os)
+        {
+            for &key in hints {
+                if let Some(k) = self.hint_anchor(key) {
+                    hinting.push((k, self.nodes[k as usize].id));
+                }
+            }
+            hinting.sort_unstable();
+            hinting.dedup();
+        }
+        let old = std::mem::take(&mut self.overlay_state.hinting);
+        self.rewatch(&old, &hinting, watch::HINT);
+        self.overlay_state.hinting = hinting;
         if cancel != self.overlay_state.cancel {
             self.overlay_state.cancel = cancel;
             // The root's table and back listener are made again.
             self.components.executor.keys.borrow_mut().changed = true;
             self.components.executor.back.borrow_mut().changed = true;
         }
+    }
+
+    /// The nodes of `old` not in `new` stop listening for `bit`, those of
+    /// `new` not in `old` start.
+    fn rewatch(&mut self, old: &[(Key, NodeId)], new: &[(Key, NodeId)], bit: u8) {
+        for &(k, id) in old {
+            if !new.contains(&(k, id)) && self.nodes.get(k as usize).is_some_and(|n| n.id == id) {
+                self.nodes[k as usize].overlay_watched &= !bit;
+                self.mark(k, super::dirty::EVENTS);
+            }
+        }
+        for &(k, id) in new {
+            if !old.contains(&(k, id)) {
+                self.nodes[k as usize].overlay_watched |= bit;
+                self.mark(k, super::dirty::EVENTS);
+            }
+        }
+    }
+
+    /// What hint overlay `key` is placed against and whose pointer it
+    /// follows: its anchor, else the nearest view around it with a frame
+    /// (its parent, unless that is a span of text).
+    fn hint_anchor(&self, key: Key) -> Option<Key> {
+        match self.overlay(key)?.config.anchor {
+            OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => self.key(id).ok(),
+            OverlayAnchor::Point(_) => None,
+            OverlayAnchor::None => {
+                let mut k = self.nodes[key as usize].parent;
+                while k != NO_KEY {
+                    let n = &self.nodes[k as usize];
+                    if n.layout.is_some() {
+                        return Some(k);
+                    }
+                    k = n.parent;
+                }
+                None
+            }
+        }
+    }
+
+    /// What overlay `key` is placed against: a hint without an anchor
+    /// against the view it follows ([`Self::hint_anchor`]).
+    fn resolved_anchor(&self, key: Key) -> OverlayAnchor {
+        let Some(state) = self.overlay(key) else {
+            return OverlayAnchor::None;
+        };
+        match state.config.anchor {
+            OverlayAnchor::None if state.config.hint.is_some() => {
+                self.hint_anchor(key).map_or(OverlayAnchor::None, |k| {
+                    OverlayAnchor::Node(self.nodes[k as usize].id)
+                })
+            }
+            anchor => anchor,
+        }
+    }
+
+    /// The pointer came over node `id` or left it (`kind`): the hints it
+    /// anchors wait for it to rest, or hide.
+    pub(super) fn overlay_hover(&mut self, id: NodeId, kind: EventKind) {
+        let Ok(anchor) = self.key(id) else {
+            return;
+        };
+        if self.nodes[anchor as usize].overlay_watched & watch::HINT == 0 {
+            return;
+        }
+        let hints: Vec<Key> = self
+            .overlays
+            .iter()
+            .copied()
+            .filter(|&k| {
+                self.overlay(k).is_some_and(|s| s.config.hint.is_some())
+                    && self.hint_anchor(k) == Some(anchor)
+            })
+            .collect();
+        for key in hints {
+            match kind {
+                EventKind::HoverIn => self.hint_wait(key),
+                _ => self.unhint(key),
+            }
+        }
+    }
+
+    /// The pointer is on hint `key`'s anchor: it shows once the pointer
+    /// rested there for its delay ([`Self::hint_due`]).
+    fn hint_wait(&mut self, key: Key) {
+        let executor = self.components.executor.clone();
+        let id = self.nodes[key as usize].id;
+        let Some(state) = self.overlay_mut(key) else {
+            return;
+        };
+        if state.hinted || state.waiting.is_some() {
+            return;
+        }
+        let delay = state.config.hint.unwrap_or(HINT_DELAY);
+        state.waiting = Some(HintTimer(act_after(&executor, id, delay, Action::Hint(id))));
+    }
+
+    /// Hint overlay `id`'s delay is over with the pointer on its anchor: it
+    /// shows (in the commit).
+    pub(super) fn hint_due(&mut self, id: NodeId) {
+        let Ok(key) = self.key(id) else {
+            return;
+        };
+        let Some(state) = self.overlay_mut(key) else {
+            return;
+        };
+        if state.waiting.take().is_none() || state.config.hint.is_none() {
+            return;
+        }
+        state.hinted = true;
+        self.hint_changed(key, true);
+    }
+
+    /// Hint `key` stops waiting, and hides when the pointer had it shown.
+    fn unhint(&mut self, key: Key) {
+        let Some(state) = self.overlay_mut(key) else {
+            return;
+        };
+        state.waiting = None;
+        if std::mem::take(&mut state.hinted) {
+            self.hint_changed(key, false);
+        }
+    }
+
+    /// Tells hint `key` what the pointer asks for: `Show` or `Dismiss`.
+    fn hint_changed(&mut self, key: Key, shown: bool) {
+        let node = &self.nodes[key as usize];
+        let kind = if shown {
+            EventKind::Show
+        } else {
+            EventKind::Dismiss
+        };
+        if node.events.contains(kind) {
+            self.events
+                .push(crate::ui::JsEvent::Event(node.id, kind, EventPayload::None));
+        }
+    }
+
+    /// A finger or button went down: the hints whose anchors it is on hide
+    /// (and wait for the pointer to come again).
+    fn hint_touches(&mut self, touch: &TouchEvent) {
+        let hints: Vec<Key> = self
+            .overlays
+            .iter()
+            .copied()
+            .filter(|&k| {
+                self.overlay(k)
+                    .is_some_and(|s| s.config.hint.is_some() && (s.hinted || s.waiting.is_some()))
+            })
+            .collect();
+        for key in hints {
+            let Some(anchor) = self.hint_anchor(key).map(|k| self.nodes[k as usize].id) else {
+                continue;
+            };
+            let pressed = touch
+                .points
+                .iter()
+                .any(|p| p.changed && p.path.contains(&anchor));
+            if pressed {
+                self.unhint(key);
+            }
+        }
+    }
+
+    /// Sets the `tooltip` of node `key`: a hint overlay the core makes
+    /// inside it, with a text in a bubble or the element JS made.
+    pub(super) fn set_tooltip(&mut self, key: Key, content: TooltipContent) {
+        let id = self.nodes[key as usize].id;
+        let mut made = self.overlay_state.tooltips.get(&id).copied();
+        // The element was the hint overlay itself: anything else starts
+        // again from a hint overlay of the core's.
+        if let Some(adopted) = made.filter(|m| m.content == Some(m.overlay)) {
+            if content == TooltipContent::Node(adopted.overlay) {
+                return;
+            }
+            self.overlay_state.tooltips.remove(&id);
+            self.release_tooltip(adopted);
+            made = None;
+        }
+        let made = match (content, made) {
+            (TooltipContent::None, made) => {
+                if let Some(made) = made {
+                    self.overlay_state.tooltips.remove(&id);
+                    self.release_tooltip(made);
+                }
+                return;
+            }
+            (TooltipContent::Text(text), made) => {
+                let mut made = match made {
+                    Some(made) => made,
+                    None => match self.make_tooltip(id) {
+                        Some(made) => made,
+                        None => return,
+                    },
+                };
+                if let Some(content) = made.content.take() {
+                    self.detach_tooltip_content(content);
+                }
+                match made.text {
+                    Some((_, raw)) => {
+                        let _ = self.apply_op(Op::SetText {
+                            id: raw,
+                            text: text.to_string(),
+                        });
+                    }
+                    None => {
+                        let block = self.components.alloc();
+                        let raw = self.components.alloc();
+                        let ops = [
+                            Op::Create {
+                                id: block,
+                                tag: Tag::Text,
+                            },
+                            Op::SetProp {
+                                id: block,
+                                prop: Prop::Class(TOOLTIP_TEXT_CLASS.into()),
+                            },
+                            Op::CreateText {
+                                id: raw,
+                                text: text.to_string(),
+                            },
+                            Op::Insert {
+                                parent: block,
+                                child: raw,
+                                before: None,
+                            },
+                            Op::SetProp {
+                                id: made.overlay,
+                                prop: Prop::Class(TOOLTIP_CLASS.into()),
+                            },
+                            Op::Insert {
+                                parent: made.overlay,
+                                child: block,
+                                before: None,
+                            },
+                        ];
+                        for op in ops {
+                            if let Err(e) = self.apply_op(op) {
+                                log::error!(target: "js", "a tooltip is not made: {e:?}");
+                            }
+                        }
+                        made.text = Some((block, raw));
+                    }
+                }
+                made
+            }
+            (TooltipContent::Node(node), made) => {
+                let mut made = match made {
+                    Some(made) => made,
+                    None => match self.make_tooltip(id) {
+                        Some(made) => made,
+                        None => return,
+                    },
+                };
+                if made.content == Some(node) {
+                    return;
+                }
+                if let Some((block, raw)) = made.text.take() {
+                    let _ = self.release(raw);
+                    let _ = self.release(block);
+                    let _ = self.apply_op(Op::SetProp {
+                        id: made.overlay,
+                        prop: Prop::Class("".into()),
+                    });
+                }
+                if let Some(old) = made.content.take() {
+                    self.detach_tooltip_content(old);
+                }
+                match self.insert(made.overlay, node, None) {
+                    Ok(()) => made.content = Some(node),
+                    Err(e) => log::error!(target: "js", "a tooltip's element is not shown: {e:?}"),
+                }
+                made
+            }
+        };
+        self.overlay_state.tooltips.insert(id, made);
+    }
+
+    /// A hint overlay inside element `id`, above it, for its `tooltip`.
+    fn make_tooltip(&mut self, id: NodeId) -> Option<CoreTooltip> {
+        let overlay = self.components.alloc();
+        let gap = px(TOOLTIP_GAP);
+        let ops = [
+            Op::Create {
+                id: overlay,
+                tag: Tag::Overlay,
+            },
+            // Never in the way of the pointer: the element works as without.
+            Op::SetProp {
+                id: overlay,
+                prop: Prop::PointerEvents(PointerEvents::None),
+            },
+            Op::SetProp {
+                id: overlay,
+                prop: Prop::Overlay(OverlayProp::Hint(Some(HINT_DELAY))),
+            },
+            Op::SetProp {
+                id: overlay,
+                prop: Prop::Overlay(OverlayProp::Placement(Placement::Top)),
+            },
+            Op::SetProp {
+                id: overlay,
+                prop: Prop::Overlay(OverlayProp::Offset(gap)),
+            },
+            Op::SetProp {
+                id: overlay,
+                prop: Prop::Overlay(OverlayProp::Margin(gap)),
+            },
+        ];
+        for op in ops {
+            if let Err(e) = self.apply_op(op) {
+                log::error!(target: "js", "a tooltip is not made: {e:?}");
+                return None;
+            }
+        }
+        // Into the element itself, wherever a component places its
+        // children.
+        if let Err(e) = self.insert(id, overlay, None) {
+            log::error!(target: "js", "a tooltip is not made: {e:?}");
+            let _ = self.release(overlay);
+            return None;
+        }
+        Some(CoreTooltip {
+            overlay,
+            text: None,
+            content: None,
+        })
+    }
+
+    /// The elements of `tooltip`s that are hint overlays themselves (a
+    /// `Tooltip` of `nsh-base`, whose root its view made one) take the place
+    /// of the core's: in the element, with their own placement, delay and
+    /// look (after the components rendered, before the overlays are shown).
+    fn adopt_hint_tooltips(&mut self) {
+        let adoptable: Vec<(NodeId, CoreTooltip)> = self
+            .overlay_state
+            .tooltips
+            .iter()
+            .filter(|(_, m)| {
+                m.content.is_some_and(|c| {
+                    c != m.overlay
+                        && self.key(c).is_ok_and(|k| {
+                            self.nodes[k as usize].kind == Kind::Overlay
+                                && self.overlay(k).is_some_and(|s| s.config.hint.is_some())
+                        })
+                })
+            })
+            .map(|(&id, &m)| (id, m))
+            .collect();
+        for (id, mut made) in adoptable {
+            let content = made.content.expect("content");
+            if let Err(e) = self.insert(id, content, None) {
+                log::error!(target: "js", "a tooltip's element is not shown: {e:?}");
+                continue;
+            }
+            let _ = self.release(made.overlay);
+            made.overlay = content;
+            self.overlay_state.tooltips.insert(id, made);
+        }
+    }
+
+    /// The element shown as a tooltip leaves it (it stays JS's).
+    fn detach_tooltip_content(&mut self, content: NodeId) {
+        if let Ok(k) = self.key(content)
+            && self.nodes[k as usize].parent != NO_KEY
+        {
+            self.detach(k);
+        }
+    }
+
+    /// Releases the nodes made for a `tooltip`.
+    fn release_tooltip(&mut self, made: CoreTooltip) {
+        if let Some(content) = made.content {
+            self.detach_tooltip_content(content);
+            if content == made.overlay {
+                // The element's own (a `Tooltip`'s): JS's to release.
+                return;
+            }
+        }
+        if let Some((block, raw)) = made.text {
+            let _ = self.release(raw);
+            let _ = self.release(block);
+        }
+        let _ = self.release(made.overlay);
     }
 
     /// Escape's binding, while an overlay listens to `onCancel`.
@@ -322,7 +822,13 @@ impl<M: TextEngine> Core<M> {
     /// A touch on the surface: `onPressOutside` of the shown overlays
     /// watching presses that a finger went down outside of.
     pub(super) fn overlay_touches(&mut self, touch: &TouchEvent) {
-        if touch.phase != TouchPhase::Start || self.overlay_state.watched.is_empty() {
+        if touch.phase != TouchPhase::Start {
+            return;
+        }
+        if !self.overlay_state.hinting.is_empty() {
+            self.hint_touches(touch);
+        }
+        if self.overlay_state.watched.is_empty() {
             return;
         }
         for point in touch.points.iter().filter(|p| p.changed) {
@@ -414,7 +920,7 @@ impl<M: TextEngine> Core<M> {
         let (config, Some(host)) = (state.config, state.host) else {
             return frame.origin;
         };
-        let anchor = match config.anchor {
+        let anchor = match self.resolved_anchor(key) {
             OverlayAnchor::None => None,
             OverlayAnchor::Point(p) => Some(Bounds {
                 origin: p,
@@ -517,9 +1023,8 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn place_overlays(&mut self) {
         for i in 0..self.overlays.len() {
             let key = self.overlays[i];
-            let anchored = self
-                .overlay(key)
-                .is_some_and(|s| s.host.is_some() && s.config.anchor != OverlayAnchor::None);
+            let anchored = self.overlay(key).is_some_and(|s| s.host.is_some())
+                && self.resolved_anchor(key) != OverlayAnchor::None;
             let frame = self.nodes[key as usize].frame;
             if !anchored || !self.nodes[key as usize].created || frame.size.width.0.is_nan() {
                 continue;

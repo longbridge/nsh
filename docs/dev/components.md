@@ -794,10 +794,26 @@ compositions of primitives in the core.
 
 `nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`) are made of
 the core's overlays (`elements.md` "Overlays"), which place them and report presses outside, Escape and back; the
-components decide to close. Their open state is controlled (`open` + `onOpenChange(open, reason)`, `defaultOpen`
-without `open`; the reason is `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
-`"select"`, `"hover"`, `"longPress"`, `"contextMenu"`). They draw nothing: the app styles each part (`popupClass` /
-`popupStyle`, `backdropClass` / `backdropStyle`) and its content.
+components decide to close. They draw nothing: the app styles each part (`popupClass` / `popupStyle`,
+`backdropClass` / `backdropStyle`) and its content.
+
+Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`):
+
+- **`open` / `defaultOpen`**: the open state is controlled when the app sets `open` (`Prop<Option<bool>>`), the
+  popup's own (`OpenState`'s signal, from `defaultOpen`) otherwise. A user's request changes the own state at once
+  when there is one; a controlled popup waits for the app to change `open`.
+- **`onOpenChange(open, reason)`**: every request to open or close (`OpenState::request`; not a request for what it
+  already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
+  `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
+  `"contextMenu"`. The app changing `open` itself is not reported here.
+- **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
+  motion is over; a popup at once), whoever opened or closed it, the app's `open` included (`lifecycle`, an effect on
+  what is shown). `Tooltip` has these two and `onOpenChange`.
+- **`onCancel`**: each attempt of the user to close it without choosing: Escape or back, a press outside, a press on
+  the backdrop. It is emitted before `onOpenChange`, whether or not a `closeOn<Trigger>` flag (`closeOnEscape`,
+  `closeOnPressOutside`, `closeOnBackdropPress`, read natively when the user acts) let it close, so an app with a flag
+  set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
+  sheet's submenu goes back a level and is none either.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -807,10 +823,21 @@ is for, never by replacing one popup with another everywhere:
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | while a finger is held on the trigger (400 ms in), and 1.5 s after it lifts |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 
 The menus' items reach their menu through context (`MenuContext`: the close function, the sheet's path of submenus,
 the level's open submenu), so the app arranges them freely. Every item of a sheet's hidden levels is out of the tree
 (its content is not placed), so screen readers and tests see only the shown level. `Dialog` stays the modal
 presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s menus stay the system's.
+
+`Tooltip` is a hint overlay of the core (`elements.md` "Overlays": `overlay().hint(delay).hint_open(..)`) as its
+view's root, so the component's host is the overlay. It is given as an element's `tooltip` (as GPUI's
+`.tooltip(..)`), never placed among children: the core takes such an element as the hint overlay itself, in the
+element (`Core::adopt_hint_tooltips` once its view made it one; Rust: `IntoTooltip for TooltipElement`), so the
+element is what the pointer rests on and what it is placed against. The core follows the pointer on it and asks
+(`on_hint_show` / `on_hint_hide`); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
+the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app's `class` / `style`), its children
+what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
+`Prop::Tooltip`) takes a text too, in a minimal bubble of the theme's tokens, or any other element as it is, in a
+hint overlay the core makes itself (`Core::set_tooltip`).

@@ -4,7 +4,7 @@ use crate::{
     animation::AnimationOp,
     geometry::{Bounds, DevicePixels, Percentage, Point, Points, Size},
     js::host::HostProps,
-    overlay::{Align, OverlayAnchor, Placement},
+    overlay::{Align, OverlayAnchor, Placement, TooltipContent},
     props::{AccessibilityProp, EdgeInsets, LayoutAnimation, PointerEvents},
     style::{Color, EllipsizeMode, Style, StylePatch},
     ui::PropEnum,
@@ -960,6 +960,15 @@ pub enum OverlayProp {
     /// safe area (default 0).
     #[prop(js = "margin", on = OVERLAY)]
     Margin(Points),
+    /// A hint (a tooltip) shown after the pointer rested on the anchor this
+    /// long ([`crate::overlay::OverlayConfig::hint`]); set by components
+    /// (`nsh-base`'s `Tooltip`).
+    #[prop(reset = OverlayProp::Hint(None))]
+    Hint(Option<std::time::Duration>),
+    /// A hint shown or hidden whatever the pointer does
+    /// ([`crate::overlay::OverlayConfig::open`]); set by components.
+    #[prop(reset = OverlayProp::Open(None))]
+    Open(Option<bool>),
 }
 
 /// An imperative call on a native view (`ref.focus()` and the like).
@@ -1567,6 +1576,14 @@ pub enum Prop {
     /// a draggable view stay clickable without it.
     #[prop(desktop = "windowDrag")]
     WindowDrag(Option<bool>),
+    /// `tooltip`: a hint about the view, shown above it on the desktops
+    /// while the pointer rests on it (after half a second) until the
+    /// pointer leaves or presses it, never on touch screens; it never takes
+    /// the pointer. A string shows in a minimal bubble drawn with the
+    /// theme's `popover` tokens; an element is shown as it is (style it, or
+    /// use `Tooltip` of `nsh/base` for its placement, delay and events).
+    #[prop(js = "tooltip", with = crate::js::host_values::tooltip, reset = Prop::Tooltip(TooltipContent::None), ts = "JSX.Element")]
+    Tooltip(TooltipContent),
     /// `focusable`: whether a view that takes presses is a stop of the
     /// keyboard focus (Tab, on the platforms that move it between
     /// pressables); `false` leaves it to the pointer (a backdrop that

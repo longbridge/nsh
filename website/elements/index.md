@@ -240,6 +240,29 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+### Tooltips
+
+`tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
+desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it. Phones
+and tablets show none. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `tooltip` | `.tooltip(..)` | `string \| JSX.Element` | A text, in a small bubble drawn with the theme's `popover` tokens (`bg-popover`, `text-popover-foreground`, `border-border`: the theme decides how it looks), or an element, shown as it is (a `Tooltip` of `nsh/base` is the tooltip itself). |
+
+```rust tabs
+view().on_press(save).tooltip("Save the document").child(text("💾"))
+```
+
+```tsx tabs
+<View onPress={save} tooltip="Save the document">
+  <Text>💾</Text>
+</View>
+```
+
+For a tooltip of its own look, placement, delay or events, give a [`Tooltip`](tooltip.md) of `nsh/base` as the
+`tooltip`, as GPUI's `.tooltip(..)` takes one.
+
 ### Context menus
 
 `onContextMenu` tells a view that the secondary button was pressed over it: a right click, Control-click on macOS, a

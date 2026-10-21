@@ -12,7 +12,7 @@ use crate::{
     geometry::{Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
-    overlay::OverlayAnchor,
+    overlay::{OverlayAnchor, TooltipContent},
     props::{AccessibilityActionDef, AccessibilityValue, Checked, PanActivation, Ripple},
     ui::TsTypes,
 };
@@ -425,6 +425,16 @@ pub(crate) fn overlay_anchor<I: HostInput>(input: &I, _: &mut HostCx) -> Option<
         _ => OverlayAnchor::None,
     };
     Some(OverlayProp::Anchor(anchor))
+}
+
+/// `tooltip`: a string, an element (a node JS made), or nothing.
+pub(crate) fn tooltip<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    let content = match (input.node(), input.as_string()) {
+        (Some(id), _) => TooltipContent::Node(id),
+        (None, Some(text)) if !text.is_empty() => TooltipContent::Text(text.into()),
+        _ => TooltipContent::None,
+    };
+    Some(Prop::Tooltip(content))
 }
 
 /// `rotation`: `{ angle }`.

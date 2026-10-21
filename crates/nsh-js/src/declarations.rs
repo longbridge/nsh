@@ -129,9 +129,9 @@ export interface OverlayProps extends CommonProps, OverlayHostProps {
 }
 
 /** What JS sets on a Rust component's host itself: the app's classes
- * (appended to the component's own), its inline and state styles, its test id, layout
- * events and the ref (`ref.command(name, args)`). */
-export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "onLayout" | "ref">;
+ * (appended to the component's own), its inline and state styles, its test id, its
+ * tooltip, layout events and the ref (`ref.command(name, args)`). */
+export type ComponentHostProps = Pick<ViewProps, "class" | "classList" | "style" | "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "testID" | "tooltip" | "onLayout" | "ref">;
 
 export interface Insets {
   top: number;

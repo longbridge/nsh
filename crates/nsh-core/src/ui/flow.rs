@@ -265,6 +265,13 @@ impl If {
 /// holds (TS: `<If when={…}>`); [`If::otherwise`] adds what shows while it
 /// does not (TS: `else={…}`). A branch is made when the condition flips to
 /// it, and what it made goes when it flips away.
+///
+/// GPUI has no counterpart: its views render again on every change, so a
+/// branch there is decided in each render, with `FluentBuilder::when` /
+/// `when_else` (NSH's [`super::FluentBuilder`] is that, decided once). NSH's
+/// components run once (`docs/dev/reactive-components.md`), so what comes
+/// and goes is a region bound to its condition: this one, named after TSX's
+/// `<If when>`, its other branch `otherwise` as `else` is a keyword.
 pub fn when<E: IntoElements>(
     condition: impl IntoReactive<bool>,
     then: impl Fn() -> E + 'static,
