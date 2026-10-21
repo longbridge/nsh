@@ -11,7 +11,7 @@ demo: el-checkbox
 复选框用来选择一个选项、列表中的一项，或者全部选项。它处于勾选、未勾选或半选（两者都不是：部分选中时的“全选”）状态。它负责行为：按压、键盘激活、禁用状态，以及屏幕阅读器读到的复选框角色和它的值。外观由应用决定：`Checkbox` 没有自己的方框、标记、颜色、尺寸或文字。它由一个指示器（方框，里面是应用的标记）以及之后的子元素（标签）组成，应用为每个部件设置样式，部件上的 `checked:`、`indeterminate:` 和 `disabled:` 类跟随复选框的状态。
 
 ```rust tabs
-use nsh_base::checkbox;
+use nsh_base::{checkbox, theme};
 use nsh_core::ui::prelude::*;
 
 fn notify() -> impl IntoElement {
@@ -26,13 +26,13 @@ fn notify() -> impl IntoElement {
             s.size(px(20.0))
                 .items_center()
                 .justify_center()
-                .rounded(px(4.0))
+                .rounded_md()
                 .border_2()
-                .border_color(rgb(0xa1a1aa))
+                .border_color(move || theme().border())
                 .transition_colors()
-                .checked(|s| s.bg(rgb(0x2563eb)).border_color(rgb(0x2563eb)))
+                .checked(|s| s.bg(move || theme().primary()).border_color(move || theme().primary()))
         })
-        .indicator(text(move || if on.get() { "✓" } else { "" }).text_color(white()))
+        .indicator(text(move || if on.get() { "✓" } else { "" }).text_color(move || theme().primary_foreground()))
         .child(text("Notify me"))
 }
 ```
@@ -48,8 +48,8 @@ function App() {
       checked={on()}
       onChange={(next) => on.set(next)}
       class="flex-row items-center gap-2"
-      indicatorClass="size-5 items-center justify-center rounded border-2 border-zinc-400 transition-colors checked:border-blue-600 checked:bg-blue-600"
-      indicator={<Text class="text-white">{on() ? "✓" : ""}</Text>}
+      indicatorClass="size-5 items-center justify-center rounded-md border-2 border-border transition-colors checked:border-primary checked:bg-primary"
+      indicator={<Text class="text-primary-foreground">{on() ? "✓" : ""}</Text>}
     >
       <Text>Notify me</Text>
     </Checkbox>
@@ -119,11 +119,11 @@ const some = () => selected().length > 0 && !all();
   indeterminate={some()}
   onChange={(next) => selected.set(next ? items.map((i) => i.id) : [])}
   class="flex-row items-center gap-2"
-  indicatorClass="group size-5 items-center justify-center rounded border-2 border-zinc-400 checked:border-blue-600 checked:bg-blue-600 indeterminate:border-blue-600 indeterminate:bg-blue-600"
+  indicatorClass="group size-5 items-center justify-center rounded-md border-2 border-border checked:border-primary checked:bg-primary indeterminate:border-primary indeterminate:bg-primary"
   indicator={
     <>
-      <Text class="hidden text-white group-checked:flex">✓</Text>
-      <View class="hidden h-0.5 w-2.5 bg-white group-indeterminate:flex" />
+      <Text class="hidden text-primary-foreground group-checked:flex">✓</Text>
+      <View class="hidden h-0.5 w-2.5 bg-primary-foreground group-indeterminate:flex" />
     </>
   }
 >
@@ -143,7 +143,7 @@ const some = () => selected().length > 0 && !all();
   disabled={locked()}
   onChange={(next) => on.set(next)}
   class="flex-row items-center gap-2 disabled:opacity-50"
-  indicatorClass="size-5 rounded border-2 border-zinc-400 checked:bg-blue-600 disabled:border-zinc-200"
+  indicatorClass="size-5 rounded-md border-2 border-border checked:border-primary checked:bg-primary disabled:border-border disabled:bg-muted"
 >
   <Text>Share usage data</Text>
 </Checkbox>
