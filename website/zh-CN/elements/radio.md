@@ -11,7 +11,7 @@ demo: el-radio
 单选框提供一组选项，用户从中恰好选一个：一个套餐、一种排序、一个主题。每个 `Radio` 负责一个选项的行为：按压、键盘激活、禁用状态，以及屏幕阅读器读到的单选框角色和它的勾选状态。包在外面的 `RadioGroup` 就是这一组，屏幕阅读器把它当作一个分组播报。外观由应用决定：单选框没有自己的圆圈、圆点、颜色、尺寸或文字。它的子元素是应用自己的指示器和标签，单选框上的 `checked:` 类，以及它里面元素上的 `group-checked:` 类，跟随它的状态。
 
 ```rust tabs
-use nsh_base::{radio, radio_group};
+use nsh_base::{radio, radio_group, theme};
 use nsh_core::ui::prelude::*;
 
 fn plans() -> impl IntoElement {
@@ -31,12 +31,12 @@ fn plans() -> impl IntoElement {
                     .justify_center()
                     .rounded_full()
                     .border_2()
-                    .border_color(rgb(0xa1a1aa))
+                    .border_color(move || theme().border())
                     .child(
                         view()
                             .size(px(10.0))
                             .rounded_full()
-                            .bg(rgb(0x2563eb))
+                            .bg(move || theme().primary())
                             .opacity(move || if checked() { 1.0_f32 } else { 0.0 }),
                     ),
             )
@@ -61,8 +61,8 @@ function App() {
       onChange={() => plan.set(value)}
       class="group flex-row items-center gap-2"
     >
-      <View class="size-5 items-center justify-center rounded-full border-2 border-zinc-400 group-checked:border-blue-600">
-        <View class="size-2.5 rounded-full group-checked:bg-blue-600" />
+      <View class="size-5 items-center justify-center rounded-full border-2 border-border group-checked:border-primary">
+        <View class="size-2.5 rounded-full group-checked:bg-primary" />
       </View>
       <Text>{label}</Text>
     </Radio>
@@ -138,8 +138,8 @@ mount(App);
   onChange={() => plan.set("team")}
   class="group flex-row items-center gap-2 disabled:opacity-50"
 >
-  <View class="size-5 items-center justify-center rounded-full border-2 border-zinc-400 group-checked:border-blue-600">
-    <View class="size-2.5 rounded-full group-checked:bg-blue-600" />
+  <View class="size-5 items-center justify-center rounded-full border-2 border-border group-checked:border-primary">
+    <View class="size-2.5 rounded-full group-checked:bg-primary" />
   </View>
   <Text>Team</Text>
 </Radio>

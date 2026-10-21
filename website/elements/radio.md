@@ -15,7 +15,7 @@ app's: a radio has no circle, dot, colors, sizes or label of its own. Its childr
 and `checked:` classes on the radio, or `group-checked:` classes on what is inside it, follow its state.
 
 ```rust tabs
-use nsh_base::{radio, radio_group};
+use nsh_base::{radio, radio_group, theme};
 use nsh_core::ui::prelude::*;
 
 fn plans() -> impl IntoElement {
@@ -35,12 +35,12 @@ fn plans() -> impl IntoElement {
                     .justify_center()
                     .rounded_full()
                     .border_2()
-                    .border_color(rgb(0xa1a1aa))
+                    .border_color(move || theme().border())
                     .child(
                         view()
                             .size(px(10.0))
                             .rounded_full()
-                            .bg(rgb(0x2563eb))
+                            .bg(move || theme().primary())
                             .opacity(move || if checked() { 1.0_f32 } else { 0.0 }),
                     ),
             )
@@ -65,8 +65,8 @@ function App() {
       onChange={() => plan.set(value)}
       class="group flex-row items-center gap-2"
     >
-      <View class="size-5 items-center justify-center rounded-full border-2 border-zinc-400 group-checked:border-blue-600">
-        <View class="size-2.5 rounded-full group-checked:bg-blue-600" />
+      <View class="size-5 items-center justify-center rounded-full border-2 border-border group-checked:border-primary">
+        <View class="size-2.5 rounded-full group-checked:bg-primary" />
       </View>
       <Text>{label}</Text>
     </Radio>
@@ -141,8 +141,8 @@ A disabled radio takes no presses, and screen readers announce it as dimmed. Its
   onChange={() => plan.set("team")}
   class="group flex-row items-center gap-2 disabled:opacity-50"
 >
-  <View class="size-5 items-center justify-center rounded-full border-2 border-zinc-400 group-checked:border-blue-600">
-    <View class="size-2.5 rounded-full group-checked:bg-blue-600" />
+  <View class="size-5 items-center justify-center rounded-full border-2 border-border group-checked:border-primary">
+    <View class="size-2.5 rounded-full group-checked:bg-primary" />
   </View>
   <Text>Team</Text>
 </Radio>
