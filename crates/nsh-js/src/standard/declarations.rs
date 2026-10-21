@@ -25,6 +25,14 @@ const SOURCES: &[(&str, &str)] = &[
         include_str!("../../../../third_party/llrt-types/events.d.ts.txt"),
     ),
     (
+        "fs",
+        include_str!("../../../../third_party/llrt-types/fs.d.ts.txt"),
+    ),
+    (
+        "fs/promises",
+        include_str!("../../../../third_party/llrt-types/fs-promises.d.ts.txt"),
+    ),
+    (
         "path",
         include_str!("../../../../third_party/llrt-types/path.d.ts.txt"),
     ),

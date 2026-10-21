@@ -748,6 +748,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fs_promises_module_is_declared() {
+        let files = type_definitions(&[]);
+        let (_, content) = files
+            .iter()
+            .find(|(path, _)| path == "fs/promises.d.ts")
+            .expect("fs/promises.d.ts");
+        for line in [
+            "export declare function readFile",
+            "export declare function writeFile",
+            "export declare function readdir",
+            "export declare function mkdir",
+            "export declare function rename",
+            "export declare function exists",
+            "export interface Stats",
+            "export interface Dirent",
+        ] {
+            assert!(content.contains(line), "missing `{line}` in fs/promises.d.ts:\n{content}");
+        }
+    }
+
+    #[test]
     fn variant_types_image_asset_lists_its_scales() {
         let files = type_definitions(&[]);
         let (_, types) = files
