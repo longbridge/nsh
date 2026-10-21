@@ -393,7 +393,7 @@ export function Form() {
         ),
       ]}
     >
-      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)}>
+      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)} style={{ flex: 1 }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
           <Scroll style={{ flex: 1 }} keyboardDismissMode="interactive">
             <View style={{ padding: 16, paddingBottom: 40, gap: 16 }}>

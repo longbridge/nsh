@@ -310,6 +310,7 @@ function ModalOptions() {
         android={{ statusBarTranslucent: translucent() }}
         ios={{ supportedOrientations: ["portrait", "landscape"] }}
         onOpenChange={(open) => visible.set(open)}
+        style={{ flex: 1 }}
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
           <TitleBar />

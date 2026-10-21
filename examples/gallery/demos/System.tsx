@@ -133,6 +133,7 @@ function StatusBarCard() {
         animation="fade"
         statusBar={{ foreground: foreground(), hidden: barHidden(), animated: true }}
         onOpenChange={(o) => open.set(o)}
+        style={{ flex: 1 }}
       >
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16, backgroundColor: backdrop() }}>
           <Text style={{ fontSize: 13, color: foreground() === "light" ? "#ffffff" : "#111214", fontFamily: mono }}>

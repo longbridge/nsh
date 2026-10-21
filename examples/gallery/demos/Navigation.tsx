@@ -467,6 +467,7 @@ export function Navigation() {
         presentation={sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen"}
         animation={sheet() === "fade" ? "fade" : "slide"}
         onOpenChange={(open) => !open && close()}
+        style={{ flex: 1 }}
       >
         <ModalBody
           fullScreen={sheet() === "fullScreen" || sheet() === "fade"}
@@ -486,6 +487,7 @@ export function Navigation() {
         closeOnBackdropPress={false}
         closeOnSwipe={false}
         onCancel={() => cancels.set(cancels() + 1)}
+        style={{ flex: 1 }}
       >
         <ModalBody
           title="Kept open"
@@ -494,7 +496,7 @@ export function Navigation() {
           onClose={close}
         />
       </Dialog>
-      <Dialog open={sheet() === "dialog"} animation="fade" onOpenChange={(open) => !open && close()}>
+      <Dialog open={sheet() === "dialog"} animation="fade" onOpenChange={(open) => !open && close()} style={{ flex: 1 }}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <View
             style={{
