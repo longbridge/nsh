@@ -182,6 +182,17 @@ Logs and errors show in the terminal. What each platform needs:
 cargo run
 ```
 
+## Acknowledgements
+
+NSH builds on the ideas of these projects:
+
+- [GPUI](https://www.gpui.rs), Zed's UI framework: the typed units and geometry (`Points`, `Point`, `Size`,
+  `Bounds`, `Edges`), `SharedString`, typed styles in Rust and much of the vocabulary of NSH's API.
+- [GPUI Kit](https://github.com/longbridge/gpui-kit): `gpui-base`'s unstyled base components, which `nsh-base`
+  follows in names and scope, the theme files and semantic tokens, and the Coding and Design Guides.
+- [Solid](https://www.solidjs.com): the reactive graph, signals, memos, effects, owners and context, which both the
+  Rust and the TSX side of NSH run on.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE-APACHE).
