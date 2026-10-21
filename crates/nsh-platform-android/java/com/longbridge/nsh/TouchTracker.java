@@ -138,9 +138,8 @@ final class TouchTracker {
         for (Feedback f : feedback) {
             MotionEvent local = MotionEvent.obtain(e);
             Matrix inverse = new Matrix();
-            f.view.transformMatrixToGlobal(inverse);
-            if (inverse.invert(inverse)) {
-                float[] at = {e.getRawX(), e.getRawY()};
+            if (toRoot(f.view, inverse) && inverse.invert(inverse)) {
+                float[] at = {e.getX(), e.getY()};
                 inverse.mapPoints(at);
                 local.offsetLocation(at[0] - e.getX(), at[1] - e.getY());
                 f.press.onTouchEvent(local);
@@ -149,6 +148,18 @@ final class TouchTracker {
         }
         if (action == MotionEvent.ACTION_UP) feedback.clear();
         return observing;
+    }
+
+    /** Maps a descendant's coordinates to this root using APIs available on Android 9. */
+    private boolean toRoot(View view, Matrix transform) {
+        if (view == root) return true;
+        ViewParent parent = view.getParent();
+        if (!(parent instanceof View)) return false;
+        View p = (View) parent;
+        if (!toRoot(p, transform)) return false;
+        transform.preTranslate(view.getLeft() - p.getScrollX(), view.getTop() - p.getScrollY());
+        if (!view.getMatrix().isIdentity()) transform.preConcat(view.getMatrix());
+        return true;
     }
 
     void cancelFeedback() {

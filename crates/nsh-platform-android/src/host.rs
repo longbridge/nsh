@@ -151,6 +151,11 @@ impl Host {
         }
         match Engine::start(config, move || AndroidTextEngine { density }, sink) {
             Ok(engine) => {
+                // The test moves its clock through the engine.
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
+                    model.engine_started(engine.control());
+                }
                 *self.answers.lock().expect("answers") = Some(engine.control());
                 *self.engine.lock().expect("engine") = Some(engine);
             }

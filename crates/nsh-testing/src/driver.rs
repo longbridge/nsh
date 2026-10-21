@@ -10,7 +10,7 @@ use nsh_core::{
     geometry::{Point, Points, Size},
     platform::ColorScheme,
 };
-use nsh_dev::protocol::TestStep;
+use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
 
 use crate::headless::{DialogAnswer, Headless};
@@ -202,17 +202,29 @@ pub trait Host: Send {
 /// own waits (a `waitFor`'s timeout, a quiet app) plus room for the round
 /// trip.
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a host may take to move the app's clock and settle.
+const CLOCK_STEP_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// An app on a real platform's host.
 pub(crate) struct Remote {
     host: Box<dyn Host>,
     /// The step taken now, which a traced app's batches print under.
     step: std::sync::Arc<std::sync::Mutex<String>>,
+    /// The app runs on a manual clock (`open`'s `clock`).
+    manual_clock: bool,
 }
 
 impl Remote {
-    pub(crate) fn new(host: Box<dyn Host>, step: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
-        Remote { host, step }
+    pub(crate) fn new(
+        host: Box<dyn Host>,
+        step: std::sync::Arc<std::sync::Mutex<String>>,
+        manual_clock: bool,
+    ) -> Self {
+        Remote {
+            host,
+            step,
+            manual_clock,
+        }
     }
 
     /// Takes `step` on the host; an action names what a traced app's
@@ -221,7 +233,24 @@ impl Remote {
         if let Some(name) = step_name(&step) {
             *self.step.lock().unwrap_or_else(|e| e.into_inner()) = name;
         }
-        self.host.step(step, STEP_TIMEOUT)
+        let timeout = match &step {
+            TestStep::Wait { ms } => STEP_TIMEOUT + Duration::from_millis(*ms),
+            // The timers due on the way run meanwhile.
+            TestStep::Clock { .. } => CLOCK_STEP_TIMEOUT,
+            _ => STEP_TIMEOUT,
+        };
+        self.host.step(step, timeout)
+    }
+
+    /// Moves the app's manual clock as `change` says; `what` names the
+    /// step when the app has none.
+    fn clock(&self, what: &str, change: ClockChange) -> Result<(), String> {
+        if !self.manual_clock {
+            return Err(format!(
+                "clock.{what} needs a manual clock: open the app with one (`open(entry, {{ clock: {{}} }})`)"
+            ));
+        }
+        self.action(TestStep::Clock { change })
     }
 
     fn action(&self, step: TestStep) -> Result<(), String> {
@@ -256,6 +285,12 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::Back => "back".to_owned(),
         TestStep::Wait { ms } => format!("wait({ms})"),
+        TestStep::Clock {
+            change: ClockChange::RunFor { ms },
+        } => format!("clock.runFor({ms})"),
+        TestStep::Clock {
+            change: ClockChange::FastForward { ms },
+        } => format!("clock.fastForward({ms})"),
         TestStep::WaitFor {
             selector,
             gone: false,
@@ -348,8 +383,15 @@ impl Driver for Remote {
     fn back(&mut self) -> Result<(), String> {
         self.action(TestStep::Back)
     }
+    // On a manual clock the app's time passes too, as headless.
     fn wait(&mut self, time: Duration) -> Result<(), String> {
-        self.action(TestStep::Wait { ms: ms(time) })
+        self.action(TestStep::Wait { ms: ms(time) })?;
+        if self.manual_clock {
+            self.action(TestStep::Clock {
+                change: ClockChange::RunFor { ms: ms(time) },
+            })?;
+        }
+        Ok(())
     }
     fn wait_for_within(&mut self, selector: &str, timeout: Duration) -> Result<(), String> {
         self.action(TestStep::WaitFor {
@@ -381,15 +423,18 @@ impl Driver for Remote {
             dark: scheme == ColorScheme::Dark,
         })
     }
-    // A real platform's clock is the system's: time passes as it does.
     fn run_for(&mut self, time: Duration) -> Result<(), String> {
-        self.action(TestStep::Wait { ms: ms(time) })
+        self.clock("runFor", ClockChange::RunFor { ms: ms(time) })
     }
-    fn fast_forward(&mut self, _: Duration) -> Result<(), String> {
-        Err(headless_only("Jumping the clock (`clock.fastForward`)"))
+    fn fast_forward(&mut self, time: Duration) -> Result<(), String> {
+        self.clock("fastForward", ClockChange::FastForward { ms: ms(time) })
     }
-    fn set_system_time(&mut self, _: std::time::SystemTime) -> Result<(), String> {
-        Err(headless_only("Setting the clock (`clock.setSystemTime`)"))
+    fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String> {
+        let unix_ms = match at.duration_since(std::time::UNIX_EPOCH) {
+            Ok(since) => since.as_secs_f64() * 1000.0,
+            Err(before) => -before.duration().as_secs_f64() * 1000.0,
+        };
+        self.clock("setSystemTime", ClockChange::SetSystemTime { unix_ms })
     }
     fn pending_dialog(&mut self) -> Option<Dialog> {
         self.query(TestStep::PendingDialog).ok().flatten()

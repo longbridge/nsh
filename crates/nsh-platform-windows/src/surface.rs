@@ -302,6 +302,11 @@ impl Surface {
         let family = crate::text::ui_family();
         match Engine::start(config, move || DWriteTextEngine::new(family), sink) {
             Ok(engine) => {
+                // The test moves its clock through the engine.
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.borrow() {
+                    model.engine_started(engine.control());
+                }
                 *self.control.borrow_mut() = Some(engine.control());
                 *self.engine.borrow_mut() = Some(engine);
             }

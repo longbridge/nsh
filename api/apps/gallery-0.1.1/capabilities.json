@@ -1,1 +1,0 @@
-{"network":{"hosts":["*"],"http":[],"sockets":["127.0.0.1:9876"]},"process":{"execute":["echo","cat","cmd.exe","claude","codex"],"exit":false,"env":[]},"fs":{"read":["${dataDir}"],"write":["${dataDir}"]},"webview":{"hosts":["*"]},"statusBar":true,"clipboard":true}

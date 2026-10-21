@@ -62,6 +62,21 @@ const QUIET: Duration = Duration::from_millis(100);
 const SETTLE: Duration = Duration::from_secs(2);
 /// How often waits look again while nothing comes.
 const POLL: Duration = Duration::from_millis(20);
+/// The wall time `ms` milliseconds from the Unix epoch (before it when
+/// negative).
+fn unix_time(ms: f64) -> std::time::SystemTime {
+    let since = Duration::from_secs_f64(ms.abs() / 1000.0);
+    if ms >= 0.0 {
+        std::time::UNIX_EPOCH + since
+    } else {
+        std::time::UNIX_EPOCH - since
+    }
+}
+
+/// How long moving the app's clock may take at most (the timers due on
+/// the way run meanwhile).
+#[cfg(not(target_arch = "wasm32"))]
+const CLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 /// A long press's hold when the view does not say (`delayLongPress`).
 const LONG_PRESS: Duration = Duration::from_millis(500);
 /// How many gestures scrolling a view into view takes at most.
@@ -87,6 +102,11 @@ struct Setup {
     forwarder: Arc<forward::Forwarder>,
     /// Where each batch's items go when the test traces the app.
     trace: Option<SendOutgoing>,
+    /// The manual clock the app runs on, when the test gave it one.
+    clock: Option<nsh_core::time::Clock>,
+    /// The engine of the app ([`Model::engine_started`]): it moves the
+    /// clock.
+    engine: Option<nsh_engine::EngineControl>,
 }
 
 #[derive(Default)]
@@ -169,6 +189,10 @@ impl Model {
             )),
             trace: trace.then(|| send.clone()),
             forwarder: forward::Forwarder::new(send),
+            clock: environment
+                .clock
+                .map(|ms| nsh_core::time::Clock::manual(unix_time(ms)).with_frames()),
+            engine: None,
         });
     }
 
@@ -176,8 +200,11 @@ impl Model {
     /// says ([`Model::set_up`]; nothing before): its storage is the test's,
     /// its requests go to the test (which answers them or lets them through
     /// to the host's network), a traced app's engine logs each commit's
-    /// timings, the environment keeps what the test fixed, and the app's
-    /// clipboard calls are served from the test's clipboard.
+    /// timings, the environment keeps what the test fixed, the app's
+    /// clipboard calls are served from the test's clipboard, and it runs on
+    /// the test's manual clock when there is one (which also moves with the
+    /// display's frames). The host hands the engine back once it started
+    /// ([`Model::engine_started`]).
     pub fn set_up_engine(&self, config: &mut nsh_engine::EngineConfig) {
         let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
         let Some(setup) = &*setup else { return };
@@ -190,6 +217,73 @@ impl Model {
         config.pinned = setup.pins;
         config.clipboard =
             Some(setup.clipboard.clone() as Arc<dyn nsh_core::clipboard::ClipboardBackend>);
+        if let Some(clock) = &setup.clock {
+            config.clock = clock.clone();
+        }
+    }
+
+    /// The engine [`Model::set_up_engine`] set up started: the test moves
+    /// its clock through it.
+    pub fn engine_started(&self, engine: nsh_engine::EngineControl) {
+        if let Some(setup) = &mut *self.setup.lock().unwrap_or_else(|e| e.into_inner()) {
+            setup.engine = Some(engine);
+        }
+    }
+
+    /// Moves the app's manual clock as `change` says, as the headless
+    /// driver moves it; an error when the app runs on the system's clock.
+    /// Off WebAssembly it returns once the engine got there (what ran was
+    /// submitted); the web's page, whose thread the engine runs on, pumps
+    /// it right after.
+    pub fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        use nsh_dev::protocol::ClockChange;
+        let (clock, engine) = {
+            let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+            let setup = setup.as_ref();
+            match (
+                setup.and_then(|s| s.clock.clone()),
+                setup.and_then(|s| s.engine.clone()),
+            ) {
+                (Some(clock), Some(engine)) => (clock, engine),
+                (None, _) => {
+                    return Err(
+                        "the app runs on the system's clock: open it with a manual one \
+                                (`open(entry, { clock: {} })`)"
+                            .into(),
+                    );
+                }
+                (Some(_), None) => return Err("the app's engine did not start".into()),
+            }
+        };
+        let by = match change {
+            ClockChange::RunFor { ms } => Duration::from_millis(ms),
+            ClockChange::FastForward { ms } => {
+                clock.advance_to(clock.now() + Duration::from_millis(ms));
+                Duration::ZERO
+            }
+            ClockChange::SetSystemTime { unix_ms } => {
+                clock.set_system_time(unix_time(unix_ms));
+                return Ok(());
+            }
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            engine.advance_clock(by, move || {
+                let _ = tx.send(());
+            });
+            rx.recv_timeout(CLOCK_TIMEOUT).map_err(|_| {
+                format!(
+                    "the app's clock did not get there in {} s",
+                    CLOCK_TIMEOUT.as_secs()
+                )
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            engine.advance_clock(by, || {});
+            Ok(())
+        }
     }
 
     /// The text on the test's clipboard (after [`Model::set_up`]).
@@ -289,6 +383,8 @@ pub trait Scene: Send + Sync {
     /// The text view showing span `id` (a nested text that takes presses)
     /// and where in its text the span is (UTF-16 units); `None` for a view.
     fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String>;
+    /// Moves the app's manual clock ([`Model::move_clock`]).
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String>;
 }
 
 impl Scene for Model {
@@ -379,6 +475,9 @@ impl Scene for Model {
     }
     fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
         Ok(self.lock().screen.span(id))
+    }
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        Model::move_clock(self, change)
     }
 }
 
@@ -521,6 +620,7 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
                 .set_viewport(Size::new(Points(*width), Points(*height)))
                 .map(|()| Value::Null),
             SceneQuery::Span { id } => model.span(*id).and_then(|s| json(to_value(s))),
+            SceneQuery::Clock { change } => model.move_clock(*change).map(|()| Value::Null),
             SceneQuery::Bounds { .. }
             | SceneQuery::Viewport
             | SceneQuery::InputText { .. }
@@ -646,6 +746,10 @@ impl Scene for RemoteScene {
     }
     fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String> {
         self.query(SceneQuery::Span { id })
+    }
+    fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
+        self.query::<serde_json::Value>(SceneQuery::Clock { change })
+            .map(drop)
     }
 }
 
@@ -988,6 +1092,9 @@ impl Agent {
                 std::thread::sleep(Duration::from_millis(ms));
                 done(self.check())
             }
+            TestStep::Clock { change } => {
+                done(self.scene.move_clock(change).and_then(|()| self.settled()))
+            }
             TestStep::WaitFor {
                 selector,
                 timeout_ms,
@@ -1079,6 +1186,7 @@ impl Agent {
                 .set_viewport(Size::new(Points(width), Points(height)))
                 .map(|()| Value::Null),
             SceneQuery::Span { id } => scene.span(id).and_then(|s| json(to_value(s))),
+            SceneQuery::Clock { change } => scene.move_clock(change).map(|()| Value::Null),
             SceneQuery::Bounds { id } => {
                 json(to_value(self.native.bounds(id).map(|b| {
                     [b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]

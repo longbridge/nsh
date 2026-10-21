@@ -546,6 +546,16 @@ impl Session {
             safe_area.bottom.0,
             safe_area.left.0,
         ]);
+        // A manual clock: the host's engine runs on one, which the test
+        // moves (and the display's frames, as headless).
+        environment.clock =
+            launch
+                .clock
+                .map(|start| match start.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(since) => since.as_secs_f64() * 1000.0,
+                    Err(before) => -before.duration().as_secs_f64() * 1000.0,
+                });
+        let manual_clock = environment.clock.is_some();
         // The app's requests come to the test, as on a headless engine:
         // answered from the routes, failed without any, or let through.
         let (inner, live): (Arc<dyn nsh_engine::Network>, bool) = match launch.network {
@@ -588,7 +598,7 @@ impl Session {
             trace,
         };
         let host = start(path, &options).map_err(|e| format!("open({entry:?}): {e}"))?;
-        let remote = Remote::new(host, step);
+        let remote = Remote::new(host, step, manual_clock);
         remote.take(nsh_dev::protocol::TestStep::Ready {
             timeout_ms: WAIT.as_millis() as u64 * 2,
         })?;

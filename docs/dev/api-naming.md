@@ -144,9 +144,8 @@ members, so a shape decides what can ever be added to it.
 
 ## Renames before the first compatible release
 
-Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, their old names listed
-in `api/closed.txt` as made before the first compatible release (`compatibility.md` rule 7). The frozen RN-shaped
-modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
+Decided with the user (2026-10-21), before v0.1.2: these land without `@deprecated` aliases, as no release froze
+them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A name that already follows `gpui-kit` stays, even where another spelling would do
 (*guides*: "Preserve established public names when changing them would cause needless churn"): `pagingEnabled`,
 `javaScriptEnabled`, `screenReaderEnabled`, `headerBackVisible`, `isAvailable`, `selectable`, `disabled`,
 `onHoverIn` / `onHoverOut` and `onFileDrop({ uris })`; and
@@ -323,6 +322,12 @@ and `Input`'s React Native names follow the rules as well.
 | `Radio::id`, `tab_index`, `tab_stop`, `track_focus` | (left out) | | Identity is the element's; the keyboard focus follows the view tree, as `Button`'s does |
 | `RadioGroup::axis(Axis)` | (left out) | `radio_group.rs` (`aria_orientation`); `gpui-shell`'s `axis` ("semantic only") | It sets only the orientation screen readers hear, which NSH's accessibility layer does not carry yet; the layout is the app's `class` (`flex-row`) |
 | `accessibility_label` on a `RadioGroup` (`gpui-shell`, any element) | (left out) | | A labelled container is one element on iOS, which would hide the radios inside it; added with a container that keeps its children elements |
+| **Tabs** (`nsh/base`) | | | |
+| `Tab::on_click(&ClickEvent, ..)` | `onPress()` | `tabs.rs` `Tab::on_click`; `Button`'s `onPress` | Press, not click (above), as `Button`'s; every press reports, the selected tab's included, as `Tab::on_click` does |
+| `Tab::set_position(position, size)` | (left out) | | As `Radio::set_position`: NSH's accessibility state has no position in a set yet |
+| `Tab::id`, `Tabs::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
+| A tab outside the keyboard focus until its list has roving focus (`Tab`'s doc comment) | each enabled tab is a focus stop, Space / Return press it | `Button`, `Radio` | The keyboard focus follows the view tree, so keyboard users reach every tab; arrow keys, Home / End and roving focus come with the tab list's keyboard model (`gpui-base`'s TODO) |
+| `Tab`'s own layout (`flex`, `items_center`, `justify_center`, a line height of 1) | (none) | `Button` (no layout of its own) | The layout is the app's `class` and `style`, as `Button`'s; centering is `items-center justify-center` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

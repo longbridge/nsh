@@ -423,3 +423,62 @@ fn a_rust_apps_radios_show_the_apps_value() {
         .collect();
     assert_eq!(dots, [1.0, 0.0]);
 }
+
+/// `nsh/base`'s `Tab` in `Tabs` from a Rust app (as its page shows it):
+/// the app's value selects one tab, whose `selected_style` applies.
+#[component]
+fn Sections() -> impl IntoElement {
+    let current = signal("overview");
+    let section = move |value: &'static str, label: &'static str| {
+        let selected = move || current.get() == value;
+        nsh_base::tab()
+            .selected(selected)
+            .on_press(move |_: &()| current.set(value))
+            .rounded(move || nsh_base::theme().radius())
+            .px_3()
+            .py_2()
+            .selected_style(|s| s.bg(rgb(0x2563eb)))
+            .child(text(label).text_sm().text_color(move || {
+                if selected() {
+                    nsh_base::theme().foreground()
+                } else {
+                    nsh_base::theme().muted_foreground()
+                }
+            }))
+    };
+    view()
+        .gap_4()
+        .child(
+            nsh_base::tabs()
+                .flex_row()
+                .self_start()
+                .gap_1()
+                .p_1()
+                .rounded(move || nsh_base::theme().radius_lg())
+                .bg(move || nsh_base::theme().muted())
+                .child(section("overview", "Overview"))
+                .child(section("activity", "Activity")),
+        )
+        .child(
+            text(move || {
+                if current.get() == "overview" {
+                    "Visitors, sign-ups and conversion this week."
+                } else {
+                    "Deploys, invoices and new members, newest first."
+                }
+            })
+            .text_color(move || nsh_base::theme().foreground()),
+        )
+}
+
+#[test]
+fn a_rust_apps_tabs_show_the_apps_value() {
+    let (_engine, rx) = start_root(Root::new::<Sections>(|| ()));
+    let first = seen(&rx);
+    let selected = first
+        .styles
+        .iter()
+        .filter(|(_, s)| s.background_color.0 == 0x2563_ebff)
+        .count();
+    assert_eq!(selected, 1);
+}

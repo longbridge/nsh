@@ -134,6 +134,37 @@ pub struct TestEnvironment {
     /// The safe area insets in points: top, right, bottom, left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_area: Option<[f32; 4]>,
+    /// The app runs on a manual clock standing at this wall time, in
+    /// milliseconds since the Unix epoch: its time moves only as the test
+    /// moves it ([`TestStep::Clock`]) and by a frame's time with each frame
+    /// the platform shows, as a headless app's does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<f64>,
+}
+
+/// How a test moves its app's manual clock ([`TestEnvironment::clock`];
+/// `app.clock`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "snake_case")]
+pub enum ClockChange {
+    /// Moves it by `ms`, a time at a time: the timers due on the way run
+    /// in order, each at its time (`clock.runFor`).
+    RunFor {
+        /// Milliseconds.
+        ms: u64,
+    },
+    /// Moves it by `ms` at once, as a device waking from sleep does: the
+    /// timers due meanwhile run once each (`clock.fastForward`).
+    FastForward {
+        /// Milliseconds.
+        ms: u64,
+    },
+    /// Sets its wall time (`Date.now()`) without moving its timers
+    /// (`clock.setSystemTime`).
+    SetSystemTime {
+        /// Milliseconds since the Unix epoch.
+        unix_ms: f64,
+    },
 }
 
 /// Messages from the server to dev hosts.
@@ -336,6 +367,12 @@ pub enum TestStep {
         /// Milliseconds.
         ms: u64,
     },
+    /// Moves the app's manual clock ([`TestEnvironment::clock`]), then
+    /// waits until it is quiet.
+    Clock {
+        /// How.
+        change: ClockChange,
+    },
     /// Waits until a view matches, or none does (`app.waitFor`).
     WaitFor {
         /// The view.
@@ -457,6 +494,11 @@ pub enum SceneQuery {
     MenuClosed,
     /// The app's storage: its entries.
     Storage,
+    /// Moves the app's manual clock ([`TestStep::Clock`]).
+    Clock {
+        /// How.
+        change: ClockChange,
+    },
     /// The window's content is this size: what lies outside it, and no
     /// scroll view brings in, is not on screen.
     SetViewport {

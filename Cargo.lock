@@ -2997,7 +2997,6 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "syn 2.0.119",
- "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
  "ureq",

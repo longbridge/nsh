@@ -65,7 +65,10 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   through `nsh_core::time::now()`, `Intl` and `Date` through `unix_ms()`. The system's clock is the default. A manual
   one (`Clock::manual`) moves only when told: the loop no longer wakes for timers, and `EngineControl::advance_clock`
   steps it to each time something comes due on the way (timers, task timers, the clock's alarms such as a held-back
-  response), running it before going on, as Playwright's `clock.runFor` and Jest's fake timers do. QuickJS reads the
+  response), running it before going on, as Playwright's `clock.runFor` and Jest's fake timers do. A manual clock
+  that moves with frames (`Clock::with_frames`: a test's app on a real platform, `nsh test --target`) also moves to a
+  frame after the last (`time::FRAME`) with each display frame, and runs the frames the app waits for on the way
+  while it is moved. QuickJS reads the
   system's time in C for `Date` and `performance`, so on a manual clock `nsh-js` replaces them (`clock.rs`: a native
   `Date` constructor that hands the intrinsic the clock's time and shares its prototype, and a `performance` of the
   same shape). The idle collection keeps the system's time.

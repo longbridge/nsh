@@ -1,0 +1,133 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+# mod-standard-access
+tap id:case-mod-standard-access
+expect Standard grants files=true tcp=true websocket=true global=true
+covers [fs/promises] default
+covers [fs/promises] readFile
+covers [fs/promises] writeFile
+covers [fs/promises] readdir
+covers [fs/promises] exists
+covers [fs/promises] unlink
+covers [fs/promises] rmdir
+covers [fs/promises] mkdir
+covers [fs/promises] stat
+covers [fs/promises] lstat
+covers [fs/promises] rename
+covers [fs/promises] readlink
+covers [net] default
+covers [net] connect
+covers [websocket] WebSocket
+covers [globals] WebSocket
+covers [net] Socket
+covers [websocket] WebSocketConnection
+# mod-accessibility
+tap id:case-mod-accessibility
+# no screen reader and asks for no less motion.
+expect Screen reader: false
+expect Reduce motion: false
+expect Calls: not called
+tap id:call
+expect Calls: done
+covers [nsh/accessibility] announce
+covers [nsh/accessibility] setAccessibilityFocus
+covers [nsh/accessibility] reduceMotion
+covers [nsh/accessibility] screenReaderEnabled
+# mod-android
+tap id:case-mod-android
+# nsh/android's functions do nothing there and the app runs on.
+expect Android: false
+expect Exit: function
+expect Calls: not called
+tap id:call
+expect Calls: done, remove function
+covers [nsh/android] isAvailable
+covers [nsh/android] BackHandler
+covers [nsh/android] Toast
+# mod-clipboard
+tap id:case-mod-clipboard
+# the headless runtime: writes go through, reads are promises that stay
+# pending (and none fails).
+expect Calls: not called
+expect Failed: none
+tap id:copy
+expect Calls: 5 promises
+wait 300
+expect Failed: none
+covers [nsh/clipboard] Clipboard
+# mod-desktop
+tap id:case-mod-desktop
+# no title bar area, the window and menu functions do nothing, and a popup
+# closes at once.
+expect Desktop: false
+expect Title bar: 0 0 0
+expect Calls: not called
+expect Popup: not shown
+tap id:window
+expect Calls: window done, close function, minimize function
+tap id:menu
+expect Calls: menu done
+expect Popup: closed
+tap id:toggles
+expect Calls: toggles done
+covers [nsh/desktop] isAvailable
+covers [nsh/desktop] titleBar
+covers [nsh/desktop] Window
+covers [nsh/desktop] Menu
+# mod-device
+tap id:case-mod-device
+# iOS phone at 1 pixel per point, in the light scheme.
+expect OS: ios
+expect Idiom: phone
+expect Catalyst: false
+expect Version: 0.0
+expect Select: ios
+expect Select mobile: mobile
+expect Ratio: 1
+expect Font scale: 1
+expect Window: 390x844
+expect Scheme: light
+tap id:dark
+expect Scheme: dark
+absent Scheme: light
+tap id:system
+expect Scheme: light
+covers [nsh/device] platform
+covers [nsh/device] pixelRatio
+covers [nsh/device] colorScheme
+covers [nsh/device] setColorScheme
+covers [nsh/device] fontScale
+covers [nsh/device] windowSize
+# mod-ios
+tap id:case-mod-ios
+# the accessory view's content exists, and takes no room in its parent.
+expect iOS: true
+expect Accessory bar
+expect Rendered
+frame id:above 0 0 390 30
+frame id:below 0 30 390 30
+frame id:column 0 81 390 60
+covers [nsh/ios] isAvailable
+covers [nsh/ios] InputAccessoryView
+# mod-keymap
+tap id:case-mod-keymap
+# an Apple platform: Apple's symbols, and Command+Q kept by the platform.
+expect Label: ⇧⌘L
+expect Label F5: F5
+expect Label alt: ⌥↩
+expect Invalid: refused
+expect Kept: refused
+expect Bound: not bound
+tap id:bind
+expect Bound: function function
+covers [nsh/keymap] keymap
+# mod-storage
+tap id:case-mod-storage
+# a key set twice keeps its last value, and a missing key reads null.
+expect Storage empty
+tap id:set
+expect Storage set: a=1,b=two missing=null
+tap id:remove
+expect Storage removed: a=1 missing=null
+tap id:clear
+expect Storage cleared: none missing=null
+covers [nsh/storage] Storage

@@ -177,3 +177,49 @@ fn rust_tasks_wait_on_the_manual_clock_too() {
     advance(&engine, 50);
     assert_eq!(shown(&rx, &mut last), "done 2");
 }
+
+const FRAMES: &str = r#"import { mount, signal, Text } from "nsh";
+
+const frames = signal(0);
+const at = signal(0);
+const loop = (time) => {
+  frames.set(frames() + 1);
+  at.set(Math.round(time));
+  requestAnimationFrame(loop);
+};
+requestAnimationFrame(loop);
+mount(() => <Text>{`${frames()} frames, the last at ${at()}`}</Text>);
+"#;
+
+#[test]
+fn a_clock_that_moves_with_frames_runs_them_at_the_display_pace() {
+    let dir = crate::temporary_root().join(format!("nsh-clock-frames-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, FRAMES).unwrap();
+    let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: Vec::new(),
+    })
+    .unwrap();
+    let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
+    let config = EngineConfig {
+        clock: Clock::manual(start_time()).with_frames(),
+        // SAFETY: compiled just now by this runtime.
+        ..EngineConfig::new(nsh_engine::App::Js(unsafe { Bundle::bytecode(bytecode) }))
+    };
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
+    let mut last = String::new();
+    // A second of the app's time: a frame every 1/60 s on the way, as
+    // a headless run's display gives them.
+    advance(&engine, 1000);
+    assert_eq!(shown(&rx, &mut last), "59 frames, the last at 983");
+    // The platform's display frame comes a frame after the last: the
+    // clock moves to its time first.
+    engine.control().frame();
+    advance(&engine, 0);
+    assert_eq!(shown(&rx, &mut last), "60 frames, the last at 1000");
+}

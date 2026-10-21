@@ -396,9 +396,11 @@ nsh test --target web                         # in a headless Chrome, Edge or Ch
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
-The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. Time is real: a `clock`
-moves as the system's does, so `app.clock.runFor(ms)` waits that long, and `fastForward` and `setSystemTime`, which
-real time cannot do, reject. The app's requests come to the test as they do headless: `network` routes answer them,
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. A manual `clock` works as
+it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
+`requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)` moves it too, and each frame the platform shows moves
+it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
+`delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
 `reducedMotion` and `safeArea` hold whatever the platform reports, and the app's clipboard calls are served from the
