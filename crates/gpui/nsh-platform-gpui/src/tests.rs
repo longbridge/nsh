@@ -12,7 +12,7 @@ use gpui::{
     VisualTestContext, Window, div,
 };
 
-use crate::{App, AppOptions, AppView, Bundle, NativeComponent};
+use crate::{App, AppOptions, AppView, Bundle, NativeComponent, Root};
 
 /// A native component that only draws a box.
 struct Square;
@@ -155,6 +155,59 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    presses_carry_where_the_pointer_was(cx);
+}
+
+/// A pad inside 8 points of padding. A press writes where it was in the
+/// pad and in the window.
+mod press_point {
+    use nsh_core::ui::prelude::*;
+
+    #[component]
+    pub(super) fn PressPoint() -> impl IntoElement {
+        let report = signal(String::from("none"));
+        view()
+            .p(px(8.0))
+            .child(
+                view()
+                    .w(px(80.0))
+                    .h(px(40.0))
+                    .on(EventKind::Press, move |p: &EventPayload| {
+                        let EventPayload::Press(e) = p else {
+                            report.set("no position".into());
+                            return;
+                        };
+                        report.set(format!(
+                            "at {:.0} {:.0} in {:.0} {:.0}",
+                            e.position.x.0,
+                            e.position.y.0,
+                            e.page_position.x.0,
+                            e.page_position.y.0
+                        ));
+                    }),
+            )
+            .child(
+                input()
+                    .auto_focus(true)
+                    .value(move || report.get())
+                    .h(px(30.0)),
+            )
+    }
+}
+
+fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.load(App::Rust(Root::of::<press_point::PressPoint>()))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "none");
+    cx.simulate_click(
+        gpui::point(gpui::px(18.0), gpui::px(20.0)),
+        gpui::Modifiers::default(),
+    );
+    wait_for(&view, cx, "at 10 12 in 18 20");
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
