@@ -171,6 +171,12 @@ and `Input`'s React Native names follow the rules as well.
 | `CheckboxIndicatorStyles` `checked`, `indeterminate`, `disabled` | `checked:` / `indeterminate:` / `disabled:` in `indicatorClass`; Rust `.checked(..)` / `.indeterminate(..)` / `.disabled_style(..)` in `indicator_style` | `CheckboxStyles::checked` → `checkedStyle` | As `Switch`'s parts |
 | `Checkbox::role(RoleOverride)` | `role` (default `"checkbox"`) | `Button::role` | `RoleOverride::Presentational` is `role="none"` |
 | `Checkbox::tab_index`, `tab_stop`, `track_focus` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
+| **Radio** (`nsh/base`) | | | |
+| `Radio::on_change(bool, &ClickEvent, ..)` | `onChange(checked: boolean)` | `radio.rs` `Radio::on_change` | Only an unchecked, enabled radio reports, and always `true`: a radio cannot uncheck itself |
+| `Radio::set_position(position, size)` | (left out) | | NSH's accessibility state has no position in a set yet; added when every platform can carry it |
+| `Radio::id`, `tab_index`, `tab_stop`, `track_focus` | (left out) | | Identity is the element's; the keyboard focus follows the view tree, as `Button`'s does |
+| `RadioGroup::axis(Axis)` | (left out) | `radio_group.rs` (`aria_orientation`); `gpui-shell`'s `axis` ("semantic only") | It sets only the orientation screen readers hear, which NSH's accessibility layer does not carry yet; the layout is the app's `class` (`flex-row`) |
+| `accessibility_label` on a `RadioGroup` (`gpui-shell`, any element) | (left out) | | A labelled container is one element on iOS, which would hide the radios inside it; added with a container that keeps its children elements |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

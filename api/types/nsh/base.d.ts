@@ -653,6 +653,32 @@ export interface PopoverProps extends ComponentHostProps {
 /** Content anchored to a trigger, shown on top of everything in its root view (the surface, or the dialog it is in) whatever clips the trigger: pressing the trigger toggles it, a press outside, Escape and the Android back button close it. It goes on the `placement` side of the trigger, on the other side when only that one has room, kept inside the safe area, and follows the trigger as it scrolls. It looks like nothing: style the popup with `popupClass` / `popupStyle` and the content as you like. */
 export declare const Popover: ((props: PopoverProps) => JSX.Element);
 
+export interface RadioProps extends ComponentHostProps {
+  /** Checked or not. The app owns the value: a press on an unchecked radio reports `true` with `onChange`, and the app checks it (and unchecks the others of its set). */
+  checked?: boolean;
+  /** No presses, no press feedback; `disabled:` styles apply, and screen readers say it is dimmed. */
+  disabled?: boolean;
+  /** The style while checked (and not disabled), as `checked:` classes. */
+  checkedStyle?: StyleProp<ViewStyle>;
+  /** What screen readers say: the option, when its children have no text that says it. */
+  accessibilityLabel?: string | null;
+  /** The content: the app's indicator (a dot, styled with `group-checked:` classes under `group` on the radio) and its label, which screen readers say. */
+  children?: JSX.Element;
+  /** An unchecked radio was pressed (a tap, a click, Space or Return): it asks to be checked, so the value is `true`. It runs before anything changes: the radio shows the `checked` the app passes back. A checked radio stays checked and reports nothing, as a radio cannot uncheck itself. */
+  onChange?: (checked: boolean) => void;
+}
+
+/** One option of a set the user picks exactly one of (a plan, a sort order), in a `RadioGroup` with the others. It owns its behavior (presses, keyboard activation, the disabled state, the radio role and its checked state for screen readers) and leaves its look to the app: no circle, dot, colors, sizes or label of its own. The app's `class` and `style` style it, `checked:` and `disabled:` classes (or `checkedStyle` and `disabledStyle`) its states, and its children are the app's indicator and label, whose `group-checked:` classes follow the radio under `group` in its `class`. */
+export declare const Radio: ((props: RadioProps) => JSX.Element);
+
+export interface RadioGroupProps extends ComponentHostProps {
+  /** The radios of the set, and whatever the app lays out between them. */
+  children?: JSX.Element;
+}
+
+/** The container of a set of `Radio`s: screen readers hear the radios inside it as one set, each still an element of its own. It holds no value: each radio is told whether it is checked and reports a press with `onChange`, and the app keeps which one is. Its layout and look are the app's `class` and `style` (`flex-row` for a row). */
+export declare const RadioGroup: ((props: RadioGroupProps) => JSX.Element);
+
 export interface SafeAreaViewProps extends ComponentHostProps {
   /** The edges to pad (all by default). */
   edges?: (Edge)[] | null;

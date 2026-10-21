@@ -266,6 +266,8 @@ MenuSeparator function
 NavPage function
 NavStack function
 Popover function
+Radio function
+RadioGroup function
 SafeAreaView function
 SelectionArea function
 Sheet function

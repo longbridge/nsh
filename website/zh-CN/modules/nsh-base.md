@@ -1,33 +1,34 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、复选框、开关、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、复选框、单选框、开关、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Switch`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、放在 `RadioGroup` 里的 `Radio`、`Switch`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, safe_area_view, …}`）。
 
 ```rust tabs
 use nsh_base::{
     AvoidBehavior, Edge, MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog,
-    keyboard_avoiding_view, nav_page, nav_stack, safe_area_view, selection_area, switch, text_view, theme,
+    keyboard_avoiding_view, nav_page, nav_stack, radio, radio_group, safe_area_view, selection_area, switch, text_view,
+    theme,
 };
 ```
 
 ```tsx tabs
 import {
   AlertDialog, Button, Checkbox, ContextMenu, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, Menu,
-  MenuItem, MenuSeparator, NavPage, NavStack, Popover, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
+  MenuItem, MenuSeparator, NavPage, NavStack, Popover, Radio, RadioGroup, SafeAreaView, safeArea, safeAreaInsets, SelectionArea, Sheet,
   Submenu, Switch, TextView, Tooltip,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   CheckboxProps, DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
+  RadioGroupProps, RadioProps, SelectionAreaProps, StatusBarForeground, SwitchProps, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -37,6 +38,7 @@ import type {
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | 带禁用和选中状态、面向屏幕阅读器有角色的按压目标。 |
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | 勾选 / 未勾选 / 半选控件，指示器及其中的标记由应用设置。 |
+| [`Radio`](../elements/radio.md)、[`RadioGroup`](../elements/radio.md) | `radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组；勾选哪一个由应用持有。 |
 | [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
 | [`Dialog`](../elements/dialog.md) | `dialog()` | 在所有内容之上呈现的内容：sheet、全屏流程、对话框。 |
@@ -70,6 +72,12 @@ import type {
 ### Checkbox
 
 一个只负责行为、没有外观的勾选 / 未勾选 / 半选控件：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告复选框角色和它的值（半选时为部分选中）；值由应用持有（`checked`、`indeterminate`、`onChange`）。应用为复选框和它的指示器设置样式，指示器上的 `checked:`、`indeterminate:` 和 `disabled:` 类跟随复选框，应用自己的标记放在指示器里（`indicator`）。见 [Checkbox](../elements/checkbox.md)。
+
+<a id="radio"></a>
+
+### Radio 与 RadioGroup
+
+一组只能恰好选一个的选项中的一项，以及包住它们的分组。单选框只负责行为、没有外观：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告单选框角色和勾选状态。分组是屏幕阅读器播报的单选框组，本身不持有值：应用告诉每个单选框是否勾选（`checked`），按下未勾选的单选框时它请求被勾选（`onChange`）。应用的指示器和标签是单选框的子元素，它们的 `group-checked:` 类跟随单选框。见 [Radio](../elements/radio.md)。
 
 <a id="switch"></a>
 
@@ -252,6 +260,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Switch](../elements/switch.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[SelectionArea](../elements/selection-area.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。

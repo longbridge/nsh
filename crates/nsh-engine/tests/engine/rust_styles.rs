@@ -372,3 +372,54 @@ fn a_rust_apps_checkbox_styles_its_indicator_by_its_value() {
     let marks = |mark: &str| first.texts.iter().filter(|(_, t)| t.text == mark).count();
     assert_eq!((marks("-"), marks("✓")), (1, 2));
 }
+
+/// `nsh/base`'s `Radio` in a `RadioGroup` from a Rust app (as its page
+/// shows it): the app's value checks one radio, and the dot inside each
+/// follows it.
+#[component]
+fn Radios() -> impl IntoElement {
+    let plan = signal("basic");
+    let option = move |value: &'static str, label: &'static str| {
+        let checked = move || plan.get() == value;
+        nsh_base::radio()
+            .checked(checked)
+            .on_change(move |_: &bool| plan.set(value))
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .child(
+                view()
+                    .size(px(20.0))
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .border_2()
+                    .border_color(rgb(0xa1a1aa))
+                    .child(
+                        view()
+                            .size(px(10.0))
+                            .rounded_full()
+                            .bg(rgb(0x2563eb))
+                            .opacity(move || if checked() { 1.0_f32 } else { 0.0 }),
+                    ),
+            )
+            .child(text(label))
+    };
+    nsh_base::radio_group()
+        .gap_3()
+        .child(option("basic", "Basic"))
+        .child(option("pro", "Pro"))
+}
+
+#[test]
+fn a_rust_apps_radios_show_the_apps_value() {
+    let (_engine, rx) = start_root(Root::new::<Radios>(|| ()));
+    let first = seen(&rx);
+    let dots: Vec<f32> = first
+        .styles
+        .iter()
+        .filter(|(_, s)| s.background_color.0 == 0x2563_ebff)
+        .map(|(_, s)| s.opacity)
+        .collect();
+    assert_eq!(dots, [1.0, 0.0]);
+}

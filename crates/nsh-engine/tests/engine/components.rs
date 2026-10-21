@@ -1879,3 +1879,173 @@ fn a_base_checkbox_reports_the_next_value_and_styles_its_indicator() {
     assert_eq!(off_mark.opacity, 0.5);
     assert_eq!(off_mark.background_color.0, 0x00ff_00ff);
 }
+
+const BASE_RADIO: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Radio, RadioGroup } from "nsh/base";
+
+function App() {
+  const plan = signal("a");
+  const changes = signal<string[]>([]);
+  const radio = (value: string, label: string, disabled = false) => (
+    <Radio
+      testID={value}
+      checked={plan() === value}
+      disabled={disabled}
+      accessibilityLabel={label}
+      class="group flex-row disabled:opacity-50"
+      checkedStyle={{ backgroundColor: "#0000ff" }}
+      onChange={(next) => {
+        changes.set([...changes(), `${value}:${next}`]);
+        plan.set(value);
+      }}
+    >
+      <View class="w-[20px] group-checked:bg-[#00ff00]" />
+      <Text>{label}</Text>
+    </Radio>
+  );
+  return (
+    <View>
+      <RadioGroup testID="plans" class="flex-row">
+        {radio("a", "Basic")}
+        {radio("b", "Pro")}
+        {radio("c", "Team", true)}
+      </RadioGroup>
+      <Text>{`Changes: ${changes().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Radio` in a `RadioGroup`: the radio group role on the
+/// group, the radio role and its checked state on each radio alone, a
+/// press on an unchecked radio asking for `true` while the app owns which
+/// one is checked, a checked or disabled radio reporting nothing, and the
+/// app's dot inside following the radio with `group-checked:`.
+#[test]
+fn a_base_radio_asks_to_be_checked_and_its_group_holds_no_value() {
+    use nsh_core::{AccessibilityRole, Checked, ViewProps};
+    let (engine, rx) = start(BASE_RADIO);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "Changes: "));
+    let view_props = |batch: &MountBatch, view| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+            _ => None,
+        })
+    };
+    let root = |test_id: &str| {
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    // The first view inside `parent`: the app's dot.
+    let dot = |parent: u32| {
+        let views: Vec<u32> = first
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("the dot")
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let state = |props: &ViewProps| props.accessibility.state;
+    let (plans, a, b, c) = (root("plans"), root("a"), root("b"), root("c"));
+    let (dot_a, dot_b) = (dot(a), dot(b));
+    let initial = std::slice::from_ref(&first);
+
+    // The group: a radio group for screen readers, laid out by the app.
+    let group = view_props(&first, plans).unwrap();
+    assert_eq!(group.accessibility.role, AccessibilityRole::Radiogroup);
+    assert_eq!(group.accessibility.label, None);
+
+    // The checked radio: checked and selected for screen readers, its
+    // `checkedStyle`, and the app's dot `group-checked:`.
+    let props = view_props(&first, a).unwrap();
+    assert_eq!(props.accessibility.role, AccessibilityRole::Radio);
+    assert_eq!(props.accessibility.label.as_deref(), Some("Basic"));
+    assert_eq!(state(&props).checked, Some(Checked::True));
+    assert!(state(&props).selected);
+    assert_eq!(style(initial, a).background_color.0, 0x0000_ffff);
+    assert_eq!(style(initial, dot_a).background_color.0, 0x00ff_00ff);
+    let props = view_props(&first, b).unwrap();
+    assert_eq!(state(&props).checked, Some(Checked::False));
+    assert!(!state(&props).selected);
+    assert_eq!(style(initial, dot_b).background_color.0, 0);
+    // The dot is a part of the radio, no second element.
+    assert!(view_props(&first, dot_a).is_none());
+
+    // A press on an unchecked radio asks for `true`; the app checks it and
+    // unchecks the other, and the styles follow.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| shows(b, "Changes: b:true"));
+    assert!(after.iter().any(|batch| shows(batch, "Changes: b:true")));
+    let now = |view| after.iter().rev().find_map(|batch| view_props(batch, view));
+    assert_eq!(state(&now(b).unwrap()).checked, Some(Checked::True));
+    assert_eq!(state(&now(a).unwrap()).checked, Some(Checked::False));
+    assert_eq!(style(&after, b).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&after, dot_b).background_color.0, 0x00ff_00ff);
+    assert_eq!(style(&after, dot_a).background_color.0, 0);
+
+    // A checked radio cannot uncheck itself: a press on it reports
+    // nothing, so the next change the app sees is `a`'s.
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    engine
+        .control()
+        .dispatch_event(a, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |batch| shows(batch, "Changes: b:true,a:true"));
+    assert!(
+        after
+            .iter()
+            .any(|batch| shows(batch, "Changes: b:true,a:true"))
+    );
+
+    // Disabled: no presses, dimmed for screen readers.
+    let disabled = view_props(&first, c).unwrap();
+    assert!(state(&disabled).disabled);
+    assert_eq!(state(&disabled).checked, Some(Checked::False));
+    assert!(!first.items.iter().any(|i| matches!(
+        i,
+        MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+    )));
+    assert_eq!(style(initial, c).opacity, 0.5);
+}

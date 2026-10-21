@@ -13,6 +13,7 @@ import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
 import BasePopups from "./base-popups";
+import BaseRadio from "./base-radio";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseSelectionArea from "./base-selection-area";
 import BaseSwitch from "./base-switch";
@@ -32,6 +33,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-selection-area": BaseSelectionArea,
   "base-switch": BaseSwitch,
   "base-checkbox": BaseCheckbox,
+  "base-radio": BaseRadio,
 };
 const shown = signal("");
 
