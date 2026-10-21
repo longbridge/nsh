@@ -90,9 +90,8 @@ impl AndroidNative {
 
     /// A finger down at `from`, moving to `to` a frame at a time easing out
     /// (a finger that stops slows down first), resting there (still
-    /// reporting where it is), then lifting: one call that the UI thread
-    /// paces, as the display paces a real finger's events.
-    fn drag(&self, from: (f32, f32), to: (f32, f32), rest: Duration) {
+    /// reporting where it is), then lifting (a scroll, a swipe).
+    fn swipe(&self, from: (f32, f32), to: (f32, f32), rest: Duration) {
         let (dx, dy) = (to.0 - from.0, to.1 - from.1);
         let n = ((dx.abs().max(dy.abs()) / MOVE_STEP).ceil() as u32).max(1);
         let mut xs = vec![self.px(from.0)];
@@ -107,11 +106,23 @@ impl AndroidNative {
             xs.push(self.px(to.0));
             ys.push(self.px(to.1));
         }
+        self.path(&xs, &ys);
+    }
+
+    /// A finger along (`xs`, `ys`), in pixels: down at the first point, a
+    /// move to each next one a frame apart, up at the last; one call that
+    /// the UI thread paces, as the display paces a real finger's events.
+    fn path(&self, xs: &[f32], ys: &[f32]) {
+        self.path_every(xs, ys, FRAME.as_millis() as u32);
+    }
+
+    /// [`Self::path`] with the points `ms` milliseconds apart.
+    fn path_every(&self, xs: &[f32], ys: &[f32], frame: u32) {
         self.call(|env, class, view| {
             let jx = env.new_float_array(xs.len() as i32)?;
-            env.set_float_array_region(&jx, 0, &xs)?;
+            env.set_float_array_region(&jx, 0, xs)?;
             let jy = env.new_float_array(ys.len() as i32)?;
-            env.set_float_array_region(&jy, 0, &ys)?;
+            env.set_float_array_region(&jy, 0, ys)?;
             env.call_static_method(
                 class,
                 "drag",
@@ -174,7 +185,35 @@ impl Native for AndroidNative {
         // The content moves towards its end as the finger moves the other
         // way.
         let from = (at.x.0, at.y.0);
-        self.drag(from, (from.0 - delta.x.0, from.1 - delta.y.0), REST);
+        self.swipe(from, (from.0 - delta.x.0, from.1 - delta.y.0), REST);
+    }
+
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        // A touchscreen samples a finger several times a frame: its first
+        // moves stay within the touch slop, so the views under it decide
+        // who takes the drag as they do for a real one.
+        const SAMPLES: u32 = 4;
+        let frame = FRAME.as_millis() as u32;
+        let (mut xs, mut ys) = (vec![self.px(from.x.0)], vec![self.px(from.y.0)]);
+        // Resting where it landed, still reported.
+        let landing = nsh_testing::agent::LANDING.as_millis() as u32 / (frame / SAMPLES);
+        for _ in 0..landing {
+            xs.push(self.px(from.x.0));
+            ys.push(self.px(from.y.0));
+        }
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            for i in 1..=SAMPLES {
+                let t = i as f32 / SAMPLES as f32;
+                xs.push(self.px(last.x.0 + (at.x.0 - last.x.0) * t));
+                ys.push(self.px(last.y.0 + (at.y.0 - last.y.0) * t));
+            }
+            last = at;
+        }
+        // The last move reaches the end, and the finger lifts there.
+        xs.push(self.px(to.x.0));
+        ys.push(self.px(to.y.0));
+        self.path_every(&xs, &ys, frame / SAMPLES);
     }
 
     fn type_text(&self, text: &str) {

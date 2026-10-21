@@ -662,6 +662,8 @@ pub(crate) enum Simulated {
     Down(f32, f32),
     /// A release at `(x, y)`.
     Up(f32, f32),
+    /// The pointer moved to `(x, y)` with its button down (a drag).
+    Move(f32, f32),
     /// A wheel / touchpad scroll at `(x, y)` by `(dx, dy)` points.
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
@@ -684,6 +686,7 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
                 focus_native(&native);
             }
         }
+        Simulated::Move(x, y) => motion(surface, Key::Mouse, x, y, time),
         Simulated::Wheel(x, y, dx, dy) => {
             let step = WheelInput::Step { notches: false };
             wheel_input(surface, x, y, dx, dy, time, step);

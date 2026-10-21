@@ -649,17 +649,22 @@ fn page(parts: &PageParts<'_>) -> String {
     if let Some(glue) = parts.glue {
         let _ = writeln!(head, "<link rel=\"modulepreload\" href=\"{glue}\">");
     }
-    // The script asks for these only once the runtime has loaded.
-    for url in [parts.wasm, parts.code, parts.harden]
+    // Requested while the page is parsed, before the runtime has loaded, and
+    // once: the page's script takes these responses (`fetches`) and reports
+    // their errors (the empty `catch` only keeps a failure that happens
+    // before then from being logged as unhandled). Not `<link rel=preload>`:
+    // WebKit does not hand a preload still in flight to the `fetch` of the
+    // same URL, which downloads the file again.
+    let urls: Vec<&str> = [parts.wasm, parts.code, parts.harden]
         .into_iter()
         .filter(|url| !url.is_empty())
         .chain(parts.fonts.iter().map(String::as_str))
-    {
-        let _ = writeln!(
-            head,
-            "<link rel=\"preload\" href=\"{url}\" as=\"fetch\" crossorigin>"
-        );
-    }
+        .collect();
+    let urls = serde_json::json!(urls).to_string().replace("</", "<\\/");
+    let _ = writeln!(
+        head,
+        "<script>const fetches = new Map({urls}.map((url) => {{ const response = fetch(url); response.catch(() => {{}}); return [url, response]; }}));</script>"
+    );
     // JSON in a script: `</script>` in a string must not end it.
     let app = parts.app.to_string().replace("</", "<\\/");
     // The page's colors until the app draws (and on its error screen).
@@ -943,8 +948,20 @@ mod tests {
         });
         assert!(html.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"));
         assert!(html.contains("from \"./nsh.0123456789.js\""));
-        assert!(html.contains("<link rel=\"preload\" href=\"assets/f.1.ttf\""));
-        assert!(html.contains("<link rel=\"preload\" href=\"harden.2.nshc\""));
+        let fetches = html
+            .lines()
+            .find(|line| line.starts_with("<script>const fetches = "))
+            .unwrap_or_default();
+        for url in [
+            "nsh.0123456789.wasm",
+            "app.1.nshc",
+            "harden.2.nshc",
+            "assets/f.1.ttf",
+        ] {
+            assert!(fetches.contains(&format!("\"{url}\"")), "{fetches}");
+        }
+        assert!(html.contains("wasm: take(app.wasm)"));
+        assert!(!html.contains("rel=\"preload\""));
         assert!(html.contains("media=\"(prefers-color-scheme: dark)\""));
         assert!(!html.contains("</script><b>"));
         assert!(!html.contains("{{"), "{html}");

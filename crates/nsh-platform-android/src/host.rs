@@ -142,13 +142,10 @@ impl Host {
         };
         let density = self.density;
         let sink = Sink(self.clone());
-        // A test session's app: the test's storage and network.
+        // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]
         if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
-            config.network = model.engine_network(config.network.take());
-            if let Some(storage) = model.engine_storage() {
-                config.storage = Some(storage);
-            }
+            model.set_up_engine(&mut config);
         }
         match Engine::start(config, move || AndroidTextEngine { density }, sink) {
             Ok(engine) => {

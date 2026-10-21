@@ -53,8 +53,15 @@
     status.replaceChildren(heading, pre);
   }
 
+  // A response the head's script requested (`fetches`) is taken once.
+  function take(url) {
+    const response = fetches.get(url) ?? fetch(url);
+    fetches.delete(url);
+    return response;
+  }
+
   async function get(url) {
-    const response = await fetch(url);
+    const response = await take(url);
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     return response;
   }
@@ -72,7 +79,7 @@
   try {
     const [loaded, code, harden] = await Promise.all([
       createPlayer(document.getElementById("app"), {
-        wasm: app.wasm,
+        wasm: take(app.wasm),
         glue: app.glue,
         assets: app.assets,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,

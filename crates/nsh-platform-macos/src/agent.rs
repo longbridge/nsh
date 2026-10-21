@@ -161,6 +161,27 @@ impl Native for MacNative {
         gesture(0, 0, 4);
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        self.activate();
+        let (x, y) = (f64::from(from.x.0), f64::from(from.y.0));
+        self.on_main(move |_, window| {
+            synth::mouse(window, NSEventType::MouseMoved, x, y, 0);
+            synth::mouse(window, NSEventType::LeftMouseDown, x, y, 1);
+        });
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(nsh_testing::agent::FRAME);
+            let (x, y) = (f64::from(at.x.0), f64::from(at.y.0));
+            self.on_main(move |_, window| {
+                synth::mouse(window, NSEventType::LeftMouseDragged, x, y, 1);
+            });
+            last = at;
+        }
+        let (x, y) = (f64::from(last.x.0), f64::from(last.y.0));
+        self.on_main(move |_, window| synth::mouse(window, NSEventType::LeftMouseUp, x, y, 1));
+    }
+
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
         self.on_main(move |_, window| synth::type_text(window, &text));

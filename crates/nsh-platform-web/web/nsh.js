@@ -619,19 +619,21 @@ class Player {
         }),
       },
     };
-    const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
     // An app's crates that call JS through wasm-bindgen (web-sys, js-sys):
     // the CLI ran `wasm-bindgen --target web` on the runtime, and its glue
     // provides the module's other imports. It loads while the module
     // compiles; a failed compile does not leave its rejection unhandled.
     const glueLoad = this.options.glue ? importGlue(this.options.glue) : null;
     glueLoad?.catch(() => {});
-    let module;
-    try {
-      module = await WebAssembly.compileStreaming(response());
-    } catch {
-      module = await WebAssembly.compile(await (await response()).arrayBuffer());
-    }
+    // One request either way: a host that does not serve exactly
+    // `application/wasm` (streaming compilation rejects any other type,
+    // parameters such as `; charset=utf-8` included) gets the body compiled
+    // whole instead of streamed.
+    const response = await (typeof url === "string" || url instanceof URL ? fetch(url) : url);
+    const type = response.headers.get("Content-Type")?.trim().toLowerCase();
+    const module = type === "application/wasm" && WebAssembly.compileStreaming
+      ? await WebAssembly.compileStreaming(response)
+      : await WebAssembly.compile(await response.arrayBuffer());
     const glue = glueLoad && (await glueLoad);
     if (glue) {
       if (typeof glue.__nsh_imports !== "function" || typeof glue.__nsh_finalize !== "function") {
@@ -684,12 +686,15 @@ class Player {
 
   /**
    * What the test sets the app up with (`ServerMessage::TestSetup`): the
-   * storage it starts with. Its requests then go to the test through
-   * `onTestSend` (`{type: "fetch", id, request}`, `{type: "fetch_cancel", id}`).
+   * storage it starts with, and whether it traces the app. Its requests,
+   * and a traced app's batches, then go to the test through `onTestSend`
+   * (`{type: "fetch", id, request}`, `{type: "fetch_cancel", id}`,
+   * `{type: "trace", items}`).
    */
-  testSetup(storage) {
+  testSetup(storage, trace) {
     if (!this.wasm.nsh_test_setup) return;
-    this.withStrings([JSON.stringify(storage ?? [])], (p, l) => this.wasm.nsh_test_setup(p, l));
+    const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace });
+    this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
   }
 
   /** The test's answer to the app's request `id` (`ServerMessage::Fetch`). */

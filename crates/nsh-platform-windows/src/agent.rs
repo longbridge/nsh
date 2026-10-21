@@ -135,6 +135,24 @@ impl Native for WindowsNative {
         }
     }
 
+    fn drag(&self, from: Point<Points>, to: Point<Points>) {
+        let (x, y) = (from.x.0, from.y.0);
+        self.on_main(move |s| {
+            synth::pointer(s, PointerKind::Move, x, y, 0);
+            synth::pointer(s, PointerKind::Down, x, y, 0);
+        });
+        std::thread::sleep(nsh_testing::agent::LANDING);
+        let mut last = from;
+        for at in nsh_testing::agent::drag_path(from, to) {
+            std::thread::sleep(FRAME);
+            let (x, y) = (at.x.0, at.y.0);
+            self.on_main(move |s| synth::pointer(s, PointerKind::Move, x, y, 0));
+            last = at;
+        }
+        let (x, y) = (last.x.0, last.y.0);
+        self.on_main(move |s| synth::pointer(s, PointerKind::Up, x, y, 0));
+    }
+
     fn type_text(&self, text: &str) {
         // Key by key, as a keyboard's characters come.
         for ch in text.chars() {

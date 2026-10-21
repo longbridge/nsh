@@ -344,6 +344,14 @@ Things that were found the hard way. Read the section of the area you change bef
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and
   `name:stream` writes an NTFS alternate data stream. `nsh-package` refuses paths with `:`, as with `\` or `..`.
 
+## Web, browsers
+
+- **WebKit does not hand a `<link rel=preload as=fetch>` still in flight to the `fetch` of the same URL**: the
+  `fetch` downloads the file again, and only once the preload has finished does it come from the HTTP cache (iOS 26.5
+  Safari: the wasm twice in 4 of 11 cold loads on Wi-Fi, each time the runtime asked before the preload was done;
+  Chromium hands it over). The published page starts its downloads with `fetch` in a head script instead
+  (`web::page`, `fetches`).
+
 ## Testing on simulators and emulators
 
 - **iOS simulator: launch apps only after `simctl bootstatus -b`**; apps launched while the simulator boots are sent to the
