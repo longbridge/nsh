@@ -443,7 +443,9 @@ Each workflow runs only when what it builds changes: the Rust workflows list the
 derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
 (`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
 It runs on every pull request: its `check` job is the status check main requires, so a pull request no other workflow
-reports `check` for (one touching only `crates/gpui`) can still merge.
+reports `check` for (one touching only `crates/gpui`) can still merge. The Compat workflow's `compat` job is required
+too, so it also runs on every pull request, and its `dorny/paths-filter` step (held to the graph by `paths.py` the same
+way) decides whether it builds and checks or passes at once.
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
