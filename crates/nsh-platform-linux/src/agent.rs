@@ -2,8 +2,9 @@
 //! where a node's view is in the window, and the input a user's hands give
 //! there, through the handlers real input goes through ([`crate::synth`]).
 //! The agent calls from a thread of its own; each call does its work on
-//! the GTK main thread (`MainContext::invoke`) and returns once it is
-//! done.
+//! the GTK main thread and returns once it is done. Calls go at the
+//! default priority, as input does: an idle source (`MainContext::invoke`)
+//! waits for a busy main loop (software rendering redrawing) to be idle.
 
 use std::{rc::Rc, sync::mpsc, time::Duration};
 
@@ -43,7 +44,7 @@ impl LinuxNative {
     ) -> Option<R> {
         let (tx, rx) = mpsc::channel();
         let key = self.key;
-        glib::MainContext::default().invoke(move || {
+        glib::MainContext::default().invoke_with_priority(glib::Priority::DEFAULT, move || {
             let _ = tx.send(Surface::by_key(key).map(|surface| f(&surface)));
         });
         rx.recv_timeout(MAIN).ok().flatten()
@@ -161,7 +162,7 @@ impl Native for LinuxNative {
     fn screenshot(&self) -> Result<Vec<u8>, String> {
         let (tx, rx) = mpsc::channel();
         let key = self.key;
-        glib::MainContext::default().invoke(move || {
+        glib::MainContext::default().invoke_with_priority(glib::Priority::DEFAULT, move || {
             let Some(window) = Surface::by_key(key).and_then(|s| synth::window(&s)) else {
                 let _ = tx.send(Err("the window is gone".to_owned()));
                 return;
