@@ -341,6 +341,7 @@ frame id:static-containing-block -20 -20 10 10
 frame id:rtl-ml 250 0 50 20
 frame id:rtl-mr 240 0 50 20
 frame id:rtl-key 250 0 50 20
+frame id:variant-order 0 0 20 20
 covers [styles] position
 covers [styles] marginRight
 

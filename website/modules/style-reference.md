@@ -316,10 +316,10 @@ A `TransformStep` is an object with one key:
 | `scale`, `scaleX`, `scaleY` | `number` (factor) | `.scale(f)`, `.scale_x(f)`, `.scale_y(f)`; `.bind_scale(&v)` | yes |
 | `rotate`, `rotateZ`, `rotateX`, `rotateY` | `number` (degrees) or `string` (`"45deg"`, `"0.5rad"`) | `.rotate(deg(…))`, `.rotate_x(…)`, `.rotate_y(…)`; `.bind_rotate(&v)` | yes |
 | `skewX`, `skewY` | `number` (degrees) or `string` | `.skew_x(…)`, `.skew_y(…)` | no |
-| `perspective` | `number` | `.perspective(d)` | no |
+| `perspective` | `number` | `.perspective(d)` on the parent (CSS's `perspective` property) | no |
 
 ```rust tabs
-view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
+view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
 ```
 
 ```tsx tabs

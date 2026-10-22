@@ -66,7 +66,7 @@ view()
 冲突的处理方式：
 
 1. 同一字符串中**靠后的类优先**：`"p-2 p-4"` 的结果是 `p-4`。不需要 `tailwind-merge`：组件可以直接把调用方传入的 `class` 追加在后面。在 Rust 中同样是后调用的方法优先。
-2. **带变体的类在普通类之后应用**，并按 Tailwind 的变体顺序排列（`hover:` 在 `active:` 之前，断点从小到大，`dark:` 最后），与它们在字符串中的位置无关。和 CSS 一样，`odd:bg-a last:bg-b` 会让位于奇数位置的最后一行得到 `bg-a`，因为 Tailwind 把 `odd` 排在 `last` 之后。
+2. **带变体的类在普通类之后应用**，并按 Tailwind 的变体顺序排列（`hover:` 在 `active:` 之前，`max-*:` 从宽到窄，断点从小到大，`dark:` 最后），与它们在字符串中的位置无关。与 Tailwind 一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的类排在后面：深色模式下悬停时 `dark:hover:bg-a dark:bg-b` 是 `bg-a`，宽度小于 `md` 时 `max-md:p-2 max-lg:p-4` 是 `p-2`。和 CSS 一样，`odd:bg-a last:bg-b` 会让位于奇数位置的最后一行得到 `bg-a`，因为 Tailwind 把 `odd` 排在 `last` 之后。
 3. **`style` 优先于类名。**
 4. `!` 让一个类变为 important：`!p-0`。
 
@@ -88,7 +88,7 @@ Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate �
 | `group-active/name:` ... | 同上，针对标记为 `group/name` 的祖先 | `.group_named("name")`；`.group_active_named("name", ..)` 等 |
 | `first:`、`last:`、`odd:`、`even:`、`only:` | 元素自身在兄弟节点中的位置。要按行的位置给行内标签上色，把 `last:text-*` 写在行上，标签会继承它 | 根据行的索引用普通 Rust 判断（`at.is_first()`、`at.is_last()`、`at.index() % 2`） |
 | `placeholder:` | 设置输入框占位文字的样式（`placeholder:text-zinc-400`） | `.placeholder_color(..)` |
-| `selection:` | 设置输入框或可选文本的选区高亮颜色（`selection:bg-violet-200`） | `.selection_color(..)` |
+| `selection:` | 设置输入框或可选文本的选区高亮颜色，也作用于元素内的输入框和文本（`selection:bg-violet-200`） | `.selection_color(..)` |
 | `dark:` | 系统外观为深色 | `AdaptiveColor`，或 `.dark(\|s\| ..)` |
 | `sm:`、`md:`、`lg:`、`xl:`、`2xl:` | 窗口宽度至少为 640、768、1024、1280、1536 点 | `.style_when(\|\| window().width >= px(768.0), \|s\| ..)` |
 | `max-sm:`、`max-md:` ... | 窗口宽度小于该断点 | 同上，使用 `<` |
@@ -154,7 +154,7 @@ view()
 - **单位是点（point）。** `p-4`（`.p_4()`）是 16 点（1 个间距步长 = 4pt，1rem = 16pt）。以 `px` 写的任意值也按点计算：`p-[13px]`（`.p(px(13.0))`）就是 13pt。
 - **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。没有 `flex` 或 `inline-flex` 的视图保持 NSH 默认的纵向排列。`block` 和 `flow-root` 使用块布局，`inline` 和 `inline-block` 也是如此，与浏览器在 flex 或 grid 父元素中的布局一致。在 Rust 中由 `.flex_row()` 和 `.flex_col()` 设置方向。
 - **视图上的文字类会被继承。** 视图上的 `text-*`、`font-*`、`leading-*`、`tracking-*` 等文字工具类（Rust 中的 `.text_color(..)`、`.font_weight(..)` 等）会像 CSS 继承那样传给其内部的文本和输入元素：`<View class="text-white">` 会让其中的标签变成白色。
-- **每个视图都是独立的盒子。** `overflow-x-hidden` 和 `overflow-y-hidden` 与 `overflow-hidden` 一样裁剪两个方向（滚动由 [scroll](../elements/scroll.md) 元素负责）；`invisible` 隐藏视图及其中的一切；`mix-blend-*` 让视图与其后绘制的一切混合；`block` 盒子的外边距与其子元素的外边距互不合并；每个视图（包括 `static` 视图）都是其 `absolute` 子元素的包含块；`fixed` 让视图在其根视图中布局（其他元素按 `absolute` 定位）。
+- **每个视图都是独立的盒子。** `overflow-x-hidden` 和 `overflow-y-hidden` 与 `overflow-hidden` 一样裁剪两个方向（滚动由 [scroll](../elements/scroll.md) 元素负责）；`invisible` 隐藏视图及其中的一切；`mix-blend-*` 让视图与其后绘制的一切混合；`block` 盒子的外边距与其子元素的外边距互不合并；`absolute` 视图与 CSS 一样，相对最近的定位祖先放置；`fixed` 让视图在其根视图中布局（其他元素按 `absolute` 定位）。
 - **文本保留空白。** 字符串中的空格和换行按原样绘制，`whitespace-*` 设置换行方式；JSX 编译器会像 JSX 一样合并字面 JSX 文本中的空白。
 - **过渡按属性组生效**：`transition` 对颜色、不透明度、阴影和变换做动画，`transition-all` 还包括圆角和边框宽度；滤镜、背景滤镜、渐变和布局会直接取新值。
 - **`focus-visible:` 即 `focus:`**：元素获得焦点时就会应用。

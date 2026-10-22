@@ -114,15 +114,14 @@ pub(crate) fn has_outer_shadow(style: &ViewStyle) -> bool {
 }
 
 /// The view's drop shadow filter, if any (it follows the content's shape):
-/// one is drawn, the last of the chain (a Tailwind shadow's widest layer).
+/// one is drawn, the widest of the chain's (the last of equals).
 pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
     style
         .effects
         .as_ref()?
         .filters
         .iter()
-        .rev()
-        .find_map(|f| match *f {
+        .filter_map(|f| match *f {
             Filter::DropShadow {
                 offset_x,
                 offset_y,
@@ -131,6 +130,7 @@ pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
             } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         })
+        .max_by(|a, b| a.2.total_cmp(&b.2))
 }
 
 impl Visual {

@@ -225,6 +225,11 @@ impl Decor {
         unsafe { target.setContents(image.as_deref()) };
     }
 
+    /// How an image view fits its image.
+    pub(crate) fn resize_mode(&self) -> ResizeMode {
+        self.mode
+    }
+
     /// How an image view fits its image (`resizeMode`) and where it places
     /// it (`objectPosition`).
     pub(crate) fn set_fit(&mut self, mode: ResizeMode, position: ObjectPosition) {

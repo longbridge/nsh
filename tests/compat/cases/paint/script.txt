@@ -595,6 +595,12 @@ style id:current borderColor #ff0000ff
 style id:drop-shadow filter drop-shadow(0 1 2 #0000001a) drop-shadow(0 1 1 #0000000f)
 style id:perspective-child transform translateX(50) translateY(50) perspective(400) translateX(-50) translateY(-50) rotateY(45deg)
 style id:selection selectionColor #ff6600ff
+style id:shadow-color boxShadow 0 1 3 0 #ff0000ff, 0 1 2 -1 #ff0000ff
+style id:shadow-alpha boxShadow 0 1 3 0 #00000033, 0 1 2 -1 #00000033
+style id:drop-shadow-color filter drop-shadow(0 3 3 #ff000080)
+style id:bg-current backgroundColor #ff000080
+style id:perspective-none transform rotateY(45deg)
+style id:palette backgroundColor #79697bff
 covers [styles] borderStyle
 covers [styles] borderWidth
 covers [styles] borderTopWidth

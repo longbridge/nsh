@@ -3113,6 +3113,41 @@ fn right_to_left_text_alignment_classes_stay_physical() {
 }
 
 #[test]
+fn a_child_moved_between_space_parents_takes_the_new_margin() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "flex-row space-x-2 w-[300px] h-[20px]");
+    view_with_classes(&mut c, 3, "flex-row space-x-8 w-[300px] h-[20px]");
+    let mut ops = Vec::new();
+    for (id, parent) in [(4, 2), (5, 2), (6, 3), (7, 3)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(class_op(id, "size-[20px]"));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    // 4 leaves `space-x-2` for `space-x-8`, before 7: 8 * 4 after it.
+    c.apply(Op::Remove {
+        parent: 2,
+        child: 4,
+    })
+    .unwrap();
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 3,
+            child: 4,
+            before: Some(7),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 7).map(|f| f.origin.x.0), Some(104.0));
+}
+
+#[test]
 fn space_classes_give_children_but_the_last_margins() {
     let mut c = core();
     view_with_classes(&mut c, 2, "flex-row space-x-4 w-[300px] h-[20px]");
@@ -3855,6 +3890,48 @@ fn texts_inherit_white_space_and_user_select_from_views() {
     c.apply(class_op(2, "truncate")).unwrap();
     let batch = c.commit().unwrap();
     assert_eq!(text(&batch, 3), Some((true, None)));
+}
+
+#[test]
+fn selection_classes_reach_the_texts_inside() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "selection:bg-red-500");
+    let mut ops = Vec::new();
+    for (id, classes) in [(3, "select-text"), (5, "select-text selection:bg-blue-500")] {
+        ops.extend([
+            Op::Create { id, tag: Tag::Text },
+            class_op(id, classes),
+            Op::CreateText {
+                id: id + 1,
+                text: "hello".into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: id + 1,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            },
+        ]);
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let highlight = |batch: &MountBatch, id| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Text { id: i, text, .. } if *i == id => Some(text.selection_color),
+            _ => None,
+        })
+    };
+    // Tailwind's `& *::selection`: the view's reaches the texts in it; a
+    // text's own wins.
+    assert_eq!(highlight(&batch, 3), Some(Some(Color(0xfb2c_36ff))));
+    assert_eq!(highlight(&batch, 5), Some(Some(Color(0x2b7f_ffff))));
+    c.apply(class_op(2, "")).unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(highlight(&batch, 3), Some(None));
 }
 
 #[test]

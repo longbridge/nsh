@@ -335,7 +335,7 @@ In Rust, transforms are methods (`.translate_x(..)`, `.rotate(..)`, `.scale(..)`
 
 ```rust tabs
 view().translate_x(px(20.0)).rotate(deg(-8.0)).scale(0.9)
-view().perspective(px(600.0)).rotate_y(deg(35.0)).backface_hidden()
+view().perspective(px(600.0)).child(view().rotate_y(deg(35.0)).backface_hidden())
 view().origin_top_left().rotate(deg(30.0))
 ```
 
@@ -345,7 +345,7 @@ view().origin_top_left().rotate(deg(30.0))
 <View style={{ transformOrigin: "top left", transform: [{ rotate: "30deg" }] }} />
 ```
 
-Steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY`, `perspective`. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust); the default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
+Steps: `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate` (`rotateZ`), `rotateX`, `rotateY`, `skewX`, `skewY`, `perspective`. Rust's `.perspective(..)` is CSS's `perspective` property, as Tailwind's `perspective-*`: it gives the view's children their depth. `transformOrigin` takes keywords, percentages and lengths (`"top left"`, `"50% 0"`, `[10, 20]`; `.origin_top_left()`, `.transform_origin(..)` in Rust); the default is the center. Transforms do not affect layout: siblings are placed as if the view were untransformed.
 
 Android has no skew transforms.
 

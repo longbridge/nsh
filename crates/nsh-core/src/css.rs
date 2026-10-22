@@ -589,16 +589,21 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     let mut explicit = false;
     if let Some(first) = parts.first() {
         let first = first.trim();
+        // `to right in oklab` or `in oklab to right`: CSS takes both orders.
         let (geometry, method) = match interpolation_at(first) {
-            Some(i) => (first[..i].trim(), Some(&first[i..])),
-            None => (first, None),
+            Some(i) => {
+                let end = method_end(&first[i..]) + i;
+                let geometry = format!("{} {}", &first[..i], &first[end..]);
+                (geometry, Some(&first[i..end]))
+            }
+            None => (first.to_string(), None),
         };
         if let Some(method) = method {
             let (space, hue) = mix_method(method)?;
             interpolation = Interpolation { space, hue };
             explicit = true;
         }
-        let configured = configure(&mut kind, geometry);
+        let configured = configure(&mut kind, geometry.trim());
         if method.is_some() && !configured {
             return None;
         }
@@ -662,7 +667,7 @@ pub(crate) fn is_legacy_color(s: &str) -> bool {
 }
 
 /// Where `arg` (a gradient's first argument) says `in <space>`, outside
-/// parentheses.
+/// parentheses (keywords in any case, as CSS's).
 fn interpolation_at(arg: &str) -> Option<usize> {
     let mut depth = 0i32;
     for (i, c) in arg.char_indices() {
@@ -670,7 +675,9 @@ fn interpolation_at(arg: &str) -> Option<usize> {
             '(' => depth += 1,
             ')' => depth -= 1,
             _ if depth == 0
-                && arg[i..].starts_with("in ")
+                && arg[i..].get(..3).is_some_and(|w| {
+                    w[..2].eq_ignore_ascii_case("in") && w.ends_with(char::is_whitespace)
+                })
                 && (i == 0 || arg[..i].ends_with(char::is_whitespace)) =>
             {
                 return Some(i);
@@ -679,6 +686,36 @@ fn interpolation_at(arg: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// The length of the `<color-interpolation-method>` `s` starts with: `in`,
+/// the space, and `<method> hue` when it follows.
+fn method_end(s: &str) -> usize {
+    let mut words = Vec::with_capacity(4);
+    let mut word = None;
+    for (i, c) in s.char_indices().chain([(s.len(), ' ')]) {
+        match (c.is_whitespace(), word) {
+            (false, None) => word = Some(i),
+            (true, Some(start)) => {
+                words.push((start, i));
+                word = None;
+                if words.len() == 4 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let text = |n: usize| words.get(n).map(|&(a, b)| s[a..b].to_ascii_lowercase());
+    let hue = matches!(
+        text(2).as_deref(),
+        Some("shorter" | "longer" | "increasing" | "decreasing")
+    ) && text(3).as_deref() == Some("hue");
+    match (hue, words.get(1)) {
+        (true, _) => words[3].1,
+        (false, Some(&(_, end))) => end,
+        (false, None) => s.len(),
+    }
 }
 
 /// How a gradient's colors mix between its stops (CSS's
@@ -1445,6 +1482,18 @@ mod tests {
         let g = gradient("linear-gradient(to right in oklch longer hue, red, blue)").unwrap();
         assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) });
         assert!(g.stops.len() >= 5);
+        // The method before the direction, and in any case.
+        for g in [
+            "linear-gradient(in oklch longer hue to right, red, blue)",
+            "linear-gradient(IN OKLCH LONGER HUE to right, red, blue)",
+        ] {
+            let g = gradient(g).unwrap();
+            assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) }, "{g:?}");
+            assert!(g.stops.len() >= 5);
+        }
+        let g = gradient("radial-gradient(in oklab circle at 25% 75%, red, blue)").unwrap();
+        assert!(matches!(g.kind, GradientKind::Radial { circle: true, .. }));
+        assert!(g.stops.len() > 2);
         let g = gradient("linear-gradient(in hsl, red 0 10px, blue 30px)").unwrap();
         assert_eq!(g.stops[1].position, Some(px(10.0).into()));
         assert!(g.stops.len() > 3);

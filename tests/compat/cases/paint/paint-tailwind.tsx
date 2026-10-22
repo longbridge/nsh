@@ -7,7 +7,10 @@
 // class wins over the width's solid, and alone is 3 points wide; a border
 // without a color is the text color around it; every drop shadow layer is
 // a filter; `perspective-*` is the children's, seen from the center;
-// `selection:bg-*` is the selection highlight.
+// `selection:bg-*` is the selection highlight. A shadow color replaces the
+// layers' colors at the size's alpha (`shadow-sm/20`); `-current` takes the
+// text color; `perspective-none` clears a perspective; Tailwind 4.3's
+// palettes (`mauve`, ...).
 import { Input, Text, View } from "nsh";
 
 function App() {
@@ -31,6 +34,16 @@ function App() {
         <View testID="perspective-child" class="size-[100px] rotate-y-45" />
       </View>
       <Input testID="selection" class="selection:bg-[#ff6600]" />
+      <View testID="shadow-color" class="h-1 shadow-sm shadow-[#ff0000]" />
+      <View testID="shadow-alpha" class="h-1 shadow-sm/20" />
+      <View testID="drop-shadow-color" class="h-1 drop-shadow-md drop-shadow-[#ff0000]/50" />
+      <View class="text-[#ff0000]">
+        <View testID="bg-current" class="h-1 bg-current/50" />
+      </View>
+      <View class="perspective-[400px] perspective-none w-[200px] h-[200px]">
+        <View testID="perspective-none" class="size-[100px] rotate-y-45" />
+      </View>
+      <View testID="palette" class="h-1 bg-mauve-500" />
     </View>
   );
 }

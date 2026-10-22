@@ -2107,6 +2107,7 @@ impl Style {
             StyleKey::BorderLeftColor => self.view.borders.colors[3] = color,
             StyleKey::BorderStartColor => self.logical.border_color[0] = Some(color),
             StyleKey::BorderEndColor => self.logical.border_color[1] = Some(color),
+            StyleKey::TextDecorationColor => self.text.decoration_color = Some(color),
             _ => debug_assert!(false, "set_color({key:?})"),
         }
     }

@@ -29,7 +29,7 @@ use crate::{
         deg, percentage, point, px, relative,
     },
     style::{Color, PatchValue, StyleDecl, StyleKey},
-    tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
+    tailwind::{self, ClassList, Decl, Part, Rank, Rule, rank, state},
     transform::TransformKind,
 };
 
@@ -226,13 +226,11 @@ impl Variant {
         }
     }
 
-    /// Tailwind's variant order: the highest of its parts.
-    fn rank(self) -> u16 {
-        let mut r = 0;
-        if self.group_states != 0 {
-            r = rank::GROUP;
-        }
-        for (bit, rank) in [
+    /// Its place in Tailwind's variant order: every part's, group
+    /// `group` (`""`: unnamed).
+    fn rank(self, group: &str) -> Rank {
+        let mut r = Rank::default();
+        let keys = [
             (state::HOVERED, rank::HOVER),
             (state::FOCUSED, rank::FOCUS),
             (state::PRESSED, rank::ACTIVE),
@@ -240,13 +238,17 @@ impl Variant {
             (state::SELECTED, rank::SELECTED),
             (state::CHECKED, rank::CHECKED),
             (state::INDETERMINATE, rank::INDETERMINATE),
-        ] {
+        ];
+        for (bit, key) in keys {
+            if self.group_states & bit != 0 {
+                r.add_group(&key, group);
+            }
             if self.states & bit != 0 {
-                r = r.max(rank);
+                r.add(key);
             }
         }
         if self.dark {
-            r = r.max(rank::DARK);
+            r.add(rank::DARK);
         }
         r
     }
@@ -270,13 +272,12 @@ pub(crate) enum ColorPart {
 impl ColorPart {
     fn part(self, c: Hsla) -> Part {
         let c = Color::from(c);
-        // A color with its own alpha replaces the layers' alpha (as
-        // Tailwind's `shadow-black/50`); an opaque one keeps theirs.
-        let own = c.0 & 0xff != 0xff;
+        // The color replaces the layers', alpha too (as Tailwind's
+        // `shadow-red-500`).
         match self {
-            ColorPart::Shadow => Part::ShadowColor(c, own),
-            ColorPart::InsetShadow => Part::InsetShadowColor(c, own),
-            ColorPart::TextShadow => Part::TextShadowColor(c, own),
+            ColorPart::Shadow => Part::ShadowColor(c),
+            ColorPart::InsetShadow => Part::InsetShadowColor(c),
+            ColorPart::TextShadow => Part::TextShadowColor(c),
             ColorPart::Ring => Part::RingColor(c),
             ColorPart::RingOffset => Part::RingOffsetColor(c),
             ColorPart::InsetRing => Part::InsetRingColor(c),
@@ -580,7 +581,7 @@ impl Declaration {
                     TransformKind::RotateY => &[Part::RotateY(v)],
                     TransformKind::SkewX => &[Part::SkewX(v)],
                     TransformKind::SkewY => &[Part::SkewY(v)],
-                    TransformKind::Perspective => &[Part::Perspective(v)],
+                    TransformKind::Perspective => &[Part::Perspective(Some(v))],
                 };
                 out.extend(parts.iter().cloned().map(Decl::Part));
             }
@@ -909,18 +910,16 @@ impl StyleRefinement {
                 }
             }
             if !decls.is_empty() {
-                let group = (variant.group_states != 0).then(|| {
-                    let name = match variant.group {
-                        0 => "",
-                        g => self.names[g as usize - 1],
-                    };
-                    (name, variant.group_states)
-                });
+                let name = match variant.group {
+                    0 => "",
+                    g => self.names[g as usize - 1],
+                };
+                let group = (variant.group_states != 0).then_some((name, variant.group_states));
                 rules.push(Rule::with(
                     variant.states,
                     group,
                     variant.dark,
-                    variant.rank(),
+                    variant.rank(name),
                     decls,
                 ));
             }
@@ -2573,6 +2572,8 @@ pub trait Styled: Sized {
     /// The step `kind` of its transform, by `amount`. The steps compose in
     /// CSS's order, whatever the order of the calls: translate, rotate,
     /// scale, then the 3D rotations and the skews.
+    /// [`TransformKind::Perspective`] is [`Styled::perspective`], its
+    /// children's depth.
     fn transform_step(self, kind: TransformKind, amount: impl IntoReactive<f32>) -> Self {
         transform_with(self, amount, move |amount| (kind, amount))
     }

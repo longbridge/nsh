@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    effects::{BlendMode, Cursor, GradientKind, Keyframes},
+    effects::{BlendMode, Cursor, Filter, GradientKind, Keyframes},
     geometry::{DefiniteLength, deg, px},
     style::{Color, FontFamily, Style},
     transform::TransformKind,
@@ -531,11 +531,43 @@ fn shadows_and_rings() {
     assert_eq!(e.box_shadows[1].spread, px(4.0));
     assert_eq!(e.box_shadows[1].color, Color(0xfb2c_36ff));
     assert_eq!(e.box_shadows[2].color, Color(0x2b7f_ff80));
-    // A color without an alpha keeps each layer's.
+    // A color replaces each layer's, alpha too (Tailwind's
+    // `--tw-shadow-color` at `--tw-shadow-alpha`, 100%).
     let s = styled("shadow-sm shadow-red-500");
     let e = s.view.effects.as_ref().unwrap();
-    assert_eq!(e.box_shadows[0].color, Color(0xfb2c_361a));
+    assert_eq!(e.box_shadows[0].color, Color(0xfb2c_36ff));
     assert!(styled("shadow-md shadow-none").view.effects.is_none());
+    // A size's modifier is the layers' alpha, and the color's.
+    let s = styled("shadow-xl/20");
+    let e = s.view.effects.as_ref().unwrap();
+    assert_eq!(e.box_shadows[0].color, Color(0x0000_0033));
+    let s = styled("shadow-red-500/50 shadow-xl/20");
+    let e = s.view.effects.as_ref().unwrap();
+    assert_eq!(e.box_shadows[0].color, Color(0xfb2c_361a));
+    // Arbitrary layers take colors and modifiers too.
+    let s = styled("shadow-[0_35px_35px_red]/20");
+    let e = s.view.effects.as_ref().unwrap();
+    assert_eq!(e.box_shadows[0].color, Color(0xff00_0033));
+    // `currentColor` everywhere Tailwind has `-current`.
+    let s =
+        styled("text-red-500 shadow-md shadow-current/50 ring-2 ring-offset-2 ring-offset-current");
+    let e = s.view.effects.as_ref().unwrap();
+    let red = Color(0xfb2c_36ff);
+    assert_eq!(e.box_shadows[0].color, red);
+    assert_eq!(e.box_shadows[2].color, red.with_alpha(0.5));
+    let s = styled("text-red-500 bg-current/50 decoration-current");
+    assert_eq!(s.view.background_color, red.with_alpha(0.5));
+    assert_eq!(s.text.decoration_color, Some(red));
+    let s = styled("text-red-500 drop-shadow-md drop-shadow-current");
+    match s.view.effects.as_ref().unwrap().filters[0] {
+        Filter::DropShadow { color, .. } => assert_eq!(color, red),
+        f => panic!("{f:?}"),
+    }
+    let s = styled("drop-shadow-blue-500/50 drop-shadow-lg");
+    match s.view.effects.as_ref().unwrap().filters[0] {
+        Filter::DropShadow { color, .. } => assert_eq!(color, Color(0x2b7f_ff80)),
+        f => panic!("{f:?}"),
+    }
 }
 
 #[test]
@@ -1493,4 +1525,136 @@ fn object_positions() {
         unknown,
         ["object-[sideways]", "object-[1px_2px_3px]", "object-middle"]
     );
+}
+
+/// Tailwind 4.3's order, which `getClassOrder` gives: a class's highest
+/// variant decides, then its next highest; one more variant comes later.
+#[test]
+fn variants_sort_as_tailwind_sorts_them() {
+    let pad = |classes: &str, dark: bool, width: f32, states: u8| {
+        let env = ClassEnvironment {
+            dark,
+            ..Default::default()
+        };
+        styled_with(classes, env, (width, 800.0), states)
+            .0
+            .layout
+            .padding
+            .left
+    };
+    let p = |n: f32| taffy::LengthPercentage::length(n);
+    // `max-*` widest first: the narrowest wins.
+    assert_eq!(pad("max-md:p-2 max-lg:p-4", false, 600.0, 0), p(8.0));
+    assert_eq!(pad("max-lg:p-4 max-md:p-2", false, 600.0, 0), p(8.0));
+    // `px` before `rem`: `max-sm` (40rem) after `max-[600px]`.
+    assert_eq!(pad("max-sm:p-2 max-[600px]:p-4", false, 500.0, 0), p(8.0));
+    // A second variant comes after the first alone.
+    let hovered = state::HOVERED;
+    assert_eq!(pad("dark:hover:p-2 dark:p-4", true, 390.0, hovered), p(8.0));
+    assert_eq!(pad("md:hover:p-2 md:p-4", false, 800.0, hovered), p(8.0));
+    // Groups by their state (`focus` after `hover`), not by position.
+    let group = ClassEnvironment::default();
+    let list = parse(&themed(), "group-focus:p-2 group-hover:p-4");
+    let mut style = Style::default();
+    let mut props = ClassProps::default();
+    let g = |_: &str| state::HOVERED | state::FOCUSED;
+    list.apply(
+        &Context {
+            env: group,
+            window: crate::geometry::size_pt(390.0, 800.0),
+            rtl: false,
+            states: 0,
+            position: 0,
+            group: &g,
+        },
+        &themed(),
+        &mut style,
+        &mut props,
+        |_| {},
+    );
+    assert_eq!(style.layout.padding.left, p(8.0));
+    // `indeterminate:` after `checked:`.
+    let both = state::CHECKED | state::INDETERMINATE;
+    assert_eq!(
+        pad("indeterminate:p-2 checked:p-4", false, 390.0, both),
+        p(8.0)
+    );
+}
+
+/// Bare values as Tailwind takes them: written as JavaScript prints
+/// numbers, integers where Tailwind wants them.
+#[test]
+fn bare_values_follow_tailwinds_grammar() {
+    let theme = themed();
+    for unknown in [
+        "p-.5",
+        "p-+4",
+        "m-1e1",
+        "border-1.5",
+        "ring-2.5",
+        "outline-0.5",
+        "duration-1.5",
+        "brightness-1.5",
+        "grow-1.5",
+        "line-clamp-1.5",
+        "z-+4",
+        "grid-cols-+2",
+        "decoration-px",
+        "outline-px",
+        "outline-offset-px",
+        "underline-offset-px",
+        "w-prose",
+        "min-w-prose",
+        "size-screen",
+        "w-1.5/2",
+        "from-10.5%",
+        "p-[-4px]",
+        "w-[-10px]",
+        "gap-[-2px]",
+        "rounded-[-4px]",
+        "text-[-4px]",
+    ] {
+        assert!(
+            !parse(&theme, unknown).unknown().is_empty(),
+            "{unknown} is no Tailwind class (or no valid CSS)"
+        );
+    }
+    for known in [
+        "p-0.5",
+        "p-3.25",
+        "opacity-2.5",
+        "bg-red-500/2.5",
+        "max-w-prose",
+        "w-dvh",
+        "size-dvw",
+        "basis-3xs",
+        "-m-[4px]",
+        "z-[+4]",
+        "perspective-none",
+        "bg-mauve-500",
+        "text-taupe-950",
+        "border-olive-200",
+        "ring-mist-400",
+        "shadow-current",
+        "inset-shadow-current",
+        "text-shadow-current",
+        "drop-shadow-current",
+        "drop-shadow-red-500",
+        "ring-offset-current",
+        "decoration-current",
+        "caret-current",
+        "from-current",
+        "via-current",
+        "to-current",
+        "bg-current/50",
+        "shadow-xl/20",
+        "drop-shadow-md/20",
+        "text-shadow-md/20",
+    ] {
+        assert_eq!(
+            parse(&theme, known).unknown(),
+            &[] as &[Box<str>],
+            "{known}"
+        );
+    }
 }

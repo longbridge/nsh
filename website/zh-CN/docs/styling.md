@@ -334,7 +334,7 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 
 ```rust tabs
 view().translate_x(px(20.0)).rotate(deg(-8.0)).scale(0.9)
-view().perspective(px(600.0)).rotate_y(deg(35.0)).backface_hidden()
+view().perspective(px(600.0)).child(view().rotate_y(deg(35.0)).backface_hidden())
 view().origin_top_left().rotate(deg(30.0))
 ```
 
@@ -344,7 +344,7 @@ view().origin_top_left().rotate(deg(30.0))
 <View style={{ transformOrigin: "top left", transform: [{ rotate: "30deg" }] }} />
 ```
 
-可用步骤：`translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`（`rotateZ`）、`rotateX`、`rotateY`、`skewX`、`skewY`、`perspective`。`transformOrigin` 接受关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`；Rust 中的 `.origin_top_left()`、`.transform_origin(..)`），默认为中心。变换不影响布局：兄弟视图的位置按视图未变换时计算。
+可用步骤：`translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`（`rotateZ`）、`rotateX`、`rotateY`、`skewX`、`skewY`、`perspective`。Rust 的 `.perspective(..)` 是 CSS 的 `perspective` 属性，与 Tailwind 的 `perspective-*` 相同：它给视图的子视图景深。`transformOrigin` 接受关键字、百分比和长度（`"top left"`、`"50% 0"`、`[10, 20]`；Rust 中的 `.origin_top_left()`、`.transform_origin(..)`），默认为中心。变换不影响布局：兄弟视图的位置按视图未变换时计算。
 
 Android 不支持斜切（skew）变换。
 

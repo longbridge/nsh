@@ -286,42 +286,129 @@ impl Condition {
 pub(crate) struct Rule {
     cond: Condition,
     decls: Vec<Decl>,
-    /// Variant order: plain utilities 0, then by Tailwind's order.
-    rank: u16,
+    /// Variant order: plain utilities first, then by Tailwind's order.
+    rank: Rank,
     /// `!`: applied after everything else.
     important: bool,
     /// Names theme tokens ([`deps::THEME`]).
     theme: bool,
 }
 
-/// Ranks of the variants Rust components use (Tailwind's order, as
-/// [`variant`] gives them).
+/// One variant's place in Tailwind's variant order (Tailwind sorts the
+/// variants it registers, the compound ones by their inner variant and
+/// then by their modifier, the breakpoints by unit and then by value).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Key {
+    /// The variant's (or for `group-*` the group's) place.
+    order: u16,
+    /// A breakpoint's unit (its index in [`BREAKPOINT_UNITS`]).
+    unit: u8,
+    /// A breakpoint's value (thousandths, negated for `max-*`), or a
+    /// group's inner variant.
+    value: i64,
+    /// A group's name (`group-hover/item`), `None` unnamed.
+    name: Option<Box<str>>,
+}
+
+impl Key {
+    const fn new(order: u16) -> Self {
+        Self {
+            order,
+            unit: 0,
+            value: 0,
+            name: None,
+        }
+    }
+}
+
+/// Breakpoint units as Tailwind orders them: by their name.
+const BREAKPOINT_UNITS: [&str; 4] = ["", "pt", "px", "rem"];
+
+/// Where a rule's variants put it: Tailwind sorts rules by the bit set of
+/// their variants' places, so the highest variant decides, then the next
+/// highest, and a rule with one more variant comes later. Plain
+/// utilities have none and come first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Rank(Vec<Key>);
+
+impl Rank {
+    /// Adds `key`, keeping the keys highest first.
+    pub(crate) fn add(&mut self, key: Key) {
+        if let Err(i) = self.0.binary_search_by(|k| key.cmp(k)) {
+            self.0.insert(i, key);
+        }
+    }
+
+    /// The group variant of `inner` (a [`rank`] key) on group `name`.
+    pub(crate) fn add_group(&mut self, inner: &Key, name: &str) {
+        self.add(Key {
+            order: rank::GROUP,
+            unit: 0,
+            value: inner.order.into(),
+            name: (!name.is_empty()).then(|| name.into()),
+        });
+    }
+}
+
+impl From<Key> for Rank {
+    fn from(key: Key) -> Self {
+        Rank(vec![key])
+    }
+}
+
+/// The places of the variants (Tailwind's order, as [`variant`] gives
+/// them).
 pub(crate) mod rank {
-    /// Before the pseudo-elements and `first:` ... `even:`.
-    pub(crate) const GROUP: u16 = 10;
-    pub(crate) const HOVER: u16 = 31;
-    pub(crate) const FOCUS: u16 = 32;
-    pub(crate) const ACTIVE: u16 = 33;
-    pub(crate) const DISABLED: u16 = 35;
-    pub(crate) const SELECTED: u16 = 29;
-    pub(crate) const CHECKED: u16 = 28;
-    /// After `checked:` in Tailwind's order; a view is never both, so
-    /// they share a rank.
-    pub(crate) const INDETERMINATE: u16 = 28;
-    pub(crate) const DARK: u16 = 80;
+    use super::Key;
+
+    /// `group-*`: before the pseudo-elements and `first:` ... `even:`.
+    pub(crate) const GROUP: u16 = 1;
+    pub(crate) const SELECTION: Key = Key::new(10);
+    pub(crate) const PLACEHOLDER: Key = Key::new(11);
+    pub(crate) const FIRST: Key = Key::new(20);
+    pub(crate) const LAST: Key = Key::new(21);
+    pub(crate) const ONLY: Key = Key::new(22);
+    pub(crate) const ODD: Key = Key::new(23);
+    pub(crate) const EVEN: Key = Key::new(24);
+    pub(crate) const CHECKED: Key = Key::new(30);
+    pub(crate) const INDETERMINATE: Key = Key::new(31);
+    /// NSH's (Tailwind has `aria-selected:`).
+    pub(crate) const SELECTED: Key = Key::new(32);
+    pub(crate) const FOCUS_WITHIN: Key = Key::new(33);
+    pub(crate) const HOVER: Key = Key::new(34);
+    pub(crate) const FOCUS: Key = Key::new(35);
+    pub(crate) const FOCUS_VISIBLE: Key = Key::new(36);
+    pub(crate) const ACTIVE: Key = Key::new(37);
+    pub(crate) const ENABLED: Key = Key::new(38);
+    pub(crate) const DISABLED: Key = Key::new(39);
+    pub(crate) const MOTION_SAFE: Key = Key::new(40);
+    pub(crate) const MOTION_REDUCE: Key = Key::new(41);
+    /// `max-*` breakpoints, widest first.
+    pub(crate) const MAX: u16 = 50;
+    /// Breakpoints and `min-*`, narrowest first.
+    pub(crate) const MIN: u16 = 51;
+    pub(crate) const PORTRAIT: Key = Key::new(60);
+    pub(crate) const LANDSCAPE: Key = Key::new(61);
+    pub(crate) const LTR: Key = Key::new(62);
+    pub(crate) const RTL: Key = Key::new(63);
+    pub(crate) const DARK: Key = Key::new(64);
+    /// NSH's platform variants, after Tailwind's.
+    pub(crate) const IOS: Key = Key::new(70);
+    pub(crate) const ANDROID: Key = Key::new(71);
+    pub(crate) const WEB: Key = Key::new(72);
 }
 
 impl Rule {
     /// A rule applying `decls` while the node is in all of [`state`]
     /// `states`, ordered by `rank`.
-    pub(crate) fn new(states: u8, rank: u16, decls: Vec<Decl>) -> Self {
+    pub(crate) fn new(states: u8, rank: impl Into<Rank>, decls: Vec<Decl>) -> Self {
         Self {
             cond: Condition {
                 states,
                 ..Condition::default()
             },
             decls,
-            rank,
+            rank: rank.into(),
             important: false,
             theme: false,
         }
@@ -330,7 +417,11 @@ impl Rule {
     /// A state style (`activeStyle`, ...): `decls` while the node is in
     /// `states` (and, unless `disabled`, not disabled), applied over the
     /// inline style as `!` utilities are, ordered by `rank`.
-    pub(crate) fn state_style(states: u8, rank: u16, decls: Vec<crate::StyleDecl>) -> Self {
+    pub(crate) fn state_style(
+        states: u8,
+        rank: impl Into<Rank>,
+        decls: Vec<crate::StyleDecl>,
+    ) -> Self {
         let mut rule = Self::new(states, rank, decls.into_iter().map(Decl::Style).collect());
         if states & state::DISABLED == 0 {
             rule.cond.not_states = state::DISABLED;
@@ -345,7 +436,7 @@ impl Rule {
         states: u8,
         group: Option<(&str, u8)>,
         dark: bool,
-        rank: u16,
+        rank: Rank,
         decls: Vec<Decl>,
     ) -> Self {
         let mut rule = Self::new(states, rank, decls);
@@ -666,7 +757,8 @@ impl ClassList {
             list.tracked |= state::PRESSED | state::HOVERED | state::FOCUS_WITHIN;
             list.groups = groups;
         }
-        list.rules.sort_by_key(|r| (r.important, r.rank));
+        list.rules
+            .sort_by(|a, b| (a.important, &a.rank).cmp(&(b.important, &b.rank)));
         list
     }
 
@@ -696,7 +788,8 @@ impl ClassList {
         list.groups.extend(over.groups.iter().cloned());
         list.unknown.extend(over.unknown.iter().cloned());
         list.tracked |= over.tracked;
-        list.rules.sort_by_key(|r| (r.important, r.rank));
+        list.rules
+            .sort_by(|a, b| (a.important, &a.rank).cmp(&(b.important, &b.rank)));
         list
     }
 }
@@ -791,7 +884,8 @@ pub fn parse(theme: &Theme, classes: &str) -> ClassList {
         }
     }
     // Stable: equal ranks keep the order of the string.
-    list.rules.sort_by_key(|r| (r.important, r.rank));
+    list.rules
+        .sort_by(|a, b| (a.important, &a.rank).cmp(&(b.important, &b.rank)));
     list
 }
 
@@ -846,9 +940,9 @@ fn parse_token(theme: &Theme, token: &str) -> Option<Token> {
         }
     }
     let mut cond = Condition::default();
-    let mut rank = 0u16;
+    let mut rank = Rank::default();
     for v in variants {
-        rank = rank.max(variant(theme, v, &mut cond)?);
+        rank.add(variant(theme, v, &mut cond)?);
     }
     if ignored(utility) {
         return Some(Token::Ignored);
@@ -897,7 +991,7 @@ fn ignored(utility: &str) -> bool {
 fn themed(
     theme: &Theme,
     cond: Condition,
-    rank: u16,
+    rank: Rank,
     important: bool,
     utility: &str,
 ) -> Option<Token> {
@@ -914,7 +1008,7 @@ fn themed(
     let rule = |cond: Condition, decls: Vec<Decl>| Rule {
         cond,
         decls,
-        rank,
+        rank: rank.clone(),
         important,
         theme: true,
     };
@@ -936,8 +1030,8 @@ fn themed(
     ))
 }
 
-/// Applies variant `v` to `cond`; returns its rank (Tailwind's order).
-fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
+/// Applies variant `v` to `cond`; returns its place in Tailwind's order.
+fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
     use state::*;
     let states = |cond: &mut Condition, s: u8| {
         cond.states |= s;
@@ -947,31 +1041,31 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
     Some(match v {
         "selection" => {
             cond.selection = true;
-            11
+            rank::SELECTION
         }
         "placeholder" => {
             cond.placeholder = true;
-            12
+            rank::PLACEHOLDER
         }
         "first" => {
             cond.position |= position::FIRST;
-            13
+            rank::FIRST
         }
         "last" => {
             cond.position |= position::LAST;
-            14
+            rank::LAST
         }
         "only" => {
             cond.position |= position::ONLY;
-            15
+            rank::ONLY
         }
         "odd" => {
             cond.position |= position::ODD;
-            16
+            rank::ODD
         }
         "even" => {
             cond.position |= position::EVEN;
-            17
+            rank::EVEN
         }
         "checked" => {
             states(cond, CHECKED);
@@ -983,71 +1077,75 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
         }
         "selected" => {
             states(cond, SELECTED);
-            29
+            rank::SELECTED
         }
         "focus-within" => {
             states(cond, FOCUS_WITHIN);
-            30
+            rank::FOCUS_WITHIN
         }
         "hover" => {
             states(cond, HOVERED);
-            31
+            rank::HOVER
         }
-        "focus" | "focus-visible" => {
+        "focus" => {
             states(cond, FOCUSED);
-            32
+            rank::FOCUS
+        }
+        "focus-visible" => {
+            states(cond, FOCUSED);
+            rank::FOCUS_VISIBLE
         }
         "active" => {
             states(cond, PRESSED);
-            33
+            rank::ACTIVE
         }
         "enabled" => {
             cond.not_states |= DISABLED;
-            34
+            rank::ENABLED
         }
         "disabled" => {
             states(cond, DISABLED);
-            35
+            rank::DISABLED
         }
         "motion-safe" => {
             cond.reduce_motion = Some(false);
-            40
+            rank::MOTION_SAFE
         }
         "motion-reduce" => {
             cond.reduce_motion = Some(true);
-            41
+            rank::MOTION_REDUCE
         }
         "portrait" => {
             cond.landscape = Some(false);
-            70
+            rank::PORTRAIT
         }
         "landscape" => {
             cond.landscape = Some(true);
-            71
+            rank::LANDSCAPE
         }
         "ltr" => {
             cond.rtl = Some(false);
-            72
+            rank::LTR
         }
         "rtl" => {
             cond.rtl = Some(true);
-            73
+            rank::RTL
         }
         "dark" => {
             cond.dark = Some(true);
-            80
+            rank::DARK
         }
         "ios" => {
             cond.platform = Some(Platform::Ios);
-            81
+            rank::IOS
         }
         "android" => {
             cond.platform = Some(Platform::Android);
-            82
+            rank::ANDROID
         }
         "web" => {
             cond.platform = Some(Platform::Web);
-            83
+            rank::WEB
         }
         v => {
             if let Some(rest) = v.strip_prefix("group-") {
@@ -1056,15 +1154,16 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
                     Some((s, n)) => (s, n),
                     None => (rest, ""),
                 };
-                let bit = match s {
-                    "hover" => HOVERED,
-                    "active" => PRESSED,
-                    "focus" | "focus-visible" => FOCUSED,
-                    "focus-within" => FOCUS_WITHIN,
-                    "disabled" => DISABLED,
-                    "selected" => SELECTED,
-                    "checked" => CHECKED,
-                    "indeterminate" => INDETERMINATE,
+                let (bit, inner) = match s {
+                    "hover" => (HOVERED, rank::HOVER),
+                    "active" => (PRESSED, rank::ACTIVE),
+                    "focus" => (FOCUSED, rank::FOCUS),
+                    "focus-visible" => (FOCUSED, rank::FOCUS_VISIBLE),
+                    "focus-within" => (FOCUS_WITHIN, rank::FOCUS_WITHIN),
+                    "disabled" => (DISABLED, rank::DISABLED),
+                    "selected" => (SELECTED, rank::SELECTED),
+                    "checked" => (CHECKED, rank::CHECKED),
+                    "indeterminate" => (INDETERMINATE, rank::INDETERMINATE),
                     _ => return None,
                 };
                 let entry = cond.group.get_or_insert_with(|| (name.into(), 0));
@@ -1072,32 +1171,51 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<u16> {
                     return None;
                 }
                 entry.1 |= bit;
-                return Some(rank::GROUP);
+                let mut group = Rank::default();
+                group.add_group(&inner, name);
+                return group.0.pop();
             }
             // Breakpoints: `md:`, `max-md:`, `min-[600px]:`, `max-[600px]:`.
             let (max, name) = match v.strip_prefix("max-") {
                 Some(n) => (true, n),
                 None => (false, v.strip_prefix("min-").unwrap_or(v)),
             };
-            let width = match name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
-                Some(arbitrary) => crate::css::length(arbitrary)?,
-                None => theme
-                    .breakpoints
-                    .iter()
-                    .position(|(n, _)| **n == *name)
-                    .map(|i| theme.breakpoints[i].1)?,
+            // Tailwind orders breakpoints by their unit's name, then by
+            // their value (`max-*` widest first).
+            let (width, unit, value) =
+                match name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
+                    Some(arbitrary) => {
+                        let arbitrary = arbitrary.trim();
+                        let digits = arbitrary
+                            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+                            .unwrap_or(arbitrary.len());
+                        let unit = BREAKPOINT_UNITS
+                            .iter()
+                            .position(|u| *u == &arbitrary[digits..])?;
+                        let value = crate::css::number(&arbitrary[..digits])?;
+                        (crate::css::length(arbitrary)?, unit, value)
+                    }
+                    None => {
+                        let b = theme.breakpoints.iter().find(|b| *b.0 == *name)?;
+                        match b.2 {
+                            true => (b.1, 3, b.1 / theme.rem),
+                            false => (b.1, 2, b.1),
+                        }
+                    }
+                };
+            let thousandths = (f64::from(value) * 1000.0).round() as i64;
+            let key = |order, value| Key {
+                order,
+                unit: unit as u8,
+                value,
+                name: None,
             };
-            let index = theme
-                .breakpoints
-                .iter()
-                .filter(|(_, w)| *w <= width)
-                .count() as u16;
             if max {
                 cond.max_width = Some(cond.max_width.map_or(width, |w| w.min(width)));
-                50 + index
+                key(rank::MAX, -thousandths)
             } else {
                 cond.min_width = Some(cond.min_width.map_or(width, |w| w.max(width)));
-                60 + index
+                key(rank::MIN, thousandths)
             }
         }
     })

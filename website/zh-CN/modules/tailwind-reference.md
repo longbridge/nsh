@@ -52,7 +52,7 @@ view()
 ## 类如何组合
 
 - **后写的生效。** 同一变体层级的工具类中，字符串里靠后的那个生效：`"p-4 p-2"` 等于 `p-2`。组件可以接收 `class` 属性并直接拼接到自己的类后面，不需要 `tailwind-merge`。
-- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：`group-*:`、`selection:`、`placeholder:`、位置（`first:` 等）、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`active:`、`enabled:`、`disabled:`、动效偏好、`max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
+- **变体在普通工具类之后应用**，顺序与 Tailwind 的变体顺序一致：`group-*:`（先按状态，再按组名）、`selection:`、`placeholder:`、位置（`first:` 等）、`checked:`、`indeterminate:`、`selected:`、`focus-within:`、`hover:`、`focus:`、`focus-visible:`、`active:`、`enabled:`、`disabled:`、动效偏好、从宽到窄的 `max-*:` 断点、按宽度升序的断点、方向（横竖屏）、书写方向、`dark:`，最后是平台。与 Tailwind 的排序一样，先比较类中顺序最靠后的变体，再比较次靠后的变体，多一个变体的排在后面（`dark:hover:` 在 `dark:` 之后）。因此 `"active:bg-red-500 bg-blue-500"` 按下时是红色。
 - **`style` 优先于类。** 内联 `style` 叠加在解析后的类之上。重要标记的工具类（`!p-4` 或 `p-4!`）连内联样式也能覆盖。
 - **文字样式会继承。** 写在视图上的文字类（`text-white`、`font-bold`、`text-center` 等）会像 CSS 一样传给其中的 `<Text>` 和 `<Input>`。
 - **display 遵循 CSS。** `flex` 和 `inline-flex` 是横向排列，除非有方向类另行指定，且与其在字符串中的位置无关（`flex-col flex` 是纵向）。没有 `flex` 的视图保持 NSH 默认的纵向排列。
@@ -79,7 +79,7 @@ view()
 
 ### 颜色
 
-内置完整的 Tailwind 4 调色板：`red`、`orange`、`amber`、`yellow`、`lime`、`green`、`emerald`、`teal`、`cyan`、`sky`、`blue`、`indigo`、`violet`、`purple`、`fuchsia`、`pink`、`rose`、`slate`、`gray`、`zinc`、`neutral`、`stone`，每种有 `50`、`100`–`900`、`950` 色阶；另有 `black`、`white` 和 `transparent`。自定义颜色在 `nsh.json` 中添加（见 [主题定制](#主题定制)）。
+内置完整的 Tailwind 4 调色板：`red`、`orange`、`amber`、`yellow`、`lime`、`green`、`emerald`、`teal`、`cyan`、`sky`、`blue`、`indigo`、`violet`、`purple`、`fuchsia`、`pink`、`rose`、`slate`、`gray`、`zinc`、`neutral`、`stone`、`mauve`、`olive`、`mist`、`taupe`，每种有 `50`、`100`–`900`、`950` 色阶；另有 `black`、`white` 和 `transparent`。自定义颜色在 `nsh.json` 中添加（见 [主题定制](#主题定制)）。
 
 所有颜色工具类都接受：
 
@@ -267,7 +267,7 @@ view()
 | `decoration-<color>` | `textDecorationColor` |
 | `underline-offset-<n>`、`underline-offset-[<length>]`、`underline-offset-auto` | `textUnderlineOffset` |
 | `text-shadow-2xs`、`-xs`、`-sm`、`-md`、`-lg` | 主题中的文字阴影（一层：主题中最宽的那层） |
-| `text-shadow-<color>` | 阴影颜色（颜色本身不带透明度时保留各层透明度） |
+| `text-shadow-<color>`、`text-shadow-current` | 阴影颜色，透明度取尺寸的 alpha（`text-shadow-md/20`） |
 | `text-shadow-none` | 去掉阴影 |
 
 Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层。
@@ -277,7 +277,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | Class | 设置 |
 |---|---|
 | `placeholder:text-<color>` | `placeholderColor` |
-| `selection:bg-<color>` | `selectionColor`（输入框或可选文本的选区高亮） |
+| `selection:bg-<color>` | `selectionColor`（输入框或可选文本的选区高亮，也作用于元素内的输入框和文本） |
 | `caret-<color>` | 光标颜色 |
 
 ## 背景
@@ -348,13 +348,13 @@ view()
 |---|---|
 | `shadow-2xs`、`shadow-xs`、`shadow-sm`、`shadow`、`shadow-md`、`shadow-lg`、`shadow-xl`、`shadow-2xl` | 主题中的 `boxShadow` |
 | `shadow-[<box-shadow>]` | 任意阴影：`shadow-[0_8px_24px_rgb(0_0_0_/_0.12)]` |
-| `shadow-<color>` | 给阴影层重新着色：`shadow-indigo-500/40` |
+| `shadow-<color>`、`shadow-current` | 给阴影层重新着色，透明度取尺寸的 alpha：`shadow-indigo-500/40`；尺寸可带 `/<alpha>`：`shadow-xl/20` |
 | `shadow-none` | 无阴影 |
 | `inset-shadow-2xs`、`-xs`、`-sm`、`inset-shadow`、`inset-shadow-[...]`、`inset-shadow-<color>`、`inset-shadow-none` | 内阴影 |
 | `opacity-<n>`、`opacity-[<value>]` | `opacity`：`opacity-50` = 0.5 |
 | `mix-blend-<mode>` | `mixBlendMode`：`normal`、`multiply`、`screen`、`overlay`、`darken`、`lighten`、`color-dodge`、`color-burn`、`hard-light`、`soft-light`、`difference`、`exclusion`、`hue`、`saturation`、`color`、`luminosity`、`plus-darker`、`plus-lighter` |
 
-阴影、环和内阴影与 CSS 一样合并为一个 `boxShadow` 列表。阴影颜色本身不带透明度时，保留各层原有的透明度。
+阴影、环和内阴影与 CSS 一样合并为一个 `boxShadow` 列表。与 Tailwind 的 `--tw-shadow-color` 一样，阴影颜色替换各层的颜色，透明度也一并替换：`shadow-md shadow-red-500` 是不透明的红色阴影，`shadow-md/20 shadow-red-500` 则为 20%。
 
 ## 滤镜
 
@@ -364,7 +364,7 @@ view()
 | `brightness-<n>`、`contrast-<n>`、`saturate-<n>` | 百分比倍数：`brightness-125` = 1.25 |
 | `grayscale`、`grayscale-<n>`、`invert`、`invert-<n>`、`sepia`、`sepia-<n>` | 不带值为 100% |
 | `hue-rotate-<deg>`、`-hue-rotate-<deg>` | `hue-rotate()` |
-| `drop-shadow`、`drop-shadow-xs`、`-sm`、`-md`、`-lg`、`-xl`、`-2xl`、`drop-shadow-[...]` | 每层一个 `drop-shadow()`，位于其他滤镜之后；Web、Linux、Windows 和 GPUI 绘制每一层，iOS、macOS 和 Android 绘制最后一层 |
+| `drop-shadow`、`drop-shadow-xs`、`-sm`、`-md`、`-lg`、`-xl`、`-2xl`、`drop-shadow-[...]`、`drop-shadow-none`；`drop-shadow-<color>`、`drop-shadow-current`；两者都可带 `/<alpha>` | 每层一个 `drop-shadow()`，位于其他滤镜之后；颜色替换各层的颜色，透明度取尺寸的 alpha；Web、Linux、Windows 和 GPUI 绘制每一层，iOS、macOS 和 Android 绘制最宽的一层 |
 | `drop-shadow-none` | 去掉投影 |
 | `filter-none` | 去掉所有滤镜 |
 | `backdrop-blur`、`backdrop-blur-<size>`、`backdrop-blur-[<length>]` | 模糊视图背后的内容 |
@@ -383,7 +383,7 @@ view()
 | `rotate-x-<deg>`、`rotate-y-<deg>`、`rotate-z-<deg>` | 3D 旋转（属于 `transform`，在平移、旋转和缩放之后） |
 | `scale-<pct>`、`scale-x-<pct>`、`scale-y-<pct>`、`scale-[<factor>]` | 缩放：`scale-95` = 0.95，`-scale-x-100` 为水平镜像 |
 | `skew-<deg>`、`skew-x-<deg>`、`skew-y-<deg>` | 斜切（Android 不支持） |
-| `perspective-dramatic`（100）、`-near`（300）、`-normal`（500）、`-midrange`（800）、`-distant`（1200）、`perspective-[<length>]` | 元素子元素 3D 旋转的透视距离，从元素中心观察（CSS 的 `perspective`：`<View class="perspective-near"><View class="rotate-y-45" /></View>`） |
+| `perspective-dramatic`（100）、`-near`（300）、`-normal`（500）、`-midrange`（800）、`-distant`（1200）、`perspective-[<length>]`、`perspective-none` | 元素子元素 3D 旋转的透视距离，从元素中心观察（CSS 的 `perspective`：`<View class="perspective-near"><View class="rotate-y-45" /></View>`） |
 | `origin-center`、`-top`、`-top-right`、`-right`、`-bottom-right`、`-bottom`、`-bottom-left`、`-left`、`-top-left`、`origin-[<value>]` | `transformOrigin` |
 | `backface-hidden`、`backface-visible` | `backfaceVisibility` |
 | `transform-none` | 清除 3D 旋转和斜切（CSS 的 `transform: none`） |
@@ -581,7 +581,7 @@ each(items, |item: &Item| item.id, move |item, index| {
 
 ### 占位符与选区
 
-`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 或可选 `<Text>` 的选区，接受选区的背景色，即高亮颜色：`selection:bg-violet-200`（样式键 `selectionColor`；在平台用同一种颜色绘制光标和选区时，也决定输入框光标的颜色）。
+`placeholder:` 作用于 `<Input>` 的占位文字，只接受文字颜色：`placeholder:text-zinc-400`（样式键 `placeholderColor`）。`selection:` 作用于 `<Input>` 或可选 `<Text>` 的选区，写在任意元素上时也作用于其中的输入框和文本（Tailwind 的 `& *::selection`；以最近的元素为准），接受选区的背景色，即高亮颜色：`selection:bg-violet-200`（样式键 `selectionColor`；在平台用同一种颜色绘制光标和选区时，也决定输入框光标的颜色）。
 
 ### 重要标记
 

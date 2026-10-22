@@ -316,10 +316,10 @@ view().p_4().rounded(px(12.0)).bg(white()).shadow([
 | `scale`、`scaleX`、`scaleY` | `number`（倍数） | `.scale(f)`、`.scale_x(f)`、`.scale_y(f)`；`.bind_scale(&v)` | 支持 |
 | `rotate`、`rotateZ`、`rotateX`、`rotateY` | `number`（度）或 `string`（`"45deg"`、`"0.5rad"`） | `.rotate(deg(…))`、`.rotate_x(…)`、`.rotate_y(…)`；`.bind_rotate(&v)` | 支持 |
 | `skewX`、`skewY` | `number`（度）或 `string` | `.skew_x(…)`、`.skew_y(…)` | 不支持 |
-| `perspective` | `number` | `.perspective(d)` | 不支持 |
+| `perspective` | `number` | 父视图的 `.perspective(d)`（CSS 的 `perspective` 属性） | 不支持 |
 
 ```rust tabs
-view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
+view().perspective(px(600.0)).child(view().rotate_y(deg(20.0)).scale(0.95))
 ```
 
 ```tsx tabs

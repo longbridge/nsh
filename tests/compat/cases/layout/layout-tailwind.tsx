@@ -4,7 +4,8 @@
 // `inline-block` is a block (no gap between its children); `space-x-*` puts
 // a margin after each child but the last (negative ones too); right to
 // left, `ml-*` / `mr-*` stay on their side while the `marginRight` key
-// keeps React Native's meaning (the end). Arbitrary values, as this
+// keeps React Native's meaning (the end); `max-*` breakpoints sort widest
+// first, so the narrowest wins. Arbitrary values, as this
 // domain's theme has a spacing of its own. The script checks each frame.
 import { Text, View } from "nsh";
 
@@ -42,6 +43,9 @@ function App() {
         <View class="static w-[100px] h-[40px]">
           <View testID="static-containing-block" class="absolute left-0 top-0 size-[10px]" />
         </View>
+      </View>
+      <View>
+        <View testID="variant-order" class="h-[20px] max-md:w-[20px] max-lg:w-[40px]" />
       </View>
       <View style={{ direction: "rtl" }}>
         <View testID="rtl-classes" class="flex-row w-[300px] h-[20px]">

@@ -11,7 +11,9 @@
 - **Tailwind** (`class` / `classList` on every element): JS only passes the strings; the core resolves them (how, and
   what is cached: `crates/nsh-core/src/tailwind/mod.rs`, `core/classes.rs`). The inline `style` always wins over classes; a key set to `undefined` sets nothing, so the class value (or the default) stays, while `null` sets the default.
   Later utilities win over earlier ones (components append a `class` prop, no `tailwind-merge`); variant rules apply
-  after plain ones in Tailwind's variant order. Display follows CSS: `flex` / `inline-flex` are rows unless a direction
+  after plain ones in Tailwind's variant order: a rule's `Rank` is its variants' places highest first, compared as
+  Tailwind compares the bit sets of a candidate's variants (`group-*` by inner state, then name; breakpoints by unit
+  name, then value, `max-*` widest first), so `dark:hover:` follows `dark:`. Display follows CSS: `flex` / `inline-flex` are rows unless a direction
   utility says otherwise, wherever it is in the string (`flex-col flex` is a column; the implied row is a
   `Decl::Default`, applied before every rule), while views without them keep React Native's column; `block` /
   `flow-root` use Taffy's block layout, and so do `inline` / `inline-block`: a browser blockifies inline boxes in flex
@@ -24,9 +26,9 @@
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, a `Button`'s `selectedStyle`), resolved the same
   way: later states win, `disabled` over all. `selected`, `checked` and `indeterminate` are value states the core sets
-  from the accessibility state (never reported by the platform), below the interaction states: `checked` and
-  `indeterminate` (one rank: a view is never both), then `selected`, then `hover`, `focus`, `active` (gpui-base's order
-  of value states). `disabled` (any element) applies `disabled:` and drops
+  from the accessibility state (never reported by the platform), below the interaction states: `checked`, then
+  `indeterminate` (Tailwind's order), then `selected`, then `hover`, `focus`, `active` (gpui-base's order of value
+  states). `disabled` (any element) applies `disabled:` and drops
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
@@ -174,7 +176,7 @@
   Known limits: iOS has no CSS filters on views (only `opacity`, `brightness` ≤ 1 and `drop-shadow`; images take every color filter
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,
-  the last of the chain (a Tailwind shadow's widest layer; the web, Linux, Windows and GPUI draw every layer a class or
+  the widest of the chain's (the last of equals; the web, Linux, Windows and GPUI draw every layer a class or
   style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest).
 - **View styles**: `backgroundColor`, `borderWidth` / `borderColor` (also per side: `borderTopWidth`, `borderLeftColor`, ...),
   `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever

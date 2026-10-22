@@ -66,7 +66,7 @@ pub(super) enum Part {
 
 impl Part {
     /// The state bits and rank of a state style.
-    fn state(self) -> Option<(u8, u16)> {
+    fn state(self) -> Option<(u8, crate::tailwind::Key)> {
         Some(match self {
             Part::Active => (state::PRESSED, rank::ACTIVE),
             Part::Hover => (state::HOVERED, rank::HOVER),
@@ -922,10 +922,13 @@ impl<M: TextEngine> Core<M> {
         keys[1] = elements.next().copied().unwrap_or(NO_KEY);
         keys[2] = elements.next().copied().unwrap_or(NO_KEY);
         for (i, k) in keys.into_iter().enumerate() {
-            if k != NO_KEY
-                && !keys[..i].contains(&k)
-                && self.space_of(k).is_some() != self.nodes[k as usize].spaced
-            {
+            if k == NO_KEY || keys[..i].contains(&k) {
+                continue;
+            }
+            let (now, was) = (self.space_of(k).is_some(), self.nodes[k as usize].spaced);
+            // The one that moved may have left another `space-*` parent,
+            // whose margin it still has.
+            if now != was || i == 0 && now {
                 self.restyle(k);
             }
         }
@@ -1293,7 +1296,7 @@ impl<M: TextEngine> Core<M> {
         if paragraph && kind == Kind::Text {
             self.mark_text_block(key);
         }
-        if (old.no_wrap != props_no_wrap || old.selectable != props_selectable)
+        if (old.no_wrap != props_no_wrap || old.selectable != props_selectable || selection)
             && kind != Kind::Text
         {
             // The texts inside inherit them.

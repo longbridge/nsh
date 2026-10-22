@@ -66,7 +66,7 @@ view()
 How conflicts resolve:
 
 1. **Later classes win** over earlier ones in the same string: `"p-2 p-4"` is `p-4`. There is no need for `tailwind-merge`: a component can append the `class` its caller passes. Later methods win in Rust too.
-2. **Variant classes apply after plain ones**, ordered by Tailwind's variant order (`hover:` before `active:`, breakpoints ascending, `dark:` last), whatever their position in the string. As in CSS, `odd:bg-a last:bg-b` gives an odd last row `bg-a`, because Tailwind sorts `odd` after `last`.
+2. **Variant classes apply after plain ones**, ordered by Tailwind's variant order (`hover:` before `active:`, `max-*:` widest first, breakpoints ascending, `dark:` last), whatever their position in the string. As in Tailwind, a class's highest variant decides, then its next highest, and a class with one more variant comes later: `dark:hover:bg-a dark:bg-b` is `bg-a` while hovered in dark mode, and `max-md:p-2 max-lg:p-4` is `p-2` below `md`. As in CSS, `odd:bg-a last:bg-b` gives an odd last row `bg-a`, because Tailwind sorts `odd` after `last`.
 3. **`style` wins over classes.**
 4. `!` makes a class important: `!p-0`.
 
@@ -88,7 +88,7 @@ Rust components (`SafeAreaView`, `KeyboardAvoidingView` and those of an app's ow
 | `group-active/name:` ... | The same, for an ancestor marked `group/name` | `.group_named("name")`; `.group_active_named("name", ..)`, ... |
 | `first:`, `last:`, `odd:`, `even:`, `only:` | The element's own position among its siblings. To color a row's label by the row's position, put `last:text-*` on the row: the label inherits it | Plain Rust from the row's index (`at.is_first()`, `at.is_last()`, `at.index() % 2`) |
 | `placeholder:` | Styles an input's placeholder (`placeholder:text-zinc-400`) | `.placeholder_color(..)` |
-| `selection:` | Colors the selection highlight of an input or a selectable text (`selection:bg-violet-200`) | `.selection_color(..)` |
+| `selection:` | Colors the selection highlight of an input or a selectable text, and of those inside the element (`selection:bg-violet-200`) | `.selection_color(..)` |
 | `dark:` | The system appearance is dark | An `AdaptiveColor`, or `.dark(\|s\| ..)` |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | The window is at least 640, 768, 1024, 1280, 1536 points wide | `.style_when(\|\| window().width >= px(768.0), \|s\| ..)` |
 | `max-sm:`, `max-md:`, ... | The window is narrower than the breakpoint | The same, with `<` |
@@ -154,7 +154,7 @@ Breakpoints compare against the window (the surface NSH renders into), not the d
 - **Units are points.** `p-4` (`.p_4()`) is 16 points (1 spacing step = 4pt, 1rem = 16pt). Arbitrary values in `px` are points too: `p-[13px]` (`.p(px(13.0))`) is 13pt.
 - **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps NSH's default column. `block` and `flow-root` use block layout, and so do `inline` and `inline-block`, as a browser lays them out in a flex or grid parent. In Rust, `.flex_row()` and `.flex_col()` set the direction.
 - **Text classes on views are inherited.** `text-*`, `font-*`, `leading-*`, `tracking-*` and the other text utilities on a view (`.text_color(..)`, `.font_weight(..)`, ... in Rust) pass to the text and input elements inside it, as CSS inheritance does: `<View class="text-white">` makes its labels white.
-- **Every view is a box of its own.** `overflow-x-hidden` and `overflow-y-hidden` clip both axes, as `overflow-hidden` does (scrolling is the [scroll](../elements/scroll.md) element's); `invisible` hides the view and everything in it; `mix-blend-*` blends a view with everything drawn behind it; `block` boxes keep their own margins and their children's apart; every view, a `static` one too, is the containing block of its `absolute` children; `fixed` lays a view out in its root view (other elements are placed as `absolute`).
+- **Every view is a box of its own.** `overflow-x-hidden` and `overflow-y-hidden` clip both axes, as `overflow-hidden` does (scrolling is the [scroll](../elements/scroll.md) element's); `invisible` hides the view and everything in it; `mix-blend-*` blends a view with everything drawn behind it; `block` boxes keep their own margins and their children's apart; an `absolute` view is placed in its nearest positioned ancestor, as in CSS; `fixed` lays a view out in its root view (other elements are placed as `absolute`).
 - **Text keeps its whitespace.** Spaces and line breaks in a string are drawn as written, and `whitespace-*` sets the wrapping; the JSX compiler collapses the whitespace of literal JSX text, as JSX does.
 - **Transitions animate property groups**: `transition` animates colors, opacity, shadows and transforms, `transition-all` also corner radii and border widths; filters, backdrop filters, gradients and layout take their new values at once.
 - **`focus-visible:` is `focus:`**: it applies whenever the element has focus.

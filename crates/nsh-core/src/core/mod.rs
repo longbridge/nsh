@@ -3961,13 +3961,14 @@ impl<M: TextEngine> Core<M> {
                         .or(node.text_style.placeholder_color);
                     config.selection_color =
                         config.selection_color.or(node.text_style.selection_color);
-                    if let Some(c) = node.class_props.as_deref() {
+                    let class = node.class_props.as_deref();
+                    if let Some(c) = class {
                         config.placeholder_color = config.placeholder_color.or(c.placeholder_color);
-                        config.selection_color = config
-                            .selection_color
-                            .or(c.selection_color)
-                            .or(c.caret_color);
                     }
+                    config.selection_color = config
+                        .selection_color
+                        .or(self.inherited_text_props(key).2)
+                        .or(class.and_then(|c| c.caret_color));
                     config.style = scaled(
                         self.inherited_text_style(key).inherit(&node.text_style),
                         node.paragraph.font_multiplier(self.font_scale),
@@ -4088,21 +4089,23 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// What the classes of `key`, else of the nearest view around it that
-    /// says, set for its lines' wrapping and its selection: `whitespace-*`
-    /// and `select-*` inherit, as CSS's `white-space` and `user-select:
-    /// auto` do. One walk up for both.
-    fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>) {
-        let (mut no_wrap, mut selectable) = (None, None);
+    /// says, set for its lines' wrapping, its selection and the
+    /// selection's highlight: `whitespace-*` and `select-*` inherit, as
+    /// CSS's `white-space` and `user-select: auto` do, and `selection:bg-*`
+    /// reaches the texts inside (Tailwind's `& *::selection`). One walk up.
+    fn inherited_text_props(&self, key: Key) -> (Option<bool>, Option<bool>, Option<Color>) {
+        let (mut no_wrap, mut selectable, mut highlight) = (None, None, None);
         let mut k = key;
-        while k != NO_KEY && (no_wrap.is_none() || selectable.is_none()) {
+        while k != NO_KEY && (no_wrap.is_none() || selectable.is_none() || highlight.is_none()) {
             let node = &self.nodes[k as usize];
             if let Some(c) = node.class_props.as_deref() {
                 no_wrap = no_wrap.or(c.no_wrap);
                 selectable = selectable.or(c.selectable);
+                highlight = highlight.or(c.selection_color);
             }
             k = node.parent;
         }
-        (no_wrap, selectable)
+        (no_wrap, selectable, highlight)
     }
 
     /// The nearest `textAlign` set on a view around `key`.
@@ -4153,7 +4156,7 @@ impl<M: TextEngine> Core<M> {
             _ => node.paragraph.ellipsize,
         };
         let inherited = self.inherited_text_style(key);
-        let (no_wrap, selectable) = self.inherited_text_props(key);
+        let (no_wrap, selectable, highlight) = self.inherited_text_props(key);
         let (align, physical) = node
             .text_style
             .text_align
@@ -4175,7 +4178,7 @@ impl<M: TextEngine> Core<M> {
                 .paragraph
                 .selection_color
                 .or(node.text_style.selection_color)
-                .or(class.and_then(|c| c.selection_color)),
+                .or(highlight),
             ..AttributedText::default()
         };
         let base = inherited.inherit(&node.text_style);

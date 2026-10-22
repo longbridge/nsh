@@ -1,11 +1,11 @@
-//! Tailwind CSS v4.1 default palette (`theme.css`), converted from OKLCH to
+//! Tailwind CSS v4.3 default palette (`theme.css`), converted from OKLCH to
 //! sRGB (out-of-gamut channels clamped). Generated; do not edit.
 
 /// Shades, in this order.
 pub(crate) const SHADES: [u16; 11] = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
 
 /// Color names and their shades as `0xRRGGBBAA`.
-pub(crate) static PALETTE: [(&str, [u32; 11]); 22] = [
+pub(crate) static PALETTE: [(&str, [u32; 11]); 26] = [
     (
         "red",
         [
@@ -158,6 +158,34 @@ pub(crate) static PALETTE: [(&str, [u32; 11]); 22] = [
         [
             0xfafaf9ff, 0xf5f5f4ff, 0xe7e5e4ff, 0xd6d3d1ff, 0xa6a09bff, 0x79716bff, 0x57534dff,
             0x44403bff, 0x292524ff, 0x1c1917ff, 0x0c0a09ff,
+        ],
+    ),
+    (
+        "mauve",
+        [
+            0xfafafaff, 0xf3f1f3ff, 0xe7e4e7ff, 0xd7d0d7ff, 0xa89ea9ff, 0x79697bff, 0x594c5bff,
+            0x463947ff, 0x2a212cff, 0x1d161eff, 0x0c090cff,
+        ],
+    ),
+    (
+        "olive",
+        [
+            0xfbfbf9ff, 0xf4f4f0ff, 0xe8e8e3ff, 0xd8d8d0ff, 0xabab9cff, 0x7c7c67ff, 0x5b5b4bff,
+            0x474739ff, 0x2b2b22ff, 0x1d1d16ff, 0x0c0c09ff,
+        ],
+    ),
+    (
+        "mist",
+        [
+            0xf9fbfbff, 0xf1f3f3ff, 0xe3e7e8ff, 0xd0d6d8ff, 0x9ca8abff, 0x67787cff, 0x4b585bff,
+            0x394447ff, 0x22292bff, 0x161b1dff, 0x090b0cff,
+        ],
+    ),
+    (
+        "taupe",
+        [
+            0xfbfaf9ff, 0xf3f1f1ff, 0xe8e4e3ff, 0xd8d2d0ff, 0xaba09cff, 0x7c6d67ff, 0x5b4f4bff,
+            0x473c39ff, 0x2b2422ff, 0x1d1816ff, 0x0c0a09ff,
         ],
     ),
 ];
