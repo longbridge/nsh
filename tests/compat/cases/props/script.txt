@@ -415,18 +415,15 @@ covers [props] src
 covers [props] placeholder
 # props-media-image-inline
 tap id:case-props-media-image-inline
-# A data: URI, base64 or percent-encoded (the placeholder), shows its
-# bytes, named by a digest of them.
-prop id:data src data:image/png;nsh-key=bc09c2590d2502c8ffaf1a3c09aa89df
-prop id:data placeholder data:image/svg+xml;nsh-key=27629908e0b78986e1cee661bb33ea9d
-# A blob: URL shows its blob's bytes: the same bytes, the same image.
-prop id:preview src data:image/png;nsh-key=bc09c2590d2502c8ffaf1a3c09aa89df
+# A data: URI (base64, and percent-encoded as the placeholder) and a blob:
+# URL show their bytes. The platforms get them under a key of the core's
+# own, which no app sees and which may change between releases, so no
+# step here names it (the engine's `images` tests check it).
 # The upload finished: the remote URL replaces the local preview, and the
 # blob's URL is revoked.
 tap id:uploaded
 prop id:preview src https://example.com/photo.png
 covers [props] src
-covers [props] placeholder
 covers [globals] URL
 covers [globals] Blob
 # props-list-sticky-offset

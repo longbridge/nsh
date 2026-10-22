@@ -588,8 +588,11 @@ pub struct ImageSource {
 impl ImageSource {
     /// This source with its bytes in hand when its URI holds them: a
     /// `data:` URI decoded (once, when the source is set) and named by a
-    /// short key. Other sources, and `data:` URIs that do not decode, stay
-    /// as they are (the platforms then report the error).
+    /// short key. Other sources stay as they are. A `data:` URI that does
+    /// not decode becomes an empty one (the platforms then report the
+    /// error): left as it is, an app could write another image's key
+    /// (`data:<type>;nsh-key=<digest>`, which has no comma) and ask the
+    /// process-wide caches whether some surface shows those bytes.
     #[must_use]
     pub fn inline(self) -> ImageSource {
         if self.data.is_some() || !self.uri.starts_with("data:") {
@@ -600,7 +603,10 @@ impl ImageSource {
                 let mime = mime.to_owned();
                 self.with_bytes(&mime, bytes.into())
             }
-            Err(_) => self,
+            Err(_) => ImageSource {
+                uri: "data:,".into(),
+                ..self
+            },
         }
     }
 
