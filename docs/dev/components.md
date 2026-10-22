@@ -13,7 +13,8 @@ come from two places:
   `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Collapsible`, `Progress`, `SelectionArea` (texts that select
   together, `text.md` "Selection areas"), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), the popups on the core's overlays (`Popover`,
-  `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below) and the
+  `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
+  (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
   modules `AlertDialog`, `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
@@ -867,3 +868,42 @@ the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app
 what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
 `Prop::Tooltip`) takes a text too, in a minimal bubble of the theme's tokens, or any other element as it is, in a
 hint overlay the core makes itself (`Core::set_tooltip`).
+
+## Toasts
+
+`nsh/base`'s toasts (`crates/nsh-base/src/toast/`) are `gpui-base`'s three pieces, with its names and semantics; the
+imperative layer (a `toast(..)` with a title, a description and an action, shown from anywhere) is a styled library's,
+as `gpui-component`'s notifications are, and is never part of NSH (the gallery's is `examples/gallery/toast.tsx`).
+
+| gpui-base | nsh-base (Rust) | TS |
+|---|---|---|
+| `ToastManager<I, T>` (`new(motion)`, `push(id, value, ToastOptions { timeout }, now)`, `dismiss(id, now)`, `dismiss_all(now)`, `advance(now, paused) -> ToastAdvance { changed, presented, ending, removed }`, `iter()`, `visible(limit)`, `get`, `len`, `is_empty`) | the same (`manager.rs`), `now` a `nsh_core::time::Instant` | the class `ToastManager` (`js.rs`) over `ToastManager<String, JsonValue>`: the same methods, `entries()` for `iter()`, no `now` (the engine's clock, so a test's manual clock moves it), milliseconds for durations |
+| `ToastMotion` (`sonner()`) | the same, `Points` for distances | a plain object of the same fields, milliseconds, fields left out Sonner's |
+| `ToastTransitionStatus` (`Starting`, `Present`, `Ending`) | the same (`PropEnum`) | `"starting" \| "present" \| "ending"` |
+| `Toast::new(id).transition_status(..)`, role alert | the component `Toast` (`toast.rs`) | `<Toast transitionStatus>` |
+| `ToastStack::new(id, state).item(id, child).motion(..).placement(Anchor).focus_handle(..)` | the component `ToastStack` (`stack.rs`): its children are the items (`children_each`, keyed by node), `Anchor` an enum of the same eight edges, `.state(ToastStackState)` | `<ToastStack motion placement onExpandedChange>` |
+| `ToastStackState::is_expanded()` | the same, a signal the stack's `ExpandedChange` writes | `onExpandedChange(expanded)` |
+
+The manager is a class rather than a reactive helper because it is `gpui-base`'s data structure, not a view: the app
+keeps it, renders `visible(limit)` (a signal of its own) and calls `advance` on a timer while anything is mounted,
+exactly as `gpui-component`'s `NotificationList` does; a class keeps one implementation for Rust and TS and its
+methods synchronous (`docs/dev/rust-classes.md`), where a reactive helper would need the core's graph, which JS's
+calls do not run in.
+
+The stack wraps each child in an absolutely positioned item at its `placement`'s edge (`top: 0` or `bottom: 0`),
+measures it (`onLayout`) and moves it with native animated values bound to its translation, `scaleX` (gpui-base's
+width inset: each collapsed layer `collapsedScaleStep` narrower, centered) and opacity, driven by critically damped
+springs whose response is the motion's `duration` (`spring_of`). Distances from the edge are gpui-base's geometry
+(`stack_heights`, `distance`): collapsed `collapsedPeek` per rank, expanded the newer items' heights plus
+`expandedGap` per rank; the stack's own height is the collapsed or expanded one, so its hover area follows.
+
+NSH's additions fit the same pieces: gpui-base expands the stack for hover and focus; NSH's views report no focus, and
+a finger down on the stack (observed `onTouch`) expands it as the pointer does, so a toast being read or swiped is
+paused. A `Toast` takes a swipe (the core's responder, claimed once the pointer moved 10 points toward
+`swipeDirection` along its axis, so its buttons stay presses; released past `swipeThreshold`, measured from where the
+pointer went down, or flicked at 0.5 points per millisecond, it moves out and emits `DismissRequest`). The stack hears
+Escape and back while it has children (an overlay of no size, `onCancel`), so nothing else loses them to an empty
+stack. A `Toast`'s `accessibilityLabel` is announced once as it mounts (`announce_for_accessibility`, every platform's
+announcement). The state classes are the app's look for the status: `startingClass` in the first frame while
+starting (the next display frame, or 50 ms where none comes: Base UI's `data-starting-style`, so the app's
+`transition` classes run the enter motion), `endingClass` while ending, `swipingClass` while swiped.

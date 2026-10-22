@@ -7,6 +7,7 @@ import { keymap } from "nsh/keymap";
 import { Storage } from "nsh/storage";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
+import { Toaster } from "./toast";
 import { type DemoEntry, nav } from "./nav";
 import { Appear, Badge, colors, desktop, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
 
@@ -54,7 +55,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     title: "Platform",
     demos: [
       { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
-      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
+      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
       { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
       { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
@@ -389,6 +390,7 @@ function App() {
       <If when={desktop()} else={<Phone />}>
         <Desktop />
       </If>
+      <Toaster />
     </View>
   );
 }
