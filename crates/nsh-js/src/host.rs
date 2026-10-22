@@ -1116,9 +1116,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         EventPayload::Press(nsh_core::PressEvent {
             position,
             page_position,
+            modifiers,
+            clicks,
         }) => {
             obj.set("position", point_object(cx, *position)?)?;
             obj.set("pagePosition", point_object(cx, *page_position)?)?;
+            obj.set("modifiers", modifiers_object(cx, modifiers)?)?;
+            obj.set("clickCount", *clicks)?;
         }
         EventPayload::Hover(nsh_core::HoverEvent {
             position,
@@ -1947,6 +1951,11 @@ const report = (v) => text(String(v));
         let event = nsh_core::PressEvent {
             position: point(px(3.0), px(4.5)),
             page_position: point(px(30.0), px(40.5)),
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            clicks: 2,
         };
         host.cx.with(|cx| {
             let value = payload_object(&cx, &EventPayload::Press(event)).unwrap();
@@ -1964,6 +1973,10 @@ const report = (v) => text(String(v));
                 ),
                 (3.0, 4.5, 30.0, 40.5)
             );
+            let modifiers: rquickjs::Object = obj.get("modifiers").unwrap();
+            assert!(modifiers.get::<_, bool>("control").unwrap());
+            assert!(!modifiers.get::<_, bool>("shift").unwrap());
+            assert_eq!(obj.get::<_, u32>("clickCount").unwrap(), 2);
         });
     }
 
