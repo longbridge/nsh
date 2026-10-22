@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`,
-//! `Tab` in `Tabs`), navigation (stacks and pages), dialogs, popups on the core's overlays
+//! `Tab` in `Tabs`), disclosure (`Collapsible`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), safe areas,
 //! selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
@@ -16,6 +16,7 @@
 mod alert_dialog;
 mod button;
 mod checkbox;
+mod collapsible;
 mod keyboard;
 mod menu;
 mod navigation;
@@ -42,6 +43,7 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
+    collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
         KeyboardAvoidingViewProps, keyboard_avoiding_view,
@@ -94,6 +96,7 @@ pub fn registry() -> Registry {
         .register::<KeyboardAvoidingView>()
         .register::<SelectionArea>()
         .register::<Checkbox>()
+        .register::<Collapsible>()
         .register::<Radio>()
         .register::<RadioGroup>()
         .register::<Switch>()
@@ -131,6 +134,7 @@ mod tests {
             [
                 "Button",
                 "Checkbox",
+                "Collapsible",
                 "ContextMenu",
                 "KeyboardAvoidingView",
                 "Menu",

@@ -1,5 +1,5 @@
 import { computed, signal, Text, View } from "nsh";
-import { Checkbox, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
 import { platform } from "nsh/device";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, switchLook } from "../ui";
@@ -132,12 +132,18 @@ const SECTIONS: { name: string; rows: [string, string][]; disabled?: boolean }[]
   { name: "Billing", rows: [], disabled: true },
 ];
 
+const USAGE: [string, string][] = [
+  ["Photos", "120 GB"],
+  ["Apps", "54 GB"],
+  ["System", "38 GB"],
+];
+
 const count = (n: number) => n.toLocaleString("en-US");
 
 /**
  * Controls: `nsh/base`'s `Switch`, `Checkbox`, `Radio` and `RadioGroup`,
- * `Tab` and `Tabs` in the settings, filters, pickers and section switchers
- * apps use them for.
+ * `Tab` and `Tabs`, `Collapsible` in the settings, filters, pickers, section
+ * switchers and disclosures apps use them for.
  */
 export function Controls() {
   const last = signal("—");
@@ -332,6 +338,81 @@ export function Controls() {
     );
   }
 
+  function Disclosure() {
+    const storage = signal(false);
+    const advanced = signal(false);
+    const originals = signal(false);
+    const look = switchLook(() => originals(), size.switch);
+    /** The always-visible row that flips a section: the app's trigger, which tells screen readers whether it is expanded. */
+    function Summary(props: { label: string; detail: string; open: boolean; set: (open: boolean) => void; first?: boolean }) {
+      return (
+        <View
+          role="button"
+          accessibilityState={{ expanded: props.open }}
+          onPress={() => {
+            const next = !props.open;
+            props.set(next);
+            last.set(`${props.label}: ${next ? "expanded" : "collapsed"}`);
+          }}
+          style={row(!!props.first)}
+          activeStyle={pressed}
+        >
+          <Label label={props.label} detail={props.detail} />
+          {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
+          <View
+            class="transition-transform duration-150"
+            style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
+          >
+            <Icon name="chevron" size={size.check} tint={colors.muted} />
+          </View>
+        </View>
+      );
+    }
+    return (
+      <Card icon="controls" title="Collapsible" subtitle="Details under a summary, kept while collapsed">
+        <View>
+          <Collapsible
+            open={storage()}
+            content={
+              <View style={{ paddingStart: size.gap, paddingBottom: size.padding }}>
+                <Each of={USAGE}>
+                  {(u) => (
+                    <View style={{ flexDirection: "row", alignItems: "center", minHeight: size.line }}>
+                      <Text style={{ flex: 1, fontSize: size.label, color: colors.muted }}>{u()[0]}</Text>
+                      <Text style={{ fontSize: size.label, color: colors.muted, fontVariant: ["tabular-nums"] }}>{u()[1]}</Text>
+                    </View>
+                  )}
+                </Each>
+              </View>
+            }
+          >
+            <Summary first label="Storage" detail="212 GB of 256 GB used" open={storage()} set={(open) => storage.set(open)} />
+          </Collapsible>
+          <Collapsible
+            open={advanced()}
+            content={
+              <Switch
+                checked={originals()}
+                onChange={(on) => {
+                  originals.set(on);
+                  last.set(`Keep originals: ${on ? "on" : "off"}`);
+                }}
+                style={{ ...row(false), flexDirection: "row-reverse", paddingStart: size.gap }}
+                activeStyle={pressed}
+                trackStyle={look.trackStyle}
+                thumbStyle={look.thumbStyle}
+              >
+                <Label label="Keep originals" detail={originals() ? "Edits are saved as copies" : "Edits replace the photo"} />
+              </Switch>
+            }
+          >
+            <Summary label="Advanced" detail="Options most people leave alone" open={advanced()} set={(open) => advanced.set(open)} />
+          </Collapsible>
+        </View>
+      </Card>
+    );
+  }
+
   function Last() {
     return (
       <Card icon="system" title="Last event">
@@ -340,5 +421,5 @@ export function Controls() {
     );
   }
 
-  return <DemoPage cards={[Settings, Filter, Plans, Sections, Last]} />;
+  return <DemoPage cards={[Settings, Filter, Plans, Sections, Disclosure, Last]} />;
 }
