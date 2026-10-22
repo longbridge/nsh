@@ -1,12 +1,14 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { Collapsible, Switch } from "nsh/base";
-import { desktop, Log, Panel, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
 
 // Each section: a summary row, the app's trigger (it says whether it is
 // expanded to screen readers), and details the collapsible shows while the
 // app has it open. The chevron turns with a transition of the app's. One
 // inset per card, leading and trailing: the summary's chevron lane is as
 // wide as the turned chevron, so it ends where the values below it end.
+// The pointer's hover and the keyboard's focus ring come from the palette;
+// the chevron and the switch stay still with reduced motion.
 const pad = desktop ? "px-3" : "px-4";
 
 function Section(props: { label: string; detail: string; open: boolean; onToggle: () => void; content: JSX.Element }) {
@@ -16,6 +18,8 @@ function Section(props: { label: string; detail: string; open: boolean; onToggle
         role="button"
         accessibilityState={{ expanded: props.open }}
         onPress={props.onToggle}
+        hoverStyle={hoverFill()}
+        focusStyle={focusRing()}
         class={`flex-row items-center gap-3 ${pad} active:opacity-70`}
         style={{ minHeight: size.row + 8 }}
       >
@@ -23,7 +27,7 @@ function Section(props: { label: string; detail: string; open: boolean; onToggle
           <Text style={{ fontSize: size.label, fontWeight: "500", color: ui().text }}>{props.label}</Text>
           <Text style={{ fontSize: size.detail, color: ui().muted }}>{props.detail}</Text>
         </View>
-        <View class="h-5 w-2 items-center justify-center transition-transform duration-150" style={{ transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}>
+        <View class="h-5 w-2 items-center justify-center transition-transform duration-150 motion-reduce:transition-none" style={{ transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}>
           <Text style={{ fontSize: 18, color: ui().muted }}>›</Text>
         </View>
       </View>
@@ -97,9 +101,11 @@ function App() {
                   originals.set(next);
                 }}
                 class={`flex-row-reverse items-center justify-between gap-3 ${pad} pb-3 active:opacity-70`}
-                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`}
+                hoverStyle={hoverFill()}
+                focusStyle={focusRing()}
+                trackClass={`${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`}
                 trackStyle={originals() ? ui().accentFill : ui().inset}
-                thumbClass={desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5"}
+                thumbClass={desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5"}
                 thumbStyle={originals() ? { backgroundColor: ui().onAccent } : ui().raised}
               >
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Keep originals</Text>

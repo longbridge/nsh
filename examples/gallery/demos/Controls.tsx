@@ -2,11 +2,12 @@ import { computed, signal, Text, View } from "nsh";
 import { Checkbox, Collapsible, Radio, RadioGroup, Switch, Tab, Tabs } from "nsh/base";
 import { platform } from "nsh/device";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, switchLook } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, switchLook } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
-// gallery's own here.
+// gallery's own here, with its hover and keyboard focus ring (`hovered`,
+// `focusRing`) on every control, and no motion with reduced motion.
 
 /**
  * The sizes of the page. Touch screens take the standard tier (44 pt and
@@ -166,6 +167,8 @@ export function Controls() {
           // The track at the trailing edge, after the label.
           style={{ ...row(!!props.first), flexDirection: "row-reverse" }}
           activeStyle={pressed}
+          hoverStyle={props.disabled ? undefined : hovered()}
+          focusStyle={focusRing()}
           disabledStyle={dimmed}
           trackStyle={look.trackStyle}
           thumbStyle={look.thumbStyle}
@@ -216,6 +219,8 @@ export function Controls() {
             }}
             style={row(true)}
             activeStyle={pressed}
+            hoverStyle={hovered()}
+            focusStyle={focusRing()}
             indicatorStyle={box(mark())}
             indicator={<BoxMark mark={mark()} />}
           >
@@ -232,6 +237,8 @@ export function Controls() {
                 // One level under "Select all": the boxes line up with its label.
                 style={{ ...row(false), paddingStart: size.control + size.gap }}
                 activeStyle={pressed}
+                hoverStyle={hovered()}
+                focusStyle={focusRing()}
                 indicatorStyle={box(has(kind().name) ? "check" : null)}
                 indicator={<BoxMark mark={has(kind().name) ? "check" : null} />}
               >
@@ -263,6 +270,8 @@ export function Controls() {
                 }}
                 style={row(i() === 0)}
                 activeStyle={pressed}
+                hoverStyle={p().disabled ? undefined : hovered()}
+                focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
                 <Ring on={plan() === p().name} />
@@ -315,6 +324,8 @@ export function Controls() {
                 }}
                 style={{ flex: 1, borderRadius: inner / 2, borderWidth: 1, borderColor: "transparent", alignItems: "center", justifyContent: "center" }}
                 selectedStyle={finish.pill}
+                hoverStyle={s().disabled || section() === s().name ? undefined : hovered()}
+                focusStyle={focusRing()}
                 disabledStyle={dimmed}
               >
                 <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: section() === s().name ? colors.text : colors.muted }}>
@@ -356,11 +367,13 @@ export function Controls() {
           }}
           style={row(!!props.first)}
           activeStyle={pressed}
+          hoverStyle={hovered()}
+          focusStyle={focusRing()}
         >
           <Label label={props.label} detail={props.detail} />
           {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
           <View
-            class="transition-transform duration-150"
+            class="transition-transform duration-150 motion-reduce:transition-none"
             style={{ width: size.check / 2, alignItems: "center", transform: [{ rotate: props.open ? "90deg" : "0deg" }] }}
           >
             <Icon name="chevron" size={size.check} tint={colors.muted} />
@@ -399,6 +412,8 @@ export function Controls() {
                 }}
                 style={{ ...row(false), flexDirection: "row-reverse", paddingStart: size.gap }}
                 activeStyle={pressed}
+                hoverStyle={hovered()}
+                focusStyle={focusRing()}
                 trackStyle={look.trackStyle}
                 thumbStyle={look.thumbStyle}
               >
