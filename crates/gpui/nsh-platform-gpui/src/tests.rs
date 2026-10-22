@@ -217,6 +217,7 @@ function App() {
       label: "Edit",
       submenu: [
         { label: "Revert", shortcut: "mod+z", when: "auto", onSelect: chose("revert") },
+        { label: "Redo app", shortcut: "mod+y", when: "auto", onSelect: chose("app-redo") },
         { label: "Remove", shortcut: "delete", when: "auto", onSelect: chose("remove") },
         { label: "Send", shortcut: "mod+enter", when: "auto", onSelect: chose("send") },
         { label: "Purge", shortcut: "shift+delete", onSelect: chose("purge") },
@@ -260,6 +261,10 @@ fn menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx: &mut TestAppContext
     wait_for(&view, cx, "abcde");
     cx.simulate_keystrokes(&format!("{primary}-z"));
     wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes(&format!("{primary}-y"));
+    wait_for(&view, cx, "abcde");
+    cx.simulate_keystrokes(&format!("{primary}-z"));
+    wait_for(&view, cx, "abcd");
     cx.simulate_keystrokes("home delete");
     wait_for(&view, cx, "bcd");
     cx.simulate_keystrokes(&format!("{primary}-enter"));
@@ -268,14 +273,14 @@ fn menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx: &mut TestAppContext
     wait_for(&view, cx, "bcd purge");
     cx.simulate_keystrokes("escape");
     wait_until_blurred(&view, cx);
-    cx.simulate_keystrokes(&format!("{primary}-z delete {primary}-enter"));
+    cx.simulate_keystrokes(&format!("{primary}-z {primary}-y delete {primary}-enter"));
     cx.run_until_parked();
     let bar = if cfg!(target_os = "macos") { 0.0 } else { 28.0 };
     cx.simulate_click(
         gpui::point(gpui::px(20.0), gpui::px(bar + 15.0)),
         gpui::Modifiers::default(),
     );
-    wait_for(&view, cx, "bcd purge revert remove send");
+    wait_for(&view, cx, "bcd purge revert app-redo remove send");
 }
 
 fn wait_until_blurred(view: &Entity<AppView>, cx: &mut VisualTestContext) {

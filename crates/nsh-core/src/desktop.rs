@@ -910,6 +910,8 @@ mod tests {
         let fires = |shortcut, when| item(shortcut, when).fires_while_editing();
         assert!(fires("ctrl+z", When::Always));
         assert!(!fires("ctrl+z", When::Auto));
+        assert!(!fires("ctrl+y", When::Auto));
+        assert!(fires("ctrl+y", When::Always));
         assert!(!fires("delete", When::Auto));
         assert!(!fires("ctrl+enter", When::Auto));
         assert!(!fires("space", When::Auto));
