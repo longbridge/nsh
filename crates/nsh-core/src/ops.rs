@@ -549,6 +549,43 @@ pub enum ResizeMode {
     Center,
 }
 
+impl ResizeMode {
+    /// Where content of `natural` size goes in a box of `size`: scaled as
+    /// the mode scales it (`Center` shrinks content larger than the box,
+    /// as CSS's `scale-down`), then placed at `position`. The rectangle
+    /// may reach outside the box (a covering image), which crops it.
+    /// Content without a size fills the box.
+    pub fn fit(
+        self,
+        natural: Size<Points>,
+        size: Size<Points>,
+        position: crate::style::ObjectPosition,
+    ) -> Bounds<Points> {
+        let (nw, nh) = (natural.width.0, natural.height.0);
+        if nw <= 0.0 || nh <= 0.0 || self == ResizeMode::Stretch {
+            return Bounds {
+                origin: Point::default(),
+                size,
+            };
+        }
+        let contain = (size.width.0 / nw).min(size.height.0 / nh);
+        let scale = match self {
+            ResizeMode::Cover => (size.width.0 / nw).max(size.height.0 / nh),
+            ResizeMode::Contain => contain,
+            ResizeMode::Center => contain.min(1.0),
+            ResizeMode::Stretch => 1.0,
+        };
+        let content = Size {
+            width: Points(nw * scale),
+            height: Points(nh * scale),
+        };
+        Bounds {
+            origin: position.place(size, content),
+            size: content,
+        }
+    }
+}
+
 /// An image source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageSource {

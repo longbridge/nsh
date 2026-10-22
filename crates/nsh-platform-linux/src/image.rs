@@ -45,7 +45,8 @@ use std::{
 
 use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
-    Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue, ResizeMode,
+    Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, ObjectPosition,
+    PayloadValue, ResizeMode,
     access::Access,
     geometry::{DevicePixels, Points, Size, size},
 };
@@ -1131,24 +1132,21 @@ fn natural(
 }
 
 /// Where an image of natural size `natural` goes in a box of `bounds`
-/// (x, y, width, height), as React Native fits it; it may extend past the
+/// (x, y, width, height), as React Native fits it and `objectPosition` places it; it may extend past the
 /// box (`cover`), which the view clips.
-fn fit(mode: ResizeMode, natural: (f32, f32), bounds: (f32, f32)) -> (f32, f32, f32, f32) {
-    let (nw, nh) = natural;
-    let (bw, bh) = bounds;
-    if nw <= 0.0 || nh <= 0.0 || matches!(mode, ResizeMode::Stretch) {
-        return (0.0, 0.0, bw, bh);
-    }
-    let contain = (bw / nw).min(bh / nh);
-    let scale = match mode {
-        ResizeMode::Cover => (bw / nw).max(bh / nh),
-        ResizeMode::Contain => contain,
-        // Natural size, shrunk to fit when larger.
-        ResizeMode::Center => contain.min(1.0),
-        ResizeMode::Stretch => 1.0,
-    };
-    let (w, h) = (nw * scale, nh * scale);
-    ((bw - w) / 2.0, (bh - h) / 2.0, w, h)
+fn fit(
+    mode: ResizeMode,
+    position: ObjectPosition,
+    natural: (f32, f32),
+    bounds: (f32, f32),
+) -> (f32, f32, f32, f32) {
+    use nsh_core::geometry::{px, size};
+    let r = mode.fit(
+        size(px(natural.0), px(natural.1)),
+        size(px(bounds.0), px(bounds.1)),
+        position,
+    );
+    (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0)
 }
 
 /// Draws `texture` at `rect` (points); mipmaps when it shrinks more than
@@ -1172,7 +1170,12 @@ fn draw_one(
     source: Option<&ImageSource>,
 ) {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
-    let (x, y, fw, fh) = fit(image.mode, natural(texture, points, source), (w, h));
+    let (x, y, fw, fh) = fit(
+        image.mode,
+        image.options.position,
+        natural(texture, points, source),
+        (w, h),
+    );
     let mut rect = graphene::Rect::new(x, y, fw, fh);
     let blur = image.options.blur_radius.0.max(0.0);
     if blur > 0.0 {
@@ -1440,13 +1443,41 @@ mod tests {
     fn fits_images() {
         let n = (200.0, 100.0);
         let b = (100.0, 100.0);
-        assert_eq!(fit(ResizeMode::Cover, n, b), (-50.0, 0.0, 200.0, 100.0));
-        assert_eq!(fit(ResizeMode::Contain, n, b), (0.0, 25.0, 100.0, 50.0));
-        assert_eq!(fit(ResizeMode::Stretch, n, b), (0.0, 0.0, 100.0, 100.0));
-        assert_eq!(fit(ResizeMode::Center, n, b), (0.0, 25.0, 100.0, 50.0));
         assert_eq!(
-            fit(ResizeMode::Center, n, (400.0, 400.0)),
+            fit(ResizeMode::Cover, ObjectPosition::CENTER, n, b),
+            (-50.0, 0.0, 200.0, 100.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::Contain, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::Stretch, ObjectPosition::CENTER, n, b),
+            (0.0, 0.0, 100.0, 100.0)
+        );
+        assert_eq!(
+            fit(ResizeMode::Center, ObjectPosition::CENTER, n, b),
+            (0.0, 25.0, 100.0, 50.0)
+        );
+        assert_eq!(
+            fit(
+                ResizeMode::Center,
+                ObjectPosition::CENTER,
+                n,
+                (400.0, 400.0)
+            ),
             (100.0, 150.0, 200.0, 100.0)
+        );
+        // `objectPosition`: a tall image covering its box shows its top.
+        let top = ObjectPosition::parse("top").unwrap();
+        assert_eq!(
+            fit(ResizeMode::Cover, top, (100.0, 300.0), b),
+            (0.0, 0.0, 100.0, 300.0)
+        );
+        let right = ObjectPosition::parse("right").unwrap();
+        assert_eq!(
+            fit(ResizeMode::Contain, right, (50.0, 100.0), b),
+            (50.0, 0.0, 50.0, 100.0)
         );
     }
 }

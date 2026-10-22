@@ -1806,16 +1806,20 @@ class Player {
 
   /**
    * `src`, `resizeMode`, `placeholder` (shown until the image loads,
-   * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
+   * then faded out over `fadeDuration`), `blurRadius` (a CSS blur) and
+   * `objectPosition` (CSS's, empty for the center).
    * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
    */
-  op_img([, id, uri, mode, placeholder, blur, fade]) {
+  op_img([, id, uri, mode, placeholder, blur, fade, position]) {
     const el = this.view(id);
     if (!el?._img) return;
     const img = el._img;
     el._fit = mode;
+    el._position = position || "";
     // The image's and the placeholder's classes (`nsh-hidden` is their state).
-    el._imgClass = `nsh-fill nsh-fit-${mode}${blur > 0 ? ` ${cssClass(`filter:blur(${blur}px);`)}` : ""}`;
+    el._imgClass = `nsh-fill nsh-fit-${mode}${blur > 0 ? ` ${cssClass(`filter:blur(${blur}px);`)}` : ""}${
+      position ? ` ${cssClass(`object-position:${position};`)}` : ""
+    }`;
     img.className = el._imgClass + (img.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
     el._fade = fade;
     const ph = placeholder ? this.asset(placeholder) : "";
@@ -1859,7 +1863,7 @@ class Player {
       el._img.classList.add("nsh-hidden");
       const fit = el._fit;
       const size = fit === "fill" ? "100% 100%" : fit === "scale-down" ? "contain" : fit || "cover";
-      const mask = `url(${JSON.stringify(el._src)}) center / ${size} no-repeat`;
+      const mask = `url(${JSON.stringify(el._src)}) ${el._position || "center"} / ${size} no-repeat`;
       // Over the view's own background.
       swapClass(el, "_tintClass", cssClass(`background-color:${el._tint};-webkit-mask:${mask};mask:${mask};`, 3));
     } else {

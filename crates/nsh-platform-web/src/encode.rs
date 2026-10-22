@@ -14,8 +14,8 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind, TransitionProps,
-    ViewKind, ViewProps, ViewStyle, WebSource,
+    ObjectPosition, Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
     ui::PropEnum,
 };
@@ -642,6 +642,15 @@ fn image_uri(s: &Option<ImageSource>) -> Option<&str> {
     s.as_ref().map(|s| &*s.uri)
 }
 
+/// An image's `objectPosition` as CSS, empty for the center (the default).
+fn object_position(p: ObjectPosition) -> String {
+    if p == ObjectPosition::CENTER {
+        String::new()
+    } else {
+        p.to_string()
+    }
+}
+
 fn resize_mode(m: ResizeMode) -> &'static str {
     match m {
         ResizeMode::Cover => "cover",
@@ -1097,6 +1106,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .opt_str(image_uri(&options.placeholder))
                 .num(options.blur_radius.0)
                 .num(options.fade_ms.unwrap_or(0.0))
+                // CSS's `object-position`; empty for the center.
+                .str(&object_position(options.position))
                 .end();
         }
         MountItem::ScrollConfig {

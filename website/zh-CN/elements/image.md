@@ -73,13 +73,14 @@ import logo from "./assets/logo.png";
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | 以该半径（点）模糊图片（在解码时于主线程外处理一次）。 |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |
 | `tintColor`（样式） | `.tint_color(..)` | `ColorValue` | | 为模板图片（单色绘制的图标）重新着色。 |
+| `objectPosition`（样式） | `.object_position(..)`、`.object_top()` 等 | `string` | `"center"` | `resizeMode` 确定尺寸后图片在盒子中的位置，同 CSS 的 `object-position`（`"top"`、`"25% 75%"`、`"right 10px bottom 20%"`）；覆盖盒子的图片围绕它裁剪。 |
 | `onLoadStart` | `.on_load_start(..)` | `() => void` | | 开始加载。 |
 | `onProgress` | `.on_progress(..)` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
 | `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）；带有变体的图片给出所加载变体的尺寸。 |
 | `onError` | `.on_error(..)` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `.on_load_end(..)` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
-`ImageStyle` 在视图样式之上增加了 `tintColor`：为模板图片（单色绘制的图标）重新着色。
+`ImageStyle` 在视图样式之上增加了 `tintColor`，为模板图片（单色绘制的图标）重新着色；以及 `objectPosition`，决定图片在盒子中的位置（[图片位置](../docs/images-and-assets.md#图片位置)）。
 
 ```rust tabs
 image(ICON).size(px(24.0)).tint_color(rgb(0x0969da))

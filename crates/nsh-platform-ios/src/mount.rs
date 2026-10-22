@@ -1914,7 +1914,7 @@ impl Mounter {
         if !matches!(s.native, Native::Image(_)) {
             return;
         }
-        s.decor.set_resize_mode(resize_mode);
+        s.decor.set_fit(resize_mode, options.position);
         let same_source =
             s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
         let same_look = s.image_options.placeholder == options.placeholder

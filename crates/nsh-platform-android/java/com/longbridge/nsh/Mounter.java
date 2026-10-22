@@ -282,7 +282,19 @@ final class Mounter {
                     int id = b.getInt(), uri = b.getInt(), mode = b.getInt();
                     String placeholder = optString(b, objects);
                     float blur = b.getFloat(), fade = b.getFloat();
+                    int xFlags = b.getInt();
+                    float x = b.getFloat();
+                    int yFlags = b.getInt();
+                    float y = b.getFloat();
                     image(id, uri >= 0 ? (String) objects[uri] : null, mode, placeholder, px(blur), fade < 0 ? -1 : Math.round(fade));
+                    View iv = views.get(id);
+                    if (iv instanceof ImageBox) {
+                        ImageBox image = (ImageBox) iv;
+                        // Lengths in pixels; fractions stay fractions of the free space.
+                        image.positionX = (xFlags & 2) != 0 ? x : x * density;
+                        image.positionY = (yFlags & 2) != 0 ? y : y * density;
+                        image.positionFlags = (xFlags & 3) | ((yFlags & 3) << 2);
+                    }
                     break;
                 }
                 case SCROLL_CONFIG: {

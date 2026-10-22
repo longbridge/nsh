@@ -1054,7 +1054,7 @@ pub(crate) fn set(
     let restart = {
         let mut guard = view.state_mut();
         let s = &mut *guard;
-        s.decor.set_resize_mode(mode);
+        s.decor.set_fit(mode, options.position);
         let image = s.image.get_or_insert_with(ImageState::default);
         image.surface = surface.key();
         let same_source = image.source.as_ref().map(|i| &i.uri) == source.map(|i| &i.uri);

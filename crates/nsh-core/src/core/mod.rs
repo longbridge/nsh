@@ -1772,7 +1772,17 @@ impl<M: TextEngine> Core<M> {
         }
         let flipped = node.rtl != rtl;
         node.rtl = rtl;
-        let view_changed = node.view_style != view;
+        // `objectPosition` is the image's (`MountItem::Image`), not the view's.
+        let position_changed = node.view_style.object_position != view.object_position;
+        let view_changed = if position_changed {
+            node.view_style
+                != ViewStyle {
+                    object_position: node.view_style.object_position,
+                    ..view.clone()
+                }
+        } else {
+            node.view_style != view
+        };
         // A span's background is part of its block's text.
         let span_background_changed = node.inline
             && node.kind == Kind::Text
@@ -1821,6 +1831,9 @@ impl<M: TextEngine> Core<M> {
         let mut flags = 0;
         if view_changed {
             flags |= dirty::VIEW;
+        }
+        if position_changed && self.nodes[key as usize].image.is_some() {
+            flags |= dirty::IMAGE;
         }
         if animation_changed {
             flags |= dirty::ANIMATION;
@@ -3383,6 +3396,7 @@ impl<M: TextEngine> Core<M> {
                             .map(|s| s.resolved(ratio)),
                         blur_radius: image.options.blur_radius,
                         fade_ms: image.options.fade_ms,
+                        position: node.view_style.object_position,
                     },
                 });
             }

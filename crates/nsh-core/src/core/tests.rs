@@ -1140,6 +1140,87 @@ fn image_uses_natural_size_and_aspect_ratio() {
 }
 
 #[test]
+fn object_position_reaches_the_image_item_only() {
+    let mut c = core();
+    let mut ops = image_ops(2, asset("asset:/a.png", &[]), None);
+    ops.push(style_op(2, &[("objectPosition", StyleValue::Str("top"))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let position = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Image { id: 2, options, .. } => Some(options.position),
+            _ => None,
+        })
+    };
+    let top = crate::style::ObjectPosition::parse("top").unwrap();
+    assert_eq!(position(&batch), Some(top));
+    // A change sends the image again, and no view style.
+    apply(
+        &mut c,
+        vec![style_op(
+            2,
+            &[("objectPosition", StyleValue::Str("right 10px bottom 0"))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        position(&batch),
+        crate::style::ObjectPosition::parse("right 10px bottom 0")
+    );
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ViewStyle { .. })),
+        "{:?}",
+        batch.items
+    );
+    // An invalid value is rejected, not misread.
+    let mut style = crate::Style::default();
+    assert!(
+        style
+            .set("objectPosition", StyleValue::Str("left 10px top"))
+            .is_err()
+    );
+}
+
+#[test]
+fn resize_modes_fit_at_their_position() {
+    use crate::{ResizeMode, geometry::size_pt, style::ObjectPosition};
+    let tall = size_pt(100.0, 300.0);
+    let square = size_pt(100.0, 100.0);
+    let at = |mode: ResizeMode, p: &str| {
+        let b = mode.fit(tall, square, ObjectPosition::parse(p).unwrap());
+        (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+    };
+    assert_eq!(at(ResizeMode::Cover, "center"), (0.0, -100.0, 100.0, 300.0));
+    assert_eq!(at(ResizeMode::Cover, "top"), (0.0, 0.0, 100.0, 300.0));
+    assert_eq!(at(ResizeMode::Cover, "bottom"), (0.0, -200.0, 100.0, 300.0));
+    let half = |p: &str| {
+        let b = ResizeMode::Contain.fit(
+            size_pt(50.0, 100.0),
+            square,
+            ObjectPosition::parse(p).unwrap(),
+        );
+        (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+    };
+    assert_eq!(half("left"), (0.0, 0.0, 50.0, 100.0));
+    assert_eq!(half("right"), (50.0, 0.0, 50.0, 100.0));
+    assert_eq!(half("25%"), (12.5, 0.0, 50.0, 100.0));
+    assert_eq!(
+        at(ResizeMode::Stretch, "left top"),
+        (0.0, 0.0, 100.0, 100.0)
+    );
+    // `Center` shrinks what does not fit, and keeps the natural size of
+    // what does.
+    let small = ResizeMode::Center.fit(size_pt(20.0, 10.0), square, ObjectPosition::CENTER);
+    assert_eq!(
+        (small.origin.x.0, small.origin.y.0, small.size.width.0),
+        (40.0, 45.0, 20.0)
+    );
+}
+
+#[test]
 fn native_components_get_their_name_props_and_size() {
     let mut c = core();
     let prop = |name: &str, value: Option<crate::JsonValue>| Op::SetProp {

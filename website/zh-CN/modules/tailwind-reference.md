@@ -412,6 +412,7 @@ view()
 | Class | 设置 |
 |---|---|
 | `object-cover`、`object-contain`、`object-fill`、`object-none`、`object-scale-down` | `resizeMode`（`fill` 拉伸，`none` 和 `scale-down` 居中） |
+| `object-top`、`object-bottom`、`object-left`、`object-right`、`object-center`、`object-top-left`、`object-top-right`、`object-bottom-left`、`object-bottom-right`、`object-[<position>]` | `objectPosition`（`object-left-top` 等与 `object-top-left` 等相同） |
 | `tint-<color>` | `tintColor`（为模板图片着色） |
 
 ## 可写但不起作用

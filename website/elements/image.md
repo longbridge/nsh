@@ -80,13 +80,14 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 | `blurRadius` | `.blur_radius(px(..))` | `number` | | Blurs the image by this radius in points (applied once while decoding, off the main thread). |
 | `fadeDuration` | `.fade_duration(ms)` | `number` | iOS `0`, Android `300` | How long a loaded image fades in, in milliseconds. |
 | `tintColor` (style) | `.tint_color(..)` | `ColorValue` | | Recolors a template image (an icon drawn in one color). |
+| `objectPosition` (style) | `.object_position(..)`, `.object_top()`, ... | `string` | `"center"` | Where the image sits in its box once `resizeMode` has sized it, as CSS's `object-position` (`"top"`, `"25% 75%"`, `"right 10px bottom 20%"`); a covering image is cropped around it. |
 | `onLoadStart` | `.on_load_start(..)` | `() => void` | | Loading began. |
 | `onProgress` | `.on_progress(..)` | `(e: { loaded: number; total: number }) => void` | | Download progress in bytes (`total` is 0 when unknown), at most every 100 ms. |
 | `onLoad` | `.on_load(..)` | `(e: { width: number; height: number }) => void` | | Loaded; the source image's size in pixels (not the decoded, downsampled one; an SVG's size in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)); for an image with variants, the loaded variant's. |
 | `onError` | `.on_error(..)` | `(e: { message: string }) => void` | | Loading failed. |
 | `onLoadEnd` | `.on_load_end(..)` | `() => void` | | After `onLoad` or `onError`. |
 
-`ImageStyle` adds `tintColor` to the view styles: it recolors a template image (an icon drawn in one color).
+`ImageStyle` adds `tintColor` to the view styles, which recolors a template image (an icon drawn in one color), and `objectPosition`, which places the image in its box ([Image position](../docs/images-and-assets.md#image-position)).
 
 ```rust tabs
 image(ICON).size(px(24.0)).tint_color(rgb(0x0969da))
