@@ -242,6 +242,7 @@ impl AppView {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            picker: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface

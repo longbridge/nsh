@@ -448,6 +448,7 @@ impl RootView {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            picker: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

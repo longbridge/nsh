@@ -311,6 +311,10 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else
   `default_answer` (the cancel button, else dismissed when cancelable, else the step fails); `nsh/test`'s `App` answers
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
+- picks (`Command::PickImages`) are answered with `onPick` (`EventPayload::Picked`): by the test's files
+  (`Headless::on_pick`, `app.onPick`; given as they are, nothing scaled), else cancelled (no files); `nsh/test`'s `App`
+  answers them after each step and its dialogs (`answer_picks_myself`), and `app.picks()` lists what was asked; a real
+  platform shows its own picker, which the driver does not answer;
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
 - the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an

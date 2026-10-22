@@ -30,7 +30,8 @@
 //! one. `webview` lists the hosts a web view may show and navigate to (its
 //! pages' own subresources are the web content's business). An app without
 //! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar and the clipboard; raw
+//! unrestricted HTTP, web views, the status bar, the clipboard and the
+//! picker; raw
 //! sockets, processes and the filesystem always require an explicit
 //! declaration.
 
@@ -349,6 +350,9 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The app may show the system's picker (`nsh/picker`): the files the
+    /// user picks in it reach the app.
+    pub picker: bool,
 }
 
 /// The parts of a URL the checks look at.
@@ -424,6 +428,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            picker: true,
             ..Self::default()
         }
     }
@@ -449,11 +454,12 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 6] = [
+        const KNOWN: [&str; 7] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
+            "picker",
             "process",
             "fs",
         ];
@@ -552,6 +558,11 @@ impl Capabilities {
             caps.clipboard = clipboard
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
+        }
+        if let Some(picker) = obj.get("picker") {
+            caps.picker = picker
+                .as_bool()
+                .ok_or("capabilities.picker must be a boolean")?;
         }
         if let Some(process) = obj.get("process") {
             let process = object(process, "capabilities.process")?;
@@ -662,6 +673,7 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        obj.insert("picker".into(), self.picker.into());
         Value::Object(obj)
     }
 
@@ -1135,6 +1147,11 @@ impl Access {
     /// Whether the app may read and write the system clipboard.
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
+    }
+
+    /// Whether the app may show the system's picker (`nsh/picker`).
+    pub fn allows_picker(&self) -> bool {
+        self.each(|c| c.picker)
     }
 }
 
@@ -1633,6 +1650,7 @@ mod tests {
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
+        assert!(!access.allows_picker());
         assert!(Access::all().is_unrestricted());
     }
 
@@ -1665,7 +1683,7 @@ mod tests {
     fn the_embedder_grants_at_most() {
         let a = Access {
             declared: caps(
-                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true }"#,
+                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true }"#,
             ),
             granted: Some(caps(
                 r#"{ "network": { "hosts": ["b.com"] }, "clipboard": true }"#,
@@ -1673,6 +1691,7 @@ mod tests {
         };
         assert!(a.allows_clipboard());
         assert!(!a.allows_http("GET", "https://a.com/"));
+        assert!(!a.allows_picker());
         assert!(a.allows_http("GET", "https://b.com/"));
         assert!(!a.allows_status_bar());
     }

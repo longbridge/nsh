@@ -48,6 +48,7 @@ fn config() -> EngineConfig {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        picker: None,
     }
 }
 

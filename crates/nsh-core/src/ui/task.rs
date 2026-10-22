@@ -79,6 +79,12 @@ pub(crate) enum Action {
     ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
+    /// Shows the system's picker for images; the files picked (none when
+    /// cancelled) resolve the slot.
+    PickImages(
+        crate::picker::PickRequest,
+        AnswerSlot<Vec<crate::picker::PickedFile>>,
+    ),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.

@@ -24,6 +24,8 @@ resvg = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
 url.workspace = true
 sha2.workspace = true
+# Picked images' sizes and types (`picker.rs`).
+imagesize.workspace = true
 
 [features]
 # SVG images for the native backends (`svg`: sniffing, sizes and rasters with

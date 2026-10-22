@@ -43,6 +43,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/device` | `windowSize`、`colorScheme`、`setColorScheme`、`fontScale`、`pixelRatio`、`locale`、`platform` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/clipboard` | `Clipboard.writeText`、`Clipboard.readText`、`Clipboard.writeImage`、`Clipboard.readImage`、`Clipboard.readFiles` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/picker` | `Picker.pickImages` | [nsh/picker](./nsh-picker.md) |
 | `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.keys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`、`nativeModule`（宿主应用注册的原生组件和函数） | [nsh/native](./nsh-native.md) |

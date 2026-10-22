@@ -472,6 +472,16 @@ pub(super) struct Components {
     /// id: their answers.
     clipboard_reads: FxHashMap<u32, ClipboardRead>,
     next_clipboard_read: u32,
+    /// Picks waiting for the platform's picker, by request.
+    #[allow(clippy::type_complexity)]
+    picks: FxHashMap<
+        u32,
+        (
+            crate::picker::PickRequest,
+            AnswerSlot<Vec<crate::picker::PickedFile>>,
+        ),
+    >,
+    next_pick: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -555,6 +565,8 @@ impl Default for Components {
             next_image_info: 1,
             clipboard_reads: FxHashMap::default(),
             next_clipboard_read: 1,
+            picks: FxHashMap::default(),
+            next_pick: 1,
             fetches: FxHashMap::default(),
             fetch_requests: Vec::new(),
             next_fetch: 1,
@@ -4384,6 +4396,35 @@ impl<M: TextEngine> Core<M> {
                 );
                 self.components.fetch_requests.push((id, *request));
             }
+            Action::PickImages(request, answer) => {
+                if !self.access.allows_picker() {
+                    answer.borrow_mut().deliver(Vec::new());
+                    self.deny(
+                        "the picker is not granted: add `\"picker\": true` to capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(picker) = self.picker.clone() {
+                    let picked = picker.pick_images(request);
+                    crate::ui::task::spawn_raw(
+                        &self.components.executor,
+                        crate::ROOT_ID,
+                        Box::pin(async move {
+                            let files = crate::picker::finish(&request, picked.await);
+                            answer.borrow_mut().deliver(files);
+                        }),
+                    );
+                    return;
+                }
+                let id = self.components.next_pick;
+                self.components.next_pick += 1;
+                self.components.picks.insert(id, (request, answer));
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickImages { id, request },
+                });
+            }
             Action::ReadClipboard(read) => {
                 let id = self.components.next_clipboard_read;
                 self.components.next_clipboard_read += 1;
@@ -4603,6 +4644,16 @@ impl<M: TextEngine> Core<M> {
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
+                true
+            }
+            EventKind::Pick if id == crate::ROOT_ID => {
+                let EventPayload::Picked { id: request, files } = payload else {
+                    return false;
+                };
+                if let Some((asked, answer)) = self.components.picks.remove(request) {
+                    let files = crate::picker::finish(&asked, files.clone());
+                    answer.borrow_mut().deliver(files);
+                }
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

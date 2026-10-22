@@ -54,6 +54,17 @@ expect Calls: 5 promises
 wait 300
 expect Failed: none
 covers [nsh/clipboard] Clipboard
+# mod-picker
+tap id:case-mod-picker
+# options out of range throw a RangeError in the call; a pick is a promise,
+# which no picker answers there.
+expect Picked: not picked
+tap id:pick
+expect Thrown: RangeError
+expect Picked: pending
+wait 300
+expect Picked: pending
+covers [nsh/picker] Picker
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup

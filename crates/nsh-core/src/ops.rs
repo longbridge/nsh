@@ -219,6 +219,7 @@ events! {
     Cancel = "onCancel": "Escape or the Android back button was pressed while the overlay was the top one listening to it (raised by the core).",
     Position = "onPosition": "The core placed an overlay (payload: `placement`, the side it went on, `x`, `y`, `width`, `height` in the root view, `availableWidth`, `availableHeight`: the room on that side).",
     MouseMove = "onMouseMove": "The mouse moved inside the view, including with a button down (desktops and web; local coordinates `x`, `y`; at most once per frame).",
+    Pick = "onPick": "A picker closed (root only; payload: [`EventPayload::Picked`], no files when cancelled).",
 
 }
 
@@ -533,6 +534,13 @@ pub enum EventPayload {
     FileDrop(Vec<String>),
     /// The lines of a text block.
     TextLayout(Vec<crate::text::TextLine>),
+    /// The files the user picked ([`EventKind::Pick`]), with their bytes.
+    Picked {
+        /// The request ([`Command::PickImages`]).
+        id: u32,
+        /// The files, in the order picked; none when cancelled.
+        files: Vec<crate::picker::PickedFile>,
+    },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.
     Native {
@@ -1355,6 +1363,16 @@ pub enum Command {
     ReadClipboardFiles {
         /// The request.
         id: u32,
+    },
+    /// Show the system's picker for images (on the root;
+    /// `Picker.pickImages`), prepare the picked ones as `request` says
+    /// ([`crate::picker`]) and report them as [`EventKind::Pick`]
+    /// ([`EventPayload::Picked`] `id`; no files when cancelled).
+    PickImages {
+        /// The request.
+        id: u32,
+        /// What to show and how to prepare the images.
+        request: crate::picker::PickRequest,
     },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.

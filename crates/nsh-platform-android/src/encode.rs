@@ -596,6 +596,16 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     Command::ReadClipboardImage { .. }
                     | Command::ReadClipboardFiles { .. }
                     | Command::SetClipboardImage(_) => e.int(-1),
+                    // `Picker.java`: the request, the limit, the longest
+                    // side (0: any), the quality (-1: none), the format.
+                    Command::PickImages { id, request } => {
+                        e.int(25);
+                        e.int(id as i32);
+                        e.int(request.limit as i32);
+                        e.int(request.max_dimension.map_or(0, |d| d.0.max(1)));
+                        e.float(request.quality.map_or(-1.0, |q| q.0));
+                        e.bool(request.format == nsh_core::picker::PickFormat::Current);
+                    }
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)

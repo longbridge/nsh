@@ -11,6 +11,7 @@ import ModDesktop from "./mod-desktop";
 import ModDevice from "./mod-device";
 import ModIos from "./mod-ios";
 import ModKeymap from "./mod-keymap";
+import ModPicker from "./mod-picker";
 import ModStorage from "./mod-storage";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -22,6 +23,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-device": ModDevice,
   "mod-ios": ModIos,
   "mod-keymap": ModKeymap,
+  "mod-picker": ModPicker,
   "mod-storage": ModStorage,
 };
 const shown = signal("");

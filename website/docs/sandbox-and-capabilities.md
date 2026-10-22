@@ -115,7 +115,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true
+    "clipboard": true,
+    "picker": true
   }
 }
 ```
@@ -176,6 +177,11 @@ allows them without allowing any remote page.
 
 `"clipboard": true` lets the app read and write the system clipboard ([`nsh/clipboard`](../modules/nsh-clipboard.md)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
 
+### `picker`
+
+`"picker": true` lets the app show the system's picker for photos ([`nsh/picker`](../modules/nsh-picker.md)): the user
+picks what reaches the app.
+
 ### Storage
 
 Every app may keep its own data on the device with [`nsh/storage`](../modules/nsh-storage.md), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
@@ -188,6 +194,7 @@ Every app may keep its own data on the device with [`nsh/storage`](../modules/ns
 | Remote image | The image fails with `onError`. |
 | Video source, web view source, status bar change | Nothing is shown or changed. |
 | Clipboard | `writeText` and `writeImage` do nothing; `readText` resolves `""`, `readImage` `null`, `readFiles` `[]`, and `hasText` and `hasImage` `false`. |
+| Picker | `pickImages` shows nothing and resolves `[]`. |
 
 Each refusal is logged once, saying which key to add:
 

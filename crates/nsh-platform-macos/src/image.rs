@@ -860,7 +860,7 @@ fn rgba_image(raster: &nsh_core::svg::Raster) -> Option<CFRetained<CGImage>> {
 
 /// The pixel size of the first image, as displayed (EXIF orientations 5–8
 /// turn it a quarter).
-fn source_size(source: &CGImageSource) -> (u32, u32) {
+pub(crate) fn source_size(source: &CGImageSource) -> (u32, u32) {
     use objc2_image_io::{
         kCGImagePropertyOrientation, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
     };

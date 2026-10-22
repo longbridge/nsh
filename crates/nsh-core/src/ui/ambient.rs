@@ -419,6 +419,15 @@ pub fn clipboard_files() -> Answer<Vec<String>> {
     answer
 }
 
+/// Shows the system's picker for images and gives the ones the user picked,
+/// prepared as `request` says, none when cancelled (TS:
+/// `Picker.pickImages`), to await in a task.
+pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::picker::PickedFile>> {
+    let (answer, action) = super::services::pick_images(request);
+    act(action);
+    answer
+}
+
 /// Shows `message` at the bottom of the screen (Android's toasts, TS:
 /// `Toast.show`); nothing happens elsewhere.
 pub fn toast(message: impl Into<String>, duration: super::ToastDuration) {

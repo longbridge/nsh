@@ -1919,6 +1919,17 @@ final class Mounter {
                 SystemUi.setClipboard(context, (String) objects[b.getInt()]);
                 break;
             }
+            case 25: {
+                Picker.Request request = new Picker.Request();
+                request.id = b.getInt();
+                request.limit = b.getInt();
+                request.maxDimension = b.getInt();
+                request.quality = b.getFloat();
+                request.current = b.getInt() != 0;
+                request.view = host;
+                Picker.show(context, request);
+                break;
+            }
             case 23: {
                 int request = b.getInt();
                 boolean hasOnly = b.getInt() != 0;

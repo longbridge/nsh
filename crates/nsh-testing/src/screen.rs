@@ -102,6 +102,10 @@ pub struct Screen {
     clipboard_reads: Vec<(u32, bool)>,
     /// The `Image.getSize` / `Image.prefetch` requests to answer.
     image_infos: Vec<u32>,
+    /// The picks asked (`Picker.pickImages`), in order, and how many were
+    /// answered.
+    picks: Vec<(u32, nsh_core::picker::PickRequest)>,
+    picks_answered: usize,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -400,6 +404,7 @@ impl Screen {
             // Headless runs load no images: the size is answered as a
             // failed load (a `TextView` asks for its images' sizes).
             Command::ImageInfo { id, .. } => self.image_infos.push(*id),
+            Command::PickImages { id, request } => self.picks.push((*id, *request)),
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
                 if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
@@ -726,6 +731,22 @@ impl Screen {
     /// The oldest dialog was answered.
     pub(crate) fn answered(&mut self) {
         self.answered = (self.answered + 1).min(self.dialogs.len());
+    }
+
+    /// The picks the app asked for so far, in order (`Picker.pickImages`).
+    pub fn picks(&self) -> Vec<nsh_core::picker::PickRequest> {
+        self.picks.iter().map(|(_, request)| *request).collect()
+    }
+
+    /// The oldest pick not answered yet: its request's id and what it
+    /// asks.
+    pub(crate) fn pending_pick(&self) -> Option<(u32, nsh_core::picker::PickRequest)> {
+        self.picks.get(self.picks_answered).copied()
+    }
+
+    /// The oldest pick was answered.
+    pub(crate) fn picked(&mut self) {
+        self.picks_answered = (self.picks_answered + 1).min(self.picks.len());
     }
 
     /// The clipboard's text.

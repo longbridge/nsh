@@ -30,6 +30,7 @@ mod mount;
 pub mod navigation;
 mod ops;
 pub mod overlay;
+pub mod picker;
 pub mod platform;
 mod props;
 pub mod reactive;

@@ -229,6 +229,9 @@ pub struct AppView {
     _keystrokes: gpui::Subscription,
     /// The view itself handled the Tab being dispatched ([`AppView::tab`]).
     tabbed: std::cell::Cell<bool>,
+    /// Answers the apps' picks in place of GPUI's open dialog
+    /// ([`AppView::set_picker`]).
+    picker: RefCell<Option<Arc<dyn nsh_core::picker::PickerBackend>>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -272,6 +275,7 @@ impl AppView {
             focus: cx.focus_handle().tab_stop(true),
             options: RefCell::new(options),
             tabbed: std::cell::Cell::new(false),
+            picker: RefCell::new(None),
             _keystrokes: cx.observe_keystrokes(Self::tab_entered),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
@@ -307,6 +311,7 @@ impl AppView {
             context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
+            picker: self.picker.borrow().clone(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -345,6 +350,13 @@ impl AppView {
     /// keeps the limits it was loaded with.
     pub fn set_limits(&self, limits: Limits) {
         self.options.borrow_mut().limits = limits;
+    }
+
+    /// Answers the picks of the apps loaded from now on
+    /// (`Picker.pickImages`) with `picker`, the embedding app's own picker,
+    /// instead of showing GPUI's open dialog; `None`: the dialog again.
+    pub fn set_picker(&self, picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>) {
+        *self.picker.borrow_mut() = picker;
     }
 
     /// Development: loads the app from a `nsh dev` server (`ws://host:port/ws`)

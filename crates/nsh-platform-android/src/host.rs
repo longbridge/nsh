@@ -151,6 +151,7 @@ impl Host {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            picker: None,
         };
         let density = self.density;
         let sink = Sink(self.clone());
@@ -1373,6 +1374,62 @@ fn floats(env: &JNIEnv<'_>, values: &[f32]) -> jfloatArray {
 }
 
 /// A registered native component emitted `name` (JSON data or `null`).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_picked(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    names: jni::objects::JObjectArray<'_>,
+    types: jni::objects::JObjectArray<'_>,
+    data: jni::objects::JObjectArray<'_>,
+    sizes: jni::objects::JIntArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let count = env.get_array_length(&data).unwrap_or(0).max(0);
+    let mut dims = vec![0; count as usize * 2];
+    let _ = env.get_int_array_region(&sizes, 0, &mut dims);
+    let string = |env: &mut JNIEnv<'_>, array: &jni::objects::JObjectArray<'_>, i: i32| {
+        env.get_object_array_element(array, i)
+            .ok()
+            .filter(|v| !v.is_null())
+            .and_then(|v| env.get_string(&JString::from(v)).ok().map(String::from))
+            .unwrap_or_default()
+    };
+    let mut files = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let name = string(&mut env, &names, i);
+        let mime = string(&mut env, &types, i);
+        let Ok(bytes) = env.get_object_array_element(&data, i) else {
+            continue;
+        };
+        let Ok(bytes) = env.convert_byte_array(JByteArray::from(bytes)) else {
+            continue;
+        };
+        let mut file =
+            nsh_core::picker::PickedFile::new(name, mime, nsh_core::ImageData::new(bytes));
+        let (w, h) = (dims[i as usize * 2], dims[i as usize * 2 + 1]);
+        if w > 0 && h > 0 {
+            file.size = nsh_core::Size::new(
+                nsh_core::geometry::DevicePixels(w),
+                nsh_core::geometry::DevicePixels(h),
+            );
+        }
+        files.push(file);
+    }
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            nsh_core::ROOT_ID,
+            EventKind::Pick,
+            EventPayload::Picked {
+                id: id as u32,
+                files,
+            },
+        );
+    }
+}
+
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_componentEvent(
     mut env: JNIEnv<'_>,

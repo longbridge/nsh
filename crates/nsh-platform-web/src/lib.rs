@@ -556,6 +556,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        picker: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
@@ -1211,6 +1212,64 @@ pub unsafe extern "C" fn nsh_event(
         },
     };
     send(|app| app.control.dispatch_event(id, kind, payload))
+}
+
+thread_local! {
+    /// The files of the pick `nsh.js` is answering ([`nsh_picked_file`]).
+    static PICKED: RefCell<Vec<nsh_core::picker::PickedFile>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A file picked for the pick `nsh.js` is answering (`Picker.pickImages`):
+/// its name, its type, its bytes, its size in pixels (0: unknown) and when
+/// it was last changed (ms since the Unix epoch). [`nsh_picked`] sends them.
+///
+/// # Safety
+///
+/// The three ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn nsh_picked_file(
+    name: *const u8,
+    name_len: usize,
+    mime: *const u8,
+    mime_len: usize,
+    ptr: *const u8,
+    len: usize,
+    width: u32,
+    height: u32,
+    last_modified: f64,
+) {
+    // SAFETY: guaranteed by the caller.
+    let (name, mime, data) = unsafe {
+        (
+            string(name, name_len),
+            string(mime, mime_len),
+            bytes(ptr, len).to_vec(),
+        )
+    };
+    let mut file = nsh_core::picker::PickedFile::new(name, mime, nsh_core::ImageData::new(data));
+    if width > 0 && height > 0 {
+        file.size = size(DevicePixels(width as i32), DevicePixels(height as i32));
+    }
+    if last_modified.is_finite() && last_modified >= 0.0 {
+        file.last_modified =
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(last_modified as u64));
+    }
+    PICKED.with_borrow_mut(|files| files.push(file));
+}
+
+/// Answers pick `request` with the files [`nsh_picked_file`] gave (none:
+/// cancelled).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_picked(request: u32) -> f64 {
+    let files = PICKED.with_borrow_mut(std::mem::take);
+    send(|app| {
+        app.control.dispatch_event(
+            ROOT_ID,
+            EventKind::Pick,
+            EventPayload::Picked { id: request, files },
+        )
+    })
 }
 
 /// Touches, as JSON `{ phase, time, points: [{ id, target, path, pageX,

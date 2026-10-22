@@ -3473,6 +3473,7 @@ class Player {
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
+      case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "exitApp": {
@@ -3548,6 +3549,77 @@ class Player {
     } catch {
       // Denied, an insecure context, or a type the browser does not write.
     }
+  }
+
+  /**
+   * `Picker.pickImages`: a file input of images. Files are read as they are,
+   * unless one is larger than `maxDimension` (or a JPEG with a `quality`):
+   * then it is drawn upright at the size that fits and encoded again (a PNG
+   * stays a PNG), as `nsh_core::picker` says. A cancelled input sends none.
+   */
+  pickImages(request, limit, maxDimension, quality, current) {
+    const app = this.app;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = current ? "image/*" : "image/jpeg,image/png,image/gif,image/webp";
+    input.multiple = limit > 1;
+    input.style.display = "none";
+    let answered = false;
+    const answer = async (files) => {
+      if (answered) return;
+      answered = true;
+      input.remove();
+      const picked = [];
+      for (const file of files.slice(0, limit)) {
+        try {
+          picked.push(await this.preparePicked(file, maxDimension, quality));
+        } catch {
+          // Unreadable: left out.
+        }
+      }
+      if (app !== this.app) return;
+      this.call((w) => {
+        for (const p of picked) {
+          this.withStrings([p.name, p.type, p.bytes], (np, nl, tp, tl, bp, bl) =>
+            w.nsh_picked_file(np, nl, tp, tl, bp, bl, p.width, p.height, p.lastModified));
+        }
+        return w.nsh_picked(request);
+      });
+    };
+    input.addEventListener("change", () => answer([...(input.files ?? [])]));
+    input.addEventListener("cancel", () => answer([]));
+    this.root.append(input);
+    input.click();
+  }
+
+  async preparePicked(file, maxDimension, quality) {
+    const type = file.type.toLowerCase();
+    let bitmap = null;
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      // A format the browser does not decode: kept as it is.
+    }
+    const width = bitmap?.width ?? 0;
+    const height = bitmap?.height ?? 0;
+    const longer = Math.max(width, height);
+    const scale = maxDimension > 0 && longer > maxDimension;
+    const requality = quality >= 0 && type === "image/jpeg";
+    const keep = { name: file.name, type, lastModified: file.lastModified, width, height };
+    if (!bitmap || !(scale || requality)) {
+      bitmap?.close();
+      return { ...keep, bytes: new Uint8Array(await file.arrayBuffer()) };
+    }
+    const factor = scale ? maxDimension / longer : 1;
+    const w = Math.max(1, Math.round(width * factor));
+    const h = Math.max(1, Math.round(height * factor));
+    const canvas = new OffscreenCanvas(w, h);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    const png = type === "image/png" && scale;
+    const out = await canvas.convertToBlob(png ? { type: "image/png" } : { type: "image/jpeg", quality: quality >= 0 ? quality : 0.9 });
+    const name = file.name.replace(/\.[^.]*$/, "") + (png ? ".png" : ".jpg");
+    return { ...keep, name, type: out.type, width: w, height: h, bytes: new Uint8Array(await out.arrayBuffer()) };
   }
 
   /** `Clipboard.readImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
