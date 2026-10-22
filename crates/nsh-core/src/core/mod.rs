@@ -1074,7 +1074,8 @@ impl<M: TextEngine> Core<M> {
         let _entered = self.components.runtime.enter();
         // Ops on a component's host go to its component, calls of a UI
         // set's modules to the module; the components learn whether JS
-        // listens to the back button.
+        // listens to the back button and JS's shortcuts even before one
+        // mounts, so a component's own join them rather than replace them.
         if self.components.instances.is_empty()
             && !matches!(
                 op,
@@ -1083,8 +1084,11 @@ impl<M: TextEngine> Core<M> {
                     ..
                 } | Op::Listen {
                     id: ROOT_ID,
-                    event: EventKind::BackPress,
+                    event: EventKind::BackPress | EventKind::KeyCommand,
                     ..
+                } | Op::SetProp {
+                    id: ROOT_ID,
+                    prop: Prop::Keymap(_),
                 }
             )
         {
@@ -2052,7 +2056,9 @@ impl<M: TextEngine> Core<M> {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
                     let size = source.as_ref().and_then(|s| s.size);
-                    image.source = source;
+                    // A `data:` URI is decoded here, once, not by every
+                    // platform at every load.
+                    image.source = source.map(ImageSource::inline);
                     flags |= dirty::IMAGE;
                     let layout = node.layout.expect("image layout");
                     if let Some(LeafContext::Image(natural)) =
@@ -2068,7 +2074,9 @@ impl<M: TextEngine> Core<M> {
             Prop::Image(option) => {
                 if let Some(image) = node.image.as_mut() {
                     match option {
-                        ImageProp::Placeholder(source) => image.options.placeholder = source,
+                        ImageProp::Placeholder(source) => {
+                            image.options.placeholder = source.map(ImageSource::inline)
+                        }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
                     }

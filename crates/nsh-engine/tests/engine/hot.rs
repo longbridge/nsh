@@ -174,6 +174,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -326,6 +327,7 @@ fn entry_edits_keep_navigation_and_state() {
             data_dir: None,
             storage: None,
             clock: Default::default(),
+            context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
         };

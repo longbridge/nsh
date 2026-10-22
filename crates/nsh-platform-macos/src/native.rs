@@ -503,6 +503,8 @@ pub(crate) fn lend(surface: &Rc<Surface>, top: &NshView, image: &NSView) -> Vec<
     };
     let mut lent = Vec::new();
     for (holder, shown) in found {
+        // `place_in` converts with AppKit's geometry, which the bounds place.
+        crate::scroll::commit_ancestors(&holder);
         let Some(place) = place_in(&shown, top.ns()) else {
             continue;
         };

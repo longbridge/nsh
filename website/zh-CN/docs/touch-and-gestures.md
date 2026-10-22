@@ -446,6 +446,8 @@ let origin = 0;
 | `.keep_touches(true)` | `onResponderTerminationRequest` 返回 `false` | 另一个视图想要接管时保留触摸（默认会交出）。 |
 | `.on_responder_terminate(..)` | `onResponderTerminate` | 另一个视图或某个原生手势接管了触摸。 |
 
+Rust 组件的响应者从成为响应者起一直保持按下状态，直到它的触摸结束，无论手指或指针移到哪里，就像 CSS 的 `:active` 会保持到按钮松开：它的 `.active(..)` 样式和其中的 `group-active:` 类在整个拖动过程中保持不变（例如拖出条带的调整大小手柄）。
+
 Rust 处理函数收到一个 `ResponderEvent`：手指在它按下的视图中的位置 `location`、page 坐标 `page`、`timestamp`，以及自成为响应者以来的手势 `gesture`。
 
 ```rust tabs

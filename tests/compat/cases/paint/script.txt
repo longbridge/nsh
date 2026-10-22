@@ -132,6 +132,10 @@ prop id:material-change ios.backdropMaterial chrome
 tap id:material-change
 prop id:material-change ios.backdropMaterial ultraThin
 style id:material-change backdropFilter blur(30)
+style id:glass backdropFilter blur(10)
+style id:glass glassEffect regular
+style id:glass-clear glassEffect clear
+nostyle id:no-glass glassEffect
 style id:blend-normal mixBlendMode normal
 style id:blend-multiply mixBlendMode multiply
 style id:blend-screen mixBlendMode screen
@@ -154,6 +158,7 @@ covers [styles] backgroundImage
 covers [styles] filter
 covers [styles] backdropFilter
 covers [props] ios.backdropMaterial
+covers [styles] glassEffect
 covers [styles] mixBlendMode
 # paint-misc
 tap id:case-paint-misc

@@ -84,6 +84,23 @@ function App() {
 mount(App);
 "#;
 
+/// A host view around a surface that holds the window's focus itself,
+/// as an embedding app's own widgets do.
+struct Host {
+    view: Entity<AppView>,
+    focus: gpui::FocusHandle,
+}
+
+impl gpui::Render for Host {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::{InteractiveElement as _, ParentElement as _};
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .child(self.view.clone())
+    }
+}
+
 /// The focused field's text.
 fn field_text(view: &Entity<AppView>, cx: &mut VisualTestContext) -> Option<String> {
     view.read_with(cx, |view, _| {
@@ -155,7 +172,11 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    presses_carry_where_the_pointer_was(cx);
+    an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
     the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
+    js_and_rust_view_shortcuts_fire_together_in_either_order(cx);
+    each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -203,6 +224,44 @@ fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppCont
     ime(&view, cx, |s| crate::text_input::char_input(s, "好"));
     assert_eq!(field_text(&view, cx).as_deref(), Some("held好"));
     wait_for(&view, cx, "compose ni|end|compose hao|change held好|end");
+}
+
+fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (host, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| AppView::new(AppOptions::default(), window, cx));
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Host { view, focus }
+    });
+    let view = host.read_with(cx, |host, _| host.view.clone());
+    view.update(cx, |view, _| {
+        view.register_component("test.square", Rc::new(|_| Box::new(Square)));
+        view.load(App::Js(Bundle::source(code)));
+    });
+    // The app's autoFocus field. The window's focus stays on the host's
+    // own element until the surface takes it.
+    wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "abc");
+    // The host can take the keyboard while the surface keeps its focused field.
+    let host_focus = host.read_with(cx, |host, _| host.focus.clone());
+    cx.update(|window, cx| window.focus(&host_focus, cx));
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        let field = crate::text_input::focused(view.surface()).unwrap();
+        crate::text_input::focus(&field);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| {
+        assert!(
+            !host_focus.is_focused(window),
+            "focus() left the keyboard on the embedding host"
+        );
+    });
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "ab");
 }
 
 struct KeyLog {
@@ -339,4 +398,260 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
         gpui::Modifiers::default(),
     );
     wait_for(&view, cx, "fired revert bound bound new");
+}
+/// The part of the embedding app a view reaches: its engine's context.
+struct Desk(&'static str);
+
+/// Which desk the engine running the call was given.
+#[nsh_core::ui::module]
+struct Whose;
+
+#[nsh_core::ui::module]
+impl Whose {
+    /// In the JS call.
+    pub(crate) fn now() -> String {
+        desk()
+    }
+
+    /// As a task, after it waited.
+    pub(crate) async fn later() -> String {
+        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        desk()
+    }
+}
+
+fn desk() -> String {
+    nsh_core::ui::engine_context::<Desk>()
+        .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
+}
+
+/// A field showing which desk `Whose` names, in the call and in a task.
+const WHOSE: &str = r#"
+import { Input, mount, signal, View } from "nsh";
+import { nativeModule } from "nsh/native";
+
+interface WhoseApi {
+  now(): string;
+  later(): Promise<string>;
+}
+const { Whose } = nativeModule<{ Whose: WhoseApi }>("test/context");
+
+function App() {
+  const text = signal("waiting");
+  setTimeout(async () => text.set(`${Whose.now()} ${await Whose.later()}`), 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+/// Two surfaces side by side in one window.
+struct Pair {
+    a: Entity<AppView>,
+    b: Entity<AppView>,
+}
+
+impl gpui::Render for Pair {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::ParentElement as _;
+        div()
+            .size_full()
+            .flex()
+            .child(div().flex_1().child(self.a.clone()))
+            .child(div().flex_1().child(self.b.clone()))
+    }
+}
+
+fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
+    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    context.module::<Whose>();
+    crate::set_ui_sets(vec![nsh_base::registry(), context]);
+    let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (pair, cx) = cx.add_window_view(|window, cx| {
+        let view = |desk: &'static str, window: &mut Window, cx: &mut gpui::Context<Pair>| {
+            let options = AppOptions {
+                context: nsh_engine::EngineContext::default().with(Desk(desk)),
+                ..AppOptions::default()
+            };
+            cx.new(|cx| AppView::new(options, window, cx))
+        };
+        Pair {
+            a: view("A", window, cx),
+            b: view("B", window, cx),
+        }
+    });
+    let (a, b) = pair.read_with(cx, |pair, _| (pair.a.clone(), pair.b.clone()));
+    for view in [&a, &b] {
+        view.update(cx, |view, _| {
+            view.load(App::Js(Bundle::source(code.clone())))
+        });
+    }
+    wait_for(&a, cx, "A A");
+    wait_for(&b, cx, "B B");
+}
+
+/// A Rust view (`test/keys`) that binds a keystroke of its own.
+mod rust_keys {
+    use nsh_core::ui::{Registry, prelude::*};
+
+    /// The set the app imports `Shortcut` from.
+    pub(super) fn registry() -> Registry {
+        let mut registry = Registry::ui_set("test/keys");
+        registry.register::<Shortcut>();
+        registry
+    }
+
+    #[derive(Debug, Clone, PartialEq, Props)]
+    pub(super) struct ShortcutProps {
+        /// The keystroke, as `on_key` takes it.
+        pub(super) keys: Prop<SharedString>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Event)]
+    pub(super) enum ShortcutEvent {
+        /// The keystroke was pressed.
+        Fired,
+    }
+
+    /// Binds `keys` (in text fields too) and reports each press.
+    #[component]
+    pub(super) fn Shortcut(props: ShortcutProps, cx: Scope<ShortcutEvent>) -> impl IntoElement {
+        let options = KeyOptions {
+            when: nsh_core::keymap::When::Always,
+            ..KeyOptions::default()
+        };
+        on_key_with(&props.keys.get(), options, move |_| {
+            cx.emit(ShortcutEvent::Fired)
+        });
+        view()
+    }
+}
+
+/// A field logging Escape (JS's binding), Shift+Enter (a Rust view's) and
+/// Mod+T (JS's, which shows and hides the view). `view_first` shows the
+/// view from the start and binds Escape once it mounted. Otherwise Escape
+/// is bound before any Rust view exists.
+fn js_and_rust_view(view_first: bool) -> String {
+    format!(
+        r#"
+import {{ Input, mount, signal, View }} from "nsh";
+import {{ keymap }} from "nsh/keymap";
+import {{ Shortcut }} from "test/keys";
+
+const VIEW_FIRST = {view_first};
+
+function App() {{
+  const fired = signal("fired");
+  const shown = signal(VIEW_FIRST);
+  const fire = (name: string) => fired.set(`${{fired()}} ${{name}}`);
+  const escape = () => keymap.bind("escape", () => fire("escape"), {{ when: "always" }});
+  keymap.bind("mod+t", () => {{ shown.set(!shown()); fire(shown() ? "shown" : "hidden"); }}, {{ when: "always" }});
+  if (VIEW_FIRST) setTimeout(() => {{ escape(); fire("bound"); }}, 0); else escape();
+  return (
+    <View style={{{{ flex: 1 }}}}>
+      <Input autoFocus value={{fired()}} style={{{{ height: 30 }}}} />
+      <If when={{shown()}}>
+        <Shortcut keys="shift+enter" onFired={{() => fire("shift")}} style={{{{ height: 10 }}}} />
+      </If>
+    </View>
+  );
+}}
+mount(App);
+"#
+    )
+}
+
+fn js_and_rust_view_shortcuts_fire_together_in_either_order(cx: &mut TestAppContext) {
+    crate::set_ui_sets(vec![nsh_base::registry(), rust_keys::registry()]);
+    let primary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    let sets = [rust_keys::registry().into()];
+
+    let code = nsh_bundler::compile_module("App.tsx", &js_and_rust_view(false), &sets).unwrap();
+    let (view, window) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(window, |view, _| view.load(App::Js(Bundle::source(code))));
+    window.update(|w, cx| w.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, window, "fired");
+    window.simulate_keystrokes(&format!("{primary}-t"));
+    wait_for(&view, window, "fired shown");
+    window.simulate_keystrokes("escape shift-enter");
+    wait_for(&view, window, "fired shown escape shift");
+    // The view goes, and only its binding with it.
+    window.simulate_keystrokes(&format!("{primary}-t"));
+    wait_for(&view, window, "fired shown escape shift hidden");
+    window.simulate_keystrokes("escape");
+    wait_for(&view, window, "fired shown escape shift hidden escape");
+
+    let code = nsh_bundler::compile_module("App.tsx", &js_and_rust_view(true), &sets).unwrap();
+    let (view, window) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(window, |view, _| view.load(App::Js(Bundle::source(code))));
+    window.update(|w, cx| w.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, window, "fired bound");
+    window.simulate_keystrokes("escape shift-enter");
+    wait_for(&view, window, "fired bound escape shift");
+    window.simulate_keystrokes(&format!("{primary}-t"));
+    wait_for(&view, window, "fired bound escape shift hidden");
+    window.simulate_keystrokes("escape");
+    wait_for(&view, window, "fired bound escape shift hidden escape");
+}
+
+/// A pad inside 8 points of padding. A press writes where it was in the
+/// pad and in the window.
+mod press_point {
+    use nsh_core::ui::prelude::*;
+
+    #[component]
+    pub(super) fn PressPoint() -> impl IntoElement {
+        let report = signal(String::from("none"));
+        view()
+            .p(px(8.0))
+            .child(
+                view()
+                    .w(px(80.0))
+                    .h(px(40.0))
+                    .on(EventKind::Press, move |p: &EventPayload| {
+                        let EventPayload::Press(e) = p else {
+                            report.set("no position".into());
+                            return;
+                        };
+                        report.set(format!(
+                            "at {:.0} {:.0} in {:.0} {:.0}",
+                            e.position.x.0,
+                            e.position.y.0,
+                            e.page_position.x.0,
+                            e.page_position.y.0
+                        ));
+                    }),
+            )
+            .child(
+                input()
+                    .auto_focus(true)
+                    .value(move || report.get())
+                    .h(px(30.0)),
+            )
+    }
+}
+
+fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| {
+        view.load(App::Rust(Root::of::<press_point::PressPoint>()))
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "none");
+    cx.simulate_click(
+        gpui::point(gpui::px(18.0), gpui::px(20.0)),
+        gpui::Modifiers::default(),
+    );
+    wait_for(&view, cx, "at 10 12 in 18 20");
 }

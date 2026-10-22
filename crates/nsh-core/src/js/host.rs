@@ -442,6 +442,14 @@ export interface PanEvent {
   valueY?: number;
 }
 
+/** Where the pointer was at a press: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
+export interface PressEvent {
+  /** Position in the pressed view (its transforms undone; a pressed span's text view). */
+  position: Point;
+  /** Position in the root view the view is in (the surface or its modal), as touches' `pageX` / `pageY`. */
+  pagePosition: Point;
+}
+
 /** Where the mouse is over a hovered view: the payload of `onHoverMove` (GPUI's `MouseMoveEvent`). */
 export interface HoverEvent {
   /** Position in the view (its transforms undone). */
@@ -497,10 +505,30 @@ export interface WebViewNavigation {
 /// its documentation. An event whose payload differs between elements has
 /// a row per payload.
 pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
-    (EventKind::Press, on::ALL, "() => void", ""),
-    (EventKind::LongPress, on::ALL, "() => void", ""),
-    (EventKind::PressDown, on::ALL, "() => void", ""),
-    (EventKind::PressUp, on::ALL, "() => void", ""),
+    (
+        EventKind::Press,
+        on::ALL,
+        "(e?: PressEvent) => void",
+        "A tap. `e` is where the pointer was, on backends that know it.",
+    ),
+    (
+        EventKind::LongPress,
+        on::ALL,
+        "(e?: PressEvent) => void",
+        "A press held for about half a second. `e` is where the pointer was, on backends that know it.",
+    ),
+    (
+        EventKind::PressDown,
+        on::ALL,
+        "(e?: PressEvent) => void",
+        "A press went down. `e` is where the pointer was, on backends that know it.",
+    ),
+    (
+        EventKind::PressUp,
+        on::ALL,
+        "(e?: PressEvent) => void",
+        "The press ended. `e` is where the pointer was, on backends that know it.",
+    ),
     (
         EventKind::HoverIn,
         on::ALL,

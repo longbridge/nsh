@@ -264,6 +264,7 @@ Text elements do not draw gradients on iOS.
 |---|---|---|
 | `filter` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`; several separated by spaces | `.brightness(n)`, `.contrast(n)`, `.grayscale(n)`, `.hue_rotate(angle)`, `.invert(n)`, `.saturate(n)`, `.sepia(n)`, `.blur(px(..))` |
 | `backdropFilter` | Filters of what is behind the view: `"blur(10px)"` (frosted glass) | `.backdrop_blur(px(10.0))`, `.backdrop_saturate(n)`, ... |
+| `glassEffect` | `"regular"` or `"clear"` for Apple's Liquid Glass on iOS 26 and later; `"none"` (the default) uses `backdropFilter` | `ViewStyle::glass_effect` (`GlassEffect`) |
 | `mixBlendMode` | How the view blends with what is behind it: `"multiply"`, `"screen"`, `"overlay"`, ... | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -306,6 +307,14 @@ view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
 
 ```tsx tabs
 <View ios={{ backdropMaterial: "regular" }} style={{ height: 64, backdropFilter: "blur(30px)" }} />
+```
+
+`glassEffect` draws Liquid Glass behind a view's content on iOS 26 and later. `"regular"` uses the standard material;
+`"clear"` takes less color from the background. Pair it with `backdropFilter` for the blur shown on earlier iOS
+versions and other platforms. The glass follows the view's size and rounded corners.
+
+```tsx
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
 ```
 
 ## Outlines, opacity and visibility

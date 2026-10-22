@@ -1090,7 +1090,8 @@ impl App {
     /// Moves the mouse over the middle of what `selector` names: the views
     /// under it hear `onHoverIn` (and the ones it left `onHoverOut`), take
     /// their `hover:` styles and hear `onHoverMove`. Desktops and the web
-    /// only: a phone has no mouse.
+    /// (at any width: a browser has a mouse) only: an iOS or Android phone
+    /// has none.
     pub async fn hover(this: Instance<Self>, selector: String) -> Result<(), String> {
         step(&this, move |app| app.hover(&selector)).await
     }

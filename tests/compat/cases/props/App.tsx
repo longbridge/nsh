@@ -10,6 +10,7 @@ import PropsListFollow from "./props-list-follow";
 import PropsListLayout from "./props-list-layout";
 import PropsListStickyOffset from "./props-list-sticky-offset";
 import PropsMediaImage from "./props-media-image";
+import PropsMediaImageInline from "./props-media-image-inline";
 import PropsMediaImageVariants from "./props-media-image-variants";
 import PropsMediaSvg from "./props-media-svg";
 import PropsMediaVideo from "./props-media-video";
@@ -29,6 +30,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-list-layout": PropsListLayout,
   "props-list-sticky-offset": PropsListStickyOffset,
   "props-media-image": PropsMediaImage,
+  "props-media-image-inline": PropsMediaImageInline,
   "props-media-image-variants": PropsMediaImageVariants,
   "props-media-svg": PropsMediaSvg,
   "props-media-video": PropsMediaVideo,

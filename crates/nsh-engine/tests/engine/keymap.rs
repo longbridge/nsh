@@ -1,6 +1,7 @@
 //! `nsh/keymap`: the table the platform gets, the handlers its key
-//! commands run, unbinding, bindings undone with their component, and the
-//! errors of invalid and reserved keystrokes.
+//! commands run, unbinding, bindings undone with their component, JS's
+//! bindings beside a Rust view's in either order, and the errors of
+//! invalid and reserved keystrokes.
 
 use std::{sync::Arc, time::Duration};
 
@@ -25,14 +26,20 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
     std::fs::write(&entry, app).unwrap();
+    let ui_sets = vec![crate::test_ui::registry()];
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
         split: false,
-        ui_sets: Vec::new(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &[]).unwrap();
+    let bytecode = nsh_js::compile_bytecode_with(
+        &bundle.code,
+        false,
+        &ui_sets.iter().map(Into::into).collect::<Vec<_>>(),
+    )
+    .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -49,11 +56,12 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         },
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
-        ui_sets: Vec::new(),
+        ui_sets,
         runtime: None,
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -204,4 +212,87 @@ fn bindings_go_when_unbound_and_with_their_component() {
     // The panel goes, and its binding with it.
     let gone = next(&rx, |s| s.keymap.as_ref().is_some_and(|k| k.is_empty()));
     assert!(gone.keymap.unwrap().is_empty());
+}
+
+/// Escape bound by JS and Shift+Enter by a Rust view (`test/ui`'s
+/// `Shortcut`); Mod+T shows and hides the view. `VIEW_FIRST` shows it from
+/// the start and binds Escape after it mounted, else Escape is bound
+/// before any Rust view exists.
+fn js_and_view(view_first: bool) -> String {
+    format!(
+        r#"import {{ mount, signal, Text }} from "nsh";
+import {{ keymap }} from "nsh/keymap";
+import {{ Shortcut }} from "test/ui";
+
+const VIEW_FIRST = {view_first};
+const shown = signal(VIEW_FIRST);
+let escapes = 0;
+const log = signal("none");
+const escape = () => keymap.bind("escape", () => log.set(`escape ${{++escapes}}`), {{ when: "always" }});
+keymap.bind("mod+t", () => shown.set(!shown()));
+if (VIEW_FIRST) setTimeout(escape, 50); else escape();
+
+mount(() => (
+  <>
+    <Text>{{`log ${{log()}}`}}</Text>
+    <If when={{shown()}}><Shortcut keys="shift+enter" /></If>
+  </>
+));
+"#
+    )
+}
+
+fn table_of(rx: &Receiver<MountBatch>, len: usize) -> Arc<Keymap> {
+    let keymap = next(rx, |s| {
+        s.keymap.as_ref().is_some_and(|k| k.bindings().len() == len)
+    })
+    .keymap
+    .expect("a table");
+    let keys: Vec<_> = keymap.bindings().iter().map(|b| b.keystroke).collect();
+    assert_eq!(keys.len(), len, "{keys:?}");
+    keymap
+}
+
+fn shows(rx: &Receiver<MountBatch>, text: &str) -> bool {
+    next(rx, |s| s.texts.iter().any(|t| t == text))
+        .texts
+        .iter()
+        .any(|t| t == text)
+}
+
+#[test]
+fn js_bindings_made_before_a_rust_view_mounts_stay_beside_its_own() {
+    let (engine, rx) = start(&js_and_view(false));
+    let keymap = table_of(&rx, 2);
+    press(&engine, &keymap, "cmd+t", false);
+    let keymap = table_of(&rx, 3);
+    press(&engine, &keymap, "escape", false);
+    assert!(
+        shows(&rx, "log escape 1"),
+        "JS's Escape fires beside the view's"
+    );
+    press(&engine, &keymap, "shift+enter", false);
+    assert!(shows(&rx, "shift+enter 1"), "the view's Shift+Enter fires");
+    // The view goes, and only its binding with it.
+    press(&engine, &keymap, "cmd+t", false);
+    let keymap = table_of(&rx, 2);
+    press(&engine, &keymap, "escape", false);
+    assert!(shows(&rx, "log escape 2"), "JS's Escape outlives the view");
+}
+
+#[test]
+fn js_bindings_made_after_a_rust_view_mounts_join_its_own() {
+    let (engine, rx) = start(&js_and_view(true));
+    let keymap = table_of(&rx, 3);
+    press(&engine, &keymap, "escape", false);
+    assert!(
+        shows(&rx, "log escape 1"),
+        "JS's Escape fires beside the view's"
+    );
+    press(&engine, &keymap, "shift+enter", false);
+    assert!(shows(&rx, "shift+enter 1"), "the view's Shift+Enter fires");
+    press(&engine, &keymap, "cmd+t", false);
+    let keymap = table_of(&rx, 2);
+    press(&engine, &keymap, "escape", false);
+    assert!(shows(&rx, "log escape 2"), "JS's Escape outlives the view");
 }

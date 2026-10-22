@@ -68,6 +68,9 @@ function App() {
         onPress={() => material.set(material() === "regular" ? "chrome" : undefined)}>
         <Text>Change material</Text>
       </View>
+      <View testID="glass" style={{ height: 4, backdropFilter: "blur(10px)", glassEffect: "regular" }} />
+      <View testID="glass-clear" style={{ height: 4, glassEffect: "clear" }} />
+      <View testID="no-glass" style={{ height: 4, glassEffect: "none" }} />
       {BLENDS.map((mode) => (
         <View testID={`blend-${mode}`} style={{ height: 2, mixBlendMode: mode }} />
       ))}

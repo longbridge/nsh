@@ -8,7 +8,7 @@ use taffy::{
 use crate::{
     css,
     effects::{
-        BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, Gradient,
+        BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
         KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
     },
     geometry::{
@@ -503,6 +503,8 @@ pub struct ViewStyle {
     pub blend_mode: BlendMode,
     /// The iOS material from `ios={{ backdropMaterial }}`, projected at mount time.
     pub backdrop_material: BackdropMaterial,
+    /// `glassEffect`.
+    pub glass_effect: GlassEffect,
     /// `outline*`.
     pub outline: Outline,
     /// `visibility: "hidden"`: not drawn and not touchable, still laid out.
@@ -712,6 +714,7 @@ impl Default for ViewStyle {
             effects: None,
             blend_mode: BlendMode::Normal,
             backdrop_material: BackdropMaterial::UltraThin,
+            glass_effect: GlassEffect::None,
             outline: Outline::NONE,
             hidden: false,
             cursor: Cursor::Auto,
@@ -1179,6 +1182,7 @@ style_keys! {
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
+    GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
     OutlineColor = "outlineColor": View "ColorValue",
@@ -2308,6 +2312,12 @@ impl Style {
                 };
                 self.edit_effects(|e| e.backdrop_filters = list);
             }
+            StyleKey::GlassEffect => {
+                self.view.glass_effect = match keyword(value)? {
+                    None => GlassEffect::None,
+                    Some(s) => GlassEffect::parse(s).ok_or(StyleError::InvalidValue)?,
+                }
+            }
             StyleKey::MixBlendMode => {
                 self.view.blend_mode = match keyword(value)? {
                     None => BlendMode::Normal,
@@ -2893,6 +2903,30 @@ mod tests {
         );
         assert_eq!(
             s.set("fontStyle", StyleValue::Str("oblique")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn glass_effect_parses() {
+        let mut s = Style::default();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("regular")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Regular);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Clear);
+        // `none`, and the null of a style that was taken off, both clear it.
+        s.set("glassEffect", StyleValue::Str("none")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        s.set("glassEffect", StyleValue::Null).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Str("frosted")),
+            Err(StyleError::InvalidValue)
+        );
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Number(1.0)),
             Err(StyleError::InvalidValue)
         );
     }

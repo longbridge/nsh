@@ -1,4 +1,5 @@
-//! Image views: loading (`asset:/`, files, HTTP, `data:`), decoding into
+//! Image views: loading (`asset:/`, files, HTTP; `data:` URIs and `blob:`
+//! URLs, whose bytes the source carries), decoding into
 //! Direct2D bitmaps, drawing with the resize mode, tint, blur and
 //! placeholder.
 //!
@@ -51,7 +52,8 @@ use std::{
 };
 
 use nsh_core::{
-    Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue, ResizeMode,
+    Command, EventKind, EventPayload, ImageData, ImageOptions, ImageSource, NodeId, PayloadValue,
+    ResizeMode,
     geometry::{Points, Size},
 };
 use rustc_hash::FxHashMap;
@@ -147,8 +149,12 @@ enum Location {
     Url(String),
     /// A file on disk.
     File(PathBuf),
-    /// A `data:` URI (decoded on the worker).
+    /// A `data:` URI (decoded on the worker): `Image.getSize`'s; a view's
+    /// source arrives decoded ([`Location::Memory`]).
     Data(String),
+    /// Bytes in memory (a decoded `data:` URI, a blob), by the source's
+    /// URI.
+    Memory(String, ImageData),
 }
 
 impl Location {
@@ -158,7 +164,7 @@ impl Location {
         match self {
             Location::Url(url) => url.clone(),
             Location::File(path) => format!("file://{}", path.display()),
-            Location::Data(uri) => uri.clone(),
+            Location::Data(uri) | Location::Memory(uri, _) => uri.clone(),
         }
     }
 }
@@ -240,20 +246,7 @@ fn percent_decode(bytes: &[u8]) -> Vec<u8> {
 
 /// The bytes of a `data:` URI (base64 or percent-encoded).
 fn data_uri(uri: &str) -> Result<Vec<u8>, String> {
-    use base64::Engine;
-    let rest = uri.strip_prefix("data:").ok_or("not a data URI")?;
-    let (meta, data) = rest.split_once(',').ok_or("malformed data URI")?;
-    if meta.ends_with(";base64") {
-        // As lenient as browsers: whitespace and missing padding pass.
-        const LENIENT: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
-            &base64::alphabet::STANDARD,
-            base64::engine::GeneralPurposeConfig::new()
-                .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
-        );
-        let clean: String = data.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-        return LENIENT.decode(clean).map_err(|e| format!("data URI: {e}"));
-    }
-    Ok(percent_decode(data.as_bytes()))
+    nsh_core::image::decode_data_uri(uri).map(|(_, bytes)| bytes)
 }
 
 /// The HTTP agent all downloads share.
@@ -273,6 +266,7 @@ fn read(location: &Location, progress: &mut dyn FnMut(u64, u64)) -> Result<Vec<u
     match location {
         Location::File(path) => std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())),
         Location::Data(uri) => data_uri(uri),
+        Location::Memory(_, data) => Ok(data.to_vec()),
         Location::Url(url) => {
             let mut response = agent().get(url).call().map_err(|e| format!("{url}: {e}"))?;
             let total = response.body().content_length().unwrap_or(0);
@@ -858,7 +852,36 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// Loads `uri` for `surface`; `done` runs on the main thread. Returns
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
-    let Some(location) = resolve(uri, surface.asset_base.borrow().as_ref()) else {
+    let location = resolve(uri, surface.asset_base.borrow().as_ref());
+    fetch_at(surface, location, uri, progress, done)
+}
+
+/// Loads `source` for `surface` as [`fetch`] does: from its bytes, when it
+/// carries them (a `data:` URI, a blob).
+fn fetch_source(
+    surface: &Surface,
+    source: &ImageSource,
+    progress: Option<Progress>,
+    done: Done,
+) -> bool {
+    match &source.data {
+        Some(data) => {
+            let location = Location::Memory(source.uri.to_string(), data.clone());
+            fetch_at(surface, Some(location), &source.uri, progress, done)
+        }
+        None => fetch(surface, &source.uri, progress, done),
+    }
+}
+
+/// Loads `location` (`uri`'s) for `surface`, as [`fetch`] does.
+fn fetch_at(
+    surface: &Surface,
+    location: Option<Location>,
+    uri: &str,
+    progress: Option<Progress>,
+    done: Done,
+) -> bool {
+    let Some(location) = location else {
         done(Err(format!("unsupported image source `{uri}`")));
         return true;
     };
@@ -1281,7 +1304,7 @@ pub(crate) fn set(
                 }
             }
         };
-        let immediate = fetch(surface, &source.uri, progress, Box::new(done));
+        let immediate = fetch_source(surface, source, progress, Box::new(done));
         waited.set(true);
         if !immediate && events.contains(EventKind::LoadStart) {
             surface.event(id, EventKind::LoadStart, EventPayload::None);
@@ -1309,7 +1332,7 @@ pub(crate) fn set(
                 Err(message) => log::warn!("image placeholder failed: {message}"),
             }
         };
-        fetch(surface, &placeholder.uri, None, Box::new(done));
+        fetch_source(surface, placeholder, None, Box::new(done));
     }
 }
 
@@ -1831,6 +1854,7 @@ mod tests {
             uri: "asset:/logo@2x.svg".into(),
             size: None,
             scales: nsh_core::ImageScales::NONE,
+            data: None,
         };
         let picture = Picture::new(decode(SVG_LOGO.to_vec()).unwrap()).unwrap();
         assert_eq!(picture.size, (48, 24));
@@ -1871,6 +1895,7 @@ mod tests {
             uri: "asset:/logo@2x.png".into(),
             size: None,
             scales: Default::default(),
+            data: None,
         };
         assert_eq!(natural((200, 100), None, Some(&source)), (100.0, 50.0));
     }
