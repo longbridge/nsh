@@ -84,6 +84,23 @@ function App() {
 mount(App);
 "#;
 
+/// A host view around a surface that holds the window's focus itself,
+/// as an embedding app's own widgets do.
+struct Host {
+    view: Entity<AppView>,
+    focus: gpui::FocusHandle,
+}
+
+impl gpui::Render for Host {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::{InteractiveElement as _, ParentElement as _};
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .child(self.view.clone())
+    }
+}
+
 /// The focused field's text.
 fn field_text(view: &Entity<AppView>, cx: &mut VisualTestContext) -> Option<String> {
     view.read_with(cx, |view, _| {
@@ -155,6 +172,9 @@ fn windows(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     keys_reach_the_fields_of_a_surface_showing_a_native_component(cx);
     compositions_are_reported_and_hold_values_until_they_end(cx);
+    an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
+    the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx);
+    each_view_s_functions_read_the_context_its_options_gave_its_engine(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -202,4 +222,272 @@ fn compositions_are_reported_and_hold_values_until_they_end(cx: &mut TestAppCont
     ime(&view, cx, |s| crate::text_input::char_input(s, "好"));
     assert_eq!(field_text(&view, cx).as_deref(), Some("held好"));
     wait_for(&view, cx, "compose ni|end|compose hao|change held好|end");
+}
+
+fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", FIELD_AFTER_COMPONENT, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (host, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| AppView::new(AppOptions::default(), window, cx));
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Host { view, focus }
+    });
+    let view = host.read_with(cx, |host, _| host.view.clone());
+    view.update(cx, |view, _| {
+        view.register_component("test.square", Rc::new(|_| Box::new(Square)));
+        view.load(App::Js(Bundle::source(code)));
+    });
+    // The app's autoFocus field. The window's focus stays on the host's
+    // own element until the surface takes it.
+    wait_for(&view, cx, "abcd");
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "abc");
+    // The host can take the keyboard while the surface keeps its focused field.
+    let host_focus = host.read_with(cx, |host, _| host.focus.clone());
+    cx.update(|window, cx| window.focus(&host_focus, cx));
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        let field = crate::text_input::focused(view.surface()).unwrap();
+        crate::text_input::focus(&field);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| {
+        assert!(
+            !host_focus.is_focused(window),
+            "focus() left the keyboard on the embedding host"
+        );
+    });
+    cx.simulate_keystrokes("end backspace");
+    wait_for(&view, cx, "ab");
+}
+
+struct KeyLog {
+    keys: Rc<std::cell::RefCell<Vec<String>>>,
+    focus: Rc<std::cell::RefCell<Option<gpui::FocusHandle>>>,
+}
+
+impl NativeComponent for KeyLog {
+    fn render(&mut self, _: &mut Window, cx: &mut GpuiApp) -> Option<AnyElement> {
+        use gpui::InteractiveElement as _;
+        let focus = self
+            .focus
+            .borrow_mut()
+            .get_or_insert_with(|| cx.focus_handle())
+            .clone();
+        let keys = self.keys.clone();
+        Some(
+            div()
+                .size_full()
+                .track_focus(&focus)
+                .on_key_down(move |e, _, _| keys.borrow_mut().push(e.keystroke.unparse()))
+                .into_any_element(),
+        )
+    }
+
+    fn focus_handle(&self) -> Option<gpui::FocusHandle> {
+        self.focus.borrow().clone()
+    }
+
+    fn set_prop(
+        &mut self,
+        _: &str,
+        _: Option<&serde_json::Value>,
+        _: &mut Window,
+        _: &mut GpuiApp,
+    ) {
+    }
+}
+
+/// A field showing which of the app's shortcuts fired, above a component
+/// that takes the keyboard. `mod+k` fires while text is edited. `j` does
+/// not. The menu's `mod+z` and `mod+shift+n` still choose their items.
+const SHORTCUTS_OVER_COMPONENT: &str = r#"
+import { Input, mount, signal, View } from "nsh";
+import { Menu } from "nsh/desktop";
+import { keymap } from "nsh/keymap";
+import { nativeComponent } from "nsh/native";
+
+const KeyLog = nativeComponent<{}, {}>("test.keylog", { props: [], events: [] });
+
+function App() {
+  const fired = signal("fired");
+  const fire = (name: string) => () => fired.set(`${fired()} ${name}`);
+  keymap.bind("mod+k", fire("bound"), { when: "always" });
+  keymap.bind("j", fire("j"));
+  Menu.setApplicationMenu([
+    {
+      label: "Edit",
+      submenu: [
+        { label: "Revert", shortcut: "mod+z", onSelect: fire("revert") },
+        { label: "New", shortcut: "mod+shift+n", onSelect: fire("new") },
+      ],
+    },
+  ]);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input value={fired()} style={{ height: 30 }} />
+      <KeyLog style={{ height: 40 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &mut TestAppContext) {
+    use std::cell::RefCell;
+    let code = nsh_bundler::compile_module("App.tsx", SHORTCUTS_OVER_COMPONENT, &[]).unwrap();
+    let keys = Rc::new(RefCell::new(Vec::new()));
+    let focus = Rc::new(RefCell::new(None));
+    let (component_keys, component_focus) = (keys.clone(), focus.clone());
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let view = AppView::new(AppOptions::default(), window, cx);
+        let title = window.window_title();
+        crate::chrome::set_standalone(view.surface(), &title, window.window_handle());
+        view
+    });
+    view.update(cx, |view, _| {
+        view.register_component(
+            "test.keylog",
+            Rc::new(move |_| {
+                Box::new(KeyLog {
+                    keys: component_keys.clone(),
+                    focus: component_focus.clone(),
+                })
+            }),
+        );
+        view.load(App::Js(Bundle::source(code)));
+    });
+    let start = Instant::now();
+    let handle = loop {
+        cx.run_until_parked();
+        if let Some(handle) = focus.borrow().clone() {
+            break handle;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the component is not drawn"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    cx.update(|window, cx| window.focus(&handle, cx));
+    cx.run_until_parked();
+    let primary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    cx.simulate_keystrokes(&format!("a j {primary}-z {primary}-k"));
+    // GPUI's test window sends no releases. K's release reaches the keymap
+    // while the component has the focus, so the next Ctrl+K is not a repeat.
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse(&format!("{primary}-k")).unwrap(),
+    });
+    cx.simulate_keystrokes(&format!("{primary}-k shift-{primary}-n"));
+    assert_eq!(
+        keys.borrow()[..4],
+        ["a", "j", &format!("{primary}-z"), &format!("{primary}-k")],
+    );
+    cx.update(|window, _| assert!(handle.is_focused(window), "the component lost the focus"));
+    // The surface starts below the platform's title and menu bars.
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
+    cx.simulate_click(
+        gpui::point(gpui::px(x + 20.0), gpui::px(y + 15.0)),
+        gpui::Modifiers::default(),
+    );
+    wait_for(&view, cx, "fired revert bound bound new");
+}
+/// The part of the embedding app a view reaches: its engine's context.
+struct Desk(&'static str);
+
+/// Which desk the engine running the call was given.
+#[nsh_core::ui::module]
+struct Whose;
+
+#[nsh_core::ui::module]
+impl Whose {
+    /// In the JS call.
+    pub(crate) fn now() -> String {
+        desk()
+    }
+
+    /// As a task, after it waited.
+    pub(crate) async fn later() -> String {
+        nsh_core::ui::prelude::timer(Duration::from_millis(5)).await;
+        desk()
+    }
+}
+
+fn desk() -> String {
+    nsh_core::ui::engine_context::<Desk>()
+        .map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
+}
+
+/// A field showing which desk `Whose` names, in the call and in a task.
+const WHOSE: &str = r#"
+import { Input, mount, signal, View } from "nsh";
+import { nativeModule } from "nsh/native";
+
+interface WhoseApi {
+  now(): string;
+  later(): Promise<string>;
+}
+const { Whose } = nativeModule<{ Whose: WhoseApi }>("test/context");
+
+function App() {
+  const text = signal("waiting");
+  setTimeout(async () => text.set(`${Whose.now()} ${await Whose.later()}`), 0);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+/// Two surfaces side by side in one window.
+struct Pair {
+    a: Entity<AppView>,
+    b: Entity<AppView>,
+}
+
+impl gpui::Render for Pair {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        use gpui::ParentElement as _;
+        div()
+            .size_full()
+            .flex()
+            .child(div().flex_1().child(self.a.clone()))
+            .child(div().flex_1().child(self.b.clone()))
+    }
+}
+
+fn each_view_s_functions_read_the_context_its_options_gave_its_engine(cx: &mut TestAppContext) {
+    let mut context = nsh_core::ui::Registry::ui_set("test/context");
+    context.module::<Whose>();
+    crate::set_ui_sets(vec![nsh_base::registry(), context]);
+    let code = nsh_bundler::compile_module("App.tsx", WHOSE, &[]).unwrap();
+    use gpui::AppContext as _;
+    let (pair, cx) = cx.add_window_view(|window, cx| {
+        let view = |desk: &'static str, window: &mut Window, cx: &mut gpui::Context<Pair>| {
+            let options = AppOptions {
+                context: nsh_engine::EngineContext::default().with(Desk(desk)),
+                ..AppOptions::default()
+            };
+            cx.new(|cx| AppView::new(options, window, cx))
+        };
+        Pair {
+            a: view("A", window, cx),
+            b: view("B", window, cx),
+        }
+    });
+    let (a, b) = pair.read_with(cx, |pair, _| (pair.a.clone(), pair.b.clone()));
+    for view in [&a, &b] {
+        view.update(cx, |view, _| {
+            view.load(App::Js(Bundle::source(code.clone())))
+        });
+    }
+    wait_for(&a, cx, "A A");
+    wait_for(&b, cx, "B B");
 }

@@ -63,7 +63,7 @@ mount(App);
 | `selected` | `.selected(..)` | `boolean` | `false` | 选中：打开的开关、当前标签页。屏幕阅读器会报告。值由应用持有，样式也由应用决定。 |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | 无 | `selected` 且未禁用时的样式，与 `selected:` 类相同。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 内容不足以说明时（比如只有图标），屏幕阅读器读出的文字。 |
-| `role` | `.role(..)` | `AccessibilityRole` | `"button"` | 它对屏幕阅读器而言是什么：`"link"`、`"tab"`、`"menuitem"`、`"switch"` 等。 |
+| `role` | `.role(..)` | `AccessibilityRole` | `"button"` | 当 `nsh/base` 没有对应的组件时，它对屏幕阅读器而言是什么：`"link"`（打开一个 URL）等。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 内容：文字、图标或任意布局。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 它的全部外观。 |
 | `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` | `.active(\|s\| ..)`、`.hover(..)`、`.focus(..)`、`.disabled_style(..)` | `StyleProp<ViewStyle>` | 无 | 按下、悬停、获得焦点或禁用时的样式，与对应的 `<state>:` 类相同。后面的状态优先，`disabled` 优先于所有状态。 |
@@ -216,41 +216,7 @@ fn bold(on: Signal<bool>) -> impl IntoElement {
 </Button>
 ```
 
-一排标签页就是每个标签一个角色为 `"tab"` 的 `Button`，当前标签设置 `selected`：
-
-```rust tabs
-#[derive(Clone, Copy, PartialEq)]
-enum Tab {
-    Inbox,
-    Archive,
-}
-
-fn tab(current: Signal<Tab>, tab: Tab, label: &'static str) -> impl IntoElement {
-    button()
-        .role(AccessibilityRole::Tab)
-        .selected(move || current.get() == tab)
-        .on_press(move || current.set(tab))
-        .rounded_full()
-        .px_4()
-        .py_2()
-        .selected_style(|s| s.bg(rgb(0x2563eb)))
-        .active(|s| s.opacity(0.7))
-        .child(text(label))
-}
-```
-
-```tsx tabs
-<View class="flex-row gap-2">
-  <Button role="tab" selected={tab() === "inbox"} onPress={() => tab.set("inbox")}
-    class="rounded-full px-4 py-2 selected:bg-blue-600 active:opacity-70">
-    <Text>Inbox</Text>
-  </Button>
-  <Button role="tab" selected={tab() === "archive"} onPress={() => tab.set("archive")}
-    class="rounded-full px-4 py-2 selected:bg-blue-600 active:opacity-70">
-    <Text>Archive</Text>
-  </Button>
-</View>
-```
+标签行用 [`Tabs`](./tabs.md)，开关用 [`Switch`](./switch.md)（均来自 `nsh/base`）：它们自带该类控件的角色、选中状态和键盘行为，用 `role="tab"` 或 `role="switch"` 的 `Button` 做不到这些。
 
 <a id="accessibility"></a>
 

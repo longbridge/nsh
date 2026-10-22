@@ -23,7 +23,7 @@ use objc2_ui_kit::{
     UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
+    UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
 };
 
 use crate::{
@@ -333,6 +333,8 @@ pub(crate) struct Mounter {
     animated: Vec<NodeId>,
     /// Image views waiting for their frame before loading.
     pending_images: Vec<NodeId>,
+    /// The display scale images were last requested at.
+    image_scale: CGFloat,
     target: Retained<EventTarget>,
     animator: Animator,
     images: ImageLoader,
@@ -408,6 +410,7 @@ impl Mounter {
             views,
             animated: Vec::new(),
             pending_images: Vec::new(),
+            image_scale: 0.0,
             animator: Animator::new(&target),
             target,
             images: ImageLoader::new(
@@ -1940,12 +1943,52 @@ impl Mounter {
         }
     }
 
+    /// The screen's pixels per point. Not `contentScaleFactor`: it stays 1
+    /// on views that draw nothing themselves.
+    fn display_scale(&self) -> CGFloat {
+        let Some(root) = self.slot(nsh_core::ROOT_ID).map(|s| s.native.view()) else {
+            return 2.0;
+        };
+        // SAFETY: a plain getter.
+        let scale = unsafe { root.traitCollection().displayScale() };
+        if scale > 0.0 {
+            return scale;
+        }
+        root.window().map_or(2.0, |w| w.screen().scale())
+    }
+
+    /// The surface's traits changed: on a screen of another scale (an
+    /// external display, Catalyst), images decode again for it.
+    pub(crate) fn traits_changed(&mut self) {
+        if self.display_scale() == self.image_scale {
+            return;
+        }
+        for (id, slot) in self.views.iter_mut().enumerate() {
+            let Some(s) = slot else { continue };
+            if !matches!(s.native, Native::Image(_))
+                || (s.image.is_none() && s.image_options.placeholder.is_none())
+            {
+                continue;
+            }
+            let id = id as NodeId;
+            for key in [s.image_key.take(), s.placeholder_key.take()]
+                .into_iter()
+                .flatten()
+            {
+                self.images.cancel(id, &key);
+            }
+            if !self.pending_images.contains(&id) {
+                self.pending_images.push(id);
+            }
+        }
+        self.start_image_loads();
+    }
+
     /// Starts loads queued during the batch, now that frames are known so
     /// images can be decoded at their display size.
     fn start_image_loads(&mut self) {
-        let scale = self
-            .slot(nsh_core::ROOT_ID)
-            .map_or(2.0, |s| s.native.view().contentScaleFactor());
+        let scale = self.display_scale();
+        self.image_scale = scale;
         for id in std::mem::take(&mut self.pending_images) {
             let Some(s) = self.slot(id) else { continue };
             let Native::Image(view) = &s.native else {
@@ -2026,7 +2069,8 @@ impl Mounter {
         };
         let view = view.clone();
         view.set_drawing(drawing.clone());
-        let scale = view.contentScaleFactor();
+        // Not the view's `contentScaleFactor`: zooming raises it.
+        let scale = self.display_scale();
         for image in drawing.images() {
             if view.has_image(&image.uri) {
                 continue;

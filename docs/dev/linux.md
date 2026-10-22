@@ -29,9 +29,10 @@ Features: `js` (default; JS apps; without it the crate only runs Rust apps and l
 server client, log forwarding, the error overlay: `dev.rs`) and `webview` (web views with WebKitGTK 6.0, the `webkit6`
 crate: `native/web.rs`; without it a `WebView` shows a placeholder). `webview` is off in `nsh-platform-linux` itself,
 so an embedding GTK app decides whether it links WebKitGTK, and on by default in `nsh-linux-host` and `nsh-linux-app`
-(their own feature `webview`): `nsh run`, `nsh package --target linux` and the generated crates of Rust apps build
-those two crates with their default features, so web views work wherever NSH runs apps, as on the other platforms.
-The price is that the release runner links `libwebkitgtk-6.0.so.4`, so every packaged app needs WebKitGTK 6.0
+(their own feature `webview`). TSX apps use these defaults. Generated Rust app runners turn off default features;
+the app enables `nsh-platform-linux`'s `webview` feature in its own Cargo dependency when it uses web views. Cargo
+unifies that feature with the runner's platform dependency, so only apps that enable it link WebKitGTK.
+With `webview`, the release runner links `libwebkitgtk-6.0.so.4`, so that packaged app needs WebKitGTK 6.0
 installed to start (`libwebkitgtk-6.0-4` on Debian / Ubuntu; GNOME desktops have it), whether or not it shows a
 web view: WebKitGTK cannot be loaded on demand the way iOS and macOS load WebKit, as the `webkit6` bindings link
 it. `cargo xtask dist` builds both with web views when `pkg-config` finds `webkitgtk-6.0`, else without them

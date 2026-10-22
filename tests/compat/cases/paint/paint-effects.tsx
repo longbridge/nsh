@@ -58,6 +58,9 @@ function App() {
       <View testID="no-filter" style={{ height: 4, filter: "none" }} />
       <View testID="backdrop" style={{ height: 4, backdropFilter: "blur(10px)" }} />
       <View testID="backdrops" style={{ height: 4, backdropFilter: "saturate(180%) blur(20px)" }} />
+      <View testID="glass" style={{ height: 4, backdropFilter: "blur(10px)", glassEffect: "regular" }} />
+      <View testID="glass-clear" style={{ height: 4, glassEffect: "clear" }} />
+      <View testID="no-glass" style={{ height: 4, glassEffect: "none" }} />
       {BLENDS.map((mode) => (
         <View testID={`blend-${mode}`} style={{ height: 2, mixBlendMode: mode }} />
       ))}

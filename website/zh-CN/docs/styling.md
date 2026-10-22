@@ -266,6 +266,7 @@ view()
 |---|---|---|
 | `filter` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`；多个之间用空格分隔 | `.brightness(n)`、`.contrast(n)`、`.grayscale(n)`、`.hue_rotate(angle)`、`.invert(n)`、`.saturate(n)`、`.sepia(n)`、`.blur(px(..))` |
 | `backdropFilter` | 作用于视图背后内容的滤镜：`"blur(10px)"`（毛玻璃） | `.backdrop_blur(px(10.0))`、`.backdrop_saturate(n)` 等 |
+| `glassEffect` | `"regular"` 或 `"clear"`，在 iOS 26 及更高版本绘制 Apple 的 Liquid Glass；`"none"`（默认值）使用 `backdropFilter` | `ViewStyle::glass_effect`（`GlassEffect`） |
 | `mixBlendMode` | 视图与其背后内容的混合方式：`"multiply"`、`"screen"`、`"overlay"` 等 | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -295,6 +296,14 @@ view()
 | `mixBlendMode` | 支持 | Android 10（API 29）起支持 |
 
 Web、Windows 和 Linux 对视图应用所有滤镜，macOS 与 iOS 相同；GPUI 绘制颜色滤镜和 `drop-shadow()`。背景滤镜在 iOS、macOS 和 Android 上是模糊，在 Web 和 Windows 上支持所有滤镜；Linux 和 GPUI 不绘制背景滤镜，GPUI 以普通混合模式绘制视图。对于包含多个 `drop-shadow()` 的 `filter`，iOS、macOS 和 Android 绘制最后一个。`mixBlendMode` 让视图与其后绘制的一切混合。
+
+`glassEffect` 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，
+`"clear"` 从背景获取的颜色更少。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。
+玻璃层随视图的尺寸和圆角更新。
+
+```tsx
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
+```
 
 ## 轮廓线、不透明度与可见性
 

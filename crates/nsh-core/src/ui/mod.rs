@@ -42,6 +42,7 @@ pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
+mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
@@ -133,6 +134,7 @@ pub use self::{
         Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
+    engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
         Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
@@ -412,8 +414,9 @@ pub mod prelude {
             set_color_scheme, set_interval, set_timeout, spawn, timer, timer_until, toast, tokens,
             window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
+        batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
+        provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,
+        use_context, when,
     };
     // Kept for apps written before `nsh_base` presented dialogs,
     // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,

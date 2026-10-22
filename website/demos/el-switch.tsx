@@ -1,13 +1,15 @@
 import { mount, signal, Text, View } from "nsh";
 import { Switch } from "nsh/base";
-import { desktop, Log, Panel, size, Split, ui } from "./palette";
+import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
 
 // The parts: geometry and motion in classes (`checked:` moves the thumb,
 // `disabled:` dims the row, both following the switch), colors from the
-// palette by the value the app owns. A pointer gets the compact size.
+// palette by the value the app owns. A pointer gets the compact size; the
+// pointer's hover and the keyboard's focus ring come from the palette, and
+// the thumb and track stay still with reduced motion.
 const row = `flex-row-reverse items-center justify-between gap-3 ${desktop ? "px-3 py-2" : "px-4 py-3"} active:opacity-70 disabled:opacity-40`;
-const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;
-const thumb = desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5";
+const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors motion-reduce:transition-none`;
+const thumb = desktop ? "size-4 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-4" : "size-5.5 rounded-full transition-transform motion-reduce:transition-none checked:translate-x-5";
 
 function Setting(props: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -16,6 +18,8 @@ function Setting(props: { label: string; detail: string; checked: boolean; disab
       disabled={props.disabled}
       onChange={props.onChange}
       class={row}
+      hoverStyle={props.disabled ? undefined : hoverFill()}
+      focusStyle={focusRing()}
       trackClass={track}
       trackStyle={props.checked ? ui().accentFill : ui().inset}
       thumbClass={thumb}
