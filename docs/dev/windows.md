@@ -65,7 +65,9 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
 - **Drawing a view** (`render::draw_view`): shadows and background (`decor.rs`), the content clipped to the bounds
   (text, image, canvas), the children (clipped to the rounded bounds when the view clips), the items the view hosts
   (`ViewState::natives`: text editors, alerts, overlays, videos — the `Hosted` trait), the scroll
-  indicator, then the border, all inside an opacity layer when translucent. Transforms are CSS-like 4x4 matrices
+  indicator, then the border, all inside an opacity layer when translucent (bounded by the area the subtree draws in:
+  an unbounded layer is a surface as large as the clip around it, often the window; a view that paints only its
+  background color fades the color instead, with no layer). Transforms are CSS-like 4x4 matrices
   (`geom.rs`); affine ones are Direct2D's 3x2 world transform, projective ones (perspective) draw the subtree into an
   offscreen bitmap mapped with `DrawBitmap`'s perspective transform. Units are points: the device context's DPI is
   the window's (the process is per-monitor DPI aware, v2).
