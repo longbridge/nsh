@@ -282,9 +282,12 @@ fn wait_until_window(
     }
 }
 
-/// The window's content height, in points.
-fn viewport_height(cx: &mut VisualTestContext) -> f32 {
-    cx.update(|window, _| f32::from(window.viewport_size().height))
+/// The height available below the title bar, before the menu bar.
+fn height_below_title_bar(cx: &mut VisualTestContext) -> f32 {
+    let full = cx.update(|window, _| f32::from(window.viewport_size().height));
+    // Windows draws a 32-point caption inside the viewport; Linux's
+    // window manager draws its decorations outside it.
+    full - if cfg!(windows) { 32.0 } else { 0.0 }
 }
 
 /// A field that reads the app's height (`h <points>`, the window less the
@@ -332,7 +335,7 @@ fn an_embedded_view_that_owns_its_window_sets_its_title_and_menu(cx: &mut TestAp
     });
     if cfg!(target_os = "linux") {
         // The menu bar is drawn above the app, 28 points tall.
-        let window = viewport_height(cx);
+        let window = height_below_title_bar(cx);
         wait_until(&view, cx, |t| t == format!("h {}", window - 28.0));
     }
 }
@@ -407,7 +410,7 @@ fn an_auto_hidden_menu_bar_shows_on_alt_alone_and_while_a_menu_is_open(cx: &mut 
     }
     let code = nsh_bundler::compile_module("App.tsx", AUTO_HIDDEN_BAR, &[]).unwrap();
     let (view, cx) = owned_view(cx, code, |_| {});
-    let full = viewport_height(cx);
+    let full = height_below_title_bar(cx);
     let (hidden, shown) = (format!("h {full}"), format!("h {}", full - 28.0));
     wait_for(&view, cx, &hidden);
     let alt_alone = |cx: &mut VisualTestContext| {
@@ -514,7 +517,7 @@ fn releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx: &mut Tes
     }
     let code = nsh_bundler::compile_module("App.tsx", AUTO_HIDDEN_BAR, &[]).unwrap();
     let (view, cx) = owned_view(cx, code, |_| {});
-    let full = viewport_height(cx);
+    let full = height_below_title_bar(cx);
     wait_for(&view, cx, &format!("h {full}"));
     for shift_first in [false, true] {
         cx.simulate_modifiers_change(if shift_first {
