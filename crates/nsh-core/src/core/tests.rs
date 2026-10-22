@@ -10856,6 +10856,66 @@ mod views {
             batch.items
         );
     }
+    /// A download's progress: a range for screen readers that follows the
+    /// app's value, and none while it is indeterminate.
+    #[derive(Default)]
+    struct Download;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct DownloadProps {}
+
+    impl Component for Download {
+        type Props = DownloadProps;
+        type Event = NoEvent;
+
+        fn view(_: DownloadProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let now = signal(Some(40.0_f32));
+            view()
+                .size_10()
+                .accessible(true)
+                .role(crate::AccessibilityRole::Progressbar)
+                .accessibility_value(move || {
+                    Some(crate::AccessibilityValue {
+                        min: Some(0.0),
+                        max: Some(100.0),
+                        now: now.get(),
+                        text: None,
+                    })
+                })
+                .on_press(move || now.set(now.get().map_or(Some(0.0), |_| None)))
+        }
+    }
+
+    #[test]
+    fn an_elements_accessibility_value_follows_its_signals() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Download>(|| DownloadProps {}));
+        let batch = c.commit().unwrap();
+        let value = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == crate::AccessibilityRole::Progressbar =>
+                {
+                    Some((*id, props.accessibility.value.clone()))
+                }
+                _ => None,
+            })
+        };
+        let (id, first) = value(&batch).expect("the progress bar's props");
+        let range = |now| crate::AccessibilityValue {
+            min: Some(0.0),
+            max: Some(100.0),
+            now,
+            text: None,
+        };
+        assert_eq!(first, Some(range(Some(40.0))));
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(value(&batch).map(|(_, v)| v), Some(Some(range(None))));
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(value(&batch).map(|(_, v)| v), Some(Some(range(Some(0.0)))));
+    }
 }
 
 mod rust_desktop {

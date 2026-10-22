@@ -388,7 +388,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded? }` | The state assistive technologies report (`checked` may be `"mixed"`). |
-| `accessibilityValue` | | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
+| `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityElementsHidden` | | `boolean` | Hides the view and its subtree from assistive technologies. |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | Whether the view is exposed. |
 | `accessibilityActions` | | `{ name: string; label?: string }[]` | Custom actions offered to assistive technologies. |
