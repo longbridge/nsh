@@ -13317,3 +13317,562 @@ fn views_moved_into_a_hidden_subtree_lose_their_frames() {
         );
     }
 }
+
+/// The layout an incremental commit gives equals the one a core laid out
+/// from scratch gives the same tree: random trees of views and texts,
+/// changed by random insertions, moves, removals, style and text changes,
+/// compared node by node after each commit. What makes layout incremental
+/// (caches, dirty propagation, partial walks) is held to this.
+mod layout_consistency {
+    use std::collections::{BTreeMap, HashMap};
+
+    use super::*;
+
+    /// A seeded xorshift64*: the same seed, the same trees.
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Rng {
+            Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+        }
+
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+
+        fn pick<T: Copy>(&mut self, of: &[T]) -> T {
+            of[self.below(of.len())]
+        }
+
+        /// True `percent`% of the time.
+        fn chance(&mut self, percent: u64) -> bool {
+            self.next() % 100 < percent
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Value {
+        N(f32),
+        S(&'static str),
+    }
+
+    /// A view or a text (its raw text child and content) in the model.
+    #[derive(Clone, Debug)]
+    struct Node {
+        parent: NodeId,
+        text: Option<(NodeId, String)>,
+        style: Vec<(&'static str, Value)>,
+        children: Vec<NodeId>,
+    }
+
+    /// The tree as the test made it.
+    #[derive(Default)]
+    struct Model {
+        nodes: BTreeMap<NodeId, Node>,
+        next: NodeId,
+    }
+
+    impl Model {
+        fn id(&mut self) -> NodeId {
+            self.next += 2;
+            self.next
+        }
+
+        fn children(&self, parent: NodeId) -> Vec<NodeId> {
+            if parent == ROOT_ID {
+                self.roots().to_vec()
+            } else {
+                self.nodes[&parent].children.clone()
+            }
+        }
+
+        fn roots(&self) -> &[NodeId] {
+            self.nodes
+                .get(&0)
+                .map_or(&[][..], |root| root.children.as_slice())
+        }
+
+        fn is_inside(&self, mut id: NodeId, ancestor: NodeId) -> bool {
+            loop {
+                if id == ancestor {
+                    return true;
+                }
+                match self.nodes.get(&id) {
+                    Some(node) if node.parent != ROOT_ID => id = node.parent,
+                    _ => return false,
+                }
+            }
+        }
+
+        /// The live nodes: views and texts, the root's holder aside.
+        fn live(&self) -> Vec<NodeId> {
+            self.nodes.keys().copied().filter(|&id| id != 0).collect()
+        }
+
+        fn views(&self) -> Vec<NodeId> {
+            self.nodes
+                .iter()
+                .filter(|(id, n)| **id != 0 && n.text.is_none())
+                .map(|(&id, _)| id)
+                .collect()
+        }
+
+        /// The subtree of `id`, it first.
+        fn subtree(&self, id: NodeId) -> Vec<NodeId> {
+            let mut out = vec![id];
+            let mut at = 0;
+            while at < out.len() {
+                out.extend(self.nodes[&out[at]].children.iter().copied());
+                at += 1;
+            }
+            out
+        }
+
+        fn detach(&mut self, id: NodeId) -> NodeId {
+            let parent = self.nodes[&id].parent;
+            let holder = if parent == ROOT_ID { 0 } else { parent };
+            self.nodes
+                .get_mut(&holder)
+                .unwrap()
+                .children
+                .retain(|&c| c != id);
+            parent
+        }
+
+        fn attach(&mut self, id: NodeId, parent: NodeId, at: usize) -> Option<NodeId> {
+            let holder = if parent == ROOT_ID { 0 } else { parent };
+            let siblings = &mut self.nodes.get_mut(&holder).unwrap().children;
+            let at = at.min(siblings.len());
+            let before = siblings.get(at).copied();
+            siblings.insert(at, id);
+            self.nodes.get_mut(&id).unwrap().parent = parent;
+            before
+        }
+
+        /// The ops that make `id` and what it holds, detached.
+        fn create(&self, id: NodeId, ops: &mut Vec<Op>) {
+            let node = &self.nodes[&id];
+            ops.push(Op::Create {
+                id,
+                tag: if node.text.is_some() {
+                    Tag::Text
+                } else {
+                    Tag::View
+                },
+            });
+            ops.push(style_of(id, &node.style));
+            if let Some((raw, content)) = &node.text {
+                ops.push(Op::CreateText {
+                    id: *raw,
+                    text: content.as_str().into(),
+                });
+                ops.push(Op::Insert {
+                    parent: id,
+                    child: *raw,
+                    before: None,
+                });
+            }
+            for &child in &node.children {
+                self.create(child, ops);
+                ops.push(Op::Insert {
+                    parent: id,
+                    child,
+                    before: None,
+                });
+            }
+        }
+
+        /// The ops that make the whole tree on a new core.
+        fn build(&self) -> Vec<Op> {
+            let mut ops = Vec::new();
+            for &id in self.roots() {
+                self.create(id, &mut ops);
+                ops.push(Op::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                });
+            }
+            ops
+        }
+    }
+
+    fn style_of(id: NodeId, style: &[(&'static str, Value)]) -> Op {
+        let props: Vec<(&str, StyleValue<'_>)> = style
+            .iter()
+            .map(|&(k, v)| {
+                (
+                    k,
+                    match v {
+                        Value::N(n) => StyleValue::Number(n),
+                        Value::S(s) => StyleValue::Str(s),
+                    },
+                )
+            })
+            .collect();
+        style_op(id, &props)
+    }
+
+    /// A random style for a view (or, `text`, a text): sizes fixed,
+    /// relative or free, flex and grid containers, absolute positions,
+    /// `display: none`, clipping, minimums and maximums.
+    fn random_style(rng: &mut Rng, text: bool, fractions: bool) -> Vec<(&'static str, Value)> {
+        use Value::{N, S};
+        // Fractional values, where rounding to whole points matters; the
+        // same number of choices either way, so a seed makes the same tree
+        // shapes.
+        let f = |whole: Value, fraction: Value| if fractions { fraction } else { whole };
+        let mut style = Vec::new();
+        let mut maybe = |rng: &mut Rng, percent, key, values: &[Value]| {
+            if rng.chance(percent) {
+                style.push((key, rng.pick(values)));
+            }
+        };
+        if !text {
+            maybe(rng, 50, "flexDirection", &[S("row"), S("column")]);
+            maybe(
+                rng,
+                15,
+                "display",
+                &[S("none"), S("grid"), S("block"), S("flex")],
+            );
+            maybe(rng, 30, "flexWrap", &[S("wrap"), S("nowrap")]);
+            maybe(
+                rng,
+                30,
+                "alignItems",
+                &[S("center"), S("flex-start"), S("stretch"), S("flex-end")],
+            );
+            maybe(
+                rng,
+                30,
+                "justifyContent",
+                &[S("center"), S("space-between"), S("flex-end")],
+            );
+            maybe(rng, 30, "padding", &[N(4.0), f(N(10.0), N(4.5))]);
+            maybe(rng, 30, "gap", &[N(3.0), f(N(8.0), N(2.5))]);
+            maybe(rng, 15, "overflow", &[S("hidden")]);
+            maybe(
+                rng,
+                15,
+                "gridTemplateColumns",
+                &[
+                    S("repeat(2, 1fr)"),
+                    S("40px 1fr"),
+                    S("repeat(3, minmax(0, 1fr))"),
+                ],
+            );
+            maybe(
+                rng,
+                40,
+                "height",
+                &[
+                    N(24.0),
+                    f(N(60.0), N(24.5)),
+                    f(S("50%"), S("33.3%")),
+                    S("auto"),
+                ],
+            );
+        }
+        maybe(
+            rng,
+            45,
+            "width",
+            &[
+                N(40.0),
+                f(N(120.0), N(37.5)),
+                f(S("50%"), S("33.3%")),
+                S("100%"),
+                S("auto"),
+            ],
+        );
+        maybe(rng, 25, "flexGrow", &[N(1.0), N(2.0)]);
+        maybe(rng, 25, "flexShrink", &[N(1.0), N(0.0)]);
+        maybe(rng, 15, "flexBasis", &[N(30.0), S("50%")]);
+        maybe(rng, 20, "margin", &[N(2.0), f(N(6.0), N(2.5))]);
+        maybe(rng, 15, "minWidth", &[N(20.0), N(90.0)]);
+        maybe(rng, 15, "maxWidth", &[N(60.0), N(150.0)]);
+        maybe(
+            rng,
+            15,
+            "alignSelf",
+            &[S("center"), S("stretch"), S("flex-end")],
+        );
+        if rng.chance(10) {
+            style.push(("position", S("absolute")));
+            style.push((
+                "left",
+                rng.pick(&[N(5.0), N(30.0), f(S("10%"), S("12.5%"))]),
+            ));
+            style.push(("top", rng.pick(&[N(4.0), N(50.0)])));
+        }
+        style
+    }
+
+    fn random_text(rng: &mut Rng) -> String {
+        let words = [
+            "a",
+            "price",
+            "12.50",
+            "a longer label",
+            "x",
+            "quote board",
+            "—",
+        ];
+        (0..1 + rng.below(4))
+            .map(|_| rng.pick(&words))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The frames of every view the core laid out: what `batches` set,
+    /// latest last.
+    fn note_frames(frames: &mut HashMap<NodeId, Bounds<Points>>, batch: Option<MountBatch>) {
+        for item in batch.iter().flat_map(|b| &b.items) {
+            match item {
+                MountItem::Frame { id, frame } => {
+                    frames.insert(*id, *frame);
+                }
+                MountItem::Delete { id } => {
+                    frames.remove(id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// One random change of the tree: its ops, and what it was.
+    fn change(rng: &mut Rng, model: &mut Model, fractions: bool) -> (Vec<Op>, String) {
+        let live = model.live();
+        let views = model.views();
+        let mut ops = Vec::new();
+        let roll = if live.len() < 8 { 0 } else { rng.below(100) };
+        let what = match roll {
+            // Add a view or a text.
+            0..=34 if live.len() < 70 => {
+                let id = model.id();
+                let text = rng.chance(45);
+                let raw = text.then(|| model.id());
+                model.nodes.insert(
+                    id,
+                    Node {
+                        parent: ROOT_ID,
+                        text: raw.map(|raw| (raw, random_text(rng))),
+                        style: random_style(rng, text, fractions),
+                        children: Vec::new(),
+                    },
+                );
+                let parent = if views.is_empty() || rng.chance(10) {
+                    ROOT_ID
+                } else {
+                    rng.pick(&views)
+                };
+                let at = rng.below(model.children(parent).len() + 1);
+                model.create(id, &mut ops);
+                let before = model.attach(id, parent, at);
+                ops.push(Op::Insert {
+                    parent,
+                    child: id,
+                    before,
+                });
+                format!("add {id} to {parent}")
+            }
+            // Change a style.
+            0..=59 => {
+                let id = rng.pick(&live);
+                let text = model.nodes[&id].text.is_some();
+                let style = random_style(rng, text, fractions);
+                ops.push(style_of(id, &style));
+                model.nodes.get_mut(&id).unwrap().style = style;
+                format!("style {id}")
+            }
+            // Change a text.
+            60..=74 => {
+                let texts: Vec<NodeId> = live
+                    .iter()
+                    .copied()
+                    .filter(|id| model.nodes[id].text.is_some())
+                    .collect();
+                if texts.is_empty() {
+                    return (ops, "nothing".into());
+                }
+                let id = rng.pick(&texts);
+                let content = random_text(rng);
+                let raw = model.nodes[&id].text.as_ref().unwrap().0;
+                ops.push(Op::SetText {
+                    id: raw,
+                    text: content.as_str().into(),
+                });
+                model.nodes.get_mut(&id).unwrap().text.as_mut().unwrap().1 = content;
+                format!("text {id}")
+            }
+            // Move a node elsewhere.
+            75..=89 => {
+                let id = rng.pick(&live);
+                let targets: Vec<NodeId> = views
+                    .iter()
+                    .copied()
+                    .filter(|&v| !model.is_inside(v, id))
+                    .chain([ROOT_ID])
+                    .collect();
+                let parent = rng.pick(&targets);
+                let old = model.detach(id);
+                ops.push(Op::Remove {
+                    parent: old,
+                    child: id,
+                });
+                let at = rng.below(model.children(parent).len() + 1);
+                let before = model.attach(id, parent, at);
+                ops.push(Op::Insert {
+                    parent,
+                    child: id,
+                    before,
+                });
+                format!("move {id} from {old} to {parent}")
+            }
+            // Remove a node and what it holds.
+            _ => {
+                let id = rng.pick(&live);
+                let parent = model.detach(id);
+                ops.push(Op::Remove { parent, child: id });
+                for gone in model.subtree(id) {
+                    let node = model.nodes.remove(&gone).unwrap();
+                    if let Some((raw, _)) = node.text {
+                        ops.push(Op::Release { id: raw });
+                    }
+                    ops.push(Op::Release { id: gone });
+                }
+                format!("remove {id}")
+            }
+        };
+        (ops, what)
+    }
+
+    /// `seed`'s run: `steps` commits of changes, each compared with a
+    /// layout from scratch; with `fractions`, sizes and offsets that are
+    /// not whole points.
+    fn run(seed: u64, steps: usize, fractions: bool) {
+        let mut rng = Rng::new(seed);
+        let mut model = Model::default();
+        model.nodes.insert(
+            0,
+            Node {
+                parent: ROOT_ID,
+                text: None,
+                style: Vec::new(),
+                children: Vec::new(),
+            },
+        );
+        let mut c = core();
+        let mut frames = HashMap::new();
+        let mut log = Vec::new();
+        for step in 0..steps {
+            // A commit takes a few changes at once, as a turn does.
+            let changes = 1 + rng.below(3);
+            let changes = if std::env::var_os("ONE_CHANGE").is_some() {
+                let _ = changes;
+                1
+            } else {
+                changes
+            };
+            for _ in 0..changes {
+                let (ops, what) = change(&mut rng, &mut model, fractions);
+                apply(&mut c, ops);
+                log.push(what);
+            }
+            note_frames(&mut frames, c.commit());
+            let mut fresh = core();
+            apply(&mut fresh, model.build());
+            let mut expected = HashMap::new();
+            note_frames(&mut expected, fresh.commit());
+            for id in model.live() {
+                let got = frames.get(&id).copied().unwrap_or_default();
+                let want = expected.get(&id).copied().unwrap_or_default();
+                assert_eq!(
+                    got,
+                    want,
+                    "seed {seed}, step {step}: node {id} laid out incrementally at {got:?}, from \
+                     scratch at {want:?}; the node and the views around it: {:?}; changes so far: \
+                     {log:?}",
+                    {
+                        let mut chain = Vec::new();
+                        let mut at = id;
+                        while let Some(node) = model.nodes.get(&at) {
+                            chain.push((at, node.style.clone(), node.text.clone()));
+                            if node.parent == ROOT_ID {
+                                break;
+                            }
+                            at = node.parent;
+                        }
+                        chain
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_layout_equals_layout_from_scratch() {
+        for seed in 0..24 {
+            run(seed, 60, true);
+        }
+        // A view of a hidden subtree's absolutely positioned container
+        // removed while the root was laid out again: Taffy's rounding pass
+        // reached it through a list that still held it, and panicked.
+        run(39, 70, false);
+    }
+}
+
+/// A list's cells take its rounded cross size, as every other view's frame
+/// is rounded: a list at a fractional place and size gives them whole
+/// points.
+#[test]
+fn list_cells_take_the_rounded_cross_size() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::List,
+            },
+            style_op(
+                2,
+                &[
+                    ("height", StyleValue::Number(400.0)),
+                    ("width", StyleValue::Number(100.6)),
+                    ("marginLeft", StyleValue::Number(0.3)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::EstimatedItemSize(px(50.0)),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Count(3),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let first = c.commit().unwrap();
+    assert_eq!(frame_of(&first, 2).unwrap().size.width, px(101.0));
+    let (mut next, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next, &mut cells, 50.0);
+    let batch = c.commit().unwrap();
+    assert!(!cells.is_empty());
+    for &cell in &cells {
+        assert_eq!(frame_of(&batch, cell).unwrap().size.width, px(101.0));
+    }
+}
