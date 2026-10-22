@@ -1921,7 +1921,7 @@ impl Mounter {
         // other modes decode it at the view's.
         let natural = |m: ResizeMode| m == ResizeMode::Center;
         let same_decode = natural(s.decor.resize_mode()) == natural(resize_mode);
-        s.decor.set_resize_mode(resize_mode);
+        s.decor.set_fit(resize_mode, options.position);
         let same_source = same_decode
             && s.image.as_ref().map(|src| &src.uri) == source.as_ref().map(|src| &src.uri);
         let same_look = s.image_options.placeholder == options.placeholder
@@ -2012,11 +2012,17 @@ impl Mounter {
                 matrix: nsh_core::compose_color_matrices(filters),
             };
             let (source, placeholder) = (
-                s.image.as_ref().map(|s| s.uri.clone()),
-                s.image_options.placeholder.as_ref().map(|s| s.uri.clone()),
+                s.image.as_ref().map(|s| (s.uri.clone(), s.data.clone())),
+                s.image_options
+                    .placeholder
+                    .as_ref()
+                    .map(|s| (s.uri.clone(), s.data.clone())),
             );
-            if let Some(uri) = source {
-                match self.images.request(id, &uri, max_pixels, scale, look) {
+            if let Some((uri, data)) = source {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, look)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -2040,9 +2046,12 @@ impl Mounter {
             }
             // The placeholder, until the image shows.
             let shown = self.slot(id).is_some_and(|s| s.image_shown);
-            if let Some(uri) = placeholder.filter(|_| !shown) {
+            if let Some((uri, data)) = placeholder.filter(|_| !shown) {
                 let plain = crate::image::Look::default();
-                match self.images.request(id, &uri, max_pixels, scale, plain) {
+                match self
+                    .images
+                    .request(id, &uri, data.as_ref(), max_pixels, scale, plain)
+                {
                     Request::Ready(decoded) => {
                         if let Some(s) = self.slot_mut(id) {
                             s.decor.set_image(Some(&decoded.image), 0.0);
@@ -2076,10 +2085,14 @@ impl Mounter {
                 continue;
             }
             // At their natural size: the drawing may scale them anyway.
-            match self
-                .images
-                .request(id, &image.uri, 0, scale, crate::image::Look::default())
-            {
+            match self.images.request(
+                id,
+                &image.uri,
+                None,
+                0,
+                scale,
+                crate::image::Look::default(),
+            ) {
                 Request::Ready(decoded) if decoded.vector => {
                     log::warn!("canvas image failed: {}", not_a_bitmap(&image.uri));
                 }

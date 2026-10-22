@@ -250,6 +250,17 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
                 e.float(options.blur_radius.0);
                 e.float(options.fade_ms.unwrap_or(-1.0));
+                // `objectPosition`, per axis: flags (1 from the end edge,
+                // 2 a fraction of the free space) and the value (points or
+                // the fraction).
+                for axis in [options.position.x, options.position.y] {
+                    let (fraction, value) = match axis.offset {
+                        DefiniteLength::Absolute(p) => (0, p.to_points(REM_SIZE).0),
+                        DefiniteLength::Fraction(f) => (2, f.0),
+                    };
+                    e.int(i32::from(axis.from_end) | fraction);
+                    e.float(value);
+                }
             }
             MountItem::ScrollConfig {
                 id,

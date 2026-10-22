@@ -188,6 +188,9 @@ struct Running {
     js_frame: bool,
     /// The surface's environment (window, appearance).
     environment: Environment,
+    /// The in-memory images (`data:` URIs, blobs) the page has blob URLs
+    /// of, by URI, while a view's source holds their bytes.
+    inline_images: nsh_core::image::InlineImages,
 }
 
 struct Sink;
@@ -584,6 +587,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             animation: UiAnimation::default(),
             js_frame: false,
             environment,
+            inline_images: Default::default(),
         });
     });
     pump()
@@ -950,6 +954,18 @@ fn flush() {
                     KEYMAP.with(|k| *k.borrow_mut() = keymap);
                     continue;
                 }
+                if let MountItem::Image {
+                    source, options, ..
+                } = item
+                {
+                    for source in source.iter().chain(&options.placeholder) {
+                        if let Some(data) = &source.data
+                            && app.inline_images.register(source)
+                        {
+                            ffi::image_bytes(&source.uri, data);
+                        }
+                    }
+                }
                 if !matches!(
                     item,
                     MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -957,6 +973,9 @@ fn flush() {
                     encode::encode(&mut out, item);
                 }
             }
+        }
+        for uri in app.inline_images.prune() {
+            ffi::release_image(&uri);
         }
         // Bound properties follow the styles just applied.
         app.animation.outputs(&mut out);

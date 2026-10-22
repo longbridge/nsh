@@ -5,7 +5,7 @@
 
 use std::{
     hash::{BuildHasher, Hasher},
-    rc::Rc,
+    sync::Arc,
 };
 
 use super::{
@@ -15,10 +15,12 @@ use super::{
     role,
 };
 
-/// A blob's bytes and type.
+/// A blob's bytes and type. The bytes are atomically counted so that an
+/// `<Image>` showing a `blob:` URL hands them to the platform without a
+/// copy ([`Blob::image_data`]).
 #[derive(Clone)]
 pub(crate) struct Blob {
-    bytes: Rc<[u8]>,
+    bytes: Arc<[u8]>,
     start: usize,
     end: usize,
     pub(crate) mime: String,
@@ -51,6 +53,12 @@ impl Blob {
         self.end - self.start
     }
 
+    /// The blob's bytes for an image source: shared with the blob, not
+    /// copied, so revoking its URL or collecting it leaves the image whole.
+    pub(crate) fn image_data(&self) -> nsh_core::ImageData {
+        nsh_core::ImageData::new(BlobBytes(self.clone()))
+    }
+
     /// `slice(start, end)` with relative (negative) positions.
     fn slice(&self, start: Option<f64>, end: Option<f64>, mime: String) -> Blob {
         let len = self.len() as f64;
@@ -71,6 +79,15 @@ impl Blob {
             end: self.start + e,
             mime,
         }
+    }
+}
+
+/// A blob's bytes, held by an image source.
+struct BlobBytes(Blob);
+
+impl AsRef<[u8]> for BlobBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.0.bytes()
     }
 }
 
@@ -334,6 +351,24 @@ pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<Blob> {
         .iter()
         .find(|(u, _)| u == url)
         .map(|(_, b)| b.clone())
+}
+
+/// Gives the image source of `prop` its blob's bytes when it is a `blob:`
+/// URL; it then goes by a digest of them, as a `data:` URI's do. One
+/// revoked or never created keeps its URL and gets no bytes: the image
+/// fails.
+pub(crate) fn resolve_image_source(cx: Ctx, prop: &mut nsh_core::Prop) {
+    use nsh_core::{ImageProp, Prop};
+    let source = match prop {
+        Prop::Source(Some(source)) | Prop::Image(ImageProp::Placeholder(Some(source))) => source,
+        _ => return,
+    };
+    if source.data.is_some() || !source.uri.starts_with("blob:") {
+        return;
+    }
+    if let Some(blob) = resolve_blob_url(cx, &source.uri) {
+        *source = std::mem::take(source).with_bytes(&blob.mime, blob.image_data());
+    }
 }
 
 native!(

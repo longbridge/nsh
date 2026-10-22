@@ -169,8 +169,12 @@ impl<M: TextEngine> Core<M> {
 
     /// [`Self::set_states`] by key.
     fn set_node_states(&mut self, key: Key, states: u8) {
+        let held = self.held_pressed() == Some(key);
         let node = &mut self.nodes[key as usize];
-        let new = node.states & !REPORTED | states & REPORTED;
+        let mut new = node.states & !REPORTED | states & REPORTED;
+        if held {
+            new |= state::PRESSED;
+        }
         if new == node.states {
             return;
         }
@@ -194,6 +198,38 @@ impl<M: TextEngine> Core<M> {
                     self.states_changed(k);
                 }
                 k = parent;
+            }
+        }
+    }
+
+    /// The node whose pressed state the touch responder holds.
+    fn held_pressed(&self) -> Option<Key> {
+        self.components
+            .touch
+            .pressed
+            .and_then(|id| self.key(id).ok())
+    }
+
+    /// Holds the `active:` (and `group-active:`) state on the components'
+    /// touch responder `id` until its touches end (`None`): a drag that
+    /// leaves its view, which the platform stops reporting as pressed,
+    /// keeps it pressed, as CSS's `:active` holds until the button is
+    /// released. The one held before is released.
+    pub(super) fn hold_pressed(&mut self, id: Option<NodeId>) {
+        let before = self.held_pressed();
+        self.components.touch.pressed = id;
+        if let Some(key) = before {
+            let node = &mut self.nodes[key as usize];
+            if node.states & state::PRESSED != 0 {
+                node.states &= !state::PRESSED;
+                self.states_changed(key);
+            }
+        }
+        if let Some(key) = self.held_pressed() {
+            let node = &mut self.nodes[key as usize];
+            if node.states & state::PRESSED == 0 {
+                node.states |= state::PRESSED;
+                self.states_changed(key);
             }
         }
     }

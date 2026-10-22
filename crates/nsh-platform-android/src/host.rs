@@ -65,6 +65,9 @@ pub(crate) struct Host {
     storage: Mutex<Option<std::path::PathBuf>>,
     /// What the running app may reach (web view navigations check it).
     access: Mutex<Arc<nsh_engine::Access>>,
+    /// The bytes of the in-memory images (`data:` URIs, blobs) the app
+    /// shows, by URI, for `Images.java` (`Native.imageBytes`).
+    inline_images: Mutex<nsh_core::image::InlineImages>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
     /// A test session's model of the app (`nsh test --target android`):
@@ -294,6 +297,31 @@ fn answer_clipboard_reads(host: &Host, batch: &MountBatch) {
     }
 }
 
+/// Makes the bytes of the in-memory images `batch` shows (`data:` URIs,
+/// blobs) reachable by their URI for `Images.java`, and forgets those no
+/// view's source holds any more.
+fn register_inline_images(host: &Host, batch: &MountBatch) {
+    let mut images = None;
+    for item in &batch.items {
+        let MountItem::Image {
+            source, options, ..
+        } = item
+        else {
+            continue;
+        };
+        for source in source.iter().chain(&options.placeholder) {
+            if source.data.is_some() {
+                images
+                    .get_or_insert_with(|| host.inline_images.lock().expect("inline images"))
+                    .register(source);
+            }
+        }
+    }
+    if let Some(mut images) = images {
+        images.prune();
+    }
+}
+
 /// Hands commits to the UI thread: one `NshView.submit(bytes, objects, seq)`
 /// call per batch.
 struct Sink(Arc<Host>);
@@ -306,6 +334,7 @@ impl MountSink for Sink {
             model.apply(&batch);
         }
         answer_clipboard_reads(host, &batch);
+        register_inline_images(host, &batch);
         let encoded = encode::encode(batch);
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
         if !encoded.animation.is_empty() {
@@ -456,6 +485,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
+        inline_images: Mutex::default(),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
         #[cfg(feature = "dev")]
@@ -595,6 +625,35 @@ extern "system" fn Java_com_longbridge_nsh_Native_mediaRedirect<'local>(
             .new_string(url)
             .unwrap_or_else(|_| JString::from(JObject::null())),
         Err(_) => JString::from(JObject::null()),
+    }
+}
+
+/// The bytes of the in-memory image `uri` (a source's `data:` URI or blob,
+/// while a view shows it; an `Image.getSize` `data:` URI, decoded), or
+/// null. Called on the image threads.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_imageBytes<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    uri: JString<'local>,
+) -> JByteArray<'local> {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Ok(uri) = env.get_string(&uri) else {
+        return JByteArray::default();
+    };
+    let uri = String::from(uri);
+    let held = host.inline_images.lock().expect("inline images").get(&uri);
+    let bytes = match &held {
+        Some(data) => Ok(data.bytes().to_vec()),
+        None => nsh_core::image::decode_data_uri(&uri).map(|(_, bytes)| bytes),
+    };
+    match bytes {
+        Ok(bytes) => env
+            .byte_array_from_slice(&bytes)
+            .unwrap_or_else(|_| JByteArray::default()),
+        Err(_) => JByteArray::default(),
     }
 }
 

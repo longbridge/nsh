@@ -331,6 +331,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
   outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface
   (`input.rs` `native_at`), or a hosted web view gets clicks on what NSH draws over it.
+- `-[NSCursor set]` costs ~2.5–3.5 ms per call on macOS 26 with a customized pointer size or color (it renders the
+  cursor image again, `_AXFMouseCursorGenerator`), even for the cursor already set; and a view's default
+  `cursorUpdate:`, which AppKit calls after views move or are added, sets the arrow. Set the cursor only when it
+  changes while the mouse is still (`input::set_cursor_at`), and answer `cursorUpdate:` with NSH's cursor: a scroll
+  that mounts rows ten times a second otherwise spends a third of those frames setting the same cursor.
+- AppKit's geometry (`hitTest:`, `convertPoint:` / `convertRect:`, `visibleRect`) follows bounds, not a
+  `sublayerTransform`: while a scroll offset is only the container layer's transform, AppKit places every view
+  below it at the last committed offset. Commit it first (`scroll::commit_pending` on a press,
+  `scroll::commit_ancestors` before a conversion); clip and pick by NSH's own placed frames and
+  `scroll::bounds_origin`. A view's logical frame (`ViewState::frame`) misses its sticky shift and RTL mirroring:
+  clip spaces are the placed frames (`ns().frame()`).
 - In `define_class!` methods, an early `return` of a `bool` or `Option<Retained<_>>` does not compile (the macro wraps
   the return type): write the body as one expression.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image

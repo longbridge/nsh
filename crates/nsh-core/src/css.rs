@@ -499,6 +499,7 @@ impl Color {
 use crate::{
     effects::{BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize},
     geometry::{DefiniteLength, Percentage, deg, percentage, px},
+    style::ObjectPosition,
 };
 
 /// A `box-shadow` list (`none` is empty).
@@ -997,6 +998,89 @@ pub(crate) fn position(w: &[&str]) -> Option<(f32, f32)> {
     Some((x, y))
 }
 
+/// An `object-position` (CSS's `<position>`): one value (`top`, `25%`,
+/// the other axis centered), two (`left bottom`, `bottom left`, `25% 10px`,
+/// `right 30%`: horizontal first unless both are keywords) or four, edges
+/// with offsets (`right 10px bottom 20%`, either axis first). Three values
+/// are not a `<position>`, as in browsers.
+pub(crate) fn object_position(s: &str) -> Option<ObjectPosition> {
+    use crate::style::PositionAxis as A;
+    #[derive(Clone, Copy, PartialEq)]
+    enum Word {
+        Left,
+        Right,
+        Top,
+        Bottom,
+        Center,
+        Length(DefiniteLength),
+    }
+    let word = |w: &str| -> Option<Word> {
+        Some(match w {
+            "left" => Word::Left,
+            "right" => Word::Right,
+            "top" => Word::Top,
+            "bottom" => Word::Bottom,
+            "center" => Word::Center,
+            w => Word::Length(length_or_percent(w)?),
+        })
+    };
+    let horizontal = |w: Word| -> Option<A> {
+        match w {
+            Word::Left => Some(A::START),
+            Word::Center => Some(A::CENTER),
+            Word::Right => Some(A::END),
+            Word::Length(l) => Some(A::start(l)),
+            _ => None,
+        }
+    };
+    let vertical = |w: Word| -> Option<A> {
+        match w {
+            Word::Top => Some(A::START),
+            Word::Center => Some(A::CENTER),
+            Word::Bottom => Some(A::END),
+            Word::Length(l) => Some(A::start(l)),
+            _ => None,
+        }
+    };
+    let words: Vec<&str> = s.split_whitespace().collect();
+    let (x, y) = match words.as_slice() {
+        [a] => match word(a)? {
+            w @ (Word::Top | Word::Bottom) => (A::CENTER, vertical(w)?),
+            w => (horizontal(w)?, A::CENTER),
+        },
+        [a, b] => {
+            let (a, b) = (word(a)?, word(b)?);
+            // Two keywords go in either order (`top left`).
+            let keyword = |w: Word| !matches!(w, Word::Length(_));
+            let swapped = keyword(a)
+                && keyword(b)
+                && (matches!(a, Word::Top | Word::Bottom) || matches!(b, Word::Left | Word::Right));
+            let (a, b) = if swapped { (b, a) } else { (a, b) };
+            (horizontal(a)?, vertical(b)?)
+        }
+        [e1, o1, e2, o2] => {
+            let mut x = None;
+            let mut y = None;
+            for (edge, o) in [(*e1, *o1), (*e2, *o2)] {
+                let o = length_or_percent(o)?;
+                let (slot, axis) = match edge {
+                    "left" => (&mut x, A::start(o)),
+                    "right" => (&mut x, A::end(o)),
+                    "top" => (&mut y, A::start(o)),
+                    "bottom" => (&mut y, A::end(o)),
+                    _ => return None,
+                };
+                if slot.replace(axis).is_some() {
+                    return None;
+                }
+            }
+            (x?, y?)
+        }
+        _ => return None,
+    };
+    Some(ObjectPosition::new(x, y))
+}
+
 /// A `filter` list (`none` is empty).
 pub(crate) fn filters(s: &str) -> Option<Vec<Filter>> {
     let s = s.trim();
@@ -1043,6 +1127,72 @@ fn filter(s: &str) -> Option<Filter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_positions() {
+        use crate::style::PositionAxis as A;
+        let p = |s: &str| object_position(s).unwrap_or_else(|| panic!("{s}"));
+        let l = |v: f32| DefiniteLength::from(px(v));
+        let f = |v: f32| DefiniteLength::from(percentage(v));
+        let at = ObjectPosition::new;
+        assert_eq!(p("center"), ObjectPosition::CENTER);
+        assert_eq!(p("top"), at(A::CENTER, A::START));
+        assert_eq!(p("bottom"), at(A::CENTER, A::END));
+        assert_eq!(p("left"), at(A::START, A::CENTER));
+        assert_eq!(p("25%"), at(A::start(f(0.25)), A::CENTER));
+        assert_eq!(p("left top"), at(A::START, A::START));
+        assert_eq!(p("top left"), at(A::START, A::START));
+        assert_eq!(p("bottom right"), at(A::END, A::END));
+        assert_eq!(p("center top"), at(A::CENTER, A::START));
+        assert_eq!(p("top center"), at(A::CENTER, A::START));
+        assert_eq!(p("25% 75%"), at(A::start(f(0.25)), A::start(f(0.75))));
+        assert_eq!(p("10px 1rem"), at(A::start(l(10.0)), A::start(l(16.0))));
+        assert_eq!(p("right 30%"), at(A::END, A::start(f(0.3))));
+        assert_eq!(
+            p("right 10px bottom 20%"),
+            at(A::end(l(10.0)), A::end(f(0.2)))
+        );
+        assert_eq!(
+            p("bottom 20% right 10px"),
+            at(A::end(l(10.0)), A::end(f(0.2)))
+        );
+        // Not `<position>`s, as in browsers.
+        for bad in [
+            "",
+            "middle",
+            "left right",
+            "top bottom",
+            "10px left",
+            "top 10px",
+            "left 10px top",
+            "center 10px top 5px",
+            "left 10px left 5px",
+            "1 2 3 4 5",
+        ] {
+            assert!(object_position(bad).is_none(), "{bad}");
+        }
+        // Written back as CSS, it reads the same.
+        for s in ["top left", "25% 75%", "right 10px bottom 20%", "center"] {
+            let v = p(s);
+            assert_eq!(p(&v.to_string()), v, "{s}");
+        }
+    }
+
+    #[test]
+    fn object_positions_place_content() {
+        use crate::geometry::{point, size};
+        let at = |s: &str| {
+            // A 100x300 image covering a 100x100 box.
+            object_position(s)
+                .unwrap()
+                .place(size(px(100.0), px(100.0)), size(px(100.0), px(300.0)))
+        };
+        assert_eq!(at("center"), point(px(0.0), px(-100.0)));
+        assert_eq!(at("top"), point(px(0.0), px(0.0)));
+        assert_eq!(at("bottom"), point(px(0.0), px(-200.0)));
+        assert_eq!(at("left 10px top 25%"), point(px(10.0), px(-50.0)));
+        assert_eq!(at("right 10px bottom 10px"), point(px(-10.0), px(-210.0)));
+    }
 
     /// The packed values CSS colors had before the Rust API took `Hsla`
     /// (`crate::color`): TSX apps render as they did.

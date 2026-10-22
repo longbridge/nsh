@@ -2320,6 +2320,25 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(sets(K::Cursor, &name))
     }),
     // Images.
+    ("object", |_, v, _| {
+        let p = match v {
+            "center" => "center",
+            "top" => "top",
+            "bottom" => "bottom",
+            "left" => "left",
+            "right" => "right",
+            "top-left" | "left-top" => "left top",
+            "top-right" | "right-top" => "right top",
+            "bottom-left" | "left-bottom" => "left bottom",
+            "bottom-right" | "right-bottom" => "right bottom",
+            v => {
+                let a = arbitrary(v)?;
+                css::object_position(&a)?;
+                return one(sets(K::ObjectPosition, &a));
+            }
+        };
+        one(sets(K::ObjectPosition, p))
+    }),
     ("tint", |t, v, _| {
         one(set(K::TintColor, color_str(color(t, v)?)))
     }),

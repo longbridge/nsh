@@ -456,6 +456,7 @@ All keys of `ViewStyle`, plus:
 | Key | Type | Rust | Description |
 |---|---|---|---|
 | `tintColor` | `ColorValue` | `.tint_color(c)` of an image | Recolors a template image (every opaque pixel takes this color), for monochrome icons. |
+| `objectPosition` | `string` | `.object_position(p)`, `.object_top()`, ... of an image | Where the image sits in its box once `resizeMode` has sized it, as CSS's `object-position`: keywords, percentages and lengths (`"top"`, `"left bottom"`, `"25% 75%"`, `"right 10px bottom 20%"`). A covering image is cropped around it. Default the center. |
 
 How an image fills its box is the `resizeMode` prop of `<Image>`, not a style; see [image](../elements/image.md).
 

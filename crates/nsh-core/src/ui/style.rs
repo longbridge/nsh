@@ -21,7 +21,7 @@ use std::{
 
 use super::{IntoReactive, Reactive, SharedString};
 use crate::{
-    BlendMode, BoxShadow, Cursor, FontVariant, TransformOrigin, TransitionProps,
+    BlendMode, BoxShadow, Cursor, FontVariant, ObjectPosition, TransformOrigin, TransitionProps,
     color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
@@ -2665,6 +2665,77 @@ pub trait Styled: Sized {
     fn origin_bottom_right(mut self) -> Self {
         self.style()
             .keyword(StyleKey::TransformOrigin, "bottom right");
+        self
+    }
+
+    /// Where an image sits in its box once its resize mode has sized it
+    /// (CSS's `object-position`; the center by default): a covering image
+    /// is cropped around it.
+    fn object_position(mut self, position: ObjectPosition) -> Self {
+        self.style().push(Declaration::Str(
+            StyleKey::ObjectPosition,
+            position.to_string().into(),
+        ));
+        self
+    }
+
+    /// Shows an image's top left corner (Tailwind's `object-top-left`).
+    fn object_top_left(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "left top");
+        self
+    }
+
+    /// Shows an image's top (Tailwind's `object-top`): a tall image
+    /// covering its box is cropped at the bottom.
+    fn object_top(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "top");
+        self
+    }
+
+    /// Shows an image's top right corner (Tailwind's `object-top-right`).
+    fn object_top_right(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "right top");
+        self
+    }
+
+    /// Shows an image's left side (Tailwind's `object-left`).
+    fn object_left(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "left");
+        self
+    }
+
+    /// Centers an image in its box (Tailwind's `object-center`, the
+    /// default).
+    fn object_center(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "center");
+        self
+    }
+
+    /// Shows an image's right side (Tailwind's `object-right`).
+    fn object_right(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "right");
+        self
+    }
+
+    /// Shows an image's bottom left corner (Tailwind's
+    /// `object-bottom-left`).
+    fn object_bottom_left(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::ObjectPosition, "left bottom");
+        self
+    }
+
+    /// Shows an image's bottom (Tailwind's `object-bottom`).
+    fn object_bottom(mut self) -> Self {
+        self.style().keyword(StyleKey::ObjectPosition, "bottom");
+        self
+    }
+
+    /// Shows an image's bottom right corner (Tailwind's
+    /// `object-bottom-right`).
+    fn object_bottom_right(mut self) -> Self {
+        self.style()
+            .keyword(StyleKey::ObjectPosition, "right bottom");
         self
     }
 

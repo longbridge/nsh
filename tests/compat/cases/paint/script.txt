@@ -209,6 +209,25 @@ covers [styles] cursor
 covers [styles] tintColor
 covers [styles] transformOrigin
 covers [styles] backfaceVisibility
+# paint-object-position
+tap id:case-paint-object-position
+expect Object position
+# Where each image sits, as edges with offsets: the center by default.
+style id:centered objectPosition left 50% top 50%
+style id:top objectPosition left 50% top 0%
+style id:top-left objectPosition left 0% top 0%
+style id:bottom-right objectPosition left 100% top 100%
+style id:percent objectPosition left 25% top 75%
+style id:lengths objectPosition left 10 top 16
+style id:edges objectPosition right 10 bottom 20%
+style id:class-top objectPosition left 50% top 0%
+prop id:class-top resizeMode cover
+style id:class-bottom-left objectPosition left 0% top 100%
+style id:class-arbitrary objectPosition right 4 top 50%
+style id:changed objectPosition left 50% top 0%
+tap id:flip
+style id:changed objectPosition left 50% top 100%
+covers [styles] objectPosition
 # paint-motion
 tap id:case-paint-motion
 expect Motion

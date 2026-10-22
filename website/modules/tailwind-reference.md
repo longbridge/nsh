@@ -418,7 +418,8 @@ Transitions run on the UI thread when a value changes, including when a variant 
 
 | Class | Sets |
 |---|---|
-| `object-cover`, `object-contain`, `object-fill`, `object-none`, `object-scale-down` | `resizeMode` (`fill` stretches, `none` is `"center"`: natural size, centered, `scale-down` is `"scale-down"`: the same, shrunk to fit where larger) |
+| `object-cover`, `object-contain`, `object-fill`, `object-none`, `object-scale-down` | `resizeMode` (`fill` stretches, `none` is `"center"`: natural size, placed at `objectPosition`, `scale-down` is `"scale-down"`: the same, shrunk to fit where larger) |
+| `object-top`, `object-bottom`, `object-left`, `object-right`, `object-center`, `object-top-left`, `object-top-right`, `object-bottom-left`, `object-bottom-right`, `object-[<position>]` | `objectPosition` (`object-left-top`, ... are the same as `object-top-left`, ...) |
 | `tint-<color>` | `tintColor` (recolors template images) |
 
 ## Accepted without effect
