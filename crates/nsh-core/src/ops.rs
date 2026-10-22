@@ -409,16 +409,21 @@ pub struct TouchEvent {
     pub activated: Option<NodeId>,
 }
 
-/// A set of [`EventKind`]s.
+// Every kind has a bit of [`EventMask`].
+const _: () = assert!(EventKind::ALL.len() <= 128, "EventMask has 128 bits");
+
+/// A set of [`EventKind`]s: one bit per kind, room for 128. Two words, not
+/// a `u128`: views keep it in Objective-C ivars, which take no 16-byte
+/// alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct EventMask(u64);
+pub struct EventMask([u64; 2]);
 
 impl std::ops::BitOr for EventMask {
     type Output = EventMask;
 
     #[inline]
     fn bitor(self, other: EventMask) -> EventMask {
-        EventMask(self.0 | other.0)
+        EventMask([self.0[0] | other.0[0], self.0[1] | other.0[1]])
     }
 }
 
@@ -426,29 +431,31 @@ impl EventMask {
     /// Returns true if `event` is in the set.
     #[inline]
     pub const fn contains(self, event: EventKind) -> bool {
-        self.0 & (1 << event as u8) != 0
+        let k = event as usize;
+        self.0[k / 64] & (1 << (k % 64)) != 0
     }
 
     /// The raw bit set, indexed by `EventKind as u8`.
     #[inline]
-    pub const fn bits(self) -> u64 {
-        self.0
+    pub const fn bits(self) -> u128 {
+        self.0[0] as u128 | (self.0[1] as u128) << 64
     }
 
     /// Adds or removes `event`.
     #[inline]
     pub fn set(&mut self, event: EventKind, enabled: bool) {
+        let k = event as usize;
         if enabled {
-            self.0 |= 1 << event as u8;
+            self.0[k / 64] |= 1 << (k % 64);
         } else {
-            self.0 &= !(1 << event as u8);
+            self.0[k / 64] &= !(1 << (k % 64));
         }
     }
 
     /// Returns true if no event is set.
     #[inline]
     pub const fn is_empty(self) -> bool {
-        self.0 == 0
+        self.0[0] == 0 && self.0[1] == 0
     }
 }
 
