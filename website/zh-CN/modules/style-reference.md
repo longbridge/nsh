@@ -78,7 +78,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `number` | 点（与密度无关）。`1` 在 iOS 上是一个 point，在 Android 上是一个 dp。 | `Points`：`px(16.0)` |
 | `DimensionValue` | `number`（点）、`` `${number}%` ``（相对父元素）或 `"auto"`。 | `Length`：`px(…)`、`relative(0.5)`、`auto()` |
 | `LengthValue` | `number`（点）或 `` `${number}%` ``，不接受 `"auto"`。 | `DefiniteLength`：`px(…)`、`relative(0.5)` |
-| `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 | `Hsla` / `AdaptiveColor`：`rgb(0x2563eb)`、`hsla(…)`, 主题颜色（`theme().primary()`） |
+| `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 | `Hsla` / `AdaptiveColor`：`rgb(0x2563eb)`、`hsla(…)`, 主题颜色（`theme().primary`） |
 | `AnimatedNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 | `AnimatedValue` / `AnimatedNode`，用 `.bind_opacity(&v)`、`.bind_background(&v)`、`.bind_translate_x(&v)` 等绑定 |
 
 采用 CSS 语法的字符串（`boxShadow`、`backgroundImage`、`filter`、`gridTemplateColumns` 等）中，长度可写 `px` 或裸数字（都是点）、`pt`，或 `rem`（16 点）。
@@ -334,6 +334,7 @@ view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
+| `glassEffect` | `"none" \| "regular" \| "clear"` | `ViewStyle::glass_effect`（`GlassEffect`） | 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
 > [!WARNING]

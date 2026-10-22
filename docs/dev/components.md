@@ -10,7 +10,7 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `SelectionArea` (texts that select
+  `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Collapsible`, `Progress`, `SelectionArea` (texts that select
   together, `text.md` "Selection areas"), `TextView` (`text-view.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below) and the
   modules `AlertDialog`, `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
@@ -60,10 +60,10 @@ come from two places:
 - **A component runs once** and makes its view with `view()`, `text()`, `image()` and other components
   (`safe_area_view()`, `chip().label("New")`), styled with GPUI-style methods (`.px_4()`, `.rounded(px(16.0))`, `.active(|s|
   s.bg(..))`). What changes is a **binding**: a closure or a signal where the value goes (`text(props.label)`,
-  `.bg(move || theme().primary())`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
+  `.bg(move || theme().primary)`, `.style_when(props.disabled, |s| ..)`); when what it read changes, only that part
   is updated. A prop is read with `props.x.get()` in a binding and `get_untracked()` in a listener. The root can be
   any element; the app's `class` (merged last, it wins) and `style` apply to it.
-- **Colors come from the theme** (`nsh_base::theme()`: gpui-kit's semantic tokens, a light and a dark value each),
+- **Colors come from the theme** (`nsh_base::theme()`: shadcn/ui's tokens, a light and a dark value each),
   not literals, so the app's `nsh.json` theme restyles its components and dark appearance switches natively. Read
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
@@ -117,11 +117,11 @@ pub fn Chip(props: ChipProps, cx: Scope<ChipEvent>) -> impl IntoElement {
     view()
         .px_3()
         .py_1()
-        .rounded(move || theme().radius())
-        .bg(move || theme().muted())
-        .active(|s| s.bg(move || theme().border()))
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted)
+        .active(|s| s.bg(move || theme().border))
         .on_press(move || cx.emit(ChipEvent::Press))
-        .child(text(props.label).text_color(move || theme().foreground()))
+        .child(text(props.label).text_color(move || theme().foreground))
 }
 ```
 
@@ -258,7 +258,7 @@ reasons: `reactive-components.md`.
   animated values take `f32`, `Points` or `Radians` too.
   `canvas(move || draw(..))` draws in a binding: again when what it read changes (a size kept from `on_layout`, the
   appearance through `color(..)`); a new drawing replaces the old one. Props that take a plain color (an input's
-  placeholder color) take `move || color(theme().muted_foreground())`: the theme color for the appearance now.
+  placeholder color) take `move || color(theme().muted_foreground)`: the theme color for the appearance now.
 - **What TS does, in Rust**:
 
   | TS | Rust component |
@@ -297,7 +297,7 @@ reasons: `reactive-components.md`.
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (`frame: Bounds<Points>`, `page: Point<Points>`) to await in a task |
   | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(px(10.0), px(10.0)))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await counter.value()`, `counter.setValue(5)` | `component_ref::<Counter>()`, `counter().component_ref(&r)`, `r.api::<CounterApi>()`: the API its view registered, its methods called directly |
-  | `<List header footer empty separator stickyHeaderIndices viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
+  | `<List header footer empty separator stickyHeaderIndices stickyHeaderOffset viewabilityConfig onViewableItemsChange loadMoreThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).sticky_header_offset(..).viewability(..).minimum_view_time(..).on_viewable_items_change(..).load_more_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
   | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
@@ -615,23 +615,38 @@ it changes, and they are resolved again when the tokens change (`Components::app
 ## The theme
 
 The core has no theme, as GPUI has none: it keeps **design tokens** (`ui::Tokens`: colors with a light and a dark
-value, and numbers, by key), gives no key a meaning and has none of its own. The theme is `nsh/base`'s, as
-`gpui-base`'s is: `nsh_base::Theme` (`crates/nsh-base/src/theme.rs`) reads gpui-kit's theme files, names the semantic
-tokens (`background`, `foreground`, `border`, `primary` / `primary_active` / `primary_foreground`, `danger` /
-`danger_active` / `danger_foreground`, `muted` / `muted_foreground`, `overlay`, `ring`, `radius`, `radius_lg`,
-`font_size`) and brings the defaults (`default-theme.json`, gpui-kit's default theme with mobile radii); no component
-of `nsh/base` draws with them. An app sets its own in `nsh.json`: `"theme": "brand.json"` (a gpui-kit theme file,
-relative to `nsh.json`) or the same JSON inline, over the default. Keys the theme does not name (desktop components',
-the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` / `set_number`):
-tokens of the app's classes (`styles.md`); a pressed color (`X.active.background`) the file leaves out is derived from
-its base; null colors (gpui-kit serializes unset ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the
+value, numbers and font families, named as CSS custom properties without `--`: `muted-foreground`, `radius`,
+`font-sans`), gives no name a meaning but `font-sans` (the app's default font, as Tailwind's `--font-sans` is a
+page's; `font-mono` is the monospaced one) and has none of its own. The theme is `nsh/base`'s: `nsh_base::Theme`
+(`crates/nsh-base/src/theme.rs`) has shadcn/ui's tokens, exactly: `background` / `foreground`, `card`, `popover`,
+`primary`, `secondary`, `muted`, `accent` (each with its `-foreground`), `destructive`, `border`, `input`, `ring`,
+`chart-1` to `chart-5`, `sidebar`, `sidebar-foreground`, `sidebar-primary` / `-foreground`, `sidebar-accent` /
+`-foreground`, `sidebar-border`, `sidebar-ring` and `radius`, one field each (`theme().primary`, `theme().chart_1`,
+`theme().sidebar_ring`, `theme().radius`), plus Tailwind's fonts `font-sans` / `font-mono` (`theme().font_sans`,
+`theme().font_mono`; `None`, the system's fonts). `theme()` returns the theme of the tokens drawn with now, made once
+per change of them; an app's own tokens are read by name (`theme().color("up")`). The defaults are shadcn's `neutral` theme (`default-theme.json`, `radius` 0.625rem = 10 pt); no component of
+`nsh/base` draws with them but `TextView`'s reading typography.
+
+A theme file is shadcn's registry `cssVars`, as shadcn and tweakcn export them: `{ "cssVars": { "theme": {…},
+"light": {…}, "dark": {…} } }` (`theme`'s values in both appearances, `light`'s in the light one and in the dark one
+where `dark` leaves them out). Values are CSS: colors (hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, names,
+`color-mix()`, `var(--x[, fallback])` of the same appearance's tokens, the file's or the default's), lengths (`rem`
+is 16 pt, `px`) and font family lists for `font-*` names (the first family that is not generic, `system-ui` /
+`sans-serif` / ... meaning the system's); values of no kind a token has (shadows, letter spacing) are left out. An
+app sets its own in `nsh.json`: `"theme": "brand.json"` (relative to `nsh.json`) or the same JSON inline, over the
+default. Names the theme adds (`surface`, `up`, `radius-card`) are the app's own tokens, as the variables of a
+Tailwind 4 `@theme` are (`Theme::color` / `number` / `font`, `set_color` / `set_number` / `set_font`): classes name
+them (`bg-surface`, `bg-up/30`, `rounded-(--radius-card)`; `styles.md`) and TS reads them with `token()` of `nsh`
+(`nsh-js` `env.rs`: reactive, a color as `#rrggbbaa` in the appearance shown, a number, a font family), typed by
+`interface Tokens`, which nsh writes per app into `.nsh/types/nsh/tokens.d.ts` from the theme
+(`nsh_bundler::tokens_declaration`). The bundler checks the
 theme; the entry hands the file to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any
 view is made; the core makes tokens of it with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s
 `tokens_of`, which also gives the defaults when the engine starts). A Rust app's root carries them
 (`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of the surface (`ui::ambient::tokens`): new
 tokens run again the bindings that read them. An embedding app can give a surface its own (`Core::set_host_tokens`,
 `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they are in the first frame): they win over the
-app's until cleared, and the app's keys they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
+app's until cleared, and the app's names they lack stay, so an embedded app looks like its host (`embedding.md`, "GPUI
 and GPUI Kit apps").
 
 ## The host node and ids

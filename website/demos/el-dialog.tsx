@@ -1,7 +1,9 @@
 import { mount, signal, Text, View } from "nsh";
-import { Button, Dialog, SafeAreaView } from "nsh/base";
-import { platform } from "nsh/device";
-import { tint, ui } from "./palette";
+import { Button, Dialog, SafeAreaView, Switch } from "nsh/base";
+import { desktop, Inspector, Panel, size, Stage, tint, ui, wide } from "./palette";
+
+const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;
+const thumb = desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5";
 
 function App() {
   const card = signal(false);
@@ -9,52 +11,80 @@ function App() {
   const backdropCloses = signal(true);
   const cancels = signal(0);
   const log = signal("–");
-  const primary = () => ({ ...ui().primary, borderRadius: 10, padding: 12, alignItems: "center" as const });
-  const secondary = () => ({ ...ui().raised, borderRadius: 10, padding: 12, alignItems: "center" as const });
+  // A pointer gets compact buttons as wide as their labels; a phone, 44-point ones.
+  const compact = { borderRadius: 8, height: size.control, paddingHorizontal: 14, alignItems: "center" as const, justifyContent: "center" as const };
+  const primary = () => (desktop ? { ...ui().primary, ...compact } : { ...ui().primary, borderRadius: 10, padding: 12, alignItems: "center" as const });
+  const secondary = () => (desktop ? { ...ui().raised, ...compact } : { ...ui().raised, borderRadius: 10, padding: 12, alignItems: "center" as const });
+  const buttonText = desktop ? 14 : 16;
+  const openCard = () => (
+    <Button onPress={() => card.set(true)} style={primary()} activeStyle={{ opacity: 0.7 }}>
+      <Text style={{ color: ui().onPrimary, fontSize: buttonText, fontWeight: "600" }}>Open a card</Text>
+    </Button>
+  );
+  const openSheet = () => (
+    <Button onPress={() => sheet.set(true)} style={secondary()} activeStyle={{ opacity: 0.7 }}>
+      <Text style={{ color: ui().text, fontSize: buttonText, fontWeight: "600" }}>Open a sheet</Text>
+    </Button>
+  );
+  const backdrop = () => (
+    <Switch
+      checked={backdropCloses()}
+      onChange={(next) => backdropCloses.set(next)}
+      class={wide() ? "flex-row items-center gap-2 self-center active:opacity-70" : "flex-row items-center gap-3 rounded-xl p-3 active:opacity-70"}
+      style={wide() ? undefined : ui().row}
+      trackClass={track}
+      trackStyle={backdropCloses() ? ui().accentFill : ui().inset}
+      thumbClass={thumb}
+      thumbStyle={backdropCloses() ? { backgroundColor: ui().onAccent } : ui().raised}
+    >
+      <Text style={{ color: ui().text, flex: wide() ? undefined : 1, fontSize: desktop ? 13 : undefined }}>closeOnBackdropPress {String(backdropCloses())}</Text>
+    </Switch>
+  );
+  const hint = desktop
+    ? "Close with Escape or a click on the backdrop."
+    : "Close with a tap on the backdrop, a swipe down or the back button. On iOS the sheet is a system pageSheet.";
+  const state = () => `open: card ${String(card())} · sheet ${String(sheet())} · onCancel ${cancels()}×`;
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 12 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>dialog</Text>
 
-      <View style={{ maxWidth: 390, gap: 10 }}>
-        <Button onPress={() => card.set(true)} style={primary()} activeStyle={{ opacity: 0.7 }}>
-          <Text style={{ color: ui().onPrimary, fontSize: 16, fontWeight: "600" }}>Open a card</Text>
-        </Button>
-        <Button onPress={() => sheet.set(true)} style={secondary()} activeStyle={{ opacity: 0.7 }}>
-          <Text style={{ color: ui().text, fontSize: 16, fontWeight: "600" }}>Open a sheet</Text>
-        </Button>
+      {() =>
+        wide() ? (
+          <>
+            <Text style={{ color: ui().muted }}>{hint}</Text>
+            <View style={{ flex: 1, flexDirection: "row", gap: 16 }}>
+              <Stage gap={16}>
+                <View style={{ flexDirection: "row", justifyContent: "center", gap: 8 }}>
+                  {openCard()}
+                  {openSheet()}
+                </View>
+                {backdrop()}
+              </Stage>
+              <Inspector>
+                <Panel title="open · onCancel">
+                  <Text style={{ fontSize: 13, color: ui().text }}>{state()}</Text>
+                </Panel>
+                <Panel title="onOpenChange(open, reason) · onOpen" grow>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: ui().accent }}>{log()}</Text>
+                </Panel>
+              </Inspector>
+            </View>
+          </>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {openCard()}
+            {openSheet()}
 
-        <Button
-          role="switch"
-          selected={backdropCloses()}
-          onPress={() => backdropCloses.set(!backdropCloses())}
-          style={{ ...ui().row, borderRadius: 12, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }}
-          activeStyle={{ opacity: 0.7 }}
-        >
-          <View
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: ui().border,
-              backgroundColor: backdropCloses() ? ui().accent : "transparent",
-            }}
-          />
-          <Text style={{ color: ui().text, flex: 1 }}>closeOnBackdropPress {String(backdropCloses())}</Text>
-        </Button>
+            {backdrop()}
 
-        <View style={{ ...ui().inset, borderRadius: 12, padding: 14, gap: 4 }}>
-          <Text style={{ color: ui().muted, fontSize: 13 }}>
-            open: card {String(card())} · sheet {String(sheet())} · onCancel {cancels()}×
-          </Text>
-          <Text style={{ color: ui().accent, fontSize: 15, fontWeight: "600" }}>{log()}</Text>
-        </View>
-        <Text style={{ color: ui().faint, fontSize: 13 }}>
-          {platform.idiom === "desktop"
-            ? "Close with Escape or a click on the backdrop."
-            : "Close with a tap on the backdrop, a swipe down or the back button. On iOS the sheet is a system pageSheet."}
-        </Text>
-      </View>
+            <View style={{ ...ui().inset, borderRadius: 12, padding: 14, gap: 4 }}>
+              <Text style={{ color: ui().muted, fontSize: 13 }}>{state()}</Text>
+              <Text style={{ color: ui().accent, fontSize: 15, fontWeight: "600" }}>{log()}</Text>
+            </View>
+            <Text style={{ color: ui().faint, fontSize: 13 }}>{hint}</Text>
+          </View>
+        )
+      }
 
       <Dialog
         open={card()}
@@ -76,13 +106,13 @@ function App() {
             ? "A press on the dimmed backdrop closes it."
             : "The backdrop only calls onCancel: close with a button."}
         </Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flexDirection: "row", gap: 8, justifyContent: desktop ? "flex-end" : undefined }}>
           <Button
             onPress={() => {
               card.set(false);
               log.set("closed by the app: Keep");
             }}
-            style={{ ...secondary(), flex: 1 }}
+            style={desktop ? secondary() : { ...secondary(), flex: 1 }}
             activeStyle={{ opacity: 0.7 }}
           >
             <Text style={{ color: ui().text, fontWeight: "600" }}>Keep</Text>
@@ -92,7 +122,7 @@ function App() {
               card.set(false);
               log.set("closed by the app: Delete");
             }}
-            style={{ flex: 1, borderRadius: 10, padding: 12, alignItems: "center", backgroundColor: ui().down }}
+            style={desktop ? { ...compact, backgroundColor: ui().down } : { flex: 1, borderRadius: 10, padding: 12, alignItems: "center", backgroundColor: ui().down }}
             activeStyle={{ opacity: 0.7 }}
           >
             <Text style={{ color: "#ffffff", fontWeight: "600" }}>Delete</Text>
@@ -127,8 +157,8 @@ function App() {
             presentation="pageSheet": a system sheet on iOS that follows the finger when swiped down. Elsewhere the
             dialog is a layer over the window, and this panel is the app's own style.
           </Text>
-          <Button onPress={() => sheet.set(false)} style={primary()} activeStyle={{ opacity: 0.7 }}>
-            <Text style={{ color: ui().onPrimary, fontSize: 16, fontWeight: "600" }}>Close</Text>
+          <Button onPress={() => sheet.set(false)} style={desktop ? { ...primary(), alignSelf: "flex-end" } : primary()} activeStyle={{ opacity: 0.7 }}>
+            <Text style={{ color: ui().onPrimary, fontSize: buttonText, fontWeight: "600" }}>Close</Text>
           </Button>
         </SafeAreaView>
       </Dialog>

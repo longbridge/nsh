@@ -113,6 +113,7 @@ pub(crate) struct NativeModule {
 
 /// `nsh`: the API apps write against.
 const NSH: &[Item] = &[
+    crate::env::TOKEN_EXPORT,
     (
         "signal",
         Export::Function(reactive::signal, 2),
@@ -309,6 +310,13 @@ export interface Context<T> extends Accessor<T> {
 
 /** A component: a function of its props rendering elements. */
 export type Component<P = {}> = (props: P) => JSX.Element;
+
+/**
+ * The design tokens of the app's theme by name, and what `token()` gives
+ * for each: a color or a font family as a string, a number. nsh declares
+ * the app's (`.nsh/types/nsh/tokens.d.ts`, from `nsh.json` `"theme"`).
+ */
+export interface Tokens {}
 "#;
 
 /// The modules that exported primitives before `nsh` did: `nsh` serves

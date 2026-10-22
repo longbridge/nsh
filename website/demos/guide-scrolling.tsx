@@ -1,6 +1,6 @@
 import { mount, Scroll, signal, Text, View, type YNode } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { tint, ui } from "./palette";
+import { desktop, size, tint, ui, wide } from "./palette";
 
 // Tints of the info, violet, danger, warn and up colours under the text colour.
 const hues = ["info", "violet", "down", "warn", "up", "faint"] as const;
@@ -116,32 +116,44 @@ function App() {
         onRefresh={refresh}
         keyboardDismissMode="on-drag"
       >
-        <View style={{ padding: 16, gap: 18 }}>
+        <View style={{ padding: 16, gap: 18, maxWidth: wide() ? 720 : undefined }}>
           <Text style={{ color: ui().muted }}>
-            Pull down to refresh ({refreshed()}×). onScroll: y = {y()}
+            {desktop ? `Scroll with the wheel or the trackpad. onScroll: y = ${y()}` : `Pull down to refresh (${refreshed()}×). onScroll: y = ${y()}`}
           </Text>
           <Text style={{ fontWeight: "600", color: ui().text }}>pagingEnabled</Text>
           <Pager />
           <Text style={{ fontWeight: "600", color: ui().text }}>snapToInterval</Text>
           <Cards />
-          <Each of={Array.from({ length: 24 }, (_, i) => i + 1)}>
-            {(n) => (
-              <View style={{ ...ui().row, padding: 14, borderRadius: 12 }}>
-                <Text style={{ color: ui().text }}>Row {n()}</Text>
-              </View>
-            )}
-          </Each>
+          <View style={{ gap: desktop ? 8 : 18 }}>
+            <Each of={Array.from({ length: 24 }, (_, i) => i + 1)}>
+              {(n) => (
+                <View
+                  style={
+                    desktop
+                      ? { ...ui().row, height: size.row, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8 }
+                      : { ...ui().row, padding: 14, borderRadius: 12 }
+                  }
+                >
+                  <Text style={{ color: ui().text, fontSize: desktop ? size.label : undefined }}>Row {n()}</Text>
+                </View>
+              )}
+            </Each>
+          </View>
           <View
             onPress={() => scroll.scrollTo({ y: 0 })}
             activeStyle={{ opacity: 0.6 }}
-            style={{
-              padding: 14,
-              borderRadius: 10,
-              ...ui().primary,
-              alignItems: "center",
-            }}
+            style={
+              desktop
+                ? { alignSelf: "flex-start", height: size.control, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8, ...ui().primary }
+                : {
+                    padding: 14,
+                    borderRadius: 10,
+                    ...ui().primary,
+                    alignItems: "center",
+                  }
+            }
           >
-            <Text style={{ color: ui().onPrimary, fontWeight: "600" }}>Back to the top (ref.scrollTo)</Text>
+            <Text style={{ color: ui().onPrimary, fontWeight: "600", fontSize: desktop ? 13 : undefined }}>Back to the top (ref.scrollTo)</Text>
           </View>
         </View>
       </Scroll>

@@ -1,6 +1,7 @@
 //! `nativeModule`: an app built without knowing the embedding app's set
 //! reaches it by name at run time; the host pushes its data to every
-//! engine through a callback a task keeps (`subscribe`).
+//! engine through a callback a task keeps (`subscribe`), and gives each
+//! engine its own context, which the set's functions read.
 
 use std::{sync::LazyLock, time::Duration};
 
@@ -9,7 +10,7 @@ use nsh_core::{
     ApproxTextEngine, MountBatch, Size,
     ui::{Registry, prelude::*},
 };
-use nsh_engine::{Bundle, Engine, EngineConfig, Environment};
+use nsh_engine::{Bundle, Engine, EngineConfig, EngineContext, Environment};
 use tokio::sync::watch;
 
 use crate::{ChannelSink, rust_classes::shown};
@@ -61,9 +62,50 @@ fn registry() -> Registry {
     r
 }
 
+/// The part of the host an engine reaches: its context.
+struct Desk(&'static str);
+
+/// Which desk the engine running the call was given, read in each kind
+/// of function.
+#[module]
+pub(crate) struct Whose;
+
+#[module]
+impl Whose {
+    /// In the JS call.
+    pub(crate) fn now() -> String {
+        desk()
+    }
+
+    /// As an op, in order with the UI.
+    pub(crate) fn op(_cx: &mut ModuleCx) -> String {
+        desk()
+    }
+
+    /// As a task, after it waited.
+    pub(crate) async fn later() -> String {
+        timer(Duration::from_millis(5)).await;
+        desk()
+    }
+}
+
+fn desk() -> String {
+    engine_context::<Desk>().map_or_else(|| "none".to_owned(), |desk| desk.0.to_owned())
+}
+
+fn context_registry() -> Registry {
+    let mut r = Registry::ui_set("host/context");
+    r.module::<Whose>();
+    r
+}
+
 /// The app, bundled and compiled with no UI set, run by an engine serving
-/// `ui_sets`.
-fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<MountBatch>) {
+/// `ui_sets` and given `context`.
+fn start(
+    app: &str,
+    ui_sets: Vec<Registry>,
+    context: EngineContext,
+) -> (Engine, Receiver<MountBatch>) {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-host-modules-{}-{}",
@@ -99,6 +141,7 @@ fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context,
         pinned: Default::default(),
         clipboard: None,
     };
@@ -134,7 +177,7 @@ mount(() => <Text>{shown()}</Text>);
 
 #[test]
 fn an_app_calls_the_functions_its_host_registered_by_name() {
-    let (_engine, rx) = start(CALLS, vec![registry()]);
+    let (_engine, rx) = start(CALLS, vec![registry()], EngineContext::default());
     assert_eq!(
         shown(&rx, "done"),
         "done 227.5|no quote for X|42|true|ReferenceError: nativeModule: nothing is registered \
@@ -154,7 +197,7 @@ mount(() => <Text>{shown}</Text>);
 
 #[test]
 fn an_app_whose_host_registered_nothing_hears_which_specifier_is_missing() {
-    let (_engine, rx) = start(ALONE, Vec::new());
+    let (_engine, rx) = start(ALONE, Vec::new(), EngineContext::default());
     assert!(
         shown(&rx, "done")
             .starts_with("done nativeModule: nothing is registered under \"host/test\"")
@@ -183,10 +226,12 @@ fn the_host_pushes_its_data_to_every_app_that_subscribed() {
     let (_a, a) = start(
         &SYNC.replace("globalThis.publisher", "true"),
         vec![registry()],
+        EngineContext::default(),
     );
     let (_b, b) = start(
         &SYNC.replace("globalThis.publisher", "false"),
         vec![registry()],
+        EngineContext::default(),
     );
     assert_eq!(shown(&a, "note from A"), "note from A");
     assert_eq!(shown(&b, "note from A"), "note from A");
@@ -195,4 +240,40 @@ fn the_host_pushes_its_data_to_every_app_that_subscribed() {
     NOTE.send_replace("from the host".to_owned());
     assert_eq!(shown(&a, "note from the host"), "note from the host");
     assert_eq!(shown(&b, "note from the host"), "note from the host");
+}
+
+const WHOSE: &str = r#"import { mount, signal, Text } from "nsh";
+import { nativeModule } from "nsh/native";
+
+interface WhoseApi {
+  now(): string;
+  op(): Promise<string>;
+  later(): Promise<string>;
+}
+const { Whose } = nativeModule<{ Whose: WhoseApi }>("host/context");
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  shown.set(`done ${Whose.now()} ${await Whose.op()} ${await Whose.later()}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn each_engine_s_functions_read_the_context_its_host_gave_it() {
+    let (_a, a) = start(
+        WHOSE,
+        vec![context_registry()],
+        EngineContext::default().with(Desk("A")),
+    );
+    let (_b, b) = start(
+        WHOSE,
+        vec![context_registry()],
+        EngineContext::default().with(Desk("B")),
+    );
+    let (_none, none) = start(WHOSE, vec![context_registry()], EngineContext::default());
+    assert_eq!(shown(&a, "done"), "done A A A");
+    assert_eq!(shown(&b, "done"), "done B B B");
+    assert_eq!(shown(&none, "done"), "done none none none");
 }

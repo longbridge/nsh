@@ -10,9 +10,10 @@ use super::{
     style::{StyleRefinement, Styled, Variant},
 };
 use crate::{
-    AccessibilityProp, AccessibilityRole, AccessibilityState, Bounds, ContextMenuEvent, EdgeInsets,
-    EventKind, EventPayload, HoverEvent, Hsla, ImageSource, ListContentStyle, NativeProp, NodeId,
-    PointerEvents, Points, Prop, Size, Tag, TouchEvent, geometry::Radians, style::Color,
+    AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
+    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, HoverEvent, Hsla, ImageSource,
+    ListContentStyle, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
+    geometry::Radians, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -161,6 +162,7 @@ pub struct Attrs {
     pub(crate) hint: Option<SharedString>,
     pub(crate) role: AccessibilityRole,
     pub(crate) state: AccessibilityState,
+    pub(crate) value: Option<AccessibilityValue>,
     pub(crate) pointer_events: PointerEvents,
     pub(crate) number_of_lines: u32,
     pub(crate) src: Option<super::ImageSrc>,
@@ -219,6 +221,9 @@ impl Attrs {
         }
         if self.state != old.state {
             out.push(Prop::Accessibility(A::State(self.state)));
+        }
+        if self.value != old.value {
+            out.push(Prop::Accessibility(A::Value(self.value.clone())));
         }
         if self.pointer_events != old.pointer_events {
             out.push(Prop::PointerEvents(self.pointer_events));
@@ -1049,6 +1054,14 @@ pub trait Accessible: Element {
                 ..state
             };
         });
+        self
+    }
+
+    /// Its value for screen readers, for a range (a progress bar, a
+    /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
+    /// indeterminate progress bar keeps its range and leaves out `now`).
+    fn accessibility_value(mut self, value: impl IntoReactive<Option<AccessibilityValue>>) -> Self {
+        self.node().bind_attr(value, |a, value| a.value = value);
         self
     }
 }

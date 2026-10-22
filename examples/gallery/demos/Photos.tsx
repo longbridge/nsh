@@ -67,7 +67,7 @@ function PhotoRow(props: { photo: Photo }) {
 function PhotoTile(props: { photo: Photo }) {
   return (
     <Press scale={0.97} accessibilityLabel={props.photo.title}>
-      <View class="hover:bg-paper-card dark:hover:bg-graphite-card" style={{ padding: 6, gap: 8, borderRadius: radius.card, borderCurve: "continuous", cursor: "pointer" }}>
+      <View class="hover:bg-card" style={{ padding: 6, gap: 8, borderRadius: radius.card, borderCurve: "continuous", cursor: "pointer" }}>
         <Image
           src={`https://picsum.photos/seed/${props.photo.id}/480/360`}
           style={{

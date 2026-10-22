@@ -19,6 +19,8 @@ on:
     paths:
       - "examples/**"
       - ".github/workflows/examples.yml"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:

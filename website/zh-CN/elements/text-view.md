@@ -10,7 +10,7 @@ demo: text-view
 
 `TextView` 显示用 Markdown、HTML 或应用自己构建的文档块写成的文档：标题、段落、强调、链接、列表与任务列表、引用和 GitHub 的提示块（alert）、代码、表格、图片、公式、脚注和折叠块。它为 AI 模型在聊天中的回复而设计：回复以 Markdown 流式到达，每来一段，文本就带着格式显示出来。解析在 Rust 中完成，文档用 [`Text`](./text.md) 元素和视图绘制。
 
-它负责行为，并自带一套阅读排版：15pt 正文、宽松的 25.5pt 行高，半粗体标题且上方留有空间，链接以主题的链接色加下划线，代码放在带边框的圆角框中，表格四边都有线、表头行带底色，引用在一侧带一条线，提示块是带图标的着色框。颜色取自主题的令牌（`foreground`、`muted.foreground`、`border`、`muted.background`、`link`、`list.head.background` 和各状态色），因此主题和深色外观都会作用于它。每个部件在这些默认样式之上接收应用的样式：TSX 中是 `classes` 和 `styles`，Rust 中是按部件给出的类型化样式（`TextViewParts`）。Rust 用 `nsh_base::text_view()` 创建它，TSX 用从 `nsh/base` 导入的 `<TextView>`。
+它负责行为，并自带一套阅读排版：15pt 正文、宽松的 25.5pt 行高，半粗体标题且上方留有空间，链接以主题的 `primary` 色加下划线，代码使用主题的 `font-mono`，放在带边框的圆角框中，表格四边都有线、表头行带底色，引用在一侧带一条线，提示块是带图标、采用 GitHub 提示色的着色框。颜色取自主题的令牌（`foreground`、`muted-foreground`、`border`、`muted`、`primary`，警示（caution）用 `destructive`），因此主题和深色外观都会作用于它。每个部件在这些默认样式之上接收应用的样式：TSX 中是 `classes` 和 `styles`，Rust 中是按部件给出的类型化样式（`TextViewParts`）。Rust 用 `nsh_base::text_view()` 创建它，TSX 用从 `nsh/base` 导入的 `<TextView>`。
 
 ```rust tabs
 use nsh_base::{TextViewLinkPressEvent, text_view, theme};
@@ -34,7 +34,7 @@ fn release_notes() -> impl IntoElement {
             .on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| log::info!("open {url}"))
             .p_5()
             .text_base()
-            .text_color(theme().foreground()),
+            .text_color(theme().foreground),
     )
 }
 ```
@@ -154,7 +154,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
                 s.px_3().py_2().border_t_1().border_color(rgb(0xe5e5e5))
             })
             .part(TextViewPart::TaskMarkerChecked, |s| s.text_color(rgb(0x16a34a)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
     text_view()
         .markdown(move || markdown.get())
@@ -217,7 +217,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 | `underline` | `Underline` | 下划线文本（`<u>`、`<ins>`）。 |
 | `highlight` | `Highlight` | 高亮文本（`<mark>`，圆角黄色底）。 |
 | `superscript`、`subscript` | `Superscript`, `Subscript` | 上标和下标（字号更小）。 |
-| `link` | `Link` | 链接（链接色，带下划线）。 |
+| `link` | `Link` | 链接（主题的 `primary` 色，带下划线）。 |
 | `image` | `Image` | 图片。 |
 | `math` | `Math` | 文本中的公式；没有 `renderMath` 时以等宽字体显示其 TeX。 |
 | `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时以等宽字体显示其 TeX。 |
@@ -664,8 +664,8 @@ fn chat_parts() {
     provide_context(
         TextViewParts::new()
             .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
-            .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Code, |s| s.bg(theme().muted).rounded(px(4.0)))
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
 }
 ```

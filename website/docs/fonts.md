@@ -18,7 +18,7 @@ Text uses the system font (San Francisco on iOS, Roboto on Android) unless a fon
 | `"monospace"`, `"ui-monospace"` | The system monospace font (SF Mono on iOS) |
 | `"ui-rounded"` | The rounded system font (SF Pro Rounded), iOS only |
 
-The system font honors every weight from 100 to 900. Tailwind's `font-sans`, `font-serif` and `font-mono` map to the first three rows.
+The system font honors every weight from 100 to 900. Tailwind's `font-sans`, `font-serif` and `font-mono` map to the first three rows, and `font-sans` and `font-mono` to the theme's fonts when it sets them ([A default font for the app](#a-default-font-for-the-app)).
 
 A family installed on the device can be named directly (`"Georgia"`, `"Avenir Next"` on iOS). Installed fonts differ between platforms and versions, so ship the fonts your design depends on. On iOS, a family that does not exist falls back to the system font with a warning in the log (`font family 'X' is not available`).
 
@@ -129,7 +129,20 @@ An arbitrary family works without a theme entry: `font-[Pacifico]`. Weight class
 
 ## A default font for the app
 
-The app's font is set on a container: the texts inside inherit it.
+The theme's `font-sans` is the app's font: every text that sets no family of its own is drawn with it, in Rust components and TSX alike, as a web page is with Tailwind's `--font-sans`. `font-mono` is the monospaced font, of the `font-mono` class and of code in `TextView`. Set them in the app's theme (`"theme"` in `nsh.json`, [Rust](./rust.md#theme)) and ship the font files as above:
+
+```json
+{
+  "cssVars": {
+    "theme": {
+      "font-sans": "Inter, sans-serif",
+      "font-mono": "JetBrains Mono, monospace"
+    }
+  }
+}
+```
+
+The first family of the list that is not a generic one is the font; a generic first family (`system-ui`, `sans-serif`) is the system font. The font can also be set on a container: the texts inside inherit it.
 
 ```rust tabs
 #[component]

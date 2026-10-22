@@ -254,9 +254,41 @@ impl ResolveSetup {
     }
 }
 
+/// The design tokens of the app in `dir`: its `nsh.json` `"theme"` over
+/// the default's (`nsh_base::Theme`), or the default's when it has none.
+pub fn theme_tokens(dir: &std::path::Path) -> Result<nsh_core::ui::Tokens, BundleError> {
+    let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+        return Ok(nsh_base::Theme::default().into_tokens());
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+    match theme_json(dir, &config)? {
+        Some(json) => Ok(nsh_base::Theme::from_json(&json)
+            .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
+            .into_tokens()),
+        None => Ok(nsh_base::Theme::default().into_tokens()),
+    }
+}
+
+/// `nsh.json`'s `"theme"`: shadcn's `cssVars` in a file (a path relative
+/// to `nsh.json`) or in place.
+fn theme_json(
+    dir: &std::path::Path,
+    config: &serde_json::Value,
+) -> Result<Option<String>, BundleError> {
+    Ok(match config.get("theme") {
+        None => None,
+        Some(serde_json::Value::String(file)) => Some(
+            std::fs::read_to_string(dir.join(file))
+                .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
+        ),
+        Some(v) => Some(v.to_string()),
+    })
+}
+
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
-/// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
-/// to `nsh.json`) or its content.
+/// `nsh.json` next to the entry, checked. `"theme"` is shadcn's `cssVars`
+/// ([`theme_json`]).
 fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, BundleError> {
     let mut setup = plugin::ThemeSetup::default();
     // The theme's tokens are classes (`bg-primary`): the default's unless
@@ -275,12 +307,7 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
             .map_err(|e| BundleError::other(format!("nsh.json: tailwind: {e}")))?;
         setup.json = Some(json);
     }
-    if let Some(theme) = config.get("theme") {
-        let json = match theme {
-            serde_json::Value::String(file) => std::fs::read_to_string(dir.join(file))
-                .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
-            v => v.to_string(),
-        };
+    if let Some(json) = theme_json(dir, &config)? {
         tokens = nsh_base::Theme::from_json(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?
             .into_tokens();

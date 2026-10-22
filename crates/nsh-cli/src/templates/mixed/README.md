@@ -7,6 +7,7 @@ module (`Format`) and a class (`Counter`) that `App.tsx` imports from `__SPECIFI
 ```sh
 nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
 nsh check                    # type checks App.tsx against the declarations generated from the Rust code
+nsh test                     # App.test.tsx, headless; --target to run it on a platform
 nsh package --target web     # or ios, android, macos, linux, windows
 ```
 

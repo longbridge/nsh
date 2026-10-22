@@ -4,6 +4,7 @@ An app written in Rust: its UI is `src/lib.rs`, and `nsh.json` names the root co
 
 ```sh
 nsh run                      # this machine's backend; --target ios, android, web, macos, linux or windows
+nsh test                     # App.test.tsx: the root tested from TypeScript, headless; --target to run it on a platform
 nsh test nsh.json --trace    # headless: what the root mounts, and the time of each commit
 nsh package --target web     # or ios, android, macos, linux, windows
 ```
@@ -33,7 +34,7 @@ import { App } from "__SPECIFIER__";
 mount(App);
 ```
 
-and a `tsconfig.json` (copy one from `nsh init --template ts`), then run it with `nsh run App.tsx`: a named TSX entry
+then run it with `nsh run App.tsx` (`tsconfig.json` is there for it and the test): a named TSX entry
 runs on QuickJS, while `nsh run` alone keeps running the Rust root. The first `nsh build App.tsx` writes the TypeScript
 declarations of `__SPECIFIER__` into `.nsh/types`. Register more with `registry.register::<…>()` (components),
 `registry.module::<…>()` and `registry.class::<…>()`.

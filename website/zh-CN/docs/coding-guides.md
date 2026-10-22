@@ -131,7 +131,7 @@ pub fn App() -> impl IntoElement {
     provide_context(Workspace::new());
     view()
         .flex_1()
-        .bg(move || theme().background())
+        .bg(move || theme().background)
         .child(inbox())
 }
 ```
@@ -187,7 +187,7 @@ fn empty_state(title: impl Into<SharedString>) -> impl IntoElement {
     view()
         .gap_2()
         .items_center()
-        .child(text(title.into()).text_color(move || theme().muted_foreground()))
+        .child(text(title.into()).text_color(move || theme().muted_foreground))
 }
 ```
 
@@ -340,7 +340,7 @@ pub fn QuantityStepper(props: QuantityStepperProps, cx: Scope<QuantityStepperEve
             move || props.value.get() <= props.min.get(),
             move || step(-1),
         ))
-        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground()))
+        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground))
         .child(step_button(
             "+",
             move || props.increment_label.get(),
@@ -363,11 +363,11 @@ fn step_button(
         .h(px(32.0))
         .items_center()
         .justify_center()
-        .rounded(move || theme().radius())
-        .bg(move || theme().muted())
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted)
         .active(|s| s.opacity(0.6))
         .disabled_style(|s| s.opacity(0.4))
-        .child(text(symbol).text_color(move || theme().foreground()))
+        .child(text(symbol).text_color(move || theme().foreground))
 }
 
 // 归属者：
@@ -555,11 +555,11 @@ Base 的长期规则是：
 
 ```rust tabs
 view()
-    .bg(move || theme().background())
-    .text_color(move || theme().foreground())
+    .bg(move || theme().background)
+    .text_color(move || theme().foreground)
     .border_1()
-    .border_color(move || theme().border())
-    .rounded(move || theme().radius())
+    .border_color(move || theme().border)
+    .rounded(move || theme().radius)
 ```
 
 ```tsx tabs
@@ -586,8 +586,8 @@ view()
 
 有效的优先级为：元素自身的样式，然后是状态样式，后面的状态优先，`disabled` 高于一切。后一层只替换自己设置的字段。
 
-新的应用自有表现优先使用主题的语义 token。应用主题文件的每个键都是 token（`theme().color("chart.up")`、`text-chart-up`），
-主题有浅色和深色两套值，所以 token 不用 `dark:` 类名也会跟随外观模式。以角色而不是组件命名 token，避免它成为每个控件的扩展点。
+新的应用自有表现优先使用主题的语义 token。应用主题文件中的每个名称都是 token，如同 Tailwind `@theme` 的变量（`"up": "#16a34a"`
+生成 `text-up`、`bg-up/30`、TSX 中的 `token("up")` 和 Rust 中的 `theme().color("up")`），主题有浅色和深色两套值，所以 token 不用 `dark:` 类名也会跟随外观模式。以角色而不是组件命名 token，避免它成为每个控件的扩展点。
 
 通过应用的主题文件（`nsh.json` 的 `"theme"`）修改主题，或让嵌入应用提供它自己的主题：主题变化时，引用 token 的类名和读取
 `theme()` 的 Rust 绑定都会原生地重新设置样式，无需运行任何 JavaScript。把 token 的值复制到自己的 signal 中的代码就不再跟随它。
@@ -598,8 +598,7 @@ view()
 ### 用户的字号就是应用的缩放
 
 文本跟随用户的字号设置（动态字体、Android 的字体缩放、桌面系统的设置）：TSX 中的 `fontScale()`、Rust 中的
-`font_scale()`，两者都是响应式的。字号刻度（`text-sm`、`text-base`）和主题的基础字号（`font.size`、
-`theme().font_size()`）设定基准，用户的设置在此之上缩放。这有意沿用 Tailwind 模型中有价值的部分：具名的字号、间距和尺寸
+`font_scale()`，两者都是响应式的。字号刻度（`text-sm`、`text-base`：16 点，即正文字号）设定基准，用户的设置在此之上缩放。这有意沿用 Tailwind 模型中有价值的部分：具名的字号、间距和尺寸
 档位，而不是互不相关的点数常量。
 
 让文本容器随文本增高：给它们最小高度和内边距，而不是固定高度。自定义组件如果把缩放的文本与周围固定的几何尺寸混合，必须记录

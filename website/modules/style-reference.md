@@ -78,7 +78,7 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 | `number` | Points (density-independent). `1` is one point on iOS and one dp on Android. | `Points`: `px(16.0)` |
 | `DimensionValue` | `number` (points), `` `${number}%` `` (of the parent), or `"auto"`. | `Length`: `px(…)`, `relative(0.5)`, `auto()` |
 | `LengthValue` | `number` (points) or `` `${number}%` ``. No `"auto"`. | `DefiniteLength`: `px(…)`, `relative(0.5)` |
-| `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). | `Hsla` / `AdaptiveColor`: `rgb(0x2563eb)`, `hsla(…)`, theme colors (`theme().primary()`) |
+| `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). | `Hsla` / `AdaptiveColor`: `rgb(0x2563eb)`, `hsla(…)`, theme colors (`theme().primary`) |
 | `AnimatedNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. | `AnimatedValue` / `AnimatedNode`, bound with `.bind_opacity(&v)`, `.bind_background(&v)`, `.bind_translate_x(&v)`, ... |
 
 Strings with CSS syntax (`boxShadow`, `backgroundImage`, `filter`, `gridTemplateColumns`, ...) take lengths in `px` and bare numbers (both points), `pt`, or `rem` (16 points).
@@ -334,6 +334,7 @@ view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`, `.brightness(…)`, `.contrast(…)`, `.grayscale(…)`, `.hue_rotate(…)`, `.invert(…)`, `.saturate(…)`, `.sepia(…)` | CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`. |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`, `.backdrop_brightness(…)`, ... | CSS filters of what is behind the view, such as `"blur(10px)"` for frosted glass. |
+| `glassEffect` | `"none" \| "regular" \| "clear"` | `ViewStyle::glass_effect` (`GlassEffect`) | Liquid Glass behind the view's content on iOS 26 and later. `"regular"` uses the standard material; `"clear"` takes less color from the background. `"none"` is the default. Pair with `backdropFilter` for the blur shown on earlier iOS versions and other platforms. |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | How the view blends with what is behind it. |
 
 > [!WARNING]

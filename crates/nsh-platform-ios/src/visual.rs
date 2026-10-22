@@ -8,11 +8,11 @@
 //! covering it, and work with transparent backgrounds.
 
 use nsh_core::{
-    BorderStyle, BoxShadow, Color, CornerRadii, Filter, Gradient, GradientKind, GradientSize,
-    ViewStyle,
+    BorderStyle, BoxShadow, Color, CornerRadii, Filter, GlassEffect, Gradient, GradientKind,
+    GradientSize, ViewStyle,
     geometry::{Points, px},
 };
-use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
+use objc2::{MainThreadMarker, MainThreadOnly, msg_send, rc::Retained, runtime::AnyClass};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSArray, NSNumber};
@@ -22,7 +22,7 @@ use objc2_quartz_core::{
 };
 use objc2_ui_kit::{
     UIBlurEffect, UIBlurEffectStyle, UIView, UIViewAnimating, UIViewAnimationCurve,
-    UIViewPropertyAnimator, UIVisualEffectView,
+    UIViewPropertyAnimator, UIVisualEffect, UIVisualEffectView,
 };
 
 use crate::decor::{cg_color, inset, rounded};
@@ -51,18 +51,72 @@ pub(crate) struct Visual {
 
 struct Backdrop {
     view: Retained<UIVisualEffectView>,
-    /// Holds the blur at a fraction of the material's strength.
-    animator: Retained<UIViewPropertyAnimator>,
+    /// Holds the blur at a fraction of the material's strength. Glass is
+    /// drawn at its own, so glass keeps no animator.
+    animator: Option<Retained<UIViewPropertyAnimator>>,
     radius: f32,
     dark: bool,
+    glass: GlassEffect,
 }
 
 impl Drop for Backdrop {
     fn drop(&mut self) {
         // A paused animator must be stopped before it is released.
-        self.animator.stopAnimation(true);
+        if let Some(animator) = &self.animator {
+            animator.stopAnimation(true);
+        }
         self.view.removeFromSuperview();
     }
+}
+
+/// A `UIGlassEffect` of `style`, or `None` where UIKit has no such class
+/// (before iOS 26) or no glass was asked for.
+///
+/// The class is looked up at runtime, the way `input.rs` looks up
+/// `UIKeyCommand`, rather than bound by `extern_class!`: that binds a
+/// class by its link-time symbol, which a system without the class fails
+/// to resolve when the app launches, and Rust cannot weakly link one yet
+/// (rust-lang/rust#29603).
+fn glass_effect(style: GlassEffect) -> Option<Retained<UIVisualEffect>> {
+    let raw: isize = match style {
+        GlassEffect::None => return None,
+        // UIGlassEffectStyle, whose cases are regular and clear.
+        GlassEffect::Regular => 0,
+        GlassEffect::Clear => 1,
+    };
+    let class = AnyClass::get(c"UIGlassEffect")?;
+    // SAFETY: UIGlassEffect's documented factory, on the class just found,
+    // which answers a UIVisualEffect. The caller holds a MainThreadMarker.
+    unsafe { Some(msg_send![class, effectWithStyle: raw]) }
+}
+
+/// Holds `target`'s blur at `radius`'s fraction of the material's
+/// strength: UIKit gives no way to set it outright.
+fn blur_animator(
+    target: Retained<UIVisualEffectView>,
+    radius: f32,
+    dark: bool,
+    mtm: MainThreadMarker,
+) -> Retained<UIViewPropertyAnimator> {
+    let material = if dark {
+        UIBlurEffectStyle::SystemUltraThinMaterialDark
+    } else {
+        UIBlurEffectStyle::SystemUltraThinMaterialLight
+    };
+    let block = block2::RcBlock::new(move || {
+        let blur = UIBlurEffect::effectWithStyle(material, mtm);
+        target.setEffect(Some(&blur));
+    });
+    let animator = UIViewPropertyAnimator::initWithDuration_curve_animations(
+        UIViewPropertyAnimator::alloc(mtm),
+        1.0,
+        UIViewAnimationCurve::Linear,
+        Some(&block),
+    );
+    animator.setPausesOnCompletion(true);
+    // The material blurs by about 30 points at full strength.
+    animator.setFractionComplete((radius / 30.0).clamp(0.05, 1.0) as CGFloat);
+    animator
 }
 
 /// Whether `style` has effects that draw outside the box (they need an
@@ -166,7 +220,7 @@ impl Visual {
         // blurs; the background color tints): light unless it is dark.
         let (r, g, b, a) = style.background_color.to_f64();
         let dark = a > 0.0 && 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
-        self.set_backdrop(view, blur, dark, local, radii, mtm);
+        self.set_backdrop(view, blur, dark, style.glass_effect, local, radii, mtm);
     }
 
     fn set_shadows(
@@ -390,54 +444,54 @@ impl Visual {
     }
 
     /// `backdrop-filter: blur()`: a system blur behind the content, its
-    /// strength set by holding a property animator at a fraction.
+    /// strength set by holding a property animator at a fraction; or, for
+    /// `glassEffect`, a glass material in the blur's place.
+    #[allow(clippy::too_many_arguments)]
     fn set_backdrop(
         &mut self,
         view: &UIView,
         radius: f32,
         dark: bool,
+        glass: GlassEffect,
         local: CGRect,
         radii: CornerRadii,
         mtm: MainThreadMarker,
     ) {
-        if radius <= 0.0 {
+        // A blur needs a radius to draw; glass draws without one.
+        if radius <= 0.0 && glass == GlassEffect::None {
             self.backdrop = None;
             return;
         }
         if self
             .backdrop
             .as_ref()
-            .is_none_or(|b| b.radius != radius || b.dark != dark)
+            .is_none_or(|b| b.radius != radius || b.dark != dark || b.glass != glass)
         {
             self.backdrop = None;
+            // Glass wherever UIKit has it. Where it does not (before iOS
+            // 26), the view falls back to its blur, and one that asked for
+            // glass alone draws nothing.
+            let effect = glass_effect(glass);
+            if effect.is_none() && radius <= 0.0 {
+                return;
+            }
             let effect_view =
                 UIVisualEffectView::initWithEffect(UIVisualEffectView::alloc(mtm), None);
             effect_view.setUserInteractionEnabled(false);
-            let target = effect_view.clone();
-            let material = if dark {
-                UIBlurEffectStyle::SystemUltraThinMaterialDark
-            } else {
-                UIBlurEffectStyle::SystemUltraThinMaterialLight
+            let animator = match effect {
+                Some(glass) => {
+                    effect_view.setEffect(Some(&glass));
+                    None
+                }
+                None => Some(blur_animator(effect_view.clone(), radius, dark, mtm)),
             };
-            let block = block2::RcBlock::new(move || {
-                let blur = UIBlurEffect::effectWithStyle(material, mtm);
-                target.setEffect(Some(&blur));
-            });
-            let animator = UIViewPropertyAnimator::initWithDuration_curve_animations(
-                UIViewPropertyAnimator::alloc(mtm),
-                1.0,
-                UIViewAnimationCurve::Linear,
-                Some(&block),
-            );
-            animator.setPausesOnCompletion(true);
-            // The material blurs by about 30 points at full strength.
-            animator.setFractionComplete((radius / 30.0).clamp(0.05, 1.0) as CGFloat);
             view.insertSubview_atIndex(&effect_view, 0);
             self.backdrop = Some(Backdrop {
                 view: effect_view,
                 animator,
                 radius,
                 dark,
+                glass,
             });
         }
         if let Some(b) = &self.backdrop {

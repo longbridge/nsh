@@ -9,6 +9,7 @@ export type IconName =
   | "form"
   | "mobile"
   | "components"
+  | "controls"
   | "gestures"
   | "physics"
   | "animation"
@@ -95,6 +96,14 @@ const glyphs: Record<IconName, Draw> = {
     rect(c, 11, 3, 6, 6, 1.6);
     rect(c, 3, 11, 6, 6, 1.6);
     circle(c, 14, 14, 3);
+  },
+  controls: (c) => {
+    // A switch over a checked box.
+    rect(c, 3, 3.5, 14, 6, 3);
+    circle(c, 14, 6.5, 1.6, true);
+    rect(c, 3, 11.5, 5, 5, 1.4);
+    line(c, [4.3, 14, 5.3, 15, 6.9, 13]);
+    line(c, [10.5, 14, 17, 14]);
   },
   gestures: (c) => {
     line(c, [8, 17, 8, 7.5, 10, 6, 11, 7.5, 11, 11]);

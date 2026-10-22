@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, `Checkbox`, `Radio` in a `RadioGroup`, `Switch`,
-//! `Tab` in `Tabs`), navigation (stacks and pages), dialogs, popups on the core's overlays
+//! `Tab` in `Tabs`), a progress bar (`Progress`), disclosure (`Collapsible`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), safe areas,
 //! selection areas,
 //! the system's dialogs and the software keyboard, and the theme's semantic
@@ -16,11 +16,13 @@
 mod alert_dialog;
 mod button;
 mod checkbox;
+mod collapsible;
 mod keyboard;
 mod menu;
 mod navigation;
 mod popover;
 mod popup;
+mod progress;
 mod radio;
 mod safe_area;
 mod selection_area;
@@ -42,6 +44,7 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
+    collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
     keyboard::{
         AvoidBehavior, Keyboard, KeyboardAvoidingView, KeyboardAvoidingViewElement,
         KeyboardAvoidingViewProps, keyboard_avoiding_view,
@@ -55,6 +58,7 @@ pub use crate::{
     navigation::{dialog, nav_page, nav_stack},
     popover::{Popover, PopoverElement, PopoverEvent, PopoverProps, popover},
     popup::OpenChangeReason,
+    progress::{Progress, ProgressElement, ProgressProps, progress},
     radio::{
         Radio, RadioElement, RadioEvent, RadioGroup, RadioGroupElement, RadioGroupProps,
         RadioProps, radio, radio_group,
@@ -94,9 +98,11 @@ pub fn registry() -> Registry {
         .register::<KeyboardAvoidingView>()
         .register::<SelectionArea>()
         .register::<Checkbox>()
+        .register::<Collapsible>()
         .register::<Radio>()
         .register::<RadioGroup>()
         .register::<Switch>()
+        .register::<Progress>()
         .register::<Tab>()
         .register::<Tabs>()
         .register::<TextView>()
@@ -131,12 +137,14 @@ mod tests {
             [
                 "Button",
                 "Checkbox",
+                "Collapsible",
                 "ContextMenu",
                 "KeyboardAvoidingView",
                 "Menu",
                 "MenuItem",
                 "MenuSeparator",
                 "Popover",
+                "Progress",
                 "Radio",
                 "RadioGroup",
                 "SafeAreaView",

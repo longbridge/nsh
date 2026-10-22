@@ -35,6 +35,7 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -335,6 +336,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

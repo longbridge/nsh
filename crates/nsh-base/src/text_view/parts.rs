@@ -196,7 +196,7 @@ type Refine = Rc<dyn Fn(StyleRefinement) -> StyleRefinement>;
 /// provide_context(
 ///     TextViewParts::new()
 ///         .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
-///         .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0))),
+///         .part(TextViewPart::Code, |s| s.bg(theme().muted).rounded(px(4.0))),
 /// );
 /// ```
 #[derive(Clone, Default)]

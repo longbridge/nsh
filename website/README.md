@@ -166,12 +166,21 @@ The rules every demo follows, now and for the ones to come:
 - **Every element page has one.** Each page of `elements/` (its index aside)
   names a demo, `el-<page>` unless one already shows the element
   (`tests/content.test.ts` checks it).
-- **It works in both layouts.** Lay it out with flex so it fills either frame:
-  no width over 390 points, nothing that only fits one of them; give wide
-  content room with `maxWidth` or columns read from `windowSize()`. Where the
-  element behaves differently by device (menus, tooltips, context menus,
-  hover), the demo shows both behaviors and says on screen what to do
-  (`platform.idiom === "desktop" ? "Right click a row" : "Hold a row"`).
+- **It is laid out for both layouts.** On a phone it is one column with flex,
+  44-point targets. In a window at least 700 points wide (`wide()` from
+  `demos/palette.ts`) it is a desktop layout ([Design Guides](docs/design-guides.md),
+  "Layout patterns"): the subject on a stage that takes the room, beside an
+  inspector column of about 300 points with its state, its event log and
+  the options that tune it (`Split`, or `Stage` and `Inspector`, with
+  `Panel`, `Log` and `Segmented`). With a pointer (`desktop`, from
+  `platform.idiom === "desktop"`) it has desktop density (`size`: controls
+  of 28 and 32 points, rows of 32 and 40): buttons as wide as their labels,
+  never as wide as the stage, comparable numbers in tabular figures at the
+  end, one content inset for the whole demo. Where the element behaves
+  differently by device (menus, tooltips, context menus, hover), the demo
+  shows both behaviors and says on screen what to do in the device's words
+  (`desktop ? "Click a row, or Tab to it and press Space" : "Tap a row"`).
+  The phone layout keeps working as the desktop one changes.
 - **It shows the element, not the gallery.** A short screen of what the page
   explains: the element's main props and events, its state printed on screen,
   colours from `demos/palette.ts` (light and dark).
@@ -191,7 +200,10 @@ Run it again after changing a demo or the runtime. Embedded demos follow
 the page's theme (`?theme=`, then a message on each change) and take their
 colours from `demos/palette.ts`; `demos/nsh.json` gives Rust components the matching light and dark
 theme (`demos/graphite-theme.json`).
-The playground compiles in the browser, without that theme. The
+The playground compiles in the browser, without that theme, one file at a
+time: it puts `demos/palette.ts` in place of a demo's import of it, so the
+palette is written without JSX and a demo declares none of its names at the
+top level. The
 player is built separately from the site. Whether it exists is decided
 at build time: without `public/play/index.html`, pages show the demo's source
 only and the home page's host app shows a placeholder. Adding or removing the
