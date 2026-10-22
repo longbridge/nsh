@@ -1,14 +1,13 @@
 import { mount, signal, Text, View } from "nsh";
 import { Sheet } from "nsh/base";
-import { platform } from "nsh/device";
-import { ui } from "./palette";
+import { desktop, Inspector, Log, Panel, size, Stage, ui, wide } from "./palette";
 
 type Side = "bottom" | "top" | "left" | "right";
 
 /** The panel's corners and size across, by the edge it is on. */
 function panel(side: Side) {
   const r = 20;
-  const across = side === "left" || side === "right" ? { width: 280 } : {};
+  const across = side === "left" || side === "right" ? { width: wide() ? 320 : 280 } : {};
   const corners = {
     bottom: { borderTopLeftRadius: r, borderTopRightRadius: r, paddingBottom: 32 },
     top: { borderBottomLeftRadius: r, borderBottomRightRadius: r, paddingTop: 32 },
@@ -28,39 +27,64 @@ function App() {
     open.set(true);
     log(`open · side ${s}`);
   };
+  /** A button that opens the sheet at side `s`. */
+  const opener = (s: Side) => (
+    <View
+      onPress={() => show(s)}
+      activeStyle={{ opacity: 0.7 }}
+      style={{
+        ...(s === side() ? ui().accentFill : ui().raised),
+        height: wide() ? size.control : 42,
+        paddingHorizontal: wide() ? 12 : 0,
+        borderRadius: wide() ? 8 : 10,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ fontSize: wide() ? 13 : 14, fontWeight: "600", color: s === side() ? ui().onAccent : ui().text }}>side="{s}"</Text>
+    </View>
+  );
+  const changes = () => <Log title="onOpenChange(open, reason) · onCancel" lines={events()} minHeight={130} />;
+
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>sheet</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Open a side; click the backdrop or press Escape to close it" : "Open a side; tap the backdrop or Android's back to close it"}
+        {desktop ? "Open a side; click the backdrop or press Escape to close it" : "Open a side; tap the backdrop or Android's back to close it"}
       </Text>
 
-      <View style={{ flex: 1, minHeight: 200, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ width: 240, gap: 8 }}>
-          <Each of={["top", "left", "right", "bottom"] as Side[]}>
-            {(s) => (
-              <View
-                onPress={() => show(s())}
-                activeStyle={{ opacity: 0.7 }}
-                style={{
-                  ...(s() === side() ? ui().accentFill : ui().raised),
-                  height: 42,
-                  borderRadius: 10,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={{ fontSize: 14, fontWeight: "600", color: s() === side() ? ui().onAccent : ui().text }}>side="{s()}"</Text>
+      {() =>
+        wide() ? (
+          <View style={{ flex: 1, flexDirection: "row", gap: 16 }}>
+            {/* Each button at the edge its sheet comes from. */}
+            <Stage width={360} gap={12}>
+              <View style={{ alignItems: "center" }}>{opener("top")}</View>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                {opener("left")}
+                {opener("right")}
               </View>
-            )}
-          </Each>
-        </View>
-      </View>
-
-      <View style={{ ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: 130 }}>
-        <Text style={{ fontSize: 12, color: ui().muted }}>onOpenChange(open, reason) · onCancel</Text>
-        <Each of={events()}>{(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}</Each>
-      </View>
+              <View style={{ alignItems: "center" }}>{opener("bottom")}</View>
+            </Stage>
+            <Inspector>
+              <Panel title="open · side">
+                <Text style={{ fontSize: 13, color: ui().text }}>
+                  {open() ? "open" : "closed"} · {side()}
+                </Text>
+              </Panel>
+              {changes()}
+            </Inspector>
+          </View>
+        ) : (
+          <>
+            <View style={{ flex: 1, minHeight: 200, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 240, gap: 8 }}>
+                <Each of={["top", "left", "right", "bottom"] as Side[]}>{(s) => opener(s())}</Each>
+              </View>
+            </View>
+            {changes()}
+          </>
+        )
+      }
 
       <Sheet
         open={open()}
@@ -75,7 +99,7 @@ function App() {
       >
         <Text style={{ fontSize: 17, fontWeight: "700", color: ui().text }}>Filters</Text>
         <Text style={{ fontSize: 14, color: ui().muted }}>
-          A panel at the {side()} edge. {platform.idiom === "desktop" ? "The backdrop and Escape close it." : "The backdrop and Android's back close it."}
+          A panel at the {side()} edge. {desktop ? "The backdrop and Escape close it." : "The backdrop and Android's back close it."}
         </Text>
         <View
           onPress={() => {
@@ -83,9 +107,13 @@ function App() {
             log("Done pressed");
           }}
           activeStyle={{ opacity: 0.7 }}
-          style={{ ...ui().primary, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" }}
+          style={
+            wide()
+              ? { ...ui().primary, alignSelf: "flex-end", height: size.control, paddingHorizontal: 14, borderRadius: 8, justifyContent: "center" }
+              : { ...ui().primary, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" }
+          }
         >
-          <Text style={{ fontSize: 14, fontWeight: "600", color: ui().onPrimary }}>Done</Text>
+          <Text style={{ fontSize: wide() ? 13 : 14, fontWeight: "600", color: ui().onPrimary }}>Done</Text>
         </View>
       </Sheet>
     </View>

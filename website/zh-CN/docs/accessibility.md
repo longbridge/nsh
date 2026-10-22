@@ -49,7 +49,7 @@ view()
 | `.hint(..)` | `accessibilityHint` | `string` | 激活元素会发生什么，在停顿后朗读。 |
 | `.role(..)` | `role` | `AccessibilityRole` | 元素是什么。 |
 | `.accessibility_state(..)` | `accessibilityState` | `AccessibilityState` | 它的状态：禁用、选中、勾选、忙碌、展开。`selected` 同时让选中样式生效，`checked` 为 true 时让勾选样式生效，为 `"mixed"` 时让半选样式生效。 |
-| | `accessibilityValue` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
+| `.accessibility_value(..)` | `accessibilityValue` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | | `accessibilityActions` | `{ name, label? }[]` | 提供给辅助技术的操作。 |
 | `.on_accessibility_action(..)` | `onAccessibilityAction` | `(e: { actionName }) => void` | 执行了某个操作（Rust：操作名称）。 |
 | | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
@@ -83,6 +83,8 @@ text("Settings")
 ```
 
 ### 状态与值
+
+应用里的开关用 `nsh/base` 的 [`Switch`](../elements/switch.md)，角色和状态由它自己设置。下面的例子展示在视图上设置角色和状态的效果。
 
 ```rust tabs
 use nsh_core::{Checked, ui::prelude::*};

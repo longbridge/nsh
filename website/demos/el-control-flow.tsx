@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { ui } from "./palette";
+import { Inspector, Panel, size, Stage, ui, wide } from "./palette";
 
 interface Todo {
   id: number;
@@ -20,74 +20,106 @@ function App() {
   const toggle = (id: number) => todos.update((list) => list.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
   const add = () => todos.update((list) => [...list, { id: nextId++, title: `Task ${nextId - 1}`, done: false }]);
   const remove = (id: number) => todos.update((list) => list.filter((t) => t.id !== id));
-  const button = { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 } as const;
+  // Touch buttons on a phone; compact ones, as wide as their labels, in a desktop layout.
+  const button = () =>
+    wide()
+      ? ({ borderRadius: 8, height: size.control, paddingHorizontal: 12, justifyContent: "center" } as const)
+      : ({ borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 } as const);
+
+  const actions = () => (
+    <View style={{ flexDirection: "row", gap: 8 }}>
+      <View onPress={add} activeStyle={{ opacity: 0.6 }} style={{ ...ui().accentFill, ...button() }}>
+        <Text style={{ color: ui().onAccent, fontWeight: "600", fontSize: wide() ? 13 : undefined }}>Add</Text>
+      </View>
+      <View onPress={() => showDone.set(!showDone())} activeStyle={{ opacity: 0.6 }} style={{ ...ui().raised, ...button() }}>
+        <Text style={{ color: ui().text, fontSize: wide() ? 13 : undefined }}>{showDone() ? "Hide done" : "Show done"}</Text>
+      </View>
+    </View>
+  );
+  const list = () => (
+    <If
+      when={visible().length > 0}
+      else={<Text style={{ color: ui().muted, textAlign: "center", marginTop: 40 }}>Nothing to show.</Text>}
+    >
+      <View style={{ gap: wide() ? 6 : 8 }}>
+        <Each of={visible()} key={(t: Todo) => t.id}>
+          {(todo, index) => (
+            <View
+              style={{
+                ...ui().row,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                ...(wide() ? { borderRadius: 8, height: size.row, paddingHorizontal: 12 } : { borderRadius: 12, padding: 12 }),
+              }}
+            >
+              <View
+                onPress={() => toggle(todo().id)}
+                hitSlop={8}
+                style={{
+                  width: wide() ? 18 : 22,
+                  height: wide() ? 18 : 22,
+                  borderRadius: wide() ? 9 : 11,
+                  borderWidth: 2,
+                  borderColor: ui().accent,
+                  backgroundColor: todo().done ? ui().accent : "transparent",
+                }}
+              />
+              <Text
+                style={{
+                  flex: 1,
+                  fontSize: wide() ? size.label : undefined,
+                  color: todo().done ? ui().faint : ui().text,
+                  textDecorationLine: todo().done ? "line-through" : "none",
+                }}
+              >
+                {index() + 1}. {todo().title}
+              </Text>
+              <If when={todo().done}>
+                <View onPress={() => remove(todo().id)} hitSlop={8}>
+                  <Text style={{ color: ui().down, fontSize: wide() ? 13 : undefined }}>Remove</Text>
+                </View>
+              </If>
+            </View>
+          )}
+        </Each>
+      </View>
+    </If>
+  );
+  const counts = () => `${todos().filter((t) => t.done).length} of ${todos().length} done`;
 
   return (
     <View style={{ flex: 1, backgroundColor: ui().page }}>
-      <View style={{ flex: 1, width: "100%", maxWidth: 560, alignSelf: "center", padding: 20, paddingTop: 24, gap: 12 }}>
-        <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>if / each</Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <View
-            onPress={add}
-            activeStyle={{ opacity: 0.6 }}
-            style={{ ...ui().accentFill, ...button }}
-          >
-            <Text style={{ color: ui().onAccent, fontWeight: "600" }}>Add</Text>
-          </View>
-          <View
-            onPress={() => showDone.set(!showDone())}
-            activeStyle={{ opacity: 0.6 }}
-            style={{ ...ui().raised, ...button }}
-          >
-            <Text style={{ color: ui().text }}>{showDone() ? "Hide done" : "Show done"}</Text>
-          </View>
-        </View>
-
-        <If
-          when={visible().length > 0}
-          else={<Text style={{ color: ui().muted, textAlign: "center", marginTop: 40 }}>Nothing to show.</Text>}
-        >
-          <View style={{ gap: 8 }}>
-            <Each of={visible()} key={(t: Todo) => t.id}>
-              {(todo, index) => (
-                <View
-                  style={{ ...ui().row, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 12, padding: 12 }}
-                >
-                  <View
-                    onPress={() => toggle(todo().id)}
-                    hitSlop={8}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 11,
-                      borderWidth: 2,
-                      borderColor: ui().accent,
-                      backgroundColor: todo().done ? ui().accent : "transparent",
-                    }}
-                  />
-                  <Text
-                    style={{
-                      flex: 1,
-                      color: todo().done ? ui().faint : ui().text,
-                      textDecorationLine: todo().done ? "line-through" : "none",
-                    }}
-                  >
-                    {index() + 1}. {todo().title}
+      {() =>
+        wide() ? (
+          <View style={{ flex: 1, padding: 20, paddingTop: 24, gap: 14 }}>
+            <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>if / each</Text>
+            <Text style={{ color: ui().muted }}>Click a circle to finish a task; Remove shows on finished ones</Text>
+            <View style={{ flex: 1, flexDirection: "row", gap: 16 }}>
+              <Stage width={420}>
+                {/* A fixed height, so the list grows downwards instead of moving. */}
+                <View style={{ height: 360 }}>{list()}</View>
+              </Stage>
+              <Inspector>
+                {actions()}
+                <Panel title="todos · showDone">
+                  <Text style={{ fontSize: 13, color: ui().text, fontVariant: ["tabular-nums"] }}>{counts()}</Text>
+                  <Text style={{ fontSize: 13, color: ui().text }}>
+                    {showDone() ? "every task shown" : `${visible().length} not done shown`}
                   </Text>
-                  <If when={todo().done}>
-                    <View onPress={() => remove(todo().id)} hitSlop={8}>
-                      <Text style={{ color: ui().down }}>Remove</Text>
-                    </View>
-                  </If>
-                </View>
-              )}
-            </Each>
+                </Panel>
+              </Inspector>
+            </View>
           </View>
-        </If>
-        <Text style={{ fontSize: 12, color: ui().muted, fontVariant: ["tabular-nums"] }}>
-          {todos().filter((t) => t.done).length} of {todos().length} done
-        </Text>
-      </View>
+        ) : (
+          <View style={{ flex: 1, width: "100%", maxWidth: 560, alignSelf: "center", padding: 20, paddingTop: 24, gap: 12 }}>
+            <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>if / each</Text>
+            {actions()}
+            {list()}
+            <Text style={{ fontSize: 12, color: ui().muted, fontVariant: ["tabular-nums"] }}>{counts()}</Text>
+          </View>
+        )
+      }
     </View>
   );
 }

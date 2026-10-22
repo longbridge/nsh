@@ -64,12 +64,14 @@ pub struct Theme {
     tokens: Option<Arc<ClassTokens>>,
 }
 
-/// The design tokens (`crate::ui::Tokens`) by the names classes give them: a key's dots are dashes (`muted.foreground`
-/// is `muted-foreground`) and `.background` may be left out (`primary` is
-/// `primary.background`). Colors are names of the color utilities
-/// (`bg-primary`, `text-muted-foreground/70`) when the Tailwind theme has no
-/// color of that name, and variables like numbers (`bg-(--primary)`,
-/// `rounded-(--radius-lg)`, `text-(length:--font-size)`).
+/// The design tokens (`crate::ui::Tokens`) by the names classes give them,
+/// their names: as Tailwind's theme variables, colors are names of the
+/// color utilities (`bg-primary`, `text-muted-foreground/70`) when the
+/// Tailwind theme has no color of that name, and every token is a
+/// variable (`bg-(--primary)`, `rounded-(--radius-lg)`,
+/// `text-(length:--font-size)`, `font-(family-name:--font-mono)`). The
+/// fonts `font-sans` and `font-mono` are what `font-sans` and `font-mono`
+/// set, as `--font-sans` and `--font-mono` are in Tailwind.
 ///
 /// Classes naming them are parsed with each appearance's values (one rule
 /// per appearance when they differ), so applying them costs what a palette
@@ -79,6 +81,7 @@ pub struct Theme {
 pub(crate) struct ClassTokens {
     colors: FxHashMap<Box<str>, AdaptiveColor>,
     numbers: FxHashMap<Box<str>, f32>,
+    fonts: FxHashMap<Box<str>, Arc<str>>,
 }
 
 static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
@@ -87,28 +90,20 @@ static DEFAULT_TOKENS: LazyLock<Arc<ClassTokens>> =
 impl ClassTokens {
     /// The names classes give `theme`'s tokens.
     pub(crate) fn new(theme: &crate::ui::Tokens) -> Self {
-        let mut tokens = ClassTokens::default();
-        // Exact names win over the short ones: set after them.
-        let mut exact = Vec::new();
-        for (key, c) in theme.colors() {
-            let name = key.replace('.', "-");
-            if let Some(short) = name.strip_suffix("-background") {
-                tokens.colors.insert(short.into(), c);
-            }
-            exact.push((name, c));
+        ClassTokens {
+            colors: theme.colors().map(|(k, c)| (k.into(), c)).collect(),
+            numbers: theme.numbers().map(|(k, n)| (k.into(), n)).collect(),
+            fonts: theme.fonts().map(|(k, f)| (k.into(), f.clone())).collect(),
         }
-        for (name, c) in exact {
-            tokens.colors.insert(name.into(), c);
-        }
-        for (key, n) in theme.numbers() {
-            tokens.numbers.insert(key.replace('.', "-").into(), n);
-        }
-        tokens
     }
 
-    /// The names of the colors and the numbers.
+    /// The names of the colors, the numbers and the fonts.
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
-        self.colors.keys().chain(self.numbers.keys()).map(|n| &**n)
+        self.colors
+            .keys()
+            .chain(self.numbers.keys())
+            .chain(self.fonts.keys())
+            .map(|n| &**n)
     }
 
     /// Whether `self` and `other` have the same names (only their values
@@ -116,8 +111,16 @@ impl ClassTokens {
     pub(crate) fn same_names(&self, other: &ClassTokens) -> bool {
         self.colors.len() == other.colors.len()
             && self.numbers.len() == other.numbers.len()
+            && self.fonts.len() == other.fonts.len()
             && self.colors.keys().all(|k| other.colors.contains_key(k))
             && self.numbers.keys().all(|k| other.numbers.contains_key(k))
+            && self.fonts.keys().all(|k| other.fonts.contains_key(k))
+    }
+
+    /// Whether `utility` is one of Tailwind's that a token replaces:
+    /// `font-sans` and `font-mono` when the theme has those fonts.
+    pub(crate) fn replaces(&self, utility: &str) -> bool {
+        self.fonts.contains_key(utility)
     }
 
     /// `utility` with its tokens replaced by their values in the light or
@@ -129,6 +132,9 @@ impl ClassTokens {
             let c = if dark { c.dark } else { c.light };
             let _ = write!(out, "#{:08x}", Color::from(c).0);
         };
+        if let Some(family) = self.fonts.get(utility) {
+            return Some(format!("font-[family-name:{}]", family.replace(' ', "_")));
+        }
         if utility.contains('(') {
             // `(--name)` and `(hint:--name)`, Tailwind 4's shorthand of
             // `[var(--name)]`.
@@ -152,8 +158,10 @@ impl ClassTokens {
                     .colors
                     .get(name)
                     .filter(|_| hint.is_none_or(|h| h == "color"));
+                let font = self.fonts.get(name).filter(|_| hint == Some("family-name"));
                 match (color, self.numbers.get(name)) {
                     (Some(c), _) => hex(&mut out, c),
+                    (None, _) if let Some(f) = font => out.push_str(&f.replace(' ', "_")),
                     (None, Some(n)) if hint == Some("number") => {
                         let _ = write!(out, "{n}");
                     }

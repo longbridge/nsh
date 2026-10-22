@@ -17,8 +17,8 @@ pub fn App() -> impl IntoElement {
     let count = signal(0_u32);
     view()
         .flex_1()
-        .bg(move || theme().background())
-        .text_color(move || theme().foreground())
+        .bg(move || theme().background)
+        .text_color(move || theme().foreground)
         .child(
             safe_area_view()
                 .flex_1()
@@ -34,13 +34,13 @@ pub fn App() -> impl IntoElement {
                                 .px_5()
                                 .py_3()
                                 .rounded(px(10.0))
-                                .bg(move || theme().primary())
+                                .bg(move || theme().primary)
                                 .active(|s| s.opacity(0.6))
                                 .on_press(move || count.update(|value| *value += 1))
                                 .child(
                                     text("Tap")
                                         .text_size(px(17.0))
-                                        .text_color(move || theme().primary_foreground()),
+                                        .text_color(move || theme().primary_foreground),
                                 ),
                         ),
                 ),

@@ -156,8 +156,8 @@ macro_rules! events {
 // The order is part of the platform protocols (`encode.rs`, `Native.java`):
 // append new kinds at the end.
 events! {
-    Press = "onPress": "A tap / click.",
-    LongPress = "onLongPress": "A press held for about half a second.",
+    Press = "onPress": "A tap / click (payload: [`EventPayload::Press`] where the backend knows the pointer, else none).",
+    LongPress = "onLongPress": "A press held for about half a second (payload as `Press`).",
     PanStart = "onPanStart": "A drag started (payload: [`EventPayload::Pan`]).",
     PanEnd = "onPanEnd": "A drag ended (payload: [`EventPayload::Pan`] with velocity).",
     Refresh = "onRefresh": "Pull-to-refresh was triggered on a scroll or list.",
@@ -169,8 +169,8 @@ events! {
     SubmitEditing = "onSubmitEditing" as "onSubmit": "The return key was pressed in an input (payload: [`EventPayload::Text`]).",
     Focus = "onFocus": "An input became focused.",
     Blur = "onBlur": "An input lost focus.",
-    PressDown = "onPressIn" as "onPressDown": "A press went down on a pressable view (a finger, a pen or a mouse button).",
-    PressUp = "onPressOut" as "onPressUp": "The press ended: released, moved away or cancelled.",
+    PressDown = "onPressIn" as "onPressDown": "A press went down on a pressable view (a finger, a pen or a mouse button; payload as `Press`).",
+    PressUp = "onPressOut" as "onPressUp": "The press ended: released, moved away or cancelled (payload as `Press`).",
     Layout = "onLayout": "The frame changed (payload: [`EventPayload::Layout`], relative to the parent).",
     PinchStart = "onPinchStart": "A pinch started (payload: `scale`, `velocity`).",
     PinchEnd = "onPinchEnd": "A pinch ended (payload: `scale`, `velocity`).",
@@ -369,6 +369,19 @@ pub struct HoverEvent {
     pub modifiers: crate::keymap::Modifiers,
 }
 
+/// Where the pointer was at a press ([`EventKind::Press`],
+/// [`EventKind::LongPress`], [`EventKind::PressDown`],
+/// [`EventKind::PressUp`]), on backends that know it, in points.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PressEvent {
+    /// Position in the pressed view, its transforms undone (for a pressed
+    /// span of a text, in that text's view).
+    pub position: Point<Points>,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page`.
+    pub page_position: Point<Points>,
+}
+
 /// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
 /// points.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -506,6 +519,9 @@ pub enum EventPayload {
     Hover(HoverEvent),
     /// A context menu asked for over a view (`onContextMenu`).
     ContextMenu(ContextMenuEvent),
+    /// Where the pointer was at a press (`onPress`, `onLongPress`,
+    /// `onPressDown`, `onPressUp`), on backends that know it.
+    Press(PressEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// The lines of a text block.
@@ -1483,6 +1499,11 @@ pub enum Prop {
     /// (one column, not inverted).
     #[prop(js = "stickyHeaderIndices", with = crate::js::host_values::sticky, reset = Prop::StickyIndices(Vec::new()), on = LIST)]
     StickyIndices(Vec<u32>),
+    /// `stickyHeaderOffset`: how far from the start of the viewport sticky
+    /// items stick, as CSS `position: sticky`'s `top` (negative: partly out
+    /// of view); the content scrolls under the space before them.
+    #[prop(js = "stickyHeaderOffset", default = Points(0.0), on = LIST)]
+    StickyOffset(Points),
     /// `contentStyle`: padding and gaps of the content.
     #[prop(js = "contentStyle", on = LIST)]
     ListContent(ListContentStyle),

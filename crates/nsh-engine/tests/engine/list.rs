@@ -116,6 +116,7 @@ fn start(app: &str) -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) 
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

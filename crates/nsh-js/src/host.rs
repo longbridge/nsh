@@ -979,6 +979,17 @@ impl Host {
         });
     }
 
+    /// Publishes the design tokens the app is drawn with to JS (`token()`
+    /// of `nsh`). Call before evaluating the bundle, then on every change.
+    pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::ui::Tokens>) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::env::set_tokens(cx.as_raw().as_ptr(), tokens);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// True if JS asked for a display frame (`requestAnimationFrame`).
     pub fn wants_frame(&self) -> bool {
         !self.shared.frames.borrow().is_empty()
@@ -1101,6 +1112,13 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             for (key, value) in fields {
                 obj.set(*key, payload_value(cx, value)?)?;
             }
+        }
+        EventPayload::Press(nsh_core::PressEvent {
+            position,
+            page_position,
+        }) => {
+            obj.set("position", point_object(cx, *position)?)?;
+            obj.set("pagePosition", point_object(cx, *page_position)?)?;
         }
         EventPayload::Hover(nsh_core::HoverEvent {
             position,
@@ -1921,6 +1939,32 @@ const report = (v) => text(String(v));
         assert_eq!(Rc::strong_count(&captured), 1);
         assert!(host.shared.system_exit_handler.borrow().is_none());
         host.stop("idempotent stop".into());
+    }
+
+    #[test]
+    fn press_payload_has_both_positions() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::PressEvent {
+            position: point(px(3.0), px(4.5)),
+            page_position: point(px(30.0), px(40.5)),
+        };
+        host.cx.with(|cx| {
+            let value = payload_object(&cx, &EventPayload::Press(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |o: &str, k: &str| {
+                let o: rquickjs::Object = obj.get(o).unwrap();
+                o.get::<_, f64>(k).unwrap()
+            };
+            assert_eq!(
+                (
+                    num("position", "x"),
+                    num("position", "y"),
+                    num("pagePosition", "x"),
+                    num("pagePosition", "y")
+                ),
+                (3.0, 4.5, 30.0, 40.5)
+            );
+        });
     }
 
     #[test]

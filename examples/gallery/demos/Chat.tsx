@@ -847,7 +847,7 @@ export function Chat() {
               role="button"
               accessibilityLabel={chip().label}
               accessibilityState={{ selected: current() === chip().id }}
-              class={current() === chip().id ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-card dark:active:bg-graphite-raised"}
+              class={current() === chip().id ? "bg-accent" : "hover:bg-card active:bg-accent"}
               style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.control, gap: 2, cursor: "pointer" }}
             >
               <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: current() === chip().id ? "600" : "400", color: colors.text }}>

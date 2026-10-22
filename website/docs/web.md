@@ -271,6 +271,7 @@ The page reports the rest of the environment, and keeps it current:
 | Value | From the browser |
 |---|---|
 | Locale (`Intl`'s default) | `navigator.languages[0]` |
+| Time zone (`Date`'s local time, `Intl`'s default `timeZone`) | the browser's (`Intl.DateTimeFormat().resolvedOptions().timeZone`), daylight saving time included |
 | The layout direction (`rtl:` / `ltr:`) | `<html dir>` when set, else the locale's script |
 | `reduceMotion()` | `prefers-reduced-motion` |
 | `fontScale()` | the root element's font size / 16 px (the browser's text size setting) |

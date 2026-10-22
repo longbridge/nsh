@@ -5,7 +5,9 @@
   CSS (v4), whose generated CSS is the reference for each utility (the tests compare against it). What NSH cannot
   support is unsupported (an unknown class, a rejected value with a warning), never given a different meaning. Inline
   style objects keep React Native's defaults for unset keys (a column, `flexShrink: 0`, `alignContent: flex-start`
-  outside grids).
+  outside grids). Colors (`crates/nsh-core/src/css.rs`) are hex, `rgb()`, `hsl()`, `oklch()`, `oklab()`, names and
+  `color-mix()` of any of them (CSS Color 5: `in srgb`, `srgb-linear`, `xyz`, `oklab`, `oklch` or `hsl`, hue methods
+  for the polar spaces, premultiplied alpha), packed to sRGB with clamped channels.
 - **Tailwind** (`class` / `classList` on every element): JS only passes the strings; the core resolves them (how, and
   what is cached: `crates/nsh-core/src/tailwind/mod.rs`, `core/classes.rs`). The inline `style` always wins over classes; a key set to `undefined` sets nothing, so the class value (or the default) stays, while `null` sets the default.
   Later utilities win over earlier ones (components append a `class` prop, no `tailwind-merge`); variant rules apply
@@ -35,11 +37,16 @@
   keys are build errors). Rust components do not use classes: their typed styles (`ui/style.rs`, every utility group has its
   methods, tested against the classes) lower into the same rules and their
   colors come from `nsh/base`'s theme, `nsh.json` `"theme"` (`docs/dev/components.md`); the Tailwind theme only
-  shapes the app's own classes. The app's classes name the design tokens (`ui::Tokens`, by the names of
-  `tailwind/theme.rs` `ClassTokens`: every color and number by its key, dots as dashes, `.background` optional; `bg-primary` when the
-  Tailwind theme has no such color, `rounded-(--radius)`): such a utility is parsed with the light and the dark
-  values as arbitrary ones (two rules of its rank when they differ) and depends on `deps::THEME`. When the design
-  tokens the app draws with change (`Core::set_tokens`, `set_host_tokens`; a host's keep the app's keys they lack,
+  shapes the app's own classes. The app's classes name the design tokens (`ui::Tokens`: shadcn/ui's and the app's
+  own, `nsh.json` `"theme"`, by the names of `tailwind/theme.rs` `ClassTokens`) as Tailwind 4 names the variables of
+  `@theme`: a color is a color utility's name (`bg-primary`, `text-muted-foreground/70`, `bg-up/30`) when the
+  Tailwind palette has no color of that name (a palette color of the same name wins), and every token is a variable
+  (`bg-(--primary)`, `rounded-(--radius)`, `text-(length:--x)`, `font-(family-name:--font-mono)`); the fonts
+  `font-sans` / `font-mono`, when the theme sets them, are what the `font-sans` / `font-mono` utilities set
+  (`ClassTokens::replaces`), and `font-sans` is the default font of every text (Tailwind's `--font-sans`, a page's
+  preflight). Such a utility is parsed with the light and the dark values as arbitrary ones (two rules of its rank
+  when they differ, so it follows the appearance with no `dark:`) and depends on `deps::THEME`. When the design
+  tokens the app draws with change (`Core::set_tokens`, `set_host_tokens`; a host's keep the app's names they lack,
   `Tokens::over`), `Core::class_tokens_changed` drops the cached strings that name tokens and resolves
   their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Class-only settings
@@ -63,7 +70,9 @@
   animation drives (`Animated` `backgroundColor`) replaces the gradients, unless that state sets a gradient of its own:
   done in the core, so every platform shows it alike), `filter` (`brightness`, `contrast`,
   `grayscale`, `hue-rotate`, `invert`, `saturate`, `sepia`, `opacity`, `blur`, `drop-shadow`; color filters are composed into one
-  matrix), `backdropFilter` (blur), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
+  matrix), `backdropFilter` (blur), `glassEffect` (Apple's Liquid Glass, drawn in the
+  `backdropFilter`'s place on iOS 26 and later and nowhere else, so give a glass view a blur to fall back
+  to), `mixBlendMode`, `outline*`, `visibility`, `cursor`, `transition*` (CSS: property groups,
   duration, delay, easing) and `animation*` (Tailwind's `spin` / `ping` / `pulse` / `bounce`), `display: grid` with
   `gridTemplateColumns/Rows` (line names: `grid.rs` turns them into taffy's `grid_template_*_names`, one set per
   line between components, a `repeat()` counting as one), `gridAutoFlow/Columns/Rows`, `gridColumn/Row(Start/End)` (by
@@ -135,9 +144,8 @@ The packed **`Color`** (`0xRRGGBBAA`) is only the storage and wire form: what th
 `#rrggbbaa`. A color becomes packed where it enters a style, a prop or an operation (`Declaration::lower`, the host
 setters), and nowhere earlier.
 
-Adjusting a color is a method of `Hsla`, so state colors are derived rather than picked (the theme's pressed shades
-are `c.blend(opaque_grey(0.0, 0.12))` in light appearance and `opaque_grey(1.0, 0.12)` in dark,
-`nsh-base`'s `theme.rs` `pressed`):
+Adjusting a color is a method of `Hsla`, so state colors are derived rather than picked (a pressed shade is
+`c.blend(opaque_grey(0.0, 0.12))` in light appearance and `opaque_grey(1.0, 0.12)` in dark):
 
 | Method | Does |
 |---|---|
@@ -157,8 +165,7 @@ are `c.blend(opaque_grey(0.0, 0.12))` in light appearance and `opaque_grey(1.0, 
 to float is `byte / 255`; float to packed clamps to `0..=1`, scales by 255 and rounds halves away from zero (the rule
 `rgb()`, `hsl()` and `oklch()` in CSS pack with); HSL to RGB is CSS Color 4's formula (`color::hsl_to_rgb`, shared
 with `hsl()`), so `hsla(h, s, l, a)` packs as `hsl(h·360 s·100% l·100% / a)` does. Tests hold all of it: every 24-bit
-color through `Hsla` and back, a table of CSS color strings with their packed values (`css.rs`), the theme's pressed
-shades against the per-channel mix they replaced, `opacity` against the packed alpha scaling it replaced (the same for
+color through `Hsla` and back, a table of CSS color strings with their packed values (`css.rs`), `opacity` against the packed alpha scaling it replaced (the same for
 opaque colors; for translucent ones within one alpha step, where `alpha · factor` is exactly a half).
 
 **Deviations from GPUI**, on purpose: packing rounds (GPUI's `From<Rgba> for u32` truncates, which loses colors on a

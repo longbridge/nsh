@@ -68,6 +68,7 @@ mod imp {
             ui_sets: &[nsh_core::ui::Registry],
             posts: nsh_core::ui::Posts,
             environment: &Environment,
+            tokens: Arc<nsh_core::ui::Tokens>,
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -129,6 +130,7 @@ mod imp {
                 nsh_core::canvas::measure_line(&*text_engine, font, text)
             }));
             host.set_environment(environment);
+            host.set_tokens(tokens);
             let script = Script {
                 host,
                 exit_requested,
@@ -271,6 +273,10 @@ mod imp {
             self.host.set_environment(environment);
         }
 
+        pub(crate) fn set_tokens(&self, tokens: Arc<nsh_core::ui::Tokens>) {
+            self.host.set_tokens(tokens);
+        }
+
         pub(crate) fn take_fonts(&self, out: &mut Vec<String>) {
             self.host.take_fonts(out);
         }
@@ -325,6 +331,7 @@ mod stub {
             _: &[nsh_core::ui::Registry],
             _: nsh_core::ui::Posts,
             _: &Environment,
+            _: Arc<nsh_core::ui::Tokens>,
             _: Rc<M>,
             _: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
@@ -401,6 +408,10 @@ mod stub {
         }
 
         pub(crate) fn set_environment(&self, _: &Environment) {
+            match *self {}
+        }
+
+        pub(crate) fn set_tokens(&self, _: Arc<nsh_core::ui::Tokens>) {
             match *self {}
         }
 
