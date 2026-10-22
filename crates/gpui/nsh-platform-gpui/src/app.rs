@@ -145,6 +145,11 @@ pub struct AppOptions {
     /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
     /// their directory of [`data_dir`](Self::data_dir).
     pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
+    /// What the embedding app gives the engines of the views made with
+    /// these options ([`nsh_engine::EngineConfig::context`]): its UI sets'
+    /// functions read it with `nsh_core::ui::engine_context`, so each view
+    /// reaches its own part of the embedding app.
+    pub context: nsh_engine::EngineContext,
 }
 
 impl Default for AppOptions {
@@ -161,6 +166,7 @@ impl Default for AppOptions {
             limits: Limits::default(),
             data_dir: None,
             storage: None,
+            context: Default::default(),
         }
     }
 }
@@ -313,6 +319,7 @@ impl AppView {
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
             clock: Default::default(),
+            context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
         };
@@ -425,10 +432,9 @@ impl AppView {
         crate::rt::flush(cx);
     }
 
-    /// [`AppView::set_theme`] with a theme in gpui-kit's JSON format
-    /// (`{ "themes": [{ "mode": "light", "colors": { … } }, …] }`: a
-    /// gpui-kit theme file, or `ThemeConfig`s serialized; null colors are
-    /// left as they are), over `nsh/base`'s default theme.
+    /// [`AppView::set_theme`] with a theme file of shadcn/ui's
+    /// (`{ "cssVars": { "theme": { … }, "light": { … }, "dark": { … } } }`,
+    /// values as CSS writes them), over `nsh/base`'s default theme.
     pub fn set_theme_json(&self, json: &str, cx: &mut GpuiApp) -> Result<(), ThemeError> {
         let theme = Theme::from_json(json)?;
         self.set_theme(Some(theme), cx);

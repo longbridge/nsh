@@ -21,7 +21,8 @@ pub(crate) fn registry() -> Registry {
         .register::<ListView>()
         .register::<Stepper>()
         .register::<TextField>()
-        .register::<Sheet>();
+        .register::<Sheet>()
+        .register::<Shortcut>();
     registry
 }
 
@@ -70,31 +71,23 @@ pub(crate) enum ButtonEvent {
 fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColor) {
     let theme = theme();
     match variant {
+        // shadcn's buttons: the role's color, 90% (80%) of it pressed.
         ButtonVariant::Primary => (
-            theme.primary(),
-            theme.primary_active(),
-            theme.primary_foreground(),
+            theme.primary,
+            theme.primary.opacity(0.9),
+            theme.primary_foreground,
         ),
-        ButtonVariant::Secondary => {
-            let color = |key| theme.color(key).unwrap_or(AdaptiveColor::TRANSPARENT);
-            (
-                color("secondary.background"),
-                color("secondary.active.background"),
-                color("secondary.foreground"),
-            )
-        }
+        ButtonVariant::Secondary => (
+            theme.secondary,
+            theme.secondary.opacity(0.8),
+            theme.secondary_foreground,
+        ),
         ButtonVariant::Danger => (
-            theme.danger(),
-            theme.danger_active(),
-            theme.danger_foreground(),
+            theme.destructive,
+            theme.destructive.opacity(0.9),
+            AdaptiveColor::rgb(0xffffff, 0xffffff),
         ),
-        ButtonVariant::Plain => (
-            AdaptiveColor::TRANSPARENT,
-            theme
-                .color("accent.background")
-                .unwrap_or(AdaptiveColor::TRANSPARENT),
-            theme.foreground(),
-        ),
+        ButtonVariant::Plain => (AdaptiveColor::TRANSPARENT, theme.accent, theme.foreground),
     }
 }
 
@@ -108,7 +101,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .justify_center()
         .px_4()
         .py_3()
-        .rounded(move || theme().radius())
+        .rounded(move || theme().radius)
         .bg(move || colors.get().0)
         .active(|s| s.bg(move || colors.get().1))
         .style_when(props.disabled, |v| v.opacity(0.5))
@@ -123,7 +116,7 @@ pub(crate) fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoEle
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .child(
             text(props.title)
-                .text_size(move || theme().font_size())
+                .text_size(px(16.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(move || colors.get().2),
         )
@@ -176,7 +169,7 @@ pub(crate) fn Group(props: GroupProps) -> impl IntoElement {
             .py_3()
             .style_when(
                 move || !at.is_first(),
-                |s| s.border_t_1().border_color(move || theme().border()),
+                |s| s.border_t_1().border_color(move || theme().border),
             )
             .child(row)
     })
@@ -225,7 +218,7 @@ pub(crate) fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoEl
                 .min_h(px(48.0))
                 .style_when(
                     move || !at.is_first(),
-                    |v| v.border_t_1().border_color(move || theme().border()),
+                    |v| v.border_t_1().border_color(move || theme().border),
                 )
                 .style_when(
                     move || inset.get() && at.is_first(),
@@ -395,6 +388,24 @@ pub(crate) fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> imp
                     .child(text("×"))
             },
         ))
+}
+
+// --- Shortcut: a binding of the view's own ---------------------------------
+
+/// Counts the presses of a keystroke the view binds itself.
+#[derive(Debug, Clone, PartialEq, Props)]
+pub(crate) struct ShortcutProps {
+    /// The keystroke, as `on_key` takes it.
+    pub(crate) keys: Prop<SharedString>,
+}
+
+/// `<keys> <count>` ([`ShortcutProps`]), counted by the view's own binding.
+#[component]
+pub(crate) fn Shortcut(props: ShortcutProps) -> impl IntoElement {
+    let keys = props.keys.get();
+    let count = signal(0);
+    on_key(&keys, move |_| count.update(|c| *c += 1));
+    text(move || format!("{keys} {}", count.get()))
 }
 
 // --- Sheet: lazy children, made while it is open ----------------------------

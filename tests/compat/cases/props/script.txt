@@ -413,3 +413,11 @@ pixelratio 1
 prop id:flag src asset:/images/flag.png
 covers [props] src
 covers [props] placeholder
+# props-list-sticky-offset
+tap id:case-props-list-sticky-offset
+# Items 0 and 3 stick 24 points below the top: each moves with the scroll
+# from 24 points before its position, and item 3 pushes item 0 out when it
+# reaches item 0's bottom there.
+expect Offset 0
+prop scroll:text:"Offset 0" stickyHeaderIndices start=-24 end=56, start=96 end=Infinity
+covers [props] stickyHeaderOffset

@@ -353,8 +353,7 @@ class Box extends ViewGroup implements Node {
     }
 
     private boolean pressable() {
-        return wants(Native.PRESS) || wants(Native.LONG_PRESS) || wants(Native.PRESS_IN)
-                || wants(Native.PRESS_OUT) || mounter.hasPressFeedback(id);
+        return mounter.handlesPress(id);
     }
 
     private boolean pannable() {

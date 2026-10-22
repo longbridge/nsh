@@ -120,7 +120,7 @@ NSH 的默认值与 Web 不同：
 
 ## 颜色
 
-在 Rust 中，颜色是类型化的值：`rgb(0x0099ff)`、`rgba(0x0099ffcc)`、`hsla(..)`、`white()`、`black()`，以及 `nsh_core::ui::palette` 中的 Tailwind 调色板（`BLUE.shade(500)`）。颜色方法接受 `AdaptiveColor`，即一个浅色值和一个深色值：`AdaptiveColor::rgb(0xffffff, 0x0d1117)` 以原生方式随系统外观切换，无需重新渲染。来自应用主题的颜色（`nsh_base` 的 `theme().primary()`）同样会自适应（[Rust](./rust.md#主题)）。
+在 Rust 中，颜色是类型化的值：`rgb(0x0099ff)`、`rgba(0x0099ffcc)`、`hsla(..)`、`white()`、`black()`，以及 `nsh_core::ui::palette` 中的 Tailwind 调色板（`BLUE.shade(500)`）。颜色方法接受 `AdaptiveColor`，即一个浅色值和一个深色值：`AdaptiveColor::rgb(0xffffff, 0x0d1117)` 以原生方式随系统外观切换，无需重新渲染。来自应用主题的颜色（`nsh_base` 的 `theme().primary`）同样会自适应（[Rust](./rust.md#主题)）。
 
 在 TSX 中，颜色属性接受 CSS 颜色字符串：
 
@@ -264,6 +264,7 @@ view()
 |---|---|---|
 | `filter` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`；多个之间用空格分隔 | `.brightness(n)`、`.contrast(n)`、`.grayscale(n)`、`.hue_rotate(angle)`、`.invert(n)`、`.saturate(n)`、`.sepia(n)`、`.blur(px(..))` |
 | `backdropFilter` | 作用于视图背后内容的滤镜：`"blur(10px)"`（毛玻璃） | `.backdrop_blur(px(10.0))`、`.backdrop_saturate(n)` 等 |
+| `glassEffect` | `"regular"` 或 `"clear"`，在 iOS 26 及更高版本绘制 Apple 的 Liquid Glass；`"none"`（默认值）使用 `backdropFilter` | `ViewStyle::glass_effect`（`GlassEffect`） |
 | `mixBlendMode` | 视图与其背后内容的混合方式：`"multiply"`、`"screen"`、`"overlay"` 等 | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -291,6 +292,14 @@ view()
 | 图片上的 `filter` | 所有颜色滤镜以及 `blur` | 与视图相同 |
 | `backdropFilter` | 系统模糊材质，近似给定半径 | Android 12（API 31）起支持 |
 | `mixBlendMode` | 支持 | Android 10（API 29）起支持 |
+
+`glassEffect` 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，
+`"clear"` 从背景获取的颜色更少。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。
+玻璃层随视图的尺寸和圆角更新。
+
+```tsx
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
+```
 
 ## 轮廓线、不透明度与可见性
 

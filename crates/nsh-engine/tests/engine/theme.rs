@@ -17,17 +17,17 @@ use crate::ChannelSink;
 /// A square of the theme's primary color.
 #[component]
 fn Swatch() -> impl IntoElement {
-    view().size_10().bg(move || theme().primary())
+    view().size_10().bg(move || theme().primary)
 }
 
 /// The primary color of a theme that sets none: `nsh-base`'s default.
 fn default_primary() -> Color {
-    Color::from(Theme::default().primary().light)
+    Color::from(Theme::default().primary.light)
 }
 
 fn themed(hex: &str) -> Theme {
     Theme::from_json(&format!(
-        r#"{{ "themes": [{{ "colors": {{ "primary.background": "{hex}" }} }}] }}"#
+        r#"{{ "cssVars": {{ "light": {{ "primary": "{hex}" }} }} }}"#
     ))
     .unwrap()
 }
@@ -54,6 +54,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -150,6 +151,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

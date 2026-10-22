@@ -556,6 +556,19 @@ final class Mounter {
     final java.util.Map<String, NshComponent.Factory> components = new java.util.HashMap<>();
     private final java.util.Set<String> missingComponents = new java.util.HashSet<>();
 
+    /**
+     * The app stopped (the view was destroyed, or another app replaced it):
+     * its native components hear {@link NshComponent#destroy} now, since no
+     * {@code DELETE} follows for them. Those already deleted are not told
+     * again.
+     */
+    void destroyComponents() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+        }
+    }
+
     /** Makes registered component {@code name} in box {@code id}. */
     private void component(int id, String name) {
         View v = views.get(id);
@@ -1038,10 +1051,6 @@ final class Mounter {
         View v = views.get(id);
         if (v == null) return;
         updateHover(id, v);
-        if ((states & STATE_PRESSED) != 0 && !v.isClickable()) {
-            // Presses reach views that report them.
-            v.setClickable(true);
-        }
     }
 
     private static final long HOVER_EVENTS =
@@ -1182,7 +1191,11 @@ final class Mounter {
         return f != null && f.longPressDelay >= 0 ? f.longPressDelay : ViewConfiguration.getLongPressTimeout();
     }
 
-    /** Whether presses on {@code id} show feedback (so the view takes them). */
+    /**
+     * Whether presses on {@code id} show feedback. A view that also handles
+     * presses shows it itself; for one that does not, the root's
+     * `TouchTracker` does, and the view stays unclickable.
+     */
     boolean hasPressFeedback(int id) {
         Feedback f = feedback.get(id);
         return tracksPress(id) || f != null && f.ripple != null;
@@ -1319,12 +1332,6 @@ final class Mounter {
         if (f == null) feedback.put(id, f = new Feedback());
         f.longPressDelay = longPressDelay >= 0 ? Math.round(longPressDelay) : -1;
         setRipple(v, f, ripple, rippleColor, rippleRadius);
-        // Feedback alone makes text and images take presses.
-        if (hasPressFeedback(id)) {
-            if (v instanceof TextBox && ((TextBox) v).press == null) ((TextBox) v).press = new Pressable(v, this, id);
-            if (v instanceof ImageBox && ((ImageBox) v).press == null) ((ImageBox) v).press = new Pressable(v, this, id);
-            if (v instanceof TextBox || v instanceof ImageBox) v.setClickable(true);
-        }
         if (slop[0] != 0 || slop[1] != 0 || slop[2] != 0 || slop[3] != 0) slops.put(id, slop);
         else slops.remove(id);
         if (v instanceof Box) {
@@ -2038,6 +2045,12 @@ final class Mounter {
         return (events.get(id) & (1L << kind)) != 0;
     }
 
+    /** Press callbacks claim a touch; visual feedback alone only observes it. */
+    boolean handlesPress(int id) {
+        return wants(id, Native.PRESS) || wants(id, Native.LONG_PRESS)
+                || wants(id, Native.PRESS_IN) || wants(id, Native.PRESS_OUT);
+    }
+
     boolean hasPan(int id) {
         return Native.hasPan(handle(), id);
     }
@@ -2112,10 +2125,12 @@ final class Mounter {
     }
 
     void pan(int id, int state, float tx, float ty, float vx, float vy) {
+        if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
         outputs(Native.pan(handle(), id, state, tx, ty, vx, vy));
     }
 
     void transformGesture(int id, boolean rotation, int state, float amount, float velocity) {
+        if (state == 0) for (TouchTracker t : touchTrackers) t.cancelFeedback();
         outputs(Native.transformGesture(handle(), id, rotation, state, amount, velocity));
     }
 }

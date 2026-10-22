@@ -61,9 +61,9 @@ pub use crate::{
     color::{Hsla, Rgba},
     core::{ApplyError, Core, ListBind, Measurement},
     effects::{
-        BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, Gradient, GradientKind,
-        GradientSize, KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
-        blur_radius, compose_color_matrices,
+        BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect, Gradient,
+        GradientKind, GradientSize, KeyframeAnimation, Keyframes, Outline, Transition,
+        TransitionProps, blur_radius, compose_color_matrices,
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
     mount::{
@@ -75,7 +75,7 @@ pub use crate::{
         DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent,
         IMAGE_SCALES, ImageProp, ImageScales, ImageSource, KeyboardAppearance, KeyboardDismissMode,
         KeyboardTaps, KeyboardType, ListContentStyle, ModalAnimation, ModalPresentation, ModalProp,
-        NativeProp, NodeId, Op, OverlayProp, PayloadValue, Prop, ROOT_ID, ResizeMode,
+        NativeProp, NodeId, Op, OverlayProp, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
         ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig,
         StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
         Viewability, WebSource,

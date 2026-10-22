@@ -42,6 +42,7 @@ pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
+mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
@@ -64,7 +65,7 @@ pub(crate) mod status_bar;
 mod style;
 mod system;
 pub(crate) mod task;
-pub(crate) mod tokens;
+pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
 
@@ -133,6 +134,7 @@ pub use self::{
         Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
+    engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
         Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
@@ -170,7 +172,7 @@ pub use self::{
         Quotas, System, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
-    tokens::{TokenSource, Tokens},
+    tokens::{FONT_MONO, FONT_SANS, Token, TokenSource, Tokens},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
@@ -186,8 +188,9 @@ pub use crate::{
     EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps,
     KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
     LayoutTransition, Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents,
-    ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig,
+    StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin,
+    Viewability,
     animation::{Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing},
     color::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
@@ -315,6 +318,7 @@ pub mod prelude {
         PointerEvents,
         Points,
         Position,
+        PressEvent,
         PropEnum,
         Props,
         Radians,
@@ -412,8 +416,9 @@ pub mod prelude {
             set_color_scheme, set_interval, set_timeout, spawn, timer, timer_until, toast, tokens,
             window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
+        batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
+        provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,
+        use_context, when,
     };
     // Kept for apps written before `nsh_base` presented dialogs,
     // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,

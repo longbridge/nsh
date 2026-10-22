@@ -10,11 +10,14 @@ import android.widget.ScrollView;
 /**
  * Press handling for leaf views (text, images): `onPressIn`, `onPressOut`,
  * `onLongPress` and `onPress` with React Native semantics (see `Box`).
+ * Feedback only (`TouchTracker`), it shows the pressed style and ripple of
+ * any node view that handles no press, and reports no event.
  */
 final class Pressable {
     private final View view;
     private final Mounter mounter;
     private final int id;
+    private final boolean feedbackOnly;
     /** The node presses go to: the view, or the pressable text span the touch is on. */
     private int node;
     /** Its listeners, for spans (which have no view). */
@@ -26,6 +29,12 @@ final class Pressable {
     private final Runnable longPress = this::longPress;
 
     Pressable(View view, Mounter mounter, int id) {
+        this(view, mounter, id, false);
+    }
+
+    /** A passive style/ripple observer, fed by the root's touch tracker. */
+    Pressable(View view, Mounter mounter, int id, boolean feedbackOnly) {
+        this.feedbackOnly = feedbackOnly;
         this.view = view;
         this.mounter = mounter;
         this.id = id;
@@ -33,12 +42,11 @@ final class Pressable {
 
     /** The view itself takes presses. */
     boolean ownWanted() {
-        return mounter.wants(id, Native.PRESS) || mounter.wants(id, Native.LONG_PRESS)
-                || mounter.wants(id, Native.PRESS_IN) || mounter.wants(id, Native.PRESS_OUT)
-                || mounter.hasPressFeedback(id);
+        return mounter.handlesPress(id);
     }
 
     private boolean wants(int kind) {
+        if (feedbackOnly) return false;
         return span ? (nodeEvents & (1L << kind)) != 0 : mounter.wants(id, kind);
     }
 
@@ -48,13 +56,13 @@ final class Pressable {
 
     boolean onTouchEvent(MotionEvent e) {
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            int link = view instanceof TextBox ? ((TextBox) view).linkAt(e.getX(), e.getY()) : -1;
+            int link = !feedbackOnly && view instanceof TextBox ? ((TextBox) view).linkAt(e.getX(), e.getY()) : -1;
             span = link >= 0;
             if (span) {
                 node = ((TextBox) view).linkNode(link);
                 nodeEvents = ((TextBox) view).linkEvents(link);
             } else {
-                if (!ownWanted()) return false;
+                if (!feedbackOnly && !ownWanted()) return false;
                 node = id;
             }
         }

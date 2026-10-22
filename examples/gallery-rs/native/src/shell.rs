@@ -178,8 +178,8 @@ fn select(demo: &'static Demo) {
 fn sidebar_row(demo: &'static Demo) -> AnyElement {
     let selected = global::<Selected>();
     let active = move || selected.with(|s| ptr::eq(s.0, demo));
-    // TS: `bg-paper-border dark:bg-graphite-raised` when selected,
-    // `hover:bg-paper-card dark:hover:bg-graphite-line` otherwise.
+    // TS: `bg-accent` when selected, `hover:bg-hover active:bg-accent`
+    // otherwise (the gallery theme's tokens).
     let fill = AdaptiveColor::new(colors::BORDER.light, colors::RAISED.dark);
     let hover = AdaptiveColor::new(colors::SURFACE.light, colors::LINE.dark);
     view()

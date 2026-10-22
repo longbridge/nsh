@@ -21,6 +21,8 @@ on:
       - ".github/workflows/gpui.yml"
   schedule:
     - cron: "0 3 * * *"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:

@@ -446,6 +446,8 @@ While responding:
 | `.keep_touches(true)` | `onResponderTerminationRequest` returning `false` | Another view wants the touches: keep them (by default they are handed over). |
 | `.on_responder_terminate(..)` | `onResponderTerminate` | Another view, or a native gesture, took the touches. |
 
+A Rust component's responder stays pressed from its grant until its touches end, wherever the finger or pointer goes, as CSS's `:active` holds until the button is released: its `.active(..)` styles and the `group-active:` classes inside it keep their look for the whole drag (a resize handle dragged off its band).
+
 The Rust handlers get a `ResponderEvent`: the finger's `location` in the view it went down on, its `page` position, the `timestamp` and the `gesture` since the grant.
 
 ```rust tabs

@@ -75,11 +75,11 @@ pub fn App() -> impl IntoElement {
             button()
                 .px(px(20.0))
                 .py(px(12.0))
-                .rounded(move || theme().radius())
-                .bg(move || theme().primary())
-                .active(|s| s.bg(move || theme().primary_active()))
+                .rounded(move || theme().radius)
+                .bg(move || theme().primary)
+                .active(|s| s.bg(move || theme().primary.opacity(0.9)))
                 .on_press(move || count.update(|c| *c += 1))
-                .child(text("Tap").text_color(move || theme().primary_foreground())),
+                .child(text("Tap").text_color(move || theme().primary_foreground)),
         )
 }
 ```
@@ -114,6 +114,10 @@ pub fn App() -> impl IntoElement {
 `nsh` 只构建你的 crate 需要的东西：一个由你的 crate 和 NSH 核心组成的小程序，它向 CLI 描述 crate 的组件和模块，其余工作由
 CLI 自己完成；再加上你运行或打包的每个目标的运行器。新 Rust 应用的第一次构建只编译你的 crate 和 NSH 的核心，大约 60 个
 crate。`nsh test` 在同样构建的、包含你的 crate 的运行器中以无界面方式运行应用的测试。
+
+在 Linux 上，由应用 crate 选择可选的平台功能。使用网页视图时，在 `nsh-platform-linux` 依赖上启用
+`webview` feature；这会链接 WebKitGTK 6.0，构建和运行时都需要安装该系统库。生成的运行器通过 Cargo
+的 feature 合并继承应用的选择。
 
 `nsh run` 期间，修改 crate 的 Rust 代码会重新构建运行器并重启应用；在浏览器中，已打开的页面会自动加载新的运行时。
 `cargo run` 在桌面后端上直接启动同一个根组件（`src/main.rs`）；嵌入 NSH 的原生应用在 macOS、Windows、Linux、GPUI 和
@@ -187,7 +191,7 @@ pub enum ChartEvent {
 pub fn Chart(props: ChartProps, cx: Scope<ChartEvent>) -> impl IntoElement {
     view()
         .h(px(160.0))
-        .bg(move || theme().muted())
+        .bg(move || theme().muted)
         .on_press(move || cx.emit(ChartEvent::Select(101.5)))
         .child(text(move || format!("{} · {}", props.symbol.get(), props.range.get())))
 }
@@ -414,12 +418,12 @@ fn the_module_formats_money() {
 
 ## 主题
 
-应用的外观由应用自己决定：NSH 提供基础元素和 `nsh_base` 中无样式的基础组件，你的 crate 是其上带样式的一层，即应用自己的组件库（[三层结构](./architecture.md#three-layers)）。Rust 组件的颜色、圆角和基础字号取自主题，即
+应用的外观由应用自己决定：NSH 提供基础元素和 `nsh_base` 中无样式的基础组件，你的 crate 是其上带样式的一层，即应用自己的组件库（[三层结构](./architecture.md#three-layers)）。Rust 组件的颜色、圆角和字体取自主题，即
 `nsh_base` 的 `theme()`，所以一个文件就能改变应用中所有组件的样式。每种颜色都有浅色和深色两个值；系统切换外观时，
-`.bg(move || theme().primary())` 这样的绑定会原生地改变颜色，不需要重新渲染。
+`.bg(move || theme().primary)` 这样的绑定会原生地改变颜色，不需要重新渲染。
 
-默认主题是 gpui-kit 的默认主题：中性的黑白配色，采用移动端的圆角。要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径
-（相对于 `nsh.json`），或者直接写入主题内容：
+主题采用 [shadcn/ui](https://ui.shadcn.com/docs/theming) 的设计令牌，默认主题是 shadcn 的 `neutral` 主题：黑白配色，圆角 10 点。
+要使用自己的主题，在 `nsh.json` 中把 `"theme"` 设为主题文件的路径（相对于 `nsh.json`），或者直接写入主题内容：
 
 ```json
 {
@@ -429,61 +433,60 @@ fn the_module_formats_money() {
 }
 ```
 
-格式是 gpui-kit 的主题文件格式。`themes` 中的每一项设置一种外观的值（`mode`：`"light"` 或 `"dark"`；没有 `mode` 的项是浅色）：
+主题文件就是 shadcn 的 `cssVars`，即 shadcn 主题和 registry 条目的格式，所以从 [shadcn 的主题](https://ui.shadcn.com/themes)或
+[tweakcn](https://tweakcn.com) 导出的主题可以原样使用。`light` 设置浅色外观的值，`dark` 设置深色外观的值，`theme` 设置两者共用的值：
 
 ```json
 {
-  "themes": [
-    {
-      "mode": "light",
-      "radius": 8,
-      "radius.lg": 14,
-      "font.size": 16,
-      "colors": {
-        "primary.background": "#7c3aed",
-        "primary.foreground": "white",
-        "border": "neutral-200"
-      }
+  "cssVars": {
+    "theme": {
+      "radius": "0.5rem",
+      "font-sans": "Inter, sans-serif"
     },
-    {
-      "mode": "dark",
-      "colors": {
-        "primary.background": "#a78bfa",
-        "primary.foreground": "neutral-950"
-      }
+    "light": {
+      "primary": "oklch(0.541 0.281 293.009)",
+      "primary-foreground": "oklch(0.969 0.016 293.756)",
+      "ring": "var(--primary)",
+      "up": "#16a34a"
+    },
+    "dark": {
+      "primary": "oklch(0.702 0.183 293.541)",
+      "primary-foreground": "oklch(0.283 0.141 291.089)",
+      "up": "#4ade80"
     }
-  ]
+  }
 }
 ```
 
-- 你的主题叠加在默认主题之上，只需列出要修改的部分。
-- 颜色可以是 CSS 颜色（`#7c3aed`、`rgb(…)`、`white`），也可以是 Tailwind 默认调色板中的名称（`neutral-900`、`red-500`）。
-  `nsh.json` 中 `tailwind` 键的颜色用于 `class` 字符串。
-- `radius`（`theme().radius()`）是控件的圆角，`radius.lg`（`theme().radius_lg()`）是卡片、底部面板等大面积表面的圆角，
-  `font.size`（`theme().font_size()`）是基础字号，单位都是点。
-- 省略的按下颜色（`primary.active.background`、`secondary.active.background`、`danger.active.background` 等）由基础颜色推导：
-  浅色模式下暗 12%，深色模式下亮 12%。
-- gpui-kit 桌面组件的键（侧边栏、标题栏等）会被接受并搁置，所以 gpui-kit 的主题文件可以原样使用。
-- 打包器在构建时检查主题：文件缺失、JSON 无效、未知的 `mode` 或不是颜色的值都会让构建失败，并报告 `nsh.json: theme: …` 错误。
+- 你的主题叠加在默认主题之上，只需列出要修改的部分。`light` 设置而 `dark` 省略的值在两种外观中都使用。
+- 值按 CSS 的写法书写。颜色可以是任意 CSS 颜色（`#7c3aed`、`rgb(…)`、`hsl(…)`、`oklch(…)`、`white`）、
+  `color-mix(in oklab, var(--primary) 80%, white)`，或同一外观的另一个令牌 `var(--primary)`（可带后备值：`var(--brand, #7c3aed)`）。
+  长度使用 `rem`（16 点）或 `px`（点）。字体是字体族列表：使用其中第一个非通用的字体族，第一个是通用字体族（`system-ui`、`sans-serif`）时使用系统字体。
+- **应用自己的令牌。** 其他任何名称都是应用的令牌，就像 Tailwind `@theme` 中的变量：上例的 `"up"` 在 Rust 中是 `theme().color("up")`，
+  在类名中是 `bg-up` / `text-up/70`，在 TSX 中是 `token("up")`（[主题 token](./tailwind.md#主题-token)）。数值如 `"radius-card": "14px"`
+  是 `theme().number("radius-card")` 和 `rounded-(--radius-card)`。
+- 打包器在构建时检查主题：文件缺失、JSON 无效或不是 `cssVars` 格式的主题都会让构建失败，并报告 `nsh.json: theme: …` 错误。
 
-主题的键及其默认的浅色和深色值：
+令牌及其默认的浅色和深色值（shadcn 的 `neutral`）：
 
-| 键 | 浅色 | 深色 | 用途 |
-|---|---|---|---|
-| `background` | `white` | `neutral-950` | 页面、列表和输入框的背景 |
-| `foreground` | `neutral-950` | `neutral-50` | `background` 上的文字 |
-| `border` | `neutral-200` | `neutral-800` | 分隔线和边框 |
-| `primary.background` / `.active.background` / `.foreground` | `neutral-900` / `neutral-950` / `neutral-50` | `neutral-50` / `neutral-200` / `neutral-900` | 主要操作（主按钮）、按下时，以及其上的文字；选中项和勾选标记 |
-| `secondary.background` / `.active.background` / `.foreground` | `neutral-200` / `neutral-300` / `neutral-900` | `neutral-800` / `#212121` / `neutral-50` | 次要操作、按下时，以及其上的文字 |
-| `danger.background` / `.active.background` / `.foreground` | `red-500` / `red-600` / `neutral-50` | `red-400` / `red-500` / `red-600` | 破坏性操作、按下时，以及其上的文字 |
-| `accent.background` | `neutral-100` | `neutral-800` | 高亮项，例如按下时的普通按钮 |
-| `muted.background` | `neutral-100` | `neutral-800` | 低调的表面：内嵌列表的页面、拖动条、清除按钮 |
-| `muted.foreground` | `neutral-500` | `neutral-400` | 次要文字：说明、标签、占位符 |
-| `group_box.background` / `.foreground` | `#f5f5f5` / `#171717` | `neutral-950` / `neutral-50` | 卡片等分组表面，以及其上的文字 |
-| `input.border` | `neutral-200` | `#2f2f2f` | 输入框的边框 |
-| `ring` | `neutral-400` | `neutral-500` | 获得焦点的输入框的边框 |
-| `list.active.background` | `#bfdbfe33` | `#1e40af33` | 按下时的列表行 |
-| `overlay` | `#0000000d` | `#00000033` | 底部面板和对话框后面的遮罩 |
+| 令牌 | `theme()` | 浅色 | 深色 | 用途 |
+|---|---|---|---|---|
+| `background` / `foreground` | `background` / `foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.145 0 0)` / `oklch(0.985 0 0)` | 应用的背景，以及其上的文字 |
+| `card` / `card-foreground` | `card` / `card_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 卡片等分组表面，以及其上的文字 |
+| `popover` / `popover-foreground` | `popover` / `popover_foreground` | `oklch(1 0 0)` / `oklch(0.145 0 0)` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | 弹出框、菜单和提示，以及其上的文字 |
+| `primary` / `primary-foreground` | `primary` / `primary_foreground` | `oklch(0.205 0 0)` / `oklch(0.985 0 0)` | `oklch(0.922 0 0)` / `oklch(0.205 0 0)` | 主要操作（主按钮），以及其上的文字 |
+| `secondary` / `secondary-foreground` | `secondary` / `secondary_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 次要操作，以及其上的文字 |
+| `muted` / `muted-foreground` | `muted` / `muted_foreground` | `oklch(0.97 0 0)` / `oklch(0.556 0 0)` | `oklch(0.269 0 0)` / `oklch(0.708 0 0)` | 低调的表面；次要文字：说明、标签、占位符 |
+| `accent` / `accent-foreground` | `accent` / `accent_foreground` | `oklch(0.97 0 0)` / `oklch(0.205 0 0)` | `oklch(0.269 0 0)` / `oklch(0.985 0 0)` | 悬停或高亮的项，例如菜单项、列表行，以及其文字 |
+| `destructive` | `destructive` | `oklch(0.577 0.245 27.325)` | `oklch(0.704 0.191 22.216)` | 破坏性操作和错误 |
+| `border` | `border` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 10%)` | 分隔线和边框 |
+| `input` | `input` | `oklch(0.922 0 0)` | `oklch(1 0 0 / 15%)` | 输入框的边框 |
+| `ring` | `ring` | `oklch(0.708 0 0)` | `oklch(0.556 0 0)` | 焦点环 |
+| `chart-1` … `chart-5` | `chart_1` … `chart_5` | `oklch(0.87 0 0)` … `oklch(0.269 0 0)` | 同浅色 | 图表的各个系列 |
+| `sidebar`、`sidebar-foreground`、`sidebar-primary`、`sidebar-primary-foreground`、`sidebar-accent`、`sidebar-accent-foreground`、`sidebar-border`、`sidebar-ring` | `sidebar`、`sidebar_foreground` 等 | `sidebar` `oklch(0.985 0 0)`，`sidebar-primary` `oklch(0.205 0 0)` | `sidebar` `oklch(0.205 0 0)`，`sidebar-primary` `oklch(0.488 0.243 264.376)` | 侧边栏的表面、主要操作、高亮项、边框和焦点环 |
+| `radius` | `radius` | `0.625rem`（10 点） | | 圆角 |
+| `font-sans` | `font_sans` | 系统字体 | | 应用的字体：没有设置自己字体族的文字都使用它 |
+| `font-mono` | `font_mono` | 系统等宽字体 | | 等宽字体：`font-mono`、`TextView` 中的代码 |
 
 ## 多个 crate
 
