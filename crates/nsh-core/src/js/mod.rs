@@ -117,6 +117,7 @@ mod tests {
         ] {
             assert!(style.contains(&format!("  {name}?: {ts};")), "{name}");
         }
+        assert!(!style.contains("backdropMaterial"));
         let text = style.find("export interface TextStyle").unwrap();
         assert!(style[text..].contains("  textDecorationStyle?:"));
         // Each host prop and event in the interface of the elements it is for.
@@ -129,6 +130,7 @@ mod tests {
             ("HostProps", "  onPressUp?: (e?: PressEvent) => void;"),
             ("HostProps", "  onLayout?: (bounds: Bounds) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
+            ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             ("InputHostProps", "  onChange?: (text: string) => void;"),
             (

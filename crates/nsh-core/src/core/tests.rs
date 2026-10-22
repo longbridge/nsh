@@ -3379,6 +3379,84 @@ fn view_with_classes(c: &mut Core<FakeEngine>, id: NodeId, classes: &str) {
 }
 
 #[test]
+fn backdrop_material_survives_restyling_and_resets() {
+    use crate::{BackdropMaterial, js::host::HostProps};
+
+    let mut c = core();
+    // A material alone still reaches the platform on first mount.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::BackdropMaterial(BackdropMaterial::Regular),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .backdrop_material,
+        BackdropMaterial::Regular
+    );
+    // Restyling must preserve the platform prop.
+    c.apply(style_op(
+        2,
+        &[("backdropFilter", StyleValue::Str("blur(30px)"))],
+    ))
+    .unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .backdrop_material,
+        BackdropMaterial::Regular
+    );
+    for material in [
+        BackdropMaterial::Thin,
+        BackdropMaterial::Thick,
+        BackdropMaterial::Chrome,
+    ] {
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::BackdropMaterial(material),
+        })
+        .unwrap();
+        assert_eq!(
+            view_style_of(&c.commit().unwrap(), 2)
+                .unwrap()
+                .backdrop_material,
+            material
+        );
+    }
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::BackdropMaterial(BackdropMaterial::Chrome),
+    })
+    .unwrap();
+    assert!(c.commit().is_none());
+    // The renderer uses the generated reset when the iOS prop is removed.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::BackdropMaterial(BackdropMaterial::Chrome)
+            .reset()
+            .unwrap(),
+    })
+    .unwrap();
+    let mounted = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(mounted.backdrop_material, BackdropMaterial::UltraThin);
+    assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
+}
+
+#[test]
 fn classes_style_views_and_inline_styles_win() {
     let mut c = core();
     view_with_classes(&mut c, 2, "w-20 h-10 p-2 bg-blue-500 rounded-lg");

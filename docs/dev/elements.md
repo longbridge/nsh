@@ -41,6 +41,11 @@ interface per element group and platform (`InputHostProps`, `IOSInputHostProps`,
 element declares (the root's, the runtime's own) is listed in `INTERNAL_EVENTS`; a test checks every `EventKind` is
 in one of them.
 
+The iOS host prop `backdropMaterial` selects the system material of a `backdropFilter` blur:
+`ultraThin` (default), `thin`, `regular`, `thick`, or `chrome`. Rust uses
+`.backdrop_material(BackdropMaterial::Regular)`. The core keeps the prop separately from the style and
+projects it into `ViewStyle::backdrop_material` when mounting, as it does Android elevation.
+
 ## Primitives only
 
 NSH's runtime provides the primitives and the capabilities; the look of an app is the app's. Styled components are

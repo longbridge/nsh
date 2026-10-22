@@ -8,8 +8,8 @@ use taffy::{
 use crate::{
     css,
     effects::{
-        BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient, KeyframeAnimation,
-        Keyframes, Outline, Transition, TransitionProps,
+        BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
+        KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
     },
     geometry::{
         AbsoluteLength, Corners, DefiniteLength, Edges, Percentage, Point, Points, REM_SIZE, Size,
@@ -504,6 +504,8 @@ pub struct ViewStyle {
     pub effects: Option<Arc<Effects>>,
     /// `mixBlendMode`.
     pub blend_mode: BlendMode,
+    /// The iOS material from `ios={{ backdropMaterial }}`, projected at mount time.
+    pub backdrop_material: BackdropMaterial,
     /// `glassEffect`.
     pub glass_effect: GlassEffect,
     /// `outline*`.
@@ -830,6 +832,7 @@ impl Default for ViewStyle {
             backface_hidden: false,
             effects: None,
             blend_mode: BlendMode::Normal,
+            backdrop_material: BackdropMaterial::UltraThin,
             glass_effect: GlassEffect::None,
             outline: Outline::NONE,
             hidden: false,

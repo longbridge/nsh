@@ -64,8 +64,9 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   props in them are the generated `IOS…HostProps` / `Android…HostProps`). The renderer
   (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
-  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: input `inputAccessoryViewID` / `textContentType` /
-  `keyboardAppearance`, Dialog `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
+  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
+  backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
+  `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
   `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' trackpad swipes, Windows' touchscreen swipes; a
   prop of several platforms names each: `#[prop(ios = "x", desktop = "x")]`). What two platforms do is a top-level prop, ignored where it does not apply (`presentation`,
   `headerLargeTitle`, `headerBackTitle`, AlertDialog's `closeOnEscape` / `closeOnBackdropPress`; `api-naming.md`).

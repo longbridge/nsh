@@ -62,8 +62,8 @@ pub use crate::{
     color::{Hsla, Rgba},
     core::{ApplyError, Core, ListBind, Measurement},
     effects::{
-        BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect, Gradient,
-        GradientKind, GradientSize, KeyframeAnimation, Keyframes, Outline, Transition,
+        BackdropMaterial, BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, GlassEffect,
+        Gradient, GradientKind, GradientSize, KeyframeAnimation, Keyframes, Outline, Transition,
         TransitionProps, blur_radius, compose_color_matrices,
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},

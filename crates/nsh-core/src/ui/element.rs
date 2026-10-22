@@ -1496,6 +1496,12 @@ pub trait Interactive: Element {
         self
     }
 
+    /// The system material of a backdrop blur (iOS).
+    fn backdrop_material(mut self, material: crate::BackdropMaterial) -> Self {
+        super::host::set(self.node(), Prop::BackdropMaterial(material));
+        self
+    }
+
     /// The id UI tests find it by.
     fn test_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::TestId(Some(id.into())));
