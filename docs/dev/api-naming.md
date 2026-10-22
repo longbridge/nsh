@@ -331,6 +331,10 @@ and `Input`'s React Native names follow the rules as well.
 | **Collapsible** (`nsh/base`) | | | |
 | `Collapsible::reveal(id, progress)` (`MotionReveal`: the content kept mounted, its measured height times `progress`, clipped) | (left out) | | NSH's layout has no height that is a fraction of the content's own; until the core has one, the app animates what it shows (opacity, a transform) |
 | Children and `content` in the order the builder was called | children first, `content` after them | `gpui-shell`'s `Collapsible` (`materialize/components/collapsible.rs`) | JSX gives a slot no place among the children; what expands goes under what shows always, as in `gpui-shell` |
+| **Progress** (`nsh/base`) | | | |
+| `ProgressTrack`, `ProgressIndicator` (components the app nests in `Progress`) | `trackClass` / `trackStyle`, `indicatorClass` / `indicatorStyle` of `Progress` | `progress.rs` `ProgressTrack`, `ProgressIndicator`; `Switch`'s `trackClass` | Parts, as `Switch`'s: `Progress` renders the track, the indicator inside it, then its children, so only the progress bar is an accessibility element |
+| The indicator's width (the app's, from its own copy of the value) | `value` percent of the track's width while determinate; an app's `w-*` / `width` on the indicator wins | `gpui-component`'s `Progress` (`progress/progress.rs`: the indicator `.w(relative(value / 100))`) | The progress bar renders the indicator, so it sizes it by the value it already has; while `indeterminate` the width is the app's |
+| `Progress::new(id)` | (left out) | | Identity is the element's (`testID` for tests), as `Radio::id` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |

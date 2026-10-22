@@ -116,6 +116,7 @@ fn start(app: &str) -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) 
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -174,6 +175,75 @@ fn scrolls_with_recycled_cells(app: &str) {
         }
     }
     assert!(grew, "onLoadMore did not extend the list");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `List` in its parent's viewport: no scroll view of its own, its
+/// rows follow the page's scroll view around it.
+#[test]
+fn a_list_in_a_pages_viewport_follows_the_page() {
+    let app = r#"
+import { List, mount, Scroll, Text, View } from "nsh";
+const rows = Array.from({ length: 100 }, (_, i) => i);
+function App() {
+  return (
+    <Scroll style={{ flex: 1 }}>
+      <View style={{ height: 200 }}><Text>header</Text></View>
+      <List viewport="parent" each={rows} estimatedItemSize={50}>
+        {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}
+      </List>
+    </Scroll>
+  );
+}
+mount(App);
+"#;
+    let (engine, rx, dir) = start(app);
+    let mut items = Vec::new();
+    while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
+        items.extend(batch.items);
+    }
+    let scrolls: Vec<u32> = items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Create {
+                id,
+                kind: ViewKind::Scroll,
+            } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(scrolls.len(), 1, "the page's scroll view only");
+    let page = scrolls[0];
+    let shown: Vec<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Text { text, .. } => Some(text.text.clone()),
+            _ => None,
+        })
+        .collect();
+    // From the list's start, 200 down, to 500 below the viewport's end:
+    // rows 0 to 16.
+    assert!(shown.contains(&"row 16".to_owned()), "{shown:?}");
+    assert!(!shown.contains(&"row 17".to_owned()), "{shown:?}");
+    // The page's content covers the whole list.
+    assert!(items.iter().any(|i| matches!(
+        i,
+        MountItem::ScrollContent { id, size } if *id == page && size.height == px(200.0 + 100.0 * 50.0)
+    )));
+    engine
+        .control()
+        .scroll(page, nsh_core::geometry::point(px(0.0), px(2000.0)), 0);
+    let mut shown = Vec::new();
+    let mut created = 0;
+    while let Ok(batch) = rx.recv_timeout(Duration::from_millis(500)) {
+        shown.extend(texts(&batch));
+        created += cells_created(&batch);
+    }
+    // 1800 into the list: rows 26 to 56, in recycled cells.
+    assert!(shown.contains(&"row 40".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"row 56".to_owned()), "{shown:?}");
+    assert!(!shown.contains(&"row 57".to_owned()), "{shown:?}");
+    assert!(created <= 14, "created {created} text views");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

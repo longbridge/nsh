@@ -42,6 +42,7 @@ pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
+mod engine_context;
 pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
@@ -133,6 +134,7 @@ pub use self::{
         Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
+    engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{
         Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, OverlayPosition,
@@ -181,13 +183,14 @@ pub use crate::geometry::{
     relative, rems, size,
 };
 pub use crate::{
-    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow,
-    ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode,
-    EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps,
-    KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty,
-    LayoutTransition, Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents,
-    ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
-    StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BackdropMaterial, BlendMode,
+    BoxShadow, ContextMenuEvent, Cursor, Dialog, DialogButton, DialogButtonStyle, EdgeInsets,
+    EllipsizeMode, EventKind, EventPayload, HoverEvent, KeyboardAppearance, KeyboardDismissMode,
+    KeyboardTaps, KeyboardType, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
+    LayoutProperty, LayoutTransition, ListViewport, Measurement, ModalAnimation, ModalPresentation,
+    PanActivation, PointerEvents, PressEvent, ResizeMode, ReturnKeyType, ScreenAnimation,
+    SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, TouchEvent,
+    TransformKind, TransformOrigin, Viewability,
     animation::{Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing},
     color::{
         ColorParseError, Hsla, Rgba, black, blue, green, hsl, hsla, opaque_grey, red, rgb, rgba,
@@ -220,6 +223,7 @@ pub mod prelude {
         Appearance,
         // Host elements and their settings.
         AutoCapitalize,
+        BackdropMaterial,
         BlendMode,
         BorderCurve,
         Bounds,
@@ -290,6 +294,7 @@ pub mod prelude {
         LayoutDirection,
         Length,
         ListLayout,
+        ListViewport,
         Listener,
         Measurement,
         Method,
@@ -315,6 +320,7 @@ pub mod prelude {
         PointerEvents,
         Points,
         Position,
+        PressEvent,
         PropEnum,
         Props,
         Radians,
@@ -412,8 +418,9 @@ pub mod prelude {
             set_color_scheme, set_interval, set_timeout, spawn, text_metrics, timer, timer_until,
             toast, tokens, window,
         },
-        batch, catch_error, cleanup, component, computed, dynamic, each, effect, provide_context,
-        resource, resource_with_value, signal, signal_with, stored, untracked, use_context, when,
+        batch, catch_error, cleanup, component, computed, dynamic, each, effect, engine_context,
+        provide_context, resource, resource_with_value, signal, signal_with, stored, untracked,
+        use_context, when,
     };
     // Kept for apps written before `nsh_base` presented dialogs,
     // navigation and system alerts (`nsh_base::{dialog, nav_stack, nav_page,

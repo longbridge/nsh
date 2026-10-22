@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -18,7 +18,7 @@ use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem,
     ui::{Root, prelude::*},
 };
-use nsh_engine::{App, EngineConfig, LocalEngine};
+use nsh_engine::{App, EngineConfig, EngineContext, LocalEngine};
 use tokio::sync::oneshot;
 
 use crate::ChannelSink;
@@ -27,6 +27,34 @@ thread_local! {
     /// What the app's task waits for: sent by the test, as a host's
     /// callback would deliver it.
     static MESSAGE: RefCell<Option<oneshot::Receiver<String>>> = const { RefCell::new(None) };
+    /// What a task's destructor read from this engine's context.
+    static RELEASED: RefCell<Option<Arc<Mutex<Option<&'static str>>>>> = const { RefCell::new(None) };
+}
+
+/// The host value one engine was given, read again when a task drops.
+struct EngineId(&'static str);
+
+/// Records the context a task's destructor sees.
+struct Probe {
+    seen: Arc<Mutex<Option<&'static str>>>,
+}
+
+impl Drop for Probe {
+    fn drop(&mut self) {
+        let found = engine_context::<EngineId>().map(|id| id.0);
+        *self.seen.lock().expect("probe") = Some(found.unwrap_or("none"));
+    }
+}
+
+/// A task that is still running when the engine drops.
+#[component]
+fn Holding() -> impl IntoElement {
+    let seen = RELEASED.with(|slot| slot.borrow().clone().expect("probe slot"));
+    spawn(async move {
+        let _probe = Probe { seen };
+        std::future::pending::<()>().await;
+    });
+    text("held")
 }
 
 #[component]
@@ -74,6 +102,35 @@ fn texts(rx: &Receiver<MountBatch>) -> Vec<String> {
         }
     }
     texts
+}
+
+#[test]
+fn dropping_a_local_engine_drops_a_task_in_that_engines_context() {
+    let seen = Arc::new(Mutex::new(None));
+    RELEASED.with(|slot| *slot.borrow_mut() = Some(seen.clone()));
+    let (tx, _rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        context: EngineContext::default().with(EngineId("own")),
+        ..EngineConfig::new(App::Rust(Root::of::<Holding>()))
+    };
+    let mut engine = LocalEngine::start(config, ApproxTextEngine, ChannelSink(tx)).unwrap();
+    // The first pump polls the task, so the probe is alive inside it.
+    engine.pump();
+    assert_eq!(
+        *seen.lock().expect("probe"),
+        None,
+        "the task is still running"
+    );
+    // Another engine's context is current. The drop must read its own.
+    let _outer = EngineContext::default().with(EngineId("outer")).enter();
+    drop(engine);
+    assert_eq!(*seen.lock().expect("probe"), Some("own"));
+    assert_eq!(
+        engine_context::<EngineId>().as_deref().map(|id| id.0),
+        Some("outer"),
+        "the outer engine's context is restored"
+    );
+    RELEASED.with(|slot| *slot.borrow_mut() = None);
 }
 
 #[test]

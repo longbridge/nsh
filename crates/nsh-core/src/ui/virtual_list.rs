@@ -18,8 +18,8 @@ use super::{
     events, when,
 };
 use crate::{
-    CellSlot, EventKind, EventPayload, ListContentStyle, PayloadValue, Prop, Tag, Viewability,
-    geometry::Points,
+    CellSlot, EventKind, EventPayload, ListContentStyle, ListViewport, PayloadValue, Prop, Tag,
+    Viewability, geometry::Points,
 };
 
 /// How a list lays out its rows: [`super::ListElement`] (the app's rows)
@@ -59,6 +59,17 @@ pub trait ListLayout: Sized {
     /// Scrolls horizontally.
     fn horizontal(mut self) -> Self {
         self.config().horizontal = Some(true);
+        self
+    }
+
+    /// What the list scrolls in (TS: `viewport`): [`ListViewport::Parent`]
+    /// lays it out at its full length and renders the rows near the
+    /// viewport of the scroll view around it, which scrolls it with what
+    /// else it holds (headers above the list, other lists); the default,
+    /// [`ListViewport::Own`], is a scroll view of its own. Fixed when the
+    /// list is made.
+    fn viewport(mut self, viewport: ListViewport) -> Self {
+        self.config().viewport = Some(viewport);
         self
     }
 

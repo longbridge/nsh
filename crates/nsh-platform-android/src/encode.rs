@@ -202,14 +202,14 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 ] {
                     e.float(v);
                 }
-                // Pressable spans: start, end, node, events (low, high).
+                // Pressable spans: start, end, node, events (four ints,
+                // lowest first).
                 e.int(text.links.len() as i32);
                 for l in &text.links {
                     e.int(l.start as i32);
                     e.int(l.end as i32);
                     e.int(l.node as i32);
-                    e.int(l.events.bits() as u32 as i32);
-                    e.int((l.events.bits() >> 32) as u32 as i32);
+                    mask(&mut e, l.events);
                 }
                 // `selectable`: 1 asked for, 0 refused (`false`: out of
                 // selection areas too), 2 unset.
@@ -223,10 +223,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
                 e.int(id as i32);
-                // A bit set indexed by `EventKind as u8`, as a Java long.
-                let bits = events.bits();
-                e.int(bits as u32 as i32);
-                e.int((bits >> 32) as u32 as i32);
+                mask(&mut e, events);
             }
             MountItem::Image {
                 id,
@@ -249,6 +246,17 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.opt_string(options.placeholder.as_ref().map(|p| &*p.uri));
                 e.float(options.blur_radius.0);
                 e.float(options.fade_ms.unwrap_or(-1.0));
+                // `objectPosition`, per axis: flags (1 from the end edge,
+                // 2 a fraction of the free space) and the value (points or
+                // the fraction).
+                for axis in [options.position.x, options.position.y] {
+                    let (fraction, value) = match axis.offset {
+                        DefiniteLength::Absolute(p) => (0, p.to_points(REM_SIZE).0),
+                        DefiniteLength::Fraction(f) => (2, f.0),
+                    };
+                    e.int(i32::from(axis.from_end) | fraction);
+                    e.float(value);
+                }
             }
             MountItem::ScrollConfig {
                 id,
@@ -864,6 +872,15 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
             }
             e.int(0);
         }
+    }
+}
+
+/// An [`nsh_core::EventMask`]: a bit set indexed by `EventKind as u8`, as
+/// four ints, lowest first (two Java longs: `Events`).
+fn mask(e: &mut Encoded, events: nsh_core::EventMask) {
+    let bits = events.bits();
+    for word in 0..4 {
+        e.int((bits >> (32 * word)) as u32 as i32);
     }
 }
 

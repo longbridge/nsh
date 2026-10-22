@@ -523,6 +523,7 @@ pub(crate) fn start_with(
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

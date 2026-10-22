@@ -55,6 +55,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

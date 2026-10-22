@@ -77,6 +77,14 @@ final class Images {
     /** Set by the mounter; until then no redirect is followed. */
     volatile Redirects redirects = (base, location) -> null;
 
+    /** The bytes of an in-memory image ({@code data:} URIs, {@code blob:} URLs), or null. */
+    interface Inline {
+        byte[] bytes(String uri);
+    }
+
+    /** Set by the mounter; until then in-memory images fail. */
+    volatile Inline inline = uri -> null;
+
     private static final int MAX_REDIRECTS = 20;
 
     private static final ExecutorService POOL = Executors.newFixedThreadPool(4, r -> {
@@ -370,6 +378,16 @@ final class Images {
 
     /** Reads `uri` (off the UI thread), reporting download progress. */
     private byte[] read(String uri, Download download) throws Exception {
+        // Their bytes are in the engine, which hands them over by URI.
+        if (uri.startsWith("data:") || uri.startsWith("blob:")) {
+            byte[] bytes = inline.bytes(uri);
+            if (bytes == null) {
+                throw new java.io.IOException(uri.startsWith("blob:")
+                        ? "no blob for " + uri + " (revoked?)"
+                        : "malformed data: URI");
+            }
+            return bytes;
+        }
         if (uri.startsWith("asset:/")) {
             byte[] bytes = assets.read(uri);
             if (bytes == null) throw new java.io.FileNotFoundException(uri);

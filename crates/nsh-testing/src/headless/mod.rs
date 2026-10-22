@@ -48,7 +48,7 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
-    MountItem, NodeId, PayloadValue, Point, Points, ROOT_ID, Size, SubmitBehavior,
+    MountItem, NodeId, PayloadValue, Point, Points, PressEvent, ROOT_ID, Size, SubmitBehavior,
     geometry::{point, px},
 };
 use nsh_engine::{
@@ -938,13 +938,58 @@ impl Headless {
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), at);
         }
+        let payload = self.press_payload(id, None);
         for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-            self.send(id, kind, EventPayload::None);
+            self.send(id, kind, payload.clone());
         }
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::End, path, at);
         }
         self.done()
+    }
+
+    /// The step `pressAt(<selector>, <x>, <y>)`: [`Headless::press`] with
+    /// the pointer at `at` in the view `selector` names (its top left
+    /// corner). The events tell the view where that is in it and in the
+    /// root.
+    pub fn press_at(&mut self, selector: &str, at: Point<Points>) -> Result<(), String> {
+        let parsed = Selector::parse(selector)?;
+        self.step(format!("pressAt({selector}, {}, {})", at.x.0, at.y.0));
+        let pick = self.screen.pressable(&parsed);
+        let id = self.picked(pick, selector, "pressable view")?;
+        let path = self.screen.touch_path(id);
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+        }
+        let payload = self.press_payload(id, Some(at));
+        for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+            self.send(id, kind, payload.clone());
+        }
+        if !path.is_empty() {
+            self.send_touch(id, nsh_core::TouchPhase::End, path);
+        }
+        self.done()
+    }
+
+    /// A press at `at` in `view` (else the view's center), in that view
+    /// and in the root. `None` when the view has no bounds.
+    fn press_payload(&self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
+        let Some(bounds) = self.screen.bounds_in_root(view) else {
+            return EventPayload::None;
+        };
+        let position = at.unwrap_or_else(|| {
+            point(
+                Points(bounds.size.width.0 / 2.0),
+                Points(bounds.size.height.0 / 2.0),
+            )
+        });
+        EventPayload::Press(PressEvent {
+            position,
+            page_position: point(
+                Points(bounds.origin.x.0 + position.x.0),
+                Points(bounds.origin.y.0 + position.y.0),
+            ),
+        })
     }
 
     /// The step `longPress(<selector>)`: holds a finger on what `selector`
@@ -961,10 +1006,11 @@ impl Headless {
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
         }
-        self.send(id, EventKind::PressDown, EventPayload::None);
+        let payload = self.press_payload(id, None);
+        self.send(id, EventKind::PressDown, payload.clone());
         self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
-        self.send(id, EventKind::LongPress, EventPayload::None);
-        self.send(id, EventKind::PressUp, EventPayload::None);
+        self.send(id, EventKind::LongPress, payload.clone());
+        self.send(id, EventKind::PressUp, payload);
         if !path.is_empty() {
             self.send_touch(id, nsh_core::TouchPhase::End, path, None);
         }
@@ -1289,6 +1335,39 @@ mod tests {
                     .on_press(move || count.update(|c| *c += 1))
                     .child(text("Add")),
             )
+    }
+
+    /// A pad under a 10-point strip. A press reports where it was in the
+    /// pad and in the root.
+    #[component]
+    fn PressPoint() -> impl IntoElement {
+        let seen = signal(String::from("none"));
+        view()
+            .child(view().h(px(10.0)))
+            .child(view().test_id("pad").w(px(80.0)).h(px(40.0)).on(
+                EventKind::Press,
+                move |p: &EventPayload| {
+                    let EventPayload::Press(e) = p else {
+                        seen.set("no position".into());
+                        return;
+                    };
+                    seen.set(format!(
+                        "at {:.0} {:.0} in {:.0} {:.0}",
+                        e.position.x.0, e.position.y.0, e.page_position.x.0, e.page_position.y.0
+                    ));
+                },
+            ))
+            .child(text(move || format!("seen: {}", seen.get())))
+    }
+
+    #[test]
+    fn presses_carry_where_the_pointer_was() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
+        app.first_render().unwrap();
+        app.press_at("id:pad", point(px(10.0), px(12.0))).unwrap();
+        app.wait_for("seen: at 10 12 in 10 22").unwrap();
+        app.press("id:pad").unwrap();
+        app.wait_for("seen: at 40 20 in 40 30").unwrap();
     }
 
     #[test]
