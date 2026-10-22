@@ -157,6 +157,39 @@ describe("the cart", () => {
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
 | `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。在真实平台上就是该平台。 |
 | `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
+| `host` | 无 | 由测试扮演的宿主应用：`{ params, handlers }`。见[扮演宿主应用](#扮演宿主应用)。 |
+
+### 扮演宿主应用
+
+嵌入在原生应用中的应用通过 [`nsh/host`](../modules/nsh-host.md) 与宿主应用通信。在测试里由测试扮演宿主应用：`host.params` 是应用启动时读取的启动参数，`host.handlers` 按名称回答应用的 `host.call`、接收它的 `host.post`。处理函数可以是一个值，用它回答每次调用；也可以是一个函数，接收调用的数据并返回回答（或回答的 promise）。函数抛出的错误会让调用失败，与宿主应用出错时一样。`handlers` 没有列出的名称的调用会失败，与不处理任何调用的宿主应用一样。
+
+```tsx
+const app = await open("./App.tsx", {
+  host: {
+    params: { conversation: "c-42" },
+    handlers: {
+      "user.profile": async ({ id }) => ({ id, name: "Ada" }),
+      "feature.flags": { search: true },
+      analytics: null,
+    },
+  },
+});
+await app.press("Profile");
+expect(app.host.calls()).toEqual([{ name: "user.profile", data: { id: 7 } }]);
+expect(app.host.posts()).toEqual([{ name: "analytics", data: { screen: "profile" } }]);
+// 应用的 `host.on("conversation.open", …)` 会收到它。
+await app.host.send("conversation.open", { id: "c-43" });
+expect(app.shows("Conversation c-43")).toBe(true);
+```
+
+`app.host.send(name, data)` 发送一个事件，然后等待应用空闲。`app.host.calls()` 和 `app.host.posts()` 按顺序列出处理函数收到的调用和投递：`name` 和 `data`。
+
+应用打开的 URL（[`openUrl`](../modules/nsh-device.md#openurl)，以及 `links="open"` 的 `TextView` 中的链接）会被记录下来，并以“已打开”回报给应用，本机上不会真正打开任何东西。`app.openedUrls()` 列出它们：
+
+```tsx
+await app.press("Contact us");
+expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
+```
 
 ### 模拟网络
 
@@ -312,6 +345,9 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.dialogs()` | 应用弹出过的对话框，按顺序排列。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
+| `await app.host.send(name, data?)` | 以宿主应用的身份向应用发送事件（`host.on`），然后等待它空闲。见[扮演宿主应用](#扮演宿主应用)。 |
+| `app.host.calls()`、`app.host.posts()` | `open` 的 `host.handlers` 收到的应用调用和投递，按顺序排列：`name`、`data`。 |
+| `app.openedUrls()` | 应用打开的 URL（`openUrl`），按顺序排列：只记录，不打开。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.screenshot(path?)` | 应用窗口的 PNG 截图（`Uint8Array`）；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
@@ -331,6 +367,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
 - **剪贴板保存文字**：应用复制的内容，粘贴时可以读回来（用 `clipboard` 设定初始内容）。
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
+- **URL 只被记录**：应用打开的 URL 以“已打开”回报，`app.openedUrls()` 列出它们。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。
@@ -380,7 +417,8 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
 `storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`locale`、`reducedMotion` 和 `safeArea` 不随平台上报的值变化；
 应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
-粘贴使用系统剪贴板。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
+粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
+`host.handlers` 只在 headless 运行：开发 host 不回答任何调用，在那里 `open` 会拒绝 handlers。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或

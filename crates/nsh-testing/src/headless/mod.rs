@@ -238,6 +238,9 @@ pub struct Headless {
     clock: Clock,
     /// On a manual clock: the engine asked for a frame.
     wanted: Option<Arc<AtomicBool>>,
+    /// The embedding app's channel with the app (`EngineConfig::host`),
+    /// which the test plays.
+    host: nsh_engine::HostChannel,
 }
 
 impl Headless {
@@ -246,6 +249,7 @@ impl Headless {
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
+        let host = config.host.clone();
         let Launched {
             engine,
             batches,
@@ -270,6 +274,7 @@ impl Headless {
             observer: None,
             clock,
             wanted,
+            host,
         })
     }
 
@@ -373,6 +378,21 @@ impl Headless {
             self.frame(by);
             self.drain();
         }
+    }
+
+    /// The embedding app's channel with the app (`nsh/host`): its launch
+    /// parameters and handlers, as the engine was given them.
+    pub fn host(&self) -> &nsh_engine::HostChannel {
+        &self.host
+    }
+
+    /// The step `host.send`: the embedding app sends event `name` with
+    /// `data` (the app's `host.on(name, ...)` hears it), and the app
+    /// settles.
+    pub fn send_host_event(&mut self, name: &str, data: nsh_core::JsonValue) -> Result<(), String> {
+        self.step(format!("host.send({name})"));
+        self.host.send(name, data)?;
+        self.done()
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a

@@ -3,11 +3,15 @@
 // view of the host app, registered as `embed.badge` (`NshAppView.register(component:)`,
 // `NshView.registerComponent`); the rest talks to the host app through its
 // channel (`nsh/host`): the host's launch parameters, its messages, a call it
-// answers and posts it hears.
+// answers and posts it hears. The documentation link opens through the host
+// (`openUrl`): a host app may route it itself (`onOpenURL`,
+// `setOpenUrlHandler`), else the system opens it. `App.test.tsx` plays the
+// host app's part.
 
 import { mount, signal, Text, View, type YNode } from "nsh";
 import { nativeComponent } from "nsh/native";
 import { host } from "nsh/host";
+import { openUrl } from "nsh/device";
 import { SafeAreaView } from "nsh/base";
 
 /** The host app's badge: a label it draws, sized to its text. */
@@ -64,6 +68,13 @@ function App() {
         <Text style={{ color: "#ffffff", fontWeight: "600" }}>Ask the host for the time</Text>
       </View>
       <Text>{answer()}</Text>
+      <Text
+        role="link"
+        onPress={() => openUrl("https://github.com/longbridge/nsh")}
+        style={{ color: "#0969da", textDecorationLine: "underline" }}
+      >
+        Read the documentation
+      </Text>
     </SafeAreaView>
   );
 }

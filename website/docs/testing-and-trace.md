@@ -165,6 +165,45 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
 | `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
+| `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
+
+### Playing the host app
+
+An app embedded in a native app talks to it through [`nsh/host`](../modules/nsh-host.md). In a test, the test plays
+the host app: `host.params` gives the launch parameters the app reads at start, and `host.handlers` answers the app's
+`host.call` and hears its `host.post`, by name. A handler is a value, which answers every call, or a function of the
+call's data that returns the answer (or a promise of it). What the function throws rejects the call, as a host app's
+error does. A call of a name `handlers` does not list fails, as it does in a host app that handles none.
+
+```tsx
+const app = await open("./App.tsx", {
+  host: {
+    params: { conversation: "c-42" },
+    handlers: {
+      "user.profile": async ({ id }) => ({ id, name: "Ada" }),
+      "feature.flags": { search: true },
+      analytics: null,
+    },
+  },
+});
+await app.press("Profile");
+expect(app.host.calls()).toEqual([{ name: "user.profile", data: { id: 7 } }]);
+expect(app.host.posts()).toEqual([{ name: "analytics", data: { screen: "profile" } }]);
+// The app's `host.on("conversation.open", …)` hears it.
+await app.host.send("conversation.open", { id: "c-43" });
+expect(app.shows("Conversation c-43")).toBe(true);
+```
+
+`app.host.send(name, data)` sends an event, then waits until the app is quiet. `app.host.calls()` and
+`app.host.posts()` list what the handlers got, in order: `name` and `data`.
+
+The URLs the app opens ([`openUrl`](../modules/nsh-device.md#openurl), a `TextView`'s links with `links="open"`) are
+recorded and reported to the app as opened, and nothing opens on this machine. `app.openedUrls()` lists them:
+
+```tsx
+await app.press("Contact us");
+expect(app.openedUrls()).toEqual(["mailto:help@example.com"]);
+```
 
 ### Stubbing the network
 
@@ -326,6 +365,9 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.dialogs()` | The dialogs the app showed, in order. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
 | `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
+| `await app.host.send(name, data?)` | Sends an event of the host app's to the app (`host.on`), then waits until it is quiet. See [Playing the host app](#playing-the-host-app). |
+| `app.host.calls()`, `app.host.posts()` | The app's calls and posts that `open`'s `host.handlers` got, in order: `name`, `data`. |
+| `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
@@ -349,6 +391,7 @@ that only a real platform can do:
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
 - **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
   so what it does not declare is refused.
+- **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
@@ -407,7 +450,9 @@ a request no route matches fails, and `"live"` lets them through to the host's n
 all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
 `reducedMotion` and `safeArea` hold whatever the platform reports, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
-as it was; a text input's own copy and paste use the system's. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
+events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
+headless: the development host answers no calls, and `open` rejects handlers there. An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
