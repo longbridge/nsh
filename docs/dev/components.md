@@ -710,7 +710,8 @@ what changed.
   node that follows it (or keeps them out of the tree while the view has none: a `Children` in a region that is not
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
-  children: one wrapper per child, so a child added or removed leaves the others' wrappers in place.
+  children: one wrapper per child, so a child added or removed leaves the others' wrappers in place, and a child JS
+  moves among them (a keyed `<Each>`'s row) keeps its wrapper, which the region moves.
 - A view passes its children on by placing its `Children` among a nested component's (`<Inset>{children}</Inset>`):
   they become that component's children (`Placement::Nested`), in that place among the content the view gives it,
   so its view places them, as deep as they are passed on; JS's insertions and removals follow them there, and content
