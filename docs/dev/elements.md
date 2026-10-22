@@ -269,8 +269,9 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   view's coordinates.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
-  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape or the Android back button,
-  to the top overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
+  touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or
+  VoiceOver's escape gesture on iOS (`RootView`'s `accessibilityPerformEscape`, as the back button), to the top
+  overlay listening only: the core binds Escape in the root's table, `overlay::ESCAPE_BINDING`, and takes
   the back button before the views' and JS's listeners). Whether to close is the app's or `nsh/base`'s.
 - **Hints (tooltips)**: an overlay with `OverlayConfig::hint` (Rust `overlay().hint(delay)`, `OverlayProp::Hint`; no
   JS prop) is shown by the core, as GPUI's tooltips are. While it is in the view on a desktop (the environment's idiom),

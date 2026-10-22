@@ -9,7 +9,7 @@ demo: el-sheet
 # Sheet
 
 A sheet is a panel at an edge of the screen over a backdrop that covers the rest: filters, a share panel, a side
-drawer. A press on the backdrop, Escape and the Android back button close it. It shows on top of everything in its
+drawer. A press on the backdrop, Escape, the Android back button and VoiceOver's escape gesture close it. It shows on top of everything in its
 window, the same on every device, and draws nothing of its own: the panel and the backdrop are the app's.
 
 ```rust tabs

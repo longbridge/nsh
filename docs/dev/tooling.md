@@ -471,9 +471,11 @@ inside the scroll view that rests (still reporting where it is) before it lifts,
 that lands in a text input also gives it the focus (made touches leave the first responder where it was, as UI test
 tools know). Typing goes through the software keyboard's input manager (`UIKeyboardImpl.addInputString:`, a key at
 a quick typist's pace), which asks the input's delegate first (`maxLength`, a controlled value), as the keyboard does.
-Back taps the header's back button (the bar button carrying the back chevron's mask) or swipes a presented sheet
-down; dialogs are answered with a tap on the `UIAlertController`'s button; screenshots are
-`drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
+Back swipes a presented sheet down; else, while the app listens to going back (an overlay's `onCancel`: a menu's
+sheet, whose backdrop covers the header, a popover), it is VoiceOver's escape gesture (`accessibilityPerformEscape`
+on the surface's root view, which hands the core the back press, as the headless driver's back does); else it taps
+the header's back button (the bar button carrying the back chevron's mask); dialogs are answered with a tap on the
+`UIAlertController`'s button; screenshots are `drawViewHierarchyInRect:` as a PNG; a step waits for finite Core Animation animations and gliding scroll views too.
 The system's appearance is the simulator's: the CLI switches it (`simctl ui appearance`) and restores it after the
 app; the screen keeps its device's size. Android (`nsh-platform-android`, feature `dev`; `TestAgent.java`;
 `nsh-cli/src/test_android.rs`): the CLI installs the host on the first device `adb devices` lists and starts it per
