@@ -52,10 +52,12 @@ Things that were found the hard way. Read the section of the area you change bef
   layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
   its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
   `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
-- **Taffy 0.15's `mark_dirty` stops at the first node whose cache is already empty**, taking its ancestors for dirty too. Nodes of a
-  `display: none` subtree always have empty caches while the hidden node above keeps its result, so a view moved in there keeps its
-  former layout: the frame walk gives everything under a `display: none` view an empty frame and its texts an empty content box,
-  whatever Taffy keeps for them (`emit_frames_in`, `flush_text`).
+- **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
+  traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
+  its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
+  above keep theirs, so a view moved in there kept its former layout. `LayoutTree::mark_dirty` clears every cache up to the root, and the
+  tree keeps no hoisted children (only Taffy's rounding pass reads them). The frame walk also gives everything under a `display: none`
+  view an empty frame and its texts an empty content box (`emit_frames_in`, `flush_text`): a hidden subtree is never read.
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
   main tree are skipped.

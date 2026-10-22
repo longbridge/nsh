@@ -1,5 +1,6 @@
 mod classes;
 mod components;
+mod layout_tree;
 mod list;
 mod measure;
 mod overlay;
@@ -15,10 +16,13 @@ mod views;
 use std::{rc::Rc, sync::Arc};
 
 use slab::Slab;
-use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
+use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position};
 
-use self::list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget};
 pub use self::measure::Measurement;
+use self::{
+    layout_tree::LayoutTree,
+    list::{ExtraKind, Follow, ListState, PendingScroll, PinTarget},
+};
 use crate::{
     animation::AnimationProp,
     geometry::{Bounds, Percentage, Point, Points, Size, rect, size_pt},
@@ -726,7 +730,7 @@ pub struct Core<M: TextEngine> {
     nodes: Slab<Node>,
     /// Node id -> key + 1 (0 = none). Ids are dense, so this is a flat vec.
     slots: Vec<u32>,
-    layout: TaffyTree<LeafContext<M::Prepared>>,
+    layout: LayoutTree<LeafContext<M::Prepared>>,
     text_engine: Rc<M>,
     measure_cache: MeasureCache,
     /// Text blocks whose final layout must be (re)made after layout.
@@ -858,11 +862,8 @@ impl<M: TextEngine + 'static> Core<M> {
 
 impl<M: TextEngine> Core<M> {
     fn with_engine(text_engine: M, viewport: Size<Points>) -> Self {
-        let mut layout = TaffyTree::with_capacity(256);
-        // The core rounds layouts itself (`rounded`): Taffy's pass walks the
-        // absolutely positioned nodes through lists it can leave stale.
-        layout.disable_rounding();
-        let root_layout = layout.new_leaf(root_style(viewport)).expect("taffy root");
+        let mut layout = LayoutTree::with_capacity(256);
+        let root_layout = layout.new_leaf(root_style(viewport));
         let mut nodes = Slab::with_capacity(256);
         let mut root = Node::new(ROOT_ID, Kind::View);
         root.layout = Some(root_layout);
@@ -1083,9 +1084,7 @@ impl<M: TextEngine> Core<M> {
         if viewport != self.viewport {
             self.viewport = viewport;
             let root = self.nodes[self.root as usize].layout.expect("root layout");
-            self.layout
-                .set_style(root, root_style(viewport))
-                .expect("taffy root");
+            self.layout.set_style(root, root_style(viewport));
             self.needs_layout = true;
             self.restyle_where(crate::tailwind::deps::WIDTH | crate::tailwind::deps::HEIGHT);
             self.components_viewport(viewport);
@@ -1135,7 +1134,7 @@ impl<M: TextEngine> Core<M> {
             && *own != Some(size)
         {
             *own = Some(size);
-            self.layout.mark_dirty(layout).expect("taffy dirty");
+            self.layout.mark_dirty(layout);
             self.needs_layout = true;
         }
     }
@@ -1197,7 +1196,7 @@ impl<M: TextEngine> Core<M> {
             cx.min_content = None;
             cx.cache = None;
             cx.laid_out = None;
-            self.layout.mark_dirty(layout).expect("taffy dirty");
+            self.layout.mark_dirty(layout);
             self.needs_layout = true;
             if self.nodes[key as usize].kind == Kind::Text {
                 self.queue_text(key);
@@ -1707,8 +1706,7 @@ impl<M: TextEngine> Core<M> {
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
-        }
-        .expect("taffy leaf");
+        };
         self.nodes[key as usize].layout = Some(layout);
         self.became(key, style);
         Ok(())
@@ -1789,8 +1787,8 @@ impl<M: TextEngine> Core<M> {
         node.control = fresh.control;
         node.component = fresh.component;
         let layout = node.layout.expect("a view has a layout");
-        let _ = self.layout.set_node_context(layout, leaf_context(kind));
-        let style = self.layout.style(layout).cloned().unwrap_or_default();
+        self.layout.set_node_context(layout, leaf_context(kind));
+        let style = self.layout.style(layout).clone();
         self.became(key, style);
         if let Some((parent, before)) = at {
             let _ = self.insert(parent, id, before);
@@ -1829,7 +1827,7 @@ impl<M: TextEngine> Core<M> {
         if !same {
             *self.text_cx(layout) = TextContext::new(Arc::new(text));
         }
-        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.layout.mark_dirty(layout);
         self.needs_layout = true;
     }
 
@@ -1917,7 +1915,7 @@ impl<M: TextEngine> Core<M> {
         if node.fixed_view {
             style.position = Position::Fixed;
         }
-        self.layout.set_style(layout, style).expect("taffy style");
+        self.layout.set_style(layout, style);
         self.needs_layout = true;
     }
 
@@ -2086,7 +2084,7 @@ impl<M: TextEngine> Core<M> {
             node.base_layout = Some(Box::new(layout));
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            self.layout.set_style(l, layout).expect("taffy style");
+            self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         let mut flags = 0;
@@ -2185,11 +2183,11 @@ impl<M: TextEngine> Core<M> {
             node.view_style = view;
             self.sync_layout_style(key);
         } else if let Some(l) = node.layout {
-            let mut layout = self.layout.style(l).expect("taffy style").clone();
+            let mut layout = self.layout.style(l).clone();
             crate::style::swap_sides(&mut layout, &mut view);
             layout.direction = direction;
             self.nodes[key as usize].view_style = view;
-            self.layout.set_style(l, layout).expect("taffy style");
+            self.layout.set_style(l, layout);
             self.needs_layout = true;
         }
         self.mark(key, dirty::VIEW);
@@ -2379,7 +2377,7 @@ impl<M: TextEngine> Core<M> {
                         && *natural != size
                     {
                         *natural = size;
-                        self.layout.mark_dirty(layout).expect("taffy dirty");
+                        self.layout.mark_dirty(layout);
                         self.needs_layout = true;
                     }
                 }
@@ -3247,8 +3245,7 @@ impl<M: TextEngine> Core<M> {
                     .layout
                     .expect("block parent has layout");
                 self.layout
-                    .insert_child_at_index(parent_layout, index as usize, child_layout)
-                    .expect("taffy insert");
+                    .insert_child_at_index(parent_layout, index as usize, child_layout);
             }
             self.needs_layout = true;
             // An overlay's native view goes to its root view
@@ -3330,9 +3327,7 @@ impl<M: TextEngine> Core<M> {
                 let parent_layout = self.nodes[parent as usize]
                     .layout
                     .expect("block parent has layout");
-                self.layout
-                    .remove_child(parent_layout, layout)
-                    .expect("taffy remove");
+                self.layout.remove_child(parent_layout, layout);
             }
             self.needs_layout = true;
             if emit_remove
@@ -3449,7 +3444,7 @@ impl<M: TextEngine> Core<M> {
             self.sticky_scrollers.retain(|&k| k != key);
         }
         if let Some((spacer, _)) = node.list.as_ref().and_then(|l| l.spacer) {
-            self.layout.remove(spacer).expect("taffy remove");
+            self.layout.remove(spacer);
         }
         if node.kind == Kind::Text {
             self.attachment_blocks.retain(|&k| k != key);
@@ -3476,7 +3471,7 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if let Some(layout) = node.layout {
-            self.layout.remove(layout).expect("taffy remove");
+            self.layout.remove(layout);
         }
         if node.created {
             self.mount.push(MountItem::Delete { id });
@@ -3582,7 +3577,7 @@ impl<M: TextEngine> Core<M> {
         if inline {
             // Block -> span: spans have no layout node or native view.
             if let Some(l) = node.layout.take() {
-                self.layout.remove(l).expect("taffy remove");
+                self.layout.remove(l);
             }
             if node.created {
                 node.created = false;
@@ -3591,11 +3586,7 @@ impl<M: TextEngine> Core<M> {
         } else {
             let style = node.base_layout.as_deref().cloned().unwrap_or_default();
             let cx = LeafContext::Text(TextContext::new(Arc::default()));
-            node.layout = Some(
-                self.layout
-                    .new_leaf_with_context(style, cx)
-                    .expect("taffy leaf"),
-            );
+            node.layout = Some(self.layout.new_leaf_with_context(style, cx));
             self.mark(key, dirty::TEXT_BUILD);
         }
     }
@@ -4212,7 +4203,7 @@ impl<M: TextEngine> Core<M> {
         if !same_layout {
             cx.layout_hash = cx.alignments.layout_hash(&cx.text);
             cx.cache = None;
-            self.layout.mark_dirty(layout).expect("taffy dirty");
+            self.layout.mark_dirty(layout);
             self.needs_layout = true;
         }
         true
@@ -4326,7 +4317,7 @@ impl<M: TextEngine> Core<M> {
                 inserted = true;
             }
             let layout = self.nodes[a as usize].layout.expect("attachment layout");
-            let dirty = self.layout.dirty(layout).unwrap_or(true);
+            let dirty = self.layout.dirty(layout);
             if dirty {
                 self.layout_root(
                     layout,
@@ -4378,7 +4369,7 @@ impl<M: TextEngine> Core<M> {
                 self.key(id).is_ok_and(|k| {
                     self.nodes[k as usize]
                         .layout
-                        .is_some_and(|l| self.layout.dirty(l).unwrap_or(true))
+                        .is_some_and(|l| self.layout.dirty(l))
                 })
             });
             if dirty {
@@ -4394,9 +4385,9 @@ impl<M: TextEngine> Core<M> {
     /// one way or the other on it).
     fn positioning_parent(&self, layout: LayoutId) -> Option<LayoutId> {
         let mut parent = self.layout.parent(layout)?;
-        match self.layout.style(layout).ok()?.position {
+        match self.layout.style(layout).position {
             Position::Absolute => {
-                while !self.layout.style(parent).ok()?.position.is_positioned() {
+                while !self.layout.style(parent).position.is_positioned() {
                     let Some(above) = self.layout.parent(parent) else {
                         break;
                     };
@@ -4449,7 +4440,7 @@ impl<M: TextEngine> Core<M> {
             height: AvailableSpace::Definite(self.viewport.height.0),
         };
         // A clean root has nothing new to lay out, nor frames to emit.
-        let main = self.layout.dirty(root).unwrap_or(true);
+        let main = self.layout.dirty(root);
         if main {
             self.layout_root(root, available);
         }
@@ -4674,13 +4665,13 @@ impl<M: TextEngine> Core<M> {
             ),
         };
         let changed = root.laid_out != Some((size, header));
-        if !changed && !self.layout.dirty(layout).unwrap_or(true) {
+        if !changed && !self.layout.dirty(layout) {
             return;
         }
         if kind == Kind::InputAccessory || (kind == Kind::HeaderItem && size.width > Points::ZERO) {
-            let mut style = self.layout.style(layout).expect("taffy style").clone();
+            let mut style = self.layout.style(layout).clone();
             style.size.width = taffy::Dimension::length(size.width.0);
-            self.layout.set_style(layout, style).expect("taffy style");
+            self.layout.set_style(layout, style);
         } else if kind != Kind::HeaderItem {
             let config_padding = match kind {
                 // Large titles and transparent headers lay the content out
@@ -4710,7 +4701,7 @@ impl<M: TextEngine> Core<M> {
                 };
                 style.padding.top = taffy::LengthPercentage::length(base + config_padding);
             }
-            self.layout.set_style(layout, style).expect("taffy style");
+            self.layout.set_style(layout, style);
         }
         let header_changed = root.laid_out.is_none_or(|(_, h)| h != header);
         self.nodes[key as usize]
@@ -4814,7 +4805,7 @@ impl<M: TextEngine> Core<M> {
                     Some(CellSlot::Item(_)) | None => item_cross,
                     Some(_) => extra_cross,
                 };
-                if resized || self.layout.dirty(cell_layout).unwrap_or(true) {
+                if resized || self.layout.dirty(cell_layout) {
                     self.layout_root(cell_layout, available(c));
                     self.nodes[cell as usize].relaid = true;
                 }
@@ -4864,8 +4855,7 @@ impl<M: TextEngine> Core<M> {
                         _ => taffy::Size::ZERO,
                     },
                 )
-            })
-            .expect("taffy layout");
+            });
     }
 
     /// Whether `key` is out of the layout: `display: none` on it or on a
@@ -4875,10 +4865,7 @@ impl<M: TextEngine> Core<M> {
         while k != NO_KEY {
             let n = &self.nodes[k as usize];
             if let Some(layout) = n.layout
-                && self
-                    .layout
-                    .style(layout)
-                    .is_ok_and(|s| s.display == taffy::Display::None)
+                && self.layout.style(layout).display == taffy::Display::None
             {
                 return true;
             }
@@ -5092,11 +5079,7 @@ impl<M: TextEngine> Core<M> {
         if !node.created {
             return;
         }
-        let hidden = hidden
-            || self
-                .layout
-                .style(layout)
-                .is_ok_and(|s| s.display == taffy::Display::None);
+        let hidden = hidden || self.layout.style(layout).display == taffy::Display::None;
         if hidden {
             self.set_frame(key, Bounds::default());
             if self.nodes[key as usize].kind.is_container() {
@@ -5112,11 +5095,7 @@ impl<M: TextEngine> Core<M> {
         }
         let node = &self.nodes[key as usize];
         let unrounded = self.layout.unrounded_layout(layout);
-        let containing = if self
-            .layout
-            .style(layout)
-            .is_ok_and(|s| s.position.is_out_of_flow())
-        {
+        let containing = if self.layout.style(layout).position.is_out_of_flow() {
             self.layout_origin(layout)
         } else {
             origin

@@ -147,7 +147,7 @@ pango = "0.22"
 pangocairo = "0.22"
 # The Linux backend's web views (its feature `webview`): WebKitGTK 6.0 (2.40+).
 webkit6 = "0.6"
-taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size"] }
+taffy = { version = "0.15", default-features = false, features = ["std", "flexbox", "grid", "block_layout", "content_size"] }
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
 

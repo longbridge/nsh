@@ -14910,7 +14910,7 @@ fn own_lists_have_no_spacer_and_scroll_themselves() {
     assert!(c.parent_lists.is_empty());
     let key = c.key(4).unwrap();
     let layout = c.nodes[key as usize].layout.unwrap();
-    assert!(c.layout.children(layout).unwrap().is_empty());
+    assert!(c.layout.children(layout).is_empty());
     let key = c.key(2).unwrap();
     assert!(
         c.nodes[key as usize]
