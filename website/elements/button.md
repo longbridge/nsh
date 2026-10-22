@@ -68,7 +68,7 @@ the typed style methods (`.px_4()`, `.bg(..)`) for its look, the state methods (
 | `selected` | `.selected(..)` | `boolean` | `false` | Selected: a toggle that is on, the current tab. Screen readers say so. The app owns the value and styles it. |
 | `selectedStyle` | `.selected_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The style while `selected` and not disabled, as `selected:` classes. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say when the content is not enough, as for an icon. |
-| `role` | `.role(..)` | `AccessibilityRole` | `"button"` | What it is for screen readers: `"link"`, `"tab"`, `"menuitem"`, `"switch"`, ... |
+| `role` | `.role(..)` | `AccessibilityRole` | `"button"` | What it is for screen readers when no `nsh/base` component is that control: `"link"` (it opens a URL), ... |
 | `children` | `.child(..)` | `JSX.Element` | none | The content: text, an icon, any layout. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | Its look, all of it. |
 | `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` | `.active(\|s\| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)` | `StyleProp<ViewStyle>` | none | The style while pressed, hovered, focused or disabled, as the `<state>:` classes. Later states win; `disabled` wins over all. |
@@ -220,41 +220,7 @@ fn bold(on: Signal<bool>) -> impl IntoElement {
 </Button>
 ```
 
-A row of tabs is a `Button` per tab with the `"tab"` role and `selected` on the current one:
-
-```rust tabs
-#[derive(Clone, Copy, PartialEq)]
-enum Tab {
-    Inbox,
-    Archive,
-}
-
-fn tab(current: Signal<Tab>, tab: Tab, label: &'static str) -> impl IntoElement {
-    button()
-        .role(AccessibilityRole::Tab)
-        .selected(move || current.get() == tab)
-        .on_press(move || current.set(tab))
-        .rounded_full()
-        .px_4()
-        .py_2()
-        .selected_style(|s| s.bg(rgb(0x2563eb)))
-        .active(|s| s.opacity(0.7))
-        .child(text(label))
-}
-```
-
-```tsx tabs
-<View class="flex-row gap-2">
-  <Button role="tab" selected={tab() === "inbox"} onPress={() => tab.set("inbox")}
-    class="rounded-full px-4 py-2 selected:bg-blue-600 active:opacity-70">
-    <Text>Inbox</Text>
-  </Button>
-  <Button role="tab" selected={tab() === "archive"} onPress={() => tab.set("archive")}
-    class="rounded-full px-4 py-2 selected:bg-blue-600 active:opacity-70">
-    <Text>Archive</Text>
-  </Button>
-</View>
-```
+A row of tabs is [`Tabs`](./tabs.md) and an on / off control is [`Switch`](./switch.md), from `nsh/base`: they own the role, the selected state and the keyboard of their kind, which a `Button` with `role="tab"` or `role="switch"` does not.
 
 ## Accessibility
 
