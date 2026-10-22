@@ -131,6 +131,7 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),

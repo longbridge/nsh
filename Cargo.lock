@@ -2951,8 +2951,10 @@ name = "nsh-core"
 version = "0.2.0"
 dependencies = [
  "cap-std",
+ "crc32fast",
  "flate2",
  "futures-util",
+ "httpdate",
  "libc",
  "log",
  "nsh-macros",

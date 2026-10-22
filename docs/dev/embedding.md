@@ -189,6 +189,17 @@ NSH draws (`src/layers.rs`).
   (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
   `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
   override one app's place; all from the next load.
+- **Caches.** An app's caches (today the images it downloads, `nsh_core::image::DiskCache`) live in
+  `<root>/<app id>/<kind>`, which the engine opens from `EngineConfig::cache` (`nsh_engine::CacheOptions`: a
+  `CacheLocation` (`System`, `Dir`, `Off`) and a `CachePolicy` per kind (`Default`, `MaxSize(ByteSize)`, `Off`),
+  sizes in `ByteSize::mib` / `gib`) and hands to the platform (`Engine::image_cache`). `EngineConfig::new` keeps none.
+  `System` is the engine's own (`~/Library/Caches`, `%LOCALAPPDATA%`, `$XDG_CACHE_HOME`) on the desktops; iOS and
+  Android, which alone know theirs, resolve it before the engine sees it (`Library/Caches/nsh`; `nsh` in the
+  Context's cache directory). One shape on every face: `AppOptions::cache` / `SurfaceOptions::cache` and
+  `AppView::set_cache` in Rust, `NshAppView.cacheOptions` (`NshCacheOptions`: `.system` / `.directory(URL)` /
+  `.off`, `.default` / `.maxSize(megabytes:)` / `.off`) in Swift over `nsh_app_set_cache` (a C struct with a leading
+  `size`, read up to it, so it can grow), `NshView.setCacheOptions(NshCacheOptions)` (immutable, built) in Java; all
+  from the next load. A new kind of cache is one more `CachePolicy` field, never another option per platform.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

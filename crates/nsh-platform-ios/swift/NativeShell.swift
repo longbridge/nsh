@@ -37,6 +37,41 @@ private func check(_ error: UnsafeMutablePointer<CChar>?) throws {
     throw NshError(message: message)
 }
 
+/// Where the apps an `NshAppView` loads keep their caches, and how much each
+/// keeps: today the images they download, kept as the server sent them so
+/// they show again without a download (and offline).
+public struct NshCacheOptions: Equatable, Sendable {
+    /// The root of the apps' caches: each app's in `<root>/<app id>`.
+    public enum Location: Equatable, Sendable {
+        /// `nsh` in the app's Caches (the system may clear it for space).
+        case system
+        /// A directory of the app's choosing.
+        case directory(URL)
+        /// Nothing on disk.
+        case off
+    }
+
+    /// How much one cache keeps.
+    public enum Policy: Equatable, Sendable {
+        /// Its default size (images: 256 MB).
+        case `default`
+        /// At most this many megabytes (MiB); the least recently used go first.
+        case maxSize(megabytes: Int)
+        /// Not kept on disk.
+        case off
+    }
+
+    /// Where: `.system` by default.
+    public var location: Location
+    /// The images the apps download: `.default` by default.
+    public var images: Policy
+
+    public init(location: Location = .system, images: Policy = .default) {
+        self.location = location
+        self.images = images
+    }
+}
+
 /// The VM limits of an app (`nil`: the default).
 public struct NshLimits: Sendable, Equatable {
     /// JS heap in MB (default 256, for an app embedded in another). Running out stops the app.
@@ -149,6 +184,42 @@ public final class NshAppView: UIView {
         didSet {
             // A file path is always UTF-8, so this cannot fail.
             try? check(nsh_app_set_storage_directory(app, storageDirectory?.path))
+        }
+    }
+
+    /// Where the apps this view loads keep their caches (the images they
+    /// downloaded, so they show again without a download and offline) and
+    /// how much each keeps. Applies from the next load.
+    public var cacheOptions = NshCacheOptions() {
+        didSet { applyCacheOptions() }
+    }
+
+    private func applyCacheOptions() {
+        var c = NativeShellC.NshCacheOptions()
+        c.size = UInt32(MemoryLayout<NativeShellC.NshCacheOptions>.size)
+        var directory: String?
+        switch cacheOptions.location {
+        case .system: c.location = UInt32(NSH_CACHE_LOCATION_SYSTEM)
+        case .directory(let url):
+            c.location = UInt32(NSH_CACHE_LOCATION_DIRECTORY)
+            directory = url.path
+        case .off: c.location = UInt32(NSH_CACHE_LOCATION_OFF)
+        }
+        switch cacheOptions.images {
+        case .default: c.images = UInt32(NSH_CACHE_POLICY_DEFAULT)
+        case .maxSize(let megabytes):
+            c.images = UInt32(NSH_CACHE_POLICY_MAX_SIZE)
+            c.images_max_mb = UInt32(clamping: megabytes)
+        case .off: c.images = UInt32(NSH_CACHE_POLICY_OFF)
+        }
+        // Valid by construction (a file path is UTF-8), so this cannot fail.
+        guard let directory else {
+            try? check(nsh_app_set_cache(app, &c))
+            return
+        }
+        directory.withCString { path in
+            c.directory = path
+            try? check(nsh_app_set_cache(app, &c))
         }
     }
 

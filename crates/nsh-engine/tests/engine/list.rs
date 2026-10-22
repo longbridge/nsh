@@ -114,6 +114,7 @@ fn start(app: &str) -> (Engine, mpsc::Receiver<MountBatch>, std::path::PathBuf) 
         ui_sets: Vec::new(),
         runtime: None,
         data_dir: None,
+        cache: nsh_engine::CacheOptions::off(),
         storage: None,
         clock: Default::default(),
         context: Default::default(),

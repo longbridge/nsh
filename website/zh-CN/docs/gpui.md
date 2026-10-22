@@ -114,6 +114,7 @@ view.load(App::Js(Bundle::source(code)));
 - `open_app_window(source, options, cx)` 在运行中的 GPUI 应用里打开一个带 `AppView` 的窗口。
 - `run_app(source, options)` 启动 GPUI，在一个窗口中运行一个应用直到窗口关闭（开发宿主就是这样做的）。
 - `AppView::register_component(name, factory)` 在加载前注册你自己的原生组件（[原生组件](./native-components.md)）。
+- `AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小：`CacheOptions { location, images }`，`CacheLocation::System`（默认）、`Dir(path)` 或 `Off`，`CachePolicy::Default`（256 MiB）、`MaxSize(ByteSize::mib(n))` 或 `Off`。
 - `AppOptions::limits`（或 `AppView::set_limits`，作用于之后加载的应用）设置 VM 限制：JS 堆、栈、时间预算和节点配额（[沙箱与能力](./sandbox-and-capabilities.md)）。嵌入的应用默认是 `Limits::default()`（256 MB 堆）；开发宿主把应用作为独立应用运行，使用 `Limits::standalone()`。
 - `AppView::connect_dev_server(url, cx)`（feature `dev`）从 `nsh dev` 加载应用，边改边重新加载，错误浮层显示在视图上；`AppView::on_error` 照样收到应用的错误。
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。

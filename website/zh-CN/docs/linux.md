@@ -124,6 +124,8 @@ view.load(Bundle::source(code).into());
 只能从你自己应用的文件中加载。独立窗口用 `nsh_platform_linux::run_app(source, options)`，传入 `AppSource::Rust(root)` 或
 `AppSource::Bundle(bundle)`。
 
+`AppOptions::cache`（或 `AppView::set_cache`，作用于之后加载的应用）设置应用保存缓存（[下载的图片](./images-and-assets.md#磁盘缓存)）的位置和每种缓存的大小（`CacheOptions`：默认为系统的缓存目录和 256 MiB 图片）。
+
 `AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-linux-上注册rust)。

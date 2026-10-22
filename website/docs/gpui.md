@@ -132,6 +132,10 @@ so only load it from your own app's files.
 - `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the development host does).
 - `AppView::register_component(name, factory)` registers a native component of yours before loading
   ([Native components](./native-components.md)).
+- `AppOptions::cache` (or `AppView::set_cache`, for the apps loaded next) sets where the apps keep their caches, the
+  [images they download](./images-and-assets.md#kept-on-disk), and how much each keeps: `CacheOptions { location,
+  images }`, `CacheLocation::System` (the default), `Dir(path)` or `Off`, `CachePolicy::Default` (256 MiB),
+  `MaxSize(ByteSize::mib(n))` or `Off`.
 - `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
   stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
   256 MB heap); the development host runs apps on its own, with `Limits::standalone()`.

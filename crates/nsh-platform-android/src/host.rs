@@ -13,7 +13,7 @@ use std::{
 
 use jni::{
     JNIEnv,
-    objects::{GlobalRef, JByteArray, JClass, JFloatArray, JObject, JString, JValue},
+    objects::{GlobalRef, JByteArray, JClass, JFloatArray, JObject, JObjectArray, JString, JValue},
     signature::{Primitive, ReturnType},
     sys::{jboolean, jfloat, jfloatArray, jint, jlong},
 };
@@ -68,6 +68,14 @@ pub(crate) struct Host {
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
+    /// Where loaded apps keep their caches (`NshView.setCacheOptions`).
+    cache: Mutex<nsh_engine::CacheOptions>,
+    /// What [`nsh_engine::CacheLocation::System`] is here: `nsh` in the
+    /// Context's cache directory (only the platform knows it).
+    system_cache_dir: Option<std::path::PathBuf>,
+    /// The running app's disk cache of downloaded images, for
+    /// `Images.java` (`Native.imageCacheLookup` / `imageCacheComplete`).
+    image_cache: Mutex<Option<nsh_core::image::DiskCache>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
     /// A test session's model of the app (`nsh test --target android`):
@@ -128,6 +136,13 @@ impl Host {
         }
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
         *self.ui.lock().expect("ui") = UiAnimation::default();
+        let mut cache = self.cache.lock().expect("cache options").clone();
+        if cache.location == nsh_engine::CacheLocation::System {
+            cache.location = match &self.system_cache_dir {
+                Some(dir) => nsh_engine::CacheLocation::Dir(dir.clone()),
+                None => nsh_engine::CacheLocation::Off,
+            };
+        }
         #[allow(unused_mut)]
         let mut config = EngineConfig {
             app,
@@ -144,6 +159,7 @@ impl Host {
             ui_sets: crate::ui_sets(),
             runtime: None,
             data_dir: self.data_dir.clone(),
+            cache,
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
@@ -161,6 +177,8 @@ impl Host {
         }
         match Engine::start(config, move || AndroidTextEngine { density }, sink) {
             Ok(engine) => {
+                // The app's downloaded images go through its disk cache.
+                *self.image_cache.lock().expect("image cache") = engine.image_cache();
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.lock().unwrap_or_else(|e| e.into_inner()) {
@@ -459,6 +477,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     density: jfloat,
     trace: jboolean,
     data_dir: JString<'_>,
+    cache_dir: JString<'_>,
 ) -> jlong {
     let Ok(view) = env.new_global_ref(view) else {
         return 0;
@@ -466,6 +485,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
     let data_dir = env
         .get_string(&data_dir)
         .ok()
+        .map(|dir| std::path::PathBuf::from(String::from(dir)));
+    let cache_dir = (!cache_dir.is_null())
+        .then(|| env.get_string(&cache_dir).ok())
+        .flatten()
         .map(|dir| std::path::PathBuf::from(String::from(dir)));
     let host = Arc::new(Host {
         view,
@@ -486,6 +509,9 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         inline_images: Mutex::default(),
+        cache: Mutex::default(),
+        system_cache_dir: cache_dir,
+        image_cache: Mutex::new(None),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
         #[cfg(feature = "dev")]
@@ -585,6 +611,152 @@ extern "system" fn Java_com_longbridge_nsh_Native_setStorage(
         }
     };
     *host.storage.lock().expect("storage") = dir;
+}
+
+/// Where the apps loaded next keep their caches and how much each keeps
+/// (`NshView.setCacheOptions`): `location` 0 the system's (`nsh` in the
+/// Context's cache directory), 1 `dir`, 2 none; `images` 0 its default
+/// size, 1 `images_max_mb` megabytes, 2 none.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setCache(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    location: jint,
+    dir: JString<'_>,
+    images: jint,
+    images_max_mb: jint,
+) {
+    use nsh_engine::{ByteSize, CacheLocation, CacheOptions, CachePolicy};
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let location = match location {
+        0 => CacheLocation::System,
+        1 => match (!dir.is_null()).then(|| env.get_string(&dir)) {
+            Some(Ok(dir)) => CacheLocation::Dir(String::from(dir).into()),
+            _ => return log::error!("invalid cache directory"),
+        },
+        _ => CacheLocation::Off,
+    };
+    let images = match images {
+        0 => CachePolicy::Default,
+        1 => CachePolicy::MaxSize(ByteSize::mib(images_max_mb.max(0) as u64)),
+        _ => CachePolicy::Off,
+    };
+    *host.cache.lock().expect("cache options") = CacheOptions::at(location).with_images(images);
+}
+
+/// What the running app's disk cache holds for `url`: its bytes (`byte[]`)
+/// when they are fresh, the conditional request headers to revalidate a
+/// stale copy with (`String[]`, names and values; empty: none), or null (a
+/// miss, or no disk cache). Called on the image threads.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    url: JString<'local>,
+) -> JObject<'local> {
+    use nsh_core::image::Lookup;
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(cache) = host.image_cache.lock().expect("image cache").clone() else {
+        return JObject::null();
+    };
+    let Ok(url) = env.get_string(&url).map(String::from) else {
+        return JObject::null();
+    };
+    match cache.lookup(&url) {
+        Lookup::Fresh(bytes) => env
+            .byte_array_from_slice(&bytes)
+            .map(JObject::from)
+            .unwrap_or_else(|_| JObject::null()),
+        lookup @ Lookup::Stale(_) => {
+            let headers = lookup.request_headers();
+            let strings: Vec<&str> = headers
+                .iter()
+                .flat_map(|(name, value)| [*name, value.as_str()])
+                .collect();
+            string_array(&mut env, &strings).unwrap_or_else(|| JObject::null())
+        }
+        Lookup::Miss => JObject::null(),
+    }
+}
+
+/// `strings` as a Java `String[]`.
+fn string_array<'local>(env: &mut JNIEnv<'local>, strings: &[&str]) -> Option<JObject<'local>> {
+    let array = env
+        .new_object_array(strings.len() as i32, "java/lang/String", JObject::null())
+        .ok()?;
+    for (i, s) in strings.iter().enumerate() {
+        let s = env.new_string(s).ok()?;
+        env.set_object_array_element(&array, i as i32, &s).ok()?;
+    }
+    Some(array.into())
+}
+
+/// Ends the download of `url` that `imageCacheLookup` started: `status` 0
+/// when the request failed, else the response's status, `headers` (names
+/// and values) and body (null without one). Stores, updates or drops the
+/// cached copy, and returns the cached bytes when they are what to show
+/// (a `304`; a stale copy when the request failed or the server erred), or
+/// null: the response's own body (a `2xx`), or an error. Called on the
+/// image threads.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    url: JString<'local>,
+    status: jint,
+    headers: JObjectArray<'local>,
+    body: JByteArray<'local>,
+) -> JByteArray<'local> {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Some(cache) = host.image_cache.lock().expect("image cache").clone() else {
+        return JByteArray::default();
+    };
+    let Ok(url) = env.get_string(&url).map(String::from) else {
+        return JByteArray::default();
+    };
+    let response = if status <= 0 {
+        Err("the request failed".to_owned())
+    } else {
+        let mut strings = Vec::new();
+        if !headers.is_null() {
+            let len = env.get_array_length(&headers).unwrap_or(0);
+            for i in 0..len {
+                let value = env
+                    .get_object_array_element(&headers, i)
+                    .ok()
+                    .filter(|o| !o.is_null())
+                    .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from));
+                strings.push(value.unwrap_or_default());
+            }
+        }
+        let pairs = strings
+            .chunks_exact(2)
+            .map(|pair| (pair[0].as_str(), pair[1].as_str()));
+        let body = if body.is_null() {
+            Vec::new()
+        } else {
+            env.convert_byte_array(&body).unwrap_or_default()
+        };
+        Ok(nsh_core::image::Fetched::new(
+            status as u16,
+            nsh_core::image::CacheHeaders::from_pairs(pairs),
+            body,
+        ))
+    };
+    // A 2xx's bytes are the body Java has.
+    let own = (200..300).contains(&status);
+    match cache.complete(&url, response) {
+        Ok(bytes) if !own => env
+            .byte_array_from_slice(&bytes)
+            .unwrap_or_else(|_| JByteArray::default()),
+        _ => JByteArray::default(),
+    }
 }
 
 /// Whether the running app's web views may navigate to `url`.

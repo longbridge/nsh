@@ -128,6 +128,15 @@ impl AppView {
         self.inner.set_limits(limits);
     }
 
+    /// Where the apps this view loads keep their caches (the images they
+    /// downloaded) and how much each keeps ([`SurfaceOptions::cache`]). A
+    /// change applies from the next [`AppView::load`].
+    pub fn set_cache(&self, cache: nsh_engine::CacheOptions) {
+        if self.inner.state.borrow().options.cache != cache {
+            self.reconfigure(|options| options.cache = cache);
+        }
+    }
+
     /// The directory the storage (`nsh/storage`) of the apps this view loads
     /// is kept in (`storage.json` in it), overriding each app's own in
     /// [`SurfaceOptions::data_dir`] (`None`: theirs). A change applies from

@@ -106,6 +106,7 @@ impl Platform {
             ui_sets: Vec::new(),
             runtime: None,
             data_dir: None,
+            cache: nsh_engine::CacheOptions::off(),
             storage: None,
             clock: Default::default(),
             context: Default::default(),

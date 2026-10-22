@@ -196,6 +196,19 @@ final class Mounter {
             long handle = handle();
             return handle == 0 ? null : Native.imageBytes(handle, uri);
         };
+        images.disk = new Images.DiskCache() {
+            @Override
+            public Object lookup(String url) {
+                long handle = handle();
+                return handle == 0 ? null : Native.imageCacheLookup(handle, url);
+            }
+
+            @Override
+            public byte[] complete(String url, int status, String[] headers, byte[] body) {
+                long handle = handle();
+                return handle == 0 ? null : Native.imageCacheComplete(handle, url, status, headers, body);
+            }
+        };
         root = new Box(context, this, 1);
         views.put(1, root);
     }
