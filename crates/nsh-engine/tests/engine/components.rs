@@ -225,6 +225,48 @@ fn shows(batch: &MountBatch, wanted: &str) -> bool {
     text_ids(batch, wanted).is_some()
 }
 
+const KEYED_CHILDREN: &str = r#"import { mount, signal, Text } from "nsh";
+import { Group } from "test/ui";
+
+const items = signal([{ id: "a", label: "A1" }, { id: "b", label: "B1" }]);
+// New objects, the same keys: the rows are kept.
+setTimeout(() => items.set([{ id: "a", label: "A2" }, { id: "b", label: "B2" }]), 50);
+
+mount(() => (
+  <Group>
+    <Each of={items()} key={(i: { id: string }) => i.id}>
+      {(item) => <Text>{item().label}</Text>}
+    </Each>
+  </Group>
+));
+"#;
+
+/// A component's children made by a keyed `<Each>` keep their rows when
+/// the items change: the children's expression is not made again.
+#[test]
+fn a_components_keyed_children_keep_their_rows() {
+    let (_engine, rx) = start(KEYED_CHILDREN);
+    let batches = until(&rx, |b| shows(b, "A2"));
+    let first = &batches[0];
+    let a = text_ids(first, "A1").expect("A1 shown");
+    let last = batches.last().unwrap();
+    assert_eq!(
+        text_ids(last, "A2"),
+        Some(a),
+        "the row's text is updated in place"
+    );
+    let deleted = batches[1..]
+        .iter()
+        .flat_map(|b| &b.items)
+        .any(|i| matches!(i, MountItem::Delete { id } if *id % 2 == 0));
+    assert!(!deleted, "no row of the app's is made again");
+    let removed = batches[1..]
+        .iter()
+        .flat_map(|b| &b.items)
+        .any(|i| matches!(i, MountItem::Remove { id } if *id % 2 == 0));
+    assert!(!removed, "the moved row stays in its wrapper");
+}
+
 const LAZY_SHEET: &str = r#"import { mount, signal, untracked, Text } from "nsh";
 import { Sheet } from "test/ui";
 

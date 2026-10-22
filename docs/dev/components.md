@@ -711,7 +711,9 @@ what changed.
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
   children: one wrapper per child, so a child added or removed leaves the others' wrappers in place, and a child JS
-  moves among them (a keyed `<Each>`'s row) keeps its wrapper, which the region moves.
+  moves among them (a keyed `<Each>`'s row) keeps its wrapper, which the region moves. The JS face inserts a component's
+  children through a memo of their getter, so their expression runs again only when what it reads itself changes: an
+  `<Each>` among them is made once and keeps its rows, as a host element's does.
 - A view passes its children on by placing its `Children` among a nested component's (`<Inset>{children}</Inset>`):
   they become that component's children (`Placement::Nested`), in that place among the content the view gives it,
   so its view places them, as deep as they are passed on; JS's insertions and removals follow them there, and content
