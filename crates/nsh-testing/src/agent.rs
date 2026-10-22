@@ -385,6 +385,11 @@ pub trait Scene: Send + Sync {
     fn span(&self, id: NodeId) -> Result<Option<(NodeId, u32, u32)>, String>;
     /// Moves the app's manual clock ([`Model::move_clock`]).
     fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String>;
+    /// Whether the app runs on a manual clock (`open`'s `clock`), which
+    /// the agent moves as time passes in a step (a long press's hold).
+    fn manual_clock(&self) -> bool {
+        false
+    }
 }
 
 impl Scene for Model {
@@ -478,6 +483,10 @@ impl Scene for Model {
     }
     fn move_clock(&self, change: nsh_dev::protocol::ClockChange) -> Result<(), String> {
         Model::move_clock(self, change)
+    }
+    fn manual_clock(&self) -> bool {
+        let setup = self.setup.lock().unwrap_or_else(|e| e.into_inner());
+        setup.as_ref().is_some_and(|s| s.clock.is_some())
     }
 }
 
@@ -1389,9 +1398,24 @@ impl Agent {
             Duration::from_secs_f64(f64::from(ms.max(0.0)) / 1000.0)
         });
         // A little past the delay, as a finger holds on.
-        self.native
-            .long_press(at, hold + Duration::from_millis(100));
-        self.settled()
+        let hold = hold + Duration::from_millis(100);
+        if !self.scene.manual_clock() {
+            self.native.long_press(at, hold);
+            return self.settled();
+        }
+        // The app's time passes while the finger rests, as headless: once
+        // it has landed, the manual clock moves by the rest of the hold
+        // (the timers of a hold the app keeps itself fire on the way).
+        // The move is sent while the finger rests, so the engine takes it
+        // between the touch's start and its end.
+        let moved = std::thread::scope(|s| {
+            s.spawn(|| self.native.long_press(at, hold));
+            std::thread::sleep(LANDING);
+            let ms = hold.saturating_sub(LANDING).as_millis() as u64;
+            self.scene
+                .move_clock(nsh_dev::protocol::ClockChange::RunFor { ms })
+        });
+        moved.and_then(|()| self.settled())
     }
 
     /// Focuses the input `selector` names by pressing it.

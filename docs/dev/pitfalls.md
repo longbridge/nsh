@@ -383,6 +383,9 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## Testing on simulators and emulators
 
+- **A manual clock stands still while a finger holds**: it moves with the frames the app asks for, and a held finger
+  asks for none, so a hold the app times itself (a `ContextMenu` on a touch screen) never came due on a real
+  platform. The agent's long press moves the clock by the hold, as the headless driver's does.
 - **iOS simulator: launch apps only after `simctl bootstatus -b`**; apps launched while the simulator boots are sent to the
   background when SpringBoard comes up.
 - **Synthetic clicks on the Simulator / Catalyst windows go to whatever macOS window is on top at that point**: floating windows

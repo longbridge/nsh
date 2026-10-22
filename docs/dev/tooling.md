@@ -410,7 +410,9 @@ view for the app to settle, so a page that is never quiet, a ticking timer, cost
 one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span) and acts there with synthesized input
-(`Native`: press, long press, scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
+(`Native`: press, long press (on a manual clock, once the finger has landed, the agent moves the clock by the rest
+of the hold, as the headless driver's hold does: a hold the app times itself, a touch screen's `ContextMenu`, comes
+due), scroll, drag along `agent::drag_path` after resting `agent::LANDING`, typed keys,
 the mouse's secondary button (`right_click`), the open context menu's items chosen or the menu closed
 (`choose_menu_item`, `close_menu`: macOS's tracking `NSMenu`, run from the run loop rather than the main queue so the
 agent's calls and the app's batches go on while it tracks; Windows' `TrackPopupMenuEx` ended with `EndMenu` and the
