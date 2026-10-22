@@ -172,6 +172,9 @@ again replaces the running app. The complete sample is
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
 | `registerComponent(String name, NshComponent.Factory factory)` | Registers a [native component](./native-components.md). |
+| `setParams(Object params)` | The launch parameters of the apps loaded next (a `Map` or `JSONObject`): the app reads them at start as `host.params` ([`nsh/host`](../modules/nsh-host.md)). Returns `false` when they are not a JSON object. |
+| `send(String name, Object data)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. Any thread. |
+| `handle(String name, HostHandler handler)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the UI thread; `null` removes the handler. The handler answers through its `NshHostReply`, once, from any thread. |
 | `connectDevServer(String url)` | Development: loads from a `nsh dev` server and reloads on every change. Returns `false` with the release AAR. |
 | `handleBack()` | Lets the app handle a back press (closes dialogs, pops pages, runs `BackHandler` listeners); returns whether it did. |
 | `destroy()` | Stops the app and calls `destroy()` on each of its native components. The view can no longer be used. |
@@ -189,6 +192,49 @@ Each app keeps its storage under its own id with no setting: a signed package un
 nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
+
+## Talking to the app
+
+The view and the app it runs talk through a channel of their own ([`nsh/host`](../modules/nsh-host.md)): launch
+parameters the app reads at start, events from the host app, and calls and posts from the app, with JSON data (maps,
+lists, strings, numbers and booleans on this side). It needs no view in the app and no native component.
+
+```java
+// Before loading: what the app opens first (`host.params` in TSX).
+nsh.setParams(Map.of("conversation", intent.getStringExtra("conversation")));
+nsh.loadAssetBundle("nsh");
+
+// The app's `await host.call("user.profile", { id })`, on the UI thread.
+nsh.handle("user.profile", (data, reply) -> {
+    Object id = ((Map<?, ?>) data).get("id");
+    api.profile(id, profile -> reply.resolve(Map.of("id", id, "name", profile.name)),
+            error -> reply.reject(error.getMessage()));
+});
+
+// The app's `host.post("analytics", …)`: no answer.
+nsh.handle("analytics", (data, reply) -> analytics.log(data));
+
+// Later: the app hears `host.on("conversation.open", …)`.
+nsh.send("conversation.open", Map.of("id", tappedConversation));
+```
+
+In Kotlin:
+
+```kotlin
+nsh.handle("user.profile") { data, reply ->
+    val id = (data as Map<*, *>)["id"]
+    lifecycleScope.launch {
+        runCatching { api.profile(id) }
+            .onSuccess { reply.resolve(mapOf("id" to id, "name" to it.name)) }
+            .onFailure { reply.reject(it.message ?: "failed") }
+    }
+}
+```
+
+Handlers run on the UI thread; a call waits for its answer in the app without blocking either side. A reply that is
+never given fails the call once it is collected, and a call of a name with no handler fails at once. Events of names
+the app does not listen to yet are kept until it does, and events sent while no app runs (before `loadAssetBundle`,
+during a reload) go to the next one.
 
 ## Limits
 

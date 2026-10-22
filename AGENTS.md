@@ -57,6 +57,7 @@ crates/
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
   nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
+                       app's side of the channel with the embedding app (`host_channel.rs`: `nsh/host`), the
                        renderer of compiled JSX (`dom.rs`, `nsh:rt`), JS's reactive graph (`reactive.rs`: `nsh-core`'s
                        graph with JS values: signals, memos, effects, owners, context), `resource` (`resource.rs`), Rust components' and modules' JS face (`components.rs`), navigation,
                        lists, canvas, animation (`navigation.rs`, `list.rs`, `canvas.rs`, `animated.rs`), touches and the

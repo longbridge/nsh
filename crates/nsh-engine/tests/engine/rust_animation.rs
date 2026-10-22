@@ -111,6 +111,7 @@ impl Platform {
             context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
+            host: Default::default(),
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

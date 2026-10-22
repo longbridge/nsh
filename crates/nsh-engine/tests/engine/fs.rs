@@ -90,6 +90,7 @@ mount(() => <Text>{{shown()}}</Text>);
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -649,6 +650,7 @@ mount(() => <Text>{shown}</Text>);
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(

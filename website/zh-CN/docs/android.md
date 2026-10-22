@@ -165,6 +165,9 @@ setContentView(column);
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
 | `registerComponent(String name, NshComponent.Factory factory)` | 注册一个[原生组件](./native-components.md)。 |
+| `setParams(Object params)` | 之后加载的应用的启动参数（`Map` 或 `JSONObject`）：应用在启动时以 `host.params` 读取（[`nsh/host`](../modules/nsh-host.md)）。不是 JSON 对象时返回 `false`。 |
+| `send(String name, Object data)` | 向应用发送一个事件（`host.on(name, …)`）；应用开始监听前会一直保留，没有应用运行时留给下一个应用。可在任意线程调用。 |
+| `handle(String name, HostHandler handler)` | 在 UI 线程处理应用对 `name` 的调用（`host.call`）和投递（`host.post`）；传 `null` 移除处理函数。处理函数通过它的 `NshHostReply` 在任意线程回答一次。 |
 | `connectDevServer(String url)` | 开发用：从 `nsh dev` 服务器加载，每次修改后重新加载。使用 release 版 AAR 时返回 `false`。 |
 | `handleBack()` | 让应用处理返回键（关闭对话框、弹出页面、执行 `BackHandler` 监听器）；返回它是否处理了。 |
 | `destroy()` | 停止应用，并对它的每个原生组件调用 `destroy()`。此后该视图不能再使用。 |
@@ -181,6 +184,44 @@ setContentView(column);
 nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
 nsh.loadAssetBundle("orders");
 ```
+
+## 与应用通信
+
+视图与它运行的应用通过一条专属通道通信（[`nsh/host`](../modules/nsh-host.md)）：应用在启动时读取的启动参数、宿主应用发来的事件，以及应用发出的调用和投递，数据都是 JSON（在这一侧是 map、list、字符串、数字和布尔值）。应用里不需要任何视图，也不需要原生组件。
+
+```java
+// 加载之前：应用首先打开的内容（TSX 中的 `host.params`）。
+nsh.setParams(Map.of("conversation", intent.getStringExtra("conversation")));
+nsh.loadAssetBundle("nsh");
+
+// 应用的 `await host.call("user.profile", { id })`，在 UI 线程处理。
+nsh.handle("user.profile", (data, reply) -> {
+    Object id = ((Map<?, ?>) data).get("id");
+    api.profile(id, profile -> reply.resolve(Map.of("id", id, "name", profile.name)),
+            error -> reply.reject(error.getMessage()));
+});
+
+// 应用的 `host.post("analytics", …)`：没有回答。
+nsh.handle("analytics", (data, reply) -> analytics.log(data));
+
+// 之后：应用通过 `host.on("conversation.open", …)` 收到它。
+nsh.send("conversation.open", Map.of("id", tappedConversation));
+```
+
+Kotlin 写法：
+
+```kotlin
+nsh.handle("user.profile") { data, reply ->
+    val id = (data as Map<*, *>)["id"]
+    lifecycleScope.launch {
+        runCatching { api.profile(id) }
+            .onSuccess { reply.resolve(mapOf("id" to id, "name" to it.name)) }
+            .onFailure { reply.reject(it.message ?: "failed") }
+    }
+}
+```
+
+处理函数在 UI 线程运行；调用在应用中等待回答，不会阻塞任何一方。始终没有给出的 reply 在被回收时让调用失败，没有处理函数的名称的调用会立即失败。应用尚未监听的名称的事件会保留到它开始监听，没有应用运行时（`loadAssetBundle` 之前、重新加载期间）发送的事件交给下一个应用。
 
 ## 限制
 

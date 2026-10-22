@@ -148,6 +148,21 @@ final class Native {
     /** A native component's own size (dp). */
     static native void componentSize(long handle, int id, float width, float height);
 
+    /** The launch parameters (a JSON object; null: none) of the apps loaded next; false if it is not one. */
+    static native boolean setHostParams(long handle, String json);
+
+    /** Sends event {@code name} with {@code json} data (null: none) to the running app; false if invalid. */
+    static native boolean sendHostEvent(long handle, String name, String json);
+
+    /** The app's calls and posts of {@code name} go to {@code NshView.hostMessage} ({@code handled}), or nowhere. */
+    static native void setHostHandler(long handle, String name, boolean handled);
+
+    /** Answers a call {@code hostMessage} got: {@code json}, or {@code error} when it failed. Frees it. */
+    static native void hostReply(long call, String json, String error);
+
+    /** Frees a call unanswered: it fails in the app. */
+    static native void hostCallFree(long call);
+
     /** Root size in dp. */
     static native void resize(long handle, float width, float height);
 

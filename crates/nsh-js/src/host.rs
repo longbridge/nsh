@@ -47,6 +47,8 @@ pub(crate) struct Shared {
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
     pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
+    /// The embedding app's side of `nsh/host` (the engine's bridge).
+    pub(crate) host_bridge: RefCell<Option<Rc<dyn nsh_core::host_channel::HostBridge>>>,
     pub(crate) system_websocket:
         RefCell<Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>>,
     /// Permissions and host-selected app directory for native system operations.
@@ -728,6 +730,41 @@ impl Host {
         transport: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
     ) {
         *self.shared.system_websocket.borrow_mut() = transport;
+    }
+
+    /// Connects `nsh/host` to the embedding app: its launch parameters, and
+    /// where the app's calls and posts go. Call before evaluating the bundle
+    /// (`host.params` is read when the module is first imported).
+    pub fn set_host_bridge(&self, bridge: Rc<dyn nsh_core::host_channel::HostBridge>) {
+        *self.shared.host_bridge.borrow_mut() = Some(bridge);
+    }
+
+    /// Delivers the embedding app's event `name` (`host.on`): to the
+    /// listeners of its name, or kept until one is added.
+    pub fn host_event(&self, name: &str, data: nsh_core::JsonValue) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::deliver(cx.as_raw().as_ptr(), name, data);
+            });
+            self.run_jobs();
+        });
+    }
+
+    /// Settles call `id` (`host.call`) with the embedding app's answer, or
+    /// rejects it with the message.
+    pub fn host_reply(&self, id: u64, result: Result<nsh_core::JsonValue, String>) {
+        if !self.cx.is_live() {
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::host_channel::settle(cx.as_raw().as_ptr(), id, result);
+            });
+            self.run_jobs();
+        });
     }
 
     /// Installs the meaning of `process.exit(code)` for this VM. The callback

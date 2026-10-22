@@ -22,6 +22,7 @@ mod fenwick;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
+pub mod host_channel;
 pub mod image;
 pub mod input;
 pub mod js;

@@ -210,6 +210,10 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
 | `connectDevServer(_ url: URL) throws` | Development: loads from a `nsh dev` server and reloads on every change. Throws with `NativeShell.xcframework`, which has no development support. |
 | `register(component:_:)` | Registers a [native component](./native-components.md). |
+| `params: [String: Any]` | The launch parameters of the apps loaded from now on: the app reads them at start as `host.params` ([`nsh/host`](../modules/nsh-host.md)). |
+| `send(_ name: String, _ data: Any? = nil)` | Sends an event to the app (`host.on(name, …)`); kept until it listens, or for the next app while none runs. |
+| `handle(_ name: String, _ handler:)` | Handles the app's calls (`host.call`) and posts (`host.post`) of `name` on the main thread: `{ data, reply in … }`, or an `async throws` function `{ data in … }` whose result answers the call. |
+| `removeHandler(_ name: String)` | Removes the handler of `name`: the app's calls of it fail at once. |
 | `static preferredStatusBarStyle`, `prefersStatusBarHidden`, `preferredStatusBarUpdateAnimation` | What the running apps asked for (their pages' and dialogs' `statusBar`, `nsh.json`'s default): return them from the hosting view controller's overrides. |
 
 > [!IMPORTANT]
@@ -227,6 +231,43 @@ app.storageDirectory = FileManager.default
     .appendingPathComponent("nsh/com.example.orders")
 try app.loadBundle(at: url)
 ```
+
+## Talking to the app
+
+The view and the app it runs talk through a channel of their own ([`nsh/host`](../modules/nsh-host.md)): launch
+parameters the app reads at start, events from the host app, and calls and posts from the app, with JSON data
+(Foundation objects on this side). It needs no view in the app and no native component.
+
+```swift
+// Before loading: what the app opens first (`host.params` in TSX).
+app.params = ["conversation": notification.conversationID]
+try app.loadBundle(at: url)
+
+// The app's `await host.call("user.profile", { id })`: return the answer, or throw to reject it.
+app.handle("user.profile") { data in
+    let id = (data as? [String: Any])?["id"] as? Int ?? 0
+    let profile = try await api.profile(id: id)
+    return ["id": id, "name": profile.name]
+}
+
+// A handler that answers later, from any thread, with its reply.
+app.handle("photo.pick") { _, reply in
+    picker.present { url in
+        if let url { reply.resolve(url.absoluteString) } else { reply.reject("cancelled") }
+    }
+}
+
+// The app's `host.post("analytics", …)`: no answer.
+app.handle("analytics") { data, _ in analytics.log(data) }
+
+// Later: the app hears `host.on("conversation.open", …)`.
+app.send("conversation.open", ["id": tapped.conversationID])
+```
+
+Handlers run on the main thread; a call waits for its answer in the app without blocking either side. A reply
+released unanswered fails the call, and a call of a name with no handler fails at once. Events of names the app does
+not listen to yet are kept until it does, and events sent while no app runs (before `loadBundle`, during a reload) go
+to the next one, so a notification tapped while the app starts still reaches it.
 
 ## Limits
 

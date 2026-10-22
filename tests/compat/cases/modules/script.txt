@@ -97,6 +97,16 @@ covers [nsh/device] colorScheme
 covers [nsh/device] setColorScheme
 covers [nsh/device] fontScale
 covers [nsh/device] windowSize
+# mod-host
+tap id:case-mod-host
+# no embedding app: no parameters, posts go nowhere and calls fail at once.
+expect Params: 0 object
+expect Calls: not called
+expect Call failed: none
+tap id:call
+expect Calls: function, post done
+expect Call failed: host.call("profile"): the embedding app handles no "profile"
+covers [nsh/host] host
 # mod-ios
 tap id:case-mod-ios
 # the accessory view's content exists, and takes no room in its parent.

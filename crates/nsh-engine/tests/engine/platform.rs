@@ -67,6 +67,7 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let batch = rx

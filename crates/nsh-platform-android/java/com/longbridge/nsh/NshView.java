@@ -49,6 +49,26 @@ public class NshView extends FrameLayout {
         void onError(String message);
     }
 
+    /**
+     * Handles the app's calls ({@code await host.call(name, data)}) and posts
+     * ({@code host.post(name, data)}) of one name ({@code nsh/host}), on the
+     * UI thread. Register it with {@link #handle}.
+     */
+    public interface HostHandler {
+        /**
+         * Called for each call or post.
+         *
+         * @param data its data: JSON as Java objects ({@code String},
+         *     {@code Number}, {@code Boolean}, {@code java.util.List},
+         *     {@code java.util.Map}), or null
+         * @param reply answers a call, once, now or later, from any thread
+         */
+        void handle(Object data, NshHostReply reply);
+    }
+
+    /** The handlers of the app's calls and posts, by name. */
+    private final java.util.Map<String, HostHandler> hostHandlers = new java.util.concurrent.ConcurrentHashMap<>();
+
     long handle;
     private final float density;
     private final Box root;
@@ -310,6 +330,66 @@ public class NshView extends FrameLayout {
      */
     public void registerComponent(String name, NshComponent.Factory factory) {
         mounter.components.put(name, factory);
+    }
+
+    /**
+     * The launch parameters of the apps loaded from now on: what the app
+     * reads synchronously at start as {@code host.params} ({@code nsh/host}),
+     * such as the conversation a notification opens. A running app keeps the
+     * parameters it started with; later requests are events ({@link #send}).
+     *
+     * @param params JSON as Java objects (a {@code java.util.Map} or an
+     *     {@code org.json.JSONObject}), or null for none
+     * @return false (and ignored) when they are not a JSON object
+     */
+    public boolean setParams(Object params) {
+        if (handle == 0) return false;
+        return Native.setHostParams(handle, params == null ? null : Json.stringify(params));
+    }
+
+    /**
+     * Sends event {@code name} with {@code data} to the running app: its
+     * {@code host.on(name, listener)} listeners get it ({@code nsh/host}). An
+     * app that does not listen to {@code name} yet keeps the event until it
+     * does; while no app runs, it waits for the next one loaded. Any thread;
+     * it never waits for the app.
+     *
+     * @param name the event
+     * @param data JSON as Java objects (see {@link HostHandler#handle}), or null
+     * @return false when the name or the data is invalid
+     */
+    public boolean send(String name, Object data) {
+        if (handle == 0 || name == null) return false;
+        return Native.sendHostEvent(handle, name, data == null ? null : Json.stringify(data));
+    }
+
+    /**
+     * Handles the app's calls ({@code await host.call(name, data)}) and posts
+     * ({@code host.post(name, data)}) of {@code name} on the UI thread,
+     * replacing the handler it had; null removes it. The app's calls of a
+     * name without a handler fail at once.
+     *
+     * @param name the call's name
+     * @param handler the handler, or null
+     */
+    public void handle(String name, HostHandler handler) {
+        if (handle == 0 || name == null) return;
+        if (handler == null) hostHandlers.remove(name);
+        else hostHandlers.put(name, handler);
+        Native.setHostHandler(handle, name, handler != null);
+    }
+
+    /** A call ({@code call} != 0) or post of the app; called by libnsh on the engine thread. */
+    void hostMessage(String name, String json, long call) {
+        main.post(() -> {
+            HostHandler handler = hostHandlers.get(name);
+            NshHostReply reply = new NshHostReply(call);
+            if (handler == null) {
+                reply.reject("the embedding app handles no \"" + name + "\"");
+                return;
+            }
+            handler.handle(Json.parse(json), reply);
+        });
     }
 
     /**

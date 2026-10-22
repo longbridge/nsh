@@ -32,6 +32,7 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/list",
     "nsh/image",
     "nsh/keymap",
+    "nsh/host",
 ];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.

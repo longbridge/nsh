@@ -556,6 +556,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
+        host: Default::default(),
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
