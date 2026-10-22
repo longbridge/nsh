@@ -426,6 +426,48 @@ pub fn blur_radius(filters: &[Filter]) -> Points {
         .sum()
 }
 
+/// `glassEffect`: a glass material drawn behind the view's content.
+///
+/// Apple's "Liquid Glass", new in iOS 26. No CSS property describes it --
+/// Safari keeps it to the private `-apple-visual-effect`, and the W3C has
+/// yet to define backdrop refraction (w3c/svgwg#1142) -- so this follows
+/// React Native's `expo-glass-effect` instead.
+///
+/// Drawn on iOS 26 and later. Earlier iOS, and every other platform, draw
+/// the view's `backdropFilter` as before, so give a glass view a blur to
+/// fall back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GlassEffect {
+    /// No glass: `backdropFilter` alone decides what is drawn behind.
+    #[default]
+    None,
+    /// The standard glass material.
+    Regular,
+    /// Clearer glass, taking less color from what is behind it.
+    Clear,
+}
+
+impl GlassEffect {
+    /// The style name ([`GlassEffect::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            GlassEffect::None => "none",
+            GlassEffect::Regular => "regular",
+            GlassEffect::Clear => "clear",
+        }
+    }
+
+    /// Parses a glass effect name.
+    pub fn parse(s: &str) -> Option<GlassEffect> {
+        Some(match s {
+            "none" => GlassEffect::None,
+            "regular" => GlassEffect::Regular,
+            "clear" => GlassEffect::Clear,
+            _ => return None,
+        })
+    }
+}
+
 /// `mixBlendMode`: how the view composites with what is behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(missing_docs)]

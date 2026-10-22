@@ -250,7 +250,8 @@ final class TestAgent {
     /**
      * Whether something moves: a view's place, offset, scroll position or
      * opacity changed since the last look (a screen sliding in, a dialog
-     * fading, a list gliding after a fling), whatever animates it.
+     * fading, a list gliding after a fling), whatever animates it, or a
+     * scroll view drew (its overscroll stretch relaxing).
      */
     static boolean animating(NshView host) {
         Boolean moving = onMain(() -> {
@@ -276,6 +277,7 @@ final class TestAgent {
         h = h * 31 + Float.floatToIntBits(v.getScaleX());
         h = h * 31 + v.getScrollX();
         h = h * 31 + v.getScrollY();
+        if (v instanceof ScrollBox) h = h * 31 + ((ScrollBox) v).frames;
         if (v instanceof ViewGroup) {
             ViewGroup g = (ViewGroup) v;
             for (int i = 0; i < g.getChildCount(); i++) h = h * 31 + signature(g.getChildAt(i));

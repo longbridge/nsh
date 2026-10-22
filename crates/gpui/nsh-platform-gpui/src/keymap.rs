@@ -64,8 +64,9 @@ pub(crate) fn clear(surface: &Surface) {
 }
 
 /// A key down: whether it fired (or, held, repeats) one of the bindings;
-/// then it is consumed.
-pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
+/// then it is consumed. `editing`: a text field or a native component has
+/// the keyboard focus.
+pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent, editing: bool) -> bool {
     let repeat = repeats(&surface.keymap, event);
     let Some(table) = surface.keymap.table.borrow().clone() else {
         return false;
@@ -77,7 +78,6 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
     if cfg!(feature = "dev") && keystroke.reloads(OS) {
         return false;
     }
-    let editing = crate::text_input::focused(surface).is_some();
     let found = table.find(keystroke, editing, repeat);
     if let KeyMatch::Fire(id) = found {
         surface.event(

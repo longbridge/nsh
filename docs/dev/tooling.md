@@ -78,8 +78,9 @@ Existing directories are never deleted automatically. Follow the CoC project con
 ## LayerFS trial
 
 The opt-in [LayerFS trial](layerfs.md) exercises Git, Cargo, build-output snapshots and branch isolation on Linux.
-Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache and has a manual
-GitHub Actions workflow. It is separate from the platform checks.
+`./scripts/layerfs prepare`, `smoke` and `status` prepare and inspect it; macOS preparation runs in a local Linux
+Docker container. Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache
+and has a manual GitHub Actions workflow. It is separate from the platform checks.
 
 ## Output
 
@@ -312,6 +313,9 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
   them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
 - the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
   inserted;
+- the app runs under what its `nsh.json` declares (`Bundle::with_capabilities_json`: `nsh test`'s compiler and an
+  app's runner, `Reply::Js::capabilities`, as `nsh build` writes `capabilities.json`), so headless refusals are a
+  device's;
 - images are not loaded: an image's size (`ImageInfo`) is answered with an error, as a failed load (a `TextView` asks
   for the sizes of its images); an image or files on the clipboard fail the step that asked (`Screen::take_unsupported`).
 
@@ -418,7 +422,8 @@ moves to the first responder only), keystrokes (`press_keys`: macOS's posted key
 takes no made-up keys; the phones, without app shortcuts, refuse them),
 `back`, dialogs, screenshots, the window's size and appearance),
 then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
-finite animations too: a screen sliding in). `Native`'s calls do their work
+finite animations too: a screen sliding in; Android counts a scroll view drawing, as its overscroll stretch relaxes
+without moving a view, and a touch then only catches the stretch). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
 test's side saves them, as the host may run on another machine. `open`'s manual clock reaches the host in the
 test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model::set_up_engine` starts the engine on

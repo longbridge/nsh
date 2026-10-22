@@ -26,6 +26,8 @@ mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
+#[cfg(feature = "js")]
+mod local_time;
 mod net;
 mod storage;
 mod text;
@@ -548,6 +550,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         })),
         storage: Some(std::sync::Arc::new(storage)),
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

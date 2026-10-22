@@ -115,6 +115,10 @@ pub fn App() -> impl IntoElement {
 CLI 自己完成；再加上你运行或打包的每个目标的运行器。新 Rust 应用的第一次构建只编译你的 crate 和 NSH 的核心，大约 60 个
 crate。`nsh test` 在同样构建的、包含你的 crate 的运行器中以无界面方式运行应用的测试。
 
+在 Linux 上，由应用 crate 选择可选的平台功能。使用网页视图时，在 `nsh-platform-linux` 依赖上启用
+`webview` feature；这会链接 WebKitGTK 6.0，构建和运行时都需要安装该系统库。生成的运行器通过 Cargo
+的 feature 合并继承应用的选择。
+
 `nsh run` 期间，修改 crate 的 Rust 代码会重新构建运行器并重启应用；在浏览器中，已打开的页面会自动加载新的运行时。
 `cargo run` 在桌面后端上直接启动同一个根组件（`src/main.rs`）；嵌入 NSH 的原生应用在 macOS、Windows、Linux、GPUI 和
 iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。

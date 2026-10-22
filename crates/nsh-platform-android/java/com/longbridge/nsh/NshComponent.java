@@ -36,7 +36,11 @@ public interface NshComponent {
      */
     default void command(String name, Object args) {}
 
-    /** The element is gone. */
+    /**
+     * The element is gone: removed by the app, or its app stopped
+     * ({@link NshView#destroy}, or another app loaded in its place). Called
+     * once; release what the component holds here.
+     */
     default void destroy() {}
 
     /** Makes a component for each element. */

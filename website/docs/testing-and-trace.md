@@ -347,6 +347,8 @@ that only a real platform can do:
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
 - **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
+- **The app runs under its capabilities**: what its `nsh.json` declares in `capabilities` is enforced as on a device,
+  so what it does not declare is refused.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
@@ -595,8 +597,8 @@ To guard performance, record the item counts of a few interactions (the `── 
 are not.
 
 > [!NOTE]
-> Tests run with every capability: `nsh.json`'s `capabilities` are not applied. Test capability rules on a device or in
-> a packaged build.
+> Tests run under the `capabilities` the app's `nsh.json` declares, as on a device: what the app does not declare is
+> refused in the test too.
 
 ## `testID` for UI tests
 

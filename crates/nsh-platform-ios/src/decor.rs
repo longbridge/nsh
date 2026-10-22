@@ -358,6 +358,7 @@ impl Decor {
             || stroke
             || ring
             || style.effects.is_some()
+            || style.glass_effect != nsh_core::GlassEffect::None
             || style.outline.is_visible();
 
         // Corners of the layer itself. Core Animation draws nothing for a
