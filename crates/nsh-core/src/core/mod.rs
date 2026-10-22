@@ -870,6 +870,7 @@ impl<M: TextEngine> Core<M> {
         // The platform owns the root view.
         root.created = true;
         let root = nodes.insert(root) as Key;
+        layout.set_tag(root_layout, root);
         let mut slots = vec![0; 256];
         slots[ROOT_ID as usize] = root + 1;
         Self {
@@ -1473,6 +1474,9 @@ impl<M: TextEngine> Core<M> {
         let relayout = self.needs_layout;
         if relayout {
             self.needs_layout = false;
+            // Boundaries first: what they give back may dirty what is
+            // around them, laid out next.
+            let relaid = self.relayout_boundaries();
             // Only walk the main tree when it was laid out again (a change
             // inside a list cell leaves it untouched).
             if self.layout_main() {
@@ -1488,6 +1492,9 @@ impl<M: TextEngine> Core<M> {
             // Screens and modals, then list cells (lists may live in them).
             self.layout_roots();
             self.layout_cells();
+            for key in relaid {
+                self.emit_frames(key);
+            }
         }
         self.update_lists(relayout);
         if !self.overlays.is_empty() {
@@ -1707,6 +1714,7 @@ impl<M: TextEngine> Core<M> {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
         };
+        self.layout.set_tag(layout, key);
         self.nodes[key as usize].layout = Some(layout);
         self.became(key, style);
         Ok(())
@@ -3586,7 +3594,9 @@ impl<M: TextEngine> Core<M> {
         } else {
             let style = node.base_layout.as_deref().cloned().unwrap_or_default();
             let cx = LeafContext::Text(TextContext::new(Arc::default()));
-            node.layout = Some(self.layout.new_leaf_with_context(style, cx));
+            let layout = self.layout.new_leaf_with_context(style, cx);
+            self.layout.set_tag(layout, key);
+            node.layout = Some(layout);
             self.mark(key, dirty::TEXT_BUILD);
         }
     }
@@ -4820,42 +4830,19 @@ impl<M: TextEngine> Core<M> {
         let cache = &mut self.measure_cache;
         self.layout
             .compute_layout_with_measure(root, available, |input, _, cx, style| {
-                // Taffy resolves style sizes, padding, border, min/max and
-                // aspect ratio; only content is measured here.
-                taffy::compute_leaf_layout(
-                    input,
-                    style,
-                    |_, _| 0.0,
-                    |known, available| match cx {
-                        Some(LeafContext::Text(cx)) => {
-                            let max_width = if cx.text.no_wrap {
-                                None
-                            } else {
-                                known.width.or(match available.width {
-                                    AvailableSpace::Definite(w) => Some(w),
-                                    AvailableSpace::MinContent => {
-                                        Some(min_content_width(engine, cache, cx).0)
-                                    }
-                                    AvailableSpace::MaxContent => None,
-                                })
-                            };
-                            let measured = measure_text(engine, cache, cx, max_width);
-                            taffy::Size {
-                                width: known.width.unwrap_or(measured.width.0),
-                                height: known.height.unwrap_or(measured.height.0),
-                            }
-                        }
-                        Some(LeafContext::Image(Some(natural))) => {
-                            image_size(*natural, known.width, known.height)
-                        }
-                        Some(LeafContext::Native(Some(own))) => taffy::Size {
-                            width: known.width.unwrap_or(own.width.0),
-                            height: known.height.unwrap_or(own.height.0),
-                        },
-                        _ => taffy::Size::ZERO,
-                    },
-                )
+                measure_leaf(engine, cache, input, cx, style)
             });
+    }
+
+    /// Lays out the relayout boundaries a change inside made dirty
+    /// (`LayoutTree::relayout_boundaries`), returning those laid out on
+    /// their own: their subtrees' frames are new.
+    fn relayout_boundaries(&mut self) -> Vec<Key> {
+        let engine = &self.text_engine;
+        let cache = &mut self.measure_cache;
+        self.layout.relayout_boundaries(|input, _, cx, style| {
+            measure_leaf(engine, cache, input, cx, style)
+        })
     }
 
     /// Whether `key` is out of the layout: `display: none` on it or on a
@@ -5921,6 +5908,50 @@ fn min_content_width<M: TextEngine>(
     }
     cx.min_content = Some(width);
     width
+}
+
+/// A leaf's layout (`taffy::compute_leaf_layout`): Taffy resolves its
+/// style's sizes, padding, border, minimums, maximums and aspect ratio;
+/// only its content (a text, an image's natural size, a native
+/// component's own size) is measured here.
+fn measure_leaf<M: TextEngine>(
+    engine: &M,
+    cache: &mut MeasureCache,
+    input: taffy::LayoutInput,
+    cx: Option<&mut LeafContext<M::Prepared>>,
+    style: &taffy::Style,
+) -> taffy::LayoutOutput {
+    taffy::compute_leaf_layout(
+        input,
+        style,
+        |_, _| 0.0,
+        |known, available| match cx {
+            Some(LeafContext::Text(cx)) => {
+                let max_width = if cx.text.no_wrap {
+                    None
+                } else {
+                    known.width.or(match available.width {
+                        AvailableSpace::Definite(w) => Some(w),
+                        AvailableSpace::MinContent => Some(min_content_width(engine, cache, cx).0),
+                        AvailableSpace::MaxContent => None,
+                    })
+                };
+                let measured = measure_text(engine, cache, cx, max_width);
+                taffy::Size {
+                    width: known.width.unwrap_or(measured.width.0),
+                    height: known.height.unwrap_or(measured.height.0),
+                }
+            }
+            Some(LeafContext::Image(Some(natural))) => {
+                image_size(*natural, known.width, known.height)
+            }
+            Some(LeafContext::Native(Some(own))) => taffy::Size {
+                width: known.width.unwrap_or(own.width.0),
+                height: known.height.unwrap_or(own.height.0),
+            },
+            _ => taffy::Size::ZERO,
+        },
+    )
 }
 
 fn measure_text<M: TextEngine>(

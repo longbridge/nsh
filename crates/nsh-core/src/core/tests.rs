@@ -16313,3 +16313,73 @@ fn sticky_views_in_a_horizontal_scroll_view_stick_at_their_left() {
     let batch = c.commit().unwrap();
     assert_eq!(sticky_of(&batch, 2), Some(vec![(4, 50.0, 1050.0)]));
 }
+
+#[test]
+fn a_relayout_boundary_that_overflows_more_lays_its_parent_out_again() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Scroll,
+            },
+            style_op(2, &[("height", StyleValue::Number(200.0))]),
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            // A size of fixed points that does not shrink: a change inside
+            // cannot change it.
+            style_op(
+                3,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                    ("flexShrink", StyleValue::Number(0.0)),
+                ],
+            ),
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("height", StyleValue::Number(10.0))]),
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    // Within the box: its parent's layout stands.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("height", StyleValue::Number(40.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 4).unwrap().size.height, px(40.0));
+    assert!(frame_of(&batch, 3).is_none());
+    // Out of it: the scroll view's content takes the overflow.
+    apply(
+        &mut c,
+        vec![style_op(4, &[("height", StyleValue::Number(500.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 4).unwrap().size.height, px(500.0));
+    let content = batch.items.iter().find_map(|i| match i {
+        MountItem::ScrollContent { id: 2, size } => Some(size.height.0),
+        _ => None,
+    });
+    assert_eq!(content, Some(500.0));
+}

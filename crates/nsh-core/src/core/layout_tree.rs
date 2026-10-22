@@ -14,6 +14,14 @@
 //!   and nothing can go stale.
 //! - **no rounding**: [`LayoutTree::unrounded_layout`] is what the
 //!   algorithms computed.
+//! - **relayout boundaries.** A change inside a node whose size its content
+//!   cannot change (fixed points both ways, in a flex container, not
+//!   shrinking nor aligned by its baseline: [`LayoutTree::is_boundary`])
+//!   dirties nothing above it: [`LayoutTree::relayout_boundaries`] lays its
+//!   subtree out again with what its parent gave it last time, and only
+//!   when what it gives back differs (its overflow, say) is its parent laid
+//!   out again. A large page with values changing often costs what changes,
+//!   not what the page is.
 
 use slab::Slab;
 use taffy::{
@@ -35,6 +43,13 @@ struct LayoutNode<C> {
     unrounded: Layout,
     detailed: DetailedLayoutInfo,
     context: Option<C>,
+    /// The core's node it lays out ([`LayoutTree::set_tag`]).
+    tag: Option<u32>,
+    /// What its parent's last full layout gave it and what it gave back:
+    /// what a boundary is laid out again with, and compared to.
+    last: Option<(LayoutInput, LayoutOutput)>,
+    /// It is a boundary waiting in [`LayoutTree::dirty_boundaries`].
+    queued: bool,
 }
 
 impl<C> LayoutNode<C> {
@@ -47,6 +62,9 @@ impl<C> LayoutNode<C> {
             unrounded: Layout::new(),
             detailed: DetailedLayoutInfo::None,
             context,
+            tag: None,
+            last: None,
+            queued: false,
         }
     }
 }
@@ -55,6 +73,8 @@ impl<C> LayoutNode<C> {
 /// measured with.
 pub(crate) struct LayoutTree<C> {
     nodes: Slab<LayoutNode<C>>,
+    /// Boundaries a change inside made dirty, to lay out again.
+    dirty_boundaries: Vec<NodeId>,
 }
 
 fn key(node: NodeId) -> usize {
@@ -65,6 +85,7 @@ impl<C> LayoutTree<C> {
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         LayoutTree {
             nodes: Slab::with_capacity(capacity),
+            dirty_boundaries: Vec::new(),
         }
     }
 
@@ -88,12 +109,20 @@ impl<C> LayoutTree<C> {
         id
     }
 
+    /// Records that `node` lays out the core's node `tag`.
+    pub(crate) fn set_tag(&mut self, node: NodeId, tag: u32) {
+        self.nodes[key(node)].tag = Some(tag);
+    }
+
     /// Frees `node`, detaching it from its parent; its children are left
     /// without one.
     pub(crate) fn remove(&mut self, node: NodeId) {
         if let Some(parent) = self.nodes[key(node)].parent {
             self.nodes[key(parent)].children.retain(|&c| c != node);
             self.mark_dirty(parent);
+        }
+        if self.nodes[key(node)].queued {
+            self.dirty_boundaries.retain(|&b| b != node);
         }
         let removed = self.nodes.remove(key(node));
         for child in removed.children {
@@ -105,10 +134,15 @@ impl<C> LayoutTree<C> {
         &self.nodes[key(node)].style
     }
 
-    /// Replaces `node`'s style.
+    /// Replaces `node`'s style: its own size may change, so its parent is
+    /// laid out again (whether it is a boundary or not).
     pub(crate) fn set_style(&mut self, node: NodeId, style: Style) {
-        self.nodes[key(node)].style = style;
-        self.mark_dirty(node);
+        let n = &mut self.nodes[key(node)];
+        n.style = style;
+        n.cache.clear();
+        if let Some(parent) = n.parent {
+            self.mark_dirty(parent);
+        }
     }
 
     /// Replaces what measures `node`.
@@ -150,16 +184,57 @@ impl<C> LayoutTree<C> {
         self.mark_dirty(parent);
     }
 
-    /// Clears the cached layouts of `node` and of every node above it, up
-    /// to the root (never stopping at a node whose cache is already empty:
-    /// see the module's docs).
+    /// Something in `node` changed (its children, what measures it):
+    /// clears the cached layouts of `node` and of every node above it up to
+    /// the root (never stopping at a node whose cache is already empty: see
+    /// the module's docs), or up to the first boundary on the way, `node`
+    /// included, which is queued to be laid out again on its own.
     pub(crate) fn mark_dirty(&mut self, node: NodeId) {
         let mut at = Some(node);
         while let Some(node) = at {
-            let n = &mut self.nodes[key(node)];
-            n.cache.clear();
-            at = n.parent;
+            self.nodes[key(node)].cache.clear();
+            if self.is_boundary(node) {
+                let n = &mut self.nodes[key(node)];
+                if !n.queued {
+                    n.queued = true;
+                    self.dirty_boundaries.push(node);
+                }
+                return;
+            }
+            at = self.nodes[key(node)].parent;
         }
+    }
+
+    /// Whether what changes inside `node` cannot change what its parent's
+    /// layout takes from it, so that layout stands: it has a size of fixed
+    /// points both ways in a flex container, and everything the flex
+    /// algorithm takes from an item follows from that size alone. Its flex
+    /// basis is `auto`, its main size (a percentage basis against a parent
+    /// of no definite size, or another length under a content-based
+    /// automatic minimum, would follow its content); it does not shrink (its
+    /// automatic minimum, its content's, is never above its size, so it
+    /// only matters to shrinking); growing takes the free space its parent
+    /// and siblings leave; it is not aligned by its baseline; its intrinsic
+    /// contributions are its size. And its parent laid it out before. What
+    /// it gives back that the size does not fix (overflow, margins) is
+    /// compared after ([`LayoutTree::relayout_boundaries`]).
+    fn is_boundary(&self, node: NodeId) -> bool {
+        let n = &self.nodes[key(node)];
+        let Some(parent) = n.parent else {
+            return false;
+        };
+        let fixed = |d: taffy::Dimension| d.into_raw().tag() == taffy::CompactLength::LENGTH_TAG;
+        let (style, parent) = (&n.style, &self.nodes[key(parent)].style);
+        let baseline = |a: taffy::AlignItems| a.keyword() == taffy::AlignItemsKeyword::Baseline;
+        n.last.is_some()
+            && parent.display == Display::Flex
+            && style.display != Display::None
+            && fixed(style.size.width)
+            && fixed(style.size.height)
+            && style.flex_shrink == 0.0
+            && style.flex_basis == taffy::Dimension::auto()
+            && !baseline(parent.align_items)
+            && !style.align_self.is_some_and(baseline)
     }
 
     /// Whether `node` has no cached layout: it changed, or something in it
@@ -172,6 +247,46 @@ impl<C> LayoutTree<C> {
     /// parent, unrounded.
     pub(crate) fn unrounded_layout(&self, node: NodeId) -> &Layout {
         &self.nodes[key(node)].unrounded
+    }
+
+    /// Lays out the boundaries a change inside made dirty, each with what
+    /// its parent gave it last time; one that gives back what it gave
+    /// before (its size, overflow, baselines, margins) leaves its parent's
+    /// layout standing, another dirties its parent, as a change of its own
+    /// would. Returns the tags of those laid out on their own: their
+    /// subtrees' frames are new, nothing else's is.
+    pub(crate) fn relayout_boundaries<M>(&mut self, measure: M) -> Vec<u32>
+    where
+        M: FnMut(LayoutInput, NodeId, Option<&mut C>, &Style) -> LayoutOutput,
+    {
+        let mut relaid = Vec::new();
+        if self.dirty_boundaries.is_empty() {
+            return relaid;
+        }
+        let mut view = View {
+            tree: self,
+            measure,
+        };
+        while let Some(node) = view.tree.dirty_boundaries.pop() {
+            let n = &mut view.tree.nodes[key(node)];
+            n.queued = false;
+            let parent = n.parent;
+            // Moved or restyled since: no longer one on its own.
+            if !view.tree.is_boundary(node) {
+                if let Some(parent) = parent {
+                    view.tree.mark_dirty(parent);
+                }
+                continue;
+            }
+            let (input, before) = view.tree.nodes[key(node)].last.clone().expect("laid out");
+            let after = view.compute_child_layout(node, input, None);
+            if after == before {
+                relaid.extend(view.tree.nodes[key(node)].tag);
+            } else if let Some(parent) = parent {
+                view.tree.mark_dirty(parent);
+            }
+        }
+        relaid
     }
 
     /// Lays out the tree under `root` within `available`, measuring leaves
@@ -217,9 +332,10 @@ where
     ) -> LayoutOutput {
         // An ancestor is `display: none`: hidden whatever its own display.
         if inputs.run_mode == RunMode::PerformHiddenLayout {
+            self.tree.nodes[key(node)].last = None;
             return compute_hidden_layout(self, node);
         }
-        compute_cached_layout(self, node, inputs, |view, node, inputs| {
+        let output = compute_cached_layout(self, node, inputs, |view, node, inputs| {
             let display = view.node(node).style.display;
             let has_children = !view.node(node).children.is_empty();
             let mut output = match (display, has_children) {
@@ -239,7 +355,11 @@ where
                 compute_oof_layout(view, node, &mut output);
             }
             output
-        })
+        });
+        if inputs.run_mode == RunMode::PerformLayout {
+            self.tree.nodes[key(node)].last = Some((inputs, output.clone()));
+        }
+        output
     }
 }
 
