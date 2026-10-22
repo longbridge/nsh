@@ -171,6 +171,28 @@ public class NshView extends FrameLayout {
         Native.setStorage(handle, dir == null ? null : dir.getPath());
     }
 
+    /**
+     * Overrides the app's theme with the host's: a theme file of shadcn/ui's
+     * ({@code { "cssVars": { "theme": {…}, "light": {…}, "dark": {…} } }},
+     * values as CSS writes them, the format of {@code nsh.json}'s
+     * {@code "theme"}). Its tokens win over the app's of the same names, in
+     * light and dark mode; the app's others stay, so a branded host sets only
+     * what its brand changes ({@code primary}, {@code radius}, ...). Call it
+     * before or after loading: it applies at once (classes such as
+     * {@code bg-primary} are resolved again) and to every app loaded later,
+     * from its first frame. Main thread.
+     *
+     * @param json the theme file, or null to give the app its own theme back
+     * @throws IllegalArgumentException when the file does not parse; the
+     *     overrides then stay as they were
+     */
+    public void setThemeOverrides(String json) {
+        String error = Native.setThemeOverrides(handle, json);
+        if (error != null) {
+            throw new IllegalArgumentException(error);
+        }
+    }
+
     /** The contents of {@code file}, or null when it does not exist. */
     private static String readText(File file) throws java.io.IOException {
         return file.exists() ? new String(Net.readAll(new FileInputStream(file)), StandardCharsets.UTF_8) : null;

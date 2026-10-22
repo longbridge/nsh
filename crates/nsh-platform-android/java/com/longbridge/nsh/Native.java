@@ -98,6 +98,12 @@ final class Native {
     /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
     static native void setStorage(long handle, String dir);
 
+    /**
+     * The embedding app's theme overrides (a shadcn/ui theme file, null: the
+     * app's own theme). Returns why the file does not parse, or null.
+     */
+    static native String setThemeOverrides(long handle, String json);
+
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
 

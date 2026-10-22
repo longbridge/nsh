@@ -188,6 +188,10 @@ pub(crate) struct Surface {
     /// The embedding app's locale and text size, standing in for the
     /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
     pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
+    /// The embedding app's theme overrides
+    /// ([`crate::AppView::set_theme_overrides`]): sent to every engine the
+    /// surface starts, before its first frame.
+    pub(crate) host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// Frame callbacks of the platform's own animations (scroll glides,
@@ -250,6 +254,7 @@ impl Surface {
             appearance: Cell::default(),
             chunks: RefCell::new(None),
             host_environment: Cell::default(),
+            host_tokens: RefCell::new(None),
             js_frame: Cell::new(false),
             frame_callbacks: RefCell::default(),
             #[cfg(feature = "dev")]
@@ -312,7 +317,14 @@ impl Surface {
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
-        match Engine::start(config, CoreTextEngine::default, sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.host_tokens.borrow().clone();
+        let setup = |control: &EngineControl| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        };
+        match Engine::start_with(config, CoreTextEngine::default, sink, setup) {
             Ok(engine) => {
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]

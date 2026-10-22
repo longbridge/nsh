@@ -192,6 +192,7 @@ final class EmbedController: UIViewController {
 | `grantCapabilities(_ json: String?) throws` | 此后加载的应用最多能做什么，JSON 格式与 `nsh.json` 的 `capabilities` 相同；`nil` 表示授予每个应用所声明的能力。JSON 无效时抛出 `NshError`。 |
 | `locale: Locale?` | 代替用户设置的语言和地区：`Intl`、`locale()` 和组件立即跟随，此后加载的应用也从它开始。`nil` 跟随系统。 |
 | `fontScale: CGFloat?` | 代替动态字体的文字大小（1 为默认）：文字和输入框按它重新排版，`fontScale()` 读到它，立即生效，此后加载的应用也一样；长度保持原样。`nil` 跟随系统。 |
+| `setThemeOverrides(_ json: String?) throws` | 把宿主的品牌加在应用的[主题](./tailwind.md#主题-token)之上：格式与 `nsh.json` 的 `"theme"` 相同的主题文件。其中的 token 在浅色和深色模式下都覆盖应用的同名 token，应用的其他 token 保持不变。立即生效，并作用于之后加载的应用；`nil` 恢复应用自己的主题。文件无法解析时抛出 `NshError`。 |
 | `storageDirectory: URL?` | 此后加载的应用保存其[存储](../modules/nsh-storage.md)的目录；`nil`：`Library/Application Support/nsh/<app id>`，按应用自己的 id。 |
 | `loadBundle(at url: URL) throws` | 运行 `nsh build` 写出的 bundle。资源取自同目录下的 `assets/`；同目录下的 `bundle.js.map` 和 `capabilities.json` 也会被读取。 |
 | `run(_ package: NshPackage)` | 运行一个已验证的签名包（见下文）。一个包只能运行一次。 |
@@ -214,6 +215,23 @@ app.storageDirectory = FileManager.default
     .appendingPathComponent("nsh/com.example.orders")
 try app.loadBundle(at: url)
 ```
+
+## 主题覆盖
+
+嵌入在多个品牌宿主应用中的同一个应用会采用各个宿主的品牌：宿主给出其品牌要改的 token，格式与 `nsh.json` 的 `"theme"` 相同的主题文件（shadcn/ui 的 `cssVars`，值按 CSS 的写法）。它们覆盖应用的同名 token，应用的其他 token 保持不变。在 `dark` 下给出 token 的深色模式值（只在 `light` 或 `theme` 下设置的 token 在两种模式下都是这个颜色）：
+
+```swift
+try app.setThemeOverrides("""
+{ "cssVars": {
+    "theme": { "radius": "0.75rem" },
+    "light": { "primary": "#e11d48", "primary-foreground": "#ffffff" },
+    "dark": { "primary": "#fb7185", "primary-foreground": "#1c1917" }
+} }
+""")
+try app.loadBundle(at: url)
+```
+
+在加载之前或之后调用都可以：`bg-primary`、`rounded-(--radius)` 等类名立即更新样式，之后加载的每个应用在第一帧就带有这些覆盖。`setThemeOverrides(nil)` 恢复应用自己的主题。
 
 ## 限制
 

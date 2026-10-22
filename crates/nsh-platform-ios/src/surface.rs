@@ -125,6 +125,8 @@ pub(crate) struct RootViewIvars {
     /// The embedding app's locale and text size over the system's
     /// ([`Surface::set_host_environment`]).
     host: Cell<nsh_engine::HostEnvironment>,
+    /// The embedding app's theme overrides ([`Surface::set_host_tokens`]).
+    host_tokens: RefCell<Option<nsh_engine::Tokens>>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
     #[cfg(feature = "dev")]
@@ -194,6 +196,7 @@ impl RootView {
             keyboard: Cell::new((0.0, 0.25)),
             environment: Cell::new(None),
             host: Cell::default(),
+            host_tokens: RefCell::new(None),
             observers: RefCell::new(Vec::new()),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
@@ -449,7 +452,13 @@ impl RootView {
             #[cfg(feature = "dev")]
             test_model: self.ivars().test_model.clone(),
         };
-        let engine = match Engine::start(config, CoreTextEngine::default, sink) {
+        // The embedding app's theme overrides are in the first frame.
+        let tokens = self.ivars().host_tokens.borrow().clone();
+        let engine = match Engine::start_with(config, CoreTextEngine::default, sink, |control| {
+            if tokens.is_some() {
+                control.set_tokens(tokens);
+            }
+        }) {
             Ok(engine) => engine,
             Err(err) => return log::error!("failed to start the engine: {err}"),
         };
@@ -644,6 +653,17 @@ impl Surface {
     pub fn set_host_environment(&self, host: nsh_engine::HostEnvironment) {
         self.view.ivars().host.set(host);
         self.view.publish_environment();
+    }
+
+    /// The embedding app's theme overrides (`nsh_base::theme_overrides`),
+    /// which win over the app's tokens of the same names (`None`: the
+    /// app's own again): sent to the running app at once, and to every app
+    /// started later before its first frame.
+    pub fn set_host_tokens(&self, tokens: Option<nsh_engine::Tokens>) {
+        *self.view.ivars().host_tokens.borrow_mut() = tokens.clone();
+        if let Some(running) = &*self.view.ivars().running.borrow() {
+            running.engine.control().set_tokens(tokens);
+        }
     }
 
     /// Replaces the running app with `app` (state is reset).

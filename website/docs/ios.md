@@ -204,6 +204,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `grantCapabilities(_ json: String?) throws` | The most the apps loaded from now on may do, as JSON in the form of `nsh.json`'s `capabilities`; `nil` grants what each app declares. Throws `NshError` for invalid JSON. |
 | `locale: Locale?` | The app's language and region in place of the user's: `Intl`, `locale()` and the components follow it at once, and the apps loaded later start in it. `nil` follows the system's. |
 | `fontScale: CGFloat?` | The text size in place of Dynamic Type's (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `nil` follows the system's. |
+| `setThemeOverrides(_ json: String?) throws` | The host's brand over the app's [theme](./tailwind.md#theme-tokens): a theme file in the format of `nsh.json`'s `"theme"`. Its tokens win over the app's of the same names, in light and dark mode, and the app's others stay. Applies at once and to the apps loaded later; `nil` gives the app its own theme back. Throws `NshError` for a file that does not parse. |
 | `storageDirectory: URL?` | Where the apps loaded from now on keep their [storage](../modules/nsh-storage.md); `nil`: `Library/Application Support/nsh/<app id>`, by the app's own id. |
 | `loadBundle(at url: URL) throws` | Runs a bundle written by `nsh build`. Assets come from `assets/` next to it; `bundle.js.map` and `capabilities.json` next to it are read too. |
 | `run(_ package: NshPackage)` | Runs a verified signed package (see below). A package runs once. |
@@ -227,6 +228,27 @@ app.storageDirectory = FileManager.default
     .appendingPathComponent("nsh/com.example.orders")
 try app.loadBundle(at: url)
 ```
+
+## Theme overrides
+
+One app embedded in several branded host apps takes each host's brand: the host gives the tokens its brand changes,
+as a theme file in the format of `nsh.json`'s `"theme"` (shadcn/ui's `cssVars`, values as CSS writes them). They win
+over the app's tokens of the same names; the app's other tokens stay. Give a token its dark-mode value under `dark`
+(one set only under `light` or `theme` is that color in both modes):
+
+```swift
+try app.setThemeOverrides("""
+{ "cssVars": {
+    "theme": { "radius": "0.75rem" },
+    "light": { "primary": "#e11d48", "primary-foreground": "#ffffff" },
+    "dark": { "primary": "#fb7185", "primary-foreground": "#1c1917" }
+} }
+""")
+try app.loadBundle(at: url)
+```
+
+Call it before or after loading: classes such as `bg-primary` and `rounded-(--radius)` restyle at once, and every app
+loaded later starts with the overrides in its first frame. `setThemeOverrides(nil)` gives the app its own theme back.
 
 ## Limits
 
