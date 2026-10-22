@@ -87,6 +87,7 @@ mount(() => <Text>{{shown()}}</Text>);
         data_dir: data,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -645,6 +646,7 @@ mount(() => <Text>{shown}</Text>);
         data_dir: Some(root.clone()),
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

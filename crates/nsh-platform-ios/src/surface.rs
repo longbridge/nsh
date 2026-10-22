@@ -173,6 +173,22 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
             self.publish_environment();
+            let Some(mounter) = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone())
+            else {
+                return;
+            };
+            // On the next turn: a batch being applied may hold the mounter.
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                if let Some(m) = mounter.get(mtm).borrow_mut().as_mut() {
+                    m.traits_changed();
+                }
+            });
         }
     }
 );
@@ -429,6 +445,7 @@ impl RootView {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
             clock: Default::default(),
+            context: Default::default(),
             pinned: Default::default(),
             clipboard: None,
         };

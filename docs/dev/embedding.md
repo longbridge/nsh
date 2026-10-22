@@ -43,14 +43,19 @@
   `MountItem::Component { name }` and `ComponentProps` (all props, then the changed ones). The component fills the box,
   emits events (`ComponentContext::emit` → `onNativeEvent` `{ name, data }` → the `on<Name>` handler) and may report
   its own size (`set_size`; the leaf measures to it where the style leaves a dimension open, like an image's natural
-  size). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
+  size). A component is destroyed once, when its element is deleted or its app stops: on Android a stopped engine
+  sends no `Delete`, so `NshView.destroy()` and a load replacing the app (`Host::load` → `NshView.appStopped`) call
+  `NshComponent.destroy()` on every component still alive (`Mounter.destroyComponents`). `ref.command(name, args)` → `Command::Native`. Unknown names render an empty box (warned once). Props and events
   cross the C ABI / JNI as JSON text (Swift `JSONSerialization`, Java `org.json` as maps and lists). Registered
   components are the embedding app's own code: capabilities do not apply to them.
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the
   surface element's prepaint lays it out at the box's window bounds and prepaints it (`prepaint_as_root`, clipped to the
   clipping ancestors), the tree paints it where it draws the box (NSH content drawn later covers it), and a `BlockMouse`
-  hitbox under it keeps NSH's input away; keys go to it while focus is inside it, and one that returns its widget's
+  hitbox under it keeps NSH's input away; keys go to it first while focus is inside it (GPUI dispatches its key
+  bindings, then its key listeners, then the surface's), and the keys it lets through reach the window's shortcuts,
+  then the app's `nsh/keymap` bindings (as while a text field is focused, so a binding whose `when` is `auto` leaves
+  typing keys to the component) and the menu's shortcuts, and nothing else of NSH's (`input::component_key`); one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
   scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
   value, window, cx)`, `command(name, args, window, cx)`), so it can update its entities. `render` is also called while
@@ -74,6 +79,14 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **Each engine's own part of the host** (`nsh_core::ui::EngineContext`): a host serving several engines (windows,
+  panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
+  `EngineContext::default().with(MyLink { .. })`, at most one value per type, `Send + Sync`. The set's Rust code
+  reads the context of the engine running it with `engine_context::<MyLink>()` (`Option<Arc<MyLink>>`): plain
+  functions in the call, `cx` functions as ops, `async` ones in their task, after awaits too, and components. The
+  engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
+  threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
+  backend's window tests run two engines reading their own.
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`

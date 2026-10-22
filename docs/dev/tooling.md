@@ -78,8 +78,9 @@ Existing directories are never deleted automatically. Follow the CoC project con
 ## LayerFS trial
 
 The opt-in [LayerFS trial](layerfs.md) exercises Git, Cargo, build-output snapshots and branch isolation on Linux.
-Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache and has a manual
-GitHub Actions workflow. It is separate from the platform checks.
+`./scripts/layerfs prepare`, `smoke` and `status` prepare and inspect it; macOS preparation runs in a local Linux
+Docker container. Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache
+and has a manual GitHub Actions workflow. It is separate from the platform checks.
 
 ## Output
 
