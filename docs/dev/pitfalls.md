@@ -172,6 +172,11 @@ Things that were found the hard way. Read the section of the area you change bef
   drawn one raises it while zoomed, so neither is the screen's scale. Images decoded at it came out at a third of their
   pixels and blurred; the scale is the trait collection's `displayScale` (`Mounter::display_scale`).
 
+- **iOS, secondary clicks**: `buttonMaskRequired` only holds touches that have buttons. A finger has none, so a tap
+  recognizer requiring the secondary button recognized every tap, and as a tap recognizer it cancelled the presses inside
+  (a `ContextMenu`'s trigger opened its menu instead of pressing). The `onContextMenu` recognizer allows only
+  `UITouchTypeIndirectPointer` touches (`mount.rs`).
+
 ## Android
 
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
