@@ -274,6 +274,12 @@ pub trait Props: Clone + PartialEq + 'static {
     #[doc(hidden)]
     const LAZY_CHILDREN: bool = false;
 
+    /// TS declares the props generic over `T`, the type of the rows a prop
+    /// takes (`#[props(generic)]`; a prop's type names it, as
+    /// [`super::Rows`] does).
+    #[doc(hidden)]
+    const GENERIC: bool = false;
+
     /// The props (their named types declared in `types`).
     fn spec(types: &mut TsTypes) -> Vec<PropSpec>;
 
@@ -395,6 +401,9 @@ pub struct ComponentSpec {
     /// (`#[prop(lazy)]` on its `Children`): the core tells it with a
     /// `$children` event on the host.
     pub lazy_children: bool,
+    /// Its props are generic over `T`, the type of the rows one takes
+    /// (`#[props(generic)]`), as a component with [`super::Items`] is.
+    pub generic: bool,
 }
 
 impl ComponentSpec {
@@ -413,6 +422,7 @@ impl ComponentSpec {
             methods,
             types,
             lazy_children: C::Props::LAZY_CHILDREN,
+            generic: C::Props::GENERIC,
         }
     }
 
@@ -1165,6 +1175,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         // A component with rows is generic over their type, like `List`.
         let (generic, extends) = match spec.items() {
             Some(_) => ("<T>", ", ListItemsProps<T>"),
+            None if spec.generic => ("<T>", ""),
             None => ("", ""),
         };
         // A component with methods: its ref is an object of them.
