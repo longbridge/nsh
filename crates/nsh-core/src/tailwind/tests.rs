@@ -622,6 +622,9 @@ fn state_backgrounds_show_over_gradients() {
     let s = pressed(classes);
     assert!(s.view.effects.is_none());
     assert_eq!(s.view.background_color, Color(0x52_52_5c_ff));
+    let s = pressed("text-red-500 bg-linear-to-b from-zinc-700 active:bg-current");
+    assert!(s.view.effects.is_none());
+    assert_eq!(s.view.background_color, s.text.color.unwrap());
     // A state that sets its own gradient keeps it.
     let s = pressed("bg-linear-to-b from-zinc-700 active:bg-zinc-600 active:from-zinc-500");
     assert_eq!(s.view.effects.as_ref().unwrap().background_images.len(), 1);

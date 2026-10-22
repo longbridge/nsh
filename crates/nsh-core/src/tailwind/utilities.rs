@@ -303,6 +303,7 @@ impl Decl {
         matches!(
             self,
             Decl::Set(StyleKey::BackgroundColor, _)
+                | Decl::SetCurrentColor(StyleKey::BackgroundColor)
                 | Decl::Adaptive(StyleKey::BackgroundColor, _)
                 | Decl::Style(StyleDecl::Set(StyleKey::BackgroundColor, _))
         )
