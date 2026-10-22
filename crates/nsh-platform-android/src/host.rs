@@ -1010,6 +1010,48 @@ extern "system" fn Java_com_longbridge_nsh_Native_touch(
     }
 }
 
+/// `onPaste`: the text, the images' encoded bytes (each a `File` in JS, the
+/// bytes never through JS strings) and local files' `file:` URLs.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_paste(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    text: JString<'_>,
+    images: jni::objects::JObjectArray<'_>,
+    uris: jni::objects::JObjectArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let mut paste =
+        nsh_core::PasteEvent::new(env.get_string(&text).map(String::from).unwrap_or_default());
+    for i in 0..env.get_array_length(&images).unwrap_or(0) {
+        let Ok(image) = env.get_object_array_element(&images, i) else {
+            continue;
+        };
+        let image = jni::objects::JByteArray::from(image);
+        if let Ok(bytes) = env.convert_byte_array(&image) {
+            paste.files.push(nsh_core::PastedFile::image(bytes));
+        }
+    }
+    for i in 0..env.get_array_length(&uris).unwrap_or(0) {
+        let Ok(uri) = env.get_object_array_element(&uris, i) else {
+            continue;
+        };
+        if let Ok(uri) = env.get_string(&JString::from(uri)) {
+            paste.uris.push(uri.into());
+        }
+    }
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            id as NodeId,
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(paste)),
+        );
+    }
+}
+
 /// Folds the caret Java reports as numbers (`caretX`, `caretY`,
 /// `caretWidth`, `caretHeight`, in dp) into `onCaretMove`'s `bounds`.
 fn caret_bounds(fields: &mut Vec<(&'static str, PayloadValue)>) {

@@ -5,8 +5,8 @@ use crate::{
     geometry::{Bounds, Points, Size},
     ops::{
         AutoCapitalize, Command, EventMask, ImageSource, KeyboardAppearance, KeyboardDismissMode,
-        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, ResizeMode,
-        ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
+        KeyboardTaps, KeyboardType, ModalAnimation, ModalPresentation, NodeId, PasteBehavior,
+        ResizeMode, ReturnKeyType, ScreenAnimation, SnapAlignment, SubmitBehavior, WebSource,
     },
     props::{EdgeInsets, GestureValues, LayoutAnimation, ViewProps},
     style::{Color, TextAlign, ViewStyle},
@@ -476,6 +476,8 @@ pub struct InputConfig {
     pub blur_on_submit: bool,
     /// `submitBehavior` as set; [`InputConfig::submit`] resolves it.
     pub submit_behavior: Option<SubmitBehavior>,
+    /// What a paste does (`pasteBehavior`).
+    pub paste_behavior: PasteBehavior,
     /// Focus once on screen.
     pub auto_focus: bool,
     /// Caret and selection color.
@@ -526,6 +528,7 @@ impl Default for InputConfig {
             editable: true,
             blur_on_submit: true,
             submit_behavior: None,
+            paste_behavior: PasteBehavior::Insert,
             auto_focus: false,
             selection_color: None,
             auto_fill: crate::ops::AutoFill::Default,

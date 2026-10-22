@@ -298,6 +298,13 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     }))
 }
 
+pub(crate) fn paste(p: &EventPayload) -> Option<Cow<'_, crate::PasteEvent>> {
+    match p {
+        EventPayload::Paste(paste) => Some(Cow::Borrowed(paste)),
+        _ => None,
+    }
+}
+
 pub(crate) fn caret(p: &EventPayload) -> Option<Cow<'_, CaretEvent>> {
     Some(Cow::Owned(CaretEvent {
         bounds: bounds_field(p, "bounds"),

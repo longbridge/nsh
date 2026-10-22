@@ -72,6 +72,7 @@ final class Native {
     static final int POSITION = 61;
     static final int MOUSE_MOVE = 62;
     static final int CARET_MOVE = 63;
+    static final int PASTE = 64;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -173,6 +174,9 @@ final class Native {
      * {@code String} values), or a single value when {@code keys} is null.
      */
     static native void eventMap(long handle, int id, int kind, String[] keys, Object[] values);
+
+    /** `onPaste`: the pasted text, the images' encoded bytes and local files' {@code file:} URLs. */
+    static native void paste(long handle, int id, String text, byte[][] images, String[] uris);
 
     /** Applies the animation items of batches up to {@code seq}; returns bound values. */
     static native float[] afterBatch(long handle, long seq);

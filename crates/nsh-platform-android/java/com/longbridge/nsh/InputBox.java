@@ -47,6 +47,8 @@ final class InputBox extends FrameLayout implements Node {
     private int pendingCount;
     /** Inside the text watcher, where replacing the text would corrupt the IME's edit. */
     private boolean watching;
+    /** `pasteBehavior` is `"insert"`: a paste inserts its text. */
+    boolean pasteInserts = true;
 
     InputBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -89,6 +91,20 @@ final class InputBox extends FrameLayout implements Node {
                 }
                 // Called while the EditText is made, before `edit` is set.
                 reportCaret(this);
+            }
+
+            @Override
+            public boolean onTextContextMenuItem(int item) {
+                // Before Android 12 a paste comes here (the menu, Ctrl+V);
+                // from then on `receiveContent` hears it.
+                if (Build.VERSION.SDK_INT < 31
+                        && (item == android.R.id.paste || item == android.R.id.pasteAsPlainText)) {
+                    android.content.ClipboardManager board = (android.content.ClipboardManager)
+                            getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                    android.content.ClipData clip = board == null ? null : board.getPrimaryClip();
+                    if (clip != null && pasted(clip) && !pasteInserts) return true;
+                }
+                return super.onTextContextMenuItem(item);
             }
 
             @Override
@@ -165,6 +181,82 @@ final class InputBox extends FrameLayout implements Node {
             }
         });
         addView(edit, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        if (Build.VERSION.SDK_INT >= 31) {
+            // Pastes and keyboards' images (GIFs, stickers) come here; the
+            // types tell keyboards that images are welcome.
+            edit.setOnReceiveContentListener(new String[] {"image/*"}, this::receiveContent);
+        }
+    }
+
+    /**
+     * A paste or a keyboard's content (Android 12 on): reported (`onPaste`), and
+     * its text left to the EditText while `pasteBehavior` inserts it. Images and
+     * files are never inserted.
+     */
+    @android.annotation.TargetApi(31)
+    private android.view.ContentInfo receiveContent(View view, android.view.ContentInfo payload) {
+        int source = payload.getSource();
+        if (source != android.view.ContentInfo.SOURCE_CLIPBOARD
+                && source != android.view.ContentInfo.SOURCE_INPUT_METHOD) return payload;
+        // Without a listener a paste that inserts is the EditText's own.
+        if (!pasted(payload.getClip()) && pasteInserts) return payload;
+        if (!pasteInserts) return null;
+        // The text goes on to the EditText; what else there was is consumed.
+        android.content.ClipData clip = payload.getClip();
+        android.content.ClipData text = null;
+        for (int i = 0; i < clip.getItemCount(); i++) {
+            android.content.ClipData.Item item = clip.getItemAt(i);
+            if (item.getUri() != null) continue;
+            if (text == null) text = new android.content.ClipData(clip.getDescription(), item);
+            else text.addItem(item);
+        }
+        return text == null ? null : new android.view.ContentInfo.Builder(payload).setClip(text).build();
+    }
+
+    /**
+     * Reports what {@code clip} holds (`onPaste`), if the app listens: its text,
+     * its images' bytes (read from their content URIs as the user pastes) and local
+     * files' URLs. True when it reported.
+     */
+    private boolean pasted(android.content.ClipData clip) {
+        if (!mounter.wants(id, Native.PASTE)) return false;
+        StringBuilder text = new StringBuilder();
+        java.util.ArrayList<byte[]> images = new java.util.ArrayList<>();
+        java.util.ArrayList<String> uris = new java.util.ArrayList<>();
+        android.content.ContentResolver resolver = getContext().getContentResolver();
+        for (int i = 0; i < clip.getItemCount(); i++) {
+            android.content.ClipData.Item item = clip.getItemAt(i);
+            android.net.Uri uri = item.getUri();
+            if (uri == null) {
+                CharSequence t = item.coerceToText(getContext());
+                if (t != null) text.append(t);
+                continue;
+            }
+            if ("file".equals(uri.getScheme())) {
+                uris.add(uri.toString());
+                continue;
+            }
+            String type = resolver.getType(uri);
+            if (type != null && type.startsWith("image/")) {
+                try (java.io.InputStream in = resolver.openInputStream(uri)) {
+                    if (in != null) images.add(readAll(in));
+                } catch (java.io.IOException | SecurityException e) {
+                    android.util.Log.w("nsh", "a pasted image could not be read: " + e);
+                }
+            } else {
+                CharSequence t = item.coerceToText(getContext());
+                if (t != null) text.append(t);
+            }
+        }
+        mounter.paste(id, text.toString(), images.toArray(new byte[0][]), uris.toArray(new String[0]));
+        return true;
+    }
+
+    private static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[64 * 1024];
+        for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
+        return out.toByteArray();
     }
 
     void configure(float fontSizeDp, int weight, boolean italic, int color, String family, float letterSpacingDp,

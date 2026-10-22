@@ -29,6 +29,9 @@ pub(crate) trait Driver: Send {
     fn press_key(&mut self, keys: &str) -> Result<(), String>;
     fn hover(&mut self, selector: &str) -> Result<(), String>;
     fn right_click(&mut self, selector: &str) -> Result<(), String>;
+    /// Pastes `content` into the input `selector` names, as the user's
+    /// paste does with it on the clipboard.
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String>;
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String>;
     fn close_menu(&mut self) -> Result<(), String>;
     fn back(&mut self) -> Result<(), String>;
@@ -95,6 +98,9 @@ impl Driver for Headless {
     }
     fn right_click(&mut self, selector: &str) -> Result<(), String> {
         Headless::right_click(self, selector)
+    }
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        Headless::paste(self, selector, content)
     }
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {
         Headless::choose_menu_item(self, label)
@@ -281,6 +287,7 @@ fn step_name(step: &TestStep) -> Option<String> {
         TestStep::PressKey { keys } => format!("keyboard.press({keys})"),
         TestStep::Hover { selector } => format!("hover({selector})"),
         TestStep::RightClick { selector } => format!("rightClick({selector})"),
+        TestStep::Paste { selector, .. } => format!("paste({selector})"),
         TestStep::ChooseMenuItem { label } => format!("chooseMenuItem({label})"),
         TestStep::CloseMenu => "closeMenu".to_owned(),
         TestStep::Back => "back".to_owned(),
@@ -370,6 +377,18 @@ impl Driver for Remote {
     fn right_click(&mut self, selector: &str) -> Result<(), String> {
         self.action(TestStep::RightClick {
             selector: selector.into(),
+        })
+    }
+    fn paste(&mut self, selector: &str, content: &nsh_core::PasteEvent) -> Result<(), String> {
+        self.action(TestStep::Paste {
+            selector: selector.into(),
+            text: content.text.clone(),
+            files: content
+                .files
+                .iter()
+                .map(|f| nsh_dev::protocol::TestFile::new(&f.name, &f.mime, f.data.clone()))
+                .collect(),
+            uris: content.uris.clone(),
         })
     }
     fn choose_menu_item(&mut self, label: &str) -> Result<(), String> {

@@ -1594,10 +1594,20 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
     let key = surface.key();
     let view = view.clone();
     crate::rt::on_app(move |cx| {
-        let has_text = cx
-            .read_from_clipboard()
+        let item = cx.read_from_clipboard();
+        // Images and files paste too while the app listens to pastes.
+        let listens = view.state().events.contains(EventKind::Paste);
+        let has_text = item
+            .as_ref()
             .and_then(|item| item.text())
-            .is_some_and(|t| !t.is_empty());
+            .is_some_and(|t| !t.is_empty())
+            || (listens
+                && item.iter().flat_map(|item| item.entries()).any(|entry| {
+                    matches!(
+                        entry,
+                        gpui::ClipboardEntry::Image(_) | gpui::ClipboardEntry::ExternalPaths(_)
+                    )
+                }));
         if let Some(surface) = Surface::by_key(key)
             && let Some(input) = input_of(&view)
         {
@@ -1881,15 +1891,15 @@ fn cut(surface: &Surface, view: &NshView, input: &InputState, secure: bool) -> b
     true
 }
 
-/// Pastes the clipboard's text into `view` (once the app is at hand: the
-/// clipboard is read with it), if it still has the focus then.
+/// Pastes the clipboard into `view` (once the app is at hand: the
+/// clipboard is read with it, only on the user's paste), if it still has
+/// the focus then: reports what it holds (`onPaste`) if the app listens,
+/// then inserts its text as `pasteBehavior` says.
 fn paste(surface: &Surface, view: &NshView) {
     let key = surface.key();
     let view = view.clone();
     crate::rt::on_app(move |cx| {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
+        let item = cx.read_from_clipboard();
         let Some(surface) = Surface::by_key(key) else {
             return;
         };
@@ -1899,11 +1909,47 @@ fn paste(surface: &Surface, view: &NshView) {
         let Some(input) = input_of(&view) else {
             return;
         };
+        let text = item.as_ref().and_then(|item| item.text());
+        if view.state().events.contains(EventKind::Paste) {
+            surface.event(
+                view.id(),
+                EventKind::Paste,
+                EventPayload::Paste(Box::new(pasted_content(text.clone(), item))),
+            );
+        }
+        if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
+            return;
+        }
+        let Some(text) = text else {
+            return;
+        };
         let text = pasted(&text, input.multiline());
         if !text.is_empty() {
             insert(&surface, &view, &input, &text, false);
         }
     });
+}
+
+/// What clipboard `item` holds, for `onPaste`: `text`, its images and its
+/// local files' `file:` URLs.
+fn pasted_content(text: Option<String>, item: Option<gpui::ClipboardItem>) -> nsh_core::PasteEvent {
+    let mut paste = nsh_core::PasteEvent::new(text.unwrap_or_default());
+    for entry in item.into_iter().flat_map(|item| item.into_entries()) {
+        match entry {
+            gpui::ClipboardEntry::Image(image) => {
+                paste.files.push(nsh_core::PastedFile::image(image.bytes));
+            }
+            gpui::ClipboardEntry::ExternalPaths(paths) => paste.uris.extend(
+                paths
+                    .paths()
+                    .iter()
+                    .filter(|path| path.is_absolute())
+                    .map(|path| nsh_core::platform::clipboard::file_url(&path.to_string_lossy())),
+            ),
+            _ => {}
+        }
+    }
+    paste
 }
 
 /// The start or end of the caret's visual line (wrapped lines included).

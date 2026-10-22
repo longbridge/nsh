@@ -2258,6 +2258,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if event == EventKind::CaretMove {
                 state.core.locate_caret(id, &mut payload);
             }
+            if event == EventKind::Paste {
+                payload = payload.into_paste();
+            }
             // Events on a Rust component's parts are the component's.
             if state.core.component_event(id, event, &payload) {
                 return true;

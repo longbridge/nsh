@@ -5,7 +5,8 @@
 // typed, which typing then continues from; what return submits; a masked,
 // a read-only input and one with a selection set by the app, and the colors
 // of placeholders and selections; where the caret is, in the input and in
-// the root view (`onCaretMove`). Each handler shows what it gets as
+// the root view (`onCaretMove`); what was pasted (`onPaste`) into an input
+// that inserts nothing itself (`pasteBehavior`). Each handler shows what it gets as
 // text. Its
 // script checks each.
 import { Input, Text, View, signal } from "nsh";
@@ -16,6 +17,7 @@ function App() {
   const text = signal("");
   const selection = signal("none");
   const caret = signal("none");
+  const pasted = signal("none");
   const size = signal("none");
   let first = -1;
   const upper = signal("");
@@ -45,6 +47,13 @@ function App() {
       <Text>Text: {text()}</Text>
       <Text>Selection: {selection()}</Text>
       <Text>Caret: {caret()}</Text>
+      <Input
+        testID="paste"
+        pasteBehavior="report"
+        style={{ width: 300, height: 40 }}
+        onPaste={(e) => pasted.set(`${e.text} files ${e.files.length} uris ${e.uris.length}`)}
+      />
+      <Text>Pasted: {pasted()}</Text>
       <Text>Submitted: {submitted()}</Text>
       <Input
         testID="notes"

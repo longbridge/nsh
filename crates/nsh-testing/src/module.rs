@@ -485,6 +485,56 @@ pub struct WaitOptions {
     pub state: Option<WaitState>,
 }
 
+/// What a test pastes ([`App::paste`]): what the clipboard holds as the
+/// user pastes.
+#[derive(Debug, Default, Clone, JsObject)]
+pub struct PasteContent {
+    /// The text.
+    pub text: Option<String>,
+    /// Paths of files whose bytes are pasted (a screenshot: an image file),
+    /// each a `File` of `onPaste`, its type from its extension.
+    pub files: Option<Vec<String>>,
+    /// `file:` URLs of local files, as a file manager copies them.
+    pub uris: Option<Vec<String>>,
+}
+
+impl PasteContent {
+    /// What `onPaste` reports of it, the files read.
+    fn read(self) -> Result<nsh_core::PasteEvent, String> {
+        let mut paste = nsh_core::PasteEvent::new(self.text.unwrap_or_default());
+        for path in self.files.unwrap_or_default() {
+            let data = std::fs::read(&path).map_err(|e| format!("paste: {path}: {e}"))?;
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+            paste.files.push(nsh_core::PastedFile::new(
+                name.clone(),
+                mime_of(&name),
+                data,
+            ));
+        }
+        paste.uris = self.uris.unwrap_or_default();
+        Ok(paste)
+    }
+}
+
+/// The MIME type of a file named `name`, by its extension.
+fn mime_of(name: &str) -> &'static str {
+    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") => "image/heic",
+        Some("svg") => "image/svg+xml",
+        Some("txt") => "text/plain",
+        Some("json") => "application/json",
+        Some("pdf") => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
 /// How far a drag moves the finger ([`App::drag`]), in points.
 #[derive(Debug, Default, Clone, Copy, PartialEq, JsObject)]
 pub struct DragBy {
@@ -1073,6 +1123,20 @@ impl App {
     /// with `menu()`). Desktops and the web only: a phone has no mouse.
     pub async fn right_click(this: Instance<Self>, selector: String) -> Result<(), String> {
         step(&this, move |app| app.right_click(&selector)).await
+    }
+
+    /// Pastes `content` into the input `selector` names (or the first input
+    /// in it), as the user's paste does with it on the clipboard: the input
+    /// takes the focus and hears `onPaste` (`files` are paths whose bytes
+    /// it gets as `File`s), then its text goes in as `pasteBehavior` says.
+    /// The machine's clipboard stays as it was.
+    pub async fn paste(
+        this: Instance<Self>,
+        selector: String,
+        content: PasteContent,
+    ) -> Result<(), String> {
+        let content = content.read()?;
+        step(&this, move |app| app.paste(&selector, &content)).await
     }
 
     /// Chooses the open context menu's action labelled `label` (a
