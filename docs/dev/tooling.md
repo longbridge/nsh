@@ -75,6 +75,12 @@ Default bundles and packages are `.nsh/out/`; `--out` still overrides that locat
 `target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not add Cargo configuration to relocate it.
 Existing directories are never deleted automatically. Follow the CoC project constraint in `AGENTS.md`.
 
+## LayerFS trial
+
+The opt-in [LayerFS trial](layerfs.md) exercises Git, Cargo, build-output snapshots and branch isolation on Linux.
+Its generated inputs and receipts live under `.nsh/layerfs/`; it reuses the normal Cargo cache and has a manual
+GitHub Actions workflow. It is separate from the platform checks.
+
 ## Output
 
 

@@ -13239,3 +13239,81 @@ fn text_takes_the_tokens_sans_font() {
         Some(crate::style::FontFamily::new("Inter"))
     );
 }
+
+/// A view (or a text) moved into a container inside a `display: none`
+/// view, absolutely positioned or not, loses its old frame: its native
+/// view is not left showing at its former size in a parent of no size.
+#[test]
+fn views_moved_into_a_hidden_subtree_lose_their_frames() {
+    for (tag, position) in [
+        (Tag::View, "relative"),
+        (Tag::Text, "relative"),
+        (Tag::View, "absolute"),
+        (Tag::Text, "absolute"),
+    ] {
+        let mut c = core();
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("display", StyleValue::Str("none"))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            style_op(4, &[("position", StyleValue::Str(position))]),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Create { id: 6, tag },
+            style_op(6, &[("height", StyleValue::Number(20.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 6,
+                before: None,
+            },
+        ];
+        if tag == Tag::Text {
+            ops.push(Op::CreateText {
+                id: 8,
+                text: "hello".into(),
+            });
+            ops.push(Op::Insert {
+                parent: 6,
+                child: 8,
+                before: None,
+            });
+        }
+        apply(&mut c, ops);
+        let shown = c.commit().unwrap();
+        assert_eq!(frame_of(&shown, 6).unwrap().size, size_pt(320.0, 20.0));
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 6,
+                },
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let hidden = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&hidden, 6),
+            Some(Bounds::default()),
+            "{tag:?} in a {position} container"
+        );
+    }
+}

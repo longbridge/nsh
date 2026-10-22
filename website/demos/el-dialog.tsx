@@ -1,6 +1,9 @@
 import { mount, signal, Text, View } from "nsh";
-import { Button, Dialog, SafeAreaView } from "nsh/base";
+import { Button, Dialog, SafeAreaView, Switch } from "nsh/base";
 import { desktop, Inspector, Panel, size, Stage, tint, ui, wide } from "./palette";
+
+const track = `${desktop ? "w-9" : "w-12"} rounded-full p-0.5 transition-colors`;
+const thumb = desktop ? "size-4 rounded-full transition-transform checked:translate-x-4" : "size-5.5 rounded-full transition-transform checked:translate-x-5";
 
 function App() {
   const card = signal(false);
@@ -24,29 +27,18 @@ function App() {
     </Button>
   );
   const backdrop = () => (
-    <Button
-      role="switch"
-      selected={backdropCloses()}
-      onPress={() => backdropCloses.set(!backdropCloses())}
-      style={
-        wide()
-          ? { flexDirection: "row", alignItems: "center", gap: 8, height: size.rowSm, alignSelf: "center" }
-          : { ...ui().row, borderRadius: 12, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }
-      }
-      activeStyle={{ opacity: 0.7 }}
+    <Switch
+      checked={backdropCloses()}
+      onChange={(next) => backdropCloses.set(next)}
+      class={wide() ? "flex-row items-center gap-2 self-center active:opacity-70" : "flex-row items-center gap-3 rounded-xl p-3 active:opacity-70"}
+      style={wide() ? undefined : ui().row}
+      trackClass={track}
+      trackStyle={backdropCloses() ? ui().accentFill : ui().inset}
+      thumbClass={thumb}
+      thumbStyle={backdropCloses() ? { backgroundColor: ui().onAccent } : ui().raised}
     >
-      <View
-        style={{
-          width: desktop ? 16 : 20,
-          height: desktop ? 16 : 20,
-          borderRadius: desktop ? 4 : 6,
-          borderWidth: 1,
-          borderColor: ui().border,
-          backgroundColor: backdropCloses() ? ui().accent : "transparent",
-        }}
-      />
       <Text style={{ color: ui().text, flex: wide() ? undefined : 1, fontSize: desktop ? 13 : undefined }}>closeOnBackdropPress {String(backdropCloses())}</Text>
-    </Button>
+    </Switch>
   );
   const hint = desktop
     ? "Close with Escape or a click on the backdrop."

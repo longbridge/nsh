@@ -136,7 +136,7 @@ both avoid `std::env`, whose accessors panic on `wasm32-unknown-unknown`.
 
 QuickJS and the LLRT modules come through `quickjs-jit` and `quickjs-jit-stdlib` on native and WebAssembly targets. The WebAssembly build uses the interpreter and pregenerated bindings; the portable standard-library implementation supplies `buffer`, `crypto`, `path`, `url`, `zlib` and `zlib-zstd`, including synchronous hashing and compression. Browser entropy reaches Rust through the player's `crypto.getRandomValues` import (`standard/random.rs`); wasm builds select getrandom's custom backend. All eleven catalog modules load on both targets, with `Buffer` and `crypto` globals. On WebAssembly, `path` uses POSIX separators and a virtual `/` working directory. The crates are
 published together at one version and pinned exactly (`=0.14.1`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
-`third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
+`crates/nsh-js/third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
 they differ (a symlink `exists`, listeners get the payload only, `Stats`' methods are on its prototype, the child

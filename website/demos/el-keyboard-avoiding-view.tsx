@@ -1,5 +1,5 @@
 import { Input, mount, Scroll, signal, Text, View } from "nsh";
-import { Button, Keyboard, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
+import { Button, Keyboard, Switch, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
 import { desktop, tint, ui } from "./palette";
 
 function App() {
@@ -39,9 +39,17 @@ function App() {
           <Button onPress={() => behavior.set("height")} selected={behavior() === "height"} style={chip(behavior() === "height")}>
             <Text style={chipText(behavior() === "height")}>height</Text>
           </Button>
-          <Button onPress={() => enabled.set(!enabled())} role="switch" selected={enabled()} style={chip(enabled())}>
-            <Text style={chipText(enabled())}>enabled {String(enabled())}</Text>
-          </Button>
+          <Switch
+            checked={enabled()}
+            onChange={(next) => enabled.set(next)}
+            class="flex-row items-center gap-2 px-1 active:opacity-70"
+            trackClass="w-9 rounded-full p-0.5 transition-colors"
+            trackStyle={enabled() ? ui().accentFill : ui().inset}
+            thumbClass="size-4 rounded-full transition-transform checked:translate-x-4"
+            thumbStyle={enabled() ? { backgroundColor: ui().onAccent } : ui().raised}
+          >
+            <Text style={{ color: ui().text, fontSize: 13, fontWeight: "600" }}>enabled {String(enabled())}</Text>
+          </Switch>
         </View>
         <Text style={{ color: ui().accent, fontSize: 13 }}>
           keyboardFrame(): height {Math.round(keyboardFrame().height)} · duration {keyboardFrame().duration.toFixed(2)} s

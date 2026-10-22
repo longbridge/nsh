@@ -447,6 +447,10 @@ It runs on every pull request: its `check` job is the status check main requires
 reports `check` for (one touching only `crates/gpui`) can still merge. The Compat workflow's `compat` job is required
 too, so it also runs on every pull request, and its `dorny/paths-filter` step (held to the graph by `paths.py` the same
 way) decides whether it builds and checks or passes at once.
+Every pull-request workflow also handles `merge_group: checks_requested`, so GitHub's merge queue tests the
+combined commit. Queue runs execute the full workflow without PR path filters; Compat always builds on a queue
+run. Website deployment runs only on pushes and manual dispatches. `.github/ci/paths.py` checks the queue
+trigger alongside the dependency paths.
 CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
 restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
 release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
