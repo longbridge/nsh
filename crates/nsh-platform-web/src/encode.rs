@@ -492,6 +492,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             let f = filters(&effects.backdrop_filters);
             let _ = write!(css, "backdrop-filter:{f};-webkit-backdrop-filter:{f};");
         }
+        if !effects.mask_images.is_empty() {
+            let images: Vec<String> = effects.mask_images.iter().map(gradient).collect();
+            let m = images.join(",");
+            // `-webkit-mask-image` for WebKit, which still needs the prefix.
+            let _ = write!(css, "mask-image:{m};-webkit-mask-image:{m};");
+        }
     }
     if !shadows.is_empty() {
         let _ = write!(css, "box-shadow:{};", shadows.join(","));

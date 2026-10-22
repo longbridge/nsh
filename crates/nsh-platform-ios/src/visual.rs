@@ -47,6 +47,8 @@ pub(crate) struct Visual {
     outline: Option<Retained<CAShapeLayer>>,
     veil: Option<Retained<CALayer>>,
     backdrop: Option<Backdrop>,
+    /// `maskImage`'s layer, held so it is not rebuilt every frame.
+    mask_image: Option<Retained<CAGradientLayer>>,
 }
 
 /// What a backdrop draws: the blur's radius, which material draws it,
@@ -249,6 +251,12 @@ impl Visual {
             glass: style.glass_effect,
         };
         self.set_backdrop(view, spec, local, radii, mtm);
+        // Last: the mask covers everything above, the backdrop's view included.
+        self.set_mask_image(
+            &layer,
+            effects.map_or(&[][..], |e| &e.mask_images[..]),
+            local,
+        );
     }
 
     fn set_shadows(
@@ -469,6 +477,27 @@ impl Visual {
         let mask = mask_layer(v);
         mask.setFrame(local);
         mask.setPath(Some(&rounded(local, radii)));
+    }
+
+    /// `mask-image`: a gradient whose alpha decides how much of the view is
+    /// drawn. Set on the view's own layer, so it masks the content, the
+    /// background, the shadows and the backdrop's view alike.
+    ///
+    /// CSS composites several mask layers; this draws the topmost one, which
+    /// is what a fade along one edge needs.
+    fn set_mask_image(&mut self, layer: &CALayer, masks: &[Gradient], local: CGRect) {
+        let Some(mask) = masks.first() else {
+            if self.mask_image.take().is_some() {
+                // SAFETY: clearing the mask.
+                unsafe { layer.setMask(None) };
+            }
+            return;
+        };
+        let g = self.mask_image.get_or_insert_with(CAGradientLayer::new);
+        g.setFrame(local);
+        shape_gradient(g, mask, local.size);
+        // SAFETY: the layer owns the mask, which has no superlayer of its own.
+        unsafe { layer.setMask(Some(g)) };
     }
 
     /// `backdrop-filter: blur()`: a system blur behind the content, its

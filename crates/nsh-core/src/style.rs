@@ -1321,6 +1321,7 @@ style_keys! {
     BackgroundImage = "backgroundImage": View "string" "CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas.",
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
+    MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included.",
     GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
@@ -2535,6 +2536,14 @@ impl Style {
                 };
                 self.edit_effects(|e| e.background_images = list);
             }
+            StyleKey::MaskImage => {
+                let list = match keyword(value)? {
+                    None => Vec::new(),
+                    Some("none") => Vec::new(),
+                    Some(s) => css::gradients(s).ok_or(StyleError::InvalidValue)?,
+                };
+                self.edit_effects(|e| e.mask_images = list);
+            }
             StyleKey::Filter => {
                 let list = match keyword(value)? {
                     None => Vec::new(),
@@ -3175,6 +3184,43 @@ mod tests {
         );
         assert_eq!(
             s.set("fontStyle", StyleValue::Str("oblique")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn mask_image_parses() {
+        let mut s = Style::default();
+        assert!(s.view.effects.is_none());
+        s.set(
+            "maskImage",
+            StyleValue::Str("linear-gradient(black 70%, transparent)"),
+        )
+        .unwrap();
+        let masks = &s.view.effects.as_ref().unwrap().mask_images;
+        assert_eq!(masks.len(), 1);
+        // `none`, and the null of a style that was taken off, both clear it.
+        s.set("maskImage", StyleValue::Str("none")).unwrap();
+        assert!(
+            s.view
+                .effects
+                .as_ref()
+                .is_none_or(|e| e.mask_images.is_empty())
+        );
+        s.set(
+            "maskImage",
+            StyleValue::Str("linear-gradient(black, transparent)"),
+        )
+        .unwrap();
+        s.set("maskImage", StyleValue::Null).unwrap();
+        assert!(
+            s.view
+                .effects
+                .as_ref()
+                .is_none_or(|e| e.mask_images.is_empty())
+        );
+        assert_eq!(
+            s.set("maskImage", StyleValue::Str("url(a.png)")),
             Err(StyleError::InvalidValue)
         );
     }

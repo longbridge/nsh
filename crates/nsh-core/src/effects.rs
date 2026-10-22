@@ -828,6 +828,10 @@ pub struct Effects {
     pub filters: Vec<Filter>,
     /// Filters applied to what is behind the view (blur only on iOS).
     pub backdrop_filters: Vec<Filter>,
+    /// `maskImage`: gradients whose alpha decides how much of the view is
+    /// drawn, top layer first (CSS order). Only gradients: CSS also takes
+    /// images and shapes here, which no platform of NSH draws yet.
+    pub mask_images: Vec<Gradient>,
 }
 
 impl Effects {
@@ -837,6 +841,7 @@ impl Effects {
             && self.background_images.is_empty()
             && self.filters.is_empty()
             && self.backdrop_filters.is_empty()
+            && self.mask_images.is_empty()
     }
 }
 
