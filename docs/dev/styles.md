@@ -55,7 +55,7 @@
   that are props in React Native (`line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*`,
   `caret-*`) lose to explicit props; `placeholder:text-*` / `selection:bg-*` lose to the `placeholderColor` /
   `selectionColor` style keys. Not supported, so unknown: `peer-*`, pseudo-elements, arbitrary CSS properties, and every
-  utility without a native meaning (`sticky`, `order-*`, `transform-3d`, `select-all`, `border-double`, intrinsic min/max constraints,
+  utility without a native meaning (`order-*`, `transform-3d`, `select-all`, `border-double`, intrinsic min/max constraints,
   `snap-*`, `scroll-*`, `overscroll-*`, `touch-*`, `isolate`) or without CSS in Tailwind (a negative
   where Tailwind has none: `-gap-4`, `-p-2`; fractions and `full` on padding, margin and gaps; non-integer `z-*`; bare
   `inset-shadow` without a theme value). Rendering hints are accepted and do nothing (`ignored` in
@@ -98,8 +98,8 @@
   place less its `top`, or `left` in a horizontal one, to where its end meets its parent's content box) and sends it
   with that view's sticky list rows (`core/sticky.rs`, `MountItem::StickyCells`), which the platforms pin on every
   scroll. It draws above its siblings of the same `zIndex` (`Node::stack_rank`), as above a page's in-flow boxes.
-  `bottom` / `right` stickiness and a zoomable scroll view are not supported. The `sticky` class stays unknown
-  (above).
+  `bottom` / `right` stickiness and a zoomable scroll view are not supported. The `sticky` class sets it, as
+  Tailwind's does.
 - **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
   font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
 - **`pointer-events-*` classes** inherit as CSS's `pointer-events` (the `pointerEvents` prop keeps React Native's

@@ -1239,7 +1239,7 @@ fn classes_without_a_native_meaning_are_unknown() {
     // What Tailwind CSS generates that NSH cannot do: unknown, never a
     // different meaning.
     all_unknown(
-        "sticky transform-3d order-1 order-first -order-2 order-[3] select-all border-double outline-double",
+        "transform-3d order-1 order-first -order-2 order-[3] select-all border-double outline-double",
     );
     all_unknown("min-w-fit min-h-max max-w-min max-h-fit");
     all_unknown(
@@ -1657,4 +1657,13 @@ fn bare_values_follow_tailwinds_grammar() {
             "{known}"
         );
     }
+}
+
+#[test]
+fn sticky_is_position_sticky() {
+    // `sticky` is CSS's `position: sticky`; a later position wins.
+    let s = styled("sticky top-0");
+    assert!(s.pending.sticky_position);
+    assert_eq!(s.layout.position, taffy::Position::Relative);
+    assert!(!styled("sticky absolute").pending.sticky_position);
 }

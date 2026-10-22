@@ -1391,6 +1391,7 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         "relative" => sets(K::Position, "relative"),
         "absolute" => sets(K::Position, "absolute"),
         "fixed" => sets(K::Position, "fixed"),
+        "sticky" => sets(K::Position, "sticky"),
         "visible" => sets(K::Visibility, "visible"),
         "invisible" | "collapse" => sets(K::Visibility, "hidden"),
         "overflow-hidden" | "overflow-clip" | "overflow-x-hidden" | "overflow-y-hidden" => {

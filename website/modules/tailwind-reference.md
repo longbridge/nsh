@@ -118,6 +118,7 @@ Arbitrary CSS properties (`[mask-type:luminance]`) are not supported.
 | `hidden` | `display: "none"` |
 | `relative`, `absolute` | `position` |
 | `static` | `position: "static"`: in the flow, its insets ignored ; absolute descendants use their nearest positioned ancestor |
+| `sticky` | `position: "sticky"`: in the flow, it sticks `top` (`left` in a horizontal scroll view) within the scroll view around it while its parent is in view |
 | `fixed` | `position: "fixed"`: an element laid out in its root view's box (the window or its modal) above that root view's children, in place while what is around it scrolls |
 | `inset-<n>`, `inset-x-<n>`, `inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`, `right-<n>`, `bottom-<n>`, `left-<n>` | the matching offset |
@@ -428,7 +429,7 @@ These utilities are rendering hints, or what every native view already is; they 
 
 ## Not supported
 
-`peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[prop:value]`), `overflow-auto` / `overflow-scroll`, `divide-*`, `columns-*`, `float-*`, `container`, container queries, `sticky`, `order-*`, `transform-3d`, `select-all`, `border-double` / `outline-double`, intrinsic min/max constraints (such as `max-w-max`), `snap-*`, `scroll-*`, `overscroll-*`, `touch-*` and `isolate` are unknown classes. `nsh build` and `nsh dev` warn about unknown classes they find in your source (`file:line:col: unknown class '...'`), and the runtime logs each unknown class once.
+`peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[prop:value]`), `overflow-auto` / `overflow-scroll`, `divide-*`, `columns-*`, `float-*`, `container`, container queries, `order-*`, `transform-3d`, `select-all`, `border-double` / `outline-double`, intrinsic min/max constraints (such as `max-w-max`), `snap-*`, `scroll-*`, `overscroll-*`, `touch-*` and `isolate` are unknown classes. `nsh build` and `nsh dev` warn about unknown classes they find in your source (`file:line:col: unknown class '...'`), and the runtime logs each unknown class once.
 
 ## Variants
 
