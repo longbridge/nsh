@@ -332,9 +332,10 @@ fn the_app_s_shortcuts_reach_it_while_a_native_component_has_the_keyboard(cx: &m
         ["a", "j", &format!("{primary}-z"), &format!("{primary}-k")],
     );
     cx.update(|window, _| assert!(handle.is_focused(window), "the component lost the focus"));
-    let bar = if cfg!(target_os = "macos") { 0.0 } else { 28.0 };
+    // The surface starts below the platform's title and menu bars.
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
     cx.simulate_click(
-        gpui::point(gpui::px(20.0), gpui::px(bar + 15.0)),
+        gpui::point(gpui::px(x + 20.0), gpui::px(y + 15.0)),
         gpui::Modifiers::default(),
     );
     wait_for(&view, cx, "fired revert bound bound new");
