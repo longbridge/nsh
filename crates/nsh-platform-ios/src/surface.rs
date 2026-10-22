@@ -14,7 +14,7 @@ use nsh_engine::{
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
-    runtime::ProtocolObject,
+    runtime::{AnyObject, ProtocolObject},
 };
 use objc2_core_foundation::{CGRect, CGSize};
 use objc2_foundation::{
@@ -190,6 +190,42 @@ define_class!(
                 }
             });
         }
+
+        /// Hardware keys no responder inside handled: the app's shortcuts
+        /// (`nsh/keymap`) take those they bind.
+        #[unsafe(method(pressesBegan:withEvent:))]
+        fn presses_began(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::root_began(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesBegan: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesEnded:withEvent:))]
+        fn presses_ended(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () = unsafe { msg_send![super(self), pressesEnded: presses, withEvent: event] };
+            }
+        }
+
+        #[unsafe(method(pressesCancelled:withEvent:))]
+        fn presses_cancelled(&self, presses: &AnyObject, event: Option<&AnyObject>) {
+            let consumed = self
+                .target()
+                .is_some_and(|target| crate::keymap::ended(&target, presses));
+            if !consumed {
+                // SAFETY: calling the superclass implementation.
+                let _: () =
+                    unsafe { msg_send![super(self), pressesCancelled: presses, withEvent: event] };
+            }
+        }
     }
 );
 
@@ -216,6 +252,18 @@ impl RootView {
         });
         // SAFETY: UIView's designated initializer.
         unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+
+    /// The running app's event target.
+    fn target(&self) -> Option<Retained<crate::target::EventTarget>> {
+        let running = self.ivars().running.borrow();
+        let mounter = running
+            .as_ref()?
+            .mounter
+            .get(self.mtm())
+            .try_borrow()
+            .ok()?;
+        mounter.as_ref().map(|m| m.target().clone())
     }
 
     /// What JS sees through `windowSize()`, `safeArea()`, `keyboard()`...

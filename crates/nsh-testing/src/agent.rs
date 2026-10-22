@@ -833,15 +833,11 @@ pub trait Native: Send + Sync {
     }
     /// Presses `keys`, a keystroke as `nsh/keymap` names it (`"mod+k"`;
     /// `mod` the platform's command key), on a hardware keyboard: the app's
-    /// shortcuts hear it, else what has the keyboard focus. Platforms
-    /// without app shortcuts (the phones) refuse it.
+    /// shortcuts hear it, else what has the keyboard focus. Every
+    /// platform's agent makes them; one that cannot refuses it.
     fn press_keys(&self, keys: &str) -> Result<(), String> {
         let _ = keys;
-        Err(
-            "this platform has no keyboard shortcuts (`nsh/keymap`) to press: \
-             run the test headless, or on a desktop or the web"
-                .into(),
-        )
+        Err("this platform's test agent presses no hardware keys: run the test headless".into())
     }
     /// Types `text` into the focused input, key by key.
     fn type_text(&self, text: &str);

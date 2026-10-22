@@ -161,6 +161,16 @@ final class Native {
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
 
     /**
+     * A hardware key went down: whether the app's shortcuts ({@code nsh/keymap}) take it.
+     * {@code unicode}: what it types without modifiers ({@code KeyEvent.getUnicodeChar(0)});
+     * {@code repeat}: an auto-repeat; {@code editing}: a text input or hosted view has the focus.
+     */
+    static native boolean keyDown(long handle, int keyCode, int unicode, int meta, boolean repeat, boolean editing);
+
+    /** A hardware key went up: whether its press was taken (then so is its release). */
+    static native boolean keyUp(long handle, int keyCode);
+
+    /**
      * {@code onHoverMove} of view {@code id}: the pointer at ({@code x}, {@code y}) in it and at
      * ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers}: 1 Ctrl, 2 Alt,
      * 4 Shift, 8 Meta.

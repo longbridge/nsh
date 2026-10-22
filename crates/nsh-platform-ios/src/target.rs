@@ -31,6 +31,8 @@ pub(crate) struct TargetIvars {
     /// Scrolls the core asked for that each scroll view applied, reported
     /// with its offsets (`EngineControl::scroll`).
     scrolls_applied: std::cell::RefCell<rustc_hash::FxHashMap<NodeId, u32>>,
+    /// The app's keyboard shortcuts, matched as keys are pressed.
+    keymap: crate::keymap::KeymapState,
 }
 
 define_class!(
@@ -455,6 +457,7 @@ impl EventTarget {
             control,
             mounter,
             scrolls_applied: Default::default(),
+            keymap: Default::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -476,7 +479,12 @@ impl EventTarget {
         self.ivars().scrolls_applied.borrow_mut().remove(&id);
     }
 
-    fn dispatch(&self, id: NodeId, event: EventKind, payload: EventPayload) {
+    /// The app's keyboard shortcuts.
+    pub(crate) fn keymap(&self) -> &crate::keymap::KeymapState {
+        &self.ivars().keymap
+    }
+
+    pub(crate) fn dispatch(&self, id: NodeId, event: EventKind, payload: EventPayload) {
         self.ivars().control.dispatch_event(id, event, payload);
     }
 

@@ -475,6 +475,11 @@ impl Mounter {
         }
     }
 
+    /// The surface's event target.
+    pub(crate) fn target(&self) -> &Retained<EventTarget> {
+        &self.target
+    }
+
     /// Node `id`'s view (`nsh test --target ios`).
     #[cfg(feature = "dev")]
     pub(crate) fn ui_view(&self, id: NodeId) -> Option<Retained<UIView>> {
@@ -1068,7 +1073,7 @@ impl Mounter {
             }
             MountItem::Command { id, command } => self.command(id, command),
             // Hardware keyboards' shortcuts are not matched yet.
-            MountItem::Keymap(_) => {}
+            MountItem::Keymap(keymap) => self.target.keymap().set(keymap),
         }
         false
     }

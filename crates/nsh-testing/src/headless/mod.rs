@@ -1621,10 +1621,14 @@ mod tests {
                 .unwrap_err()
                 .contains("nothing")
         );
-        // Phones fire no app shortcuts.
+        // Phones and tablets fire them from a hardware keyboard too; on
+        // Android `mod` is Control.
         let mut phone = open_shortcuts(nsh_core::platform::Os::Ios);
-        phone.press_key("mod+k").unwrap();
-        assert!(phone.shows("Palette 0"));
+        phone.press_key("cmd+k").unwrap();
+        phone.wait_for("Palette 1").unwrap();
+        let mut android = open_shortcuts(nsh_core::platform::Os::Android);
+        android.press_key("ctrl+k").unwrap();
+        android.wait_for("Palette 1").unwrap();
     }
 
     #[cfg(feature = "js")]

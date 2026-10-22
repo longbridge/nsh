@@ -68,6 +68,8 @@ pub(crate) struct Host {
     /// The bytes of the in-memory images (`data:` URIs, blobs) the app
     /// shows, by URI, for `Images.java` (`Native.imageBytes`).
     inline_images: Mutex<nsh_core::image::InlineImages>,
+    /// The app's keyboard shortcuts, matched on the UI thread.
+    pub(crate) keymap: Mutex<crate::keymap::KeymapState>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
     /// A test session's model of the app (`nsh test --target android`):
@@ -91,6 +93,13 @@ impl Host {
 
     fn control(&self) -> Option<EngineControl> {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
+    }
+
+    /// Hands event `kind` of node `id` to the running app.
+    pub(crate) fn dispatch(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
+        if let Some(control) = self.control() {
+            control.dispatch_event(id, kind, payload);
+        }
     }
 
     /// The VM limits of the apps loaded from now on.
@@ -127,6 +136,10 @@ impl Host {
             self.app_stopped();
         }
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
+        self.keymap
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         *self.ui.lock().expect("ui") = UiAnimation::default();
         #[allow(unused_mut)]
         let mut config = EngineConfig {
@@ -335,7 +348,13 @@ impl MountSink for Sink {
         }
         answer_clipboard_reads(host, &batch);
         register_inline_images(host, &batch);
-        let encoded = encode::encode(batch);
+        let mut encoded = encode::encode(batch);
+        if let Some(keymap) = encoded.keymap.take() {
+            host.keymap
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .set(keymap);
+        }
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
         if !encoded.animation.is_empty() {
             host.animation_queue
@@ -486,6 +505,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         inline_images: Mutex::default(),
+        keymap: Mutex::default(),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
         #[cfg(feature = "dev")]

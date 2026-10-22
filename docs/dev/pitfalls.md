@@ -167,6 +167,12 @@ Things that were found the hard way. Read the section of the area you change bef
   prevented every press there, so a navigation bar's back button did nothing (seen on an iPhone foldable simulator; a
   real tap through XCUITest reproduced it). `PressRecognizer` is not preventable by tap recognizers on a `UIWindow`
   (`press.rs`, `is_window_tap`); edge-gesture gates are not taps and still cancel presses.
+- **iOS, a hardware keyboard's keys** reach the first responder as presses (`pressesBegan:withEvent:`) before
+  UIKit's text system acts on them: a text input that does not call `super` for a press neither moves its caret,
+  inserts a line break nor types it, and must not call `super` for that key's release either. A held key's press
+  comes once (the text system repeats on its own), so a binding that repeats needs a timer of its own
+  (`keymap.rs`). A press's `responder` is the first responder it went to: presses bubbling up to the root view from
+  an input were matched there already.
 
 - **iOS, the screen scale**: a `UIView` that draws nothing itself keeps a `contentScaleFactor` of 1 on a 3x screen, and a
   drawn one raises it while zoomed, so neither is the screen's scale. Images decoded at it came out at a third of their
@@ -231,6 +237,11 @@ Things that were found the hard way. Read the section of the area you change bef
   so a line is wider than its sum of advances; `TextLayouts.Prepared.desired` adds the largest negative spacing back, or text laid
   out at its natural width wraps (`tracking-tight`).
 
+- **Android, a hardware keyboard's keys** go to the input method first, then down the window's views
+  (`dispatchKeyEvent`, the parents before the focused view): `NshView`, which holds the focus when no input does,
+  sees every key meant for the views inside it. Keys with Control come as `dispatchKeyShortcutEvent` first, where a
+  text field selects all, copies and pastes, so the app's shortcuts are matched there too.
+
 ## Linux, GTK
 
 - **inotify reports reads** (`Access` events), FSEvents does not: file watchers (`nsh dev`, `cargo run`'s xtask) ignore
@@ -281,6 +292,9 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Made-up edge swipes do not start `interactivePopGestureRecognizer`**; the back button is tapped instead. A
   scroll view's glide or bounce is not a Core Animation animation: `isDecelerating` says it moves, and a tap during
   it only stops it.
+- **A hardware keyboard's keys are IOHID keyboard events** (`IOHIDEventCreateKeyboardEvent`, usage page 7) handed to
+  UIKit the way touches are: they become presses, key commands and typing as a real keyboard's do. Modifiers are
+  keys of their own (left Control, Shift, Option, Command), down before the key and up after it.
 - **`-[UIApplication _enqueueHIDEvent:]` takes an `IOHIDEventRef`**: objc2's debug type checks reject an object
   pointer, so the argument has the `^{__IOHIDEvent=}` encoding.
 

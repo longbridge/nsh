@@ -151,7 +151,161 @@ impl Key {
             Key::F(_) => return None,
         })
     }
+
+    /// The key of USB HID keyboard usage `usage` (usage page 7, which
+    /// UIKit's `UIKey.keyCode` is): the key's place on the US layout,
+    /// whatever layout types on it; the keypad's digits and Enter too.
+    pub fn from_hid_usage(usage: u16) -> Option<Key> {
+        Some(match usage {
+            4..=29 => Key::Char(char::from(b'a' + (usage - 4) as u8)),
+            30..=38 => Key::Char(char::from(b'1' + (usage - 30) as u8)),
+            39 => Key::Char('0'),
+            40 | 88 => Key::Enter,
+            41 => Key::Escape,
+            42 => Key::Backspace,
+            43 => Key::Tab,
+            44 => Key::Char(' '),
+            58..=69 => Key::F((usage - 57) as u8),
+            73 => Key::Insert,
+            74 => Key::Home,
+            75 => Key::PageUp,
+            76 => Key::Delete,
+            77 => Key::End,
+            78 => Key::PageDown,
+            79 => Key::Right,
+            80 => Key::Left,
+            81 => Key::Down,
+            82 => Key::Up,
+            89..=97 => Key::Char(char::from(b'1' + (usage - 89) as u8)),
+            98 => Key::Char('0'),
+            104..=115 => Key::F((usage - 91) as u8),
+            _ => {
+                return HID_KEYS
+                    .iter()
+                    .find(|(u, _)| *u == usage)
+                    .map(|&(_, c)| Key::Char(c));
+            }
+        })
+    }
+
+    /// The USB HID keyboard usage of this key (the main keyboard's, not
+    /// the keypad's): what a hardware keyboard sends for it.
+    pub fn hid_usage(self) -> Option<u16> {
+        Some(match self {
+            Key::Char(c @ 'a'..='z') => 4 + u16::from(c as u8 - b'a'),
+            Key::Char(c @ '1'..='9') => 30 + u16::from(c as u8 - b'1'),
+            Key::Char('0') => 39,
+            Key::Enter => 40,
+            Key::Escape => 41,
+            Key::Backspace => 42,
+            Key::Tab => 43,
+            Key::Char(' ') => 44,
+            Key::F(n @ 1..=12) => 57 + u16::from(n),
+            Key::F(n @ 13..=24) => 91 + u16::from(n),
+            Key::Insert => 73,
+            Key::Home => 74,
+            Key::PageUp => 75,
+            Key::Delete => 76,
+            Key::End => 77,
+            Key::PageDown => 78,
+            Key::Right => 79,
+            Key::Left => 80,
+            Key::Down => 81,
+            Key::Up => 82,
+            Key::Char(c) => return HID_KEYS.iter().find(|(_, k)| *k == c).map(|&(u, _)| u),
+            Key::F(_) => return None,
+        })
+    }
+
+    /// The key of Android key code `code` (`KeyEvent.KEYCODE_*`); the
+    /// keypad's digits and Enter too.
+    pub fn from_android_keycode(code: i32) -> Option<Key> {
+        Some(match code {
+            7..=16 => Key::Char(char::from(b'0' + (code - 7) as u8)),
+            29..=54 => Key::Char(char::from(b'a' + (code - 29) as u8)),
+            19 => Key::Up,
+            20 => Key::Down,
+            21 => Key::Left,
+            22 => Key::Right,
+            61 => Key::Tab,
+            62 => Key::Char(' '),
+            66 | 160 => Key::Enter,
+            67 => Key::Backspace,
+            92 => Key::PageUp,
+            93 => Key::PageDown,
+            111 => Key::Escape,
+            112 => Key::Delete,
+            122 => Key::Home,
+            123 => Key::End,
+            124 => Key::Insert,
+            131..=142 => Key::F((code - 130) as u8),
+            144..=153 => Key::Char(char::from(b'0' + (code - 144) as u8)),
+            _ => {
+                return ANDROID_KEYS
+                    .iter()
+                    .find(|(k, _)| *k == code)
+                    .map(|&(_, c)| Key::Char(c));
+            }
+        })
+    }
+
+    /// The Android key code of this key (`KeyEvent.KEYCODE_*`, the main
+    /// keyboard's): what a key event for it carries.
+    pub fn android_keycode(self) -> Option<i32> {
+        Some(match self {
+            Key::Char(c @ '0'..='9') => 7 + i32::from(c as u8 - b'0'),
+            Key::Char(c @ 'a'..='z') => 29 + i32::from(c as u8 - b'a'),
+            Key::Up => 19,
+            Key::Down => 20,
+            Key::Left => 21,
+            Key::Right => 22,
+            Key::Tab => 61,
+            Key::Char(' ') => 62,
+            Key::Enter => 66,
+            Key::Backspace => 67,
+            Key::PageUp => 92,
+            Key::PageDown => 93,
+            Key::Escape => 111,
+            Key::Delete => 112,
+            Key::Home => 122,
+            Key::End => 123,
+            Key::Insert => 124,
+            Key::F(n @ 1..=12) => 130 + i32::from(n),
+            Key::Char(c) => return ANDROID_KEYS.iter().find(|(_, k)| *k == c).map(|&(k, _)| k),
+            Key::F(_) => return None,
+        })
+    }
 }
+
+/// The US layout's punctuation keys' USB HID usages.
+const HID_KEYS: &[(u16, char)] = &[
+    (45, '-'),
+    (46, '='),
+    (47, '['),
+    (48, ']'),
+    (49, '\\'),
+    (51, ';'),
+    (52, '\''),
+    (53, '`'),
+    (54, ','),
+    (55, '.'),
+    (56, '/'),
+];
+
+/// The US layout's punctuation keys' Android key codes.
+const ANDROID_KEYS: &[(i32, char)] = &[
+    (55, ','),
+    (56, '.'),
+    (68, '`'),
+    (69, '-'),
+    (70, '='),
+    (71, '['),
+    (72, ']'),
+    (73, '\\'),
+    (74, ';'),
+    (75, '\''),
+    (76, '/'),
+];
 
 /// One key with its modifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -640,6 +794,34 @@ mod tests {
         }
         assert_eq!(Key::Char('?').virtual_key(), None);
         assert_eq!(Key::F(25).virtual_key(), None);
+    }
+
+    #[test]
+    fn keys_have_hid_usages_and_android_key_codes_both_ways() {
+        assert_eq!(Key::from_hid_usage(4), Some(Key::Char('a')));
+        assert_eq!(Key::from_hid_usage(39), Some(Key::Char('0')));
+        assert_eq!(Key::from_hid_usage(81), Some(Key::Down));
+        assert_eq!(Key::from_hid_usage(56), Some(Key::Char('/')));
+        assert_eq!(Key::from_hid_usage(88), Some(Key::Enter));
+        assert_eq!(Key::from_hid_usage(104), Some(Key::F(13)));
+        assert_eq!(Key::from_hid_usage(225), None);
+        // The keypad's keys have the main keyboard's usages back.
+        for usage in (0..=0xFF).filter(|u| !(88..=98).contains(u)) {
+            if let Some(key) = Key::from_hid_usage(usage) {
+                assert_eq!(key.hid_usage(), Some(usage), "{key:?}");
+            }
+        }
+        assert_eq!(Key::from_android_keycode(29), Some(Key::Char('a')));
+        assert_eq!(Key::from_android_keycode(7), Some(Key::Char('0')));
+        assert_eq!(Key::from_android_keycode(20), Some(Key::Down));
+        assert_eq!(Key::from_android_keycode(76), Some(Key::Char('/')));
+        assert_eq!(Key::from_android_keycode(160), Some(Key::Enter));
+        assert_eq!(Key::from_android_keycode(59), None);
+        for code in (0..=300).filter(|c| *c != 160 && !(144..=153).contains(c)) {
+            if let Some(key) = Key::from_android_keycode(code) {
+                assert_eq!(key.android_keycode(), Some(code), "{key:?}");
+            }
+        }
     }
 
     fn parse(text: &str) -> Result<Keystroke, KeystrokeError> {
