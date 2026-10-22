@@ -21,7 +21,8 @@ pub(crate) fn registry() -> Registry {
         .register::<ListView>()
         .register::<Stepper>()
         .register::<TextField>()
-        .register::<Sheet>();
+        .register::<Sheet>()
+        .register::<Shortcut>();
     registry
 }
 
@@ -387,6 +388,24 @@ pub(crate) fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> imp
                     .child(text("×"))
             },
         ))
+}
+
+// --- Shortcut: a binding of the view's own ---------------------------------
+
+/// Counts the presses of a keystroke the view binds itself.
+#[derive(Debug, Clone, PartialEq, Props)]
+pub(crate) struct ShortcutProps {
+    /// The keystroke, as `on_key` takes it.
+    pub(crate) keys: Prop<SharedString>,
+}
+
+/// `<keys> <count>` ([`ShortcutProps`]), counted by the view's own binding.
+#[component]
+pub(crate) fn Shortcut(props: ShortcutProps) -> impl IntoElement {
+    let keys = props.keys.get();
+    let count = signal(0);
+    on_key(&keys, move |_| count.update(|c| *c += 1));
+    text(move || format!("{keys} {}", count.get()))
 }
 
 // --- Sheet: lazy children, made while it is open ----------------------------

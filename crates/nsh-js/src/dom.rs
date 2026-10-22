@@ -1282,8 +1282,12 @@ fn set_prop(
     let mut warnings = crate::protocol::Warnings::deferred();
     // SAFETY: live node data.
     let tag = unsafe { (*p).tag };
-    let decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
+    let mut decoded = crate::protocol::decode_prop(id, tag, name, v, &mut warnings);
     dom(cx).shared.warnings.borrow_mut().merge(warnings);
+    if let Ok(Some(Op::SetProp { prop, .. })) = &mut decoded {
+        // A `blob:` URL's bytes are in this VM: they go with the source.
+        crate::web::blob::resolve_image_source(cx, prop);
+    }
     match decoded {
         Ok(Some(op)) => dom(cx).push(cx, op),
         Ok(None) => Ok(()),

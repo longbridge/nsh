@@ -123,6 +123,21 @@ style id:backdrops backdropFilter saturate(1.8) blur(20)
 nostyle id:backdrops filter
 style id:mask maskImage linear-gradient(#000000 70%, #00000000)
 nostyle id:no-mask maskImage
+prop id:material ios.backdropMaterial regular
+prop id:material-chrome ios.backdropMaterial chrome
+prop id:no-material ios.backdropMaterial ultraThin
+prop id:material-thin ios.backdropMaterial thin
+prop id:material-thick ios.backdropMaterial thick
+prop id:material-change ios.backdropMaterial regular
+tap id:material-change
+prop id:material-change ios.backdropMaterial chrome
+tap id:material-change
+prop id:material-change ios.backdropMaterial ultraThin
+style id:material-change backdropFilter blur(30)
+style id:glass backdropFilter blur(10)
+style id:glass glassEffect regular
+style id:glass-clear glassEffect clear
+nostyle id:no-glass glassEffect
 style id:blend-normal mixBlendMode normal
 style id:blend-multiply mixBlendMode multiply
 style id:blend-screen mixBlendMode screen
@@ -145,6 +160,8 @@ covers [styles] backgroundImage
 covers [styles] filter
 covers [styles] backdropFilter
 covers [styles] maskImage
+covers [props] ios.backdropMaterial
+covers [styles] glassEffect
 covers [styles] mixBlendMode
 # paint-misc
 tap id:case-paint-misc
@@ -207,6 +224,25 @@ covers [styles] cursor
 covers [styles] tintColor
 covers [styles] transformOrigin
 covers [styles] backfaceVisibility
+# paint-object-position
+tap id:case-paint-object-position
+expect Object position
+# Where each image sits, as edges with offsets: the center by default.
+style id:centered objectPosition left 50% top 50%
+style id:top objectPosition left 50% top 0%
+style id:top-left objectPosition left 0% top 0%
+style id:bottom-right objectPosition left 100% top 100%
+style id:percent objectPosition left 25% top 75%
+style id:lengths objectPosition left 10 top 16
+style id:edges objectPosition right 10 bottom 20%
+style id:class-top objectPosition left 50% top 0%
+prop id:class-top resizeMode cover
+style id:class-bottom-left objectPosition left 0% top 100%
+style id:class-arbitrary objectPosition right 4 top 50%
+style id:changed objectPosition left 50% top 0%
+tap id:flip
+style id:changed objectPosition left 50% top 100%
+covers [styles] objectPosition
 # paint-motion
 tap id:case-paint-motion
 expect Motion

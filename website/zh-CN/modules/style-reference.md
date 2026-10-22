@@ -334,6 +334,7 @@ view().perspective(px(600.0)).rotate_y(deg(20.0)).scale(0.95)
 |---|---|---|---|
 | `filter` | `string` | `.blur(r)`、`.brightness(…)`、`.contrast(…)`、`.grayscale(…)`、`.hue_rotate(…)`、`.invert(…)`、`.saturate(…)`、`.sepia(…)` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`。 |
 | `backdropFilter` | `string` | `.backdrop_blur(r)`、`.backdrop_brightness(…)` 等 | 作用于视图背后内容的 CSS 滤镜，例如毛玻璃效果 `"blur(10px)"`。 |
+| `glassEffect` | `"none" \| "regular" \| "clear"` | `ViewStyle::glass_effect`（`GlassEffect`） | 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，`"clear"` 从背景获取的颜色更少，默认值为 `"none"`。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。 |
 | `mixBlendMode` | `"normal" \| "multiply" \| "screen" \| "overlay" \| "darken" \| "lighten" \| "color-dodge" \| "color-burn" \| "hard-light" \| "soft-light" \| "difference" \| "exclusion" \| "hue" \| "saturation" \| "color" \| "luminosity" \| "plus-darker" \| "plus-lighter"` | `.mix_blend_mode(mode)` | 视图与背后内容的混合方式。 |
 
 > [!WARNING]
@@ -454,6 +455,7 @@ view()
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
 | `tintColor` | `ColorValue` | 图片的 `.tint_color(c)` | 为模板图片重新着色（所有不透明像素都变成这个颜色），用于单色图标。 |
+| `objectPosition` | `string` | 图片的 `.object_position(p)`、`.object_top()` 等 | `resizeMode` 确定尺寸后图片在盒子中的位置，同 CSS 的 `object-position`：关键字、百分比与长度（`"top"`、`"left bottom"`、`"25% 75%"`、`"right 10px bottom 20%"`）。覆盖盒子的图片围绕它裁剪。默认居中。 |
 
 图片如何填充盒子由 `<Image>` 的 `resizeMode` 属性决定，不是样式；见 [image](../elements/image.md)。
 

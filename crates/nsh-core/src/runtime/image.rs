@@ -28,6 +28,7 @@ impl ImageUrl {
             uri: self.url.into(),
             size: None,
             scales: self.scales,
+            data: None,
         };
         let ratio = crate::ui::prelude::pixel_ratio();
         let scale = source.variant(ratio).unwrap_or(1.0);

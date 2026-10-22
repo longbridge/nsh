@@ -8,6 +8,7 @@ expect Link
 # does not apply.
 prop id:link accessibilityLabel In a browser
 prop id:link elevation 0
+prop id:link backdropMaterial ultraThin
 covers [props] web
 # props-text-scaling
 tap id:case-props-text-scaling

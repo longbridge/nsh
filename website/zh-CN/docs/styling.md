@@ -264,6 +264,7 @@ view()
 |---|---|---|
 | `filter` | 作用于视图及其内容的 CSS 滤镜：`brightness()`、`contrast()`、`grayscale()`、`hue-rotate()`、`invert()`、`saturate()`、`sepia()`、`opacity()`、`blur()`、`drop-shadow()`；多个之间用空格分隔 | `.brightness(n)`、`.contrast(n)`、`.grayscale(n)`、`.hue_rotate(angle)`、`.invert(n)`、`.saturate(n)`、`.sepia(n)`、`.blur(px(..))` |
 | `backdropFilter` | 作用于视图背后内容的滤镜：`"blur(10px)"`（毛玻璃） | `.backdrop_blur(px(10.0))`、`.backdrop_saturate(n)` 等 |
+| `glassEffect` | `"regular"` 或 `"clear"`，在 iOS 26 及更高版本绘制 Apple 的 Liquid Glass；`"none"`（默认值）使用 `backdropFilter` | `ViewStyle::glass_effect`（`GlassEffect`） |
 | `mixBlendMode` | 视图与其背后内容的混合方式：`"multiply"`、`"screen"`、`"overlay"` 等 | `.mix_blend_mode(BlendMode::Multiply)` |
 
 ```rust tabs
@@ -291,6 +292,29 @@ view()
 | 图片上的 `filter` | 所有颜色滤镜以及 `blur` | 与视图相同 |
 | `backdropFilter` | 系统模糊材质，近似给定半径 | Android 12（API 31）起支持 |
 | `mixBlendMode` | 支持 | Android 10（API 29）起支持 |
+
+在 iOS 上，`ios={{ backdropMaterial: "regular" }}` 选择 `backdropFilter` 模糊所使用的系统材质。
+可选值为 `"ultraThin"`（默认）、`"thin"`、`"regular"`、`"thick"` 和 `"chrome"`。
+与正数模糊半径配合使用即可显示材质。Rust 使用 `.backdrop_material(BackdropMaterial::Regular)`
+与 `.backdrop_blur(px(30.0))`。半径用于近似控制材质强度：NSH 按比例应用所选材质，
+在 30 点达到完整强度。浅色或深色变体由视图的背景色决定。
+这些选项对应 Apple 的[系统模糊材质](https://developer.apple.com/documentation/uikit/uiblureffect/style/systemmaterial)。
+
+```rust tabs
+view().backdrop_blur(px(30.0)).backdrop_material(BackdropMaterial::Regular)
+```
+
+```tsx tabs
+<View ios={{ backdropMaterial: "regular" }} style={{ height: 64, backdropFilter: "blur(30px)" }} />
+```
+
+`glassEffect` 在 iOS 26 及更高版本中，于视图内容背后绘制 Liquid Glass。`"regular"` 使用标准材质，
+`"clear"` 从背景获取的颜色更少。配合 `backdropFilter`，可在更早的 iOS 版本及其他平台上显示模糊效果。
+玻璃层随视图的尺寸和圆角更新。
+
+```tsx
+<View style={{ height: 80, borderRadius: 16, backdropFilter: "blur(12px)", glassEffect: "regular" }} />
+```
 
 ## 轮廓线、不透明度与可见性
 

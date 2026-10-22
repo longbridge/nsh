@@ -36,8 +36,13 @@ fn bench_gallery_scroll() {
         ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode(&bundle.code, true).unwrap();
-    let host = Host::new().unwrap();
+    let bytecode =
+        nsh_js::compile_bytecode_with(&bundle.code, true, &[nsh_base::registry().into()]).unwrap();
+    let host = Host::with_options(nsh_js::HostOptions {
+        ui_sets: vec![nsh_base::registry()],
+        ..Default::default()
+    })
+    .unwrap();
     // The runtime reads the environment while it loads.
     host.set_environment(&nsh_js::Environment {
         window: Size::new(px(390.0), px(844.0)),

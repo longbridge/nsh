@@ -189,6 +189,10 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
+        images.inline = uri -> {
+            long handle = handle();
+            return handle == 0 ? null : Native.imageBytes(handle, uri);
+        };
         root = new Box(context, this, 1);
         views.put(1, root);
     }
@@ -282,7 +286,19 @@ final class Mounter {
                     int id = b.getInt(), uri = b.getInt(), mode = b.getInt();
                     String placeholder = optString(b, objects);
                     float blur = b.getFloat(), fade = b.getFloat();
+                    int xFlags = b.getInt();
+                    float x = b.getFloat();
+                    int yFlags = b.getInt();
+                    float y = b.getFloat();
                     image(id, uri >= 0 ? (String) objects[uri] : null, mode, placeholder, px(blur), fade < 0 ? -1 : Math.round(fade));
+                    View iv = views.get(id);
+                    if (iv instanceof ImageBox) {
+                        ImageBox image = (ImageBox) iv;
+                        // Lengths in pixels; fractions stay fractions of the free space.
+                        image.positionX = (xFlags & 2) != 0 ? x : x * density;
+                        image.positionY = (yFlags & 2) != 0 ? y : y * density;
+                        image.positionFlags = (xFlags & 3) | ((yFlags & 3) << 2);
+                    }
                     break;
                 }
                 case SCROLL_CONFIG: {
@@ -555,6 +571,19 @@ final class Mounter {
     /** The components the app registered ({@link NshView#registerComponent}). */
     final java.util.Map<String, NshComponent.Factory> components = new java.util.HashMap<>();
     private final java.util.Set<String> missingComponents = new java.util.HashSet<>();
+
+    /**
+     * The app stopped (the view was destroyed, or another app replaced it):
+     * its native components hear {@link NshComponent#destroy} now, since no
+     * {@code DELETE} follows for them. Those already deleted are not told
+     * again.
+     */
+    void destroyComponents() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
+        }
+    }
 
     /** Makes registered component {@code name} in box {@code id}. */
     private void component(int id, String name) {

@@ -154,6 +154,20 @@ image(photo).resize_mode(ResizeMode::Contain).size(px(140.0)).bg(rgb(0xeaeef2))
 
 Tailwind 类 `object-cover`、`object-contain` 等效果相同。
 
+### 图片位置
+
+缩放后的图片在框中的位置由 `objectPosition` 样式决定（Rust 中为 `.object_position(..)` 和 `.object_top()` 等），即 CSS 的 `object-position`，默认居中。覆盖整个框的图片围绕这个位置裁剪，完整放入的图片在留白中按它移动。它接受关键字（`"top"`、`"left bottom"`）、百分比与长度（`"25% 75%"`、`"10px 0"`），以及带偏移的边（`"right 10px bottom 20%"`）。聊天气泡里的长图可以这样显示顶部：
+
+```rust tabs
+image(photo).resize_mode(ResizeMode::Cover).object_top().w(px(220.0)).h(px(160.0)).rounded(px(16.0))
+```
+
+```tsx tabs
+<Image src={photo} resizeMode="cover" style={{ width: 220, height: 160, borderRadius: 16, objectPosition: "top" }} />
+```
+
+Tailwind 类与 Tailwind 相同：`object-top`、`object-bottom`、`object-left`、`object-right`、`object-center`、`object-top-left`、`object-top-right`、`object-bottom-left`、`object-bottom-right`，以及任意值（`object-[25%_75%]`）。
+
 ## 图片样式
 
 图片也是视图：它们支持圆角（也可按角设置）、边框、阴影、不透明度和变换。圆角会裁剪图片。

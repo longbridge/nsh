@@ -1079,6 +1079,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -1103,6 +1104,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -1136,6 +1138,87 @@ fn image_uses_natural_size_and_aspect_ratio() {
     assert_eq!(
         frame_of(&batch, 3).map(|f| (f.size.width.0, f.size.height.0)),
         Some((50.0, 25.0))
+    );
+}
+
+#[test]
+fn object_position_reaches_the_image_item_only() {
+    let mut c = core();
+    let mut ops = image_ops(2, asset("asset:/a.png", &[]), None);
+    ops.push(style_op(2, &[("objectPosition", StyleValue::Str("top"))]));
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let position = |batch: &MountBatch| {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::Image { id: 2, options, .. } => Some(options.position),
+            _ => None,
+        })
+    };
+    let top = crate::style::ObjectPosition::parse("top").unwrap();
+    assert_eq!(position(&batch), Some(top));
+    // A change sends the image again, and no view style.
+    apply(
+        &mut c,
+        vec![style_op(
+            2,
+            &[("objectPosition", StyleValue::Str("right 10px bottom 0"))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        position(&batch),
+        crate::style::ObjectPosition::parse("right 10px bottom 0")
+    );
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ViewStyle { .. })),
+        "{:?}",
+        batch.items
+    );
+    // An invalid value is rejected, not misread.
+    let mut style = crate::Style::default();
+    assert!(
+        style
+            .set("objectPosition", StyleValue::Str("left 10px top"))
+            .is_err()
+    );
+}
+
+#[test]
+fn resize_modes_fit_at_their_position() {
+    use crate::{ResizeMode, geometry::size_pt, style::ObjectPosition};
+    let tall = size_pt(100.0, 300.0);
+    let square = size_pt(100.0, 100.0);
+    let at = |mode: ResizeMode, p: &str| {
+        let b = mode.fit(tall, square, ObjectPosition::parse(p).unwrap());
+        (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+    };
+    assert_eq!(at(ResizeMode::Cover, "center"), (0.0, -100.0, 100.0, 300.0));
+    assert_eq!(at(ResizeMode::Cover, "top"), (0.0, 0.0, 100.0, 300.0));
+    assert_eq!(at(ResizeMode::Cover, "bottom"), (0.0, -200.0, 100.0, 300.0));
+    let half = |p: &str| {
+        let b = ResizeMode::Contain.fit(
+            size_pt(50.0, 100.0),
+            square,
+            ObjectPosition::parse(p).unwrap(),
+        );
+        (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
+    };
+    assert_eq!(half("left"), (0.0, 0.0, 50.0, 100.0));
+    assert_eq!(half("right"), (50.0, 0.0, 50.0, 100.0));
+    assert_eq!(half("25%"), (12.5, 0.0, 50.0, 100.0));
+    assert_eq!(
+        at(ResizeMode::Stretch, "left top"),
+        (0.0, 0.0, 100.0, 100.0)
+    );
+    // `Center` shrinks what does not fit, and keeps the natural size of
+    // what does.
+    let small = ResizeMode::Center.fit(size_pt(20.0, 10.0), square, ObjectPosition::CENTER);
+    assert_eq!(
+        (small.origin.x.0, small.origin.y.0, small.size.width.0),
+        (40.0, 45.0, 20.0)
     );
 }
 
@@ -2982,6 +3065,84 @@ fn view_with_classes(c: &mut Core<FakeEngine>, id: NodeId, classes: &str) {
 }
 
 #[test]
+fn backdrop_material_survives_restyling_and_resets() {
+    use crate::{BackdropMaterial, js::host::HostProps};
+
+    let mut c = core();
+    // A material alone still reaches the platform on first mount.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::BackdropMaterial(BackdropMaterial::Regular),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .backdrop_material,
+        BackdropMaterial::Regular
+    );
+    // Restyling must preserve the platform prop.
+    c.apply(style_op(
+        2,
+        &[("backdropFilter", StyleValue::Str("blur(30px)"))],
+    ))
+    .unwrap();
+    assert_eq!(
+        view_style_of(&c.commit().unwrap(), 2)
+            .unwrap()
+            .backdrop_material,
+        BackdropMaterial::Regular
+    );
+    for material in [
+        BackdropMaterial::Thin,
+        BackdropMaterial::Thick,
+        BackdropMaterial::Chrome,
+    ] {
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::BackdropMaterial(material),
+        })
+        .unwrap();
+        assert_eq!(
+            view_style_of(&c.commit().unwrap(), 2)
+                .unwrap()
+                .backdrop_material,
+            material
+        );
+    }
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::BackdropMaterial(BackdropMaterial::Chrome),
+    })
+    .unwrap();
+    assert!(c.commit().is_none());
+    // The renderer uses the generated reset when the iOS prop is removed.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::BackdropMaterial(BackdropMaterial::Chrome)
+            .reset()
+            .unwrap(),
+    })
+    .unwrap();
+    let mounted = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(mounted.backdrop_material, BackdropMaterial::UltraThin);
+    assert!(!mounted.effects.unwrap().backdrop_filters.is_empty());
+}
+
+#[test]
 fn classes_style_views_and_inline_styles_win() {
     let mut c = core();
     view_with_classes(&mut c, 2, "w-20 h-10 p-2 bg-blue-500 rounded-lg");
@@ -4351,6 +4512,7 @@ fn refused_urls_fail_and_send_nothing() {
                     uri: uri.into(),
                     size: None,
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -7695,6 +7857,48 @@ mod touch {
         );
     }
 
+    /// A band dragged by its touches, dimmed while pressed.
+    #[component]
+    fn Band() -> impl IntoElement {
+        view()
+            .size(px(40.0))
+            .opacity(0.9)
+            .active(|s| s.opacity(0.5))
+            .claim_touches(TouchClaim::on_start())
+    }
+
+    #[test]
+    fn the_responder_stays_pressed_until_its_touches_end() {
+        let mut c = core();
+        c.mount_root(&crate::ui::Root::new::<Band>(|| ()));
+        let batch = c.commit().unwrap();
+        let id = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if style.opacity == 0.9 => Some(*id),
+                _ => None,
+            })
+            .expect("the band is mounted");
+        c.component_event(
+            ROOT_ID,
+            EventKind::Touch,
+            &touch(TouchPhase::Start, &[id], 0.0, 0.0),
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(view_style_of(&batch, id).unwrap().opacity, 0.5);
+        // The drag left the band: the platform reports it no longer pressed.
+        c.set_states(id, 0);
+        assert!(c.commit().is_none_or(|b| view_style_of(&b, id).is_none()));
+        c.component_event(
+            ROOT_ID,
+            EventKind::Touch,
+            &touch(TouchPhase::End, &[id], 80.0, 16.0),
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(view_style_of(&batch, id).unwrap().opacity, 0.9);
+    }
+
     #[test]
     fn a_pan_activation_decides_by_axis() {
         let pan = crate::PanActivation::horizontal(px(10.0), px(8.0));
@@ -7981,6 +8185,122 @@ fn a_view_that_loses_its_absolute_child_lays_out() {
     assert!(batch.items.iter().any(|i| matches!(
         i,
         MountItem::Frame { id: 6, frame, .. } if frame.origin.y.0 == 30.0
+    )));
+}
+
+/// An absolutely placed view leaving a block that is not laid out again (in
+/// a `display: none` subtree, which taffy hides without renewing the
+/// blocks' lists of the out-of-flow boxes they placed) lays out: the freed
+/// view must not stay listed there. Its sibling stays and keeps the block
+/// from being childless.
+#[test]
+fn an_absolute_view_leaving_a_hidden_block_lays_out() {
+    let mut c = core();
+    // 2 (hidden later) > 4 (relative: the block) > 6 (absolute), 8.
+    for (id, absolute) in [(2, false), (4, false), (6, true), (8, false)] {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        let mut props = vec![("height", StyleValue::Number(20.0))];
+        if absolute {
+            props.push(("position", StyleValue::Str("absolute")));
+        }
+        if id == 4 {
+            props.push(("position", StyleValue::Str("relative")));
+        }
+        c.apply(style_op(id, &props)).unwrap();
+    }
+    for (parent, child) in [(4, 6), (4, 8), (2, 4), (ROOT_ID, 2)] {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit().unwrap();
+    c.apply(style_op(
+        2,
+        &[
+            ("height", StyleValue::Number(20.0)),
+            ("display", StyleValue::Str("none")),
+        ],
+    ))
+    .unwrap();
+    c.commit().unwrap();
+    // Out while hidden, and a new view takes the freed one's slot.
+    c.apply(Op::Release { id: 6 }).unwrap();
+    c.apply(Op::Create {
+        id: 10,
+        tag: Tag::View,
+    })
+    .unwrap();
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 10,
+        before: None,
+    })
+    .unwrap();
+    c.commit().unwrap();
+    // Shown again: the block lays its children out.
+    c.apply(style_op(2, &[("height", StyleValue::Number(30.0))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Frame { id: 10, frame, .. } if frame.origin.y.0 == 30.0
+    )));
+}
+
+/// As above, with the block absolutely placed itself: its fresh layout node
+/// must not leave its old one listed by the block that placed it.
+#[test]
+fn an_absolute_view_leaving_a_hidden_absolute_block_lays_out() {
+    let mut c = core();
+    // 2 (hidden later) > 4 (absolute: the block) > 6 (absolute), 8.
+    for (id, absolute) in [(2, false), (4, true), (6, true), (8, false)] {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        let mut props = vec![("height", StyleValue::Number(20.0))];
+        if absolute {
+            props.push(("position", StyleValue::Str("absolute")));
+        }
+        c.apply(style_op(id, &props)).unwrap();
+    }
+    for (parent, child) in [(4, 6), (4, 8), (2, 4), (ROOT_ID, 2)] {
+        c.apply(Op::Insert {
+            parent,
+            child,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit().unwrap();
+    c.apply(style_op(
+        2,
+        &[
+            ("height", StyleValue::Number(20.0)),
+            ("display", StyleValue::Str("none")),
+        ],
+    ))
+    .unwrap();
+    c.commit().unwrap();
+    // Out while hidden, and new views take the freed ones' slots.
+    c.apply(Op::Release { id: 6 }).unwrap();
+    for id in [10, 12] {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: id,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit().unwrap();
+    // Shown again: the blocks lay their children out.
+    c.apply(style_op(2, &[("height", StyleValue::Number(30.0))]))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::Frame { id: 10, frame, .. } if frame.origin.y.0 == 30.0
     )));
 }
 
@@ -10802,6 +11122,62 @@ mod views {
         assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
     }
 
+    #[test]
+    fn jss_shortcuts_bound_before_any_view_stay_beside_the_views() {
+        use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
+        let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.bindings().iter().map(|b| b.id).collect()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let listening = |c: &Core<FakeEngine>| {
+            c.nodes[c.root as usize]
+                .events
+                .contains(EventKind::KeyCommand)
+        };
+        let mut c = core();
+        let js = KeyBinding::new(
+            1,
+            Keystroke::parse_with("escape", true).unwrap(),
+            When::Always,
+            false,
+        );
+        apply(
+            &mut c,
+            vec![
+                Op::SetProp {
+                    id: ROOT_ID,
+                    prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![js]))),
+                },
+                Op::Listen {
+                    id: ROOT_ID,
+                    event: EventKind::KeyCommand,
+                    enabled: true,
+                },
+            ],
+        );
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let table = tables(&batch);
+        let [js, ours] = table.last().expect("a table").as_slice() else {
+            panic!("{table:?}");
+        };
+        assert_eq!(*js, 1);
+        assert!(*ours >= crate::ui::keys::FIRST_ID);
+        assert!(listening(&c));
+        // The view's binding goes; JS's stays, still listened to.
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+        assert!(listening(&c));
+    }
+
     /// A pressable box with the pointing hand.
     #[component]
     fn Pointing() -> impl IntoElement {
@@ -10855,6 +11231,66 @@ mod views {
             "{:?}",
             batch.items
         );
+    }
+    /// A download's progress: a range for screen readers that follows the
+    /// app's value, and none while it is indeterminate.
+    #[derive(Default)]
+    struct Download;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct DownloadProps {}
+
+    impl Component for Download {
+        type Props = DownloadProps;
+        type Event = NoEvent;
+
+        fn view(_: DownloadProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let now = signal(Some(40.0_f32));
+            view()
+                .size_10()
+                .accessible(true)
+                .role(crate::AccessibilityRole::Progressbar)
+                .accessibility_value(move || {
+                    Some(crate::AccessibilityValue {
+                        min: Some(0.0),
+                        max: Some(100.0),
+                        now: now.get(),
+                        text: None,
+                    })
+                })
+                .on_press(move || now.set(now.get().map_or(Some(0.0), |_| None)))
+        }
+    }
+
+    #[test]
+    fn an_elements_accessibility_value_follows_its_signals() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Download>(|| DownloadProps {}));
+        let batch = c.commit().unwrap();
+        let value = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == crate::AccessibilityRole::Progressbar =>
+                {
+                    Some((*id, props.accessibility.value.clone()))
+                }
+                _ => None,
+            })
+        };
+        let (id, first) = value(&batch).expect("the progress bar's props");
+        let range = |now| crate::AccessibilityValue {
+            min: Some(0.0),
+            max: Some(100.0),
+            now,
+            text: None,
+        };
+        assert_eq!(first, Some(range(Some(40.0))));
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(value(&batch).map(|(_, v)| v), Some(Some(range(None))));
+        assert!(c.component_event(id, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(value(&batch).map(|(_, v)| v), Some(Some(range(Some(0.0)))));
     }
 }
 
@@ -12771,6 +13207,7 @@ fn asset(uri: &str, scales: &[f32]) -> ImageSource {
         uri: uri.into(),
         size: Some(crate::geometry::size_pt(40.0, 30.0)),
         scales: scales.iter().copied().collect(),
+        data: None,
     }
 }
 

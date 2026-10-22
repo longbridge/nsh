@@ -104,11 +104,10 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
             ));
         }
     }
-    // Children sit in the container's bounds, which scroll views move.
-    let offset = view.container_view().map_or((0.0, 0.0), |c| {
-        let o = c.bounds().origin;
-        (o.x as f32, o.y as f32)
-    });
+    // Children sit in the container's bounds, which scroll views move: by
+    // their offset, which shows as a layer transform before the bounds
+    // have it.
+    let offset = crate::scroll::bounds_origin(view);
     for child in view.child_views() {
         let o = child.ns().frame().origin;
         let at = (

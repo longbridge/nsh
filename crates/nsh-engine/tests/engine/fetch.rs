@@ -134,6 +134,7 @@ fn fetch_round_trips_through_the_platform_network() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -242,6 +243,7 @@ fn fetch_stays_within_the_capabilities() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };
@@ -309,6 +311,7 @@ fn rust_components_fetch_through_the_platform_network() {
         data_dir: None,
         storage: None,
         clock: Default::default(),
+        context: Default::default(),
         pinned: Default::default(),
         clipboard: None,
     };

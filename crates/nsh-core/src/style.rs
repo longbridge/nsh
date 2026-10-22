@@ -8,8 +8,8 @@ use taffy::{
 use crate::{
     css,
     effects::{
-        BlendMode, BoxShadow, Cursor, Effects, Filter, Gradient, KeyframeAnimation, Keyframes,
-        Outline, Transition, TransitionProps,
+        BackdropMaterial, BlendMode, BoxShadow, Cursor, Effects, Filter, GlassEffect, Gradient,
+        KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
     },
     geometry::{
         AbsoluteLength, Corners, DefiniteLength, Edges, Percentage, Point, Points, REM_SIZE, Size,
@@ -495,12 +495,19 @@ pub struct ViewStyle {
     pub elevation: Points,
     /// `transformOrigin`: the point transforms act around.
     pub transform_origin: TransformOrigin,
+    /// `objectPosition`: where an image sits in its box (image views; the
+    /// platforms take it from [`crate::mount::ImageOptions::position`]).
+    pub object_position: ObjectPosition,
     /// `backfaceVisibility: "hidden"`: invisible when turned away.
     pub backface_hidden: bool,
     /// Layered / inset shadows, gradients and filters.
     pub effects: Option<Arc<Effects>>,
     /// `mixBlendMode`.
     pub blend_mode: BlendMode,
+    /// The iOS material from `ios={{ backdropMaterial }}`, projected at mount time.
+    pub backdrop_material: BackdropMaterial,
+    /// `glassEffect`.
+    pub glass_effect: GlassEffect,
     /// `outline*`.
     pub outline: Outline,
     /// `visibility: "hidden"`: not drawn and not touchable, still laid out.
@@ -601,6 +608,121 @@ impl TransformOrigin {
             y: y.unwrap_or(fraction(0.5)),
             z,
         })
+    }
+}
+
+/// One axis of a CSS `<position>`: a distance from the start edge (left,
+/// top) or the end edge (right, bottom). Percentages are fractions of the
+/// free space: the box's size less the content's (negative when the
+/// content overflows), as CSS's `object-position` resolves them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct PositionAxis {
+    /// Measured from the end edge (right, bottom) instead of the start.
+    pub from_end: bool,
+    /// The distance from that edge.
+    pub offset: DefiniteLength,
+}
+
+impl Default for PositionAxis {
+    /// The center.
+    fn default() -> Self {
+        Self::CENTER
+    }
+}
+
+impl PositionAxis {
+    /// The start edge (`left`, `top`, `0%`).
+    pub const START: Self = Self::start(DefiniteLength::Fraction(Percentage(0.0)));
+    /// The center (`center`, `50%`).
+    pub const CENTER: Self = Self::start(DefiniteLength::Fraction(Percentage(0.5)));
+    /// The end edge (`right`, `bottom`, `100%`).
+    pub const END: Self = Self::start(DefiniteLength::Fraction(Percentage(1.0)));
+
+    /// `offset` from the start edge.
+    pub const fn start(offset: DefiniteLength) -> Self {
+        Self {
+            from_end: false,
+            offset,
+        }
+    }
+
+    /// `offset` from the end edge.
+    pub const fn end(offset: DefiniteLength) -> Self {
+        Self {
+            from_end: true,
+            offset,
+        }
+    }
+
+    /// Where content starts along this axis, from the box's start edge,
+    /// given the `free` space (the box's size less the content's).
+    pub fn resolve(&self, free: Points) -> Points {
+        let d = self
+            .offset
+            .to_points(AbsoluteLength::Points(free), REM_SIZE);
+        if self.from_end { free - d } else { d }
+    }
+}
+
+/// `objectPosition`: where an image sits in its box once
+/// `resizeMode` / `object-fit` has sized it, as CSS's `object-position`
+/// places it (the center by default). The parts of a covering image
+/// outside the box are cropped.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct ObjectPosition {
+    /// Horizontal.
+    pub x: PositionAxis,
+    /// Vertical.
+    pub y: PositionAxis,
+}
+
+impl ObjectPosition {
+    /// The center (the default).
+    pub const CENTER: Self = Self {
+        x: PositionAxis::CENTER,
+        y: PositionAxis::CENTER,
+    };
+
+    /// A position of two axes.
+    pub const fn new(x: PositionAxis, y: PositionAxis) -> Self {
+        Self { x, y }
+    }
+
+    /// Parses CSS's `<position>` as `object-position` takes it: one or two
+    /// keywords, percentages or lengths (`top`, `left bottom`, `25% 75%`,
+    /// `10px 0`), or edges with offsets (`right 10px bottom 20%`).
+    pub fn parse(s: &str) -> Option<Self> {
+        css::object_position(s)
+    }
+
+    /// The top left corner of content of `content` size placed in a box of
+    /// `size`.
+    pub fn place(&self, size: Size<Points>, content: Size<Points>) -> Point<Points> {
+        point(
+            self.x.resolve(size.width - content.width),
+            self.y.resolve(size.height - content.height),
+        )
+    }
+}
+
+impl std::fmt::Display for ObjectPosition {
+    /// CSS's four-value form (`left 50% top 10px`), which every position
+    /// can be written in.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let length = |l: DefiniteLength| match l {
+            DefiniteLength::Absolute(a) => format!("{}px", a.to_points(REM_SIZE).0),
+            DefiniteLength::Fraction(p) => format!("{}%", p.0 * 100.0),
+        };
+        write!(
+            f,
+            "{} {} {} {}",
+            if self.x.from_end { "right" } else { "left" },
+            length(self.x.offset),
+            if self.y.from_end { "bottom" } else { "top" },
+            length(self.y.offset),
+        )
     }
 }
 
@@ -706,9 +828,12 @@ impl Default for ViewStyle {
             tint_color: None,
             elevation: Points::ZERO,
             transform_origin: TransformOrigin::CENTER,
+            object_position: ObjectPosition::CENTER,
             backface_hidden: false,
             effects: None,
             blend_mode: BlendMode::Normal,
+            backdrop_material: BackdropMaterial::UltraThin,
+            glass_effect: GlassEffect::None,
             outline: Outline::NONE,
             hidden: false,
             cursor: Cursor::Auto,
@@ -1177,6 +1302,7 @@ style_keys! {
     Filter = "filter": View "string" "CSS filters of the view and its content: `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`, `saturate()`, `sepia()`, `opacity()`, `blur()`, `drop-shadow()`.",
     BackdropFilter = "backdropFilter": View "string" "CSS filters of what is behind the view (`blur(10px)`).",
     MaskImage = "maskImage": View "string" "A CSS gradient whose alpha decides how much of the view is drawn, fully where opaque and not at all where transparent: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`. Masks everything the view draws, its backdrop filter included.",
+    GlassEffect = "glassEffect": View "\"none\" | \"regular\" | \"clear\"" "A glass material behind the view's content (Apple's Liquid Glass). Drawn on iOS 26 and later; elsewhere the view's `backdropFilter` is drawn as before, so give a glass view a blur to fall back to.",
     MixBlendMode = "mixBlendMode": View "\"normal\" | \"multiply\" | \"screen\" | \"overlay\" | \"darken\" | \"lighten\" | \"color-dodge\" | \"color-burn\" | \"hard-light\" | \"soft-light\" | \"difference\" | \"exclusion\" | \"hue\" | \"saturation\" | \"color\" | \"luminosity\" | \"plus-darker\" | \"plus-lighter\"" "How the view blends with what is behind it.",
     OutlineWidth = "outlineWidth": View "number" "A line outside the border that takes no space.",
     OutlineColor = "outlineColor": View "ColorValue",
@@ -1241,6 +1367,7 @@ style_keys! {
     BorderStyle = "borderStyle": View "\"solid\" | \"dashed\" | \"dotted\"",
     BorderCurve = "borderCurve": View "\"circular\" | \"continuous\"" "`continuous`: corners whose curvature eases into the edges (iOS app icons).",
     TintColor = "tintColor": Image "ColorValue" "Recolors a template image.",
+    ObjectPosition = "objectPosition": Image "string" "Where the image sits in its box once `resizeMode` has sized it, as CSS's `object-position`: keywords, percentages and lengths (`\"top\"`, `\"left bottom\"`, `\"25% 75%\"`, `\"right 10px bottom 20%\"`). A covering image is cropped around it. Default the center.",
     BackfaceVisibility = "backfaceVisibility": View "\"visible\" | \"hidden\"" "`\"hidden\"`: invisible while turned away (3D rotations).",
     TransformOrigin = "transformOrigin": View "string | (number | string)[]" "The point `transform` acts around: keywords, percentages and lengths (\"top left\", \"50% 0\", `[10, 20]`). Default the center.",
     Opacity = "opacity": View "number | AnimatedNode",
@@ -2136,6 +2263,12 @@ impl Style {
                 }
             }
             StyleKey::TintColor => self.view.tint_color = color(value)?,
+            StyleKey::ObjectPosition => {
+                self.view.object_position = match keyword(value)? {
+                    None => ObjectPosition::CENTER,
+                    Some(s) => ObjectPosition::parse(s).ok_or(StyleError::InvalidValue)?,
+                }
+            }
             StyleKey::BackfaceVisibility => {
                 self.view.backface_hidden = match keyword(value)? {
                     None | Some("visible") => false,
@@ -2313,6 +2446,12 @@ impl Style {
                     Some(s) => css::filters(s).ok_or(StyleError::InvalidValue)?,
                 };
                 self.edit_effects(|e| e.backdrop_filters = list);
+            }
+            StyleKey::GlassEffect => {
+                self.view.glass_effect = match keyword(value)? {
+                    None => GlassEffect::None,
+                    Some(s) => GlassEffect::parse(s).ok_or(StyleError::InvalidValue)?,
+                }
             }
             StyleKey::MixBlendMode => {
                 self.view.blend_mode = match keyword(value)? {
@@ -2936,6 +3075,30 @@ mod tests {
         );
         assert_eq!(
             s.set("maskImage", StyleValue::Str("url(a.png)")),
+            Err(StyleError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn glass_effect_parses() {
+        let mut s = Style::default();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("regular")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Regular);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::Clear);
+        // `none`, and the null of a style that was taken off, both clear it.
+        s.set("glassEffect", StyleValue::Str("none")).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        s.set("glassEffect", StyleValue::Str("clear")).unwrap();
+        s.set("glassEffect", StyleValue::Null).unwrap();
+        assert_eq!(s.view.glass_effect, GlassEffect::None);
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Str("frosted")),
+            Err(StyleError::InvalidValue)
+        );
+        assert_eq!(
+            s.set("glassEffect", StyleValue::Number(1.0)),
             Err(StyleError::InvalidValue)
         );
     }

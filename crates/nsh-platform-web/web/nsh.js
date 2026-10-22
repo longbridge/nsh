@@ -304,6 +304,21 @@ const CODE_CHARS = {
 };
 
 /**
+ * The browser's offset of local time from UTC at `ms` (ms since the epoch),
+ * in seconds east, as `struct tm`'s `tm_gmtoff` holds it (`local_time.rs`):
+ * daylight saving time included; 0 for a time the browser cannot place.
+ */
+function localOffset(ms) {
+  const west = new Date(ms).getTimezoneOffset();
+  return Number.isFinite(west) ? 0 - west * 60 : 0;
+}
+
+/** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
+function timeZoneName() {
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+}
+
+/**
  * The key of a key event as `nsh_key` takes it (-1: none): the character
  * it types without modifiers, or, when Shift or Option change it or the
  * layout types no ASCII there, the US layout's character of the same key
@@ -503,6 +518,9 @@ class Player {
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
+    // Browser blob URLs of the in-memory images (`data:` URIs, blobs) the
+    // views show, by the source's URI (`image_bytes`).
+    this.inlineImages = new Map();
     this.pointers = new Map();
     this.requests = new Map();
     this.websockets = new Map();
@@ -538,6 +556,13 @@ class Player {
       nsh: {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
+        // QuickJS' local time (`local_time.rs`) and Intl's default zone.
+        local_offset: (ms) => localOffset(ms),
+        time_zone: (p, cap) => {
+          const zone = encoder.encode(timeZoneName());
+          if (zone.length <= cap) this.bytes(p, cap).set(zone);
+          return zone.length;
+        },
         measure_text: (fp, fl, tp, tl) => {
           // Blink keeps every shaped string in the measuring context's
           // PlainTextPainter (a FrameShapeCache keyed by font), and drops it
@@ -563,6 +588,21 @@ class Player {
           const face = new FontFace(family, data, { weight: String(weight), style: italic ? "italic" : "normal" });
           document.fonts.add(face);
           this.fontLoading(face.load());
+        },
+        image_bytes: (up, ul, dp, dl) => {
+          const uri = this.str(up, ul);
+          const old = this.inlineImages.get(uri);
+          if (old) URL.revokeObjectURL(old);
+          // The key names the media type (`data:<type>;nsh-key=…`): browsers
+          // draw an SVG blob only with its type.
+          const type = uri.startsWith("data:") ? uri.slice(5, uri.indexOf(";")) : "";
+          this.inlineImages.set(uri, URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type })));
+        },
+        release_image: (p, l) => {
+          const uri = this.str(p, l);
+          const url = this.inlineImages.get(uri);
+          if (url) URL.revokeObjectURL(url);
+          this.inlineImages.delete(uri);
         },
         submit: (p, l) => {
           const batch = JSON.parse(this.str(p, l));
@@ -1227,7 +1267,8 @@ class Player {
       const path = uri.slice("asset:/".length).replace(/^\/+/, "");
       return this.options.assets?.[path] ?? this.assetBase + path;
     }
-    return uri;
+    // An in-memory image: its bytes came with `image_bytes`.
+    return this.inlineImages.get(uri) ?? uri;
   }
 
   // Mounting ------------------------------------------------------------
@@ -1806,16 +1847,21 @@ class Player {
 
   /**
    * `src`, `resizeMode`, `placeholder` (shown until the image loads,
-   * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
-   * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
+   * then faded out over `fadeDuration`), `blurRadius` (a CSS blur) and
+   * `objectPosition` (CSS's, empty for the center).
+   * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and
+   * `blob:` URLs arrive as bytes (`image_bytes`) and show as browser blob URLs.
    */
-  op_img([, id, uri, mode, placeholder, blur, fade]) {
+  op_img([, id, uri, mode, placeholder, blur, fade, position]) {
     const el = this.view(id);
     if (!el?._img) return;
     const img = el._img;
     el._fit = mode;
+    el._position = position || "";
     // The image's and the placeholder's classes (`nsh-hidden` is their state).
-    el._imgClass = `nsh-fill nsh-fit-${mode}${blur > 0 ? ` ${cssClass(`filter:blur(${blur}px);`)}` : ""}`;
+    el._imgClass = `nsh-fill nsh-fit-${mode}${blur > 0 ? ` ${cssClass(`filter:blur(${blur}px);`)}` : ""}${
+      position ? ` ${cssClass(`object-position:${position};`)}` : ""
+    }`;
     img.className = el._imgClass + (img.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
     el._fade = fade;
     const ph = placeholder ? this.asset(placeholder) : "";
@@ -1859,7 +1905,7 @@ class Player {
       el._img.classList.add("nsh-hidden");
       const fit = el._fit;
       const size = fit === "fill" ? "100% 100%" : fit === "scale-down" ? "contain" : fit || "cover";
-      const mask = `url(${JSON.stringify(el._src)}) center / ${size} no-repeat`;
+      const mask = `url(${JSON.stringify(el._src)}) ${el._position || "center"} / ${size} no-repeat`;
       // Over the view's own background.
       swapClass(el, "_tintClass", cssClass(`background-color:${el._tint};-webkit-mask:${mask};mask:${mask};`, 3));
     } else {
