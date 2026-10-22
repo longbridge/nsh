@@ -23,7 +23,7 @@ use objc2_ui_kit::{
     UIGestureRecognizer, UIGestureRecognizerState, UIPanGestureRecognizer,
     UIPinchGestureRecognizer, UIRefreshControl, UIRotationGestureRecognizer, UIScrollView,
     UIScrollViewContentInsetAdjustmentBehavior, UIScrollViewKeyboardDismissMode,
-    UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
+    UITraitEnvironment, UIUserInterfaceIdiom, UIView, UIViewAnimationOptions,
 };
 
 use crate::{
@@ -209,6 +209,18 @@ fn innermost(view: &UIView, point: CGPoint) -> Retained<UIView> {
         }
     }
     view.retain()
+}
+
+/// The screen's pixels per point where `view` shows. Not
+/// `contentScaleFactor`: a view that draws no content of its own (the root,
+/// an image view, whose image is a layer's contents) keeps it at 1.
+fn display_scale(view: &UIView) -> CGFloat {
+    // SAFETY: a plain getter; 0 while the view has no screen yet.
+    let scale = unsafe { view.traitCollection().displayScale() };
+    if scale > 0.0 {
+        return scale;
+    }
+    view.window().map_or(2.0, |w| w.screen().scale())
 }
 
 fn ui_insets(i: nsh_core::EdgeInsets) -> objc2_ui_kit::UIEdgeInsets {
@@ -1941,7 +1953,7 @@ impl Mounter {
     fn start_image_loads(&mut self) {
         let scale = self
             .slot(nsh_core::ROOT_ID)
-            .map_or(2.0, |s| s.native.view().contentScaleFactor());
+            .map_or(2.0, |s| display_scale(s.native.view()));
         for id in std::mem::take(&mut self.pending_images) {
             let Some(s) = self.slot(id) else { continue };
             let Native::Image(view) = &s.native else {
@@ -2017,7 +2029,7 @@ impl Mounter {
         };
         let view = view.clone();
         view.set_drawing(drawing.clone());
-        let scale = view.contentScaleFactor();
+        let scale = display_scale(&view);
         for image in drawing.images() {
             if view.has_image(&image.uri) {
                 continue;
