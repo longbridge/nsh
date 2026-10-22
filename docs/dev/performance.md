@@ -78,6 +78,13 @@ coalescing interval, with the latest coordinates kept independently per view and
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
+- High-frequency updates (`cargo test --release -p nsh-core bench_high_frequency -- --ignored --nocapture`: `Board`, a quote board of
+  80 rows of a mark and five cells, 961 views, the first cells of 40 rows changing together on each press, their texts' lengths too):
+  ~4.4µs per event, then per commit ~140µs when the cells have a size of their own and ~180µs when they take their text's, 40 mount
+  items either way. Nearly all of the commit is Taffy laying the dirty paths out again (~116µs of it, measured once by timing the
+  commit's phases): a changed text dirties every view up to the root, and the flex algorithm of the root and of each changed row runs
+  again over all their children, fixed cells included (nothing stops the dirtying at a view whose size its content cannot change); the
+  frame walk is ~10µs, the texts (the tests' engine) under 2µs. This is the baseline relayout boundaries are measured against.
 - Rust components' handles (`handle_bench`: `cargo test --release -p nsh-engine --test engine bench_handles --
   --ignored --nocapture --test-threads=1`, 1000 calls in one press, the minimum of 200 presses, per call; steady
   state of five runs). In brackets, when `AnimatedValue` was an `Rc` of its node and `ElementRef` an `Rc` of its
