@@ -231,6 +231,7 @@ impl Attrs {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
+                data: None,
             })));
         }
         if self.inset_padding != old.inset_padding {
@@ -1785,6 +1786,7 @@ impl Image {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
+                data: None,
             })))
         });
         self

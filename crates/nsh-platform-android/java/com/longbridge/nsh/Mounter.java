@@ -189,6 +189,10 @@ final class Mounter {
         this.density = host.getResources().getDisplayMetrics().density;
         this.images = images;
         images.redirects = (base, location) -> Native.mediaRedirect(handle(), base, location);
+        images.inline = uri -> {
+            long handle = handle();
+            return handle == 0 ? null : Native.imageBytes(handle, uri);
+        };
         root = new Box(context, this, 1);
         views.put(1, root);
     }

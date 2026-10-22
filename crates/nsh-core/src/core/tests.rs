@@ -1079,6 +1079,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -1103,6 +1104,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -4351,6 +4353,7 @@ fn refused_urls_fail_and_send_nothing() {
                     uri: uri.into(),
                     size: None,
                     scales: ImageScales::NONE,
+                    data: None,
                 })),
             },
             Op::Insert {
@@ -12771,6 +12774,7 @@ fn asset(uri: &str, scales: &[f32]) -> ImageSource {
         uri: uri.into(),
         size: Some(crate::geometry::size_pt(40.0, 30.0)),
         scales: scales.iter().copied().collect(),
+        data: None,
     }
 }
 

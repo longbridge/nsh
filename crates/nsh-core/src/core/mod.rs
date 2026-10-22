@@ -2048,7 +2048,9 @@ impl<M: TextEngine> Core<M> {
             Prop::Source(source) => {
                 if let Some(image) = node.image.as_mut() {
                     let size = source.as_ref().and_then(|s| s.size);
-                    image.source = source;
+                    // A `data:` URI is decoded here, once, not by every
+                    // platform at every load.
+                    image.source = source.map(ImageSource::inline);
                     flags |= dirty::IMAGE;
                     let layout = node.layout.expect("image layout");
                     if let Some(LeafContext::Image(natural)) =
@@ -2064,7 +2066,9 @@ impl<M: TextEngine> Core<M> {
             Prop::Image(option) => {
                 if let Some(image) = node.image.as_mut() {
                     match option {
-                        ImageProp::Placeholder(source) => image.options.placeholder = source,
+                        ImageProp::Placeholder(source) => {
+                            image.options.placeholder = source.map(ImageSource::inline)
+                        }
                         ImageProp::BlurRadius(r) => image.options.blur_radius = r.max(Points::ZERO),
                         ImageProp::FadeDuration(ms) => image.options.fade_ms = ms,
                     }

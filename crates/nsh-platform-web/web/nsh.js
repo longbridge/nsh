@@ -503,6 +503,9 @@ class Player {
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
+    // Browser blob URLs of the in-memory images (`data:` URIs, blobs) the
+    // views show, by the source's URI (`image_bytes`).
+    this.inlineImages = new Map();
     this.pointers = new Map();
     this.requests = new Map();
     this.websockets = new Map();
@@ -563,6 +566,21 @@ class Player {
           const face = new FontFace(family, data, { weight: String(weight), style: italic ? "italic" : "normal" });
           document.fonts.add(face);
           this.fontLoading(face.load());
+        },
+        image_bytes: (up, ul, dp, dl) => {
+          const uri = this.str(up, ul);
+          const old = this.inlineImages.get(uri);
+          if (old) URL.revokeObjectURL(old);
+          // The key names the media type (`data:<type>;nsh-key=…`): browsers
+          // draw an SVG blob only with its type.
+          const type = uri.startsWith("data:") ? uri.slice(5, uri.indexOf(";")) : "";
+          this.inlineImages.set(uri, URL.createObjectURL(new Blob([this.bytes(dp, dl).slice()], { type })));
+        },
+        release_image: (p, l) => {
+          const uri = this.str(p, l);
+          const url = this.inlineImages.get(uri);
+          if (url) URL.revokeObjectURL(url);
+          this.inlineImages.delete(uri);
         },
         submit: (p, l) => {
           const batch = JSON.parse(this.str(p, l));
@@ -1227,7 +1245,8 @@ class Player {
       const path = uri.slice("asset:/".length).replace(/^\/+/, "");
       return this.options.assets?.[path] ?? this.assetBase + path;
     }
-    return uri;
+    // An in-memory image: its bytes came with `image_bytes`.
+    return this.inlineImages.get(uri) ?? uri;
   }
 
   // Mounting ------------------------------------------------------------
@@ -1807,7 +1826,8 @@ class Player {
   /**
    * `src`, `resizeMode`, `placeholder` (shown until the image loads,
    * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
-   * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
+   * Any URL the browser loads works: `asset:/` and http(s); `data:` URIs and
+   * `blob:` URLs arrive as bytes (`image_bytes`) and show as browser blob URLs.
    */
   op_img([, id, uri, mode, placeholder, blur, fade]) {
     const el = this.view(id);

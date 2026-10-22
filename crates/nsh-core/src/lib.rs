@@ -22,6 +22,7 @@ mod fenwick;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
+pub mod image;
 pub mod input;
 pub mod js;
 pub mod keymap;
@@ -66,6 +67,7 @@ pub use crate::{
         blur_radius, compose_color_matrices,
     },
     geometry::{Bounds, Corners, Edges, Point, Points, Size},
+    image::ImageData,
     mount::{
         ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem, NO_NATIVE_HEADER,
         NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,
