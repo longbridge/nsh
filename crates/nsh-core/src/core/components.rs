@@ -1029,6 +1029,7 @@ impl<M: TextEngine> Core<M> {
                 self.key(child)?;
                 let inst = self.components.instances.get_mut(&parent).expect("host");
                 let was_empty = inst.js_children.is_empty();
+                let moved = inst.js_children.contains(&child);
                 inst.js_children.retain(|&c| c != child);
                 let at = before.and_then(|b| inst.js_children.iter().position(|&c| c == b));
                 inst.js_children
@@ -1055,7 +1056,10 @@ impl<M: TextEngine> Core<M> {
                         let anchor = self.anchor_node(anchor);
                         self.join_nested_at(nested, child, at.and(before).or(anchor));
                     }
-                    // Its wrapper is the view's (a region of them).
+                    // Its wrapper is the view's (a region of them, keyed
+                    // by the child): a child moved among the others keeps
+                    // its wrapper, which the region moves.
+                    Placement::Each if moved => {}
                     Placement::Each => self.detach_id(child),
                     Placement::None => self.detach_id(child),
                 }

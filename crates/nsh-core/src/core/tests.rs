@@ -5923,6 +5923,36 @@ mod components {
         assert_eq!(frame_of(&batch, w4).map(|f| f.origin.y.0), Some(26.0));
         assert!(wrapper_of(&batch, 4).is_none() && wrapper_of(&batch, 6).is_none());
 
+        // A child moved (inserted again, as a keyed `<Each>` moves its row)
+        // keeps its wrapper and stays in it; the wrapper moves.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 8,
+                before: None,
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id } if *id == 8)),
+            "the moved child stays in its wrapper"
+        );
+        assert_eq!(frame_of(&batch, w8).map(|f| f.origin.y.0), Some(52.0));
+        assert_eq!(frame_of(&batch, w4).map(|f| f.origin.y.0), Some(0.0));
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 8,
+                before: Some(4),
+            }],
+        );
+        c.commit().unwrap();
+
         // A child removed takes its wrapper away; the child itself stays JS's.
         apply(
             &mut c,
