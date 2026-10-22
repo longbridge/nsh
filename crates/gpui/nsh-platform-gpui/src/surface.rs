@@ -146,7 +146,7 @@ pub(crate) struct Surface {
     /// A field took the surface's focus. The view takes the window's at the
     /// next paint, or the keys for the field go to whatever element of the
     /// embedding app had it ([`crate::events::install`]).
-    pub(crate) wants_window_focus: Cell<bool>,
+    pub(crate) window_focus_requested: Cell<bool>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -226,7 +226,7 @@ impl Surface {
             invalid: Cell::new(false),
             input_pressed: Cell::new(0),
             input_hovered: Cell::new(false),
-            wants_window_focus: Cell::new(false),
+            window_focus_requested: Cell::new(false),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             js_frame: Cell::new(false),
