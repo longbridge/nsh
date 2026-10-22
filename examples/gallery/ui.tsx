@@ -1,9 +1,10 @@
-import type { JSX, ScrollProps, ViewStyle } from "nsh";
-import { computed, effect, Image, Scroll, signal, Text, View } from "nsh";
+import type { JSX, ScrollProps, Tokens, ViewStyle } from "nsh";
+import { computed, effect, Image, Scroll, signal, Text, token, View } from "nsh";
+import { reduceMotion } from "nsh/accessibility";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, platform, setColorScheme, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
-import { Button as BaseButton, Sheet as BaseSheet, safeArea } from "nsh/base";
+import { Button as BaseButton, Sheet as BaseSheet, safeArea, Switch, Tab, Tabs } from "nsh/base";
 import { nav } from "./nav";
 import { Icon, type IconName } from "./icons";
 import logoDark from "./logo-dark.svg";
@@ -14,9 +15,8 @@ export const isDark = () => colorScheme() !== "light";
 
 /**
  * An object with `dark`'s keys whose getters read `dark` or `light` by the
- * appearance shown: every read in a reactive scope (JSX, a `draw`, an
- * effect) follows appearance changes, and spreads into components keep the
- * getters.
+ * appearance shown, for the finishes below: shadows and gradients are no
+ * design tokens, so they stay here while every color is the theme's.
  */
 function themed<T extends object>(dark: T, light: T): T {
   const out = {} as T;
@@ -69,93 +69,64 @@ export interface Palette {
   down: string;
 }
 
+/** An object whose getters read the theme's tokens: reads in a reactive
+ * scope (JSX, a `draw`, an effect) follow the appearance and the theme. */
+function tokens<K extends string>(names: Record<K, keyof Tokens>): Record<K, string> {
+  const out = {} as Record<K, string>;
+  for (const key of Object.keys(names) as K[]) {
+    Object.defineProperty(out, key, { enumerable: true, get: () => token(names[key]) });
+  }
+  return out;
+}
+
 /**
  * The gallery's look: a graphite page (or a paper one in light
  * appearance), cards with an inset surface, tabular numbers and one citrus
- * accent. Sizes are for phones: 16 pt gutters, 44 pt touch targets, 15 pt
- * body text. The desktop layout (`desktop`) keeps them and puts more side by
- * side.
+ * accent, its colors the tokens of `theme.json`. Sizes are for phones:
+ * 16 pt gutters, 44 pt touch targets, 15 pt body text. The desktop layout
+ * (`desktop`) keeps them and puts more side by side.
  */
-export const colors: Palette = themed<Palette>(
-  {
-    background: "#101113",
-    surface: "#18191c",
-    inset: "#0c0d0f",
-    raised: "#24262a",
-    field: "#0c0d0f",
-    fieldBorder: "#2c2e33",
-    border: "#2c2e33",
-    line: "#24262a",
-    text: "#eceef1",
-    muted: "#8d9198",
-    faint: "#5a5e65",
-    accent: "#c8f26d",
-    accentFill: "#c8f26d",
-    onAccent: "#13160c",
-    light: "#eef0f2",
-    onLight: "#111214",
-    track: "#24262a",
-    knob: "#8d9198",
-    code: "#d9dde3",
-    info: "#7ea8ff",
-    warn: "#ffb547",
-    danger: "#ff6170",
-    up: "#45d49a",
-    down: "#ff6170",
-  },
-  {
-    background: "#f4f4f2",
-    surface: "#ffffff",
-    inset: "#f0f0ec",
-    raised: "#fbfbf9",
-    field: "#e8e8e3",
-    fieldBorder: "#cfcfc8",
-    border: "#d8d8d1",
-    line: "#e2e2dc",
-    text: "#16171a",
-    muted: "#5f636a",
-    faint: "#9a9ea4",
-    accent: "#4f6e0c",
-    accentFill: "#c8f26d",
-    onAccent: "#13160c",
-    light: "#16171a",
-    onLight: "#ffffff",
-    track: "#e2e2dd",
-    knob: "#ffffff",
-    code: "#2a2d33",
-    info: "#3d63d1",
-    warn: "#b26a00",
-    danger: "#d43a4a",
-    up: "#138a5a",
-    down: "#d43a4a",
-  },
-);
+export const colors: Palette = tokens<keyof Palette>({
+  background: "background",
+  surface: "card",
+  inset: "inset",
+  raised: "raised",
+  field: "field",
+  fieldBorder: "input",
+  border: "border",
+  line: "line",
+  text: "foreground",
+  muted: "muted-foreground",
+  faint: "faint",
+  accent: "brand",
+  accentFill: "brand-fill",
+  onAccent: "on-brand",
+  light: "primary",
+  onLight: "primary-foreground",
+  track: "track",
+  knob: "knob",
+  code: "code",
+  info: "info",
+  warn: "warn",
+  danger: "destructive",
+  up: "up",
+  down: "down",
+});
 
-/** `rgba()` of a `#rrggbb` color. */
-export function alpha(hex: string, a: number) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+/** `color` at opacity `a`. */
+export function alpha(color: string, a: number) {
+  return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
 }
 
 /** Translucent tints of the tones, for fills behind text. */
-export const tints = themed(
-  {
-    accent: "rgba(200,242,109,0.14)",
-    info: "rgba(126,168,255,0.16)",
-    warn: "rgba(255,181,71,0.16)",
-    danger: "rgba(255,97,112,0.16)",
-    up: "rgba(69,212,154,0.16)",
-    down: "rgba(255,97,112,0.16)",
-  },
-  {
-    accent: "rgba(124,170,20,0.14)",
-    info: "rgba(61,99,209,0.10)",
-    warn: "rgba(178,106,0,0.11)",
-    danger: "rgba(212,58,74,0.10)",
-    up: "rgba(19,138,90,0.10)",
-    down: "rgba(212,58,74,0.10)",
-  },
-);
+export const tints = tokens({
+  accent: "brand-tint",
+  info: "info-tint",
+  warn: "warn-tint",
+  danger: "destructive-tint",
+  up: "up-tint",
+  down: "down-tint",
+});
 
 /** A surface's finish: a gradient over its color and its shadows. */
 export interface Finish {
@@ -277,7 +248,18 @@ export const toneTint = (tone: Tone) => (tone === "neutral" ? colors.raised : ti
 /** The monospaced family, for code (API names, identifiers). Figures use
  * the system font with tabular numbers instead. */
 export const mono = "monospace";
-export const radius = { card: 16, inset: 12, control: 10 } as const;
+/** Corner radii (`theme.json`'s `radius-card`, `radius`, `radius-control`). */
+export const radius = {
+  get card() {
+    return token("radius-card");
+  },
+  get inset() {
+    return token("radius");
+  },
+  get control() {
+    return token("radius-control");
+  },
+};
 
 /** The system header's colors on every page (iOS, Android). */
 export const header = {
@@ -331,7 +313,7 @@ export function PageHeader(props: {
           role="button"
           accessibilityLabel="Back"
           hitSlop={6}
-          class="hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-line dark:active:bg-graphite-raised"
+          class="hover:bg-hover active:bg-accent"
           style={{ height: 32, flexDirection: "row", alignItems: "center", gap: 2, paddingLeft: 4, paddingRight: 10, borderRadius: radius.control, cursor: "pointer" }}
         >
           <Icon name="back" size={18} tint={tint()} />
@@ -401,6 +383,20 @@ export const motion = {
 } as const;
 
 /**
+ * A pressable under the pointer (`hoverStyle`): a whisper of the text color
+ * over its surface, quieter than pressed and than selected. Leave it off a
+ * disabled control and off a selected one, whose own fill shows.
+ */
+export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
+
+/**
+ * The keyboard focus (`focusStyle`): a 2-point ring of `info` inside the
+ * view's edge, so a card's rounded clip does not cut it (`offset` 2 puts it
+ * outside, around a filled button).
+ */
+export const focusRing = (offset = -2): ViewStyle => ({ outlineStyle: "solid", outlineWidth: 2, outlineColor: colors.info, outlineOffset: offset });
+
+/**
  * A pressable that sinks a little under the finger and springs back (the
  * spring runs natively; only press in / out reach JS).
  */
@@ -435,6 +431,17 @@ export function Press(props: {
     </View>
   );
 }
+
+/**
+ * `Press`'s feedback for a `Tab` of `nsh/base`, which reports no press down
+ * to spring with: it sinks a little while pressed and eases back, and takes
+ * presses 4 pt around it without taking more room (a hit slop). Spread
+ * `style` and `activeStyle` into the tab's.
+ */
+export const tabPress = {
+  style: { margin: -4, padding: 4, transitionProperty: "transform", transitionDuration: 150, transitionTimingFunction: "ease-out" },
+  activeStyle: { transform: [{ scale: 0.97 }] },
+} satisfies { style: ViewStyle; activeStyle: ViewStyle };
 
 /**
  * Fades and lifts its content in once mounted; `index` staggers siblings
@@ -643,8 +650,9 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
 /**
- * A button, 44 pt tall: `primary` is light (the main action), `secondary`
- * dark, `accent` citrus. A `color` fills it with that color instead.
+ * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
+ * `primary` is light (the main action), `secondary` dark, `accent` citrus
+ * (the theme's `brand-fill`). A `color` fills it with that color instead.
  */
 export function Button(props: {
   label: string;
@@ -654,8 +662,10 @@ export function Button(props: {
   disabled?: boolean;
   /** Grows to share a row with its siblings. */
   flex?: number;
+  size?: "small" | "regular";
   onPress: () => void;
 }) {
+  const small = () => props.size === "small";
   // `nsh/base`'s Button gives the behavior (presses, disabled, the button
   // role); the look below is the gallery's own.
   const scale = createAnimatedValue(1);
@@ -670,18 +680,20 @@ export function Button(props: {
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.label}
-      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }] }}
+      hoverStyle={props.disabled ? undefined : { opacity: 0.88 }}
+      focusStyle={focusRing(2)}
+      style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }], borderRadius: small() ? 8 : radius.control }}
     >
       <View
         style={{
-          height: 44,
-          paddingHorizontal: 18,
-          borderRadius: radius.control,
+          height: small() ? 32 : 44,
+          paddingHorizontal: small() ? 12 : 18,
+          borderRadius: small() ? 8 : radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "center",
-          gap: 8,
+          gap: small() ? 6 : 8,
           backgroundColor: bg(),
           ...(props.color || variant() === "ghost"
             ? {}
@@ -695,9 +707,9 @@ export function Button(props: {
         }}
       >
         <If when={props.icon}>
-          <Icon name={props.icon!} size={16} tint={fg()} />
+          <Icon name={props.icon!} size={small() ? 14 : 16} tint={fg()} />
         </If>
-        <Text style={{ fontSize: 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
+        <Text style={{ fontSize: small() ? 13 : 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
       </View>
     </BaseButton>
   );
@@ -781,51 +793,80 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
   );
 }
 
-/** An on / off switch: the knob springs across, the track changes color natively. */
+/**
+ * An on / off switch (`nsh/base`'s `Switch`, in the gallery's look): the
+ * knob springs across, the track changes color natively.
+ */
 export function Toggle(props: { value: boolean; onChange: (value: boolean) => void; label?: string }) {
-  const t = createAnimatedValue(props.value ? 1 : 0);
-  let last = props.value;
+  const look = switchLook(() => props.value);
   return (
-    <View
-      onPress={() => {
-        last = !props.value;
-        t.spring(last ? 1 : 0, motion.settle);
-        props.onChange(last);
-      }}
-      role="switch"
+    <Switch
+      checked={props.value}
+      onChange={props.onChange}
       accessibilityLabel={props.label}
-      accessibilityState={{ checked: props.value }}
-      hitSlop={8}
-      style={{
-        width: 50,
-        height: 30,
-        borderRadius: 15,
-        padding: 3,
-        backgroundColor: t.interpolate({ inputRange: [0, 1], outputRange: [colors.track, colors.accentFill] }),
-        borderWidth: 1,
-        borderColor: colors.border,
-        ...finish.track,
-      }}
-    >
-      <View
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 11,
-          backgroundColor: props.value ? colors.onAccent : colors.knob,
-          // A drop of glass: a specular top over the knob's color.
-          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
-          boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
-          transform: [{ translateX: t.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }) }],
-        }}
-      />
-    </View>
+      // 8 pt more to press on every side (the hit slop of a 30 pt track),
+      // without taking more room.
+      style={{ margin: -8, padding: 8 }}
+      trackStyle={look.trackStyle}
+      thumbStyle={look.thumbStyle}
+    />
   );
 }
 
 /**
+ * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
+ * track that turns citrus and a knob that springs across, both natively.
+ * `on` is the value the app owns: the knob follows it, from a press or from
+ * elsewhere. `small` is 38 × 22, for pointer-sized rows. Read the styles in
+ * JSX, so the appearance is followed.
+ */
+export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
+  // The track's size and inset, and the knob: it travels what is left inside
+  // the border and the padding.
+  const [width, height, inset, knob] = size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
+  const t = createAnimatedValue(on() ? 1 : 0);
+  const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
+  let shown = on();
+  effect(() => {
+    const next = on();
+    if (next === shown) return;
+    shown = next;
+    // Reduced motion: the knob and the track change in place.
+    if (reduceMotion()) t.set(next ? 1 : 0);
+    else t.spring(next ? 1 : 0, motion.settle);
+  });
+  return {
+    get trackStyle(): ViewStyle {
+      return {
+        width,
+        height,
+        borderRadius: height / 2,
+        padding: inset,
+        backgroundColor: t.interpolate({ inputRange: [0, 1], outputRange: [colors.track, colors.accentFill] }),
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...finish.track,
+      };
+    },
+    get thumbStyle(): ViewStyle {
+      return {
+        width: knob,
+        height: knob,
+        borderRadius: knob / 2,
+        backgroundColor: on() ? colors.onAccent : colors.knob,
+        // A drop of glass: a specular top over the knob's color.
+        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.202) 0%, rgba(255,255,255,0.098) 60%)",
+        boxShadow: isDark() ? "inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 3px rgba(0,0,0,0.4)" : finish.knob.boxShadow,
+        transform: [{ translateX: x }],
+      };
+    },
+  };
+}
+
+/**
  * Equal segments with an indicator that springs to the selected one
- * (`count` shows a quiet number after a label).
+ * (`count` shows a quiet number after a label): `nsh/base`'s `Tabs`, a tab
+ * per segment, in the gallery's look.
  */
 export function Segmented<T extends string>(props: {
   options: readonly { value: T; label: string; count?: number }[];
@@ -853,9 +894,8 @@ export function Segmented<T extends string>(props: {
     placed = true;
   });
   return (
-    <View
+    <Tabs
       onLayout={(e) => width.set(e.size.width)}
-      role="tablist"
       style={{
         height,
         flexDirection: "row",
@@ -883,10 +923,9 @@ export function Segmented<T extends string>(props: {
       />
       <Each of={props.options}>
         {(option) => (
-          <View
+          <Tab
+            selected={props.value === option().value}
             onPress={() => props.onChange(option().value)}
-            role="tab"
-            accessibilityState={{ selected: props.value === option().value }}
             style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5 }}
           >
             <Text
@@ -902,10 +941,10 @@ export function Segmented<T extends string>(props: {
             <If when={option().count !== undefined}>
               <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{option().count}</Text>
             </If>
-          </View>
+          </Tab>
         )}
       </Each>
-    </View>
+    </Tabs>
   );
 }
 

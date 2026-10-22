@@ -761,8 +761,8 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
     let change = computed(move || quote.get().percent());
     let market = live.market;
     let active = props.active;
-    // TS: `bg-paper-border dark:bg-graphite-raised` when active,
-    // `hover:bg-paper-card dark:hover:bg-graphite-card` otherwise.
+    // TS: `bg-accent` when active, `hover:bg-card` otherwise (the gallery
+    // theme's tokens).
     let fill = AdaptiveColor::new(colors::BORDER.light, colors::RAISED.dark);
     view()
         .h(px(64.0))

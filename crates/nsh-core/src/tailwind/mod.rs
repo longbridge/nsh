@@ -700,6 +700,9 @@ fn parse_token(theme: &Theme, token: &str) -> Option<Token> {
     for v in variants {
         rank = rank.max(variant(theme, v, &mut cond)?);
     }
+    if theme.tokens().replaces(utility) {
+        return themed(theme, cond, rank, important, utility);
+    }
     let Some(decls) = utilities::parse(theme, utility) else {
         return themed(theme, cond, rank, important, utility);
     };

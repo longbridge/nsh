@@ -1,7 +1,6 @@
 import { Input, mount, Scroll, signal, Text, View } from "nsh";
-import { Button, Keyboard, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
-import { platform } from "nsh/device";
-import { tint, ui } from "./palette";
+import { Button, Keyboard, Switch, KeyboardAvoidingView, keyboardFrame } from "nsh/base";
+import { desktop, tint, ui } from "./palette";
 
 function App() {
   const draft = signal("");
@@ -29,7 +28,7 @@ function App() {
       <View style={{ padding: 20, paddingTop: 24, paddingBottom: 8, gap: 8 }}>
         <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>keyboard-avoiding-view</Text>
         <Text style={{ color: ui().muted }}>
-          {platform.idiom === "desktop"
+          {desktop
             ? "Desktops type with a hardware keyboard: its height stays 0 and the view keeps its layout. Open this on a phone to see it move."
             : "Tap the message field: the bar moves up with the keyboard."}
         </Text>
@@ -40,9 +39,17 @@ function App() {
           <Button onPress={() => behavior.set("height")} selected={behavior() === "height"} style={chip(behavior() === "height")}>
             <Text style={chipText(behavior() === "height")}>height</Text>
           </Button>
-          <Button onPress={() => enabled.set(!enabled())} role="switch" selected={enabled()} style={chip(enabled())}>
-            <Text style={chipText(enabled())}>enabled {String(enabled())}</Text>
-          </Button>
+          <Switch
+            checked={enabled()}
+            onChange={(next) => enabled.set(next)}
+            class="flex-row items-center gap-2 px-1 active:opacity-70"
+            trackClass="w-9 rounded-full p-0.5 transition-colors"
+            trackStyle={enabled() ? ui().accentFill : ui().inset}
+            thumbClass="size-4 rounded-full transition-transform checked:translate-x-4"
+            thumbStyle={enabled() ? { backgroundColor: ui().onAccent } : ui().raised}
+          >
+            <Text style={{ color: ui().text, fontSize: 13, fontWeight: "600" }}>enabled {String(enabled())}</Text>
+          </Switch>
         </View>
         <Text style={{ color: ui().accent, fontSize: 13 }}>
           keyboardFrame(): height {Math.round(keyboardFrame().height)} · duration {keyboardFrame().duration.toFixed(2)} s
@@ -61,7 +68,7 @@ function App() {
         </View>
       </Scroll>
 
-      <View style={{ flexDirection: "row", gap: 8, padding: 12, borderTopWidth: 1, borderTopColor: ui().border, backgroundColor: ui().page }}>
+      <View style={{ flexDirection: "row", gap: 8, padding: 12, paddingHorizontal: desktop ? 20 : 12, borderTopWidth: 1, borderTopColor: ui().border, backgroundColor: ui().page }}>
         <Input
           value={draft()}
           onChange={(text) => draft.set(text)}

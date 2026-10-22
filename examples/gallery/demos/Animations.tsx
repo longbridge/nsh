@@ -1,7 +1,8 @@
 import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
 import { Animated, type CompositeAnimation, createAnimatedValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type AnimatedNode } from "nsh/animated";
+import { Tab, Tabs } from "nsh/base";
 import { Icon } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, Press, radius, Segmented, tints } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, radius, Segmented, tabPress, tints } from "../ui";
 
 /** The tones of the demos' dots and tiles (call in a reactive scope). */
 const tones = () => [colors.accent, colors.info, colors.warn, colors.danger, colors.up];
@@ -288,7 +289,7 @@ function EasingPlot() {
         }}
       />
       <Scroll horizontal scrollbar={false}>
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <Tabs style={{ flexDirection: "row", gap: 8 }}>
           <Each of={curves}>
             {(c, i) => (
               <Chip
@@ -301,7 +302,7 @@ function EasingPlot() {
               />
             )}
           </Each>
-        </View>
+        </Tabs>
       </Scroll>
       <Button label="Play" icon="play" onPress={play} />
     </Card>
@@ -352,10 +353,10 @@ function EasingRace() {
   );
 }
 
-/** A selectable capsule (36 pt, with hit slop up to 44). */
+/** A selectable capsule, a tab of the curves (36 pt, with hit slop up to 44). */
 function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
   return (
-    <Press onPress={props.onPress} hitSlop={4} role="tab" accessibilityState={{ selected: !!props.active }}>
+    <Tab selected={props.active} onPress={props.onPress} style={tabPress.style} activeStyle={tabPress.activeStyle}>
       <View
         style={{
           height: 36,
@@ -370,7 +371,7 @@ function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
       >
         <Text style={{ fontSize: 13, fontWeight: "500", color: props.active ? colors.onLight : colors.text }}>{props.label}</Text>
       </View>
-    </Press>
+    </Tab>
   );
 }
 

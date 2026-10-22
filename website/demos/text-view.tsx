@@ -1,7 +1,6 @@
 import { cleanup, mount, signal, Scroll, Text, View } from "nsh";
 import { TextView } from "nsh/base";
-import { platform } from "nsh/device";
-import { ui } from "./palette";
+import { desktop, size, ui } from "./palette";
 
 const REPLY = `## Moving to offline sync
 
@@ -21,7 +20,7 @@ nsh export --out backup.json
 \`\`\`
 
 > [!TIP]
-> ${platform.idiom === "desktop" ? "Drag across the paragraphs to select them, then copy." : "Long-press a paragraph to copy it."}`;
+> ${desktop ? "Drag across the paragraphs to select them, then copy." : "Long-press a paragraph to copy it."}`;
 
 function App() {
   const text = signal(REPLY);
@@ -54,9 +53,13 @@ function App() {
         <View
           onPress={play}
           activeStyle={{ opacity: 0.75 }}
-          style={{ ...ui().raised, borderRadius: 12, paddingVertical: 10, alignItems: "center", opacity: streaming() ? 0.5 : 1 }}
+          style={
+            desktop
+              ? { ...ui().raised, alignSelf: "flex-start", borderRadius: 8, height: size.control, paddingHorizontal: 12, justifyContent: "center", opacity: streaming() ? 0.5 : 1 }
+              : { ...ui().raised, borderRadius: 12, paddingVertical: 10, alignItems: "center", opacity: streaming() ? 0.5 : 1 }
+          }
         >
-          <Text style={{ color: ui().text, fontSize: 15, fontWeight: "600" }}>{streaming() ? "Streaming…" : "Stream it again"}</Text>
+          <Text style={{ color: ui().text, fontSize: desktop ? 13 : 15, fontWeight: "600" }}>{streaming() ? "Streaming…" : "Stream it again"}</Text>
         </View>
       </View>
     </Scroll>

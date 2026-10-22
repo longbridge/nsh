@@ -47,6 +47,8 @@ pub(crate) struct PressIvars {
     long_press_delay: Cell<f64>,
     /// The view itself takes presses (not only its text's pressable spans).
     own: Cell<bool>,
+    /// Has press handlers, rather than only tracking the pressed style.
+    handles_press: Cell<bool>,
     /// The pressable text span the current touch is on: its presses go
     /// there.
     link: Cell<Option<TextLink>>,
@@ -124,7 +126,13 @@ define_class!(
                 // A quick tap inside a scroll view: report the press in now.
                 self.press_in();
             }
-            self.set_state(UIGestureRecognizerState::Ended);
+            // A style observer reports the pressed state without competing
+            // with an ancestor that handles the click.
+            self.set_state(if self.ivars().handles_press.get() || self.ivars().link.get().is_some() {
+                UIGestureRecognizerState::Ended
+            } else {
+                UIGestureRecognizerState::Failed
+            });
         }
 
         #[unsafe(method(touchesCancelled:withEvent:))]
@@ -180,6 +188,7 @@ impl PressRecognizer {
             long_press: Cell::new(false),
             long_press_delay: Cell::new(LONG_PRESS),
             own: Cell::new(false),
+            handles_press: Cell::new(false),
             link: Cell::new(None),
         });
         // SAFETY: the designated initializer; `handlePress:` is implemented by
@@ -205,8 +214,9 @@ impl PressRecognizer {
     }
 
     /// Whether the view itself takes presses.
-    pub(crate) fn set_own(&self, on: bool) {
+    pub(crate) fn set_own(&self, on: bool, handles_press: bool) {
         self.ivars().own.set(on);
+        self.ivars().handles_press.set(handles_press);
     }
 
     /// The pressable text span the current press is on.
@@ -284,9 +294,15 @@ impl PressRecognizer {
                 return true;
             }
             if let Some(recognizers) = v.gestureRecognizers()
-                && recognizers
-                    .iter()
-                    .any(|r| r.isEnabled() && r.isKindOfClass(PressRecognizer::class()))
+                && recognizers.iter().any(|r| {
+                    r.isEnabled()
+                        && r.downcast_ref::<PressRecognizer>().is_some_and(|r| {
+                            r.ivars().handles_press.get()
+                                || v.downcast_ref::<TextView>().is_some_and(|t| {
+                                    t.link_at(touch.locationInView(Some(&v))).is_some()
+                                })
+                        })
+                })
             {
                 return true;
             }

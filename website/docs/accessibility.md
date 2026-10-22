@@ -84,6 +84,8 @@ text("Settings")
 
 ### States and values
 
+For an on / off control in an app, use [`Switch`](../elements/switch.md) from `nsh/base`, which sets the role and state itself. The example shows what a role and state on a view do.
+
 ```rust tabs
 use nsh_core::{Checked, ui::prelude::*};
 

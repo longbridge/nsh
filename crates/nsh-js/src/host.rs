@@ -979,6 +979,17 @@ impl Host {
         });
     }
 
+    /// Publishes the design tokens the app is drawn with to JS (`token()`
+    /// of `nsh`). Call before evaluating the bundle, then on every change.
+    pub fn set_tokens(&self, tokens: std::sync::Arc<nsh_core::ui::Tokens>) {
+        self.guarded(Phase::Call, || {
+            self.cx.with(|cx| {
+                crate::env::set_tokens(cx.as_raw().as_ptr(), tokens);
+            });
+            self.run_jobs();
+        });
+    }
+
     /// True if JS asked for a display frame (`requestAnimationFrame`).
     pub fn wants_frame(&self) -> bool {
         !self.shared.frames.borrow().is_empty()

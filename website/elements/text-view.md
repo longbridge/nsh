@@ -14,9 +14,9 @@ is made for the replies of AI models in a chat: the reply streams in as Markdown
 formatting in place. Parsing happens in Rust, and the document is drawn with [`Text`](./text.md) elements and views.
 
 It owns behavior and comes with a reading typography of its own: 15pt text in generous 25.5pt lines, semibold
-headings with room above them, links underlined in the theme's link color, code in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
-alerts as tinted boxes with an icon. Its colors are the theme's tokens (`foreground`, `muted.foreground`, `border`,
-`muted.background`, `link`, `list.head.background` and the status colors), so a theme and the dark appearance reach
+headings with room above them, links underlined in the theme's `primary` color, code in the theme's `font-mono` in a bordered, rounded box, tables ruled on every side with a tinted header row, quotes with a line at their side and
+alerts as tinted boxes with an icon in GitHub's alert colors. Its colors are the theme's tokens (`foreground`, `muted-foreground`, `border`,
+`muted`, `primary`, and `destructive` for a caution), so a theme and the dark appearance reach
 it. Each part takes the app's styles over these defaults: `classes` and `styles` in TSX, typed styles by part
 (`TextViewParts`) in Rust. Rust makes one with `nsh_base::text_view()`, TSX with `<TextView>` from `nsh/base`.
 
@@ -42,7 +42,7 @@ fn release_notes() -> impl IntoElement {
             .on_link_press(|TextViewLinkPressEvent { url, .. }: &TextViewLinkPressEvent| log::info!("open {url}"))
             .p_5()
             .text_base()
-            .text_color(theme().foreground()),
+            .text_color(theme().foreground),
     )
 }
 ```
@@ -180,7 +180,7 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
                 s.px_3().py_2().border_t_1().border_color(rgb(0xe5e5e5))
             })
             .part(TextViewPart::TaskMarkerChecked, |s| s.text_color(rgb(0x16a34a)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
     text_view()
         .markdown(move || markdown.get())
@@ -246,7 +246,7 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `underline` | `Underline` | Underlined text (`<u>`, `<ins>`). |
 | `highlight` | `Highlight` | Highlighted text (`<mark>`, on a rounded yellow). |
 | `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
-| `link` | `Link` | Links (in the link color, underlined). |
+| `link` | `Link` | Links (in the theme's `primary` color, underlined). |
 | `image` | `Image` | Images. |
 | `math` | `Math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
 | `mathBlock` | `MathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |
@@ -717,8 +717,8 @@ fn chat_parts() {
     provide_context(
         TextViewParts::new()
             .part(TextViewPart::Heading1, |s| s.text_2xl().font_weight(FontWeight::BOLD))
-            .part(TextViewPart::Code, |s| s.bg(theme().muted()).rounded(px(4.0)))
-            .part(TextViewPart::Link, |s| s.text_color(theme().primary())),
+            .part(TextViewPart::Code, |s| s.bg(theme().muted).rounded(px(4.0)))
+            .part(TextViewPart::Link, |s| s.text_color(theme().primary)),
     );
 }
 ```

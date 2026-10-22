@@ -35,7 +35,7 @@ use super::{
 ///     view()
 ///         .px_4()
 ///         .py_3()
-///         .bg(move || theme().primary()) // nsh-base's theme
+///         .bg(move || theme().primary) // nsh-base's theme
 ///         .on_press(move || cx.emit(ButtonEvent::Press))
 ///         .child(text(props.title))
 /// }
