@@ -96,7 +96,10 @@ const _: fn() = || {
 impl Drop for EngineContextGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
-        CURRENT.with(|current| *current.borrow_mut() = previous);
+        // Host values may read the context during cleanup; release the
+        // mutable borrow before dropping the context that owns them.
+        let outgoing = CURRENT.with(|current| current.replace(previous));
+        drop(outgoing);
     }
 }
 
@@ -127,5 +130,29 @@ mod tests {
             assert_eq!(engine_context::<&str>().as_deref(), Some(&"outer"));
         }
         assert_eq!(engine_context::<u32>(), None);
+    }
+
+    #[test]
+    fn releasing_context_values_allows_them_to_read_the_restored_context() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct HostState(Arc<AtomicBool>);
+        impl Drop for HostState {
+            fn drop(&mut self) {
+                assert_eq!(engine_context::<u32>().as_deref(), Some(&7));
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let _outer = EngineContext::default().with(7_u32).enter();
+        let released = Arc::new(AtomicBool::new(false));
+        // Only the thread-local owns this context when its guard exits,
+        // as after LocalEngine releases its driver during shutdown.
+        let inner = EngineContext::default()
+            .with(HostState(released.clone()))
+            .enter();
+        drop(inner);
+        assert!(released.load(Ordering::SeqCst));
+        assert_eq!(engine_context::<u32>().as_deref(), Some(&7));
     }
 }
