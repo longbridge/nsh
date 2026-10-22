@@ -1059,20 +1059,35 @@ impl Screen {
         Some(self.bounds_in_root(id)?.center())
     }
 
+    /// The canvas containing the one node `selector` names, and its
+    /// center in that canvas's coordinates; `None` for ordinary views.
+    pub(crate) fn canvas_node(&self, selector: &Selector) -> Option<(NodeId, Point<Points>)> {
+        let [id] = self.resolve(selector)[..] else {
+            return None;
+        };
+        let view = self.nodes.get(&id)?;
+        view.canvas_node
+            .then_some((view.parent?, view.frame.center()))
+    }
+
     /// The view a pointer at `at` (in the root) reaches: the topmost,
     /// innermost one there that receives touches. Canvas nodes are not views.
     fn hit_pointer(&self, at: Point<Points>) -> NodeId {
-        let shown: HashSet<NodeId> = self.attached().into_iter().collect();
-        self.hit_in(ROOT, at, &shown).unwrap_or(ROOT)
+        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
+        self.hit_in(ROOT, at, &attached).unwrap_or(ROOT)
     }
 
-    fn hit_in(&self, id: NodeId, at: Point<Points>, shown: &HashSet<NodeId>) -> Option<NodeId> {
-        let receives = self
-            .nodes
-            .get(&id)
-            .map_or(PointerEvents::Auto, |v| v.pointer_events);
-        if receives == PointerEvents::None
-            || id != ROOT && !self.bounds_in_root(id).is_some_and(|b| b.contains(&at))
+    fn hit_in(&self, id: NodeId, at: Point<Points>, attached: &HashSet<NodeId>) -> Option<NodeId> {
+        let view = self.nodes.get(&id);
+        let receives = view.map_or(PointerEvents::Auto, |v| v.pointer_events);
+        if receives == PointerEvents::None || view.is_some_and(|v| v.hidden) {
+            return None;
+        }
+        let inside = id == ROOT || self.bounds_in_root(id).is_some_and(|b| b.contains(&at));
+        // Unclipped children can receive a pointer outside their parent's box.
+        if !inside
+            && (receives == PointerEvents::BoxOnly
+                || view.is_some_and(|v| v.clips || v.scroll.is_some()))
         {
             return None;
         }
@@ -1081,15 +1096,15 @@ impl Screen {
         {
             for &child in children.iter().rev() {
                 let node = self.nodes.get(&child).is_some_and(|v| v.canvas_node);
-                if node || !shown.contains(&child) {
+                if node || !attached.contains(&child) {
                     continue;
                 }
-                if let Some(hit) = self.hit_in(child, at, shown) {
+                if let Some(hit) = self.hit_in(child, at, attached) {
                     return Some(hit);
                 }
             }
         }
-        (receives != PointerEvents::BoxNone).then_some(id)
+        (inside && receives != PointerEvents::BoxNone).then_some(id)
     }
 
     /// The view a press on the selector's match goes to: it, or its nearest
@@ -1316,7 +1331,6 @@ impl Screen {
     /// View `id`'s bounds in the root's points: its frame moved by those
     /// of the views around it and the offsets of the scroll views around
     /// it (transforms aside).
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
         if let Some((text, ..)) = self.span(id) {
             return self.bounds_in_root(text);
@@ -1469,6 +1483,81 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A canvas over a pressable pad, both inside a plain container.
+    fn canvas_screen() -> Screen {
+        let mut screen = Screen::default();
+        screen.apply(&batch(vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::Canvas),
+            create(6, ViewKind::View),
+            frame(2, 0.0, 0.0, 200.0, 40.0),
+            frame(4, 0.0, 0.0, 200.0, 40.0),
+            frame(6, 0.0, 0.0, 200.0, 40.0),
+            insert(1, 2),
+            insert(2, 6),
+            insert(2, 4),
+        ]));
+        screen.nodes.get_mut(&4).unwrap().pointer_events = PointerEvents::None;
+        screen
+            .nodes
+            .get_mut(&6)
+            .unwrap()
+            .events
+            .set(EventKind::Press, true);
+        screen.canvas(
+            4,
+            &[nsh_core::canvas::CanvasNode::new(
+                Bounds::new(Point::default(), Size::new(Points(100.0), Points(40.0))),
+                AccessibilityRole::Text,
+                "cell",
+            )
+            .test_id("cell")],
+        );
+        screen
+    }
+
+    #[test]
+    fn canvas_presses_skip_hidden_subtrees() {
+        let mut screen = canvas_screen();
+        screen.apply(&batch(vec![
+            create(8, ViewKind::View),
+            create(10, ViewKind::View),
+            frame(8, 0.0, 0.0, 200.0, 40.0),
+            frame(10, 0.0, 0.0, 200.0, 40.0),
+            insert(2, 8),
+            insert(8, 10),
+            style(8, |s| s.hidden = true),
+        ]));
+        screen
+            .nodes
+            .get_mut(&10)
+            .unwrap()
+            .events
+            .set(EventKind::Press, true);
+        assert_eq!(
+            screen.pressable(&Selector::parse("id:cell").unwrap()),
+            Pick::One(6)
+        );
+    }
+
+    #[test]
+    fn canvas_presses_reach_visible_overflow_but_respect_clipping() {
+        let mut screen = canvas_screen();
+        screen.apply(&batch(vec![
+            frame(2, 0.0, 0.0, 100.0, 40.0),
+            frame(4, 100.0, 0.0, 100.0, 40.0),
+            frame(6, 100.0, 0.0, 100.0, 40.0),
+        ]));
+        let selector = Selector::parse("id:cell").unwrap();
+        assert_eq!(screen.count("id:cell"), Ok(1));
+        assert_eq!(screen.pressable(&selector), Pick::One(6));
+        screen.nodes.get_mut(&2).unwrap().clips = true;
+        assert_eq!(screen.pressable(&selector), Pick::None);
+        screen.nodes.get_mut(&2).unwrap().clips = false;
+        screen.nodes.get_mut(&2).unwrap().pointer_events = PointerEvents::BoxOnly;
+        assert_eq!(screen.pressable(&selector), Pick::None);
+    }
 
     fn batch(items: Vec<MountItem>) -> MountBatch {
         MountBatch { items }

@@ -924,17 +924,25 @@ impl Headless {
         self.step(format!("press({selector})"));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        let at = self
+            .screen
+            .canvas_node(&parsed)
+            .and_then(|(canvas, center)| {
+                self.screen
+                    .bounds_in_root(canvas)
+                    .map(|b| b.origin + center)
+            });
         // The finger, as platforms report it to the views around it that
         // listen to touches (an overlay's `onPressOutside` among them).
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), at);
         }
         for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
             self.send(id, kind, EventPayload::None);
         }
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::End, path);
+            self.send_touch(id, nsh_core::TouchPhase::End, path, at);
         }
         self.done()
     }
@@ -951,14 +959,14 @@ impl Headless {
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), None);
         }
         self.send(id, EventKind::PressDown, EventPayload::None);
         self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
         self.send(id, EventKind::LongPress, EventPayload::None);
         self.send(id, EventKind::PressUp, EventPayload::None);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::End, path);
+            self.send_touch(id, nsh_core::TouchPhase::End, path, None);
         }
         self.done()
     }
@@ -1043,7 +1051,14 @@ impl Headless {
 
     /// A finger going down on (or lifting from) `target`, reported on the
     /// root with the views around it that listen to touches.
-    fn send_touch(&self, target: NodeId, phase: nsh_core::TouchPhase, path: Vec<NodeId>) {
+    fn send_touch(
+        &self,
+        target: NodeId,
+        phase: nsh_core::TouchPhase,
+        path: Vec<NodeId>,
+        at: Option<Point<Points>>,
+    ) {
+        let location = at.and_then(|p| self.screen.bounds_in_root(target).map(|b| p - b.origin));
         let touch = nsh_core::TouchEvent {
             phase,
             timestamp: 0.0,
@@ -1051,8 +1066,8 @@ impl Headless {
                 id: 0,
                 target,
                 path,
-                page: Point::default(),
-                location: Point::default(),
+                page: at.unwrap_or_default(),
+                location: location.unwrap_or_default(),
                 changed: true,
             }],
             activated: None,
@@ -1313,6 +1328,7 @@ mod tests {
     #[component]
     fn Cells() -> impl IntoElement {
         let pressed = signal(0_u32);
+        let touched = signal((Point::<Points>::default(), Point::<Points>::default()));
         let cell = |x: f32, label: &str, id: &str| {
             nsh_core::canvas::CanvasNode::new(
                 Bounds::new(point(px(x), px(0.0)), size(px(100.0), px(40.0))),
@@ -1328,6 +1344,13 @@ mod tests {
             .node(cell(100.0, "Total", "cell-b1").selected(true));
         view()
             .child(text(move || format!("pressed: {}", pressed.get())))
+            .child(text(move || {
+                format!(
+                    "touch x: {} local x: {}",
+                    touched.get().0.x.0,
+                    touched.get().1.x.0
+                )
+            }))
             .child(
                 view()
                     .w(px(200.0))
@@ -1337,6 +1360,9 @@ mod tests {
                             .test_id("pad")
                             .absolute()
                             .size_full()
+                            .on_touch(move |event: &nsh_core::TouchEvent| {
+                                touched.set((event.points[0].page, event.points[0].location))
+                            })
                             .on_press(move || pressed.update(|n| *n += 1)),
                     )
                     .child(
@@ -1359,8 +1385,18 @@ mod tests {
         assert_eq!(app.screen().selected("id:cell-a1"), Ok(false));
         app.press("id:cell-b1").unwrap();
         app.wait_for("pressed: 1").unwrap();
+        assert!(
+            app.shows("touch x: 150 local x: 150"),
+            "{:?}",
+            app.screen().texts()
+        );
         app.press("text:12").unwrap();
         app.wait_for("pressed: 2").unwrap();
+        assert!(
+            app.shows("touch x: 50 local x: 50"),
+            "{:?}",
+            app.screen().texts()
+        );
     }
 
     /// The metrics of a line of text in a canvas font.

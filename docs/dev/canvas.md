@@ -72,3 +72,8 @@ handles presses (`pointerEvents: "none"`) keeps working. The GPUI backend makes 
 `canvas_nodes`, no actions of their own) and the headless driver views of its model (`label:`, `text:`, `id:` and
 `role:` find them, `press` presses under them, `Screen::selected` reads their selected state as it reads a view's);
 the other backends do not show them yet.
+
+The test model skips hidden subtrees when finding the view under a node and follows visible overflow until a
+clipping view stops it. Headless touches carry the node's center in root and target-local coordinates. A real
+host's agent keeps the center relative to the canvas (`Scene::canvas_node`, `SceneQuery::CanvasNode`), brings
+that point into view, and presses it at the canvas's native position.
