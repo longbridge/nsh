@@ -179,7 +179,9 @@ impl<M: TextEngine> Core<M> {
     /// or a view again when it no longer does; whether it changed.
     pub(super) fn fix_or_unfix(&mut self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
-        let fixed = node.wants_fixed && (node.kind == Kind::View || node.fixed_view);
+        let fixed = node.wants_fixed
+            && !node.kind.is_root()
+            && (node.layout.is_some() || node.kind == Kind::Text);
         if fixed == node.fixed_view {
             return false;
         }
@@ -197,8 +199,8 @@ impl<M: TextEngine> Core<M> {
         if self.nodes[key as usize].parent != NO_KEY {
             self.unlink(key, true);
         }
+        self.set_inline(key, false);
         let node = &mut self.nodes[key as usize];
-        node.kind = Kind::Overlay;
         node.fixed_view = true;
         node.root = Some(Box::default());
         let layout = node.layout.expect("a view has a layout");
@@ -234,11 +236,15 @@ impl<M: TextEngine> Core<M> {
         }
         self.roots.retain(|&k| k != key);
         let node = &mut self.nodes[key as usize];
-        node.kind = Kind::View;
         node.fixed_view = false;
         node.root = None;
-        if let Some(base) = node.base_layout.take() {
-            self.layout.set_style(layout, *base).expect("taffy style");
+        if let Some(base) = node.base_layout.as_deref() {
+            self.layout
+                .set_style(layout, base.clone())
+                .expect("taffy style");
+        }
+        if !node.kind.derives_layout() {
+            node.base_layout = None;
         }
         self.needs_layout = true;
     }
@@ -261,7 +267,7 @@ impl<M: TextEngine> Core<M> {
     /// its children for its classes (`first:`, `last:`, ...).
     pub(super) fn is_tooltip_overlay(&self, key: Key) -> bool {
         let node = &self.nodes[key as usize];
-        node.kind == Kind::Overlay
+        node.is_overlay()
             && node.parent != NO_KEY
             && self
                 .overlay_state
@@ -329,13 +335,13 @@ impl<M: TextEngine> Core<M> {
                     .layout
                     .style(layout)
                     .is_ok_and(|s| s.display == taffy::Display::None);
-                if hidden && n.kind != Kind::Overlay {
+                if hidden && !n.is_overlay() {
                     return None;
                 }
             }
             match n.kind {
                 Kind::Modal if modal.is_none() => modal = Some(k),
-                Kind::Overlay => {
+                _ if n.is_overlay() => {
                     // Shown in its root view, which is this one's unless a
                     // modal is between them.
                     let host = self.overlay(k)?.host?;
@@ -353,7 +359,7 @@ impl<M: TextEngine> Core<M> {
         let mut depth = 0;
         let mut k = self.nodes[key as usize].parent;
         while k != NO_KEY {
-            if self.nodes[k as usize].kind == Kind::Overlay {
+            if self.nodes[k as usize].is_overlay() {
                 depth += 1;
             }
             k = self.nodes[k as usize].parent;
@@ -844,7 +850,7 @@ impl<M: TextEngine> Core<M> {
                 m.content.is_some_and(|c| {
                     c != m.overlay
                         && self.key(c).is_ok_and(|k| {
-                            self.nodes[k as usize].kind == Kind::Overlay
+                            self.nodes[k as usize].is_overlay()
                                 && self.overlay(k).is_some_and(|s| s.config.hint.is_some())
                         })
                 })
@@ -944,7 +950,7 @@ impl<M: TextEngine> Core<M> {
                     p == id
                         || Some(p) == anchor
                         || self.key(p).is_ok_and(|k| {
-                            self.nodes[k as usize].kind == Kind::Overlay && self.is_ancestor(key, k)
+                            self.nodes[k as usize].is_overlay() && self.is_ancestor(key, k)
                         })
                 });
                 if inside {
@@ -1084,7 +1090,7 @@ impl<M: TextEngine> Core<M> {
         let mut out: Option<(f32, f32, f32, f32)> = None;
         for &c in &self.nodes[key as usize].children {
             let n = &self.nodes[c as usize];
-            if n.kind == Kind::Overlay || n.layout.is_none() {
+            if n.is_overlay() || n.layout.is_none() {
                 continue;
             }
             let Some(m) = self.measure(n.id) else {

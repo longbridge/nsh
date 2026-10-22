@@ -127,7 +127,8 @@ fn physical_classes_name_the_other_side_right_to_left() {
     let s = resolve("pl-4", false);
     assert_eq!(s.layout.padding.left, taffy::LengthPercentage::length(16.0));
     let s = resolve("text-left", true);
-    assert_eq!(s.text.text_align, Some(crate::style::TextAlign::Right));
+    assert_eq!(s.text.text_align, Some(crate::style::TextAlign::Left));
+    assert!(s.text.text_align_physical);
     // Logical classes need nothing: the core places them.
     let list = parse(
         &theme,
@@ -165,7 +166,7 @@ fn space_gives_the_children_margins() {
     let space = props.space.unwrap();
     assert!(space.reverse_y);
     let mut child = Style::default();
-    space.apply(&mut child);
+    space.apply(&mut child, false);
     assert_eq!(
         child.layout.margin.top,
         taffy::LengthPercentageAuto::length(8.0)
@@ -479,11 +480,8 @@ fn typography() {
     assert_eq!(s.text.line_height, None);
     let s = styled("text-sm/[1.25]");
     assert_eq!(s.text.line_height_multiple, Some(1.25));
-    assert_eq!(
-        styled("leading-[150%]").text.line_height_multiple,
-        Some(1.5)
-    );
-    assert_eq!(styled("leading-[2em]").text.line_height_multiple, Some(2.0));
+    assert_eq!(styled("leading-[150%]").text.line_height_em, Some(1.5));
+    assert_eq!(styled("leading-[2em]").text.line_height_em, Some(2.0));
     assert_eq!(styled("leading-[22px]").text.line_height, Some(px(22.0)));
     assert_eq!(styled("leading-6").text.line_height, Some(px(24.0)));
     // `leading-*` wins over a size's own line height whatever the order
@@ -865,7 +863,7 @@ fn display() {
     );
     // Block formatting contexts use Taffy's block layout.
     assert_eq!(styled("block").layout.display, taffy::Display::Block);
-    assert_eq!(styled("flow-root").layout.display, taffy::Display::Block);
+    assert_eq!(styled("flow-root").layout.display, taffy::Display::FlowRoot);
     // Inline boxes in a flex or grid parent are blockified, as a browser
     // computes them (`display: inline-block` -> `block`).
     assert_eq!(styled("inline-block").layout.display, taffy::Display::Block);
@@ -1208,9 +1206,9 @@ fn classes_without_a_native_meaning_are_unknown() {
     all_unknown(
         "sticky transform-3d order-1 order-first -order-2 order-[3] select-all border-double outline-double",
     );
-    all_unknown("w-fit h-min size-max min-w-fit min-h-max max-w-min max-h-fit w-max");
+    all_unknown("min-w-fit min-h-max max-w-min max-h-fit");
     all_unknown(
-        "snap-x snap-center scroll-smooth scroll-mt-4 scroll-px-2 overscroll-none touch-none isolate box-content md:snap-x scroll-anything",
+        "snap-x snap-center scroll-smooth scroll-mt-4 scroll-px-2 overscroll-none touch-none isolate md:snap-x scroll-anything",
     );
     // What Tailwind CSS generates nothing for.
     all_unknown(
@@ -1347,4 +1345,95 @@ fn styled_in(theme: &Theme, classes: &str) -> Style {
         |_| {},
     );
     style
+}
+
+#[test]
+fn current_colors_follow_the_cascade_and_inherit() {
+    for classes in [
+        "text-red-500 border-2 border-blue-500 border-current ring ring-blue-500 ring-current outline-2 outline-blue-500 outline-current",
+        "text-red-500 border-current border-2 ring-current ring outline-current outline-2",
+    ] {
+        let s = styled(classes);
+        let color = s.text.color.unwrap();
+        assert_eq!(s.view.borders.colors, [color; 4], "{classes}");
+        assert_eq!(s.view.outline.color, color, "{classes}");
+        assert!(
+            s.view
+                .effects
+                .as_ref()
+                .unwrap()
+                .box_shadows
+                .iter()
+                .all(|shadow| shadow.color == color)
+        );
+    }
+    assert_eq!(styled("text-red-500 text-inherit").text.color, None);
+    assert_eq!(styled("text-red-500 text-current").text.color, None);
+}
+
+#[test]
+fn arbitrary_lengths_require_css_units_and_use_the_configured_rem() {
+    let mut theme = themed();
+    theme.rem = 20.0;
+    for (classes, expected) in [("w-[2rem]", 40.0), ("w-[2pt]", 8.0 / 3.0)] {
+        let list = parse(&theme, classes);
+        let group = |_: &str| 0;
+        let cx = Context {
+            env: ClassEnvironment::default(),
+            window: crate::geometry::size_pt(390.0, 844.0),
+            rtl: false,
+            states: 0,
+            position: 0,
+            group: &group,
+        };
+        let mut s = Style::default();
+        list.apply(&cx, &theme, &mut s, &mut ClassProps::default(), |_| {});
+        assert_eq!(s.layout.size.width, taffy::Dimension::length(expected));
+    }
+    for classes in [
+        "w-[100]",
+        "p-[8]",
+        "text-[14]",
+        "rounded-[8]",
+        "rotate-1.5",
+        "scale-x-12.5",
+    ] {
+        assert_eq!(parse(&theme, classes).unknown().len(), 1, "{classes}");
+    }
+    assert_eq!(
+        styled("inset-s-4").logical.inset[0],
+        styled("start-4").logical.inset[0]
+    );
+    assert_eq!(
+        styled("inset-e-4").logical.inset[1],
+        styled("end-4").logical.inset[1]
+    );
+}
+
+#[test]
+fn configured_rem_reaches_composite_css_values() {
+    let mut theme = themed();
+    theme.rem = 20.0;
+    let list = parse(&theme, "shadow-[0_1rem_2rem_3px_#000]");
+    let mut style = Style::default();
+    let group = |_: &str| 0;
+    let context = Context {
+        env: ClassEnvironment::default(),
+        window: crate::geometry::size_pt(390.0, 844.0),
+        rtl: false,
+        states: 0,
+        position: 0,
+        group: &group,
+    };
+    list.apply(
+        &context,
+        &theme,
+        &mut style,
+        &mut ClassProps::default(),
+        |_| {},
+    );
+    let effects = style.view.effects.unwrap();
+    assert_eq!(effects.box_shadows[0].offset_y, px(20.0));
+    assert_eq!(effects.box_shadows[0].blur, px(40.0));
+    assert_eq!(effects.box_shadows[0].spread, px(3.0));
 }

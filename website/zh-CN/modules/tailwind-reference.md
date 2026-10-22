@@ -111,12 +111,14 @@ view()
 |---|---|
 | `flex`、`inline-flex` | `display: "flex"`，没有方向类时为横向 |
 | `grid`、`inline-grid` | `display: "grid"` |
-| `block`、`flow-root` | `display: "block"`（块级布局） |
+| `block`、`flow-root` | 对应的块级布局或独立块级格式化上下文 |
+| `box-border`、`box-content` | 尺寸包含边框和内边距，或仅包含内容 |
+| `w/h/size-min`、`w/h/size-max`、`w/h/size-fit` | Taffy 的固有尺寸：`min-content`、`max-content`、`fit-content` |
 | `inline`、`inline-block` | `display: "block"`：浏览器在 flex 或 grid 父元素中为它们计算的值 |
 | `hidden` | `display: "none"` |
 | `relative`、`absolute` | `position` |
-| `static` | `position: "static"`：留在文档流中，忽略其偏移（与所有视图一样，仍是其绝对定位子元素的包含块） |
-| `fixed` | `position: "fixed"`：视图在其根视图（窗口或所在模态框）的范围内布局，位于该根视图的子元素之上，周围内容滚动时保持不动 |
+| `static` | `position: "static"`：留在文档流中，忽略其偏移；绝对定位后代以最近的非 static 祖先为包含块 |
+| `fixed` | `position: "fixed"`：元素在其根视图（窗口或所在模态框）的范围内布局，位于该根视图的子元素之上，周围内容滚动时保持不动 |
 | `inset-<n>`、`inset-x-<n>`、`inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`、`right-<n>`、`bottom-<n>`、`left-<n>` | 对应的偏移 |
 | `start-<n>`、`end-<n>` | `start` / `end`（随书写方向） |
@@ -233,7 +235,7 @@ view()
 | `text-<color>` | `color` |
 | `leading-none`（1）、`leading-tight`（1.25）、`leading-snug`（1.375）、`leading-normal`（1.5）、`leading-relaxed`（1.625）、`leading-loose`（2） | `lineHeight`，字号的倍数 |
 | `leading-<n>`、`leading-[<length>]` | `lineHeight`，单位为点（`leading-6` = 24） |
-| `leading-[<number>]` | `lineHeight`，字号的倍数（`leading-[1.5]`；`em` 和 `%` 同理），`text-sm/[1.5]` 也是如此 |
+| `leading-[<number>]` | `lineHeight`，字号的倍数（`leading-[1.5]`），子元素继承该倍数；`em` 和 `%` 先按当前字号计算为长度，再继承该长度 |
 | `tracking-tighter`（-0.05em）、`tracking-tight`（-0.025em）、`tracking-normal`（0）、`tracking-wide`（0.025em）、`tracking-wider`（0.05em）、`tracking-widest`（0.1em） | 相对字号的 `letterSpacing` |
 | `tracking-[<value>]` | `letterSpacing`：`tracking-[0.2em]`、`tracking-[1px]` |
 
@@ -425,7 +427,7 @@ view()
 
 ## 不支持
 
-`peer-*` 变体、伪元素（`before:`、`after:`）、任意属性（`[prop:value]`）、`overflow-auto` / `overflow-scroll`、`divide-*`、`columns-*`、`float-*`、`container`、容器查询、`sticky`、`order-*`、`transform-3d`、`select-all`、`border-double` / `outline-double`、固有尺寸（`w-fit`、`h-min`、`max-w-max` 等）、`snap-*`、`scroll-*`、`overscroll-*`、`touch-*`、`isolate` 和 `box-content` 都是未知类。`nsh build` 和 `nsh dev` 会对源码中发现的未知类给出警告（`file:line:col: unknown class '...'`），运行时也会对每个未知类记录一次日志。
+`peer-*` 变体、伪元素（`before:`、`after:`）、任意属性（`[prop:value]`）、`overflow-auto` / `overflow-scroll`、`divide-*`、`columns-*`、`float-*`、`container`、容器查询、`sticky`、`order-*`、`transform-3d`、`select-all`、`border-double` / `outline-double`、固有最小/最大尺寸约束（如 `max-w-max`）、`snap-*`、`scroll-*`、`overscroll-*`、`touch-*` 和 `isolate` 都是未知类。`nsh build` 和 `nsh dev` 会对源码中发现的未知类给出警告（`file:line:col: unknown class '...'`），运行时也会对每个未知类记录一次日志。
 
 ## 变体
 

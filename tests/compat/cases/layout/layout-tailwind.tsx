@@ -33,6 +33,16 @@ function App() {
         <View testID="overlap-a" style={{ width: 50, height: 20 }} />
         <View testID="overlap-b" style={{ width: 50, height: 20 }} />
       </View>
+      <View testID="content-box" class="box-content w-[100px] h-[20px] p-[10px] border-[2px]" />
+      <View class="flex-row space-x-[20px]! w-[200px] h-[20px]">
+        <View class="w-[30px] h-[20px] mr-0" />
+        <View testID="important-space" class="w-[30px] h-[20px]" />
+      </View>
+      <View class="relative w-[200px] h-[80px] p-[20px]">
+        <View class="static w-[100px] h-[40px]">
+          <View testID="static-containing-block" class="absolute left-0 top-0 size-[10px]" />
+        </View>
+      </View>
       <View style={{ direction: "rtl" }}>
         <View testID="rtl-classes" class="flex-row w-[300px] h-[20px]">
           <View testID="rtl-ml" class="ml-[10px] w-[50px] h-[20px]" />

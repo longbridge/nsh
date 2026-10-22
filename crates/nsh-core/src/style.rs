@@ -748,6 +748,8 @@ pub struct TextStyle {
     pub line_height: Option<Points>,
     /// Block alignment (only meaningful on a text block).
     pub text_align: Option<TextAlign>,
+    /// Physical class alignment, preserved across direction changes in descendants.
+    pub text_align_physical: bool,
     /// Font family; `None` inherits (the system font at the root).
     pub font_family: Option<FontFamily>,
     /// Italic (`fontStyle`).
@@ -757,7 +759,10 @@ pub struct TextStyle {
     /// Extra space between characters in ems of this node's font size
     /// (`"0.05em"`); overrides `letter_spacing` when set after it.
     pub letter_spacing_em: Option<f32>,
-    /// Line height as a multiple of the font size (`"1.5"`, `"1.5em"`),
+    /// A line-height length relative to this node's font size (`em` or
+    /// a percentage), resolved before inheritance.
+    pub line_height_em: Option<f32>,
+    /// Line height as a multiple of the font size (`"1.5"`),
     /// inherited as a multiple.
     pub line_height_multiple: Option<f32>,
     /// Underline / strikethrough.
@@ -865,10 +870,7 @@ pub(crate) struct Pending {
     border_logical: [Option<Points>; 2],
     /// `borderStyle: "none"` / `"hidden"`: every used width is 0.
     border_hidden: bool,
-    /// `position: "static"`: laid out as `relative`, its insets ignored.
-    pub(crate) static_position: bool,
-    /// `position: "fixed"`: laid out in its root view's box (a view; other
-    /// elements as `absolute`).
+    /// `position: "fixed"`: laid out and mounted in its root view's box.
     pub(crate) fixed_position: bool,
     /// `animationDuration`.
     animation_duration: Option<f32>,
@@ -1146,20 +1148,21 @@ macro_rules! style_keys {
 }
 
 style_keys! {
-    Display = "display": Layout "\"flex\" | \"grid\" | \"block\" | \"none\"",
-    Position = "position": Layout "\"relative\" | \"absolute\" | \"static\" | \"fixed\"" "`static`: in the flow, its insets ignored (it stays the containing block of its absolute children, as every view is). `fixed`: a view laid out in its root view's box (the surface, or the modal it is in) and drawn above that root view's children, so it stays in place while what is around it scrolls; other elements are `absolute`.",
+    Display = "display": Layout "\"flex\" | \"grid\" | \"block\" | \"flow-root\" | \"none\"",
+    BoxSizing = "boxSizing": Layout "\"border-box\" | \"content-box\"" "The box that width and height include.",
+    Position = "position": Layout "\"relative\" | \"absolute\" | \"static\" | \"fixed\"" "`static` stays in flow and lets absolute descendants use the nearest positioned ancestor as their containing block. `fixed` lays an element out in its root view and mounts it above that root view's children.",
     FlexDirection = "flexDirection": Layout "\"row\" | \"column\" | \"row-reverse\" | \"column-reverse\"",
     FlexWrap = "flexWrap": Layout "\"wrap\" | \"nowrap\" | \"wrap-reverse\"",
     Flex = "flex": Layout "number",
     FlexGrow = "flexGrow": Layout "number",
     FlexShrink = "flexShrink": Layout "number",
-    FlexBasis = "flexBasis": Layout "DimensionValue",
+    FlexBasis = "flexBasis": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
     JustifyContent = "justifyContent": Layout "Exclude<Distribute, \"stretch\"> | \"stretch\"",
     AlignItems = "alignItems": Layout "Align",
     AlignSelf = "alignSelf": Layout "Align | \"auto\"",
     AlignContent = "alignContent": Layout "Distribute",
-    Width = "width": Layout "DimensionValue",
-    Height = "height": Layout "DimensionValue",
+    Width = "width": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
+    Height = "height": Layout "DimensionValue | \"min-content\" | \"max-content\" | \"fit-content\"",
     MinWidth = "minWidth": Layout "LengthValue",
     MinHeight = "minHeight": Layout "LengthValue",
     MaxWidth = "maxWidth": Layout "LengthValue",
@@ -1577,6 +1580,16 @@ impl Len {
     }
 }
 
+/// Intrinsic sizes are delegated to Taffy's sizing algorithms.
+fn dimension(value: StyleValue<'_>) -> Result<Dimension, StyleError> {
+    Ok(match value {
+        StyleValue::Str("min-content") => Dimension::min_content(),
+        StyleValue::Str("max-content") => Dimension::max_content(),
+        StyleValue::Str("fit-content") => Dimension::fit_content(),
+        value => Len::parse(value)?.dim(),
+    })
+}
+
 /// A zero-default length: `null` resets to 0 rather than `auto`.
 fn lp_or_zero(v: StyleValue<'_>) -> Result<LengthPercentage, StyleError> {
     match v {
@@ -1960,6 +1973,13 @@ impl Style {
         match key {
             StyleKey::BorderColor => self.view.borders.colors = [color; 4],
             StyleKey::OutlineColor => self.view.outline.color = color,
+            StyleKey::BackgroundColor => self.view.background_color = color,
+            StyleKey::BorderTopColor => self.view.borders.colors[0] = color,
+            StyleKey::BorderRightColor => self.view.borders.colors[1] = color,
+            StyleKey::BorderBottomColor => self.view.borders.colors[2] = color,
+            StyleKey::BorderLeftColor => self.view.borders.colors[3] = color,
+            StyleKey::BorderStartColor => self.logical.border_color[0] = Some(color),
+            StyleKey::BorderEndColor => self.logical.border_color[1] = Some(color),
             _ => debug_assert!(false, "set_color({key:?})"),
         }
     }
@@ -1982,21 +2002,28 @@ impl Style {
                     None | Some("flex") => Display::Flex,
                     Some("grid") => Display::Grid,
                     Some("block") => Display::Block,
+                    Some("flow-root") => Display::FlowRoot,
                     Some("none") => Display::None,
                     Some(_) => return Err(StyleError::InvalidValue),
                 }
             }
+            StyleKey::BoxSizing => {
+                l.box_sizing = match keyword(value)? {
+                    None | Some("border-box") => taffy::BoxSizing::BorderBox,
+                    Some("content-box") => taffy::BoxSizing::ContentBox,
+                    _ => return Err(StyleError::InvalidValue),
+                };
+            }
             StyleKey::Position => {
-                let (position, fixed, is_static) = match keyword(value)? {
-                    None | Some("relative") => (Position::Relative, false, false),
-                    Some("absolute") => (Position::Absolute, false, false),
-                    Some("fixed") => (Position::Absolute, true, false),
-                    Some("static") => (Position::Relative, false, true),
+                let (position, fixed) = match keyword(value)? {
+                    None | Some("relative") => (Position::Relative, false),
+                    Some("absolute") => (Position::Absolute, false),
+                    Some("fixed") => (Position::Fixed, true),
+                    Some("static") => (Position::Static, false),
                     Some(_) => return Err(StyleError::InvalidValue),
                 };
                 l.position = position;
                 self.pending.fixed_position = fixed;
-                self.pending.static_position = is_static;
             }
             StyleKey::FlexDirection => {
                 l.flex_direction = match keyword(value)? {
@@ -2034,7 +2061,7 @@ impl Style {
             }
             StyleKey::FlexGrow => l.flex_grow = number(value, 0.0)?,
             StyleKey::FlexShrink => l.flex_shrink = number(value, 0.0)?,
-            StyleKey::FlexBasis => l.flex_basis = Len::parse(value)?.dim(),
+            StyleKey::FlexBasis => l.flex_basis = dimension(value)?,
             StyleKey::JustifyContent => l.justify_content = align_content(value)?,
             StyleKey::AlignItems => {
                 l.align_items = align_items(value)?.unwrap_or(AlignItems::STRETCH)
@@ -2046,8 +2073,8 @@ impl Style {
                 }
             }
             StyleKey::AlignContent => l.align_content = align_content(value)?,
-            StyleKey::Width => l.size.width = Len::parse(value)?.dim(),
-            StyleKey::Height => l.size.height = Len::parse(value)?.dim(),
+            StyleKey::Width => l.size.width = dimension(value)?,
+            StyleKey::Height => l.size.height = dimension(value)?,
             StyleKey::MinWidth => l.min_size.width = min_len(value)?,
             StyleKey::MinHeight => l.min_size.height = min_len(value)?,
             StyleKey::MaxWidth => l.max_size.width = Len::parse(value)?.lpa(),
@@ -2238,24 +2265,37 @@ impl Style {
             StyleKey::LineHeight => {
                 // Numbers are points (React Native); strings may be a
                 // multiple of the font size (`"1.5"`, `"1.5em"`) or points.
-                let (points, multiple) = match value {
+                let (points, multiple, em) = match value {
                     StyleValue::Str(s)
                         if s.ends_with("px") || s.ends_with("pt") || s.ends_with("rem") =>
                     {
                         (
                             Some(px(css::length(s).ok_or(StyleError::InvalidValue)?)),
                             None,
+                            None,
                         )
                     }
-                    StyleValue::Str(s) => {
-                        let n = css::number(s.strip_suffix("em").unwrap_or(s))
-                            .ok_or(StyleError::InvalidValue)?;
-                        (None, Some(n.max(0.0)))
+                    StyleValue::Str(s) if s.ends_with('%') || s.ends_with("em") => {
+                        let n = if let Some(n) = s.strip_suffix('%') {
+                            css::number(n).map(|n| n / 100.0)
+                        } else {
+                            css::number(s.strip_suffix("em").unwrap())
+                        }
+                        .filter(|n| *n >= 0.0)
+                        .ok_or(StyleError::InvalidValue)?;
+                        (None, None, Some(n))
                     }
-                    v => (opt_points(v)?, None),
+                    StyleValue::Str(s) => {
+                        let n = css::number(s)
+                            .filter(|n| *n >= 0.0)
+                            .ok_or(StyleError::InvalidValue)?;
+                        (None, Some(n), None)
+                    }
+                    v => (opt_points(v)?, None, None),
                 };
                 self.text.line_height = points;
                 self.text.line_height_multiple = multiple;
+                self.text.line_height_em = em;
             }
             StyleKey::FontFamily => {
                 self.text.font_family = keyword(value)?.map(|name| FontFamily::new(name.trim()))
@@ -2339,6 +2379,7 @@ impl Style {
                 }
             }
             StyleKey::TextAlign => {
+                self.text.text_align_physical = false;
                 self.text.text_align = match keyword(value)? {
                     None => None,
                     Some("auto") => Some(TextAlign::Auto),

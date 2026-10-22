@@ -53,18 +53,18 @@
   that are props in React Native (`line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*`,
   `caret-*`) lose to explicit props; `placeholder:text-*` / `selection:bg-*` lose to the `placeholderColor` /
   `selectionColor` style keys. Not supported, so unknown: `peer-*`, pseudo-elements, arbitrary CSS properties, and every
-  utility without a native meaning (`sticky`, `order-*`, `transform-3d`, `select-all`, `border-double`, intrinsic sizes,
-  `snap-*`, `scroll-*`, `overscroll-*`, `touch-*`, `isolate`, `box-content`) or without CSS in Tailwind (a negative
+  utility without a native meaning (`sticky`, `order-*`, `transform-3d`, `select-all`, `border-double`, intrinsic min/max constraints,
+  `snap-*`, `scroll-*`, `overscroll-*`, `touch-*`, `isolate`) or without CSS in Tailwind (a negative
   where Tailwind has none: `-gap-4`, `-p-2`; fractions and `full` on padding, margin and gaps; non-integer `z-*`; bare
   `inset-shadow` without a theme value). Rendering hints are accepted and do nothing (`ignored` in
   `tailwind/mod.rs`: `antialiased`, `will-change-*`'s values, ...). `space-x/y-*` (and `-reverse`) are margins on each
   element child but the last, as Tailwind's `:where(& > :not(:last-child))`: the parent's `ClassProps::space`, which
   the core applies to a child's style before its classes and inline style (`classes.rs` `space_of`), so the child's
-  own margins win; an insert or removal restyles only the children whose last-ness changed (`spacing_changed`).
+  own margins win. An important space utility is applied after normal child styles and before the child's important classes; an insert or removal restyles only the children whose last-ness changed (`spacing_changed`).
 - **`ch`**: `w-/min-w-/max-w-prose` are Tailwind's `65ch`, the advance of the node's font's `0` (`Decl::Ch`; the core
   measures it with the text engine, cached per font, `Core::zero_advance`): the font it inherits, or its own once its
   classes set one. Such classes depend on `deps::CH`; a font change around them restyles them (`mark_inheriting_text`),
-  and the ones styled in a batch are checked again as the commit starts, with the tree in place (`sync_ch`). Without a
+  including text nodes and reparented subtrees; the ones styled in a batch are checked again as the commit starts, with the tree in place (`sync_ch`). Without a
   tree (`ClassList::apply`), `1ch` is 8 points. An app's theme `container.prose` (points) replaces it.
 - **`perspective-*`** (and the typed `.perspective()`) is CSS's `perspective`: depth for the children, seen from the
   view's center (`Style::perspective`). The core composes `translate(-d) perspective() translate(d)` before the
@@ -82,12 +82,17 @@
   (`TransitionProps`: colors, opacity, transform, shadows, shape), and filters, backdrop filters, gradients and layout
   take their new values at once; `focus-visible:` is `focus:` (the state bits, a `u8`, have none left for a focus's
   origin, which only the desktops and the web report).
-- **`position`**: `static` is taffy's `relative` with its insets set to `auto` after they are placed (`Pending`, so in any
-  order); every view stays a containing block for absolute children, a static one too (taffy places absolute children in
-  their parent). `fixed` (`fixed`, `position: "fixed"`) makes a `View` one of the core's overlays of no anchor (`overlay.rs`
-  `fix_view`: a layout root in a box the size of its root view, its native view in that root view above its children,
-  shown while the views around it are, as `Kind::Overlay`'s): at once while it is in no parent, else as the commit starts
-  (`sync_fixed`), and a view in its parent again when its style drops it. Other elements are laid out `absolute`.
+- **Layout values**: `box-content` / `box-border` select Taffy's content-box / border-box sizing. Width and
+  height accept `min-content`, `max-content` and `fit-content` (`w/h/size-min/max/fit`); min-content text measures
+  each Unicode line-breaking segment with the platform text engine and caches the widest one. `flow-root` uses
+  Taffy's flow-root display. Intrinsic min/max constraints remain unknown classes.
+- **`position`**: `static` uses Taffy's static positioning: it stays in flow, ignores insets and lets absolute
+  descendants use the nearest positioned ancestor. The core converts containing-block offsets to native-parent
+  coordinates. `fixed` retains the element's kind and uses Taffy's fixed positioning in a root-sized overlay wrapper
+  (`overlay.rs`, `sync_fixed`); its native view mounts in the surface or modal root and returns to its logical parent
+  when fixed positioning is removed.
+- **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
+  font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
 - **`pointer-events-*` classes** inherit as CSS's `pointer-events` (the `pointerEvents` prop keeps React Native's
   subtree meaning, and wins): a view that is `none` by its own class or the nearest one above mounts `box-none` when a
   `pointer-events-auto` inside it is a target, `none` at the top of what it blocks, and nothing below that

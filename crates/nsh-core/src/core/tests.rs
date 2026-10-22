@@ -14572,3 +14572,288 @@ fn list_cells_take_the_rounded_cross_size() {
         assert_eq!(frame_of(&batch, cell).unwrap().size.width, px(101.0));
     }
 }
+
+#[test]
+fn prose_respects_responsive_widths_and_inherited_font_updates() {
+    let mut c = Core::new(SizedEngine, size_pt(2000.0, 480.0));
+    for (id, tag, classes, parent) in [
+        (2, Tag::View, "text-[20px]", ROOT_ID),
+        (3, Tag::Text, "max-w-prose w-full h-[10px]", 2),
+        (
+            4,
+            Tag::View,
+            "text-[20px] max-w-prose md:max-w-[100px] w-full h-[10px]",
+            2,
+        ),
+        (5, Tag::View, "text-[10px]", ROOT_ID),
+    ] {
+        c.apply(Op::Create { id, tag }).unwrap();
+        c.apply(class_op(id, classes)).unwrap();
+        c.apply(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit().unwrap();
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(650.0));
+    assert_eq!(c.measure(4).unwrap().frame.size.width, px(100.0));
+    c.apply(class_op(2, "text-[10px]")).unwrap();
+    c.commit().unwrap();
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(325.0));
+    c.apply(class_op(2, "text-[20px]")).unwrap();
+    c.commit().unwrap();
+    c.apply(Op::Insert {
+        parent: 5,
+        child: 3,
+        before: None,
+    })
+    .unwrap();
+    c.commit().unwrap();
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(325.0));
+}
+
+#[test]
+fn space_important_margins_win_over_normal_child_styles() {
+    for (space, child, expected) in [
+        ("space-x-[20px]", "mr-0", 30.0),
+        ("space-x-[20px]!", "mr-0", 50.0),
+        ("space-x-[20px]!", "mr-0!", 30.0),
+    ] {
+        let mut c = core();
+        view_with_classes(
+            &mut c,
+            2,
+            &format!("flex flex-row w-[200px] h-[40px] {space}"),
+        );
+        for id in [3, 4] {
+            c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+            c.apply(class_op(
+                id,
+                &format!("w-[30px] h-[20px] {}", if id == 3 { child } else { "" }),
+            ))
+            .unwrap();
+            c.apply(Op::Insert {
+                parent: 2,
+                child: id,
+                before: None,
+            })
+            .unwrap();
+        }
+        c.commit().unwrap();
+        assert_eq!(
+            c.measure(4).unwrap().frame.origin.x,
+            px(expected),
+            "{space} {child}"
+        );
+    }
+}
+
+#[test]
+fn percentage_line_heights_inherit_as_computed_lengths() {
+    for (leading, expected) in [
+        ("leading-[150%]", 30.0),
+        ("leading-[1.5em]", 30.0),
+        ("leading-[1.5]", 15.0),
+    ] {
+        let mut c = core();
+        for (id, classes, parent) in [
+            (2, format!("text-[20px] {leading}"), ROOT_ID),
+            (3, "text-[10px]".to_owned(), 2),
+        ] {
+            c.apply(Op::Create { id, tag: Tag::Text }).unwrap();
+            c.apply(class_op(id, &classes)).unwrap();
+            c.apply(Op::Insert {
+                parent,
+                child: id,
+                before: None,
+            })
+            .unwrap();
+        }
+        c.apply(Op::CreateText {
+            id: 4,
+            text: "small".to_owned(),
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: 3,
+            child: 4,
+            before: None,
+        })
+        .unwrap();
+        let batch = c.commit().unwrap();
+        let text = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id: 2, text, .. } => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.spans[0].style.line_height, px(expected), "{leading}");
+    }
+}
+
+#[test]
+fn static_boxes_use_taffys_containing_block() {
+    let mut c = core();
+    for (id, classes, parent) in [
+        (2, "relative w-[300px] h-[300px] p-[40px]", ROOT_ID),
+        (3, "static w-[200px] h-[100px]", 2),
+        (4, "absolute top-0 left-0 size-[10px]", 3),
+    ] {
+        c.apply(Op::Create { id, tag: Tag::View }).unwrap();
+        c.apply(class_op(id, classes)).unwrap();
+        c.apply(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        })
+        .unwrap();
+    }
+    c.commit().unwrap();
+    assert_eq!(c.measure(4).unwrap().page, point(px(0.0), px(0.0)));
+    assert_eq!(
+        c.measure(4).unwrap().frame.origin,
+        point(px(-40.0), px(-40.0))
+    );
+    c.apply(class_op(3, "relative w-[200px] h-[100px]"))
+        .unwrap();
+    c.commit().unwrap();
+    assert_eq!(c.measure(4).unwrap().page, point(px(40.0), px(40.0)));
+}
+
+#[test]
+fn fixed_elements_keep_their_kind_and_mount_in_the_root() {
+    for tag in [Tag::View, Tag::Text, Tag::Image, Tag::Input, Tag::Scroll] {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "p-[40px] h-[200px]");
+        c.apply(Op::Create { id: 3, tag }).unwrap();
+        c.apply(class_op(3, "fixed top-0 left-0 w-[80px] h-[20px]"))
+            .unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        })
+        .unwrap();
+        let batch = c.commit().unwrap();
+        assert!(inserts(&batch).contains(&(ROOT_ID, 3, None)), "{tag:?}");
+        assert_eq!(
+            c.measure(3).unwrap().page,
+            point(px(0.0), px(0.0)),
+            "{tag:?}"
+        );
+        assert_eq!(c.nodes[c.key(3).unwrap() as usize].kind, Kind::of(tag));
+        c.apply(class_op(3, "relative w-[80px] h-[20px]")).unwrap();
+        c.commit().unwrap();
+        assert_eq!(
+            c.measure(3).unwrap().page,
+            point(px(40.0), px(40.0)),
+            "{tag:?}"
+        );
+    }
+}
+
+#[test]
+fn intrinsic_sizes_and_content_boxes_are_computed_by_taffy() {
+    let mut c = core();
+    for (id, classes) in [
+        (2, "box-content w-[100px] h-[20px] p-[10px] border-2"),
+        (3, "box-border w-[100px] h-[20px] p-[10px] border-2"),
+    ] {
+        view_with_classes(&mut c, id, classes);
+    }
+    c.commit().unwrap();
+    assert_eq!(c.measure(2).unwrap().frame.size, size_pt(124.0, 44.0));
+    assert_eq!(c.measure(3).unwrap().frame.size.width, px(100.0));
+
+    for (classes, expected) in [("w-min", 48.0), ("w-max", 72.0), ("w-fit", 72.0)] {
+        let mut c = core();
+        c.apply(Op::Create {
+            id: 2,
+            tag: Tag::Text,
+        })
+        .unwrap();
+        c.apply(class_op(2, classes)).unwrap();
+        c.apply(Op::CreateText {
+            id: 3,
+            text: "longer hi".into(),
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: 2,
+            child: 3,
+            before: None,
+        })
+        .unwrap();
+        c.apply(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        })
+        .unwrap();
+        c.commit().unwrap();
+        assert_eq!(
+            c.measure(2).unwrap().frame.size.width,
+            px(expected),
+            "{classes}"
+        );
+    }
+}
+
+#[test]
+fn physical_text_alignment_survives_a_descendants_direction_change() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "text-left");
+    c.apply(Op::Create {
+        id: 3,
+        tag: Tag::Text,
+    })
+    .unwrap();
+    c.apply(style_op(3, &[("direction", StyleValue::Str("rtl"))]))
+        .unwrap();
+    c.apply(Op::CreateText {
+        id: 4,
+        text: "aligned".into(),
+    })
+    .unwrap();
+    c.apply(Op::Insert {
+        parent: 3,
+        child: 4,
+        before: None,
+    })
+    .unwrap();
+    c.apply(Op::Insert {
+        parent: 2,
+        child: 3,
+        before: None,
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    let align = batch.items.iter().find_map(|i| match i {
+        MountItem::Text { id: 3, text, .. } => Some(text.align),
+        _ => None,
+    });
+    assert_eq!(align, Some(TextAlign::Left));
+}
+
+#[test]
+fn a_fixed_text_span_can_return_to_its_inline_parent() {
+    let mut c = core();
+    add(&mut c, 2, Tag::Text, ROOT_ID, &[]);
+    add(&mut c, 3, Tag::Text, 2, &[]);
+    c.commit();
+    assert!(c.nodes[c.key(3).unwrap() as usize].inline);
+    c.apply(class_op(3, "fixed top-0 left-0 w-[40px] h-[20px]"))
+        .unwrap();
+    let batch = c.commit().unwrap();
+    assert!(inserts(&batch).contains(&(ROOT_ID, 3, None)));
+    assert_eq!(c.measure(3).unwrap().page, point(px(0.0), px(0.0)));
+    c.apply(class_op(3, "relative")).unwrap();
+    c.commit();
+    let node = &c.nodes[c.key(3).unwrap() as usize];
+    assert!(node.inline);
+    assert!(node.layout.is_none());
+}

@@ -91,8 +91,9 @@ Layout is computed in Rust (flexbox and CSS grid). The defaults differ from CSS'
 
 | Key | Type | Rust | Description |
 |---|---|---|---|
-| `display` | `"flex" \| "grid" \| "block" \| "none"` | `.flex()`, `.grid()`, `.hidden()` | The layout of the children. `"none"` removes the element from layout and hides it. `"block"` stacks children as CSS block layout does. Default `"flex"`. |
-| `position` | `"relative" \| "absolute" \| "static" \| "fixed"` | `.relative()`, `.absolute()` | `"absolute"` takes the element out of the flow and places it by `top` / `right` / `bottom` / `left` relative to its parent. `"static"` stays in the flow and ignores its insets. `"fixed"` lays a view out in its root view's box (the window, or the modal it is in) and draws it above that root view's children, so it stays in place while what is around it scrolls; without insets it sits at the root view's top left, and other elements are placed as `"absolute"`. Every view is the containing block of its absolute children, whatever its own `position`. Default `"relative"`. |
+| `display` | `"flex" \| "grid" \| "block" \| "flow-root" \| "none"` | `.flex()`, `.grid()`, `.hidden()` | The layout of the children. `"none"` removes the element from layout and hides it. `"block"` stacks children as CSS block layout does. Default `"flex"`. |
+| `boxSizing` | `"border-box" \| "content-box"` | | Dimensions include borders and padding, or content alone. Default `"border-box"`. |
+| `position` | `"relative" \| "absolute" \| "static" \| "fixed"` | `.relative()`, `.absolute()` | `"static"` stays in flow and ignores insets; absolute descendants use their nearest positioned ancestor. `"fixed"` preserves the element type and lays out and mounts it in its surface or modal root, keeping it in place while surrounding content scrolls. Default `"relative"`. |
 | `top` | `DimensionValue` | `.top(…)`, `.inset(…)` | Offset from the parent's top edge (absolute) or from the element's own position (relative). |
 | `right` | `DimensionValue` | `.right(…)` | Offset from the right edge. In right-to-left layouts it means the end edge. |
 | `bottom` | `DimensionValue` | `.bottom(…)` | Offset from the bottom edge. |
@@ -477,3 +478,5 @@ Some settings are props in NSH, not style keys. Their Tailwind classes exist, bu
 - [Tailwind reference](./tailwind-reference.md): every supported utility and variant.
 - [Layout](../docs/layout.md): flexbox and grid in practice.
 - [view](../elements/view.md), [text](../elements/text.md), [image](../elements/image.md): the elements these styles apply to.
+
+`width`, `height` and `flexBasis` also accept `"min-content"`, `"max-content"` and `"fit-content"`, computed by Taffy.

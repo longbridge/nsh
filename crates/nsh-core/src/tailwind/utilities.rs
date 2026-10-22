@@ -150,6 +150,10 @@ pub(crate) enum Decl {
     /// [`Decl::Default`] is (a border width's color): the node's text
     /// color, its own or the one it inherits.
     CurrentColor(StyleKey),
+    /// An explicit currentColor declaration, in normal cascade order.
+    SetCurrentColor(StyleKey),
+    /// Explicit ring color in currentColor (`true`: inset ring).
+    RingCurrent(bool),
     /// A length in CSS's `ch` (the advance of the font's `0`):
     /// `max-w-prose`, `65ch`.
     Ch(StyleKey, f32),
@@ -213,17 +217,41 @@ impl Decl {
         &self,
         dark: bool,
         rtl: bool,
+        important: bool,
         style: &mut Style,
         props: &mut ClassProps,
         parts: &mut Parts,
     ) {
         match self {
             Decl::Set(key, value) => {
-                let (key, value) = directed(*key, value, rtl);
-                let _ = style.set_key(key, value.as_value());
+                if *key == K::TextAlign {
+                    let _ = style.set_key(*key, value.as_value());
+                    style.text.text_align_physical = matches!(
+                        style.text.text_align,
+                        Some(crate::style::TextAlign::Left | crate::style::TextAlign::Right)
+                    );
+                } else {
+                    let (key, value) = directed(*key, value, rtl);
+                    let _ = style.set_key(key, value.as_value());
+                }
             }
             // Applied by `ClassList::apply` before the rules.
             Decl::Default(..) | Decl::CurrentColor(_) => {}
+            Decl::SetCurrentColor(key) => {
+                let key = if rtl {
+                    mirrored(*key).unwrap_or(*key)
+                } else {
+                    *key
+                };
+                style.set_color(key, parts.current);
+            }
+            Decl::RingCurrent(inset) => {
+                parts.push(if *inset {
+                    Part::InsetRingColor(parts.current)
+                } else {
+                    Part::RingColor(parts.current)
+                });
+            }
             Decl::Style(decl) => {
                 let _ = decl.apply(style);
             }
@@ -240,8 +268,10 @@ impl Decl {
                     let space = props.space.get_or_insert_default();
                     if *y {
                         space.y = Some(v.clone());
+                        space.important_y = important;
                     } else {
                         space.x = Some(v.clone());
+                        space.important_x = important;
                     }
                 }
                 PropDecl::SpaceReverse(y) => {
@@ -258,8 +288,7 @@ impl Decl {
                 parts.touched |= touched::SCREEN;
             }
             Decl::Ch(key, n) => {
-                parts.lengths_ch.push((*key, *n));
-                parts.touched |= touched::CH;
+                let _ = style.set_key(*key, crate::style::StyleValue::Number(n * parts.ch));
             }
             Decl::Adaptive(key, values) => {
                 let (key, value) = directed(*key, &values[usize::from(dark)], rtl);
@@ -348,8 +377,16 @@ impl Decl {
             }
             Decl::AdaptivePart(_) => deps::DARK,
             Decl::Set(key, value) | Decl::Default(key, value) if sided(*key, value) => deps::RTL,
-            Decl::CurrentColor(_) | Decl::Part(Part::Ring(_) | Part::InsetRing(_)) => {
+            Decl::CurrentColor(_)
+            | Decl::RingCurrent(_)
+            | Decl::Part(Part::Ring(_) | Part::InsetRing(_)) => deps::CURRENT_COLOR,
+            Decl::SetCurrentColor(key) => {
                 deps::CURRENT_COLOR
+                    | if mirrored(*key).is_some() {
+                        deps::RTL
+                    } else {
+                        0
+                    }
             }
             Decl::Ch(..) => deps::CH,
             _ => 0,
@@ -369,7 +406,6 @@ pub(crate) mod touched {
     pub(crate) const TRANSITION: u16 = 128;
     pub(crate) const ANIMATE: u16 = 256;
     pub(crate) const TEXT_SHADOW: u16 = 512;
-    pub(crate) const CH: u16 = 1024;
     pub(crate) const ALL: u16 = u16::MAX;
 }
 
@@ -424,8 +460,7 @@ pub(crate) struct Parts {
     pub(crate) screen: Vec<(StyleKey, f32, f32)>,
     /// CSS's `currentColor`: the ring's color when no class sets one.
     pub(crate) current: Color,
-    /// Lengths in `ch`, and what one is.
-    pub(crate) lengths_ch: Vec<(StyleKey, f32)>,
+    /// The advance of the node font's `0`.
     pub(crate) ch: f32,
 }
 
@@ -560,9 +595,6 @@ impl Parts {
         only: u16,
     ) {
         let has = |group: u16| only & group != 0;
-        for &(key, n) in self.lengths_ch.iter().filter(|_| has(touched::CH)) {
-            let _ = style.set_key(key, crate::style::StyleValue::Number(n * self.ch));
-        }
         for &(key, fw, fh) in self.screen.iter().filter(|_| has(touched::SCREEN)) {
             let _ = style.set_key(
                 key,
@@ -819,6 +851,17 @@ fn fraction(v: &str) -> Option<f32> {
     (b > 0.0).then(|| a / b)
 }
 
+fn class_length(theme: &Theme, value: &str) -> Option<f32> {
+    let value = value.trim();
+    if css::number(value).is_some_and(|n| n != 0.0) {
+        return None;
+    }
+    if let Some(n) = value.strip_suffix("rem") {
+        return css::number(n).map(|n| n * theme.rem);
+    }
+    css::length(value)
+}
+
 /// A length value of a spacing-like utility: steps, `px`, fractions,
 /// `full`, `auto` (when allowed), or arbitrary lengths / percentages.
 fn length_value(theme: &Theme, v: &str, neg: bool, auto: bool) -> Option<PatchValue> {
@@ -838,7 +881,12 @@ fn length_value(theme: &Theme, v: &str, neg: bool, auto: bool) -> Option<PatchVa
         v => {
             let a = arbitrary(v)?;
             let a = arbitrary_hinted(&a, "length").unwrap_or(&a).to_string();
-            match css::length_or_percent(&a)? {
+            let length = if let Some(percent) = a.strip_suffix('%') {
+                crate::geometry::percentage(css::number(percent)? / 100.0).into()
+            } else {
+                px(class_length(theme, &a)?).into()
+            };
+            match length {
                 DefiniteLength::Absolute(l) => PatchValue::Number(sign * l.to_points(REM_SIZE).0),
                 DefiniteLength::Fraction(f) => {
                     PatchValue::Str(format!("{}%", sign * f.0 * 100.0).into())
@@ -940,8 +988,8 @@ fn part(p: Part) -> Option<Vec<Decl>> {
 /// An angle in degrees: a number (`45`) or arbitrary (`[0.5turn]`).
 fn degrees(v: &str) -> Option<f32> {
     match arbitrary(v) {
-        Some(a) => css::angle(&a).or_else(|| css::number(&a)),
-        None => num(v),
+        Some(a) => css::angle(&a),
+        None => num(v).filter(|n| n.fract() == 0.0),
     }
 }
 
@@ -970,10 +1018,24 @@ fn percent_factor(v: &str) -> Option<f32> {
     }
 }
 
+fn scale_factor(v: &str) -> Option<f32> {
+    if v.starts_with('[') {
+        percent_factor(v)
+    } else {
+        num(v).filter(|n| n.fract() == 0.0).map(|n| n / 100.0)
+    }
+}
+
 // --- Utilities --------------------------------------------------------------
 
 /// Parses one utility.
 pub(crate) fn parse(theme: &Theme, utility: &str) -> Option<Vec<Decl>> {
+    if theme.rem != REM_SIZE.0 && utility.contains('[') && utility.contains("rem") {
+        let normalized = rem_lengths(utility, theme.rem);
+        if normalized != utility {
+            return parse(theme, &normalized);
+        }
+    }
     if let Some(d) = keyword(utility) {
         return Some(d);
     }
@@ -998,6 +1060,57 @@ pub(crate) fn parse(theme: &Theme, utility: &str) -> Option<Vec<Decl>> {
     bare(theme, u, neg)
 }
 
+/// Normalize arbitrary CSS lengths before shared CSS parsers consume them.
+/// Quoted font names and strings retain their literal contents.
+fn rem_lengths(value: &str, rem: f32) -> String {
+    let bytes = value.as_bytes();
+    let mut out = String::with_capacity(value.len());
+    let mut at = 0;
+    let mut copied = 0;
+    let mut quote = None;
+    while at < bytes.len() {
+        let ch = bytes[at];
+        if ch == b'\\' {
+            at = (at + 2).min(bytes.len());
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            at += 1;
+            continue;
+        }
+        if ch == b'\'' || ch == b'"' {
+            quote = Some(ch);
+            at += 1;
+            continue;
+        }
+        if ch.is_ascii_digit() || ch == b'.' {
+            let start = at;
+            while at < bytes.len()
+                && (bytes[at].is_ascii_digit()
+                    || matches!(bytes[at], b'.' | b'e' | b'E' | b'+' | b'-'))
+            {
+                at += 1;
+            }
+            if value[at..].starts_with("rem")
+                && !bytes.get(at + 3).is_some_and(u8::is_ascii_alphabetic)
+                && let Some(n) = css::number(&value[start..at])
+            {
+                out.push_str(&value[copied..start]);
+                out.push_str(&format!("{}px", n * rem));
+                at += 3;
+                copied = at;
+            }
+        } else {
+            at += 1;
+        }
+    }
+    out.push_str(&value[copied..]);
+    out
+}
+
 type Handler = fn(&Theme, &str, bool) -> Option<Vec<Decl>>;
 
 /// The prefixes Tailwind CSS has a negative form of (`-mt-2`); a leading
@@ -1014,6 +1127,8 @@ static NEGATIVE: &[&str] = &[
     "m",
     "space-x",
     "space-y",
+    "inset-s",
+    "inset-e",
     "inset-x",
     "inset-y",
     "inset",
@@ -1070,7 +1185,10 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         // block is, a browser blockifies inline boxes: `inline` and
         // `inline-block` compute to `block` there. (Inside a block there is
         // no inline formatting context: they are blocks too.)
-        "block" | "flow-root" | "inline-block" | "inline" => sets(K::Display, "block"),
+        "block" | "inline-block" | "inline" => sets(K::Display, "block"),
+        "flow-root" => sets(K::Display, "flow-root"),
+        "box-content" => sets(K::BoxSizing, "content-box"),
+        "box-border" => sets(K::BoxSizing, "border-box"),
         "grid" | "inline-grid" => sets(K::Display, "grid"),
         "hidden" => sets(K::Display, "none"),
         "static" => sets(K::Position, "static"),
@@ -1343,6 +1461,11 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
             clear: FontVariant::TABULAR_NUMS,
         }),
         // Backgrounds.
+        "bg-current" => Decl::SetCurrentColor(K::BackgroundColor),
+        "outline-current" => Decl::SetCurrentColor(K::OutlineColor),
+        "ring-current" => Decl::RingCurrent(false),
+        "inset-ring-current" => Decl::RingCurrent(true),
+        "text-inherit" | "text-current" => Decl::Set(K::Color, PatchValue::Null),
         "bg-none" => Decl::Part(Part::GradientNone),
         "bg-linear-to-t" | "bg-gradient-to-t" => {
             Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(0.0) }))
@@ -1620,6 +1743,12 @@ static PREFIXES: &[(&str, Handler)] = &[
     }),
     ("left", |t, v, n| {
         one(set(K::Left, length_value(t, v, n, true)?))
+    }),
+    ("inset-s", |t, v, n| {
+        one(set(K::Start, length_value(t, v, n, true)?))
+    }),
+    ("inset-e", |t, v, n| {
+        one(set(K::End, length_value(t, v, n, true)?))
     }),
     ("start", |t, v, n| {
         one(set(K::Start, length_value(t, v, n, true)?))
@@ -1979,19 +2108,19 @@ static PREFIXES: &[(&str, Handler)] = &[
         Some(outline_width(points(t, v)?))
     }),
     ("inset-ring", |t, v, _| {
-        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| css::length(&a))) {
+        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
             return part(Part::InsetRing(n));
         }
         part(Part::InsetRingColor(color(t, v)?))
     }),
     ("ring-offset", |t, v, _| {
-        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| css::length(&a))) {
+        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
             return part(Part::RingOffset(n));
         }
         part(Part::RingOffsetColor(color(t, v)?))
     }),
     ("ring", |t, v, _| {
-        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| css::length(&a))) {
+        if let Some(n) = num(v).or_else(|| arbitrary(v).and_then(|a| class_length(t, &a))) {
             return part(Part::Ring(n));
         }
         part(Part::RingColor(color(t, v)?))
@@ -2122,13 +2251,13 @@ static PREFIXES: &[(&str, Handler)] = &[
         part(Part::Rotate(signed(degrees(v)?, n)))
     }),
     ("scale-x", |_, v, n| {
-        part(Part::ScaleX(signed(percent_factor(v)?, n)))
+        part(Part::ScaleX(signed(scale_factor(v)?, n)))
     }),
     ("scale-y", |_, v, n| {
-        part(Part::ScaleY(signed(percent_factor(v)?, n)))
+        part(Part::ScaleY(signed(scale_factor(v)?, n)))
     }),
     ("scale", |_, v, n| {
-        let s = signed(percent_factor(v)?, n);
+        let s = signed(scale_factor(v)?, n);
         Some(vec![
             Decl::Part(Part::ScaleX(s)),
             Decl::Part(Part::ScaleY(s)),
@@ -2147,7 +2276,7 @@ static PREFIXES: &[(&str, Handler)] = &[
     ("perspective", |t, v, _| {
         let p = match t.perspective.get(v) {
             Some(p) => *p,
-            None => css::length(&arbitrary(v)?)?,
+            None => class_length(t, &arbitrary(v)?)?,
         };
         part(Part::Perspective(p))
     }),
@@ -2323,6 +2452,17 @@ fn stop_position(v: &str) -> Option<f32> {
 }
 
 fn size(theme: &Theme, v: &str, key: StyleKey, width: bool) -> Option<Vec<Decl>> {
+    if matches!(key, K::Width | K::Height) {
+        let intrinsic = match v {
+            "fit" => Some("fit-content"),
+            "min" => Some("min-content"),
+            "max" => Some("max-content"),
+            _ => None,
+        };
+        if let Some(value) = intrinsic {
+            return one(sets(key, value));
+        }
+    }
     // Window-relative: `w-screen`, `h-dvh`, `min-h-svh`...
     let screen = match v {
         "screen" | "dvw" | "svw" | "lvw" if width => Some((1.0, 0.0)),
@@ -2354,20 +2494,28 @@ fn radius(theme: &Theme, v: &str, keys: &[StyleKey]) -> Option<Vec<Decl>> {
         "full" => 9999.0,
         v => match theme.radius.get(v) {
             Some(r) => *r,
-            None => css::length(&arbitrary(v)?)?,
+            None => class_length(theme, &arbitrary(v)?)?,
         },
     };
     Some(keys.iter().map(|k| setn(*k, r)).collect())
 }
 
 fn border(theme: &Theme, v: &str, widths: &[StyleKey], colors: &[StyleKey]) -> Option<Vec<Decl>> {
+    if v == "current" {
+        return Some(
+            colors
+                .iter()
+                .map(|&key| Decl::SetCurrentColor(key))
+                .collect(),
+        );
+    }
     if let Some(n) = num(v) {
         return Some(border_widths(widths, n));
     }
     if let Some(a) = arbitrary(v)
         && let Some(w) = arbitrary_hinted(&a, "length")
-            .and_then(css::length)
-            .or_else(|| css::length(&a))
+            .and_then(|s| class_length(theme, s))
+            .or_else(|| class_length(theme, &a))
     {
         return Some(border_widths(widths, w));
     }
@@ -2388,7 +2536,7 @@ fn blur(theme: &Theme, v: &str, backdrop: bool) -> Option<Vec<Decl>> {
         "none" => 0.0,
         v => match theme.blur.get(v) {
             Some(r) => *r,
-            None => css::length(&arbitrary(v)?)?,
+            None => class_length(theme, &arbitrary(v)?)?,
         },
     };
     one(filter(backdrop, 0, Filter::Blur(px(r))))
@@ -2441,13 +2589,13 @@ fn text(theme: &Theme, v: &str, _neg: bool) -> Option<Vec<Decl>> {
     }
     if base.starts_with('[') {
         let a = arbitrary(base)?;
-        if let Some(l) = arbitrary_hinted(&a, "length").and_then(css::length) {
+        if let Some(l) = arbitrary_hinted(&a, "length").and_then(|s| class_length(theme, s)) {
             return one(setn(K::FontSize, l));
         }
         if let Some(c) = arbitrary_hinted(&a, "color").and_then(css::color) {
             return one(set(K::Color, color_str(c)));
         }
-        if let Some(l) = css::length(&a) {
+        if let Some(l) = class_length(theme, &a) {
             let mut out = vec![setn(K::FontSize, l)];
             if line.is_some() {
                 out.push(line_height()?);
@@ -2468,10 +2616,10 @@ fn line_height(theme: &Theme, v: &str) -> Option<Decl> {
     }
     if let Some(a) = arbitrary(v) {
         let a = a.trim();
-        let multiple = match a.strip_suffix('%') {
-            Some(p) => css::number(p).map(|p| p / 100.0),
-            None => css::number(a.strip_suffix("em").unwrap_or(a)),
-        };
+        if a.ends_with('%') || a.ends_with("em") && !a.ends_with("rem") {
+            return Some(sets(K::LineHeight, a));
+        }
+        let multiple = css::number(a);
         if let Some(m) = multiple.filter(|m| *m >= 0.0) {
             return Some(sets(K::LineHeight, &m.to_string()));
         }

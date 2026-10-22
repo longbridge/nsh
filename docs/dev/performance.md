@@ -230,3 +230,8 @@ draw a panel.
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
 The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.
+
+- Tailwind containing blocks, font-relative lengths and intrinsic text sizes (PR #323 follow-up, Linux,
+  debug counter trace against `70254f80`): first commit 656 → 674µs, press commit 313 → 312µs;
+  both runs produce 56 ops / 49 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes
+  after `+1`. Single runs establish unchanged work counts; timings are a smoke check, not a benchmark.

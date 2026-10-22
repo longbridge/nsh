@@ -12,6 +12,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+unicode-linebreak.workspace = true
 rustc-hash.workspace = true
 slab.workspace = true
 taffy.workspace = true

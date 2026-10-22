@@ -91,8 +91,9 @@ card().style_when(selected, |s| s.border_color(rgb(0x2563eb)).border(px(2.0)))
 
 | 键 | 类型 | Rust | 说明 |
 |---|---|---|---|
-| `display` | `"flex" \| "grid" \| "block" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
-| `position` | `"relative" \| "absolute" \| "static" \| "fixed"` | `.relative()`、`.absolute()` | `"absolute"` 使元素脱离文档流，按 `top` / `right` / `bottom` / `left` 相对父元素定位。`"static"` 留在文档流中并忽略其偏移。`"fixed"` 让视图在其根视图（窗口或所在的模态框）的范围内布局，并绘制在该根视图的子元素之上，因此周围内容滚动时它保持不动；没有偏移时位于根视图左上角，其他元素按 `"absolute"` 定位。无论自身的 `position` 是什么，每个视图都是其绝对定位子元素的包含块。默认 `"relative"`。 |
+| `display` | `"flex" \| "grid" \| "block" \| "flow-root" \| "none"` | `.flex()`、`.grid()`、`.hidden()` | 子元素的布局方式。`"none"` 将元素移出布局并隐藏。`"block"` 按 CSS 块级布局堆叠子元素。默认 `"flex"`。 |
+| `boxSizing` | `"border-box" \| "content-box"` | | 尺寸包含边框和内边距，或仅包含内容。默认 `"border-box"`。 |
+| `position` | `"relative" \| "absolute" \| "static" \| "fixed"` | `.relative()`, `.absolute()` | `"static"` 留在文档流中并忽略偏移，绝对定位后代使用最近的非 static 祖先作为包含块。`"fixed"` 保留元素类型，在窗口或模态框根视图中布局和挂载，周围内容滚动时保持不动。默认 `"relative"`。 |
 | `top` | `DimensionValue` | `.top(…)`、`.inset(…)` | 距父元素上边（绝对定位），或相对自身位置的偏移（相对定位）。 |
 | `right` | `DimensionValue` | `.right(…)` | 距右边的偏移。从右到左布局中表示结束边。 |
 | `bottom` | `DimensionValue` | `.bottom(…)` | 距下边的偏移。 |
@@ -477,3 +478,5 @@ view()
 - [Tailwind 参考](./tailwind-reference.md)：支持的全部工具类和变体。
 - [布局](../docs/layout.md)：flexbox 和网格的实际用法。
 - [view](../elements/view.md)、[text](../elements/text.md)、[image](../elements/image.md)：这些样式所作用的元素。
+
+`width`、`height` 和 `flexBasis` 也接受 `"min-content"`、`"max-content"` 和 `"fit-content"`，由 Taffy 计算。

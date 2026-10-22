@@ -402,27 +402,47 @@ pub struct Space {
     pub reverse_x: bool,
     /// `space-y-reverse`.
     pub reverse_y: bool,
+    /// The horizontal margins override normal child declarations.
+    pub important_x: bool,
+    /// The vertical margins override normal child declarations.
+    pub important_y: bool,
 }
 
 impl Space {
     /// The margins of a child: React Native's `marginRight` is the end
     /// side in either direction, `marginLeft` the start side.
-    pub(crate) fn apply(&self, style: &mut Style) {
+    pub(crate) fn apply(&self, style: &mut Style, important: bool) {
         use crate::style::StyleKey as K;
-        if let Some(v) = &self.x {
+        if let Some(v) = &self.x
+            && self.important_x == important
+        {
             let key = if self.reverse_x {
                 K::MarginLeft
             } else {
                 K::MarginRight
             };
+            let other = if self.reverse_x {
+                K::MarginRight
+            } else {
+                K::MarginLeft
+            };
+            let _ = style.set_key(other, crate::style::StyleValue::Number(0.0));
             let _ = style.set_key(key, v.as_value());
         }
-        if let Some(v) = &self.y {
+        if let Some(v) = &self.y
+            && self.important_y == important
+        {
             let key = if self.reverse_y {
                 K::MarginTop
             } else {
                 K::MarginBottom
             };
+            let other = if self.reverse_y {
+                K::MarginBottom
+            } else {
+                K::MarginTop
+            };
+            let _ = style.set_key(other, crate::style::StyleValue::Number(0.0));
             let _ = style.set_key(key, v.as_value());
         }
     }
@@ -546,7 +566,14 @@ impl ClassList {
             }
             important |= rule.important;
             for decl in &rule.decls {
-                decl.apply(cx.env.dark, cx.rtl, style, props, &mut parts);
+                decl.apply(
+                    cx.env.dark,
+                    cx.rtl,
+                    rule.important,
+                    style,
+                    props,
+                    &mut parts,
+                );
             }
             let background = rule.decls.iter().any(Decl::sets_background_color);
             if rule.cond.interactive() {
@@ -590,7 +617,14 @@ impl ClassList {
             {
                 if rule.cond.matches(cx) {
                     for decl in &rule.decls {
-                        decl.apply(cx.env.dark, cx.rtl, style, props, &mut parts);
+                        decl.apply(
+                            cx.env.dark,
+                            cx.rtl,
+                            rule.important,
+                            style,
+                            props,
+                            &mut parts,
+                        );
                     }
                 }
             }
@@ -845,7 +879,6 @@ fn ignored(utility: &str) -> bool {
         utility,
         "antialiased"
             | "subpixel-antialiased"
-            | "box-border"
             | "isolation-auto"
             | "appearance-none"
             | "appearance-auto"

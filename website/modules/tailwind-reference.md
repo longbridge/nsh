@@ -111,12 +111,14 @@ Arbitrary CSS properties (`[mask-type:luminance]`) are not supported.
 |---|---|
 | `flex`, `inline-flex` | `display: "flex"`, and a row unless a direction utility is present |
 | `grid`, `inline-grid` | `display: "grid"` |
-| `block`, `flow-root` | `display: "block"` (block layout) |
+| `block`, `flow-root` | block layout or an independent block formatting context |
+| `box-border`, `box-content` | dimensions include borders and padding, or content alone |
+| `w/h/size-min`, `w/h/size-max`, `w/h/size-fit` | Taffy intrinsic sizes: `min-content`, `max-content`, `fit-content` |
 | `inline`, `inline-block` | `display: "block"`: what a browser computes for them in a flex or grid parent |
 | `hidden` | `display: "none"` |
 | `relative`, `absolute` | `position` |
-| `static` | `position: "static"`: in the flow, its insets ignored (still the containing block of its absolute children, as every view is) |
-| `fixed` | `position: "fixed"`: a view laid out in its root view's box (the window or its modal) above that root view's children, in place while what is around it scrolls |
+| `static` | `position: "static"`: in the flow, its insets ignored ; absolute descendants use their nearest positioned ancestor |
+| `fixed` | `position: "fixed"`: an element laid out in its root view's box (the window or its modal) above that root view's children, in place while what is around it scrolls |
 | `inset-<n>`, `inset-x-<n>`, `inset-y-<n>` | `top` / `right` / `bottom` / `left` |
 | `top-<n>`, `right-<n>`, `bottom-<n>`, `left-<n>` | the matching offset |
 | `start-<n>`, `end-<n>` | `start` / `end` (direction-aware) |
@@ -233,7 +235,7 @@ Container widths (points): `3xs` 256, `2xs` 288, `xs` 320, `sm` 384, `md` 448, `
 | `text-<color>` | `color` |
 | `leading-none` (1), `leading-tight` (1.25), `leading-snug` (1.375), `leading-normal` (1.5), `leading-relaxed` (1.625), `leading-loose` (2) | `lineHeight` as a multiple of the font size |
 | `leading-<n>`, `leading-[<length>]` | `lineHeight` in points (`leading-6` = 24) |
-| `leading-[<number>]` | `lineHeight` as a multiple of the font size (`leading-[1.5]`; also `em` and `%`), as in `text-sm/[1.5]` |
+| `leading-[<number>]` | `lineHeight` as a multiple of the font size (`leading-[1.5]`), inherited as that multiplier; `em` and `%` compute a length at the element's font size before inheritance |
 | `tracking-tighter` (-0.05em), `tracking-tight` (-0.025em), `tracking-normal` (0), `tracking-wide` (0.025em), `tracking-wider` (0.05em), `tracking-widest` (0.1em) | `letterSpacing` relative to the font size |
 | `tracking-[<value>]` | `letterSpacing`: `tracking-[0.2em]`, `tracking-[1px]` |
 
@@ -425,7 +427,7 @@ These utilities are rendering hints, or what every native view already is; they 
 
 ## Not supported
 
-`peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[prop:value]`), `overflow-auto` / `overflow-scroll`, `divide-*`, `columns-*`, `float-*`, `container`, container queries, `sticky`, `order-*`, `transform-3d`, `select-all`, `border-double` / `outline-double`, intrinsic sizes (`w-fit`, `h-min`, `max-w-max`, ...), `snap-*`, `scroll-*`, `overscroll-*`, `touch-*`, `isolate` and `box-content` are unknown classes. `nsh build` and `nsh dev` warn about unknown classes they find in your source (`file:line:col: unknown class '...'`), and the runtime logs each unknown class once.
+`peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[prop:value]`), `overflow-auto` / `overflow-scroll`, `divide-*`, `columns-*`, `float-*`, `container`, container queries, `sticky`, `order-*`, `transform-3d`, `select-all`, `border-double` / `outline-double`, intrinsic min/max constraints (such as `max-w-max`), `snap-*`, `scroll-*`, `overscroll-*`, `touch-*` and `isolate` are unknown classes. `nsh build` and `nsh dev` warn about unknown classes they find in your source (`file:line:col: unknown class '...'`), and the runtime logs each unknown class once.
 
 ## Variants
 
