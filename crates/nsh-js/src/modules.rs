@@ -532,7 +532,13 @@ impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
         let host = registries.len();
-        registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
+        registries.extend(
+            ui_sets
+                .iter()
+                .flat_map(Registry::sets)
+                .filter(|r| r.specifier().is_some())
+                .cloned(),
+        );
         ModuleTable {
             registries,
             host,

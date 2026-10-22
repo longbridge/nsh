@@ -5,6 +5,11 @@ the capabilities. `nsh/base` (the crate `nsh-base`) is the unstyled foundation e
 pages (and their status bar), dialogs, safe areas, the system's alert dialog and the software keyboard. NSH provides no styled
 components: the look of an app is the app's, drawn from the primitives, or from Rust components in the app's own crate,
 whose UI set is a module of its own (`app/native`; `docs/dev/components.md`, `tooling.md`). Each export has one home.
+A UI set may serve a family of exports whose names only make sense together as a module under a path of its own
+specifier, as `gpui-base`'s `plot` is a module of its crate: a submodule of the set (`Registry::submodule`, such as
+`nsh/base/<family>` of `nsh/base`), served, described and declared wherever the set is (`Registry::sets`: the hosts'
+module tables, the core's components, the toolchain's descriptions, one declaration file per module), so a list of UI
+sets names only the set.
 
 Every module is native: `nsh-js` serves it (`modules.rs`: NSH's own modules by `nsh_core::js::NATIVE_MODULES`, then the
 registries: the runtime's `nsh_core::runtime::registries()` and the UI sets a host serves, `nsh/base` and the app's), and the bundler keeps
