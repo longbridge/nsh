@@ -95,8 +95,9 @@ Until a release is recorded the last two have nothing to check: nothing is froze
 
 `cargo xtask compat` runs them all: it clones `nsh-compat` into `target/nsh-compat/nsh-compat` (or brings it up to
 date; one with changes of its own is used as it is), links this checkout as `target/nsh-compat/nsh`, builds `nsh` and
-runs `nsh-compat`'s tests with this checkout's Cargo cache. The Core workflow does the same on every pull request,
-with both repositories checked out side by side. `nsh-compat`'s own CI runs it against NSH's `main`, so a change to
+runs `nsh-compat`'s tests with this checkout's Cargo cache. The Compat workflow does the same with both repositories
+checked out side by side. Its job, `compat`, is a check `main` requires, so it reports on every pull request: one
+that changes nothing the checks build passes in seconds, the others run them. `nsh-compat`'s own CI runs it against NSH's `main`, so a change to
 the checks is held to the code as it is. Its pull requests are reviewed by NSH's maintainers (its CODEOWNERS).
 
 ### The apps of the API being written

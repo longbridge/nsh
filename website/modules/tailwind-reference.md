@@ -634,7 +634,7 @@ With this theme, `bg-brand-500`, `bg-brand` (the `DEFAULT` shade), `text-accent`
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> The Tailwind theme shapes only your app's classes. Rust components take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Rust](../docs/rust.md). Classes can name that theme's colors and numbers too (`bg-primary`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
+> The Tailwind theme shapes only your app's classes. The app's design tokens (shadcn/ui's colors, `radius`, the fonts and the app's own) are its theme, the `"theme"` key of `nsh.json`, which Rust components draw with; see [Rust](../docs/rust.md#theme). Classes name those tokens as Tailwind names `@theme` variables (`bg-primary`, `bg-up/30`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
 
 ## Related
 

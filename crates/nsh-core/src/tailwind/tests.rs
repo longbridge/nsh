@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     effects::{BlendMode, Cursor, GradientKind, Keyframes},
     geometry::{DefiniteLength, deg, percentage, px},
-    style::{Color, Style},
+    style::{Color, FontFamily, Style},
     transform::TransformKind,
 };
 
@@ -127,11 +127,11 @@ fn theme_tokens() {
     let s = styled("bg-primary text-muted-foreground border border-border rounded-(--radius)");
     assert_eq!(
         s.view.background_color,
-        Color::from(ui.color("primary.background").unwrap().light)
+        Color::from(ui.color("primary").unwrap().light)
     );
     assert_eq!(
         s.text.color,
-        Some(Color::from(ui.color("muted.foreground").unwrap().light))
+        Some(Color::from(ui.color("muted-foreground").unwrap().light))
     );
     assert_eq!(
         s.view.borders.colors[0],
@@ -146,17 +146,17 @@ fn theme_tokens() {
     );
     assert_eq!(
         s.view.background_color,
-        Color::from(ui.color("primary.background").unwrap().dark)
+        Color::from(ui.color("primary").unwrap().dark)
     );
     assert_eq!(
         s.text.color,
-        Some(Color::from(ui.color("muted.foreground").unwrap().dark))
+        Some(Color::from(ui.color("muted-foreground").unwrap().dark))
     );
     // Opacity modifiers, longer prefixes, variants, the long form.
-    let s = styled("bg-primary-background/50 border-t-2 border-t-ring");
+    let s = styled("bg-primary/50 border-t-2 border-t-ring");
     assert_eq!(
         s.view.background_color,
-        Color::from(ui.color("primary.background").unwrap().light).with_alpha(0.5)
+        Color::from(ui.color("primary").unwrap().light).with_alpha(0.5)
     );
     assert_eq!(
         s.view.borders.colors[0],
@@ -171,11 +171,11 @@ fn theme_tokens() {
     );
     assert_eq!(
         props.caret_color,
-        Some(Color::from(ui.color("primary.background").unwrap().light))
+        Some(Color::from(ui.color("primary").unwrap().light))
     );
     assert_eq!(
         props.placeholder_color,
-        Some(Color::from(ui.color("muted.foreground").unwrap().light))
+        Some(Color::from(ui.color("muted-foreground").unwrap().light))
     );
     let e = s.view.effects.as_ref().unwrap();
     assert!(
@@ -184,21 +184,23 @@ fn theme_tokens() {
             .any(|l| l.color == Color::from(ui.color("ring").unwrap().light))
     );
     // The shadow's color keeps each layer's alpha.
-    assert!(e.box_shadows.iter().any(
-        |l| l.color.0 >> 8 == Color::from(ui.color("primary.background").unwrap().light).0 >> 8
-    ));
+    assert!(
+        e.box_shadows
+            .iter()
+            .any(|l| l.color.0 >> 8 == Color::from(ui.color("primary").unwrap().light).0 >> 8)
+    );
     let g = &e.background_images[0];
     assert_eq!(
         g.stops[0].color,
-        Color::from(ui.color("primary.background").unwrap().light)
+        Color::from(ui.color("primary").unwrap().light)
     );
-    let accent = ui.color("accent.background").unwrap();
+    let accent = ui.color("accent").unwrap();
     assert_eq!(g.stops.last().unwrap().color, Color::from(accent.light));
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color::from(accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
-    assert_eq!(s.text.font_size, Some(px(ui.number("font.size").unwrap())));
-    assert_eq!(s.view.border_radius, px(ui.number("radius.lg").unwrap()));
+    assert_eq!(s.text.font_size, Some(px(ui.number("font-size").unwrap())));
+    assert_eq!(s.view.border_radius, px(ui.number("radius-lg").unwrap()));
     // Later utilities still win, in both appearances.
     let (s, _) = styled_with("bg-primary bg-red-500", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color(0xfb2c_36ff));
@@ -215,13 +217,13 @@ fn theme_tokens() {
 fn tailwind_colors_win_over_tokens_and_tokens_come_from_the_theme() {
     let mut theme = Theme::from_json(r##"{ "colors": { "primary": "#ff0000" } }"##).unwrap();
     let mut ui = crate::ui::Tokens::default();
-    ui.set_number("radius.card", 10.0);
+    ui.set_number("radius-card", 10.0);
     ui.set_color(
-        "chart.up",
+        "chart-up",
         crate::ui::AdaptiveColor::rgb(0x00ff00, 0x008800),
     );
     ui.set_color(
-        "chart.grid",
+        "chart-grid",
         crate::ui::AdaptiveColor::rgb(0x0000ff, 0x0000ff),
     );
     theme.set_tokens(&ui);
@@ -820,4 +822,62 @@ fn placeholder_and_props() {
     );
     assert_eq!(props.resize_mode, Some(crate::ops::ResizeMode::Contain));
     assert_eq!(props.selectable, Some(false));
+}
+
+#[test]
+fn font_tokens_are_tailwinds_sans_and_mono() {
+    let mut theme = Theme::default();
+    assert_eq!(
+        styled_in(&theme, "font-mono").text.font_family,
+        Some(FontFamily::new("monospace"))
+    );
+    let mut ui = crate::ui::Tokens::default();
+    ui.set_font(crate::ui::FONT_SANS, "Inter");
+    ui.set_font(crate::ui::FONT_MONO, "JetBrains Mono");
+    theme.set_tokens(&ui);
+    assert_eq!(
+        styled_in(&theme, "font-sans").text.font_family,
+        Some(FontFamily::new("Inter"))
+    );
+    assert_eq!(
+        styled_in(&theme, "font-mono").text.font_family,
+        Some(FontFamily::new("JetBrains Mono"))
+    );
+    assert_eq!(
+        styled_in(&theme, "font-(family-name:--font-mono)")
+            .text
+            .font_family,
+        Some(FontFamily::new("JetBrains Mono"))
+    );
+    assert_eq!(
+        styled_in(&theme, "font-[family-name:Fira_Code]")
+            .text
+            .font_family,
+        Some(FontFamily::new("Fira Code"))
+    );
+    assert_ne!(parse(&theme, "font-sans").deps() & deps::THEME, 0);
+}
+
+/// `classes` applied with `theme`, in light appearance.
+fn styled_in(theme: &Theme, classes: &str) -> Style {
+    let group = |_: &str| 0;
+    let list = parse(theme, classes);
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    let mut style = Style::default();
+    let context = Context {
+        env: ClassEnvironment::default(),
+        window: crate::geometry::size_pt(390.0, 844.0),
+        rtl: false,
+        states: 0,
+        position: 0,
+        group: &group,
+    };
+    list.apply(
+        &context,
+        theme,
+        &mut style,
+        &mut ClassProps::default(),
+        |_| {},
+    );
+    style
 }

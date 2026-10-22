@@ -84,6 +84,8 @@ text("Settings")
 
 ### 状态与值
 
+应用里的开关用 `nsh/base` 的 [`Switch`](../elements/switch.md)，角色和状态由它自己设置。下面的例子展示在视图上设置角色和状态的效果。
+
 ```rust tabs
 use nsh_core::{Checked, ui::prelude::*};
 

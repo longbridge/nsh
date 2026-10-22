@@ -291,6 +291,15 @@ impl VirtualList {
         self
     }
 
+    /// The sticky rows stick this far from the start instead, as CSS
+    /// `position: sticky`'s `top` (`.sticky_header_offset(px(56.0))` under a
+    /// 56 pt translucent bar; the rows scroll under the space before them;
+    /// TS: `stickyHeaderOffset`).
+    pub fn sticky_header_offset(mut self, offset: Points) -> Self {
+        super::host::set(&mut self.0, Prop::StickyOffset(offset));
+        self
+    }
+
     /// Scrolls to row `index` before the first frame (TS:
     /// `initialScrollIndex`).
     pub fn initial_scroll_index(mut self, index: usize) -> Self {

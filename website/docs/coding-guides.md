@@ -144,7 +144,7 @@ pub fn App() -> impl IntoElement {
     provide_context(Workspace::new());
     view()
         .flex_1()
-        .bg(move || theme().background())
+        .bg(move || theme().background)
         .child(inbox())
 }
 ```
@@ -206,7 +206,7 @@ fn empty_state(title: impl Into<SharedString>) -> impl IntoElement {
     view()
         .gap_2()
         .items_center()
-        .child(text(title.into()).text_color(move || theme().muted_foreground()))
+        .child(text(title.into()).text_color(move || theme().muted_foreground))
 }
 ```
 
@@ -371,7 +371,7 @@ pub fn QuantityStepper(props: QuantityStepperProps, cx: Scope<QuantityStepperEve
             move || props.value.get() <= props.min.get(),
             move || step(-1),
         ))
-        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground()))
+        .child(text(move || props.value.get().to_string()).text_color(move || theme().foreground))
         .child(step_button(
             "+",
             move || props.increment_label.get(),
@@ -394,11 +394,11 @@ fn step_button(
         .h(px(32.0))
         .items_center()
         .justify_center()
-        .rounded(move || theme().radius())
-        .bg(move || theme().muted())
+        .rounded(move || theme().radius)
+        .bg(move || theme().muted)
         .active(|s| s.opacity(0.6))
         .disabled_style(|s| s.opacity(0.4))
-        .child(text(symbol).text_color(move || theme().foreground()))
+        .child(text(symbol).text_color(move || theme().foreground))
 }
 
 // The owner:
@@ -606,11 +606,11 @@ Read semantic values from the theme and apply layout with the typed style method
 
 ```rust tabs
 view()
-    .bg(move || theme().background())
-    .text_color(move || theme().foreground())
+    .bg(move || theme().background)
+    .text_color(move || theme().foreground)
     .border_1()
-    .border_color(move || theme().border())
-    .rounded(move || theme().radius())
+    .border_color(move || theme().border)
+    .rounded(move || theme().radius)
 ```
 
 ```tsx tabs
@@ -643,9 +643,10 @@ Rules:
 The effective precedence is the element's own style, then the state styles, later states winning, with `disabled`
 over all. Later layers only replace fields they set.
 
-Prefer the theme's semantic tokens for new app-owned presentation. Every key of the app's theme file is a token
-(`theme().color("chart.up")`, `text-chart-up`), and the theme has light and dark values, so a token follows the
-appearance with no `dark:` class. Name tokens after roles, not components, so they do not become the extension point
+Prefer the theme's semantic tokens for new app-owned presentation. Every name in the app's theme file is a token, as a
+variable of Tailwind's `@theme` is (`"up": "#16a34a"` gives `text-up`, `bg-up/30`, `token("up")` in TSX and
+`theme().color("up")` in Rust), and the theme has light and dark values, so a token follows the appearance with no
+`dark:` class. Name tokens after roles, not components, so they do not become the extension point
 for every widget.
 
 Change the theme through the app's theme file (`nsh.json` `"theme"`), or let the embedding app give its own: classes
@@ -659,8 +660,8 @@ hiding all keyboard focus.
 ### The user's text size is the app's zoom
 
 Text follows the user's text size (Dynamic Type, Android's font scale, the desktops' settings): `fontScale()` in TSX,
-`font_scale()` in Rust, both reactive. The type scale (`text-sm`, `text-base`) and the theme's base font size
-(`font.size`, `theme().font_size()`) set the reference, and the user's setting scales it. This deliberately follows
+`font_scale()` in Rust, both reactive. The type scale (`text-sm`, `text-base`: 16 points, the body size) sets
+the reference, and the user's setting scales it. This deliberately follows
 the useful part of Tailwind's model: named type, spacing and size steps instead of unrelated point constants.
 
 Let text containers grow with their text: give them minimum heights and padding rather than fixed heights. A custom

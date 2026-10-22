@@ -284,7 +284,7 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
       role="button"
       accessibilityLabel={props.stock.name}
       accessibilityState={props.wide ? { selected: !!props.active } : undefined}
-      class={props.wide ? (props.active ? "bg-paper-border dark:bg-graphite-raised" : "hover:bg-paper-card dark:hover:bg-graphite-card") : undefined}
+      class={props.wide ? (props.active ? "bg-accent" : "hover:bg-card") : undefined}
       style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, cursor: props.wide ? "pointer" : undefined }}
     >
       <If when={props.active}>

@@ -203,9 +203,9 @@ impl Shell {
         window.refresh();
     }
 
-    /// Switches to the themes registered from `themes/violet.json` (an nsh
-    /// theme file, loaded into GPUI Kit's registry as it is), or back to
-    /// GPUI Kit's default.
+    /// Switches to the themes registered from `themes/violet.json` (a GPUI
+    /// Kit theme file, in GPUI Kit's registry), or back to GPUI Kit's
+    /// default; the surfaces follow ([`theme::nsh_theme`]).
     fn set_violet(&mut self, violet: bool, window: &mut Window, cx: &mut Context<Self>) {
         let registry = gpui_kit::component::ThemeRegistry::global(cx);
         let (light, dark) = if violet {

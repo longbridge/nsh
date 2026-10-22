@@ -45,13 +45,20 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Taffy 0.15 custom measure callbacks must delegate to `taffy::compute_leaf_layout`** and only compute the content size. Returning the
   content size directly skips resolving the leaf's own style (width / height / padding / min / max), so leaves such as
   `<Image style={{width: 48}}>` end up with a zero size.
-- **Taffy 0.15 keeps a node's hoisted (absolutely placed) children while the node has no children**: it rewrites the list only when it lays
-  out a container, and a childless node is laid out as a leaf. A view whose last child, an absolute one, is removed would keep listing it,
-  and the next rounding pass fails on the freed node (`invalid SlotMap key`); `unlink` gives such a view a fresh Taffy node
-  (`forget_hoisted`).
+- **Taffy 0.15's rounding pass is off; the core rounds layouts itself** (`rounded`, `Core::layout_origin`, the frame walk). Taffy rounds
+  absolutely positioned nodes through their containing block's list of "hoisted" children, which it leaves stale: a childless node keeps
+  the absolute child it last laid out, a hidden subtree's are never filled, a containing block served from the cache keeps its old ones.
+  A freed node still listed made the next pass panic (`invalid SlotMap key`), a hidden one kept its former layout, and an incremental
+  layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
+  its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
+  `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
+- **Taffy 0.15's `mark_dirty` stops at the first node whose cache is already empty**, taking its ancestors for dirty too. Nodes of a
+  `display: none` subtree always have empty caches while the hidden node above keeps its result, so a view moved in there keeps its
+  former layout: the frame walk gives everything under a `display: none` view an empty frame and its texts an empty content box,
+  whatever Taffy keeps for them (`emit_frames_in`, `flush_text`).
 - **List cells are independent Taffy roots** (not children of the list's Taffy node; their width follows the list's cross axis): scrolling only
   relays out dirty cells and only emits frames for relaid cell subtrees; when the main tree is clean, `compute_layout` and the frame walk of the
-  main tree are skipped (Taffy runs a full rounding pass even over a clean root).
+  main tree are skipped.
 - **Taffy defaults are CSS semantics**; `Style::default()` switches to RN semantics: column, flexShrink 0, alignContent flex-start (stored as `normal` and
   resolved per display by `style::resolve_normal_alignment`, so grids keep CSS's `normal`), position relative,
   and min sizes 0 (an unset or `auto` `minWidth` / `minHeight` is 0). Taffy's `auto` minimum is CSS's automatic minimum size (the
@@ -87,6 +94,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **IPAs are zipped with `ditto -c -k --norsrc --keepParent`**: `--sequesterRsrc` adds `__MACOSX/` resource forks.
 
 ## iOS, UIKit and Mac Catalyst
+
+- **Pressed-style observers must leave ancestor clicks working**: a view with only `activeStyle` / `active:`
+  has a `PressRecognizer` to report its pressed state, but yields the click to the nearest ancestor with press
+  handlers. `handled_deeper` counts handlers and pressable text spans; a style-only recognizer ends as failed
+  after reporting its state, so it does not compete with the ancestor's recognizer.
 
 - **UIFont and CTFont are toll-free bridged**: the text engine gets system fonts with `UIFont::systemFontOfSize_weight` and uses them as
   CTFonts (verified by rendering). CoreText attributes must use CT keys (colors are CGColors), not UIKit's NSForegroundColor.
@@ -182,6 +194,14 @@ Things that were found the hard way. Read the section of the area you change bef
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft
   input mode resize instead of panning: the system picks the mode at the first layout, before the app's content is mounted,
   and a mode set from code afterwards is overridden. Windows that ask for `adjustPan` are left to the system.
+- **Android, passive press feedback**: `activeStyle` / `active:` and `android.ripple` observe a touch without
+  consuming it. The root's `TouchTracker` feeds style-only views through `Pressable`; `Box` and leaf views take
+  clicks for their press handlers or text spans. Feedback is cancelled when scrolling, panning, pinching or rotation
+  takes over, so a styled child leaves its parent's overlay or menu trigger clickable. The walk up from the touched
+  view stops at the first press handler, or at a text only when the finger is on one of its pressable spans (as
+  iOS's `handled_deeper` checks the link at the touch), so a card around plain text still shows its pressed style.
+  While feedback shows, the root claims the gesture as a clickable view would: Android sends the release only to
+  the view that took the down, and the release is what ends the feedback.
 - **Android, drags that start on a child**: a pannable `Box` intercepts the move that exceeds the slop and starts its pan right
   there; that intercepted move never reaches its `onTouchEvent`, so starting the pan there is what makes a quick flick (few moves)
   pan and end at all.

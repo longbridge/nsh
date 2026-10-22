@@ -39,7 +39,7 @@ import { Image, mount, Text, View } from "nsh";
 ```rust tabs
 view()
     .rounded(px(12.0))
-    .bg(move || theme().background())
+    .bg(move || theme().background)
     .on_press(move || open.set(true))
     .child(text("Open").font_weight(FontWeight::SEMIBOLD))
 ```
@@ -231,7 +231,7 @@ pub fn Card(props: CardProps) -> impl IntoElement {
     view()
         .p(px(14.0))
         .rounded(px(12.0))
-        .bg(move || theme().background())
+        .bg(move || theme().background)
         .gap_2()
         .child(text(props.title).font_weight(FontWeight::SEMIBOLD))
         .child(props.children)
@@ -431,7 +431,7 @@ Rust 应用的根是 `nsh.json` 的 `"root"` 指定的组件；`nsh run` 和 `ns
 pub fn App() -> impl IntoElement {
     view()
         .flex_1()
-        .bg(move || theme().background())
+        .bg(move || theme().background)
         .child(home())
 }
 ```

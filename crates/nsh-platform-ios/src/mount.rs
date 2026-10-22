@@ -2178,12 +2178,13 @@ impl Mounter {
         slot.events = events;
         let v = slot.values;
         let any = |kinds: &[EventKind]| kinds.iter().any(|&k| events.contains(k));
-        let own_press = any(&[
+        let handles_press = any(&[
             EventKind::Press,
             EventKind::LongPress,
             EventKind::PressDown,
             EventKind::PressUp,
-        ]) || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
+        ]);
+        let own_press = handles_press || slot.tracked & nsh_core::tailwind::state::PRESSED != 0;
         let (links, links_long_press) = match &slot.native {
             Native::Text(t) => (t.has_links(), t.links_long_press()),
             _ => (false, false),
@@ -2234,7 +2235,7 @@ impl Mounter {
         }
         if let Some(press) = &g.press {
             press.set_long_press(events.contains(EventKind::LongPress) || links_long_press);
-            press.set_own(own_press);
+            press.set_own(own_press, handles_press);
             press.set_long_press_delay(slot.long_press_delay);
         }
         let wants_hover = slot.tracked & nsh_core::tailwind::state::HOVERED != 0
