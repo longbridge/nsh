@@ -1146,33 +1146,24 @@ opt-level = 3
     fn write_rust_runner(&self, ws: &Path, dir: &str, root: &RootConfig) -> anyhow::Result<()> {
         let app = self.dependencies();
         let sets = self.sets();
-        let (os, lib, platform, features, exit) = match dir {
+        let (os, lib, platform, exit) = match dir {
             "rust-linux" => (
                 "target_os = \"linux\"",
                 "nsh-linux-app",
                 "nsh-platform-linux",
-                ", features = [\"webview\"]",
                 true,
             ),
             "rust-macos" => (
                 "target_os = \"macos\"",
                 "nsh-macos-app",
                 "nsh-platform-macos",
-                "",
                 true,
             ),
-            "rust-windows" => (
-                "windows",
-                "nsh-windows-app",
-                "nsh-platform-windows",
-                "",
-                true,
-            ),
+            "rust-windows" => ("windows", "nsh-windows-app", "nsh-platform-windows", true),
             _ => (
                 "target_os = \"ios\"",
                 "nsh-ios-app",
                 "nsh-platform-ios",
-                "",
                 false,
             ),
         };
@@ -1186,8 +1177,7 @@ opt-level = 3
                  [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
                 self.bin(dir),
                 self.bin(dir),
-                self.nsh
-                    .dep(lib, &format!(", default-features = false{features}")),
+                self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
                 self.nsh.dep(platform, ", default-features = false"),
@@ -2492,7 +2482,8 @@ mod tests {
                 "{main}"
             );
         }
-        assert!(read("rust-linux/Cargo.toml").contains("features = [\"webview\"]"));
+        // Optional platform features come from the app, not its runner.
+        assert!(!read("rust-linux/Cargo.toml").contains("webview"));
         let android = read("rust-android/lib.rs");
         assert!(android.contains("nsh::main!(app_root());"), "{android}");
         assert!(read("rust-android/Cargo.toml").contains("default-features = false"));
