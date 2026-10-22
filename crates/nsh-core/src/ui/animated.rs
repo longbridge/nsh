@@ -35,7 +35,8 @@ use super::{
     task::{Action, Answer, Executor},
 };
 use crate::animation::{
-    AnimationId, AnimationOp, Composite, Driver, Easing, Extrapolate, MathOp, Operand, Output,
+    AnimationId, AnimationOp, Composite, Driver, Easing, Extrapolate, Keyframe, KeyframeTiming,
+    MathOp, MotionChannel, MotionSpec, Operand, Output, StaggerFrom,
 };
 
 /// A node of the graph, released when the last of what holds it goes
@@ -710,6 +711,17 @@ impl AnimatedValue {
         end
     }
 
+    /// Plays `frames` as CSS keyframes play (TS: `keyframes(frames,
+    /// options)`): each segment with its easing, `timing.iterations` times
+    /// in `timing.direction`.
+    pub fn keyframes(
+        &self,
+        frames: impl IntoIterator<Item = Keyframe>,
+        timing: KeyframeTiming,
+    ) -> AnimationEnd {
+        Animation::keyframes(self, frames, timing).start()
+    }
+
     /// Springs to `to`.
     pub fn spring(&self, to: f32, spring: Spring) -> AnimationEnd {
         self.start(spring.driver(to))
@@ -956,6 +968,22 @@ impl Animation {
         )
     }
 
+    /// `value` through `frames`, as CSS keyframes play (TS:
+    /// `Animated.keyframes`): offsets spread as the Web Animations API
+    /// spreads them, an easing per segment, iterations, a direction and a
+    /// delay ([`KeyframeTiming`]).
+    pub fn keyframes(
+        value: &AnimatedValue,
+        frames: impl IntoIterator<Item = Keyframe>,
+        timing: KeyframeTiming,
+    ) -> Self {
+        let frames: Vec<Keyframe> = frames.into_iter().collect();
+        Self::new(
+            crate::animation::keyframes(value.0.id(), &frames, &timing),
+            value.0.live().into_iter().collect(),
+        )
+    }
+
     /// A wait of `ms` milliseconds (in a sequence).
     pub fn delay(ms: f32) -> Self {
         Self::new(Composite::Delay(ms), Vec::new())
@@ -1009,6 +1037,25 @@ impl Animation {
             .into_iter()
             .enumerate()
             .map(|(i, a)| Self::sequence([Self::delay(ms * i as f32), a]));
+        Self::parallel(staged)
+    }
+
+    /// `animations` all at once, each starting `ms` milliseconds after the
+    /// one before, counted from `from` (TS: `Animated.stagger(ms, list, {
+    /// from })`): from the center, a list ripples out from its middle.
+    pub fn stagger_from(
+        ms: f32,
+        from: StaggerFrom,
+        animations: impl IntoIterator<Item = Animation>,
+    ) -> Self {
+        let animations: Vec<Animation> = animations.into_iter().collect();
+        let count = animations.len();
+        let staged = animations.into_iter().enumerate().map(|(i, a)| {
+            Self::sequence([
+                Self::delay(ms * crate::animation::stagger_delay(i, count, from)),
+                a,
+            ])
+        });
         Self::parallel(staged)
     }
 
@@ -1111,6 +1158,104 @@ impl Animation {
 impl fmt::Debug for Animation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Animation").field(&self.0.spec).finish()
+    }
+}
+
+/// Animated values for a view's opacity and the parts of its transform
+/// (TS: `createMotion`), and motions to play on them: presets
+/// ([`crate::animation::MotionPreset`]: entrances, exits, attention seekers,
+/// loops) or keyframes of the app's own ([`MotionSpec`]). Bind it with
+/// [`super::Styled::bind_motion`]. A `Copy` handle, kept by the owner
+/// current when it is made, as an [`AnimatedValue`] is.
+///
+/// ```ignore
+/// let card = motion().entering(MotionPreset::FadeInUp);
+/// view().bind_motion(&card).on_press(move || {
+///     card.play(MotionPreset::Pulse);
+/// })
+/// ```
+#[derive(Clone, Copy)]
+pub struct Motion {
+    values: [AnimatedValue; 9],
+}
+
+impl fmt::Debug for Motion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Motion").finish_non_exhaustive()
+    }
+}
+
+impl Motion {
+    pub(crate) fn new(executor: &Rc<Executor>) -> Self {
+        Self {
+            values: MotionChannel::ALL.map(|c| AnimatedValue::new(executor, c.identity())),
+        }
+    }
+
+    /// The value of `channel` (opacity 0..1, translations in points,
+    /// rotations in degrees, scales).
+    pub fn value(&self, channel: MotionChannel) -> AnimatedValue {
+        self.values[channel.index()]
+    }
+
+    /// Starting where `motion` starts and playing it at once: a view that
+    /// comes in shows its first frame where the motion begins.
+    pub fn entering(self, motion: impl Into<MotionSpec>) -> Self {
+        let motion = motion.into();
+        for (channel, start) in motion.start_values() {
+            self.value(channel).set(start);
+        }
+        let _ = self.play(motion);
+        self
+    }
+
+    /// Plays `motion` on its channels (a new one interrupts the one
+    /// playing). When the user asks for less motion
+    /// ([`super::ambient::reduce_motion`]), it lands where it ends without moving.
+    pub fn play(&self, motion: impl Into<MotionSpec>) -> AnimationEnd {
+        self.run(motion.into(), super::ambient::reduce_motion())
+    }
+
+    /// Plays `motion` even when the user asks for less motion.
+    pub fn play_ignoring_reduce_motion(&self, motion: impl Into<MotionSpec>) -> AnimationEnd {
+        self.run(motion.into(), false)
+    }
+
+    /// `motion` as an [`Animation`] to compose, not started (TS:
+    /// `motion.animation(..)`): `Animation::stagger_from(60.0,
+    /// StaggerFrom::Center, cards.iter().map(|m| m.animation(..)))`. Like
+    /// [`Self::play`], it lands at its end when the user asks for less
+    /// motion (as things are when it is made).
+    pub fn animation(&self, motion: impl Into<MotionSpec>) -> Animation {
+        self.composed(motion.into(), super::ambient::reduce_motion())
+    }
+
+    fn composed(&self, motion: MotionSpec, reduced: bool) -> Animation {
+        let nodes = self.values.map(|v| v.0.id());
+        let held = self
+            .values
+            .iter()
+            .filter_map(|v| v.0.live())
+            .collect::<Vec<_>>();
+        Animation::new(motion.composite(&nodes, reduced), held)
+    }
+
+    fn run(&self, motion: MotionSpec, reduced: bool) -> AnimationEnd {
+        self.composed(motion, reduced).start()
+    }
+
+    /// Stops it where it is.
+    pub fn stop(&self) {
+        for value in &self.values {
+            value.stop();
+        }
+    }
+
+    /// Stops it and puts every channel back at rest.
+    pub fn reset(&self) {
+        for channel in MotionChannel::ALL {
+            self.value(channel).set(channel.identity());
+        }
     }
 }
 
@@ -1239,6 +1384,57 @@ mod tests {
 
     fn timing(to: f32, ms: f32) -> Driver {
         Timing::new(ms, Easing::Linear).driver(to)
+    }
+
+    #[test]
+    fn keyframes_staggers_and_motions_describe_their_trees() {
+        use crate::animation::{MotionPreset, StaggerFrom};
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = Rc::new(Executor::default());
+        let values: Vec<AnimatedValue> =
+            (0..3).map(|_| AnimatedValue::new(&executor, 0.0)).collect();
+        let step = |v: &AnimatedValue| {
+            Animation::keyframes(
+                v,
+                [Keyframe::new(0.0), Keyframe::new(1.0)],
+                KeyframeTiming::new(100.0),
+            )
+        };
+        let rippled = Animation::stagger_from(40.0, StaggerFrom::Center, values.iter().map(step));
+        let Composite::Parallel { children, .. } = &rippled.0.spec else {
+            panic!("{:?}", rippled.0.spec)
+        };
+        let delays: Vec<f32> = children
+            .iter()
+            .map(|c| match c {
+                Composite::Sequence(s) => match s[0] {
+                    Composite::Delay(ms) => ms,
+                    _ => -1.0,
+                },
+                _ => -1.0,
+            })
+            .collect();
+        assert_eq!(delays, [40.0, 0.0, 40.0]);
+
+        let motion = Motion::new(&executor);
+        executor.take_actions();
+        let _ = motion.play_ignoring_reduce_motion(MotionPreset::Shake);
+        let started = executor.take_actions().into_iter().find_map(|a| match a {
+            Action::Animate {
+                op: AnimationOp::StartComposite { spec, .. },
+                ..
+            } => Some(spec),
+            _ => None,
+        });
+        let Some(Composite::Parallel { children, .. }) = started else {
+            panic!("{started:?}")
+        };
+        // `shake` moves one channel: translateX.
+        assert_eq!(children.len(), 1);
+        let mut nodes = Vec::new();
+        children[0].nodes(&mut nodes);
+        assert_eq!(nodes, [motion.value(MotionChannel::TranslateX).node().id()]);
     }
 
     #[test]
