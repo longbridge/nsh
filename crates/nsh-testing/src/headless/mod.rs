@@ -957,16 +957,22 @@ impl Headless {
         self.step(format!("pressAt({selector}, {}, {})", at.x.0, at.y.0));
         let pick = self.screen.pressable(&parsed);
         let id = self.picked(pick, selector, "pressable view")?;
+        // `at` is in the view. The touch reports it in the root, as `press`
+        // reports a canvas node's center.
+        let page = self
+            .screen
+            .bounds_in_root(id)
+            .map(|bounds| bounds.origin + at);
         let path = self.screen.touch_path(id);
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone());
+            self.send_touch(id, nsh_core::TouchPhase::Start, path.clone(), page);
         }
         let payload = self.press_payload(id, Some(at));
         for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
             self.send(id, kind, payload.clone());
         }
         if !path.is_empty() {
-            self.send_touch(id, nsh_core::TouchPhase::End, path);
+            self.send_touch(id, nsh_core::TouchPhase::End, path, page);
         }
         self.done()
     }
